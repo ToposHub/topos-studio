@@ -97,6 +97,7 @@ from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.audio_dsp import (
     StripEQFilter,
     EffectChain,
+    SpatialPanner,
     # AUD-15506: mix 热路径依赖提升为模块级导入，消除逐块函数内 import 的
     # 查找/调用开销（channel_layout 无反向依赖；audio_dsp 本就是本模块依赖）。
     apply_clip_fade,
@@ -353,10 +354,10 @@ def topological_sort_buses(
         if output_target in bus_set:
             targets.add(output_target)
         for send in r.get("sends", []) or []:
-            if not isinstance(send, (tuple, list)) or len(send) < 2:
-                continue
-            send_target, send_level = send[0], send[1]
-            if send_target in bus_set and float(send_level) > 0.0:
+            # MX-14: 4 元组/2 元组/dict 兼容；muted 的 send 不贡献信号，
+            # 不构成排序边（否则静音的 send 会造成假环告警）
+            send_target, send_level, _tap, send_muted = unpack_send(send)
+            if send_target in bus_set and send_level > 0.0 and not send_muted:
                 targets.add(send_target)
         for target in targets:
             downstream[bid].append(target)
@@ -377,6 +378,29 @@ def topological_sort_buses(
     # 剩余 in_degree > 0 的节点在环中
     cycle_ids = [bid for bid in bus_ids if in_degree[bid] > 0]
     return sorted_ids, cycle_ids
+
+
+def unpack_send(entry: Any) -> tuple:
+    """MX-14: 把一条 send 条目解包为 (target_bus_id, level, tap, muted)。
+
+    兼容三种形态：
+    - 旧 2 元组 (target, level) → ("post_fader", False)（旧行为，声音不变）
+    - 新 4 元组 (target, level, tap, muted)
+    - dict {"target_bus_id", "level", "tap", "muted"}
+    """
+    if isinstance(entry, dict):
+        return (
+            entry.get("target_bus_id"),
+            float(entry.get("level", 0.0) or 0.0),
+            str(entry.get("tap", "post_fader") or "post_fader"),
+            bool(entry.get("muted", False)),
+        )
+    seq = tuple(entry)
+    target = seq[0] if seq else None
+    level = float(seq[1]) if len(seq) > 1 else 0.0
+    tap = str(seq[2]) if len(seq) > 2 and seq[2] else "post_fader"
+    muted = bool(seq[3]) if len(seq) > 3 else False
+    return (target, level, tap, muted)
 
 
 def compute_audible_solo_closure(
@@ -609,7 +633,7 @@ class AudioTrackState:
 # =============================================================================
 
 class TrackLevel:
-    """每轨电平测量数据（W9/W11）。
+    """每轨电平测量数据（W9/W11，CW-A1 扩展）。
 
     包含 sample peak（峰值）、RMS（均方根，线性振幅）和 LUFS（响度，dB）。
     支持索引访问 [0]/[1]（返回 peak_l/peak_r）以向后兼容旧测试/调用方。
@@ -620,9 +644,13 @@ class TrackLevel:
         rms_l: 左声道 RMS（root-mean-square，线性）
         rms_r: 右声道 RMS
         lufs: Momentary LUFS（EBU R128，立体声合并，dB）。默认 -70（无信号）
+        pre_peak: pre-fader 峰值（fader/FX 前的输入电平，线性；Dynamics Input 表）
+        gr: {instance_id: 块内最大增益衰减（正 dB）}——链内动态效果器遥测
+        sc: {instance_id: 检源电平（dBFS）}——压缩器侧链探测遥测
     """
 
-    __slots__ = ("peak_l", "peak_r", "rms_l", "rms_r", "lufs")
+    __slots__ = ("peak_l", "peak_r", "rms_l", "rms_r", "lufs", "pre_peak", "gr", "sc",
+                 "taps")
 
     def __init__(
         self,
@@ -631,12 +659,22 @@ class TrackLevel:
         rms_l: float = 0.0,
         rms_r: float = 0.0,
         lufs: float = -70.0,
+        pre_peak: float = 0.0,
+        gr: Optional[dict] = None,
+        sc: Optional[dict] = None,
+        taps: Optional[dict] = None,
     ) -> None:
         self.peak_l = float(peak_l)
         self.peak_r = float(peak_r)
         self.rms_l = float(rms_l)
         self.rms_r = float(rms_r)
         self.lufs = float(lufs)
+        self.pre_peak = float(pre_peak)
+        self.gr = dict(gr) if gr else {}
+        self.sc = dict(sc) if sc else {}
+        # MX-02: {instance_id: {"in_db","out_db","gr_db","sc_db","effect_type"}}——
+        # 链处理时按实例真实采样（不再把轨末端 peak 冒充插件输出）
+        self.taps = dict(taps) if taps else {}
 
     def __getitem__(self, index: int) -> float:
         """索引访问：[0]=peak_l, [1]=peak_r（向后兼容 (l, r) tuple）。"""
@@ -1620,6 +1658,34 @@ class AudioDecoder:
 # AudioMixer
 # =============================================================================
 
+# MX-05: 轨道处理顺序（版本化契约，实时 mix_samples 与离线
+# AudioGraphRenderer.render_track_block 严格同序）：
+#   1. clip_stage   逐 clip：decode → source patch → 声道适配 → clip fade
+#                   → crossfade → clip gain → clip FX → 逐 clip pan/balance
+#                   （RMA-08 按源布局选法则）→ 汇入轨输入块（MX-04 求和）
+#   2. volume       轨音量/自动化 ramp（对求和块一次）
+#   3. panner       SpatialPanner 矩阵 + boom（状态化，一次；pan/balance
+#                   逐样本增益已在其前的 clip 阶段施加）
+#   4. strip_eq     6 频段参量 EQ（post-fader，状态化，一次）
+#   5. track_fx     FX 机架链（外部侧链检源透传，状态化，一次）
+#   6. mute_gate    自动化静音门控（链输出端，同时门控 EQ/FX 尾音泄漏）
+# 之后进入路由（output_bus_id / sends → Bus 或 Master）。
+# Send tap 位置（MX-14，Send 模型 v2）：post_fader=链后推子后（默认，
+# 旧工程即此行为）；pre_fader=clip 求和后、音量/pan/EQ/FX 前（不随推子
+# 变化）。pre/post-FX 更细粒度 tap 仍为后续工作（需 MX-05 图扩展）。
+# 版本：ORDER_VERSION = 1（当前唯一受支持组合；旧工程即此顺序）。
+TRACK_CHAIN_ORDER: tuple = (
+    "clip_stage", "volume", "panner", "strip_eq", "track_fx", "mute_gate",
+)
+ORDER_VERSION: int = 1
+
+# MX-03: Master 条带 DSP 的保留键（与 UI 的 MASTER_TRACK_ID="-1" 对齐；
+# 普通轨/Bus 的 track_id 永不取此值，注册/清理路径不会误碰）。
+# Master 链顺序：mute → volume → strip_eq → track_fx → limiter
+# （与轨链 strip_eq→track_fx 同构，音量后、限幅器前）。
+MASTER_BUS_KEY = "-1"
+
+
 class AudioMixer:
     """
     音频混合器。
@@ -1649,9 +1715,17 @@ class AudioMixer:
         # 的 mixer audio 效果）。在 decoder 解码后、track volume/pan 之前
         # 应用（item-FX = pre-track-FX 语义）。key=clip_id。
         self._clip_effect_chains: Dict[str, EffectChain] = {}
+        # H09：Freeze 捕获资产注册表（set_freeze_registry 注入）
+        self._freeze_registry: Dict[str, dict] = {}
+        # H03：clip 尾音 drain 记账（clip 结束帧 / 所属轨 / 剩余预算）
+        self._clip_end_frames: Dict[str, int] = {}
+        self._clip_track_of: Dict[str, str] = {}
+        self._clip_tail_left: Dict[str, int] = {}
         # D04（第六轮审计）：动画 FX 的逐帧参数采样器（frame -> entries）；
         # mix_samples 在处理该 clip 块前按当前帧更新链参数。
         self._clip_effect_samplers: Dict[str, Any] = {}
+        # MX-10: 轨级 fx 参数自动化采样器（track_id -> frame->entries）
+        self._track_effect_samplers: Dict[str, Any] = {}
         # clip_id → track_id 反查表，用于 remove_track 时清理对应 clip 链。
         self._clip_to_track: Dict[str, str] = {}
         # W11: 每轨一个 LUFS 响度计（EBU R128，跨样本块连续）
@@ -1708,6 +1782,215 @@ class AudioMixer:
         # 模块反向 import 本模块（topological_sort_buses），不能在模块级导入，
         # 首次用到时解析一次并缓存函数引用。
         self._declick_edges_fn: Optional[Callable[[Any, float], Any]] = None
+        # CW-A1: 每轨空间声像器参数（SpatialPannerParams.to_dict() 形式；
+        # 空 dict/缺失=未使用，回退普通 pan/balance）。lr 真源仍是 track.pan。
+        self._track_panner_params: Dict[str, dict] = {}
+        self._track_panners: Dict[str, SpatialPanner] = {}
+        # CW-A1: 频谱仪按需计算——仅当存在 EQ 对话框打开时才维护每轨
+        # post-chain 频谱窗并在表计节流点做 FFT（仿 LUFS 门控）。
+        self._spectrum_metering_enabled: bool = False
+        self._spectrum_windows: Dict[str, np.ndarray] = {}
+        self._spectrum_write: Dict[str, int] = {}
+        # CW-A1: 外部侧链 —— 上一混音块的 Bus 检源输出 tap（Bus 在阶段 2
+        # 才混音，被控轨用上一块输出探测）+ 轨处理顺序缓存
+        # (decoder_keys, order, track_sc_needed, all_sc_sources)。
+        self._sc_bus_taps: Dict[str, np.ndarray] = {}
+        self._sc_order_cache: Optional[tuple] = None
+        # MX-07: 每轨尾音剩余样本（feed-zero drain 调度；seek/remove_track 清）
+        self._track_tail_remaining: Dict[str, int] = {}
+        # MX-01: 播放代数（manager 在 play/pause/resume/stop/seek 时 bump；
+        # 播放线程构造遥测载荷时读取盖章——面板据此丢弃旧代排队事件）
+        self._telemetry_generation: int = 0
+
+    def bump_telemetry_generation(self) -> int:
+        """MX-01: 递增播放代数（manager 生命周期事件调用，持锁）。"""
+        with QMutexLocker(self._mutex):
+            self._telemetry_generation += 1
+            return self._telemetry_generation
+
+    def _sidechain_track_order(self) -> tuple:
+        """按外部侧链依赖对普通轨排序（调用方持锁）。
+
+        Returns:
+            (order, track_sc_needed, all_sc_sources)
+            - order: 轨处理顺序（检源先于被控；无侧链时即 decoder 注册顺序）
+            - track_sc_needed: 被引用为检源的普通轨集合（需保留输出 tap）
+            - all_sc_sources: 全部检源 id（含 Bus；Bus 检源用上一块 tap）
+
+        结果按 decoder 键集缓存；链参数变化由 set_track_effect_chain 置失效。
+        环依赖：无法满足的轨按原序强制放置（其检源 tap 尚不可用 →
+        EffectChain.sidechain_map 不命中 → 压缩器回退内部检源）并告警一次。
+        """
+        keys = tuple(self._decoders.keys())
+        cached = self._sc_order_cache
+        if cached is not None and cached[0] == keys:
+            return cached[1], cached[2], cached[3]
+
+        deps: Dict[str, set] = {}
+        all_sources: set = set()
+        key_set = set(keys)
+        for tid in keys:
+            chain = self._effect_chains.get(tid)
+            if chain is None:
+                continue
+            srcs = chain.sidechain_sources()
+            if not srcs:
+                continue
+            all_sources |= srcs
+            track_srcs = {s for s in srcs if s in key_set and s != tid}
+            if track_srcs:
+                deps[tid] = track_srcs
+        # Bus 的链也可能引用检源（Bus 压缩器被普通轨/其他 Bus 键控）
+        for tid, chain in self._effect_chains.items():
+            if tid in key_set or chain is None:
+                continue
+            all_sources |= chain.sidechain_sources()
+
+        order = list(keys)
+        track_needed: set = set()
+        # MX-03: Bus/Master 链引用的检源若为普通轨，同样需要保留输出 tap——
+        # 此前 track_needed 只含"被普通轨链引用"的检源，Bus/Master 压缩器的
+        # 外部检源 tap 从未被记录（sidechain_map 不命中 → 回退内部检源）。
+        track_needed |= {s for s in all_sources if s in key_set}
+        if deps:
+            for srcs in deps.values():
+                track_needed |= srcs
+            placed: set = set()
+            result: list = []
+            remaining = list(keys)
+            while remaining:
+                progressed = False
+                for tid in list(remaining):
+                    if deps.get(tid, set()) <= placed:
+                        result.append(tid)
+                        placed.add(tid)
+                        remaining.remove(tid)
+                        progressed = True
+                if not progressed:
+                    tid = remaining.pop(0)
+                    logger.warning(
+                        "audio sidechain dependency cycle at track %s; "
+                        "falling back to internal detection", tid,
+                    )
+                    result.append(tid)
+                    placed.add(tid)
+            order = result
+
+        self._sc_order_cache = (keys, order, track_needed, all_sources)
+        return order, track_needed, all_sources
+
+    # ── CW-A1: 空间声像器 / 频谱仪 ────────────────────────────
+
+    def set_track_panner(self, track_id: str, panner: Optional[dict]) -> None:
+        """设置某轨的空间声像器参数（CW-A1）。线程安全。
+
+        Args:
+            track_id: 轨道 ID
+            panner: SpatialPannerParams.to_dict()；None/空 dict 表示未使用
+                    （回退普通 pan/balance）
+        """
+        with QMutexLocker(self._mutex):
+            if not panner:
+                self._track_panner_params.pop(track_id, None)
+                self._track_panners.pop(track_id, None)
+                return
+            self._track_panner_params[track_id] = dict(panner)
+            if track_id not in self._track_panners:
+                self._track_panners[track_id] = SpatialPanner(self._sample_rate)
+            self._track_panners[track_id].set_params(panner, sample_rate=self._sample_rate)
+
+    def set_spectrum_metering(self, enabled: bool) -> None:
+        """开/关频谱仪计算（EQ 对话框打开状态驱动，线程安全）。"""
+        with QMutexLocker(self._mutex):
+            self._spectrum_metering_enabled = bool(enabled)
+            if not enabled:
+                self._spectrum_windows.clear()
+                self._spectrum_write.clear()
+
+    # 频谱窗长度（样本）与输出 bin 数
+    SPECTRUM_WINDOW_SAMPLES = 2048
+    SPECTRUM_BINS = 96
+    SPECTRUM_MIN_HZ = 20.0
+    SPECTRUM_MAX_HZ = 20000.0
+
+    def collect_spectra(self) -> Dict[str, tuple]:
+        """计算并返回每轨频谱（调用点：播放线程表计节流 ~33Hz，持锁）。
+
+        MX-09: 窗缓存按写入指针重排后加窗（环窗跨界不再产生伪瞬态）；
+        L/R 按**功率合成**（mean(|L|²,|R|²)），L=-R 反相立体声仍显示双声道
+        能量（旧的 (L+R)/2 mono 折叠会完全相消）。
+
+        Returns:
+            {track_id: (freqs list[float], db list[float])}——96 个对数 bins
+            （20Hz..20kHz，峰值归一 dB，满量程 0dB 附近、地板 -120dB）。
+        """
+        result: Dict[str, tuple] = {}
+        if not self._spectrum_metering_enabled:
+            return result
+        n = self.SPECTRUM_WINDOW_SAMPLES
+        freqs = self._spectrum_bin_freqs()
+        win_fn = np.hanning(n)
+        bin_hz = np.fft.rfftfreq(n, d=1.0 / self._sample_rate)
+        for tid, window in self._spectrum_windows.items():
+            try:
+                widx = self._spectrum_write.get(tid, 0)
+                # MX-09: 按环窗 write 指针重排（时间顺序恢复），跨界无伪瞬态
+                ordered = np.roll(window, -widx, axis=-1)
+                spectra = np.fft.rfft(ordered * win_fn, axis=-1)
+                # 功率合成（L=-R 不相消）；幅度归一 = 相干增益校正
+                mag = np.sqrt(np.mean(np.abs(spectra) ** 2, axis=0))                     / max(n, 1) * 2.0
+                # 对数 bins 聚合（取 bin 内最大）
+                db = np.full(len(freqs), -120.0)
+                bin_idx = np.clip(np.searchsorted(bin_hz, freqs), 0, len(mag) - 1)
+                for k in range(len(freqs)):
+                    lo = bin_idx[max(k - 1, 0)]
+                    hi = bin_idx[min(k + 1, len(bin_idx) - 1)] + 1
+                    seg = mag[lo:hi]
+                    if seg.size:
+                        db[k] = max(db[k], 20.0 * float(np.log10(max(float(np.max(seg)), 1e-6))))
+                result[tid] = (freqs, [float(v) for v in db])
+            except Exception:  # noqa: BLE001 — 频谱是纯表计，失败不影响混音
+                continue
+        return result
+
+    def _spectrum_bin_freqs(self) -> list:
+        """对数分布的频谱 bin 中心频率（缓存）。"""
+        cached = getattr(self, "_spectrum_bin_freqs_cache", None)
+        if cached is not None:
+            return cached
+        lo, hi = self.SPECTRUM_MIN_HZ, self.SPECTRUM_MAX_HZ
+        freqs = [lo * ((hi / lo) ** (i / (self.SPECTRUM_BINS - 1)))
+                 for i in range(self.SPECTRUM_BINS)]
+        self._spectrum_bin_freqs_cache = freqs
+        return freqs
+
+    def _push_spectrum_window(self, track_id: str, track_output: np.ndarray) -> None:
+        """把该轨完整输出（post-chain，立体声）推入 2048 样本环形窗。
+
+        MX-09: 缓存立体声（L/R 两行），collect_spectra 做功率合成；
+        write 指针记录环窗写入位置供时间序重排。
+        """
+        n = self.SPECTRUM_WINDOW_SAMPLES
+        ch = track_output.shape[0]
+        if ch >= 2:
+            stereo = track_output[:2].astype(np.float64, copy=False)
+        else:
+            stereo = np.repeat(track_output[:1].astype(np.float64, copy=False),
+                               2, axis=0)
+        win = self._spectrum_windows.get(track_id)
+        if win is None or win.shape[0] != 2 or win.shape[1] != n:
+            win = np.zeros((2, n), dtype=np.float64)
+            self._spectrum_windows[track_id] = win
+            self._spectrum_write[track_id] = 0
+        idx = self._spectrum_write.get(track_id, 0)
+        m = stereo.shape[1]
+        pos = 0
+        while pos < m:
+            take = min(m - pos, n - idx)
+            win[:, idx:idx + take] = stereo[:, pos:pos + take]
+            pos += take
+            idx = (idx + take) % n
+        self._spectrum_write[track_id] = idx
 
     def set_lufs_metering(self, enabled: bool) -> None:
         """开/关 LUFS 响度计算（表模式驱动，线程安全）。"""
@@ -1844,9 +2127,23 @@ class AudioMixer:
             for cid in clip_ids_to_remove:
                 self._clip_effect_chains.pop(cid, None)
                 self._clip_effect_samplers.pop(cid, None)
+                self._clip_end_frames.pop(cid, None)
+                self._clip_track_of.pop(cid, None)
+                self._clip_tail_left.pop(cid, None)
                 self._clip_to_track.pop(cid, None)
             # W11: 清理 LUFS 响度计
             self._lufs_meters.pop(track_id, None)
+            # MX-10: 清理 fx 参数自动化采样器
+            self._track_effect_samplers.pop(track_id, None)
+            # CW-A1: 清理空间声像器 / 频谱窗 / 侧链状态
+            self._track_panner_params.pop(track_id, None)
+            self._track_panners.pop(track_id, None)
+            self._spectrum_windows.pop(track_id, None)
+            self._spectrum_write.pop(track_id, None)
+            self._sc_bus_taps.pop(track_id, None)
+            self._sc_order_cache = None
+            # MX-07: 清尾音调度
+            self._track_tail_remaining.pop(track_id, None)
             # 清理混音 scratch 缓冲（防轨道频繁增删时内存累积）
             self._mix_acc_scratch.pop(track_id, None)
             self._mix_pad_scratch.pop(track_id, None)
@@ -2071,6 +2368,14 @@ class AudioMixer:
             # W26: 同步更新 FX 机架效果器链
             for chain in self._effect_chains.values():
                 chain.set_params(chain._last_entries, sample_rate=self._sample_rate)
+            # CW-A1: 同步空间声像器（boom 滤波系数按采样率重算）
+            for tid, panner in self._track_panners.items():
+                panner.set_params(self._track_panner_params.get(tid), sample_rate=self._sample_rate)
+            # 频谱窗按旧采样率填充，清零重收
+            self._spectrum_windows.clear()
+            self._spectrum_write.clear()
+            self._sc_bus_taps.clear()
+            self._sc_order_cache = None
             # P-clip-FX: 同步更新 per-clip 效果器链
             for clip_chain in self._clip_effect_chains.values():
                 clip_chain.set_params(clip_chain._last_entries, sample_rate=self._sample_rate)
@@ -2107,6 +2412,17 @@ class AudioMixer:
                 chain.reset_state()
             for clip_chain in self._clip_effect_chains.values():
                 clip_chain.reset_state()
+            self._clip_tail_left.clear()
+            # CW-A1: 空间声像器 boom 滤波状态 / 侧链 tap / 频谱窗一并复位
+            for panner in self._track_panners.values():
+                panner.reset_state()
+            self._sc_bus_taps.clear()
+            # MX-07: seek 清尾音调度（旧位置的尾音不得复活）
+            self._track_tail_remaining.clear()
+            for win in self._spectrum_windows.values():
+                win.fill(0.0)
+            for tid in list(self._spectrum_write.keys()):
+                self._spectrum_write[tid] = 0
             for meter in self._lufs_meters.values():
                 try:
                     meter.reset()
@@ -2127,20 +2443,90 @@ class AudioMixer:
                 self._eq_filters[track_id] = StripEQFilter(self._sample_rate)
             self._eq_filters[track_id].set_params(params, sample_rate=self._sample_rate)
 
-    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams]) -> None:
-        """设置某轨的 FX 机架效果器链（W26）。线程安全。
+    def set_freeze_registry(self, registry: Optional[dict]) -> None:
+        """H09：注入 Freeze 捕获资产注册表（{capture_id: capture_dict}）。
+
+        之后的 set_track/master_effect_chain 会按实例 ``freeze_capture_id``
+        自动装载；None 清空（切换工程）。实时窗口的冻结按钮经
+        ``take_freeze_capture`` 拉取捕获并由宿主落盘/入表。
+        """
+        with QMutexLocker(self._mutex):
+            self._freeze_registry = dict(registry or {})
+
+    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams],
+                               animated_sampler: Optional[Any] = None) -> None:
+        """设置某轨的 FX 机架效果器链（W26；MX-10 扩展采样器）。线程安全。
 
         在 strip EQ 之后应用（post-fader，post-EQ）。
 
         Args:
             track_id: 轨道 ID
             chain_params: EffectChainParams，None 表示清空链
+            animated_sampler: MX-10——``frame -> entries`` 采样器（fx 参数
+                关键帧）；提供时 mix_samples 在处理该轨每个块前按当前帧
+                重设链参数（块边界粒度，与 clip FX 同型）。None=静态。
         """
         entries = chain_params.to_dsp_entries() if chain_params is not None else None
         with QMutexLocker(self._mutex):
             if track_id not in self._effect_chains:
                 self._effect_chains[track_id] = EffectChain(self._sample_rate)
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
+            # H09：Freeze 捕获资产（注册表存在且实例引用资产 → 装载）
+            if chain_params is not None and self._freeze_registry:
+                from src.features.edit.core.freeze_capture_store import (
+                    apply_freeze_registry,
+                )
+                apply_freeze_registry(self._effect_chains[track_id],
+                                      chain_params, self._freeze_registry)
+            # CW-A1: 链参数变化可能改变侧链依赖 → 失效排序缓存
+            self._sc_order_cache = None
+            # MX-10: fx 参数自动化采样器（None/清链 → 移除）
+            if animated_sampler is not None and chain_params is not None:
+                self._track_effect_samplers[track_id] = animated_sampler
+            else:
+                self._track_effect_samplers.pop(track_id, None)
+
+    def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
+        """MX-03: 设置 Master Strip EQ。线程安全。
+
+        在 master 音量后、限幅器前应用（与轨链 strip_eq 同构）。
+        None 表示禁用 EQ。
+        """
+        with QMutexLocker(self._mutex):
+            eqf = self._eq_filters.get(MASTER_BUS_KEY)
+            if eqf is None:
+                eqf = StripEQFilter(self._sample_rate)
+                self._eq_filters[MASTER_BUS_KEY] = eqf
+            eqf.set_params(params, sample_rate=self._sample_rate)
+
+    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams],
+                                animated_sampler: Any = None) -> None:
+        """MX-03: 设置 Master FX 机架链。线程安全。
+
+        在 master EQ 后、限幅器前应用；外部侧链检源与普通轨同一 tap 池
+        （Bus 检源天然一个块延迟，与被控轨消费 Bus tap 的语义一致）。
+        None 表示清空链。R05: animated_sampler 为 Master fx 参数自动化
+        采样器（master_automation 的 fx/* 键；块边界消费，与轨级同型）。
+        """
+        entries = chain_params.to_dsp_entries() if chain_params is not None else None
+        with QMutexLocker(self._mutex):
+            chain = self._effect_chains.get(MASTER_BUS_KEY)
+            if chain is None:
+                chain = EffectChain(self._sample_rate)
+                self._effect_chains[MASTER_BUS_KEY] = chain
+            chain.set_params(entries, sample_rate=self._sample_rate)
+            # H09：Master 链的 Freeze 资产装载（与轨级同语义）
+            if chain_params is not None and self._freeze_registry:
+                from src.features.edit.core.freeze_capture_store import (
+                    apply_freeze_registry,
+                )
+                apply_freeze_registry(chain, chain_params,
+                                      self._freeze_registry)
+            if animated_sampler is not None:
+                self._track_effect_samplers[MASTER_BUS_KEY] = animated_sampler
+            else:
+                self._track_effect_samplers.pop(MASTER_BUS_KEY, None)
+            self._sc_order_cache = None
 
     def set_clip_effects(
         self,
@@ -2372,8 +2758,17 @@ class AudioMixer:
             ]
             registered_bus_set = set(all_registered_buses)
 
-            # 遍历所有普通音频轨（非 Bus）
-            for track_id, decoders in self._decoders.items():
+            # CW-A1: 外部侧链 —— 检源轨先于被控轨处理（拓扑序）。
+            # sidechain_taps 起始于上一块的 Bus 检源 tap（Bus 在阶段 2 才混音，
+            # 被控轨用上一块输出探测 = 一个混音块的延迟，对 ducking 场景无感）。
+            track_order, track_sc_needed, all_sc_sources = self._sidechain_track_order()
+            sidechain_taps: Dict[str, np.ndarray] = dict(self._sc_bus_taps)
+
+            # 遍历所有普通音频轨（非 Bus，按侧链依赖排序）
+            for track_id in track_order:
+                decoders = self._decoders.get(track_id)
+                if decoders is None:
+                    continue
                 state = self._tracks.get(track_id)
                 if not state or not state.enabled:
                     continue
@@ -2448,10 +2843,17 @@ class AudioMixer:
                 track_sum_sq_l = 0.0
                 track_sum_sq_r = 0.0
                 track_sample_count = 0
-                # W11: 该轨总输出缓冲（供 LUFS 测量）
-                # A3: 懒分配——仅在该轨确实解码出样本时才创建，避免无 clip 轨
-                # 每帧分配 num_samples × output_channels × float32 的空缓冲。
+                # CW-A1: pre-fader 峰值（volume/pan/FX 之前，Dynamics Input 表）
+                track_pre_peak = 0.0
+                # W11: 该轨总输出缓冲（供 LUFS 测量）——MX-04 后在轨阶段赋值
                 track_output_acc: Optional[np.ndarray] = None
+                # MX-04: 轨输入块（所有 clip 的源级处理完成后在此求和，
+                # 轨 DSP 只对求和结果运行一次）。复用 scratch，每次清零。
+                # MX-07: 无 clip 但尾音未结束时保持全零（feed-zero drain）。
+                track_input = self._mix_scratch(
+                    self._mix_acc_scratch, track_id, output_channels, num_samples
+                )
+                any_clip_samples = False
 
                 for decoder in self._iter_decoders(decoders):
                     # 解码音频
@@ -2461,12 +2863,7 @@ class AudioMixer:
 
                     if samples is None:
                         continue
-
-                    # A3: 首次拿到样本时才分配该轨累积缓冲（复用 scratch，零分配）
-                    if track_output_acc is None:
-                        track_output_acc = self._mix_scratch(
-                            self._mix_acc_scratch, track_id, output_channels, num_samples
-                        )
+                    any_clip_samples = True
 
                     # F2.1 · Source Patching：素材级源声道映射先于 downmix 选道
                     # （5.1 只送 L/R、单选 C 做 ADR 对轨等）。select_channels
@@ -2543,6 +2940,12 @@ class AudioMixer:
                     # 包络。与 clip fade 同级（源电平调整），在 clip-FX/volume 之前。
                     clip_id = getattr(decoder, "_clip_id", None)
                     if clip_id is not None:
+                        # H03：clip 生命周期记账——clip FX 尾音 drain 用
+                        self._clip_end_frames[clip_id] = (
+                            int(getattr(decoder, "_timeline_start", 0) or 0)
+                            + int(getattr(decoder, "_timeline_duration", 0) or 0))
+                        self._clip_track_of[clip_id] = track_id
+                    if clip_id is not None:
                         samples = self._apply_audio_crossfade(
                             samples, track_id, clip_id, current_frame, fps
                         )
@@ -2572,24 +2975,14 @@ class AudioMixer:
                             if clip_chain.is_active:
                                 samples = clip_chain.process(samples)
 
-                    # 应用音量和声像（§3.2: 逐样本 ramp 替代每帧单标量）
-                    # 注：in-place 分支仅用于独占数组（base is None，即
-                    # decode/resample/concatenate 的产物）；视图走拷贝乘，
-                    # 避免污染 decoder 缓冲（多声道截取 samples[:ch] 等）。
-                    if volume_ramp is not None:
-                        n = samples.shape[-1]
-                        vr = volume_ramp[:n]
-                        samples = samples * vr[np.newaxis, :]
-                    elif volume == 1.0:
-                        # 默认音量（绝大多数轨）：跳过整段乘法与分配。
-                        pass
-                    elif samples.base is None:
-                        # 独占数据：原位乘，零分配。
-                        samples *= volume
-                    else:
-                        samples = samples * volume
+                    # CW-A1: pre-fader 峰值改在轨阶段对求和输入测量（MX-04：
+                    # 多 clip 重叠时求和电平才反映 Dynamics 检测到的真实输入）
 
                     # 应用声像（RMA-08: 按源声道数选算法）。
+                    # MX-04: pan 是逐声道线性增益且依赖 clip 源布局（mono
+                    # equal-power / stereo balance），保留在 clip 阶段逐 clip
+                    # 施加；音量 / 空间声像器 / EQ / FX 在轨阶段对求和输入
+                    # 一次处理（有状态 DSP 只推进一次）。
                     # mono 源用 equal-power pan（center 恒功率 -3dB/侧），stereo 源用
                     # balance（unity-center，保持原响度与声像），surround 用 trim。
                     # §3.2: pan ramp 时逐样本计算 left/right gain。
@@ -2616,99 +3009,206 @@ class AudioMixer:
                         if samples.shape[0] > 1:
                             samples[1] *= right_gain
 
-                    # W7: 应用 Strip EQ（post-fader，在 volume/pan 之后、累计 peak 之前）
-                    # EQ 滤波器实例在 self._eq_filters 中按 track_id 缓存
-                    eq_filter = self._eq_filters.get(track_id)
-                    if eq_filter is not None and eq_filter.is_active:
-                        samples = eq_filter.process(samples)
-
-                    # W26: 应用 FX 机架效果器链（post-EQ，在 strip EQ 之后）
-                    chain = self._effect_chains.get(track_id)
-                    if chain is not None and chain.is_active:
-                        samples = chain.process(samples)
-
-                    # 将 mute 放在 strip 输出端，确保自动化切点同时门控 EQ/FX
-                    # 的输出；这样不会让通道被静音后残留 effect tail 泄到 Master。
-                    if mute_gate is not None:
-                        samples = samples * mute_gate[np.newaxis, :samples.shape[-1]]
-
-                    # 累计该轨电平（在补零/截取前，避免 padding 拉低 peak/RMS）
-                    if samples.shape[0] >= 2 and samples.shape[-1] > 0:
-                        track_peak_l = max(track_peak_l, float(np.max(np.abs(samples[0]))))
-                        track_peak_r = max(track_peak_r, float(np.max(np.abs(samples[1]))))
-                        # A2: RMS 平方和用 np.dot 替代 np.sum(x**2)，避免创建临时平方数组
-                        track_sum_sq_l += float(np.dot(samples[0], samples[0]))
-                        track_sum_sq_r += float(np.dot(samples[1], samples[1]))
-                        track_sample_count += samples.shape[-1]
-                    elif samples.shape[-1] > 0:
-                        p = float(np.max(np.abs(samples[0])))
-                        track_peak_l = max(track_peak_l, p)
-                        track_peak_r = max(track_peak_r, p)
-                        sq = float(np.dot(samples[0], samples[0]))
-                        track_sum_sq_l += sq
-                        track_sum_sq_r += sq
-                        track_sample_count += samples.shape[-1]
-
-                    # 混合到输出
-                    # A2: 补零用 scratch 缓冲复用（替代每轨每帧一次 np.zeros
-                    # 大数组分配）；截取分支是视图，天然零拷贝。
-                    cur_len = samples.shape[-1]
-                    if cur_len < num_samples:
-                        padded = self._mix_scratch(
-                            self._mix_pad_scratch, track_id, output_channels, num_samples
-                        )
-                        padded[:, :cur_len] = samples
-                        samples = padded
-                    elif cur_len > num_samples:
-                        # 截取
+                    # MX-04: clip 块汇入轨输入（时间对齐求和；短块由 scratch
+                    # 零填充语义覆盖）。超长块先截取。轨级处理在 clip 循环后
+                    # 统一进行（音量/panner/EQ/FX/mute/路由）。
+                    if samples.shape[-1] > num_samples:
                         samples = samples[..., :num_samples]
+                    track_input[:, :samples.shape[-1]] += samples
 
-                    # W11: 累积到该轨输出（供 LUFS 测量）
-                    track_output_acc[:, :samples.shape[-1]] += samples
-                    # W25: 路由到目标（Bus 或 Master）+ 处理 sends
-                    target_bus = routing.get("output_bus_id")
-                    if target_bus is not None and target_bus in registered_bus_set:
-                        # 路由到 Bus
-                        if target_bus not in bus_inputs:
-                            bus_inputs[target_bus] = self._mix_scratch(
-                                self._mix_bus_scratch, target_bus,
-                                output_channels, num_samples,
-                            )
-                        bus_inputs[target_bus][:, :samples.shape[-1]] += samples
-                    elif target_bus is not None:
-                        # AUD-15402: output_bus_id 指向未注册 bus（如 bus 已删除但
-                        # 轨的路由未清理）。旧行为为未知目标也建缓冲——样本累积进
-                        # 永不被消费的孤儿缓冲，整轨音频静默丢失。与 Bus 阶段及
-                        # topological_sort_buses 的"未知目标视为 Master"语义统一：
-                        # 兜底进 master 并告警。
-                        logger.warning(
-                            "audio track %s routes to unknown bus %s; falling back to master",
-                            track_id, target_bus,
-                        )
-                        output += samples
+                # ── H03: clip FX 尾音 ──
+                # 已结束 clip 的 per-clip 链按其尾音预算继续喂零（实时/
+                # 成片/Stem 同语义；修前实时 clip Delay 回声整段丢失——
+                # 复审 clip_tail_peaks live=0 已复现）。输出汇入轨求和
+                # （pan/链语义同成片：尾音不再过 clip pan——成片同口径）。
+                for _cid, _cchain in self._clip_effect_chains.items():
+                    if self._clip_track_of.get(_cid) != track_id:
+                        continue
+                    _cend = self._clip_end_frames.get(_cid)
+                    if _cend is None or current_frame < _cend:
+                        continue
+                    if _cid not in self._clip_tail_left:
+                        self._clip_tail_left[_cid] = (
+                            _cchain.tail_estimate_samples()
+                            if _cchain is not None else 0)
+                    _cleft = self._clip_tail_left.get(_cid, 0)
+                    if _cleft <= 0 or _cchain is None or not _cchain.is_active:
+                        continue
+                    _ctail = _cchain.process(
+                        np.zeros((min(2, output_channels), num_samples),
+                                 dtype=np.float32))
+                    _cn = min(_ctail.shape[-1], track_input.shape[-1])
+                    track_input[:_ctail.shape[0], :_cn] += _ctail[:, :_cn]
+                    self._clip_tail_left[_cid] = max(0, _cleft - num_samples)
+                    any_clip_samples = True
+
+                # ── MX-07: 尾音调度 ──
+                # 本块无 clip 输入时按链尾音估计喂零推进（feed-zero drain）；
+                # 静音/solo 剔除/自动化全零路径已在上方 continue（尾音切断
+                # 语义：DSP 状态冻结，不再排空）。seek/stop 由
+                # reset_dsp_states 清空调度。
+                track_chain = self._effect_chains.get(track_id)
+                if any_clip_samples:
+                    self._track_tail_remaining[track_id] = (
+                        track_chain.tail_estimate_samples() if track_chain else 0
+                    )
+                else:
+                    tail_remaining = self._track_tail_remaining.get(track_id, 0)
+                    if tail_remaining <= 0:
+                        # 无 clip 且无尾音 → 整轨跳过（A3 语义保持）
+                        continue
+                    self._track_tail_remaining[track_id] = max(
+                        0, tail_remaining - num_samples)
+                    # track_input 保持全零（drain：有状态 Delay/Reverb 继续出尾音）
+
+                # ── MX-04: 轨阶段——对求和后的输入一次应用轨链 ──
+                # CW-A1: pre-fader 峰值（clip-FX 后、音量前；drain 块为 0）
+                if any_clip_samples and track_input.shape[-1] > 0:
+                    track_pre_peak = float(np.max(np.abs(track_input)))
+
+                # 音量（§3.2: 逐样本 ramp；求和后应用一次，线性等价）
+                samples = track_input
+                if volume_ramp is not None:
+                    n = samples.shape[-1]
+                    vr = volume_ramp[:n]
+                    samples = samples * vr[np.newaxis, :]
+                elif volume != 1.0:
+                    samples = samples * volume
+                # volume==1.0 时 samples 即 track_input（scratch 视图）——
+                # 下方所有消费者只读或先拷贝（panner/EQ/chain 内部 astype copy）
+
+                # CW-A1: 空间声像器（状态化，块级一次；矩阵读取未污染输入）
+                panner = self._track_panners.get(track_id)
+                if panner is not None and panner.is_active:
+                    if pan_ramp is not None and len(pan_ramp) > 0:
+                        mid = min(len(pan_ramp) - 1, samples.shape[-1] // 2)
+                        pan_eff = float(np.clip(pan_ramp[mid], -1.0, 1.0))
                     else:
-                        # 直接到 Master
-                        output += samples
-                    # 处理 sends（post-fader，并行发送到多个 Bus）
-                    for send_bus_id, send_level in routing.get("sends", []):
-                        if send_level <= 0.0:
-                            continue
-                        if send_bus_id not in registered_bus_set:
-                            # AUD-15402: send 指向未注册 bus——并行 tap 落空，
-                            # 跳过并告警（与 Bus 阶段 send 只认已注册目标一致）。
+                        pan_eff = pan
+                    samples = panner.process(samples, pan_eff)
+
+                # W7: Strip EQ（post-fader，状态化，块级一次）
+                eq_filter = self._eq_filters.get(track_id)
+                if eq_filter is not None and eq_filter.is_active:
+                    samples = eq_filter.process(samples)
+
+                # W26: FX 机架效果器链（post-EQ；CW-A1 外部侧链检源透传）
+                # Sample automation even while the chain is neutral/bypassed:
+                # the current block can activate it. process() skips inactive
+                # nodes and refreshes their bypass telemetry after sampling.
+                if track_chain is not None:
+                    # MX-10: fx 参数自动化——块边界按当前帧重设链参数
+                    # （与 clip FX 的 animated_sampler 同型；失败不阻断混音）
+                    fx_sampler = self._track_effect_samplers.get(track_id)
+                    if fx_sampler is not None:
+                        try:
+                            track_chain.set_params(
+                                fx_sampler(current_frame),
+                                sample_rate=self._sample_rate)
+                        except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
                             logger.warning(
-                                "audio track %s send targets unknown bus %s; send skipped",
-                                track_id, send_bus_id,
-                            )
-                            continue
-                        if send_bus_id not in bus_inputs:
-                            bus_inputs[send_bus_id] = self._mix_scratch(
-                                self._mix_bus_scratch, send_bus_id,
-                                output_channels, num_samples,
-                            )
+                                "fx automation sampler failed for track %s",
+                                track_id, exc_info=True)
+                            self._track_effect_samplers.pop(track_id, None)
+                    sc_map = None
+                    if sidechain_taps:
+                        raw_map = track_chain.sidechain_map(sidechain_taps)
+                        if raw_map:
+                            cur_n = samples.shape[-1]
+                            sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
+                    samples = track_chain.process(samples, sidechain_by_id=sc_map)
+
+                # mute 门控在链输出端（自动化切点同时门控 EQ/FX 尾音泄漏）
+                if mute_gate is not None:
+                    samples = samples * mute_gate[np.newaxis, :samples.shape[-1]]
+
+                # 补零到块宽（复用 scratch）→ 该轨输出缓冲
+                if samples.shape[-1] < num_samples:
+                    padded = self._mix_scratch(
+                        self._mix_pad_scratch, track_id, output_channels, num_samples
+                    )
+                    padded[:, :samples.shape[-1]] = samples
+                    samples = padded
+                track_output_acc = samples
+
+                # 累计该轨电平（求和后的完整轨输出；drain 块峰值为回声能量）
+                if samples.shape[0] >= 2 and samples.shape[-1] > 0:
+                    track_peak_l = float(np.max(np.abs(samples[0])))
+                    track_peak_r = float(np.max(np.abs(samples[1])))
+                    # A2: RMS 平方和用 np.dot 替代 np.sum(x**2)，避免创建临时平方数组
+                    track_sum_sq_l = float(np.dot(samples[0], samples[0]))
+                    track_sum_sq_r = float(np.dot(samples[1], samples[1]))
+                    track_sample_count = samples.shape[-1]
+                elif samples.shape[-1] > 0:
+                    p = float(np.max(np.abs(samples[0])))
+                    track_peak_l = track_peak_r = p
+                    sq = float(np.dot(samples[0], samples[0]))
+                    track_sum_sq_l = track_sum_sq_r = sq
+                    track_sample_count = samples.shape[-1]
+
+                # W25: 路由到目标（Bus 或 Master）+ 处理 sends
+                target_bus = routing.get("output_bus_id")
+                if target_bus is not None and target_bus in registered_bus_set:
+                    # 路由到 Bus
+                    if target_bus not in bus_inputs:
+                        bus_inputs[target_bus] = self._mix_scratch(
+                            self._mix_bus_scratch, target_bus,
+                            output_channels, num_samples,
+                        )
+                    bus_inputs[target_bus][:, :samples.shape[-1]] += samples
+                elif target_bus is not None:
+                    # AUD-15402: output_bus_id 指向未注册 bus（如 bus 已删除但
+                    # 轨的路由未清理）。兜底进 master 并告警（与 Bus 阶段一致）。
+                    logger.warning(
+                        "audio track %s routes to unknown bus %s; falling back to master",
+                        track_id, target_bus,
+                    )
+                    output += samples
+                else:
+                    # 直接到 Master
+                    output += samples
+                # 处理 sends（MX-14: post-fader 默认 / pre-fader 可选 + 独立
+                # mute；并行发送到多个 Bus）
+                for send_entry in routing.get("sends", []):
+                    send_bus_id, send_level, send_tap, send_muted = (
+                        unpack_send(send_entry))
+                    if send_level <= 0.0 or send_muted:
+                        continue
+                    if send_bus_id not in registered_bus_set:
+                        # AUD-15402: send 指向未注册 bus——并行 tap 落空，
+                        # 跳过并告警（与 Bus 阶段 send 只认已注册目标一致）。
+                        logger.warning(
+                            "audio track %s send targets unknown bus %s; send skipped",
+                            track_id, send_bus_id,
+                        )
+                        continue
+                    if send_bus_id not in bus_inputs:
+                        bus_inputs[send_bus_id] = self._mix_scratch(
+                            self._mix_bus_scratch, send_bus_id,
+                            output_channels, num_samples,
+                        )
+                    if send_tap == "pre_fader":
+                        # MX-14: 推子前 tap——clip 求和块（音量/pan/EQ/FX 前），
+                        # 不随推子变化；自动化静音门控同时门控 pre send
+                        pre_src = track_input
+                        pre_n = pre_src.shape[-1]
+                        if mute_gate is not None:
+                            pre_src = pre_src * mute_gate[np.newaxis, :pre_n]
+                        bus_inputs[send_bus_id][:, :pre_n] += pre_src * send_level
+                    else:
                         bus_inputs[send_bus_id][:, :samples.shape[-1]] += samples * send_level
 
-                if track_peak_l > 0.0 or track_peak_r > 0.0:
+                if track_peak_l > 0.0 or track_peak_r > 0.0 or track_pre_peak > 0.0:
+                    # CW-A1: 侧链 tap（该轨完整输出，推子后；仅在本块内消费）
+                    # 供后续被控轨的压缩器探测
+                    if track_id in track_sc_needed and track_output_acc is not None:
+                        sidechain_taps[track_id] = track_output_acc
+                    # CW-A1: GR / 检源电平遥测（链内动态效果器按 instance_id）
+                    gr_map = track_chain.collect_gain_reduction() if track_chain is not None else {}
+                    sc_levels = track_chain.collect_detector_levels() if track_chain is not None else {}
+                    # CW-A1: 频谱窗（EQ 对话框打开时）
+                    if self._spectrum_metering_enabled and track_output_acc is not None:
+                        self._push_spectrum_window(track_id, track_output_acc)
                     # 计算 RMS（均方根）
                     if track_sample_count > 0:
                         rms_l = float(np.sqrt(track_sum_sq_l / track_sample_count))
@@ -2716,8 +3216,6 @@ class AudioMixer:
                     else:
                         rms_l = rms_r = 0.0
                     # W11: 喂入 LUFS 响度计（用该轨完整输出，K-weighting 后计算）
-                    # A3: track_output_acc 在该轨无样本时为 None，跳过 LUFS（peak 已为 0，
-                    # 此分支仅在 peak>0 时进入，理论上 acc 不会是 None，这里做防御）。
                     # W11-gate: 无 LUFS 消费者时跳过 K-weighting（近一半混音耗时）。
                     lufs_m = -70.0
                     if (
@@ -2735,6 +3233,9 @@ class AudioMixer:
                     per_track_peaks[track_id] = TrackLevel(
                         peak_l=track_peak_l, peak_r=track_peak_r,
                         rms_l=rms_l, rms_r=rms_r, lufs=lufs_m,
+                        pre_peak=track_pre_peak, gr=gr_map, sc=sc_levels,
+                        taps=(track_chain.tap_levels()
+                              if track_chain is not None else {}),
                     )
 
             # W25/AM-14: 阶段 2 — 按拓扑序处理 Bus 轨（支持多层 Bus→Bus）。
@@ -2755,8 +3256,19 @@ class AudioMixer:
                 )
             for bus_id in sorted_buses:
                 bus_input = bus_inputs.get(bus_id)
+                bus_had_input = bus_input is not None
                 if bus_input is None:
-                    continue
+                    # MX-07: 无输入但尾音未结束的 Bus 喂零推进（Bus 也可挂
+                    # Delay/Reverb；尾音调度与普通轨同一契约）
+                    tail_rem = self._track_tail_remaining.get(bus_id, 0)
+                    if tail_rem <= 0:
+                        continue
+                    self._track_tail_remaining[bus_id] = max(
+                        0, tail_rem - num_samples)
+                    bus_input = self._mix_scratch(
+                        self._mix_bus_scratch, bus_id, output_channels, num_samples
+                    )
+                    bus_inputs[bus_id] = bus_input
                 bus_state = self._tracks.get(bus_id)
                 if bus_state is None or not bus_state.enabled or bus_state.muted:
                     continue
@@ -2810,6 +3322,9 @@ class AudioMixer:
                     bus_samples = bus_input * bus_vol_ramp[np.newaxis, :]
                 else:
                     bus_samples = bus_input * bus_volume
+                # MX-03: Bus pre-fader 峰值（音量/EQ/FX 前；Dynamics Input 表）
+                bus_pre_peak = (float(np.max(np.abs(bus_input)))
+                                if bus_input.shape[-1] > 0 else 0.0)
                 # pan（RMA-08: Bus 输入是已混的立体声，用 balance unity-center，
                 # 保持 center 响度与声像；不再用 equal-power 把整体降 -3dB）
                 # AUD-15506: balance_gains 已提升为模块级导入。
@@ -2824,14 +3339,50 @@ class AudioMixer:
                     bus_samples[0] *= lg
                     if bus_samples.shape[0] > 1:
                         bus_samples[1] *= rg
+                # CW-A1: Bus 空间声像器（与普通轨同级，balance 之后叠加矩阵）
+                bus_panner = self._track_panners.get(bus_id)
+                if bus_panner is not None and bus_panner.is_active:
+                    bus_samples = bus_panner.process(bus_samples, bus_pan)
                 # EQ
                 bus_eq = self._eq_filters.get(bus_id)
                 if bus_eq is not None and bus_eq.is_active:
                     bus_samples = bus_eq.process(bus_samples)
-                # W26: FX 机架效果器链（post-EQ）
+                # W26: FX 机架效果器链（post-EQ）。MX-03: 外部侧链检源透传——
+                # 此前只有导出（render_bus_stage sidechain_taps）接检源，
+                # 实时 Bus 链的压缩器外部检源被无声忽略（MX-08 残留缺口）。
                 bus_chain = self._effect_chains.get(bus_id)
-                if bus_chain is not None and bus_chain.is_active:
-                    bus_samples = bus_chain.process(bus_samples)
+                if bus_chain is not None:
+                    # R05: Bus fx 参数自动化——块边界按当前帧重设链参数
+                    # （set_track_effect_chain 对 Bus 同样注册 sampler，
+                    # 此前实时 Bus 阶段建而不消费）
+                    bus_sampler = self._track_effect_samplers.get(bus_id)
+                    if bus_sampler is not None:
+                        try:
+                            bus_chain.set_params(
+                                bus_sampler(int(current_frame)),
+                                sample_rate=self._sample_rate)
+                        except Exception:  # noqa: BLE001 — 求值失败回退静态
+                            logger.warning(
+                                "AudioMixer: bus fx automation sampler "
+                                "failed for %s", bus_id, exc_info=True)
+                            self._track_effect_samplers[bus_id] = None
+                    bus_sc_map = None
+                    if sidechain_taps:
+                        raw_map = bus_chain.sidechain_map(sidechain_taps)
+                        if raw_map:
+                            cur_n = bus_samples.shape[-1]
+                            bus_sc_map = {iid: buf[:, :cur_n]
+                                          for iid, buf in raw_map.items()}
+                    bus_samples = bus_chain.process(
+                        bus_samples, sidechain_by_id=bus_sc_map)
+                # MX-07: Bus 尾音调度（有真实输入时刷新估计；drain 块已提前扣减）
+                if bus_had_input:
+                    self._track_tail_remaining[bus_id] = (
+                        bus_chain.tail_estimate_samples() if bus_chain else 0)
+                # CW-A1: 该 Bus 被引用为侧链检源 → 记录本块输出（供下一块的
+                # 被控轨探测；Bus 在阶段 2 混音，晚于普通轨，天然一个块延迟）
+                if bus_id in all_sc_sources:
+                    self._sc_bus_taps[bus_id] = bus_samples.astype(np.float64, copy=True)
                 # AM-14: Bus 处理后按自身 routing 输出（Bus→Bus 或 →Master）
                 bus_routing = self._track_routing.get(bus_id, {})
                 bus_target = bus_routing.get("output_bus_id") if isinstance(bus_routing, dict) else None
@@ -2849,29 +3400,64 @@ class AudioMixer:
                     output += bus_samples
                 # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
                 # 此前实时 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
+                # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。
                 if isinstance(bus_routing, dict):
-                    for send_bus_id, send_level in bus_routing.get("sends", []) or []:
-                        if send_level <= 0.0:
+                    for send_entry in bus_routing.get("sends", []) or []:
+                        send_bus_id, send_level, send_tap, send_muted = (
+                            unpack_send(send_entry))
+                        if send_level <= 0.0 or send_muted:
                             continue
+                        if send_bus_id not in bus_inputs and send_bus_id in registered_bus_set:
+                            bus_inputs[send_bus_id] = self._mix_scratch(
+                                self._mix_bus_scratch, send_bus_id,
+                                output_channels, num_samples,
+                            )
                         if send_bus_id in bus_inputs:
-                            bus_inputs[send_bus_id][:, :bus_samples.shape[-1]] += bus_samples * send_level
+                            send_src = bus_input if send_tap == "pre_fader" else bus_samples
+                            bus_inputs[send_bus_id][:, :send_src.shape[-1]] += send_src * send_level
                         elif send_bus_id not in registered_bus_set:
                             # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
                             logger.warning(
                                 "audio bus %s send targets unknown bus %s; send skipped",
                                 bus_id, send_bus_id,
                             )
-                # per-track peak（Bus 电平）
+                # per-track peak（Bus 电平；MX-03 补 pre/GR/SC/taps/频谱/LUFS，
+                # 与普通轨同一 TrackLevel 契约——Bus 上的 Dynamics/EQ 对话框
+                # 读数不再缺 GR/检源/频谱）
                 if bus_samples.shape[0] >= 2:
                     bl = float(np.max(np.abs(bus_samples[0])))
                     br = float(np.max(np.abs(bus_samples[1])))
                 else:
                     bl = br = float(np.max(np.abs(bus_samples[0])))
-                if bl > 0.0 or br > 0.0:
-                    rms_bl = float(np.sqrt(np.mean(bus_samples[0] ** 2))) if bus_samples.shape[-1] > 0 else 0.0
-                    rms_br = float(np.sqrt(np.mean(bus_samples[1] ** 2))) if bus_samples.shape[0] > 1 and bus_samples.shape[-1] > 0 else rms_bl
+                if bl > 0.0 or br > 0.0 or bus_pre_peak > 0.0:
+                    if bus_samples.shape[-1] > 0:
+                        rms_bl = float(np.sqrt(np.mean(bus_samples[0] ** 2)))
+                        rms_br = float(np.sqrt(np.mean(bus_samples[1] ** 2))) \
+                            if bus_samples.shape[0] > 1 else rms_bl
+                    else:
+                        rms_bl = rms_br = 0.0
+                    if self._spectrum_metering_enabled and bus_samples.shape[-1] > 0:
+                        self._push_spectrum_window(bus_id, bus_samples)
+                    bus_lufs = -70.0
+                    if self._lufs_metering_enabled and bus_samples.shape[-1] > 0:
+                        try:
+                            if bus_id not in self._lufs_meters:
+                                self._lufs_meters[bus_id] = LoudnessMeter(
+                                    self._sample_rate, output_channels)
+                            bmeter = self._lufs_meters[bus_id]
+                            bmeter.process(bus_samples)
+                            bus_lufs = bmeter.momentary_lufs
+                        except Exception:
+                            pass
                     per_track_peaks[bus_id] = TrackLevel(
-                        peak_l=bl, peak_r=br, rms_l=rms_bl, rms_r=rms_br, lufs=-70.0,
+                        peak_l=bl, peak_r=br, rms_l=rms_bl, rms_r=rms_br,
+                        lufs=bus_lufs, pre_peak=bus_pre_peak,
+                        gr=(bus_chain.collect_gain_reduction()
+                            if bus_chain is not None else {}),
+                        sc=(bus_chain.collect_detector_levels()
+                            if bus_chain is not None else {}),
+                        taps=(bus_chain.tap_levels()
+                              if bus_chain is not None else {}),
                     )
 
             # Master 总线增益 + 静音（在软限幅之前应用，让正增益真正放大信号）
@@ -2881,6 +3467,8 @@ class AudioMixer:
             # 改为逐样本门控（>0.5 静音 + 边界 de-click），与导出 apply_master 一致。
             master_auto_mode = self._master_automation_mode
             master_auto = self._master_automation if master_auto_mode != "off" else None
+            master_pre_peak = float(np.max(np.abs(output))) if output.size else 0.0
+            master_gate: Optional[np.ndarray] = None
             static_muted = self._master_muted
             if static_muted:
                 output *= 0.0
@@ -2897,9 +3485,8 @@ class AudioMixer:
                             ),
                             dtype=output.dtype,
                         )
-                        gate = (mute_ramp <= 0.5).astype(output.dtype)
-                        gate = self._apply_declick(gate, float(self._sample_rate))
-                        output = output * gate[np.newaxis, :]
+                        master_gate = (mute_ramp <= 0.5).astype(output.dtype)
+                        master_gate = self._apply_declick(master_gate, float(self._sample_rate))
                 # volume automation ramp（逐样本）或静态增益
                 vol_ramp = None
                 if master_auto:
@@ -2917,10 +3504,86 @@ class AudioMixer:
                 elif self._master_volume != 1.0:
                     output *= self._master_volume
 
+            # MX-03: Master 条带处理——EQ → FX（音量后、限幅器前；与轨链
+            # strip_eq→track_fx 同构）。外部侧链检源与普通轨同一 tap 池
+            # （Bus 检源天然一个块延迟，与被控轨消费 Bus tap 语义一致）。
+            master_eq = self._eq_filters.get(MASTER_BUS_KEY)
+            if master_eq is not None and master_eq.is_active:
+                output = master_eq.process(output)
+            master_chain = self._effect_chains.get(MASTER_BUS_KEY)
+            if master_chain is not None:
+                # R05: Master fx 参数自动化——与轨/Bus 同型，块边界消费
+                master_sampler = self._track_effect_samplers.get(MASTER_BUS_KEY)
+                if master_sampler is not None:
+                    try:
+                        master_chain.set_params(
+                            master_sampler(int(current_frame)),
+                            sample_rate=self._sample_rate)
+                    except Exception:  # noqa: BLE001 — 求值失败回退静态
+                        logger.warning(
+                            "AudioMixer: master fx automation sampler failed",
+                            exc_info=True)
+                        self._track_effect_samplers[MASTER_BUS_KEY] = None
+                master_sc_map = None
+                if sidechain_taps:
+                    raw_map = master_chain.sidechain_map(sidechain_taps)
+                    if raw_map:
+                        cur_n = output.shape[-1]
+                        master_sc_map = {iid: buf[:, :cur_n]
+                                         for iid, buf in raw_map.items()}
+                output = master_chain.process(
+                    output, sidechain_by_id=master_sc_map)
+
+            # Mute gates the complete Master output, including existing FX tails.
+            # Apply the automation envelope once, after the user effect chain.
+            if static_muted:
+                output *= 0.0
+            elif master_gate is not None:
+                output *= master_gate[np.newaxis, :]
+
             # AM-09: 连续状态 Master 限幅器（替代无状态逐 buffer 峰值归一化）。
             # 跨 buffer 平滑增益包络，避免相邻 buffer 缩放比例不同造成的 pumping。
             # 在 master 增益之后跑，保护正增益（master_volume > 1.0）导致的削波。
             output = self._master_limiter.process(output)
+
+            # MX-03: Master 遥测——post-limiter 测量（与播放线程 ring peek 的
+            # audio_level 表同源，不双轨）；spectrum/GR/SC/taps 供 Master
+            # EQ/FX 对话框（payload 键 = MASTER_BUS_KEY，面板路由到 master strip）。
+            if output.shape[-1] > 0:
+                if output.shape[0] >= 2:
+                    m_peak_l = float(np.max(np.abs(output[0])))
+                    m_peak_r = float(np.max(np.abs(output[1])))
+                else:
+                    m_peak_l = m_peak_r = float(np.max(np.abs(output[0])))
+                if m_peak_l > 0.0 or m_peak_r > 0.0:
+                    m_cnt = output.shape[-1]
+                    m_rms_l = float(np.sqrt(np.dot(output[0], output[0]) / m_cnt))
+                    m_rms_r = (float(np.sqrt(np.dot(output[1], output[1]) / m_cnt))
+                               if output.shape[0] > 1 else m_rms_l)
+                    if self._spectrum_metering_enabled:
+                        self._push_spectrum_window(MASTER_BUS_KEY, output)
+                    m_lufs = -70.0
+                    if self._lufs_metering_enabled:
+                        try:
+                            if MASTER_BUS_KEY not in self._lufs_meters:
+                                self._lufs_meters[MASTER_BUS_KEY] = LoudnessMeter(
+                                    self._sample_rate, output_channels)
+                            mmeter = self._lufs_meters[MASTER_BUS_KEY]
+                            mmeter.process(output)
+                            m_lufs = mmeter.momentary_lufs
+                        except Exception:
+                            pass
+                    per_track_peaks[MASTER_BUS_KEY] = TrackLevel(
+                        peak_l=m_peak_l, peak_r=m_peak_r,
+                        rms_l=m_rms_l, rms_r=m_rms_r, lufs=m_lufs,
+                        pre_peak=master_pre_peak,
+                        gr=(master_chain.collect_gain_reduction()
+                            if master_chain is not None else {}),
+                        sc=(master_chain.collect_detector_levels()
+                            if master_chain is not None else {}),
+                        taps=(master_chain.tap_levels()
+                              if master_chain is not None else {}),
+                    )
 
             return output, per_track_peaks
 
@@ -3279,6 +3942,9 @@ class AudioPlaybackThread(QThread):
     audio_level = pyqtSignal(list)  # [left_db, right_db]
     audio_track_levels = pyqtSignal(dict)  # {track_id: [left_db, right_db]} per-track 电平
     output_failed = pyqtSignal(str)  # AUD-15508
+    # R10：设备格式回退（requested≠actual）上报——manager 统一经
+    # sample_rate_changed 通知 UI/曲线/频谱重建（此前只同步线程内部状态）
+    device_format_changed = pyqtSignal(float, int)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -3310,6 +3976,9 @@ class AudioPlaybackThread(QThread):
         # Mixer per-track 电平：由 prefill/direct-mix 路径写入最新峰值，
         # 主循环按节流频率 emit 出去（供 AudioMixerPanel 各轨电平表）。
         self._latest_per_track_peaks: Dict[str, tuple] = {}
+        # An empty measurement is real silence, distinct from no new mix.
+        self._track_levels_pending: bool = False
+        self._last_emitted_track_ids: set[str] = set()
         self._last_track_level_emit_ms: float = 0.0
 
         # 小数帧累积器，消除 int() 截断导致的累积漂移
@@ -3506,6 +4175,9 @@ class AudioPlaybackThread(QThread):
                         new_channels=device_channels,
                         samples_per_frame=self._samples_per_frame,
                     )
+                    # R10：回报 manager（UI 曲线/频谱轴与解码/DSP 同源）
+                    self.device_format_changed.emit(float(device_rate),
+                                                    int(device_channels))
 
             if self._running and self._paused and self._output is not None:
                 self._output.suspend()
@@ -3624,6 +4296,9 @@ class AudioPlaybackThread(QThread):
         self._fractional_frame = 0.0
         self._sample_chunk_fraction = 0.0
         self._prefill_chunk_fraction = 0.0
+        self._latest_per_track_peaks = {}
+        self._track_levels_pending = False
+        self._last_emitted_track_ids.clear()
         if self._output:
             self._output.reset_buffer(
                 keep_suspended=self._paused if keep_suspended is None else keep_suspended
@@ -3732,8 +4407,8 @@ class AudioPlaybackThread(QThread):
                 self.msleep(5)
                 return False
             # 直接 mix 路径可获得 per-track 峰值，更新最新缓存（供主循环 emit）
-            if _direct_per_track:
-                self._latest_per_track_peaks = _direct_per_track
+            self._latest_per_track_peaks = _direct_per_track
+            self._track_levels_pending = True
             # ring 中的残留旧样本已被本分支跳过，若不清空会在后续周期被
             # 先于新数据消费（重复播放旧段）。清空后把直混结果写入 ring，统一
             # 经 peek→write→commit 消费：写失败（written==0）时样本留在 ring，
@@ -3833,7 +4508,7 @@ class AudioPlaybackThread(QThread):
         # 发射 per-track 电平（节流 ~33Hz，避免 UI 过载）
         try:
             now_ms = time.perf_counter() * 1000.0
-            if (self._latest_per_track_peaks
+            if (self._track_levels_pending
                     and now_ms - self._last_track_level_emit_ms >= 30.0):
                 self._last_track_level_emit_ms = now_ms
                 track_levels: Dict[str, dict] = {}
@@ -3841,7 +4516,7 @@ class AudioPlaybackThread(QThread):
                 # 一次 log10 完成全部转换，替代每轨 4 次 Python 层 log10 调用。
                 track_ids_ordered = list(self._latest_per_track_peaks.keys())
                 if track_ids_ordered:
-                    lin_arr = np.empty((len(track_ids_ordered), 4), dtype=np.float64)
+                    lin_arr = np.empty((len(track_ids_ordered), 5), dtype=np.float64)
                     lufs_arr = np.empty((len(track_ids_ordered),), dtype=np.float64)
                     for i, tid in enumerate(track_ids_ordered):
                         lvl = self._latest_per_track_peaks[tid]
@@ -3849,21 +4524,67 @@ class AudioPlaybackThread(QThread):
                         lin_arr[i, 1] = lvl.peak_r
                         lin_arr[i, 2] = lvl.rms_l
                         lin_arr[i, 3] = lvl.rms_r
+                        lin_arr[i, 4] = getattr(lvl, "pre_peak", 0.0)
                         lufs_arr[i] = lvl.lufs
-                    # 一次向量化 log10（替代 len×4 次 Python log10）
+                    # 一次向量化 log10（替代 len×5 次 Python log10）
                     db_arr = 20.0 * np.log10(np.maximum(lin_arr, 1e-10))
                     db_arr = np.maximum(db_arr, -100.0)
                     for i, tid in enumerate(track_ids_ordered):
-                        track_levels[tid] = {
+                        lvl = self._latest_per_track_peaks[tid]
+                        payload = {
                             "peak": [float(db_arr[i, 0]), float(db_arr[i, 1])],
                             "rms": [float(db_arr[i, 2]), float(db_arr[i, 3])],
                             # W11: LUFS（立体声合并值），直接是 dB，无需转换
                             "lufs": [float(lufs_arr[i]), float(lufs_arr[i])],
+                            # CW-A1: pre-fader 峰值（Dynamics Input 表）
+                            "pre": float(db_arr[i, 4]),
                         }
-                # 清空缓存：电平表靠下次填充刷新，无信号时由 UI 侧衰减归零
+                        # CW-A1: GR / 侧链检源电平（按 instance_id；仅动态对话框消费）
+                        gr = getattr(lvl, "gr", None)
+                        sc = getattr(lvl, "sc", None)
+                        if gr:
+                            payload["gr"] = dict(gr)
+                        if sc:
+                            payload["sc"] = dict(sc)
+                        # MX-02: 按实例 tap（in/out/GR/SC 真实采样）——对话框
+                        # 不再把轨末端 peak 冒充插件输出
+                        taps = getattr(lvl, "taps", None)
+                        if taps:
+                            payload["taps"] = dict(taps)
+                        # MX-01: 实时载荷同样盖播放代——stop/pause 后已入队
+                        # 的旧代事件被面板守卫丢弃，不再回亮表计/频谱
+                        payload["generation"] = int(
+                            getattr(self._mixer, "_telemetry_generation", 0))
+                        track_levels[tid] = payload
+                # CW-A1: 频谱（EQ 对话框打开时；非对话轨不出键）。
+                # 持 mixer 锁：_spectrum_windows 由 mix_samples 在锁内写入，
+                # scrub 线程的 mix_samples 可与本读并发（collect_spectra 契约：持锁）。
+                if getattr(self._mixer, "_spectrum_metering_enabled", False):
+                    try:
+                        with QMutexLocker(self._mixer._mutex):
+                            spectra = self._mixer.collect_spectra()
+                        for tid, (freqs, dbs) in spectra.items():
+                            if tid in track_levels:
+                                track_levels[tid]["spectrum"] = {
+                                    "freqs": freqs, "db": dbs}
+                    except Exception:
+                        pass
+                # Missing tracks need complete silence, not only an empty dict:
+                # effect editors consume telemetry while strip meters can reset
+                # on absence. Include Master so its FX also clear in natural gaps.
+                for tid in self._last_emitted_track_ids - track_levels.keys():
+                    track_levels[tid] = {
+                        "peak": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
+                        "rms": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
+                        "lufs": [-70.0, -70.0], "pre": LEVEL_SILENT_DB,
+                        "gr": {}, "sc": {}, "taps": {}, "spectrum": None,
+                        "silent": True,
+                        "generation": int(getattr(self._mixer, "_telemetry_generation", 0)),
+                    }
+                self._last_emitted_track_ids = set(self._latest_per_track_peaks)
                 self._latest_per_track_peaks = {}
-                if track_levels:
-                    self.audio_track_levels.emit(track_levels)
+                self._track_levels_pending = False
+                self.audio_track_levels.emit(track_levels)
         except Exception:
             pass
 
@@ -3944,11 +4665,10 @@ class AudioPlaybackThread(QThread):
                 n,
                 self._channels,
             )
+            self._latest_per_track_peaks = per_track
+            self._track_levels_pending = True
             if samples is None or samples.size == 0:
                 break
-            # prefill 是稳态播放路径：缓存最新 per-track 峰值，供主循环节流 emit。
-            if per_track:
-                self._latest_per_track_peaks = per_track
             written = self._ring.write(samples)
             if written <= 0:
                 break
@@ -4250,6 +4970,11 @@ class AudioPlaybackManager(QObject):
     end_reached = pyqtSignal()              # 播放到达终点
     audio_level_changed = pyqtSignal(list)  # [left_db, right_db] 电平
     audio_track_levels_changed = pyqtSignal(dict)  # {track_id: [l_db, r_db]} per-track 电平
+    # MX-01: 播放代数复位（play/pause/resume/stop/seek）。订阅者丢弃
+    # generation < 当前代的排队遥测（旧代事件不得回亮表计/频谱）。
+    audio_telemetry_reset = pyqtSignal(int)
+    # MX-09: 引擎采样率下发（设备/工程切换时 EQ 曲线与频谱轴同步重算）
+    sample_rate_changed = pyqtSignal(float)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -4313,11 +5038,42 @@ class AudioPlaybackManager(QObject):
 
         self._sample_rate = sample_rate
         self._clock.set_sample_rate(sample_rate)
+        # MX-09: 采样率下发（UI 曲线/频谱轴同一真源）
+        try:
+            self.sample_rate_changed.emit(float(sample_rate))
+        except (RuntimeError, AttributeError):
+            pass
+        # DSP 状态按采样率重置（IIR 系数失配会产生咔哒声）；
+        # mixer.set_sample_rate 自带锁（QMutex 非递归，外层不得再包）
+        self._mixer.set_sample_rate(float(sample_rate))
 
         if self._playback_thread is not None:
             logger.debug("Sample rate changed while playback thread exists; restart required")
 
         logger.debug(f"Sample rate set to {sample_rate}")
+
+    def _on_device_format_changed(self, actual_rate: float,
+                                  actual_channels: int) -> None:
+        """R10：播放线程设备回退回报（线程内已同步 clock/mixer/decoder）。
+
+        manager 侧只更新真源并广播 sample_rate_changed——线程重开设备
+        时以 manager._sample_rate 为 requested，避免递归重开（线程自身
+        不再从 manager 拉新率；下次显式 set_sample_rate 才重协商）。
+        """
+        if actual_rate <= 0:
+            return
+        changed = int(actual_rate) != int(self._sample_rate)
+        self._sample_rate = int(actual_rate)
+        self._clock.set_sample_rate(int(actual_rate))
+        if changed:
+            try:
+                self.sample_rate_changed.emit(float(actual_rate))
+            except (RuntimeError, AttributeError):
+                pass
+            logger.info(
+                "R10: device negotiated rate %d Hz (channels %d) "
+                "propagated via sample_rate_changed",
+                int(actual_rate), int(actual_channels))
 
     def set_timeline_fps(self, fps: float) -> None:
         """
@@ -4690,14 +5446,38 @@ class AudioPlaybackManager(QObject):
         """
         self._mixer.set_track_strip_eq(track_id, params)
 
-    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams]) -> None:
-        """设置某轨的 FX 机架效果器链（W26）。转发到 AudioMixer。
+    def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams],
+                               animated_sampler: Optional[Any] = None) -> None:
+        """设置某轨的 FX 机架效果器链（W26；MX-10 采样器）。转发到 AudioMixer。
 
         Args:
             track_id: 轨道 ID
             chain_params: EffectChainParams，None 表示清空链
+            animated_sampler: MX-10 fx 参数自动化采样器（None=静态）
         """
-        self._mixer.set_track_effect_chain(track_id, chain_params)
+        self._mixer.set_track_effect_chain(track_id, chain_params,
+                                            animated_sampler=animated_sampler)
+
+    def set_track_panner(self, track_id: str, panner: Optional[dict]) -> None:
+        """设置某轨的空间声像器参数（CW-A1）。转发到 AudioMixer。
+
+        Args:
+            track_id: 轨道 ID
+            panner: SpatialPannerParams.to_dict()；None/空 dict=未使用
+        """
+        self._mixer.set_track_panner(track_id, panner)
+
+    def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
+        """MX-03: 设置 Master Strip EQ。转发到 AudioMixer。"""
+        self._mixer.set_master_strip_eq(params)
+
+    def set_master_effect_chain(self, chain_params: Optional[EffectChainParams]) -> None:
+        """MX-03: 设置 Master FX 机架链。转发到 AudioMixer。"""
+        self._mixer.set_master_effect_chain(chain_params)
+
+    def set_spectrum_metering(self, enabled: bool) -> None:
+        """开/关频谱仪计算（EQ 对话框打开状态驱动，CW-A1）。转发到 AudioMixer。"""
+        self._mixer.set_spectrum_metering(enabled)
 
     def set_clip_effects(
         self,
@@ -4778,6 +5558,10 @@ class AudioPlaybackManager(QObject):
         # AUD-15508: 播放线程上报输出失败（启动失败/设备中途丢失）。
         # 信号经队列投递回 manager 线程，stop() 在此执行不会与播放线程死锁。
         self._playback_thread.output_failed.connect(self._on_output_failed)
+        # R10：线程内设备协商回退 → manager 统一通知（区分 requested/actual：
+        # manager._sample_rate 更新为 actual；UI 经 sample_rate_changed 重建）
+        self._playback_thread.device_format_changed.connect(
+            self._on_device_format_changed)
         self._playback_thread.start()
 
     def _on_output_failed(self, reason: str) -> None:
@@ -5009,6 +5793,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PLAYING.value)
+        # MX-01: 新播放代（丢弃停止/暂停期排队的旧代静音与表计事件）
+        self._bump_telemetry_generation()
         playback_trace(
             "audio_manager.play",
             start_frame=start_frame,
@@ -5035,6 +5821,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PAUSED.value)
+        # MX-01: 暂停 = 新播放代 + 完整静音事件（GR/SC/频谱一并清空）
+        self._bump_telemetry_generation()
         # B13：暂停的瞬时电平 = 静音（与播放线程 -100dB 钳制地板一致）；
         # peak-hold 衰减由各电平表自行处理，这里只提供真实状态 feed
         self._emit_silent_levels()
@@ -5064,6 +5852,8 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.PLAYING.value)
+        # MX-01: 新播放代
+        self._bump_telemetry_generation()
 
         logger.debug("Audio playback resumed")
 
@@ -5098,28 +5888,52 @@ class AudioPlaybackManager(QObject):
 
         # 发射状态变化
         self.state_changed.emit(AudioPlaybackState.STOPPED.value)
+        # MX-01: 停止 = 新播放代 + 完整静音事件（GR/SC/频谱/轨迹清空；
+        # 迟到的旧代排队事件被面板代数守卫丢弃）
+        self._bump_telemetry_generation()
         # B13：停止（含 EOF→stop）后瞬时电平归静音——不伪造音频、不改
-        # 表控件，只把真实生命周期状态 feed 给订阅者；迟到的线程回调
-        # 由 _on_audio_* 的播放态守卫丢弃
+        # 表控件，只把真实生命周期状态 feed 给订阅者
         self._emit_silent_levels()
         self.frame_changed.emit(0)
         playback_trace("audio_manager.stop")
 
         logger.debug("Audio playback stopped")
 
-    def _emit_silent_levels(self) -> None:
-        """B13：向全部电平订阅者广播静音（master + per-track）。
+    def _bump_telemetry_generation(self) -> int:
+        """MX-01: 递增播放代数并广播复位（play/pause/resume/stop/seek 调用）。
 
-        master 用双声道 [silent, silent]；per-track 用最近一次 feed 出现
-        的轨集合（各表按既有衰减/peak-hold 规则回落）。静音地板与播放
-        线程的 dB 钳制一致（-100dB），不引入第二套"无声"语义。
+        计数器真源在 AudioMixer（播放线程构造载荷时读取同一值盖章）。
+        """
+        gen = self._mixer.bump_telemetry_generation()
+        try:
+            self.audio_telemetry_reset.emit(gen)
+        except (RuntimeError, AttributeError):
+            pass  # QObject 已析构/无订阅者的测试环境
+        return gen
+
+    def _emit_silent_levels(self) -> None:
+        """B13/MX-01：向全部电平订阅者广播**版本化完整静音事件**。
+
+        master 用双声道 [silent, silent]；per-track 用统一 payload dict：
+        电平地板 + GR/SC 清空 + spectrum=None（对话框清当前频谱/轨迹）+
+        silent 标记 + 播放代数（面板据此丢弃旧代排队事件）。stop/pause/
+        seek/缺轨共用同一"无声"语义，不再残留最后一帧读数。
         """
         silent = [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
         self.audio_level_changed.emit(list(silent))
         track_ids = getattr(self, "_last_track_level_ids", None) or ()
         if track_ids:
+            gen = int(getattr(self._mixer, "_telemetry_generation", 0))
+            silent_payload = {
+                "peak": list(silent), "rms": list(silent),
+                # lufs 与实时 payload 同构（[l, r] 列表——面板 LUFS 表模式
+                # 会 list() 该值，标量会抛 TypeError 中断清表循环）
+                "lufs": [-70.0, -70.0], "pre": LEVEL_SILENT_DB,
+                "gr": {}, "sc": {}, "spectrum": None,
+                "silent": True, "generation": gen,
+            }
             self.audio_track_levels_changed.emit({
-                track_id: list(silent) for track_id in track_ids})
+                track_id: dict(silent_payload) for track_id in track_ids})
 
     def seek(self, frame: int) -> None:
         """
@@ -5144,6 +5958,10 @@ class AudioPlaybackManager(QObject):
         # owns the live decode cadence; the next mix_samples() call will seek
         # each decoder under the mixer lock when it observes the new frame.
         playback_trace("audio_manager.seek_deferred_to_audio_thread", frame=frame)
+
+        # MX-01: seek = 新播放代（旧位置频谱/轨迹/排队事件全部失效；
+        # DSP 状态由播放线程的 reset_dsp_states 统一清）
+        self._bump_telemetry_generation()
 
         # 发射帧变化
         self.frame_changed.emit(frame)

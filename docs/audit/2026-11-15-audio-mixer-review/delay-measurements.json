@@ -1,0 +1,34 @@
+{
+  "sample_rate": 48000.0,
+  "block_samples": 2000,
+  "block_budget_ms": 41.666666666666664,
+  "parameter_change": "10 -> 10.25 ms, 1 kHz, amplitude 0.5",
+  "boundary_step": 0.4364238624319738,
+  "steady_max_step": 0.06527728688997825,
+  "timings": [
+    {
+      "delay_ms": 0.0,
+      "median_process_ms": 144.84467800002676
+    },
+    {
+      "delay_ms": 0.01,
+      "median_process_ms": 80.279343999905
+    },
+    {
+      "delay_ms": 0.1,
+      "median_process_ms": 20.958296999992854
+    },
+    {
+      "delay_ms": 1.0,
+      "median_process_ms": 5.372623000084786
+    },
+    {
+      "delay_ms": 10.0,
+      "median_process_ms": 1.0521499999640582
+    },
+    {
+      "delay_ms": 121.0,
+      "median_process_ms": 0.5260760000282971
+    }
+  ]
+}

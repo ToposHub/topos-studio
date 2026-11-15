@@ -865,6 +865,14 @@ class EditPage(QWidget):
             self._audio_manager.audio_track_levels_changed.connect(
                 mixer_panel.update_per_track_levels
             )
+            # MX-01: 播放代数复位（stop/pause/seek 清全部读数 + 丢弃旧代事件）
+            self._audio_manager.audio_telemetry_reset.connect(
+                mixer_panel.on_telemetry_reset
+            )
+            # MX-09: 采样率下发（EQ 曲线/频谱轴同一真源）
+            self._audio_manager.sample_rate_changed.connect(
+                mixer_panel.on_engine_sample_rate
+            )
             self._mixer_signals_connected = True
             # W11: LUFS 按需计算——表模式驱动（无 LUFS 表时省掉 K-weighting，
             # 占混音热路径近一半耗时）。先同步当前状态再监听变化。
@@ -875,6 +883,13 @@ class EditPage(QWidget):
                 self._audio_manager.set_lufs_metering(
                     mixer_panel.is_lufs_metering_active()
                 )
+            # CW-A1: 频谱仪按需计算——EQ 对话框打开状态驱动（无对话框时
+            # 播放线程不做 FFT）。先同步当前状态再监听变化。
+            if hasattr(mixer_panel, "spectrum_metering_changed"):
+                set_spectrum = getattr(self._audio_manager, "set_spectrum_metering", None)
+                if callable(set_spectrum):
+                    mixer_panel.spectrum_metering_changed.connect(set_spectrum)
+                    set_spectrum(mixer_panel.is_spectrum_metering_active())
             logger.debug("Audio level signals connected to mixer_panel")
 
     # ==================== Transport Bar Wiring ====================
@@ -1676,6 +1691,13 @@ class EditPage(QWidget):
                 set_master_auto_mode = getattr(audio_mgr, "set_master_automation_mode", None)
                 if set_master_auto_mode is not None:
                     set_master_auto_mode(str(getattr(self._current_timeline, "master_automation_mode", "off") or "off"))
+                # MX-03: Master 条带（EQ/FX）同步到引擎
+                set_master_eq = getattr(audio_mgr, "set_master_strip_eq", None)
+                if set_master_eq is not None:
+                    set_master_eq(getattr(self._current_timeline, "master_strip_eq", None))
+                set_master_chain = getattr(audio_mgr, "set_master_effect_chain", None)
+                if set_master_chain is not None:
+                    set_master_chain(getattr(self._current_timeline, "master_effect_chain", None))
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to sync master state to engine: %s", e)
 
@@ -1772,9 +1794,28 @@ class EditPage(QWidget):
         set_chain = getattr(audio_mgr, "set_track_effect_chain", None)
         if callable(set_chain):
             try:
-                set_chain(track_id, effect_chain)
+                # MX-10: fx 参数自动化采样器（automation 含 fx/* 键且
+                # mode != off 时非 None；链/曲线变化经签名触发重建）
+                fx_sampler = None
+                try:
+                    from src.features.edit.core.timeline_v2 import (
+                        build_track_fx_sampler,
+                    )
+                    fx_sampler = build_track_fx_sampler(track)
+                except Exception:  # noqa: BLE001 — 采样器构建失败回退静态链
+                    fx_sampler = None
+                set_chain(track_id, track.effect_chain,
+                          animated_sampler=fx_sampler)
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_effect_chain failed for %s: %s", track_id, e)
+        # CW-A1: 空间声像器（spread/rotate/divergence/boom 立体声域矩阵）
+        panner = getattr(track, "panner", None)
+        set_panner = getattr(audio_mgr, "set_track_panner", None)
+        if callable(set_panner):
+            try:
+                set_panner(track_id, panner if panner else None)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_track_panner failed for %s: %s", track_id, e)
         # 自动化（Read 模式回放）
         automation = getattr(track, "automation", None)
         set_auto = getattr(audio_mgr, "set_track_automation", None)
@@ -1790,13 +1831,15 @@ class EditPage(QWidget):
                 set_auto_mode(track_id, str(getattr(track, "automation_mode", "off") or "off"))
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_automation_mode failed for %s: %s", track_id, e)
-        # 路由（output_bus_id + sends + is_bus）
+        # 路由（output_bus_id + sends + is_bus；MX-14: send 4 元组带 tap/mute）
         set_routing = getattr(audio_mgr, "set_track_routing", None)
         if callable(set_routing):
             try:
                 sends = getattr(track, "sends", ()) or ()
                 sends_list = [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in sends if getattr(s, "enabled", True)
                 ]
                 set_routing(
@@ -1867,6 +1910,11 @@ class EditPage(QWidget):
                  bool(getattr(s, "enabled", True)))
                 for s in sends
             )
+
+        def _panner_sig(track: Any) -> Any:
+            """CW-A1: 轨道级空间声像器签名（空 dict=未使用）。"""
+            panner = getattr(track, "panner", None)
+            return _sig_value(panner) if panner else None
 
         def _audio_transitions_sig(track: Any) -> Any:
             """AT: 该轨音频转场签名（仅 audio:* 实例影响声音）。
@@ -1965,6 +2013,8 @@ class EditPage(QWidget):
                 _sends_sig(track),
                 # AT: 音频转场（audio:* 实例）变化需重新下发 crossfade 到引擎
                 _audio_transitions_sig(track),
+                # CW-A1: 空间声像器（spread/rotate/divergence/boom）
+                _panner_sig(track),
                 tuple(clip_entries),
             ))
 
@@ -1978,6 +2028,13 @@ class EditPage(QWidget):
             _sig_value(master_auto) if master_auto else None,
             master_auto_mode,
         )
+        # MX-03: Master 条带（EQ/FX）纳入签名（修改触发重同步）
+        master_strip_sig = (
+            _sig_value(getattr(timeline, "master_strip_eq", None))
+            if timeline is not None else None,
+            _sig_value(getattr(timeline, "master_effect_chain", None))
+            if timeline is not None else None,
+        )
 
         return (
             round(float(timeline_fps), 6),
@@ -1985,6 +2042,7 @@ class EditPage(QWidget):
             bool(master_muted),
             tuple(track_entries),
             master_auto_sig,
+            master_strip_sig,
         )
 
     def _build_timeline_preview_signature(self, timeline: Any) -> tuple[Any, ...]:

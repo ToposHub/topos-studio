@@ -114,6 +114,20 @@ def _render_export(renderer, amp):
 # Parity：各节点实时 vs 导出一致
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _eq_bands(bell1_freq: float = 0.0, bell1_gain: float = 0.0,
+              bell2_freq: float = 0.0, bell2_gain: float = 0.0) -> list:
+    """CW-A1: 参数化 EQ 测试频段（平直 + 可选两个 Bell）。"""
+    from src.features.edit.core.timeline_v2 import default_eq_bands_flat
+    bands = [dict(b) for b in default_eq_bands_flat()]
+    if bell1_gain:
+        bands[2] = {**bands[2], "filter_type": "Bell", "freq": bell1_freq,
+                    "gain": bell1_gain, "q": 2.1, "enabled": True}
+    if bell2_gain:
+        bands[3] = {**bands[3], "filter_type": "Bell", "freq": bell2_freq,
+                    "gain": bell2_gain, "q": 1.4, "enabled": True}
+    return bands
+
 class TestVolumePanParity:
     """volume/pan 节点实时与导出一致。"""
 
@@ -133,10 +147,10 @@ class TestEQParity:
 
     def test_eq_parity(self):
         amp = 0.4
-        eq = StripEQParams(
-            enabled=True, mode="3-band", bands=(3.0, -2.0, 4.0), gain=2.0,
-            low_cut_enable=False, low_cut=20.0, high_cut_enable=False, high_cut=20000.0,
-        )
+        eq = StripEQParams.from_dict({
+            "enabled": True, "voicing": "Clean", "master_gain": 2.0,
+            "bands": _eq_bands(320.0, 3.0, 2400.0, -2.0),
+        })
         mixer = _mixer_with_track(amp, strip_eq=eq)
         renderer = _renderer_with_track(amp, strip_eq=eq)
         rt = _render_realtime(mixer)
@@ -223,10 +237,10 @@ class TestExportIncorporatesNodes:
     def test_export_incorporates_eq(self):
         """导出路径应用 EQ（此前缺失）。"""
         amp = 0.4
-        eq = StripEQParams(
-            enabled=True, mode="3-band", bands=(0.0, 0.0, 0.0), gain=6.0,
-            low_cut_enable=False, low_cut=20.0, high_cut_enable=False, high_cut=20000.0,
-        )
+        eq = StripEQParams.from_dict({
+            "enabled": True, "voicing": "Clean", "master_gain": 6.0,
+            "bands": _eq_bands(),
+        })
         renderer = _renderer_with_track(amp, strip_eq=eq)
         # 无 EQ 基线
         renderer_base = _renderer_with_track(amp)

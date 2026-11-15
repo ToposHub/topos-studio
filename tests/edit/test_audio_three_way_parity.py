@@ -75,9 +75,14 @@ def _sequence(with_eq: bool, with_bus: bool) -> TimelineSequence:
         timeline_start=0, timeline_duration=FRAMES,
         source_start=0, source_duration=FRAMES, speed=SpeedParams(speed=1.0),
     )
+    from src.features.edit.core.timeline_v2 import default_eq_bands_flat
+    _bands = [dict(b) for b in default_eq_bands_flat()]
+    _bands[2] = {**_bands[2], "filter_type": "Bell", "freq": 320.0,
+                 "gain": 3.0, "q": 2.1, "enabled": True}
+    _bands[3] = {**_bands[3], "filter_type": "Bell", "freq": 2400.0,
+                 "gain": -2.0, "q": 1.4, "enabled": True}
     eq = StripEQParams(
-        enabled=True, mode="3-band", bands=(3.0, -2.0, 4.0), gain=2.0,
-        low_cut_enable=False, low_cut=20.0, high_cut_enable=False, high_cut=20000.0,
+        enabled=True, voicing="Clean", master_gain=2.0, bands=tuple(_bands),
     ) if with_eq else None
     t1 = EditTrack(
         track_id="t1", name="A1", track_type="audio", index=0,

@@ -1612,11 +1612,16 @@ class TestLevelLifecycleB13:
 
         manager.stop()
 
-        # B13：stop 后 master/per-track 瞬时值归静音地板
+        # B13/MX-01：stop 后 master/per-track 瞬时值归静音地板；
+        # per-track 为版本化完整静音 payload（GR/SC/频谱一并清空）
         assert master[-1] == [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
-        assert per_track[-1] == {
-            "a1": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
-            "a2": [LEVEL_SILENT_DB, LEVEL_SILENT_DB]}
+        last = per_track[-1]
+        assert set(last) == {"a1", "a2"}
+        for vals in last.values():
+            assert isinstance(vals, dict)
+            assert vals["peak"] == [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
+            assert vals["gr"] == {} and vals["sc"] == {}
+            assert vals["spectrum"] is None and vals["silent"] is True
 
     def test_pause_emits_silent_levels(self) -> None:
         manager = self._manager()
@@ -1655,4 +1660,8 @@ class TestLevelLifecycleB13:
         manager.audio_track_levels_changed.connect(per_track.append)
         manager._on_audio_track_levels({"mono": [-12.0, -12.0]})
         manager.stop()
-        assert per_track[-1] == {"mono": [LEVEL_SILENT_DB, LEVEL_SILENT_DB]}
+        last = per_track[-1]
+        assert set(last) == {"mono"}
+        # MX-01：静音广播为版本化 payload dict（轨集合与最近 feed 一致）
+        assert last["mono"]["peak"] == [LEVEL_SILENT_DB, LEVEL_SILENT_DB]
+        assert last["mono"]["silent"] is True

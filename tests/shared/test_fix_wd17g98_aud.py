@@ -694,23 +694,23 @@ class TestAud37702InterpolationSignalContract:
 
 class TestAud37706DynamicsDefaults:
     def test_tabs_without_instance_show_class_defaults(self, qapp):
-        """chain 无实例时三个 tab 显示类默认参数（非范围最小值）。"""
+        """CW-A1: chain 无实例时三张卡片显示类默认参数（非范围最小值）。"""
         from src.shared.ui.audio_mixer.dynamics_dialog import DynamicsDialog
 
         dlg = DynamicsDialog(track_id="t1", track_name="Voice", chain=None)
 
-        comp_threshold = dlg._comp_tab._knobs["threshold_db"]._spin.value()
-        comp_release = dlg._comp_tab._knobs["release_ms"]._spin.value()
-        assert comp_threshold == pytest.approx(-24.0)   # 默认，而非范围最小 -60
-        assert comp_release == pytest.approx(250.0)
+        comp_threshold = dlg.comp_card.c_thresh.value()
+        comp_release = dlg.comp_card.c_release.value()
+        assert comp_threshold == pytest.approx(-15.0)   # 默认，而非范围最小 -60
+        assert comp_release == pytest.approx(93.0)
 
-        ng_threshold = dlg._ng_tab._knobs["threshold_db"]._spin.value()
-        assert ng_threshold == pytest.approx(-40.0)     # 默认，而非 -60
+        eg_threshold = dlg.eg_card.c_thresh.value()
+        assert eg_threshold == pytest.approx(-35.0)     # 默认，而非 -50
 
-        lim_threshold = dlg._lim_tab._knobs["threshold_db"]._spin.value()
-        lim_release = dlg._lim_tab._knobs["release_ms"]._spin.value()
-        assert lim_threshold == pytest.approx(-3.0)     # 默认，而非 -20
-        assert lim_release == pytest.approx(100.0)
+        lim_threshold = dlg.lim_card.c_thresh.value()
+        lim_release = dlg.lim_card.c_release.value()
+        assert lim_threshold == pytest.approx(-6.0)     # 默认，而非 -30
+        assert lim_release == pytest.approx(93.0)
 
     def test_tab_with_instance_shows_instance_params(self, qapp):
         """反例：有实例时仍显示实例参数。"""
@@ -727,8 +727,8 @@ class TestAud37706DynamicsDefaults:
             ),
         ))
         dlg = DynamicsDialog(track_id="t1", track_name="Voice", chain=chain)
-        assert dlg._comp_tab._knobs["threshold_db"]._spin.value() == pytest.approx(-6.0)
-        assert dlg._comp_tab._knobs["ratio"]._spin.value() == pytest.approx(8.0)
+        assert dlg.comp_card.c_thresh.value() == pytest.approx(-6.0)
+        assert dlg.comp_card.c_ratio.value() == pytest.approx(8.0)
 
 
 # ────────────────────────── AUD-37712: Limiter Reset ──────────────────────────
@@ -742,21 +742,22 @@ class TestAud37712LimiterReset:
         committed: list[object] = []
         dlg.limiter_committed.connect(lambda _tid, p: committed.append(p))
 
-        # 偏离默认（直接调内部参数处理，模拟用户调参后的状态）
-        dlg._thresh_spin.setValue(-10.0)
-        dlg._rel_spin.setValue(500.0)
-        assert dlg._thresh_spin.value() == pytest.approx(-10.0)
-        assert dlg._rel_spin.value() == pytest.approx(500.0)
+        # 偏离默认（直接调卡片旋钮，模拟用户调参后的状态）
+        dlg.card.c_thresh.setValue(-10.0)
+        dlg.card.c_release.setValue(500.0)
+        dlg._on_card_changed(dlg.card._data)
+        assert dlg.card.c_thresh.value() == pytest.approx(-10.0)
+        assert dlg.card.c_release.value() == pytest.approx(500.0)
         committed.clear()
 
-        dlg._on_reset()
+        dlg.reset()
 
         assert len(committed) == 1                     # 恰好一次提交
-        assert committed[0].threshold_db == pytest.approx(-3.0)
-        assert committed[0].release_ms == pytest.approx(100.0)
-        # 两个旋钮都被完整重置
-        assert dlg._thresh_spin.value() == pytest.approx(-3.0)
-        assert dlg._rel_spin.value() == pytest.approx(100.0)
+        assert committed[0].threshold_db == pytest.approx(-6.0)
+        assert committed[0].release_ms == pytest.approx(93.0)
+        # 旋钮都被完整重置
+        assert dlg.card.c_thresh.value() == pytest.approx(-6.0)
+        assert dlg.card.c_release.value() == pytest.approx(93.0)
 
 
 # ────────────────────────── AUD-37804: 预设保存补齐字段 ──────────────────────────

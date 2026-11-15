@@ -207,6 +207,95 @@ class SetTrackPanCommand:
 
 
 @dataclass(frozen=True)
+class SetTrackPannerCommand:
+    """
+    Command to set track spatial panner params (CW-A1).
+
+    Panner is stored as a dict (SpatialPannerParams.to_dict()); empty dict
+    means "not in use" (fallback to plain pan/balance). The lr value itself
+    lives in EditTrack.pan (see SetTrackPanCommand) — this command only
+    covers the remaining panner fields.
+
+    Attributes:
+        command_id: Unique identifier
+        label: Human-readable label
+        track_id: Track ID to set panner
+        panner: New panner dict ({} = disable)
+        _old_panner: Old panner dict (for undo)
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    panner: dict
+    _old_panner: dict | None = None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetTrackPannerCommand"]:
+        """Apply the command: set panner."""
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+
+        old_panner = dict(track.panner or {})
+        new_track = track.with_panner(self.panner)
+
+        new_timeline = timeline.with_track_updated(new_track)
+        logger.debug(
+            "SetTrackPannerCommand applied: track %s panner keys=%d",
+            self.track_id, len(self.panner or {}),
+        )
+        updated_cmd = SetTrackPannerCommand(
+            command_id=self.command_id,
+            label=self.label,
+            track_id=self.track_id,
+            panner=self.panner,
+            _old_panner=old_panner,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        """Undo the command: restore old panner."""
+        if self._old_panner is None:
+            logger.warning("SetTrackPannerCommand undo: old_panner not stored")
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        new_timeline = timeline.with_track_updated(track.with_panner(self._old_panner))
+        logger.debug("SetTrackPannerCommand undone: track %s", self.track_id)
+        return new_timeline
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackPannerCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "panner": dict(self.panner or {}),
+            "old_panner": dict(self._old_panner or {}) if self._old_panner else {},
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> SetTrackPannerCommand:
+        return SetTrackPannerCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Spatial Panner"),
+            track_id=data.get("track_id", ""),
+            panner=dict(data.get("panner") or {}),
+            _old_panner=dict(data.get("old_panner") or {}) if data.get("old_panner") else None,
+        )
+
+    @staticmethod
+    def create(track_id: str, panner: dict) -> SetTrackPannerCommand:
+        return SetTrackPannerCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Spatial Panner",
+            track_id=track_id,
+            panner=dict(panner or {}),
+        )
+
+
+@dataclass(frozen=True)
 class SetTrackStripEQCommand:
     """
     Command to set a track's Strip EQ parameters (W6).
@@ -377,6 +466,213 @@ class SetTrackEffectChainCommand:
 
 
 @dataclass(frozen=True)
+class UpgradeTrackEffectAlgorithmCommand:
+    """H01：显式把轨道 FX 链的 algorithm_version 升级到目标版本。
+
+    语义（fx_versioning.upgrade_chain_algorithm_version）：
+    - 只改 ``algorithm_version``，不动声音参数——升级后实例按新版本算法
+      渲染（声音可能改变，这正是"显式升级"的含义）；
+    - future（> 本地版本）实例原样保留，不伪装成本地版本；
+    - 经 CommandStack 执行 → 天然 undo / 保存重开可核对。
+
+    Attributes:
+        target_version: 目标算法版本（None = 本地当前版本）
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    target_version: Optional[int] = None
+    _old_effect_chain: Optional[Any] = None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "UpgradeTrackEffectAlgorithmCommand"]:
+        from src.features.edit.core.fx_versioning import (
+            upgrade_chain_algorithm_version,
+        )
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        old_chain = track.effect_chain
+        if old_chain is None or not old_chain.effects:
+            # 空链：无操作（保留原时间线对象）
+            return timeline, UpgradeTrackEffectAlgorithmCommand(
+                command_id=self.command_id, label=self.label,
+                track_id=self.track_id,
+                target_version=self.target_version,
+                _old_effect_chain=old_chain)
+        upgraded = upgrade_chain_algorithm_version(
+            old_chain, target=self.target_version)
+        new_track = track.with_effect_chain(upgraded)
+        new_timeline = timeline.with_track_updated(new_track)
+        logger.debug(
+            "UpgradeTrackEffectAlgorithmCommand applied: track %s -> v%s",
+            self.track_id,
+            self.target_version or "current")
+        return new_timeline, UpgradeTrackEffectAlgorithmCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id,
+            target_version=self.target_version,
+            _old_effect_chain=old_chain)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        new_track = track.with_effect_chain(self._old_effect_chain)
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UpgradeTrackEffectAlgorithmCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "target_version": self.target_version,
+            "old_effect_chain": self._old_effect_chain.to_dict()
+            if self._old_effect_chain is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "UpgradeTrackEffectAlgorithmCommand":
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        old = data.get("old_effect_chain")
+        return UpgradeTrackEffectAlgorithmCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Upgrade FX Algorithm"),
+            track_id=data.get("track_id", ""),
+            target_version=data.get("target_version"),
+            _old_effect_chain=EffectChainParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(track_id: str,
+               target_version: Optional[int] = None) -> "UpgradeTrackEffectAlgorithmCommand":
+        return UpgradeTrackEffectAlgorithmCommand(
+            command_id=str(uuid.uuid4()),
+            label="Upgrade FX Algorithm",
+            track_id=track_id,
+            target_version=target_version,
+        )
+
+
+@dataclass(frozen=True)
+class SetMasterStripEQCommand:
+    """Command to set the Master bus Strip EQ (MX-03).
+
+    Master EQ 与普通轨同一 StripEQParams 模型，在 master 音量后、限幅器前
+    应用（AudioMixer.mix_samples 阶段 3 / AudioGraphRenderer.apply_master）。
+    None 表示禁用。undo/redo/序列化与轨级命令同构。
+    """
+
+    command_id: str
+    label: str
+    strip_eq: Optional[Any]  # StripEQParams | None
+    _old_strip_eq: Optional[Any] = None  # StripEQParams | None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetMasterStripEQCommand"]:
+        old_strip_eq = timeline.master_strip_eq
+        new_timeline = timeline.with_master_strip_eq(self.strip_eq)
+        logger.debug("SetMasterStripEQCommand applied")
+        updated_cmd = SetMasterStripEQCommand(
+            command_id=self.command_id,
+            label=self.label,
+            strip_eq=self.strip_eq,
+            _old_strip_eq=old_strip_eq,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        return timeline.with_master_strip_eq(self._old_strip_eq)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetMasterStripEQCommand",
+            "label": self.label,
+            "strip_eq": self.strip_eq.to_dict() if self.strip_eq is not None else None,
+            "old_strip_eq": self._old_strip_eq.to_dict() if self._old_strip_eq is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetMasterStripEQCommand":
+        from src.features.edit.core.timeline_v2 import StripEQParams
+        se = data.get("strip_eq")
+        old = data.get("old_strip_eq")
+        return SetMasterStripEQCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Master Strip EQ"),
+            strip_eq=StripEQParams.from_dict(se) if se else None,
+            _old_strip_eq=StripEQParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(strip_eq: Optional[Any]) -> "SetMasterStripEQCommand":
+        return SetMasterStripEQCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Master Strip EQ",
+            strip_eq=strip_eq,
+        )
+
+
+@dataclass(frozen=True)
+class SetMasterEffectChainCommand:
+    """Command to set the Master bus FX rack chain (MX-03).
+
+    Master FX 与普通轨同一 EffectChainParams 模型（instance_id 身份独立），
+    在 master EQ 后、限幅器前应用。None 表示清空链。
+    """
+
+    command_id: str
+    label: str
+    effect_chain: Optional[Any]  # EffectChainParams | None
+    _old_effect_chain: Optional[Any] = None  # EffectChainParams | None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetMasterEffectChainCommand"]:
+        old_chain = timeline.master_effect_chain
+        new_timeline = timeline.with_master_effect_chain(self.effect_chain)
+        logger.debug("SetMasterEffectChainCommand applied")
+        updated_cmd = SetMasterEffectChainCommand(
+            command_id=self.command_id,
+            label=self.label,
+            effect_chain=self.effect_chain,
+            _old_effect_chain=old_chain,
+        )
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        return timeline.with_master_effect_chain(self._old_effect_chain)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetMasterEffectChainCommand",
+            "label": self.label,
+            "effect_chain": self.effect_chain.to_dict() if self.effect_chain is not None else None,
+            "old_effect_chain": self._old_effect_chain.to_dict() if self._old_effect_chain is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetMasterEffectChainCommand":
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        ec = data.get("effect_chain")
+        old = data.get("old_effect_chain")
+        return SetMasterEffectChainCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Master FX Chain"),
+            effect_chain=EffectChainParams.from_dict(ec) if ec else None,
+            _old_effect_chain=EffectChainParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(effect_chain: Optional[Any]) -> "SetMasterEffectChainCommand":
+        return SetMasterEffectChainCommand(
+            command_id=str(uuid.uuid4()),
+            label="Set Master FX Chain",
+            effect_chain=effect_chain,
+        )
+
+
+@dataclass(frozen=True)
 class SetMasterVolumeCommand:
     """
     Command to set Master bus volume (W12).
@@ -511,6 +807,102 @@ class SetMasterMuteCommand:
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MX-11: 单一 ChannelStripState capture/apply（预设与快照覆盖同一字段集）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _capture_strip_state(track: Any) -> dict:
+    """捕获单条 strip 的完整混音状态（volume/pan/mute/solo/EQ/FX/Panner/
+    routing）。预设、快照与 undo 共用同一字段集——不再出现"预设文件存了
+    效果但应用没恢复"。"""
+    return {
+        "volume": float(getattr(track, "volume", 1.0)),
+        "pan": float(getattr(track, "pan", 0.0)),
+        "is_muted": bool(getattr(track, "is_muted", False)),
+        "is_solo": bool(getattr(track, "is_solo", False)),
+        "strip_eq": (track.strip_eq.to_dict()
+                     if getattr(track, "strip_eq", None) is not None else None),
+        "effect_chain": (track.effect_chain.to_dict()
+                         if getattr(track, "effect_chain", None) is not None
+                         else None),
+        # 全量快照语义：空 dict = 目标轨当前无 panner（undo 据此精确恢复）；
+        # 与预设文件的 panner=None（未捕获→保留现状）显式区分。
+        "panner": dict(getattr(track, "panner", {}) or {}),
+        "output_bus_id": getattr(track, "output_bus_id", None),
+        "sends": [s.to_dict() if hasattr(s, "to_dict") else dict(s)
+                  for s in (getattr(track, "sends", ()) or ())],
+    }
+
+
+def _apply_strip_state(track: Any, ts: dict, full_snapshot: bool = False) -> Any:
+    """把 strip 状态 dict 应用到 track。
+
+    两种语义（MX-11 审查修正）：
+    - full_snapshot=True（快照 apply/undo、预设 undo 的 _old_state）：
+      capture 总是写全字段（panner 捕获为 dict 可空、sends 捕获实际
+      元组）——空值就是被捕获的真实状态，逐字段精确恢复（A→B→A）。
+    - full_snapshot=False（通道预设 apply，默认）：键缺失或值为 None/
+      空表示"预设未捕获该字段"（旧版预设文件只有五字段）——保留目标
+      轨现状，不得清掉活动 Panner/路由/Sends。
+    """
+    from src.features.edit.core.timeline_v2 import (
+        EffectChainParams, Send, StripEQParams,
+    )
+    new_track = track
+    if "volume" in ts:
+        new_track = new_track.with_volume(float(ts.get("volume", 1.0)))
+    if "pan" in ts:
+        new_track = new_track.with_pan(float(ts.get("pan", 0.0)))
+    if "is_muted" in ts:
+        new_track = new_track.with_muted(bool(ts.get("is_muted", False)))
+    if "is_solo" in ts:
+        new_track = new_track.with_solo(bool(ts.get("is_solo", False)))
+    if "strip_eq" in ts:
+        se = ts.get("strip_eq")
+        try:
+            new_track = new_track.with_strip_eq(
+                StripEQParams.from_dict(se) if se else None)
+        except Exception as e:  # noqa: BLE001 — 坏字段降级不阻断
+            logger.warning(f"strip_eq parse failed: {e}")
+    if "effect_chain" in ts:
+        ec = ts.get("effect_chain")
+        try:
+            new_track = new_track.with_effect_chain(
+                EffectChainParams.from_dict(ec) if ec else None)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"effect_chain parse failed: {e}")
+    if "panner" in ts and (ts.get("panner") is not None or full_snapshot):
+        try:
+            new_track = new_track.with_panner(dict(ts.get("panner") or {}))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"panner parse failed: {e}")
+    elif "panner" in ts and ts.get("panner") is None and not full_snapshot:
+        # R05：显式捕获为空的 panner（键存在且值为 None）→ 清除
+        new_track = new_track.with_panner({})
+    if "output_bus_id" in ts and (ts.get("output_bus_id") is not None
+                                  or full_snapshot):
+        try:
+            new_track = new_track.with_output_bus(ts.get("output_bus_id"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"output_bus parse failed: {e}")
+    elif "output_bus_id" in ts and ts.get("output_bus_id") is None \
+            and not full_snapshot:
+        # R05：显式空路由 → 回 Master
+        new_track = new_track.with_output_bus(None)
+    if "sends" in ts and (ts.get("sends") or full_snapshot):
+        try:
+            sends = tuple(
+                Send.from_dict(sd) if isinstance(sd, dict) else sd
+                for sd in (ts.get("sends") or ()))
+            new_track = new_track.with_sends(sends)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"sends parse failed: {e}")
+    elif "sends" in ts and not ts.get("sends") and not full_snapshot:
+        # R05：显式空 sends 列表 → 清空
+        new_track = new_track.with_sends(())
+    return new_track
+
+
 @dataclass(frozen=True)
 class ApplyChannelStripPresetCommand:
     """
@@ -535,25 +927,65 @@ class ApplyChannelStripPresetCommand:
     is_muted: bool
     is_solo: bool
     strip_eq: Optional[Any] = None
+    # MX-11: 完整 strip 状态（FX 链 / Panner / routing）——预设应用与 undo
+    # 覆盖同一字段集
+    effect_chain: Optional[Any] = None
+    panner: Optional[dict] = None
+    output_bus_id: Optional[str] = None
+    sends: tuple = ()
     # 旧值（apply 时填充）
     _old_volume: float | None = None
     _old_pan: float | None = None
     _old_muted: bool | None = None
     _old_solo: bool | None = None
     _old_strip_eq: Optional[Any] = None
+    _old_state: Optional[dict] = None
+    # R05：字段存在性（来自 ChannelStripPreset.explicit_fields）——显式
+    # 字段即使为空也写入 new_state（清除语义）；未显式字段保留目标轨现状
+    _explicit_fields: frozenset = frozenset()
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "ApplyChannelStripPresetCommand"]:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
 
-        # 记录旧值
-        old = (track.volume, track.pan, track.is_muted, track.is_solo, track.strip_eq)
+        # MX-11: 记录完整旧状态（undo 逐字段恢复）
+        old_state = _capture_strip_state(track)
 
-        # 一次性应用所有参数（链式 with_*）
-        new_track = track.with_volume(self.volume).with_pan(self.pan)
-        new_track = new_track.with_muted(self.is_muted).with_solo(self.is_solo)
-        new_track = new_track.with_strip_eq(self.strip_eq)
+        # MX-11 审查修正：预设未携带的字段（None/空）从 new_state 省略——
+        # 旧版预设文件只有五字段，应用时不得清掉目标轨的活动
+        # Panner/路由/Sends（"预设没存的状态保留现状"）。
+        new_state = {
+            "volume": self.volume, "pan": self.pan,
+            "is_muted": self.is_muted, "is_solo": self.is_solo,
+        }
+        # R05：显式字段（全量捕获的预设）即使为空也进 new_state——
+        # _apply_strip_state 按"显式空 = 清除"处理；旧版预设（未显式）
+        # 保持"没存就保留现状"的兼容语义。
+        _explicit = self._explicit_fields
+        if self.strip_eq is not None:
+            new_state["strip_eq"] = self.strip_eq.to_dict()
+        elif "strip_eq" in _explicit:
+            new_state["strip_eq"] = None
+        if self.effect_chain is not None:
+            new_state["effect_chain"] = self.effect_chain.to_dict()
+        elif "effect_chain" in _explicit:
+            new_state["effect_chain"] = None
+        if self.panner:
+            new_state["panner"] = dict(self.panner)
+        elif "panner" in _explicit:
+            new_state["panner"] = None
+        if self.output_bus_id:
+            new_state["output_bus_id"] = self.output_bus_id
+        elif "output_bus_id" in _explicit:
+            new_state["output_bus_id"] = None
+        if self.sends:
+            new_state["sends"] = [
+                s.to_dict() if hasattr(s, "to_dict") else dict(s)
+                for s in self.sends]
+        elif "sends" in _explicit:
+            new_state["sends"] = []
+        new_track = _apply_strip_state(track, new_state)
 
         new_timeline = timeline.with_track_updated(new_track)
         logger.debug(f"ApplyChannelStripPresetCommand applied: track {self.track_id}")
@@ -564,8 +996,10 @@ class ApplyChannelStripPresetCommand:
             track_id=self.track_id,
             volume=self.volume, pan=self.pan,
             is_muted=self.is_muted, is_solo=self.is_solo, strip_eq=self.strip_eq,
-            _old_volume=old[0], _old_pan=old[1], _old_muted=old[2],
-            _old_solo=old[3], _old_strip_eq=old[4],
+            effect_chain=self.effect_chain, panner=self.panner,
+            output_bus_id=self.output_bus_id, sends=self.sends,
+            _old_state=old_state,
+            _explicit_fields=self._explicit_fields,
         )
         return new_timeline, updated_cmd
 
@@ -573,13 +1007,20 @@ class ApplyChannelStripPresetCommand:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
+        # MX-11: 旧状态存在时逐字段恢复（含 EQ/FX/Panner/routing）；
+        # 旧命令序列化（无 _old_state）回退到仅五字段恢复。
+        if self._old_state is not None:
+            # _old_state 是全量 capture（含空 dict/空 tuple 的真实状态）
+            new_track = _apply_strip_state(track, self._old_state,
+                                           full_snapshot=True)
+            return timeline.with_track_updated(new_track)
         new_track = track.with_volume(self._old_volume).with_pan(self._old_pan)
         new_track = new_track.with_muted(self._old_muted).with_solo(self._old_solo)
         new_track = new_track.with_strip_eq(self._old_strip_eq)
         return timeline.with_track_updated(new_track)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "command_id": self.command_id,
             "command_type": "ApplyChannelStripPresetCommand",
             "label": self.label,
@@ -587,15 +1028,37 @@ class ApplyChannelStripPresetCommand:
             "volume": self.volume, "pan": self.pan,
             "is_muted": self.is_muted, "is_solo": self.is_solo,
             "strip_eq": self.strip_eq.to_dict() if self.strip_eq is not None else None,
-            "old_volume": self._old_volume, "old_pan": self._old_pan,
-            "old_muted": self._old_muted, "old_solo": self._old_solo,
-            "old_strip_eq": self._old_strip_eq.to_dict() if self._old_strip_eq is not None else None,
+            "effect_chain": (self.effect_chain.to_dict()
+                             if self.effect_chain is not None else None),
+            "panner": self.panner,
+            "output_bus_id": self.output_bus_id,
+            "sends": [s.to_dict() if hasattr(s, "to_dict") else dict(s)
+                      for s in self.sends],
         }
+        if self._old_state is not None:
+            d["old_state"] = self._old_state
+        else:
+            d.update({
+                "old_volume": self._old_volume, "old_pan": self._old_pan,
+                "old_muted": self._old_muted, "old_solo": self._old_solo,
+                "old_strip_eq": (self._old_strip_eq.to_dict()
+                                 if self._old_strip_eq is not None else None),
+            })
+        if self._explicit_fields:
+            d["explicit_fields"] = sorted(self._explicit_fields)
+        return d
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ApplyChannelStripPresetCommand":
-        from src.features.edit.core.timeline_v2 import StripEQParams
+        from src.features.edit.core.timeline_v2 import (
+            EffectChainParams, Send, StripEQParams,
+        )
         se = data.get("strip_eq")
+        ec = data.get("effect_chain")
+        sends = tuple(
+            Send.from_dict(sd) if isinstance(sd, dict) else sd
+            for sd in (data.get("sends") or ()))
+        old_state = data.get("old_state")
         old_se = data.get("old_strip_eq")
         return ApplyChannelStripPresetCommand(
             command_id=data.get("command_id", str(uuid.uuid4())),
@@ -604,14 +1067,20 @@ class ApplyChannelStripPresetCommand:
             volume=float(data.get("volume", 1.0)), pan=float(data.get("pan", 0.0)),
             is_muted=bool(data.get("is_muted", False)), is_solo=bool(data.get("is_solo", False)),
             strip_eq=StripEQParams.from_dict(se) if se else None,
+            effect_chain=EffectChainParams.from_dict(ec) if ec else None,
+            panner=data.get("panner"),
+            output_bus_id=data.get("output_bus_id"),
+            sends=sends,
+            _old_state=old_state,
             _old_volume=data.get("old_volume"), _old_pan=data.get("old_pan"),
             _old_muted=data.get("old_muted"), _old_solo=data.get("old_solo"),
             _old_strip_eq=StripEQParams.from_dict(old_se) if old_se else None,
+            _explicit_fields=frozenset(data.get("explicit_fields") or ()),
         )
 
     @staticmethod
     def create_from_preset(track_id: str, preset: Any) -> "ApplyChannelStripPresetCommand":
-        """从 ChannelStripPreset 构造命令。"""
+        """从 ChannelStripPreset 构造命令（MX-11: 全字段）。"""
         return ApplyChannelStripPresetCommand(
             command_id=str(uuid.uuid4()),
             label=f"Apply Preset: {preset.name}",
@@ -619,6 +1088,12 @@ class ApplyChannelStripPresetCommand:
             volume=preset.volume, pan=preset.pan,
             is_muted=preset.is_muted, is_solo=preset.is_solo,
             strip_eq=preset.strip_eq,
+            effect_chain=getattr(preset, "effect_chain", None),
+            panner=getattr(preset, "panner", None),
+            output_bus_id=getattr(preset, "output_bus_id", None),
+            sends=tuple(getattr(preset, "sends", ()) or ()),
+            _explicit_fields=frozenset(
+                getattr(preset, "explicit_fields", frozenset()) or ()),
         )
 
 
@@ -645,56 +1120,52 @@ class ApplyMixSnapshotCommand:
     track_states: dict = field(default_factory=dict)
     master_volume: float = 1.0
     master_muted: bool = False
+    # R05：Master 条带全字段。"_unset"=旧快照未捕获（应用时保留现状）
+    master_strip_eq: Any = "_unset"
+    master_effect_chain: Any = "_unset"
     _old_snapshot: Optional[dict] = None
 
     def _capture_current(self, timeline: TimelineSequence) -> dict:
-        """捕获当前 timeline 的混音状态为 dict（用于 undo）。"""
+        """捕获当前 timeline 的混音状态为 dict（用于 undo；MX-11/R05 全字段）。"""
         track_states: dict[str, dict] = {}
         for track in timeline.audio_tracks:
-            track_states[track.track_id] = {
-                "volume": track.volume, "pan": track.pan,
-                "is_muted": track.is_muted, "is_solo": track.is_solo,
-                "strip_eq": track.strip_eq.to_dict() if track.strip_eq is not None else None,
-            }
+            track_states[track.track_id] = _capture_strip_state(track)
         return {
             "track_states": track_states,
             "master_volume": timeline.master_volume,
             "master_muted": timeline.master_muted,
+            # R05：Master EQ/FX 一并捕获（undo 恢复同一字段集；dict 序列化
+            # 与命令 to_dict/旧快照格式一致）
+            "master_strip_eq": (timeline.master_strip_eq.to_dict()
+                                if timeline.master_strip_eq is not None else None),
+            "master_effect_chain": (timeline.master_effect_chain.to_dict()
+                                    if timeline.master_effect_chain is not None
+                                    else None),
         }
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "ApplyMixSnapshotCommand"]:
         old_snapshot = self._capture_current(timeline)
         new_timeline = timeline
-        # 应用每条轨道
+        # 应用每条轨道（MX-11: 全字段走统一 helper）
         for track in new_timeline.audio_tracks:
             ts = self.track_states.get(track.track_id)
             if ts is None:
                 continue
-            new_track = track.with_volume(float(ts.get("volume", 1.0)))
-            new_track = new_track.with_pan(float(ts.get("pan", 0.0)))
-            new_track = new_track.with_muted(bool(ts.get("is_muted", False)))
-            new_track = new_track.with_solo(bool(ts.get("is_solo", False)))
-            # strip_eq
-            se = ts.get("strip_eq")
-            if se:
-                try:
-                    from src.features.edit.core.timeline_v2 import StripEQParams
-                    new_track = new_track.with_strip_eq(StripEQParams.from_dict(se))
-                except Exception as e:
-                    logger.warning(
-                        f"ApplyMixSnapshotCommand: strip EQ parse failed "
-                        f"for track {track.track_id}: {e}")
-            else:
-                new_track = new_track.with_strip_eq(None)
+            # MixSnapshot.track_states 来自全量 capture（ChannelStripPreset
+            # .from_track）：空值 = 被捕获的真实状态
+            new_track = _apply_strip_state(track, ts, full_snapshot=True)
             new_timeline = new_timeline.with_track_updated(new_track)
-        # Master
+        # Master（R05：EQ/FX 一并恢复；"_unset" = 旧快照未捕获 → 保留现状）
         new_timeline = new_timeline.with_master_volume(self.master_volume)
         new_timeline = new_timeline.with_master_muted(self.master_muted)
+        new_timeline = self._restore_master_strip(new_timeline, self)
 
         updated_cmd = ApplyMixSnapshotCommand(
             command_id=self.command_id, label=self.label,
             snapshot_name=self.snapshot_name, track_states=self.track_states,
             master_volume=self.master_volume, master_muted=self.master_muted,
+            master_strip_eq=self.master_strip_eq,
+            master_effect_chain=self.master_effect_chain,
             _old_snapshot=old_snapshot,
         )
         logger.debug(f"ApplyMixSnapshotCommand applied: {self.snapshot_name}")
@@ -708,17 +1179,53 @@ class ApplyMixSnapshotCommand:
             ts = self._old_snapshot.get("track_states", {}).get(track.track_id)
             if ts is None:
                 continue
-            new_track = track.with_volume(float(ts.get("volume", 1.0)))
-            new_track = new_track.with_pan(float(ts.get("pan", 0.0)))
-            new_track = new_track.with_muted(bool(ts.get("is_muted", False)))
-            new_track = new_track.with_solo(bool(ts.get("is_solo", False)))
+            # MX-11: undo 与 apply 同一字段集（旧实现漏恢复 strip_eq/FX）
+            new_track = _apply_strip_state(track, ts, full_snapshot=True)
             new_timeline = new_timeline.with_track_updated(new_track)
         new_timeline = new_timeline.with_master_volume(self._old_snapshot.get("master_volume", 1.0))
         new_timeline = new_timeline.with_master_muted(self._old_snapshot.get("master_muted", False))
+        # R05：undo 恢复 Master EQ/FX（旧格式 _old_snapshot 无该键 → 保留现状）
+        new_timeline = self._restore_master_strip(new_timeline, self._old_snapshot)
         return new_timeline
 
+    def _restore_master_strip(self, timeline: TimelineSequence,
+                              source: Any) -> TimelineSequence:
+        """R05：从命令参数或旧快照 dict 恢复 Master EQ/FX。
+
+        "_unset"（旧快照未捕获）→ 保留 timeline 现状；其余值（含 None）
+        按快照真实状态恢复。
+        """
+        from src.features.edit.core.timeline_v2 import (
+            EffectChainParams, StripEQParams,
+        )
+        se = getattr(source, "master_strip_eq", None)
+        if isinstance(source, dict):
+            if "master_strip_eq" not in source:
+                se = "_unset"
+            else:
+                se = source.get("master_strip_eq")
+        if se != "_unset":
+            try:
+                timeline = timeline.with_master_strip_eq(
+                    StripEQParams.from_dict(se) if se else None)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"master_strip_eq parse failed: {e}")
+        ec = getattr(source, "master_effect_chain", None)
+        if isinstance(source, dict):
+            if "master_effect_chain" not in source:
+                ec = "_unset"
+            else:
+                ec = source.get("master_effect_chain")
+        if ec != "_unset":
+            try:
+                timeline = timeline.with_master_effect_chain(
+                    EffectChainParams.from_dict(ec) if ec else None)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"master_effect_chain parse failed: {e}")
+        return timeline
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "command_id": self.command_id,
             "command_type": "ApplyMixSnapshotCommand",
             "label": self.label,
@@ -728,6 +1235,17 @@ class ApplyMixSnapshotCommand:
             "master_muted": self.master_muted,
             "old_snapshot": self._old_snapshot,
         }
+        if self.master_strip_eq != "_unset":
+            d["master_strip_eq"] = (
+                self.master_strip_eq.to_dict()
+                if hasattr(self.master_strip_eq, "to_dict")
+                else self.master_strip_eq)
+        if self.master_effect_chain != "_unset":
+            d["master_effect_chain"] = (
+                self.master_effect_chain.to_dict()
+                if hasattr(self.master_effect_chain, "to_dict")
+                else self.master_effect_chain)
+        return d
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ApplyMixSnapshotCommand":
@@ -738,6 +1256,8 @@ class ApplyMixSnapshotCommand:
             track_states=data.get("track_states", {}),
             master_volume=float(data.get("master_volume", 1.0)),
             master_muted=bool(data.get("master_muted", False)),
+            master_strip_eq=data.get("master_strip_eq", "_unset"),
+            master_effect_chain=data.get("master_effect_chain", "_unset"),
             _old_snapshot=data.get("old_snapshot"),
         )
 
@@ -751,6 +1271,9 @@ class ApplyMixSnapshotCommand:
             track_states=dict(snapshot.track_states),
             master_volume=snapshot.master_volume,
             master_muted=snapshot.master_muted,
+            master_strip_eq=getattr(snapshot, "master_strip_eq", "_unset"),
+            master_effect_chain=getattr(snapshot, "master_effect_chain",
+                                        "_unset"),
         )
 
 
@@ -1373,12 +1896,14 @@ class SetTrackOutputBusCommand:
 
 @dataclass(frozen=True)
 class AddSendCommand:
-    """Add a send to a track (W27)."""
+    """Add a send to a track (W27; MX-14 扩展 tap/muted)."""
     command_id: str
     label: str
     track_id: str
     target_bus_id: str
     level: float = 1.0
+    tap: str = "post_fader"   # MX-14
+    muted: bool = False       # MX-14
     _new_send_id: Optional[str] = None
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "AddSendCommand"]:
@@ -1386,12 +1911,14 @@ class AddSendCommand:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
-        send = Send(target_bus_id=self.target_bus_id, level=self.level)
+        send = Send(target_bus_id=self.target_bus_id, level=self.level,
+                    tap=self.tap, muted=self.muted)
         new_track = track.with_send_added(send)
         new_timeline = timeline.with_track_updated(new_track)
         updated_cmd = AddSendCommand(
             command_id=self.command_id, label=self.label, track_id=self.track_id,
             target_bus_id=self.target_bus_id, level=self.level,
+            tap=self.tap, muted=self.muted,
             _new_send_id=send.send_id,
         )
         return new_timeline, updated_cmd
@@ -1409,6 +1936,7 @@ class AddSendCommand:
             "command_id": self.command_id, "command_type": "AddSendCommand",
             "label": self.label, "track_id": self.track_id,
             "target_bus_id": self.target_bus_id, "level": self.level,
+            "tap": self.tap, "muted": self.muted,
             "new_send_id": self._new_send_id,
         }
 
@@ -1420,15 +1948,19 @@ class AddSendCommand:
             track_id=data.get("track_id", ""),
             target_bus_id=data.get("target_bus_id", ""),
             level=float(data.get("level", 1.0)),
+            tap=str(data.get("tap", "post_fader") or "post_fader"),
+            muted=bool(data.get("muted", False)),
             _new_send_id=data.get("new_send_id"),
         )
 
     @staticmethod
-    def create(track_id: str, target_bus_id: str, level: float = 1.0) -> "AddSendCommand":
+    def create(track_id: str, target_bus_id: str, level: float = 1.0,
+               tap: str = "post_fader", muted: bool = False) -> "AddSendCommand":
         return AddSendCommand(
             command_id=str(uuid.uuid4()),
             label=f"Add Send → {target_bus_id}",
             track_id=track_id, target_bus_id=target_bus_id, level=level,
+            tap=tap, muted=muted,
         )
 
 
@@ -1501,10 +2033,12 @@ class RemoveSendCommand:
 
 @dataclass(frozen=True)
 class UpdateSendCommand:
-    """Update a send's level/enabled (AM-08 阶段 4.2 Routing UI).
+    """Update a send's level/enabled/target/tap/muted（AM-08 + MX-14）。
 
     此前缺此命令：send level/enabled 变更无独立 undo entry。
-    现由 Routing UI 的 send-level slider / enable toggle 提交。
+    现由 Routing UI 的 send-level slider / enable toggle / tap 选择 / mute 提交。
+    MX-14: apply/undo 重建 Send 时保留未变更字段（含 tap/muted）——旧实现
+    重建丢字段，改 level 会把 pre_fader/muted 静默复位。
     """
     command_id: str
     label: str
@@ -1513,9 +2047,13 @@ class UpdateSendCommand:
     new_level: Optional[float] = None      # None=不改 level
     new_enabled: Optional[bool] = None     # None=不改 enabled
     new_target_bus_id: Optional[str] = None  # None=不改目标
+    new_tap: Optional[str] = None          # MX-14: None=不改 tap 位置
+    new_muted: Optional[bool] = None       # MX-14: None=不改独立 mute
     _old_level: Optional[float] = None
     _old_enabled: Optional[bool] = None
     _old_target_bus_id: Optional[str] = None
+    _old_tap: Optional[str] = None
+    _old_muted: Optional[bool] = None
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "UpdateSendCommand"]:
         from src.features.edit.core.timeline_v2 import Send
@@ -1530,13 +2068,16 @@ class UpdateSendCommand:
         if old_send is None:
             raise ValueError(f"Send not found: {self.send_id}")
 
-        # 构造新 Send（不可变，逐字段替换）
+        # 构造新 Send（不可变，逐字段替换；未指定字段保留旧值）
         new_level = self.new_level if self.new_level is not None else old_send.level
         new_enabled = self.new_enabled if self.new_enabled is not None else old_send.enabled
         new_target = self.new_target_bus_id if self.new_target_bus_id is not None else old_send.target_bus_id
+        new_tap = self.new_tap if self.new_tap is not None else old_send.tap
+        new_muted = self.new_muted if self.new_muted is not None else old_send.muted
         new_send = Send(
             send_id=old_send.send_id, target_bus_id=new_target,
             level=float(new_level), enabled=bool(new_enabled),
+            tap=str(new_tap), muted=bool(new_muted),
         )
         new_track = track.with_send_updated(new_send)
         new_timeline = timeline.with_track_updated(new_track)
@@ -1545,8 +2086,10 @@ class UpdateSendCommand:
             send_id=self.send_id,
             new_level=self.new_level, new_enabled=self.new_enabled,
             new_target_bus_id=self.new_target_bus_id,
+            new_tap=self.new_tap, new_muted=self.new_muted,
             _old_level=old_send.level, _old_enabled=old_send.enabled,
             _old_target_bus_id=old_send.target_bus_id,
+            _old_tap=old_send.tap, _old_muted=old_send.muted,
         )
         return new_timeline, updated_cmd
 
@@ -1555,7 +2098,7 @@ class UpdateSendCommand:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             return timeline
-        # 还原到旧值
+        # 还原到旧值（未捕获的旧字段保持当前值）
         old_send = None
         for s in track.sends:
             if s.send_id == self.send_id:
@@ -1567,6 +2110,8 @@ class UpdateSendCommand:
             send_id=old_send.send_id, target_bus_id=self._old_target_bus_id or old_send.target_bus_id,
             level=self._old_level if self._old_level is not None else old_send.level,
             enabled=self._old_enabled if self._old_enabled is not None else old_send.enabled,
+            tap=self._old_tap if self._old_tap is not None else old_send.tap,
+            muted=self._old_muted if self._old_muted is not None else old_send.muted,
         )
         return timeline.with_track_updated(track.with_send_updated(restored))
 
@@ -1576,8 +2121,10 @@ class UpdateSendCommand:
             "label": self.label, "track_id": self.track_id, "send_id": self.send_id,
             "new_level": self.new_level, "new_enabled": self.new_enabled,
             "new_target_bus_id": self.new_target_bus_id,
+            "new_tap": self.new_tap, "new_muted": self.new_muted,
             "old_level": self._old_level, "old_enabled": self._old_enabled,
             "old_target_bus_id": self._old_target_bus_id,
+            "old_tap": self._old_tap, "old_muted": self._old_muted,
         }
 
     @staticmethod
@@ -1590,14 +2137,20 @@ class UpdateSendCommand:
             new_level=data.get("new_level"),
             new_enabled=data.get("new_enabled"),
             new_target_bus_id=data.get("new_target_bus_id"),
+            new_tap=data.get("new_tap"),
+            new_muted=data.get("new_muted"),
             _old_level=data.get("old_level"),
             _old_enabled=data.get("old_enabled"),
             _old_target_bus_id=data.get("old_target_bus_id"),
+            _old_tap=data.get("old_tap"),
+            _old_muted=data.get("old_muted"),
         )
 
     @staticmethod
     def create(track_id: str, send_id: str, *, level: Optional[float] = None,
-               enabled: Optional[bool] = None, target_bus_id: Optional[str] = None) -> "UpdateSendCommand":
+               enabled: Optional[bool] = None, target_bus_id: Optional[str] = None,
+               tap: Optional[str] = None, muted: Optional[bool] = None,
+               ) -> "UpdateSendCommand":
         parts = []
         if level is not None:
             parts.append(f"level={level}")
@@ -1605,9 +2158,14 @@ class UpdateSendCommand:
             parts.append(f"enabled={enabled}")
         if target_bus_id is not None:
             parts.append(f"target={target_bus_id}")
+        if tap is not None:
+            parts.append(f"tap={tap}")
+        if muted is not None:
+            parts.append(f"muted={muted}")
         return UpdateSendCommand(
             command_id=str(uuid.uuid4()),
             label=f"Update Send ({', '.join(parts) or 'no-op'})",
             track_id=track_id, send_id=send_id,
             new_level=level, new_enabled=enabled, new_target_bus_id=target_bus_id,
+            new_tap=tap, new_muted=muted,
         )

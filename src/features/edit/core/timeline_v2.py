@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
+# R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
+from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
 from src.features.edit.core.clip_params import (
     ClipBlendMode,
     CropParams,
@@ -2271,24 +2273,33 @@ class SubtitleClip:
 
 @dataclass(frozen=True)
 class Send:
-    """音频发送（W24）— 把一条 strip 的信号（post-fader）发送到 Bus/Aux。
+    """音频发送（W24/MX-14）— 把一条 strip 的信号发送到 Bus/Aux。
 
     Attributes:
         send_id: 唯一标识
         target_bus_id: 目标 Bus 轨的 track_id
-        level: 发送电平（0.0-1.0，post-fader 线性增益）
+        level: 发送电平（0.0-1.0，线性增益）
         enabled: 是否启用
+        tap: 取样位置（MX-14，Send 模型 v2）。"post_fader"=轨链输出端
+            （音量/pan/EQ/FX 之后，默认——旧工程即此行为，声音不变）；
+            "pre_fader"=clip 求和后、音量/EQ/FX 之前（不随推子变化）。
+        muted: 独立静音（MX-14）——只断开该 send 的贡献，不影响主输出，
+            也不清空 send 配置（区别于 enabled=False 的移除语义）。
     """
     send_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     target_bus_id: str = ""
     level: float = 1.0
     enabled: bool = True
+    tap: str = "post_fader"
+    muted: bool = False
 
     def __post_init__(self) -> None:
         if not self.target_bus_id:
             raise ValueError("target_bus_id cannot be empty")
         if self.level < 0.0 or self.level > 1.0:
             raise ValueError(f"level must be in [0.0, 1.0]: {self.level}")
+        if self.tap not in _SEND_TAPS:
+            raise ValueError(f"tap must be one of {_SEND_TAPS}: {self.tap}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2296,124 +2307,284 @@ class Send:
             "target_bus_id": self.target_bus_id,
             "level": self.level,
             "enabled": self.enabled,
+            "tap": self.tap,
+            "muted": self.muted,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "Send":
+        # MX-14: 未知 tap 值降级为默认 post_fader（保持旧声音，不阻断加载）
+        tap = str(data.get("tap", "post_fader") or "post_fader")
+        if tap not in _SEND_TAPS:
+            logger.warning(
+                "Send.from_dict: unknown tap %r → post_fader (default)", tap)
+            tap = "post_fader"
         return Send(
             send_id=data.get("send_id", str(uuid.uuid4())),
             target_bus_id=data.get("target_bus_id", ""),
             level=float(data.get("level", 1.0)),
             enabled=bool(data.get("enabled", True)),
+            tap=tap,
+            muted=bool(data.get("muted", False)),
         )
 
 
-@dataclass(frozen=True)
-class StripEQParams:
-    """轨道级 Graphic EQ 参数（多频段：3 / 7 / 10 / 15 band）。
+# MX-14: Send 取样位置合法集合（版本化契约；默认 post_fader=旧行为）
+_SEND_TAPS = ("post_fader", "pre_fader")
 
-    参考专业混音器 / audio_pro 的多频段图形均衡器。
-    频段数由 mode 决定，每个频段一个 biquad（lowshelf / peaking / highshelf）。
-    频率与 Q 值由 EQ_BAND_CONFIGS（audio_dsp.py）固定，用户只调各频段增益。
+
+# ── 参数化 EQ 频段模型（CW-A1 重构：6 频段全参量）──────────────────────────────
+
+_EQ_FILTER_TYPES = ("HPF", "Low Shelf", "Bell", "High Shelf", "Notch", "LPF")
+_EQ_VOICINGS = ("Clean", "British", "Warm", "Punch")
+_EQ_SLOPES = (6, 12, 18, 24)
+_EQ_RANGE_KEYS = ("L", "ML", "MH", "H")
+
+
+def auto_range_key(freq: float) -> str:
+    """根据频率自动匹配最合适的旋钮精细调节区间（与 EQ UI 一致）。"""
+    if freq < 350.0:
+        return "L"
+    elif freq < 1400.0:
+        return "ML"
+    elif freq < 7500.0:
+        return "MH"
+    return "H"
+
+
+def default_eq_bands_demo() -> tuple[dict, ...]:
+    """6 频段演示布局（Band 6 LPF 默认旁路）。"""
+    return (
+        {"index": 1, "enabled": True,  "solo": False, "filter_type": "HPF",        "range_key": "L",  "freq": 65.0,    "gain": 0.0,  "q": 1.1, "slope": 12},
+        {"index": 2, "enabled": True,  "solo": False, "filter_type": "Low Shelf",  "range_key": "L",  "freq": 110.0,   "gain": -4.5, "q": 1.4, "slope": 12},
+        {"index": 3, "enabled": True,  "solo": False, "filter_type": "Bell",       "range_key": "ML", "freq": 320.0,   "gain": -2.2, "q": 2.1, "slope": 12},
+        {"index": 4, "enabled": True,  "solo": False, "filter_type": "Bell",       "range_key": "MH", "freq": 2400.0,  "gain": 3.4,  "q": 1.4, "slope": 12},
+        {"index": 5, "enabled": True,  "solo": False, "filter_type": "High Shelf", "range_key": "H",  "freq": 8200.0,  "gain": 2.0,  "q": 1.2, "slope": 12},
+        {"index": 6, "enabled": False, "solo": False, "filter_type": "LPF",        "range_key": "H",  "freq": 19500.0, "gain": 0.0,  "q": 1.1, "slope": 12},
+    )
+
+
+def default_eq_bands_flat() -> tuple[dict, ...]:
+    """6 频段平直布局（全部 0 dB，仅 HPF/LPF 旁路）。"""
+    return (
+        {"index": 1, "enabled": False, "solo": False, "filter_type": "HPF",        "range_key": "L",  "freq": 70.0,    "gain": 0.0, "q": 1.1, "slope": 12},
+        {"index": 2, "enabled": True,  "solo": False, "filter_type": "Low Shelf",  "range_key": "L",  "freq": 80.0,    "gain": 0.0, "q": 1.1, "slope": 12},
+        {"index": 3, "enabled": True,  "solo": False, "filter_type": "Bell",       "range_key": "ML", "freq": 250.0,   "gain": 0.0, "q": 1.1, "slope": 12},
+        {"index": 4, "enabled": True,  "solo": False, "filter_type": "Bell",       "range_key": "MH", "freq": 1500.0,  "gain": 0.0, "q": 1.1, "slope": 12},
+        {"index": 5, "enabled": True,  "solo": False, "filter_type": "High Shelf", "range_key": "H",  "freq": 6000.0,  "gain": 0.0, "q": 1.2, "slope": 12},
+        {"index": 6, "enabled": False, "solo": False, "filter_type": "LPF",        "range_key": "H",  "freq": 20000.0, "gain": 0.0, "q": 1.1, "slope": 12},
+    )
+
+
+def _normalize_eq_band(band: Any, idx: int) -> dict[str, Any]:
+    """校验并归一化单个 EQ 频段 dict（范围钳位 + 缺失字段补默认）。
+
+    全新开始语义：形状不符（如旧图形 EQ 的 float 列表元素）或数值异常时，
+    该频段回退到平直默认，绝不抛异常阻断工程加载。
+    """
+    if not isinstance(band, dict):
+        return dict(default_eq_bands_flat()[idx])
+    ftype = str(band.get("filter_type", "Bell"))
+    if ftype not in _EQ_FILTER_TYPES:
+        ftype = "Bell"
+    try:
+        freq = float(band.get("freq", 1000.0))
+    except (TypeError, ValueError):
+        freq = 1000.0
+    freq = max(20.0, min(22000.0, freq))
+    try:
+        gain = float(band.get("gain", 0.0))
+    except (TypeError, ValueError):
+        gain = 0.0
+    gain = max(-20.0, min(20.0, gain))
+    try:
+        q = float(band.get("q", 1.1))
+    except (TypeError, ValueError):
+        q = 1.1
+    q = max(0.3, min(10.3, q))
+    try:
+        slope = int(band.get("slope", 12))
+    except (TypeError, ValueError):
+        slope = 12
+    if slope not in _EQ_SLOPES:
+        slope = 12
+    range_key = str(band.get("range_key", "") or "")
+    if range_key not in _EQ_RANGE_KEYS:
+        range_key = auto_range_key(freq)
+    return {
+        "index": idx + 1,
+        "enabled": bool(band.get("enabled", True)),
+        "solo": bool(band.get("solo", False)),
+        "filter_type": ftype,
+        "range_key": range_key,
+        "freq": freq,
+        "gain": gain,
+        "q": q,
+        "slope": slope,
+    }
+
+
+def preserves_param_extras(cls, extra_known: tuple = ()):
+    """H01：效果参数 dataclass 的**参数内部未知字段**保留装饰器。
+
+    复审 H01-4：实例 ``params`` dict 里的未来/未知键不能因
+    ``XParams.from_dict(...).to_dict()`` 往返而丢失（与
+    ``TrackEffectInstance._extra_fields`` 同契约，作用在参数层）。
+
+    机制：
+    - 已知键 = dataclass 字段名 ∪ ``cls.default().to_dict()`` 键 ∪
+      ``extra_known``（legacy 别名）；
+    - ``from_dict`` 把未知键存到实例 ``_extra_fields``（类级默认 {}，
+      frozen 实例经 ``object.__setattr__``）；
+    - ``to_dict`` 在末尾合并 ``_extra_fields``；
+    - ``@preserves_extras`` 使 ``with_*``/``copy`` 派生方法携带 extras。
+
+    相等性不含 extras（非 dataclass 字段）；``dataclasses.replace`` 不
+    携带（参数对象一律经 from_dict 重建，关键往返路径已覆盖）。
+    """
+    import dataclasses as _dc
+    import functools as _ft
+
+    orig_from_dict = cls.from_dict
+    orig_to_dict = cls.to_dict
+    known_cache: list = []
+
+    def _known() -> frozenset:
+        if not known_cache:
+            keys = {f.name for f in _dc.fields(cls)}
+            try:
+                probe = cls.default() if hasattr(cls, "default") else None
+            except Exception:
+                probe = None
+            if probe is not None:
+                keys.update(orig_to_dict(probe).keys())
+            keys.update(extra_known)
+            known_cache.append(frozenset(keys))
+        return known_cache[0]
+
+    @_ft.wraps(orig_from_dict)
+    def from_dict(data):
+        inst = orig_from_dict(data)
+        extras = split_extras(data or {}, _known())
+        if extras:
+            object.__setattr__(inst, "_extra_fields", extras)
+        return inst
+
+    @_ft.wraps(orig_to_dict)
+    def to_dict(self):
+        out = orig_to_dict(self)
+        extras = getattr(self, "_extra_fields", None)
+        if extras:
+            out.update(extras)
+        return out
+
+    cls.from_dict = staticmethod(from_dict)
+    cls.to_dict = to_dict
+    cls._extra_fields = {}
+    return preserves_extras(cls)
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class StripEQParams:
+    """轨道级参数化 EQ（6 频段全参量，CW-A1 重构）。
+
+    每个频段独立选择滤波器形状（HPF / Low Shelf / Bell / High Shelf /
+    Notch / LPF），并可调频率 / 增益 / Q（剪切滤波器另有 6..24 dB/oct 斜率）。
+    voicing 是调音台染色特性（按比例缩放 Q），master_gain 为整体输出增益。
 
     Attributes:
-        mode: 频段模式（"3-band" / "7-band" / "10-band" / "15-band"，默认 "10-band"）
-        bands: 各频段增益（dB），tuple[float, ...]，长度需匹配 mode 的频段数；
-               切换 mode 时若长度不匹配由调用方/UI 补零
-        gain: EQ 整体增益（-12.0..+12.0 dB，默认 0）
-        low_cut: 低切频率（20..1000 Hz，默认 20；仅 low_cut_enable=True 生效）
-        high_cut: 高切频率（1000..20000 Hz，默认 20000；仅 high_cut_enable=True 生效）
-        low_cut_enable: 低切开关（默认 False）
-        high_cut_enable: 高切开关（默认 False）
         enabled: EQ 总开关（False=旁路，信号直通）
+        voicing: 染色特性（"Clean" / "British" / "Warm" / "Punch"，Q 缩放系数）
+        master_gain: 整体输出增益（-20.0..+20.0 dB）
+        bands: 6 个频段 dict（见 default_eq_bands_demo），逐段归一化校验
     """
-    mode: str = "10-band"
-    bands: tuple = ()  # tuple[float, ...]
-    gain: float = 0.0
-    low_cut: float = 20.0
-    high_cut: float = 20000.0
-    low_cut_enable: bool = False
-    high_cut_enable: bool = False
     enabled: bool = True
+    voicing: str = "Clean"
+    master_gain: float = 0.0
+    bands: tuple = field(default_factory=default_eq_bands_flat)
 
     def __post_init__(self) -> None:
-        valid_modes = ("3-band", "7-band", "10-band", "15-band")
-        if self.mode not in valid_modes:
-            raise ValueError(f"mode must be one of {valid_modes}: {self.mode}")
-        if not (-12.0 <= self.gain <= 12.0):
-            raise ValueError(f"gain must be in [-12, 12]: {self.gain}")
-        if not (20.0 <= self.low_cut <= 1000.0):
-            raise ValueError(f"low_cut must be in [20, 1000]: {self.low_cut}")
-        if not (1000.0 <= self.high_cut <= 20000.0):
-            raise ValueError(f"high_cut must be in [1000, 20000]: {self.high_cut}")
-        # bands 增益范围校验（每段 ±12 dB）
-        for i, g in enumerate(self.bands):
-            if not (-12.0 <= float(g) <= 12.0):
-                raise ValueError(f"bands[{i}] must be in [-12, 12]: {g}")
+        if self.voicing not in _EQ_VOICINGS:
+            raise ValueError(f"voicing must be one of {_EQ_VOICINGS}: {self.voicing}")
+        if not (-20.0 <= self.master_gain <= 20.0):
+            raise ValueError(f"master_gain must be in [-20, 20]: {self.master_gain}")
+        if not self.bands:
+            raise ValueError("bands cannot be empty")
+        # 频段逐个校验（bands 必须是 dict 序列；构造方负责先归一化）
+        normalized = tuple(_normalize_eq_band(b, i) for i, b in enumerate(self.bands))
+        object.__setattr__(self, "bands", normalized)
 
     @staticmethod
-    def default(mode: str = "10-band") -> "StripEQParams":
-        """平直响应（所有频段 0 dB，启用）。
-
-        Args:
-            mode: 频段模式，默认 "10-band"
-        """
-        from src.features.edit.core.audio_dsp import get_band_count
-        n = get_band_count(mode)
-        return StripEQParams(mode=mode, bands=tuple([0.0] * n))
+    def default() -> "StripEQParams":
+        """平直响应（全部频段 0 dB，启用）。"""
+        return StripEQParams(bands=default_eq_bands_flat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mode": self.mode,
-            "bands": list(self.bands),
-            "gain": self.gain,
-            "low_cut": self.low_cut,
-            "high_cut": self.high_cut,
-            "low_cut_enable": self.low_cut_enable,
-            "high_cut_enable": self.high_cut_enable,
             "enabled": self.enabled,
+            "voicing": self.voicing,
+            "master_gain": self.master_gain,
+            "bands": [dict(b) for b in self.bands],
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "StripEQParams":
-        from src.features.edit.core.audio_dsp import get_band_count
-        mode = str(data.get("mode", "10-band"))
-        n = get_band_count(mode)
         bands_data = data.get("bands", [])
-        # 补齐/截断 bands 到当前 mode 的频段数
-        bands = tuple(float(bands_data[i]) if i < len(bands_data) else 0.0 for i in range(n))
+        # 全新开始：旧图形 EQ（bands 为 float 列表）→ 整体落平直默认
+        if not isinstance(bands_data, (list, tuple)) or not bands_data or \
+                not all(isinstance(b, dict) for b in bands_data):
+            bands_data = default_eq_bands_flat()
+        # 不足 6 段时用平直默认补齐（频段身份 = 下标，不可缺位）
+        flat = default_eq_bands_flat()
+        bands = tuple(
+            dict(bands_data[i]) if i < len(bands_data) else dict(flat[i])
+            for i in range(len(flat))
+        )
+        voicing = str(data.get("voicing", "Clean"))
+        if voicing not in _EQ_VOICINGS:
+            voicing = "Clean"
+        try:
+            master_gain = float(data.get("master_gain", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            master_gain = 0.0
         return StripEQParams(
-            mode=mode,
-            bands=bands,
-            gain=float(data.get("gain", 0.0)),
-            low_cut=float(data.get("low_cut", 20.0)),
-            high_cut=float(data.get("high_cut", 20000.0)),
-            low_cut_enable=bool(data.get("low_cut_enable", False)),
-            high_cut_enable=bool(data.get("high_cut_enable", False)),
             enabled=bool(data.get("enabled", True)),
+            voicing=voicing,
+            master_gain=max(-20.0, min(20.0, master_gain)),
+            bands=bands,
         )
 
 
 # ── FX 机架数据模型（W26）─────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class LimiterParams:
-    """限幅器参数（FX 机架效果器之一）。
+    """限幅器参数（FX 机架效果器之一，CW-A1 重构）。
 
     Attributes:
-        threshold_db: 阈值（dB），[-20, 0]，信号超过此值被限制
-        release_ms: 释放时间（ms），[10, 1000]，增益恢复速度
+        threshold_db: 阈值（dB），[-30, 0]，信号超过此值被限制
+        attack_ms: 启动时间（ms），[0.7, 30]，增益下降速度
+        hold_ms: 保持时间（ms），[0, 4000]，达到限制后增益的驻留时间
+        release_ms: 释放时间（ms），[50, 4000]，增益恢复速度
         enabled: 是否启用（False=旁路直通）
     """
-    threshold_db: float = -3.0
-    release_ms: float = 100.0
+    threshold_db: float = -6.0
+    attack_ms: float = 0.71
+    hold_ms: float = 0.0
+    release_ms: float = 93.0
     enabled: bool = True
 
     def __post_init__(self) -> None:
-        if not (-20.0 <= self.threshold_db <= 0.0):
-            raise ValueError(f"threshold_db must be in [-20, 0]: {self.threshold_db}")
-        if not (10.0 <= self.release_ms <= 1000.0):
-            raise ValueError(f"release_ms must be in [10, 1000]: {self.release_ms}")
+        if not (-30.0 <= self.threshold_db <= 0.0):
+            raise ValueError(f"threshold_db must be in [-30, 0]: {self.threshold_db}")
+        if not (0.7 <= self.attack_ms <= 30.0):
+            raise ValueError(f"attack_ms must be in [0.7, 30]: {self.attack_ms}")
+        if not (0.0 <= self.hold_ms <= 4000.0):
+            raise ValueError(f"hold_ms must be in [0, 4000]: {self.hold_ms}")
+        if not (50.0 <= self.release_ms <= 4000.0):
+            raise ValueError(f"release_ms must be in [50, 4000]: {self.release_ms}")
 
     @staticmethod
     def default() -> "LimiterParams":
@@ -2422,6 +2593,8 @@ class LimiterParams:
     def to_dict(self) -> dict[str, Any]:
         return {
             "threshold_db": self.threshold_db,
+            "attack_ms": self.attack_ms,
+            "hold_ms": self.hold_ms,
             "release_ms": self.release_ms,
             "enabled": self.enabled,
         }
@@ -2429,46 +2602,131 @@ class LimiterParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "LimiterParams":
         return LimiterParams(
-            threshold_db=float(data.get("threshold_db", -3.0)),
-            release_ms=float(data.get("release_ms", 100.0)),
+            threshold_db=float(data.get("threshold_db", -6.0)),
+            attack_ms=float(data.get("attack_ms", 0.71)),
+            hold_ms=float(data.get("hold_ms", 0.0)),
+            release_ms=float(data.get("release_ms", 93.0)),
             enabled=bool(data.get("enabled", True)),
         )
 
 
 @dataclass(frozen=True)
-class CompressorParams:
-    """压缩器参数（FX 机架效果器之一）。
+class DynamicsParams:
+    """Dynamics 完整单元参数（Da Vinci Fairlight 语义，CW-A1）。
 
-    移植自 audio_pro 的 Compressor（WebAudio DynamicsCompressorNode 拓扑）。
+    单一效果器实例携带 Expander/Gate → Compressor（含 Make Up）→ Limiter
+    三个子模块的完整状态——clip 级 Dynamics 是一条 EffectInstance，
+    不在属性面板拆分为三张卡片。轨级 Dynamics 仍以 panel="dynamics"
+    三实例存储（DSP 遥测按实例定位）；两种形态共用同一面板 UI。
+
+    Attributes:
+        enabled: 总电源（False=三模块全部旁路直通）
+        makeup: 全局 Make Up 补偿增益（dB），[0, 24]（写入 comp.makeup_gain）
+        eg: ExpanderParams.to_dict() 子状态
+        comp: CompressorParams.to_dict() 子状态（makeup_gain 与 makeup 同步）
+        lim: LimiterParams.to_dict() 子状态
+    """
+    enabled: bool = True
+    makeup: float = 0.0
+    eg: dict[str, Any] = field(default_factory=lambda: ExpanderParams.default().to_dict())
+    comp: dict[str, Any] = field(default_factory=lambda: CompressorParams.default().to_dict())
+    lim: dict[str, Any] = field(default_factory=lambda: LimiterParams.default().to_dict())
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.makeup <= 24.0):
+            raise ValueError(f"makeup must be in [0, 24]: {self.makeup}")
+        # 子状态统一经各自 from_dict 归一化（缺键/非法值落默认，AUD 容错语义）
+        object.__setattr__(self, "eg", ExpanderParams.from_dict(dict(self.eg or {})).to_dict())
+        comp = CompressorParams.from_dict(dict(self.comp or {})).to_dict()
+        # 单一真源：makeup 顶层字段与 comp.makeup_gain 保持一致（顶层优先）
+        comp["makeup_gain"] = self.makeup
+        object.__setattr__(self, "comp", comp)
+        object.__setattr__(self, "lim", LimiterParams.from_dict(dict(self.lim or {})).to_dict())
+
+    @staticmethod
+    def default() -> "DynamicsParams":
+        return DynamicsParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        comp = dict(self.comp)
+        comp["makeup_gain"] = self.makeup  # 单一真源：makeup 写入 comp
+        return {
+            "enabled": self.enabled,
+            "makeup": self.makeup,
+            "eg": dict(self.eg),
+            "comp": comp,
+            "lim": dict(self.lim),
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "DynamicsParams":
+        data = dict(data or {})
+        comp = dict(data.get("comp") or {})
+        makeup = float(data.get("makeup", comp.get("makeup_gain", 0.0)))
+        return DynamicsParams(
+            enabled=bool(data.get("enabled", True)),
+            makeup=max(0.0, min(24.0, makeup)),
+            eg=dict(data.get("eg") or {}),
+            comp=comp,
+            lim=dict(data.get("lim") or {}),
+        )
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class CompressorParams:
+    """压缩器参数（FX 机架效果器之一，CW-A1 重构：并行混合 + 保持 + 侧链）。
+
+    feed-forward 峰值压缩拓扑；knee 为百分比软拐点宽度（内部映射 0..24 dB）。
+    mix 是并行压缩（Dry/Wet 混合）；sc_* 是侧链（外部检源路由与监听）。
 
     Attributes:
         threshold_db: 阈值（dB），[-60, 0]，信号超过此值开始压缩
-        ratio: 压缩比，[1.0, 20.0]（1=不压缩，20=近限制）
-        attack_ms: 启动时间（ms），[0, 1000]，包络跟随上升速度
-        release_ms: 释放时间（ms），[10, 5000]，包络跟随下降速度
-        knee_db: 软拐点宽度（dB），[0, 40]（0=硬拐点）
-        makeup_gain: 输出补偿增益（dB），[0, +24]
+        ratio: 压缩比，[1.2, 20.0]（1.2:1 起压，20:1 近限制）
+        attack_ms: 启动时间（ms），[0.7, 1000]，包络跟随上升速度
+        hold_ms: 保持时间（ms），[0, 4000]，压缩增益的驻留时间
+        release_ms: 释放时间（ms），[50, 5000]，包络跟随下降速度
+        knee: 软拐点宽度（0..100 %，内部映射 0..24 dB，0=硬拐点）
+        mix: 压缩湿信号比例（0..100 %，100=经典串行压缩）
+        makeup_gain: 输出补偿增益（dB），[0, +24]（Dynamics 面板 MakeUp 推子）
+        sc_on: 侧链开关（False=内部检源）
+        sc_listen: 侧链监听（True=输出检源信号用于 audition）
+        sc_source: 侧链源（"internal" 或任意轨道 track_id）
         enabled: 是否启用（False=旁路直通）
     """
-    threshold_db: float = -24.0
-    ratio: float = 4.0
-    attack_ms: float = 3.0
-    release_ms: float = 250.0
-    knee_db: float = 30.0
+    threshold_db: float = -15.0
+    ratio: float = 2.5
+    attack_ms: float = 1.4
+    hold_ms: float = 0.0
+    release_ms: float = 93.0
+    knee: float = 15.0
+    mix: float = 100.0
     makeup_gain: float = 0.0
+    sc_on: bool = False
+    sc_listen: bool = False
+    sc_source: str = "internal"
     enabled: bool = True
+    # R09：Make Up 位置（三实例 DY 面板形态）。None = legacy（v3 语义：
+    # makeup 在压缩器内部、Limiter 之前——旧工程声音不变）；True = 组后
+    # 增益（整个 Dynamics 组（EG→Comp→Lim）处理完后再乘，与复合
+    # DynamicsEffect 的放置一致——两形态同参数不再产生不同限幅声音）。
+    makeup_post: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if not (-60.0 <= self.threshold_db <= 0.0):
             raise ValueError(f"threshold_db must be in [-60, 0]: {self.threshold_db}")
-        if not (1.0 <= self.ratio <= 20.0):
-            raise ValueError(f"ratio must be in [1, 20]: {self.ratio}")
-        if not (0.0 <= self.attack_ms <= 1000.0):
-            raise ValueError(f"attack_ms must be in [0, 1000]: {self.attack_ms}")
-        if not (10.0 <= self.release_ms <= 5000.0):
-            raise ValueError(f"release_ms must be in [10, 5000]: {self.release_ms}")
-        if not (0.0 <= self.knee_db <= 40.0):
-            raise ValueError(f"knee_db must be in [0, 40]: {self.knee_db}")
+        if not (1.2 <= self.ratio <= 20.0):
+            raise ValueError(f"ratio must be in [1.2, 20]: {self.ratio}")
+        if not (0.7 <= self.attack_ms <= 1000.0):
+            raise ValueError(f"attack_ms must be in [0.7, 1000]: {self.attack_ms}")
+        if not (0.0 <= self.hold_ms <= 4000.0):
+            raise ValueError(f"hold_ms must be in [0, 4000]: {self.hold_ms}")
+        if not (50.0 <= self.release_ms <= 5000.0):
+            raise ValueError(f"release_ms must be in [50, 5000]: {self.release_ms}")
+        if not (0.0 <= self.knee <= 100.0):
+            raise ValueError(f"knee must be in [0, 100]: {self.knee}")
+        if not (0.0 <= self.mix <= 100.0):
+            raise ValueError(f"mix must be in [0, 100]: {self.mix}")
         if not (0.0 <= self.makeup_gain <= 24.0):
             raise ValueError(f"makeup_gain must be in [0, 24]: {self.makeup_gain}")
 
@@ -2477,58 +2735,130 @@ class CompressorParams:
         return CompressorParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "threshold_db": self.threshold_db,
             "ratio": self.ratio,
             "attack_ms": self.attack_ms,
+            "hold_ms": self.hold_ms,
             "release_ms": self.release_ms,
-            "knee_db": self.knee_db,
+            "knee": self.knee,
+            "mix": self.mix,
             "makeup_gain": self.makeup_gain,
+            "sc_on": self.sc_on,
+            "sc_listen": self.sc_listen,
+            "sc_source": self.sc_source,
             "enabled": self.enabled,
         }
+        # R09：makeup_post 仅在显式设置时持久化（None=legacy 不写键，
+        # 旧工程往返不出现新字段）
+        if self.makeup_post is not None:
+            result["makeup_post"] = bool(self.makeup_post)
+        return result
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "CompressorParams":
         return CompressorParams(
-            threshold_db=float(data.get("threshold_db", -24.0)),
-            ratio=float(data.get("ratio", 4.0)),
-            attack_ms=float(data.get("attack_ms", 3.0)),
-            release_ms=float(data.get("release_ms", 250.0)),
-            knee_db=float(data.get("knee_db", 30.0)),
+            threshold_db=float(data.get("threshold_db", -15.0)),
+            ratio=float(data.get("ratio", 2.5)),
+            attack_ms=float(data.get("attack_ms", 1.4)),
+            hold_ms=float(data.get("hold_ms", 0.0)),
+            release_ms=float(data.get("release_ms", 93.0)),
+            knee=float(data.get("knee", 15.0)),
+            mix=float(data.get("mix", 100.0)),
             makeup_gain=float(data.get("makeup_gain", 0.0)),
+            sc_on=bool(data.get("sc_on", False)),
+            sc_listen=bool(data.get("sc_listen", False)),
+            sc_source=str(data.get("sc_source", "internal") or "internal"),
             enabled=bool(data.get("enabled", True)),
+            makeup_post=(None if data.get("makeup_post") is None
+                         else bool(data.get("makeup_post"))),
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ReverbParams:
-    """混响器参数（FX 机架效果器之一）。
+    """声学房间混响器参数（FX 机架效果器之一，CW-A1 重构）。
 
-    基于 Schroeder FDN（4-comb + 2-allpass，Freeverb 风格）。
-    移植自 audio_pro 的 Reverb 参数。
+    物理房间模型：H/L/W 三维尺寸驱动早反射簇的时空分布，RT60 驱动晚期
+    FDN 尾音，Brightness/Modulation 控制高频阻尼与梳状微调制；ER/Reverb
+    两级独立音色染色（lo/hi shelf）；输出级提供 Direct/ER/Reverb 三路
+    电平与 Dry/Wet 交叉淡化。
 
     Attributes:
-        mix: 湿信号比例（0..100，%），0=完全干，100=完全湿
-        decay: 混响时间 RT60（秒，0.1..10），越大空间感越强
-        pre_delay_ms: 预延迟（ms，0..200），湿信号到达前的纯延迟（早反射感）
-        damping_hz: 高频阻尼频率（Hz，1000..20000），越低高频衰减越快
+        height/length/width: 房间尺寸（m），早反射跨距与扩散的驱动量
+        pre_delay: 预延迟（ms，-200..200；负值有效钳为 0）
+        reverb_time: 混响时间 RT60（ms，100..4000）
+        distance: 声源到听音点距离（m，0..30），驱动直达/ER 附加延迟
+        brightness: 高频亮度（%，6..100），映射晚期阻尼频率
+        modulation: 梳状微调制深度（%，0..100）
+        er_lo_freq/er_hi_freq: 早反射染色 shelf 频率（Hz）
+        er_lo_gain/er_hi_gain: 早反射染色增益（dB，-18..+6）
+        rev_lo_freq/rev_hi_freq: 晚期混响染色 shelf 频率（Hz）
+        rev_lo_gain/rev_hi_gain: 晚期混响染色增益（dB，-18..+6）
+        dry_wet: 干湿交叉淡化（%，0=全干 100=全湿）
+        direct_db/er_db/reverb_db: 三路输出电平（dB，-60..+6，-60≈-inf）
         enabled: 是否启用（False=旁路直通）
     """
-    mix: float = 30.0
-    decay: float = 2.0
-    pre_delay_ms: float = 0.0
-    damping_hz: float = 5000.0
+    height: float = 10.0
+    length: float = 30.0
+    width: float = 40.0
+    pre_delay: float = 42.0
+    reverb_time: float = 2730.0
+    distance: float = 19.87
+    brightness: float = 50.0
+    modulation: float = 2.0
+    er_lo_freq: float = 300.0
+    er_hi_freq: float = 10000.0
+    er_lo_gain: float = 0.0
+    er_hi_gain: float = -6.1
+    rev_lo_freq: float = 291.0
+    rev_hi_freq: float = 11100.0
+    rev_lo_gain: float = 1.1
+    rev_hi_gain: float = -2.2
+    dry_wet: float = 100.0
+    direct_db: float = 0.0
+    er_db: float = 0.0
+    reverb_db: float = 0.0
     enabled: bool = True
 
     def __post_init__(self) -> None:
-        if not (0.0 <= self.mix <= 100.0):
-            raise ValueError(f"mix must be in [0, 100]: {self.mix}")
-        if not (0.1 <= self.decay <= 10.0):
-            raise ValueError(f"decay must be in [0.1, 10]: {self.decay}")
-        if not (0.0 <= self.pre_delay_ms <= 200.0):
-            raise ValueError(f"pre_delay_ms must be in [0, 200]: {self.pre_delay_ms}")
-        if not (1000.0 <= self.damping_hz <= 20000.0):
-            raise ValueError(f"damping_hz must be in [1000, 20000]: {self.damping_hz}")
+        for name in ("height",):
+            v = getattr(self, name)
+            if not (2.0 <= v <= 30.0):
+                raise ValueError(f"{name} must be in [2, 30]: {v}")
+        for name in ("length", "width"):
+            v = getattr(self, name)
+            if not (3.0 <= v <= 80.0):
+                raise ValueError(f"{name} must be in [3, 80]: {v}")
+        if not (-200.0 <= self.pre_delay <= 200.0):
+            raise ValueError(f"pre_delay must be in [-200, 200]: {self.pre_delay}")
+        if not (100.0 <= self.reverb_time <= 4000.0):
+            raise ValueError(f"reverb_time must be in [100, 4000]: {self.reverb_time}")
+        if not (0.0 <= self.distance <= 30.0):
+            raise ValueError(f"distance must be in [0, 30]: {self.distance}")
+        if not (6.0 <= self.brightness <= 100.0):
+            raise ValueError(f"brightness must be in [6, 100]: {self.brightness}")
+        if not (0.0 <= self.modulation <= 100.0):
+            raise ValueError(f"modulation must be in [0, 100]: {self.modulation}")
+        if not (150.0 <= self.er_lo_freq <= 500.0):
+            raise ValueError(f"er_lo_freq must be in [150, 500]: {self.er_lo_freq}")
+        if not (1000.0 <= self.er_hi_freq <= 16000.0):
+            raise ValueError(f"er_hi_freq must be in [1000, 16000]: {self.er_hi_freq}")
+        if not (150.0 <= self.rev_lo_freq <= 500.0):
+            raise ValueError(f"rev_lo_freq must be in [150, 500]: {self.rev_lo_freq}")
+        if not (1000.0 <= self.rev_hi_freq <= 16000.0):
+            raise ValueError(f"rev_hi_freq must be in [1000, 16000]: {self.rev_hi_freq}")
+        for name in ("er_lo_gain", "er_hi_gain", "rev_lo_gain", "rev_hi_gain"):
+            v = getattr(self, name)
+            if not (-18.0 <= v <= 6.0):
+                raise ValueError(f"{name} must be in [-18, 6]: {v}")
+        if not (0.0 <= self.dry_wet <= 100.0):
+            raise ValueError(f"dry_wet must be in [0, 100]: {self.dry_wet}")
+        for name in ("direct_db", "er_db", "reverb_db"):
+            v = getattr(self, name)
+            if not (-60.0 <= v <= 6.0):
+                raise ValueError(f"{name} must be in [-60, 6]: {v}")
 
     @staticmethod
     def default() -> "ReverbParams":
@@ -2536,55 +2866,111 @@ class ReverbParams:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mix": self.mix,
-            "decay": self.decay,
-            "pre_delay_ms": self.pre_delay_ms,
-            "damping_hz": self.damping_hz,
+            "height": self.height, "length": self.length, "width": self.width,
+            "pre_delay": self.pre_delay, "reverb_time": self.reverb_time,
+            "distance": self.distance, "brightness": self.brightness,
+            "modulation": self.modulation,
+            "er_lo_freq": self.er_lo_freq, "er_hi_freq": self.er_hi_freq,
+            "er_lo_gain": self.er_lo_gain, "er_hi_gain": self.er_hi_gain,
+            "rev_lo_freq": self.rev_lo_freq, "rev_hi_freq": self.rev_hi_freq,
+            "rev_lo_gain": self.rev_lo_gain, "rev_hi_gain": self.rev_hi_gain,
+            "dry_wet": self.dry_wet,
+            "direct_db": self.direct_db, "er_db": self.er_db,
+            "reverb_db": self.reverb_db,
             "enabled": self.enabled,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ReverbParams":
+        def _f(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
         return ReverbParams(
-            mix=float(data.get("mix", 30.0)),
-            decay=float(data.get("decay", 2.0)),
-            pre_delay_ms=float(data.get("pre_delay_ms", 0.0)),
-            damping_hz=float(data.get("damping_hz", 5000.0)),
+            height=_f("height", 10.0), length=_f("length", 30.0),
+            width=_f("width", 40.0), pre_delay=_f("pre_delay", 42.0),
+            reverb_time=_f("reverb_time", 2730.0), distance=_f("distance", 19.87),
+            brightness=_f("brightness", 50.0), modulation=_f("modulation", 2.0),
+            er_lo_freq=_f("er_lo_freq", 300.0), er_hi_freq=_f("er_hi_freq", 10000.0),
+            er_lo_gain=_f("er_lo_gain", 0.0), er_hi_gain=_f("er_hi_gain", -6.1),
+            rev_lo_freq=_f("rev_lo_freq", 291.0), rev_hi_freq=_f("rev_hi_freq", 11100.0),
+            rev_lo_gain=_f("rev_lo_gain", 1.1), rev_hi_gain=_f("rev_hi_gain", -2.2),
+            dry_wet=_f("dry_wet", 100.0),
+            direct_db=_f("direct_db", 0.0), er_db=_f("er_db", 0.0),
+            reverb_db=_f("reverb_db", 0.0),
             enabled=bool(data.get("enabled", True)),
         )
 
 
-@dataclass(frozen=True)
-class DelayParams:
-    """延迟器参数（FX 机架效果器之一）。
+# DL-01：Delay 输入选择矩阵（真实实现的能力面）。旧菜单的 LCR/Quad/5.0/5.1/7.1
+# 从未有真实多声道 Delay 实现（DSP 一直按立体声处理）——from_dict 迁移到
+# "Stereo"，不改变声音，同时移除假能力声明。
+_DELAY_INPUT_FORMATS = ("Stereo", "Mono", "Left", "Right")
+_DELAY_LEGACY_INPUT_FORMATS = ("LCR", "Quad", "5.0", "5.1", "7.1")
 
-    环形缓冲延迟 + 反馈 + 低切 + ping-pong（立体声反馈交叉）。
-    移植自 audio_pro 的 Delay 参数。
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class DelayParams:
+    """立体声双线延迟器参数（FX 机架效果器之一，CW-A1 重构）。
+
+    L/R 独立延迟线（反馈支持负号=相位反转），stereo_blend 交叉反馈矩阵，
+    high_ratio 控制反馈回路高频阻尼，输入级 low/high cut 滤波，
+    输出级 dry/wet 与电平。
 
     Attributes:
-        time_ms: 延迟时间（ms，1..2000）
-        feedback: 反馈量（%，0..90，0=单次回声，90=长尾）
-        mix: 湿信号比例（%，0..100）
-        ping_pong: 乒乓模式（True=立体声反馈交叉到对侧声道）
-        low_cut_hz: 反馈回路低切频率（Hz，20..1000），去除低频隆隆
+        low_cut: 输入低切（Hz，20..5000）
+        high_cut: 输入高切（Hz，100..20000）
+        left_delay/right_delay: 声道延迟时间（ms，0..1200）
+        left_feedback/right_feedback: 声道反馈量（%，-99..+99，负值翻相）
+        high_ratio: 反馈高频阻尼比（%，0..100，越大高频衰减越快）
+        stereo_blend: 交叉反馈比例（%，0=独立 100=完全交叉）
+        dry_wet: 湿信号比例（%，0..100）
+        level_db: 输出电平（dB，-24..+6）
+        link_lr: UI 联动开关（仅界面便利，DSP 不读）
+        input_format: 输入格式（"Stereo"/"Mono"/"Left"/"Right"，DL-01 选择矩阵；
+            "Mono" = (L+R)/2 平均驱动双线；"Left"/"Right" = 单声道内容驱动双线）
         enabled: 是否启用（False=旁路直通）
     """
-    time_ms: float = 300.0
-    feedback: float = 40.0
-    mix: float = 30.0
-    ping_pong: bool = False
-    low_cut_hz: float = 100.0
+    low_cut: float = 108.0
+    high_cut: float = 12500.0
+    left_delay: float = 121.0
+    left_feedback: float = 16.0
+    right_delay: float = 135.0
+    right_feedback: float = -7.0
+    high_ratio: float = 60.0
+    stereo_blend: float = 15.0
+    dry_wet: float = 30.0
+    level_db: float = 0.0
+    link_lr: bool = False
+    input_format: str = "Stereo"
     enabled: bool = True
 
     def __post_init__(self) -> None:
-        if not (1.0 <= self.time_ms <= 2000.0):
-            raise ValueError(f"time_ms must be in [1, 2000]: {self.time_ms}")
-        if not (0.0 <= self.feedback <= 90.0):
-            raise ValueError(f"feedback must be in [0, 90]: {self.feedback}")
-        if not (0.0 <= self.mix <= 100.0):
-            raise ValueError(f"mix must be in [0, 100]: {self.mix}")
-        if not (20.0 <= self.low_cut_hz <= 1000.0):
-            raise ValueError(f"low_cut_hz must be in [20, 1000]: {self.low_cut_hz}")
+        if not (20.0 <= self.low_cut <= 5000.0):
+            raise ValueError(f"low_cut must be in [20, 5000]: {self.low_cut}")
+        if not (100.0 <= self.high_cut <= 20000.0):
+            raise ValueError(f"high_cut must be in [100, 20000]: {self.high_cut}")
+        if not (0.0 <= self.left_delay <= 1200.0):
+            raise ValueError(f"left_delay must be in [0, 1200]: {self.left_delay}")
+        if not (-99.0 <= self.left_feedback <= 99.0):
+            raise ValueError(f"left_feedback must be in [-99, 99]: {self.left_feedback}")
+        if not (0.0 <= self.right_delay <= 1200.0):
+            raise ValueError(f"right_delay must be in [0, 1200]: {self.right_delay}")
+        if not (-99.0 <= self.right_feedback <= 99.0):
+            raise ValueError(f"right_feedback must be in [-99, 99]: {self.right_feedback}")
+        if not (0.0 <= self.high_ratio <= 100.0):
+            raise ValueError(f"high_ratio must be in [0, 100]: {self.high_ratio}")
+        if not (0.0 <= self.stereo_blend <= 100.0):
+            raise ValueError(f"stereo_blend must be in [0, 100]: {self.stereo_blend}")
+        if not (0.0 <= self.dry_wet <= 100.0):
+            raise ValueError(f"dry_wet must be in [0, 100]: {self.dry_wet}")
+        if not (-24.0 <= self.level_db <= 6.0):
+            raise ValueError(f"level_db must be in [-24, 6]: {self.level_db}")
+        if self.input_format not in _DELAY_INPUT_FORMATS:
+            raise ValueError(f"invalid input_format: {self.input_format}")
 
     @staticmethod
     def default() -> "DelayParams":
@@ -2592,27 +2978,44 @@ class DelayParams:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "time_ms": self.time_ms,
-            "feedback": self.feedback,
-            "mix": self.mix,
-            "ping_pong": self.ping_pong,
-            "low_cut_hz": self.low_cut_hz,
+            "low_cut": self.low_cut, "high_cut": self.high_cut,
+            "left_delay": self.left_delay, "left_feedback": self.left_feedback,
+            "right_delay": self.right_delay, "right_feedback": self.right_feedback,
+            "high_ratio": self.high_ratio, "stereo_blend": self.stereo_blend,
+            "dry_wet": self.dry_wet, "level_db": self.level_db,
+            "link_lr": self.link_lr, "input_format": self.input_format,
             "enabled": self.enabled,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "DelayParams":
+        def _f(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        fmt = str(data.get("input_format", "Stereo") or "Stereo")
+        # DL-01：旧菜单从未有真实多声道 Delay 实现（DSP 一直按立体声处理），
+        # LCR/Quad/5.0/5.1/7.1 枚举迁移到 Stereo（不改变声音，移除假能力声明）
+        if fmt in _DELAY_LEGACY_INPUT_FORMATS:
+            fmt = "Stereo"
+        if fmt not in _DELAY_INPUT_FORMATS:
+            fmt = "Stereo"
         return DelayParams(
-            time_ms=float(data.get("time_ms", 300.0)),
-            feedback=float(data.get("feedback", 40.0)),
-            mix=float(data.get("mix", 30.0)),
-            ping_pong=bool(data.get("ping_pong", False)),
-            low_cut_hz=float(data.get("low_cut_hz", 100.0)),
+            low_cut=_f("low_cut", 108.0), high_cut=_f("high_cut", 12500.0),
+            left_delay=_f("left_delay", 121.0), left_feedback=_f("left_feedback", 16.0),
+            right_delay=_f("right_delay", 135.0), right_feedback=_f("right_feedback", -7.0),
+            high_ratio=_f("high_ratio", 60.0), stereo_blend=_f("stereo_blend", 15.0),
+            dry_wet=_f("dry_wet", 30.0), level_db=_f("level_db", 0.0),
+            link_lr=bool(data.get("link_lr", False)),
+            input_format=fmt,
             enabled=bool(data.get("enabled", True)),
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class SaturationParams:
     """谐波失真饱和器参数（FX 机架效果器之一）。
 
@@ -2648,6 +3051,7 @@ class SaturationParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ImagerParams:
     """立体声成像器参数（FX 机架效果器之一）。
 
@@ -2691,49 +3095,212 @@ class ImagerParams:
 
 
 @dataclass(frozen=True)
-class NoiseGateParams:
-    """噪声门参数（FX 机架效果器之一）。
+@preserves_param_extras
+class ExpanderParams:
+    """扩展器/门限参数（FX 机架效果器之一，CW-A1 重构）。
 
-    peak 包络跟随 + attack/release 平滑。移植自 audio_pro 的 Noise Gate。
+    向下扩展器：低于阈值的信号按 1:ratio 下扩，range_db 封顶最大衰减。
+    mode="Gate" 时按高比率陡降门限处理（ratio 锁定为门限陡降）。
+
+    兼容：``from_dict`` 接受旧 noise_gate 键（threshold_db/attack_ms/
+    release_ms），自动以 Gate 模式无损承接（CW-A1 全新开始策略）。
 
     Attributes:
-        threshold_db: 阈值（dB），[-60, 0]，信号低于此值被关门（衰减到 0）
-        attack_ms: 开门时间（ms），[0, 50]，从关到开的过渡速度
-        release_ms: 关门时间（ms），[10, 1000]，从开到关的过渡速度
+        mode: "Expander"（比率下扩）或 "Gate"（高比率门）
+        threshold_db: 阈值（dB），[-50, 0]，低于此值开始下扩
+        range_db: 最大衰减深度（dB），[0, 60]（Gate 模式即门深）
+        ratio: 扩展比（1:x），[1.1, 3.0]
+        attack_ms: 开门时间（ms），[0.5, 100]
+        hold_ms: 保持时间（ms），[0, 4000]
+        release_ms: 关门时间（ms），[50, 4000]
         enabled: 是否启用（False=旁路直通）
     """
-    threshold_db: float = -40.0
-    attack_ms: float = 1.0
-    release_ms: float = 100.0
+    mode: str = "Expander"
+    threshold_db: float = -35.0
+    range_db: float = 18.0
+    ratio: float = 1.8
+    attack_ms: float = 1.4
+    hold_ms: float = 0.0
+    release_ms: float = 93.0
     enabled: bool = True
 
     def __post_init__(self) -> None:
-        if not (-60.0 <= self.threshold_db <= 0.0):
-            raise ValueError(f"threshold_db must be in [-60, 0]: {self.threshold_db}")
-        if not (0.0 <= self.attack_ms <= 50.0):
-            raise ValueError(f"attack_ms must be in [0, 50]: {self.attack_ms}")
-        if not (10.0 <= self.release_ms <= 1000.0):
-            raise ValueError(f"release_ms must be in [10, 1000]: {self.release_ms}")
+        if self.mode not in ("Expander", "Gate"):
+            raise ValueError(f"mode must be Expander|Gate: {self.mode}")
+        if not (-50.0 <= self.threshold_db <= 0.0):
+            raise ValueError(f"threshold_db must be in [-50, 0]: {self.threshold_db}")
+        if not (0.0 <= self.range_db <= 60.0):
+            raise ValueError(f"range_db must be in [0, 60]: {self.range_db}")
+        if not (1.1 <= self.ratio <= 3.0):
+            raise ValueError(f"ratio must be in [1.1, 3.0]: {self.ratio}")
+        if not (0.5 <= self.attack_ms <= 100.0):
+            raise ValueError(f"attack_ms must be in [0.5, 100]: {self.attack_ms}")
+        if not (0.0 <= self.hold_ms <= 4000.0):
+            raise ValueError(f"hold_ms must be in [0, 4000]: {self.hold_ms}")
+        if not (50.0 <= self.release_ms <= 4000.0):
+            raise ValueError(f"release_ms must be in [50, 4000]: {self.release_ms}")
 
     @staticmethod
-    def default() -> "NoiseGateParams":
-        return NoiseGateParams()
+    def default() -> "ExpanderParams":
+        return ExpanderParams()
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "mode": self.mode,
             "threshold_db": self.threshold_db,
+            "range_db": self.range_db,
+            "ratio": self.ratio,
             "attack_ms": self.attack_ms,
+            "hold_ms": self.hold_ms,
             "release_ms": self.release_ms,
             "enabled": self.enabled,
         }
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "NoiseGateParams":
-        return NoiseGateParams(
-            threshold_db=float(data.get("threshold_db", -40.0)),
-            attack_ms=float(data.get("attack_ms", 1.0)),
-            release_ms=float(data.get("release_ms", 100.0)),
+    def from_dict(data: dict[str, Any]) -> "ExpanderParams":
+        # 旧 noise_gate 键无损承接：无 mode/range 键但带 release_ms 键 → Gate
+        legacy_gate = ("mode" not in data and "range_db" not in data
+                       and "range" not in data and "release_ms" in data)
+        mode = str(data.get("mode", "Gate" if legacy_gate else "Expander"))
+        if mode not in ("Expander", "Gate"):
+            mode = "Gate" if legacy_gate else "Expander"
+        ratio = float(data.get("ratio", 1.8))
+        if legacy_gate:
+            ratio = 2.5
+
+        def _f(key: str, default: float, lo: float, hi: float) -> float:
+            try:
+                return max(lo, min(hi, float(data.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        return ExpanderParams(
+            mode=mode,
+            threshold_db=_f("threshold_db", -35.0, -50.0, 0.0),
+            range_db=_f("range_db", _f("range", 18.0, 0.0, 60.0), 0.0, 60.0),
+            ratio=max(1.1, min(3.0, ratio)),
+            attack_ms=_f("attack_ms", 1.4, 0.5, 100.0),
+            hold_ms=_f("hold_ms", 0.0, 0.0, 4000.0),
+            release_ms=_f("release_ms", 93.0, 50.0, 4000.0),
             enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class SpatialPannerParams:
+    """空间声像器参数（轨级属性，非链效果；CW-A1 重构）。
+
+    lr（左右）不在此存储——``EditTrack.pan`` 是唯一真源（保持 pan 自动化
+    兼容）。立体声域实现：spread/rotate/divergence/boom 真实生效；
+    fb/elevation/format/space_mode 完整持久化并参与可视化，待多声道
+    引擎后启用。
+
+    Attributes:
+        enabled: 声像器总开关（False=回退普通 pan/balance）
+        space_mode: 空间视图模式（"2D" / "3D"）
+        format: 扬声器制式（"2.0"/"5.1"/"7.1"/"7.1.4"，立体声域暂可视化）
+        fb: 前后定位（-100..100，100=正前）
+        elevation: 高度（0..100，0=地面 100=天花板，3D）
+        rotate: 声场旋转角（0..360 deg）
+        spread: 声场弥散宽度（0=PNT 点声源 .. 100=FULL）
+        spread_auto: Auto Spread 收敛（越靠边界越向点声源收敛）
+        divergence: 全场弥散度（0..100，对侧串音）
+        div_mode: 弥散模式（"2D" / "3D"）
+        boom_on: LFE 低频发送开关
+        boom_route: 低频发送路由（"Pre" 推子前 / "Post" 推子后 / "Only" 仅低频）
+        boom_gain: 低频发送增益（dB，-60≈-inf .. +10）
+    """
+    enabled: bool = True
+    space_mode: str = "2D"
+    format: str = "2.0"
+    fb: float = 100.0
+    elevation: float = 0.0
+    rotate: float = 0.0
+    spread: float = 100.0
+    spread_auto: bool = False
+    divergence: float = 0.0
+    div_mode: str = "2D"
+    boom_on: bool = False
+    boom_route: str = "Pre"
+    boom_gain: float = -60.0
+
+    def __post_init__(self) -> None:
+        if self.space_mode not in ("2D", "3D"):
+            raise ValueError(f"space_mode must be 2D|3D: {self.space_mode}")
+        if self.format not in ("2.0", "5.1", "7.1", "7.1.4"):
+            raise ValueError(f"invalid format: {self.format}")
+        if not (-100.0 <= self.fb <= 100.0):
+            raise ValueError(f"fb must be in [-100, 100]: {self.fb}")
+        if not (0.0 <= self.elevation <= 100.0):
+            raise ValueError(f"elevation must be in [0, 100]: {self.elevation}")
+        if not (0.0 <= self.rotate <= 360.0):
+            raise ValueError(f"rotate must be in [0, 360]: {self.rotate}")
+        if not (0.0 <= self.spread <= 100.0):
+            raise ValueError(f"spread must be in [0, 100]: {self.spread}")
+        if not (0.0 <= self.divergence <= 100.0):
+            raise ValueError(f"divergence must be in [0, 100]: {self.divergence}")
+        if self.div_mode not in ("2D", "3D"):
+            raise ValueError(f"div_mode must be 2D|3D: {self.div_mode}")
+        if self.boom_route not in ("Pre", "Post", "Only"):
+            raise ValueError(f"boom_route must be Pre|Post|Only: {self.boom_route}")
+        if not (-60.0 <= self.boom_gain <= 10.0):
+            raise ValueError(f"boom_gain must be in [-60, 10]: {self.boom_gain}")
+
+    @staticmethod
+    def default() -> "SpatialPannerParams":
+        return SpatialPannerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "space_mode": self.space_mode,
+            "format": self.format,
+            "fb": self.fb,
+            "elevation": self.elevation,
+            "rotate": self.rotate,
+            "spread": self.spread,
+            "spread_auto": self.spread_auto,
+            "divergence": self.divergence,
+            "div_mode": self.div_mode,
+            "boom_on": self.boom_on,
+            "boom_route": self.boom_route,
+            "boom_gain": self.boom_gain,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SpatialPannerParams":
+        def _f(key: str, default: float, lo: float, hi: float) -> float:
+            try:
+                return max(lo, min(hi, float(data.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        space_mode = str(data.get("space_mode", "2D") or "2D")
+        if space_mode not in ("2D", "3D"):
+            space_mode = "2D"
+        fmt = str(data.get("format", "2.0") or "2.0")
+        if fmt not in ("2.0", "5.1", "7.1", "7.1.4"):
+            fmt = "2.0"
+        div_mode = str(data.get("div_mode", "2D") or "2D")
+        if div_mode not in ("2D", "3D"):
+            div_mode = "2D"
+        boom_route = str(data.get("boom_route", "Pre") or "Pre")
+        if boom_route not in ("Pre", "Post", "Only"):
+            boom_route = "Pre"
+        return SpatialPannerParams(
+            enabled=bool(data.get("enabled", True)),
+            space_mode=space_mode,
+            format=fmt,
+            fb=_f("fb", 100.0, -100.0, 100.0),
+            elevation=_f("elevation", 0.0, 0.0, 100.0),
+            rotate=_f("rotate", 0.0, 0.0, 360.0),
+            spread=_f("spread", 100.0, 0.0, 100.0),
+            spread_auto=bool(data.get("spread_auto", False)),
+            divergence=_f("divergence", 0.0, 0.0, 100.0),
+            div_mode=div_mode,
+            boom_on=bool(data.get("boom_on", False)),
+            boom_route=boom_route,
+            boom_gain=_f("boom_gain", -60.0, -60.0, 10.0),
         )
 
 
@@ -2751,7 +3318,14 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["delay"] = DelayParams
         _EFFECT_PARAM_REGISTRY["saturation"] = SaturationParams
         _EFFECT_PARAM_REGISTRY["imager"] = ImagerParams
-        _EFFECT_PARAM_REGISTRY["noise_gate"] = NoiseGateParams
+        _EFFECT_PARAM_REGISTRY["expander"] = ExpanderParams
+        # CW-A1: NoiseGate 由 Expander(Gate) 无损承接（from_dict 兼容旧键）
+        _EFFECT_PARAM_REGISTRY["noise_gate"] = ExpanderParams
+        # Dynamics 完整单元（EG→Comp→Lim 单实例，clip 级不拆分）
+        _EFFECT_PARAM_REGISTRY["dynamics"] = DynamicsParams
+        # NF-01（2026-11-15 计划 §6）：两款新复合 FX
+        _EFFECT_PARAM_REGISTRY["voice_changer"] = VoiceChangerParams
+        _EFFECT_PARAM_REGISTRY["spectral_mangler"] = SpectralManglerParams
     return _EFFECT_PARAM_REGISTRY
 
 
@@ -2778,7 +3352,342 @@ def _deep_copy_automation(automation: dict) -> dict:
     }
 
 
+# NF-01（2026-11-15 计划 §7.1/§8.1）：两款新复合 FX 的扁平参数 schema。
+# UI 保留嵌套结构，模型层只存这份扁平键（双向 adapter 在对话框侧维护
+# 唯一映射表）；自动化键沿用 fx/{instance_id}/{param} 顶层键。
+
+_VC_FORMANT_MODES = ("natural", "crisp")
+_VC_TRACKING_MODES = ("vocal", "wide")
+_VC_CARRIERS = ("saw", "pulse", "choir", "noise")
+
+
+def _seed_of(d: dict) -> int:
+    """H12：seed 宽容解析（坏字符串/浮点 → 0，不再抛 ValueError）。"""
+    try:
+        return int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass(frozen=True)
+@preserves_param_extras
+class VoiceChangerParams:
+    """Voice Changer（Formant → Pitch → Vocoder → OutputGain）参数。
+
+    默认 = 原型 ``default_voice_neutral()``（中性：Formant 恒等、
+    Pitch/Vocoder 关闭）。``default_*_demo()`` 是试听预设，不在新建实例
+    时自动加载。random_seed 为持久元数据（uint32；复制实例继承，Random
+    换新 seed 一次提交），不进连续自动化 lane。
+    """
+
+    enabled: bool = True
+    output_gain_db: float = 0.0
+    # Formant
+    formant_enabled: bool = True
+    formant_mode: str = "natural"
+    formant_shift_st: float = 0.0
+    formant_throat_pct: float = 0.0
+    formant_gender_pct: float = 0.0
+    formant_preserve_pct: float = 90.0
+    formant_timbre_pct: float = 0.0
+    formant_mix_pct: float = 100.0
+    # Pitch
+    pitch_enabled: bool = False
+    pitch_tracking: str = "vocal"
+    pitch_semitones: float = 0.0
+    pitch_fine_cents: float = 0.0
+    pitch_formant_link_pct: float = 0.0
+    pitch_glide_ms: float = 18.0
+    pitch_jitter_pct: float = 0.0
+    pitch_mix_pct: float = 100.0
+    # Vocoder
+    vocoder_enabled: bool = False
+    vocoder_carrier: str = "saw"
+    vocoder_bands: int = 16
+    vocoder_carrier_hz: float = 115.0
+    vocoder_formant_st: float = 0.0
+    vocoder_unvoiced_pct: float = 72.0
+    vocoder_release_ms: float = 24.0
+    vocoder_mix_pct: float = 100.0
+    # 元数据
+    random_seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.formant_mode not in _VC_FORMANT_MODES:
+            raise ValueError(f"formant_mode must be in {_VC_FORMANT_MODES}")
+        if self.pitch_tracking not in _VC_TRACKING_MODES:
+            raise ValueError(f"pitch_tracking must be in {_VC_TRACKING_MODES}")
+        if self.vocoder_carrier not in _VC_CARRIERS:
+            raise ValueError(f"vocoder_carrier must be in {_VC_CARRIERS}")
+        object.__setattr__(self, "random_seed",
+                           int(self.random_seed) & 0xFFFFFFFF)
+
+    @staticmethod
+    def default() -> "VoiceChangerParams":
+        return VoiceChangerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "output_gain_db": self.output_gain_db,
+            "formant_enabled": self.formant_enabled,
+            "formant_mode": self.formant_mode,
+            "formant_shift_st": self.formant_shift_st,
+            "formant_throat_pct": self.formant_throat_pct,
+            "formant_gender_pct": self.formant_gender_pct,
+            "formant_preserve_pct": self.formant_preserve_pct,
+            "formant_timbre_pct": self.formant_timbre_pct,
+            "formant_mix_pct": self.formant_mix_pct,
+            "pitch_enabled": self.pitch_enabled,
+            "pitch_tracking": self.pitch_tracking,
+            "pitch_semitones": self.pitch_semitones,
+            "pitch_fine_cents": self.pitch_fine_cents,
+            "pitch_formant_link_pct": self.pitch_formant_link_pct,
+            "pitch_glide_ms": self.pitch_glide_ms,
+            "pitch_jitter_pct": self.pitch_jitter_pct,
+            "pitch_mix_pct": self.pitch_mix_pct,
+            "vocoder_enabled": self.vocoder_enabled,
+            "vocoder_carrier": self.vocoder_carrier,
+            "vocoder_bands": self.vocoder_bands,
+            "vocoder_carrier_hz": self.vocoder_carrier_hz,
+            "vocoder_formant_st": self.vocoder_formant_st,
+            "vocoder_unvoiced_pct": self.vocoder_unvoiced_pct,
+            "vocoder_release_ms": self.vocoder_release_ms,
+            "vocoder_mix_pct": self.vocoder_mix_pct,
+            "random_seed": self.random_seed,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "VoiceChangerParams":
+        d = data or {}
+
+        def _b(key: str, default: bool) -> bool:
+            return bool(d.get(key, default))
+
+        def _f(key: str, default: float) -> float:
+            # H12：非有限值（NaN/±Inf）→ 默认（修前 NaN 增益穿透 DSP
+            # 产生整块非有限输出；数值范围由 DSP np.clip 统一兜底）
+            try:
+                v = float(d.get(key, default))
+            except (TypeError, ValueError):
+                return default
+            import math as _math
+            return v if _math.isfinite(v) else default
+
+        def _s(key: str, default: str, allowed: tuple) -> str:
+            v = str(d.get(key, default) or default)
+            return v if v in allowed else default
+
+        def _i(key: str, default: int, lo: int, hi: int) -> int:
+            try:
+                return max(lo, min(hi, int(d.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        return VoiceChangerParams(
+            enabled=_b("enabled", True),
+            output_gain_db=_f("output_gain_db", 0.0),
+            formant_enabled=_b("formant_enabled", True),
+            formant_mode=_s("formant_mode", "natural", _VC_FORMANT_MODES),
+            formant_shift_st=_f("formant_shift_st", 0.0),
+            formant_throat_pct=_f("formant_throat_pct", 0.0),
+            formant_gender_pct=_f("formant_gender_pct", 0.0),
+            formant_preserve_pct=_f("formant_preserve_pct", 90.0),
+            formant_timbre_pct=_f("formant_timbre_pct", 0.0),
+            formant_mix_pct=_f("formant_mix_pct", 100.0),
+            pitch_enabled=_b("pitch_enabled", False),
+            pitch_tracking=_s("pitch_tracking", "vocal", _VC_TRACKING_MODES),
+            pitch_semitones=_f("pitch_semitones", 0.0),
+            pitch_fine_cents=_f("pitch_fine_cents", 0.0),
+            pitch_formant_link_pct=_f("pitch_formant_link_pct", 0.0),
+            pitch_glide_ms=_f("pitch_glide_ms", 18.0),
+            pitch_jitter_pct=_f("pitch_jitter_pct", 0.0),
+            pitch_mix_pct=_f("pitch_mix_pct", 100.0),
+            vocoder_enabled=_b("vocoder_enabled", False),
+            vocoder_carrier=_s("vocoder_carrier", "saw", _VC_CARRIERS),
+            vocoder_bands=_i("vocoder_bands", 16, 8, 32),
+            vocoder_carrier_hz=_f("vocoder_carrier_hz", 115.0),
+            vocoder_formant_st=_f("vocoder_formant_st", 0.0),
+            vocoder_unvoiced_pct=_f("vocoder_unvoiced_pct", 72.0),
+            vocoder_release_ms=_f("vocoder_release_ms", 24.0),
+            vocoder_mix_pct=_f("vocoder_mix_pct", 100.0),
+            random_seed=_seed_of(d),
+        )
+
+
+_SM_ROUTINGS = ("ring_grain_dist", "grain_ring_dist", "dist_grain_ring",
+                "parallel")
+_SM_RING_MODES = ("sine", "dual", "fm_ring", "rectify")
+_SM_GRAIN_MODES = ("cloud", "reverse", "scatter")
+_SM_DIST_CURVES = ("tape", "fold", "hard_clip", "bitcrush")
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class SpectralManglerParams:
+    """Spectral Mangler（Ring／Grain／Dist 三模块 + 拓扑）参数。
+
+    默认 = 原型 ``default_mangler_init()``（三模块关闭、global_mix=100、
+    gain=0；其余保留 demo 数值作为再次开模块的起点）。
+    ``output_limiter_enabled`` 生产 Init=False（Demo 可开）。
+    """
+
+    enabled: bool = True
+    routing: str = "ring_grain_dist"
+    global_mix_pct: float = 100.0
+    output_gain_db: float = 0.0
+    output_limiter_enabled: bool = False
+    # Ring
+    ring_enabled: bool = False
+    ring_mode: str = "fm_ring"
+    ring_carrier_hz: float = 340.0
+    ring_lfo_rate_hz: float = 2.4
+    ring_lfo_depth_pct: float = 35.0
+    ring_warp_pct: float = 28.0
+    ring_spread_pct: float = 45.0
+    ring_mix_pct: float = 65.0
+    # Grain
+    grain_enabled: bool = False
+    grain_freeze: bool = False
+    grain_mode: str = "cloud"
+    grain_size_ms: float = 85.0
+    grain_density_hz: float = 24.0
+    grain_pitch_st: float = 7.0
+    grain_pitch_jitter_pct: float = 22.0
+    grain_position_pct: float = 30.0
+    grain_spray_pct: float = 45.0
+    grain_feedback_pct: float = 38.0
+    grain_mix_pct: float = 70.0
+    # Dist
+    dist_enabled: bool = False
+    dist_curve: str = "fold"
+    dist_drive_db: float = 14.5
+    dist_fold_pct: float = 42.0
+    dist_bias_pct: float = 12.0
+    dist_tone_hz: float = 5200.0
+    dist_resonance_pct: float = 25.0
+    dist_mix_pct: float = 80.0
+    # 元数据
+    random_seed: int = 0
+    #: H09：Freeze 捕获资产引用（项目侧 id；空 = 无资产。raw PCM 不进
+    #: 参数 JSON；automation kind = never）
+    freeze_capture_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.routing not in _SM_ROUTINGS:
+            raise ValueError(f"routing must be in {_SM_ROUTINGS}")
+        if self.ring_mode not in _SM_RING_MODES:
+            raise ValueError(f"ring_mode must be in {_SM_RING_MODES}")
+        if self.grain_mode not in _SM_GRAIN_MODES:
+            raise ValueError(f"grain_mode must be in {_SM_GRAIN_MODES}")
+        if self.dist_curve not in _SM_DIST_CURVES:
+            raise ValueError(f"dist_curve must be in {_SM_DIST_CURVES}")
+        object.__setattr__(self, "random_seed",
+                           int(self.random_seed) & 0xFFFFFFFF)
+
+    @staticmethod
+    def default() -> "SpectralManglerParams":
+        return SpectralManglerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "routing": self.routing,
+            "global_mix_pct": self.global_mix_pct,
+            "output_gain_db": self.output_gain_db,
+            "output_limiter_enabled": self.output_limiter_enabled,
+            "ring_enabled": self.ring_enabled,
+            "ring_mode": self.ring_mode,
+            "ring_carrier_hz": self.ring_carrier_hz,
+            "ring_lfo_rate_hz": self.ring_lfo_rate_hz,
+            "ring_lfo_depth_pct": self.ring_lfo_depth_pct,
+            "ring_warp_pct": self.ring_warp_pct,
+            "ring_spread_pct": self.ring_spread_pct,
+            "ring_mix_pct": self.ring_mix_pct,
+            "grain_enabled": self.grain_enabled,
+            "grain_freeze": self.grain_freeze,
+            "grain_mode": self.grain_mode,
+            "grain_size_ms": self.grain_size_ms,
+            "grain_density_hz": self.grain_density_hz,
+            "grain_pitch_st": self.grain_pitch_st,
+            "grain_pitch_jitter_pct": self.grain_pitch_jitter_pct,
+            "grain_position_pct": self.grain_position_pct,
+            "grain_spray_pct": self.grain_spray_pct,
+            "grain_feedback_pct": self.grain_feedback_pct,
+            "grain_mix_pct": self.grain_mix_pct,
+            "dist_enabled": self.dist_enabled,
+            "dist_curve": self.dist_curve,
+            "dist_drive_db": self.dist_drive_db,
+            "dist_fold_pct": self.dist_fold_pct,
+            "dist_bias_pct": self.dist_bias_pct,
+            "dist_tone_hz": self.dist_tone_hz,
+            "dist_resonance_pct": self.dist_resonance_pct,
+            "dist_mix_pct": self.dist_mix_pct,
+            "random_seed": self.random_seed,
+            "freeze_capture_id": self.freeze_capture_id,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SpectralManglerParams":
+        d = data or {}
+
+        def _b(key: str, default: bool) -> bool:
+            return bool(d.get(key, default))
+
+        def _f(key: str, default: float) -> float:
+            # H12：非有限值（NaN/±Inf）→ 默认（修前 NaN 增益穿透 DSP
+            # 产生整块非有限输出；数值范围由 DSP np.clip 统一兜底）
+            try:
+                v = float(d.get(key, default))
+            except (TypeError, ValueError):
+                return default
+            import math as _math
+            return v if _math.isfinite(v) else default
+
+        def _s(key: str, default: str, allowed: tuple) -> str:
+            v = str(d.get(key, default) or default)
+            return v if v in allowed else default
+
+        return SpectralManglerParams(
+            enabled=_b("enabled", True),
+            routing=_s("routing", "ring_grain_dist", _SM_ROUTINGS),
+            global_mix_pct=_f("global_mix_pct", 100.0),
+            output_gain_db=_f("output_gain_db", 0.0),
+            output_limiter_enabled=_b("output_limiter_enabled", False),
+            ring_enabled=_b("ring_enabled", False),
+            ring_mode=_s("ring_mode", "fm_ring", _SM_RING_MODES),
+            ring_carrier_hz=_f("ring_carrier_hz", 340.0),
+            ring_lfo_rate_hz=_f("ring_lfo_rate_hz", 2.4),
+            ring_lfo_depth_pct=_f("ring_lfo_depth_pct", 35.0),
+            ring_warp_pct=_f("ring_warp_pct", 28.0),
+            ring_spread_pct=_f("ring_spread_pct", 45.0),
+            ring_mix_pct=_f("ring_mix_pct", 65.0),
+            grain_enabled=_b("grain_enabled", False),
+            grain_freeze=_b("grain_freeze", False),
+            grain_mode=_s("grain_mode", "cloud", _SM_GRAIN_MODES),
+            grain_size_ms=_f("grain_size_ms", 85.0),
+            grain_density_hz=_f("grain_density_hz", 24.0),
+            grain_pitch_st=_f("grain_pitch_st", 7.0),
+            grain_pitch_jitter_pct=_f("grain_pitch_jitter_pct", 22.0),
+            grain_position_pct=_f("grain_position_pct", 30.0),
+            grain_spray_pct=_f("grain_spray_pct", 45.0),
+            grain_feedback_pct=_f("grain_feedback_pct", 38.0),
+            grain_mix_pct=_f("grain_mix_pct", 70.0),
+            dist_enabled=_b("dist_enabled", False),
+            dist_curve=_s("dist_curve", "fold", _SM_DIST_CURVES),
+            dist_drive_db=_f("dist_drive_db", 14.5),
+            dist_fold_pct=_f("dist_fold_pct", 42.0),
+            dist_bias_pct=_f("dist_bias_pct", 12.0),
+            dist_tone_hz=_f("dist_tone_hz", 5200.0),
+            dist_resonance_pct=_f("dist_resonance_pct", 25.0),
+            dist_mix_pct=_f("dist_mix_pct", 80.0),
+            random_seed=_seed_of(d),
+            freeze_capture_id=str(d.get("freeze_capture_id", "") or ""),
+        )
+
+
+@dataclass(frozen=True)
+@preserves_extras
 class TrackEffectInstance:
     """FX 机架链中的单个效果器条目。
 
@@ -2791,6 +3700,9 @@ class TrackEffectInstance:
         panel: 由哪个 UI 面板管理（"fx"=FX 列表多实例；"dynamics"=DY 胶囊单例）。
             仅 UI 层使用，DSP（to_dsp_entries）不读此字段，所有实例照常处理。
             默认 "fx"，旧项目无此字段时回填 "fx"（向后兼容）。
+        algorithm_version: 实例创建/最后编辑时的 DSP 算法版本（R01）。
+            0 = 未标注（历史工程）→ 按 legacy 兼容桶渲染；原样存回不覆写。
+            未来版本（> audio_dsp.ALGORITHM_VERSION）同样原样保留。
     """
     effect_type: str
     params: dict
@@ -2798,42 +3710,88 @@ class TrackEffectInstance:
     order: int = 0
     instance_id: str = ""
     panel: str = "fx"
+    algorithm_version: int = 0
+    # R01：未知顶层键 opaque 保留（DESK-04A 模式，load→save→reload 无损）
+    _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.effect_type:
             raise ValueError("effect_type cannot be empty")
-        # 校验 effect_type 是否已注册
+        # R01：未知 effect_type 不再抛错（单实例不得清整条链 / 阻断工程加载）。
+        # 数据以 opaque payload 保留；DSP 侧 EffectChain.set_params 跳过并告警，
+        # 能力判定见 fx_versioning.effect_type_support（预览/导出 preflight 共用）。
         registry = _ensure_effect_param_registry()
         if self.effect_type not in registry:
-            raise ValueError(f"Unknown effect_type: {self.effect_type}")
+            logger.warning(
+                "TrackEffectInstance: unknown effect_type %r preserved as "
+                "opaque payload (rendering will skip it with a diagnostic)",
+                self.effect_type,
+            )
         # AUD-19104：构造即复制 params dict——frozen 模型不得内嵌调用方
         # 持有的可变引用（否则对 params 的原位编辑会穿透所有快照）。
         object.__setattr__(self, "params", dict(self.params))
+        try:
+            av = max(0, int(self.algorithm_version or 0))
+        except (TypeError, ValueError):
+            av = 0
+        if av == 0:
+            # 0 = 本构建新建实例（UI/命令构造走默认值）→ 标记当前算法版本。
+            # 旧工程加载由 from_dict 显式给 LEGACY_ALGORITHM_VERSION，
+            # 不会进入本分支——两类"未标注"语义由此区分（R01）。
+            from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+            av = int(ALGORITHM_VERSION)
+        object.__setattr__(self, "algorithm_version", av)
         # instance_id 为空时自动生成（frozen dataclass 用 object.__setattr__）
         if not self.instance_id:
             import uuid as _uuid
             object.__setattr__(self, "instance_id", str(_uuid.uuid4()))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "effect_type": self.effect_type,
             "params": dict(self.params),
             "enabled": self.enabled,
             "order": self.order,
             "instance_id": self.instance_id,
             "panel": self.panel,
+            "algorithm_version": self.algorithm_version,
         }
+        result.update(self._extra_fields)
+        return result
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TrackEffectInstance":
-        return TrackEffectInstance(
+        known = frozenset({
+            "effect_type", "params", "enabled", "order",
+            "instance_id", "panel", "algorithm_version",
+        })
+        # H01：旧数据（无版本键）映射为 0 = 未标注（早于版本标注的工程，
+        # era 跨 43dfb2e3..1016a3cd 有历史歧义）——按最旧可复现语义渲染
+        # 并在诊断中说明；不再猜测成 v2，显式升级走 command。
+        from src.features.edit.core.fx_versioning import (
+            UNSPECIFIED_ALGORITHM_VERSION,
+        )
+        try:
+            raw_av = int(data.get("algorithm_version",
+                                  UNSPECIFIED_ALGORITHM_VERSION)
+                         or UNSPECIFIED_ALGORITHM_VERSION)
+        except (TypeError, ValueError):
+            raw_av = UNSPECIFIED_ALGORITHM_VERSION
+        inst = TrackEffectInstance(
             effect_type=str(data.get("effect_type", "")),
             params=dict(data.get("params", {}) or {}),
             enabled=bool(data.get("enabled", True)),
             order=int(data.get("order", 0)),
             instance_id=str(data.get("instance_id", "")),
             panel=str(data.get("panel", "fx")),
+            # 占位 1 避开 post_init 的 0→current 归一化；数据路径的
+            # 0 = 未标注（era 歧义）须原样保留，与 UI 新建实例区分（H01）。
+            algorithm_version=max(1, raw_av),
+            _extra_fields=split_extras(data, known),
         )
+        if raw_av <= 0:
+            object.__setattr__(inst, "algorithm_version", 0)
+        return inst
 
 
 @dataclass(frozen=True)
@@ -2853,8 +3811,18 @@ class EffectChainParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "EffectChainParams":
         effects_data = data.get("effects", []) if data else []
-        effects = tuple(TrackEffectInstance.from_dict(e) for e in effects_data)
-        return EffectChainParams(effects=effects)
+        effects: list[TrackEffectInstance] = []
+        # R01：逐条容错——未知 effect_type 已在 TrackEffectInstance 内保留为
+        # opaque payload；此处只跳过结构性损坏（非 dict）条目并记录，
+        # 单条脏数据不再让整个 EditTrack / TimelineSequence 反序列化失败。
+        for e in effects_data:
+            if not isinstance(e, dict):
+                logger.warning(
+                    "EffectChainParams.from_dict: skip corrupted (non-dict) "
+                    "effect entry %r", e)
+                continue
+            effects.append(TrackEffectInstance.from_dict(e))
+        return EffectChainParams(effects=tuple(effects))
 
     @staticmethod
     def from_strip_eq(eq_params: "StripEQParams") -> "EffectChainParams":
@@ -2869,9 +3837,17 @@ class EffectChainParams:
         ))
 
     def to_dsp_entries(self) -> list:
-        """转换为 EffectChain.set_params 接收的 [(effect_type, params_dict, enabled), ...] 列表。"""
+        """转成 EffectChain.set_params 的条目列表（CW-A1/R01: 5 元组）。
+
+        Returns:
+            [(effect_type, params dict, enabled, instance_id, algorithm_version),
+             ...] 按 order 排序。instance_id 供 GR 遥测 / 侧链检源按实例定位；
+            algorithm_version（R01）供 DSP 选择 legacy/current 兼容路径。
+            未知 effect_type 的实例照常返回——DSP 侧跳过并告警（不静默清链）。
+        """
         return [
-            (e.effect_type, e.params, e.enabled)
+            (e.effect_type, dict(e.params) if e.params else None, e.enabled,
+             e.instance_id, e.algorithm_version, e.panel)
             for e in sorted(self.effects, key=lambda x: x.order)
         ]
 
@@ -2901,7 +3877,10 @@ class EditTrack:
     is_muted: bool = False
     is_solo: bool = False
     volume: float = 1.0  # 音量（0.0-2.0，默认 1.0）
-    pan: float = 0.0  # 声相（-1.0 左, 0.0 中, 1.0 右）
+    pan: float = 0.0  # 声相（-1.0 左, 0.0 中, 1.0 右）；空间声像器的 lr 真源
+    # CW-A1: 空间声像器参数（SpatialPannerParams.to_dict() 形式；空 dict=未使用，
+    # 回退普通 pan/balance）。lr 由 pan 字段唯一承载以保自动化兼容。
+    panner: dict = field(default_factory=dict)
     # W6: 轨道级 Strip EQ 参数（专业混音 strip 标配，None=禁用/默认）
     strip_eq: Optional["StripEQParams"] = None
     # W26: FX 机架效果器链（None=未使用）。向后兼容：旧项目 strip_eq 加载时自动迁移。
@@ -3061,6 +4040,7 @@ class EditTrack:
                  is_solo: bool | None = None,
                  volume: float | None = None,
                  pan: float | None = None,
+                 panner: Optional[dict] = None,
                  strip_eq: Optional["StripEQParams"] | None = None,
                  color: Optional[str] | None = None,
                  automation: Optional[dict] = None,
@@ -3098,6 +4078,8 @@ class EditTrack:
             is_solo=self.is_solo if is_solo is None else is_solo,
             volume=self.volume if volume is None else volume,
             pan=self.pan if pan is None else pan,
+            # panner 参数 None 表示"不传"；要清空请传空 dict {}
+            panner=dict(self.panner) if panner is None else dict(panner),
             strip_eq=self.strip_eq if strip_eq is None else strip_eq,
             color=self.color if color is None else color,
             # AUD-19104：未显式更新时深拷贝（KeyframeTrack 可变），派生
@@ -3281,6 +4263,10 @@ class EditTrack:
         """创建新实例，修改声相（-1.0 左, 0.0 中, 1.0 右）。"""
         return self._rebuild(pan=new_pan)
 
+    def with_panner(self, new_panner: dict) -> EditTrack:
+        """CW-A1: 创建新实例，修改空间声像器参数（空 dict=未使用）。"""
+        return self._rebuild(panner=dict(new_panner or {}))
+
     def with_strip_eq(self, new_strip_eq: Optional["StripEQParams"]) -> EditTrack:
         """创建新实例，修改 Strip EQ 参数。传 None 表示禁用 EQ（旁路）。"""
         # AUD-19100：dataclasses.replace 自动携带全部字段（含 is_sync_locked/
@@ -3373,6 +4359,7 @@ class EditTrack:
     AUTOMATION_PAN = "pan"
     AUTOMATION_MUTE = "mute"
 
+
     def get_automation_value(self, param: str, frame: int, default: float) -> float:
         """查询某参数在指定帧的自动化值（线性插值）。
 
@@ -3453,6 +4440,7 @@ class EditTrack:
             "is_visible": self.is_visible,
             "is_muted": self.is_muted, "is_solo": self.is_solo, "volume": self.volume,
             "pan": self.pan,
+            "panner": dict(self.panner),
             "strip_eq": self.strip_eq.to_dict() if self.strip_eq is not None else None,
             "effect_chain": self.effect_chain.to_dict() if self.effect_chain is not None else None,
             "color": self.color,
@@ -3505,6 +4493,12 @@ class EditTrack:
             for s in (data.get("sends") or ())
             if isinstance(s, dict) and s.get("target_bus_id")
         )
+        # CW-A1: 空间声像器参数经 SpatialPannerParams 归一化；缺失/损坏 → 空 dict
+        panner_data = data.get("panner")
+        panner: dict = (
+            SpatialPannerParams.from_dict(panner_data).to_dict()
+            if isinstance(panner_data, dict) and panner_data else {}
+        )
         track = EditTrack(
             track_id=data.get("track_id", str(uuid.uuid4())), name=data.get("name", ""),
             track_type=data.get("track_type", "video"), index=data.get("index", 0),
@@ -3517,6 +4511,7 @@ class EditTrack:
             is_visible=data.get("is_visible", True),
             is_muted=data.get("is_muted", False), is_solo=data.get("is_solo", False),
             volume=data.get("volume", 1.0), pan=data.get("pan", 0.0),
+            panner=panner,
             strip_eq=StripEQParams.from_dict(strip_eq_data) if strip_eq_data else None,
             effect_chain=effect_chain,
             color=data.get("color"),
@@ -3535,7 +4530,7 @@ class EditTrack:
             "track_id", "name", "track_type", "track_role", "index", "clips",
             "subtitle_clips", "transitions", "is_enabled", "is_locked",
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
-            "pan", "strip_eq", "effect_chain", "color", "automation",
+            "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
             "automation_mode", "is_bus", "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })
@@ -3555,6 +4550,143 @@ class EditTrack:
             return NotImplemented
         return self.track_id == other.track_id
 
+
+
+
+# MX-10: FX 参数自动化命名空间。track.automation 的 key 采用
+# "fx/{instance_id}/{param_key}"（模型 dict key 天然泛型，序列化/快照/
+# 命令层零改动即支持）；块边界处由采样器按当前帧求值并覆盖链参数。
+AUTOMATION_FX_PREFIX = "fx/"
+
+
+def parse_fx_automation_key(key: str) -> Optional[tuple]:
+    """解析 "fx/{instance_id}/{param_key}" → (instance_id, param_key)。
+
+    非本命名空间（volume/pan/mute 或其他）返回 None。
+    instance_id 含 "/" 时按第一个 "/" 拆分（instance_id 由 uuid 生成，
+    不含 "/"；param_key 为 schema 键，同样不含 "/"）。
+    """
+    if not key.startswith(AUTOMATION_FX_PREFIX):
+        return None
+    rest = key[len(AUTOMATION_FX_PREFIX):]
+    if "/" not in rest:
+        return None
+    iid, _, pkey = rest.partition("/")
+    if not iid or not pkey:
+        return None
+    return iid, pkey
+
+
+#: H12：参数自动化类别（automation_kind 真源）。
+#: never      = 元数据/资源引用（seed、总开关）——不得进入数值 lane；
+#: event      = 离散事件语义（routing/模式/曲线/Freeze）——fx_sampler 块
+#:               边界重设天然支持（每块一次，无中间插值意义）；
+#: continuous = 连续参数（浮点，单位各异；块边界求值 + DSP 侧平滑/淡化）。
+FX_AUTOMATION_NEVER = frozenset({
+    "random_seed", "enabled", "algorithm_version", "freeze_capture_id",
+})
+FX_AUTOMATION_EVENT = frozenset({
+    "routing", "formant_mode", "pitch_tracking", "vocoder_carrier",
+    "ring_mode", "grain_mode", "dist_curve", "grain_freeze",
+})
+
+
+def automation_param_kind(param_key: str) -> str:
+    """H12：自动化 eligibility（UI 键列表与采样消费共用）。"""
+    if param_key in FX_AUTOMATION_NEVER:
+        return "never"
+    if param_key in FX_AUTOMATION_EVENT:
+        return "event"
+    return "continuous"
+
+
+def validate_effect_params(effect_type: str, params: dict) -> tuple:
+    """H12：参数统一校验（预览/导出/保存前共用）。
+
+    Returns:
+        (cleaned_dict, diagnostics)：cleaned 为经 ``XParams.from_dict``
+        归一化的 dict（非有限值/坏类型回退默认，未知键保留）；diagnostics
+        为被替换字段列表 ``[(key, raw, replacement), ...]``。未知
+        effect_type 返回 (原 dict, [])（opaque payload 原样，调用方走
+        fx_versioning 诊断）。
+    """
+    registry = _ensure_effect_param_registry()
+    cls = registry.get(effect_type)
+    if cls is None or not isinstance(params, dict):
+        return dict(params or {}), []
+    try:
+        cleaned_obj = cls.from_dict(params)
+    except Exception:
+        return dict(params or {}), [("__all__", "unparsable", "raw kept")]
+    cleaned = cleaned_obj.to_dict()
+    diags = []
+    for key, raw in (params or {}).items():
+        if key not in cleaned:
+            continue
+        try:
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                import math as _math
+                if not _math.isfinite(float(raw)):
+                    diags.append((key, raw, cleaned[key]))
+                    continue
+            if cleaned.get(key) != raw and str(cleaned.get(key)) != str(raw):
+                # 类型/枚举/范围归一（int("3")→3 等静默归一不计；只报
+                # 数值被替换与枚举回退）
+                if isinstance(raw, (int, float)) and isinstance(
+                        cleaned.get(key), (int, float)):
+                    if float(raw) == float(cleaned[key]):
+                        continue
+                diags.append((key, raw, cleaned[key]))
+        except Exception:
+            pass
+    return cleaned, diags
+
+
+def build_track_fx_sampler(track: Any) -> Optional[Any]:
+    """MX-10: 从 track.automation 的 fx/* 键构建 ``frame -> entries`` 采样器。
+
+    返回 None 当：automation_mode == "off" / 无 fx 键 / 无效果链。
+    采样器闭包捕获 track 快照（frozen dataclass）——链或曲线编辑产生新
+    track 对象，由调用方（edit_page 同步 / renderer 节点构建）重建采样器。
+
+    求值语义：块边界粒度（每块按起始帧求值一次，与 clip FX 的
+    animated_sampler 同型）；keyframe 插值由 KeyframeTrack.get_value 完成；
+    未知参数键（链参数里不存在）被忽略。
+    """
+    if str(getattr(track, "automation_mode", "off") or "off").lower() == "off":
+        return None
+    chain = getattr(track, "effect_chain", None)
+    if chain is None:
+        return None
+    fx_tracks: dict = {}
+    for key, kt in (getattr(track, "automation", None) or {}).items():
+        parsed = parse_fx_automation_key(str(key))
+        if parsed is not None and getattr(kt, "keyframes", None):
+            fx_tracks[parsed] = kt
+    if not fx_tracks:
+        return None
+    base_entries = chain.to_dsp_entries()
+
+    def _sampler(frame: int) -> list:
+        entries = []
+        for entry in base_entries:
+            etype, params, enabled, iid = entry[0], entry[1], entry[2], entry[3]
+            av = entry[4] if len(entry) > 4 else 0
+            p = dict(params) if params else {}
+            for (eid, pkey), kt in fx_tracks.items():
+                if eid == iid and pkey in p:
+                    # H12：never 类参数（seed/enabled/版本）不进数值 lane
+                    if automation_param_kind(pkey) == "never":
+                        continue
+                    try:
+                        p[pkey] = kt.get_value(int(frame), p[pkey])
+                    except (TypeError, ValueError, KeyError):
+                        pass
+            entries.append((etype, p, enabled, iid, av,
+                            entry[5] if len(entry) > 5 else "fx"))
+        return entries
+
+    return _sampler
 
 @dataclass(frozen=True)
 class TimelineClipboardPayload:
@@ -3726,6 +4858,11 @@ class TimelineSequence:
     # 引擎在 apply_master 阶段逐样本 ramp 应用（与轨级 automation 一致）。
     master_automation: dict = field(default_factory=dict)
     master_automation_mode: str = "off"  # off/read/write/touch/latch
+    # MX-03: Master 条带处理（EQ/FX 与普通轨同一参数模型）。引擎在 master
+    # 音量后、限幅器前应用（TRACK_CHAIN_ORDER 的 master 段）。立体声 Master
+    # 不建模 Panner（无意义），能力矩阵见计划 §5 MX-03。
+    master_strip_eq: Optional[StripEQParams] = None
+    master_effect_chain: Optional[EffectChainParams] = None
     # TAEP P0: 单调递增的乐观锁 revision。每次经统一提交入口（command /
     # EditProjectService）成功落地一次原子变更后递增。它不是序列化 schema 版本，
     # 而是 timeline 内容版本，用于 AI plan 的 base_revision 一致性检查
@@ -3742,7 +4879,8 @@ class TimelineSequence:
         "format_settings", "video_tracks", "audio_tracks", "subtitle_tracks",
         "caption_graphics", "markers", "range_start", "range_end",
         "master_volume", "master_muted", "master_automation",
-        "master_automation_mode", "revision",
+        "master_automation_mode", "master_strip_eq", "master_effect_chain",
+        "revision", "audio_fx_schema_version",
     })
 
     def __post_init__(self) -> None:
@@ -4043,7 +5181,10 @@ class TimelineSequence:
                  master_volume: float | None = None,
                  master_muted: bool | None = None,
                  master_automation: dict | None = None,
-                 master_automation_mode: str | None = None) -> TimelineSequence:
+                 master_automation_mode: str | None = None,
+                 # MX-03: None=清除条带，... 哨兵=不传（与 range_start 同语义）
+                 master_strip_eq: Any = ...,
+                 master_effect_chain: Any = ...) -> TimelineSequence:
         """Internal immutable rebuilder — centralizes field passing.
 
         保留 revision 不变（bump 只发生在提交边界，见 ``with_revision_bumped``）。
@@ -4073,6 +5214,8 @@ class TimelineSequence:
                 if master_automation is None else master_automation
             ),
             master_automation_mode=self.master_automation_mode if master_automation_mode is None else master_automation_mode,
+            master_strip_eq=(self.master_strip_eq if master_strip_eq is ... else master_strip_eq),
+            master_effect_chain=(self.master_effect_chain if master_effect_chain is ... else master_effect_chain),
             revision=self.revision,
             _extra_fields=dict(self._extra_fields),
         )
@@ -4239,7 +5382,11 @@ class TimelineSequence:
             "master_volume": self.master_volume, "master_muted": self.master_muted,
             "master_automation": {k: v.to_dict() for k, v in self.master_automation.items()} if self.master_automation else {},
             "master_automation_mode": self.master_automation_mode,
+            "master_strip_eq": self.master_strip_eq.to_dict() if self.master_strip_eq else None,
+            "master_effect_chain": self.master_effect_chain.to_dict() if self.master_effect_chain else None,
             "revision": self.revision,
+            # R01：FX 序列化 schema 版本（缺失 = legacy v1；from_dict 不回填改写）
+            "audio_fx_schema_version": AUDIO_FX_SCHEMA_VERSION,
             # R28/F-R09：未知字段保留
             **self._extra_fields}
 
@@ -4259,6 +5406,23 @@ class TimelineSequence:
                     param, exc,
                 )
         graphics_block = migrate_caption_graphics_block(data.get("caption_graphics"))
+        # MX-03: Master EQ/FX 反序列化（坏字段降级为 None，不阻断序列加载）
+        master_eq = None
+        eq_data = data.get("master_strip_eq")
+        if isinstance(eq_data, dict) and eq_data:
+            try:
+                master_eq = StripEQParams.from_dict(eq_data)
+            except (TypeError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "TimelineSequence.from_dict: 丢弃损坏的 master_strip_eq: %s", exc)
+        master_chain = None
+        chain_data = data.get("master_effect_chain")
+        if isinstance(chain_data, dict) and chain_data:
+            try:
+                master_chain = EffectChainParams.from_dict(chain_data)
+            except (TypeError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "TimelineSequence.from_dict: 丢弃损坏的 master_effect_chain: %s", exc)
         known_graphics = {
             "caption_graphics_schema_version", "caption_graphic_bindings",
             "caption_track_graphic_styles", "composite_templates",
@@ -4321,6 +5485,8 @@ class TimelineSequence:
             master_muted=bool(data.get("master_muted", False)),
             master_automation=master_auto,
             master_automation_mode=str(data.get("master_automation_mode", "off") or "off"),
+            master_strip_eq=master_eq,
+            master_effect_chain=master_chain,
             revision=int(data.get("revision", 0) or 0),
             # R28：未知键进 extras（caption_graphics 块的内部键除外——
             # 它们已由 migrate_caption_graphics_block 消化）
@@ -4355,6 +5521,14 @@ class TimelineSequence:
     def with_master_automation_mode(self, mode: str) -> TimelineSequence:
         """§3.1: 创建新实例，设置 Master automation 模式（off/read/write/touch/latch）。"""
         return self._rebuild(master_automation_mode=str(mode))
+
+    def with_master_strip_eq(self, params: Optional[StripEQParams]) -> TimelineSequence:
+        """MX-03: 创建新实例，设置 Master Strip EQ（None=禁用）。"""
+        return self._rebuild(master_strip_eq=params)
+
+    def with_master_effect_chain(self, chain: Optional[EffectChainParams]) -> TimelineSequence:
+        """MX-03: 创建新实例，设置 Master FX 机架链（None=清空）。"""
+        return self._rebuild(master_effect_chain=chain)
 
     def with_range(self, range_start: int | None, range_end: int | None) -> TimelineSequence:
         """Create new instance with updated In/Out range for range playback/export."""

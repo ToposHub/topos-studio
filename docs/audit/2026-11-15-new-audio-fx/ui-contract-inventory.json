@@ -1,0 +1,433 @@
+{
+  "method": "AST literal extraction only; user UI modules were not executed",
+  "ui_sources": [
+    {
+      "source": "/Users/heng/Documents/vscode/Topos test/VoiceChanger-UI.py",
+      "sha256": "29db29d0987cf9007455349dbc796a5cd62a978d7aa8b1e57dc95d3720e95ae2",
+      "lines": 2453,
+      "state_leaf_count": 26,
+      "demo_state": {
+        "enabled": true,
+        "output_gain": 0.0,
+        "formant": {
+          "enabled": true,
+          "mode": "Natural",
+          "shift": 4.2,
+          "throat": 20.0,
+          "gender": 45.0,
+          "preserve": 90.0,
+          "timbre": 12.0,
+          "mix": 100.0
+        },
+        "pitch": {
+          "enabled": true,
+          "tracking": "Vocal",
+          "semitones": 4.0,
+          "fine": 0.0,
+          "formant_link": 0.0,
+          "glide": 18.0,
+          "jitter": 0.0,
+          "mix": 100.0
+        },
+        "vocoder": {
+          "enabled": false,
+          "carrier": "Saw",
+          "bands": 16,
+          "carrier_hz": 115.0,
+          "formant": 0.0,
+          "unvoiced": 72.0,
+          "release": 24.0,
+          "mix": 100.0
+        }
+      },
+      "neutral_state": {
+        "enabled": true,
+        "output_gain": 0.0,
+        "formant": {
+          "enabled": true,
+          "mode": "Natural",
+          "shift": 0.0,
+          "throat": 0.0,
+          "gender": 0.0,
+          "preserve": 90.0,
+          "timbre": 0.0,
+          "mix": 100.0
+        },
+        "pitch": {
+          "enabled": false,
+          "tracking": "Vocal",
+          "semitones": 0.0,
+          "fine": 0.0,
+          "formant_link": 0.0,
+          "glide": 18.0,
+          "jitter": 0.0,
+          "mix": 100.0
+        },
+        "vocoder": {
+          "enabled": false,
+          "carrier": "Saw",
+          "bands": 16,
+          "carrier_hz": 115.0,
+          "formant": 0.0,
+          "unvoiced": 72.0,
+          "release": 24.0,
+          "mix": 100.0
+        }
+      },
+      "knob_ranges": [
+        {
+          "label": "Shift",
+          "min": -12.0,
+          "max": 12.0,
+          "control_reset": 0.0,
+          "line": 1252
+        },
+        {
+          "label": "Throat",
+          "min": -100.0,
+          "max": 100.0,
+          "control_reset": 0.0,
+          "line": 1257
+        },
+        {
+          "label": "Gender",
+          "min": -100.0,
+          "max": 100.0,
+          "control_reset": 0.0,
+          "line": 1262
+        },
+        {
+          "label": "Preserve",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 90.0,
+          "line": 1273
+        },
+        {
+          "label": "Timbre",
+          "min": -50.0,
+          "max": 50.0,
+          "control_reset": 0.0,
+          "line": 1278
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 100.0,
+          "line": 1283
+        },
+        {
+          "label": "Semitones",
+          "min": -24.0,
+          "max": 24.0,
+          "control_reset": 0.0,
+          "line": 1445
+        },
+        {
+          "label": "Fine",
+          "min": -100.0,
+          "max": 100.0,
+          "control_reset": 0.0,
+          "line": 1450
+        },
+        {
+          "label": "Formant Link",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 0.0,
+          "line": 1456
+        },
+        {
+          "label": "Glide",
+          "min": 0.0,
+          "max": 200.0,
+          "control_reset": 18.0,
+          "line": 1467
+        },
+        {
+          "label": "Age Jitter",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 0.0,
+          "line": 1472
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 100.0,
+          "line": 1477
+        },
+        {
+          "label": "Bands",
+          "min": 8.0,
+          "max": 32.0,
+          "control_reset": 16.0,
+          "line": 1627
+        },
+        {
+          "label": "Carrier Hz",
+          "min": 50.0,
+          "max": 440.0,
+          "control_reset": 115.0,
+          "line": 1632
+        },
+        {
+          "label": "Formant",
+          "min": -12.0,
+          "max": 12.0,
+          "control_reset": 0.0,
+          "line": 1637
+        },
+        {
+          "label": "Unvoiced",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 72.0,
+          "line": 1648
+        },
+        {
+          "label": "Release",
+          "min": 5.0,
+          "max": 500.0,
+          "control_reset": 24.0,
+          "line": 1653
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 100.0,
+          "line": 1658
+        }
+      ]
+    },
+    {
+      "source": "/Users/heng/Documents/vscode/Topos test/SpectralMangler-UI.py",
+      "sha256": "36e0da68cd1c0cf2805b94af679f6c48fb18a7e0fda638c980b1d31693a6c791",
+      "lines": 2635,
+      "state_leaf_count": 31,
+      "demo_state": {
+        "enabled": true,
+        "routing": "Ring → Grain → Dist",
+        "global_mix": 85.0,
+        "output_gain": -1.5,
+        "ring": {
+          "enabled": true,
+          "mode": "FM-Ring",
+          "carrier": 340.0,
+          "lfo_rate": 2.4,
+          "lfo_depth": 35.0,
+          "warp": 28.0,
+          "spread": 45.0,
+          "mix": 65.0
+        },
+        "grain": {
+          "enabled": true,
+          "freeze": false,
+          "mode": "Cloud",
+          "size": 85.0,
+          "density": 24.0,
+          "pitch": 7.0,
+          "pitch_jitter": 22.0,
+          "position": 30.0,
+          "spray": 45.0,
+          "feedback": 38.0,
+          "mix": 70.0
+        },
+        "dist": {
+          "enabled": true,
+          "curve": "Fold",
+          "drive": 14.5,
+          "fold": 42.0,
+          "bias": 12.0,
+          "tone": 5200.0,
+          "resonance": 25.0,
+          "mix": 80.0
+        }
+      },
+      "neutral_state": {
+        "enabled": true,
+        "routing": "Ring → Grain → Dist",
+        "global_mix": 100.0,
+        "output_gain": 0.0,
+        "ring": {
+          "enabled": false,
+          "mode": "FM-Ring",
+          "carrier": 340.0,
+          "lfo_rate": 2.4,
+          "lfo_depth": 35.0,
+          "warp": 28.0,
+          "spread": 45.0,
+          "mix": 65.0
+        },
+        "grain": {
+          "enabled": false,
+          "freeze": false,
+          "mode": "Cloud",
+          "size": 85.0,
+          "density": 24.0,
+          "pitch": 7.0,
+          "pitch_jitter": 22.0,
+          "position": 30.0,
+          "spray": 45.0,
+          "feedback": 38.0,
+          "mix": 70.0
+        },
+        "dist": {
+          "enabled": false,
+          "curve": "Fold",
+          "drive": 14.5,
+          "fold": 42.0,
+          "bias": 12.0,
+          "tone": 5200.0,
+          "resonance": 25.0,
+          "mix": 80.0
+        }
+      },
+      "knob_ranges": [
+        {
+          "label": "Carrier",
+          "min": 10.0,
+          "max": 5000.0,
+          "control_reset": 340.0,
+          "line": 1447
+        },
+        {
+          "label": "LFO Rate",
+          "min": 0.05,
+          "max": 40.0,
+          "control_reset": 2.4,
+          "line": 1452
+        },
+        {
+          "label": "LFO Depth",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 35.0,
+          "line": 1457
+        },
+        {
+          "label": "Warp / FM",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 28.0,
+          "line": 1468
+        },
+        {
+          "label": "Spread",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 45.0,
+          "line": 1473
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 65.0,
+          "line": 1478
+        },
+        {
+          "label": "Size",
+          "min": 5.0,
+          "max": 500.0,
+          "control_reset": 85.0,
+          "line": 1618
+        },
+        {
+          "label": "Density",
+          "min": 1.0,
+          "max": 80.0,
+          "control_reset": 24.0,
+          "line": 1623
+        },
+        {
+          "label": "Pitch",
+          "min": -24.0,
+          "max": 24.0,
+          "control_reset": 7.0,
+          "line": 1628
+        },
+        {
+          "label": "Jitter",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 22.0,
+          "line": 1633
+        },
+        {
+          "label": "Position",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 30.0,
+          "line": 1644
+        },
+        {
+          "label": "Spray",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 45.0,
+          "line": 1649
+        },
+        {
+          "label": "Feedback",
+          "min": 0.0,
+          "max": 95.0,
+          "control_reset": 38.0,
+          "line": 1654
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 70.0,
+          "line": 1659
+        },
+        {
+          "label": "Drive",
+          "min": 0.0,
+          "max": 36.0,
+          "control_reset": 14.5,
+          "line": 1819
+        },
+        {
+          "label": "Fold / Crush",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 42.0,
+          "line": 1824
+        },
+        {
+          "label": "Bias",
+          "min": -100.0,
+          "max": 100.0,
+          "control_reset": 12.0,
+          "line": 1829
+        },
+        {
+          "label": "Tone",
+          "min": 200.0,
+          "max": 16000.0,
+          "control_reset": 5200.0,
+          "line": 1840
+        },
+        {
+          "label": "Resonance",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 25.0,
+          "line": 1845
+        },
+        {
+          "label": "Mix",
+          "min": 0.0,
+          "max": 100.0,
+          "control_reset": 80.0,
+          "line": 1850
+        }
+      ]
+    }
+  ]
+}

@@ -93,7 +93,7 @@ class _SendSlotWidget(QFrame):
         self._target_combo.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self._target_combo, stretch=1)
 
-        # level 推子（0.0-1.0，post-fader 发送量）
+        # level 推子（0.0-1.0，发送量）
         from src.shared.ui.widgets.drag_value import DragValue
         self._level_spin = DragValue(
             label="", min_v=0.0, max_v=1.0,
@@ -104,6 +104,34 @@ class _SendSlotWidget(QFrame):
         self._level_spin.interaction_started.connect(self._on_drag_started)
         self._level_spin.interaction_ended.connect(self._on_drag_ended)
         layout.addWidget(self._level_spin)
+
+        # MX-14: tap 位置（Post=链后推子后；Pre=clip 求和后、推子/EQ/FX 前）
+        self._tap_combo = QComboBox()
+        self._tap_combo.addItem("Post", "post_fader")
+        self._tap_combo.addItem("Pre", "pre_fader")
+        current_tap = str(getattr(send, "tap", "post_fader") or "post_fader")
+        if current_tap not in ("post_fader", "pre_fader"):
+            current_tap = "post_fader"
+        for i in range(self._tap_combo.count()):
+            if self._tap_combo.itemData(i) == current_tap:
+                self._tap_combo.setCurrentIndex(i)
+                break
+        self._tap_combo.setToolTip(I18N.tr(
+            "audio.mixer.routing.send_tap",
+            "取样位置：Post=推子后（随推子变化）；Pre=推子前（不随推子变化）"))
+        self._tap_combo.currentIndexChanged.connect(self._on_changed)
+        layout.addWidget(self._tap_combo)
+
+        # MX-14: 独立 mute（只断开 send，不影响主输出）
+        self._mute_btn = QPushButton("M")
+        self._mute_btn.setCheckable(True)
+        self._mute_btn.setFixedSize(28, 24)
+        self._mute_btn.setChecked(bool(getattr(send, "muted", False)))
+        self._mute_btn.setToolTip(I18N.tr(
+            "audio.mixer.routing.send_mute",
+            "独立静音此 Send（不影响主输出）"))
+        self._mute_btn.toggled.connect(lambda _on: self._on_changed())
+        layout.addWidget(self._mute_btn)
 
         # 删除按钮
         self._remove_btn = QPushButton("✕")
@@ -163,6 +191,8 @@ class _SendSlotWidget(QFrame):
             target_bus_id=target,
             level=float(self._level_spin.value()),
             enabled=bool(self._enable_switch.isChecked()),
+            tap=str(self._tap_combo.currentData() or "post_fader"),
+            muted=bool(self._mute_btn.isChecked()),
         )
 
 
@@ -261,7 +291,8 @@ class RoutingDialog(QDialog):
 
         # ── Send slots ──
         sends_group = QGroupBox(
-            I18N.tr("audio.mixer.routing.sends_group", "发送（Sends, post-fader）")
+            I18N.tr("audio.mixer.routing.sends_group",
+                    "发送（Sends，可选推子前/后）")
         )
         sg_layout = QVBoxLayout(sends_group)
 
@@ -441,7 +472,12 @@ class RoutingDialog(QDialog):
         # 当前 track 的拟定路由（最后写入，覆盖快照中该轨的旧状态）
         routing[self._track_id] = {
             "output_bus_id": payload.get("output_bus_id"),
-            "sends": [(s.target_bus_id, s.level) for s in payload.get("sends", [])],
+            "sends": [
+                (s.target_bus_id, s.level,
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)))
+                for s in payload.get("sends", [])
+            ],
             "is_bus": self._track_id in set(bus_ids),
         }
 

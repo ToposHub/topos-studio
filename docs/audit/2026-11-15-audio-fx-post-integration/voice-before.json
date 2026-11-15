@@ -1,0 +1,93 @@
+{
+  "neutral_impulse_at_start": {
+    "input_peak": 1.0,
+    "output_peak": 0.0,
+    "output_energy": 0.0,
+    "reported_latency_samples": 1024
+  },
+  "reset_dry_leak": {
+    "first_1024_peak": 0.4,
+    "later_peak": 0.0
+  },
+  "vocoder_noise_whole_vs_480_max_error": 0.0232374313045896,
+  "vocoder_saw_whole_vs_480_max_error": 0.07437567322076043,
+  "pitch_link_left_to_silent_right": {
+    "left_peak": 0.010905568979967098,
+    "right_peak": 0.359735346094276
+  },
+  "pitch_tracking_endpoint_max_difference": 0.0,
+  "vocoder_formant_st_endpoint_max_difference": 0.0,
+  "pitch_glide_ms_endpoint_max_difference": 0.0,
+  "pitch_buffer_growth": [
+    {
+      "processed": 480,
+      "allocated_samples_per_channel": 31680
+    },
+    {
+      "processed": 4800,
+      "allocated_samples_per_channel": 31680
+    },
+    {
+      "processed": 24000,
+      "allocated_samples_per_channel": 45184
+    },
+    {
+      "processed": 48000,
+      "allocated_samples_per_channel": 69184
+    }
+  ],
+  "pitch_zero_50_percent_mix": {
+    "nonzero_indices": [
+      0,
+      5280
+    ],
+    "values": [
+      0.25,
+      0.25
+    ],
+    "reported_latency_samples": 0
+  },
+  "f0_pure_tones": {
+    "220.0": {
+      "estimate_hz": 220.1834862385321,
+      "confidence": 0.90907846774886
+    },
+    "440.0": {
+      "estimate_hz": 440.3669724770642,
+      "confidence": 0.9545324114203583
+    },
+    "880.0": {
+      "estimate_hz": 440.3669724770642,
+      "confidence": 0.9544932825128356
+    },
+    "1760.0": {
+      "estimate_hz": 440.3669724770642,
+      "confidence": 0.9543367739075256
+    }
+  },
+  "neutral_ending_impulse": {
+    "first_block_peak": 0.0,
+    "next_zero_block_peak": 0.500020936218813,
+    "reported_tail_samples": 0
+  },
+  "pitch_out_of_band_alias": {
+    "input_frequency_hz": 20000.0,
+    "pitch_semitones": 12.0,
+    "target_frequency_hz": 40000.0,
+    "actual_loudest_hz": 8000.0,
+    "output_rms": 0.23696211773087122
+  },
+  "right_only_voice_analysis": {
+    "effect_type": "voice_changer",
+    "f0_in_hz": null,
+    "f0_out_hz": null,
+    "voiced": false,
+    "confidence": 0.0,
+    "in_rms": 0.0,
+    "out_rms": 0.0,
+    "formant_active": true,
+    "pitch_active": false,
+    "vocoder_active": false,
+    "sample_position": 12000
+  }
+}

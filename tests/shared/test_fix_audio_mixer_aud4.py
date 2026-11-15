@@ -282,17 +282,18 @@ class TestLimiterCommandPath:
 
     def test_open_editor_connects_both_signals(self, qapp):
         """接线修复：limiter_preview 与 limiter_committed 均被连接。"""
-        from PyQt6.QtCore import QObject, pyqtSignal
+        from PyQt6.QtCore import pyqtSignal
+        from PyQt6.QtWidgets import QDialog
         from src.features.edit.core.timeline_v2 import LimiterParams
 
-        # 用真实 QObject 派生的替身（信号机制可用）
-        class FakeDlg(QObject):
+        # Retain the editor's QDialog lifecycle contract as well as its signals.
+        class FakeDlg(QDialog):
             limiter_preview = pyqtSignal(str, object)
             limiter_committed = pyqtSignal(str, object)
 
             def __init__(self, *, track_id, track_name, instance_id,
                          initial_params=None, parent=None):
-                super().__init__()
+                super().__init__(parent)
                 self._track_id = track_id
 
             def isVisible(self):

@@ -1,0 +1,28 @@
+{
+  "sample_rate": 48000,
+  "block_samples": 2000,
+  "block_budget_ms": 41.666666666666664,
+  "timing_boundary": "shared machine during concurrent review, not isolated benchmark",
+  "cases": [
+    {
+      "delay_ms": 0.01,
+      "feedback_pct": 0.0,
+      "median_ms": 0.6212829975993372
+    },
+    {
+      "delay_ms": 0.01,
+      "feedback_pct": 30.0,
+      "median_ms": 88.85134999945876
+    },
+    {
+      "delay_ms": 0.1,
+      "feedback_pct": 30.0,
+      "median_ms": 46.02882499966654
+    },
+    {
+      "delay_ms": 121.0,
+      "feedback_pct": 30.0,
+      "median_ms": 0.2832389982359018
+    }
+  ]
+}

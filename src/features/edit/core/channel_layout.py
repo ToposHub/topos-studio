@@ -104,7 +104,10 @@ class ChannelLayout(Enum):
     def from_av_layout_name(name: str) -> "ChannelLayout":
         """从 PyAV layout 名称解析（"mono"/"stereo"/"5.1"/"7.1"/"5.1(side)"/...）。
 
-        宽松解析：匹配前缀，未知抛 ValueError（拒绝而非截断）。
+        宽松解析声道顺序变体（如 5.1(side)）；未知抛 ValueError（拒绝而非
+        截断）。MX-15：高度布局（5.1.2/7.1.4 等 x.y.z 三段名）是不同布局
+        而非顺序变体——此前 startswith 会把 "7.1.4" 静默当成 7.1，高度
+        声道被无声丢弃；现在显式拒绝并给出原因。
         """
         n = (name or "").strip().lower()
         if n in ("mono", "1c"):
@@ -112,8 +115,16 @@ class ChannelLayout(Enum):
         if n in ("stereo", "2c", "2.0"):
             return ChannelLayout.STEREO
         if n.startswith("5.1"):
+            if n.startswith("5.1."):
+                raise ValueError(
+                    f"Unsupported PyAV layout: {name!r} —— 高度布局"
+                    f"（5.1.x）不支持，需先显式降混（MX-15 能力矩阵）")
             return ChannelLayout.SURROUND_5_1
         if n.startswith("7.1"):
+            if n.startswith("7.1."):
+                raise ValueError(
+                    f"Unsupported PyAV layout: {name!r} —— 高度布局"
+                    f"（7.1.x）不支持，需先显式降混（MX-15 能力矩阵）")
             return ChannelLayout.SURROUND_7_1
         raise ValueError(f"Unsupported PyAV layout: {name!r}")
 

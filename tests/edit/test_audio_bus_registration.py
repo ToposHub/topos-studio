@@ -141,9 +141,8 @@ class TestBusRoutingIntegration:
         mixer.register_bus_track("bus1", AudioTrackState(track_id="bus1", volume=1.0))
         mixer.set_track_routing("bus1", None, [], is_bus=True)
         mixer.set_track_strip_eq("bus1", StripEQParams(
-            enabled=True, mode="3-band", bands=(0.0, 0.0, 0.0), gain=6.0,
-            low_cut_enable=False, low_cut=20.0, high_cut_enable=False, high_cut=20000.0,
-        ))
+            enabled=True, master_gain=6.0,
+        ))  # CW-A1: 参数化 EQ（整体 +6dB）
         out, _ = mixer.mix_samples(0, FPS, N, 2)
         eq_peak = float(np.max(np.abs(out)))
         # EQ +6dB 应显著放大（远大于基线 0.4），证明 EQ 进入 Bus 链生效

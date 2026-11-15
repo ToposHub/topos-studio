@@ -1,0 +1,62 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 3 items
+
+tests/edit/test_audio_post_integration_master_guard.py FFF               [100%]
+
+=================================== FAILURES ===================================
+_____________ test_master_guard_is_causal_before_a_later_overload ______________
+tests/edit/test_audio_post_integration_master_guard.py:12: in test_master_guard_is_causal_before_a_later_overload
+    np.testing.assert_array_equal(processed[:, :3500], signal[:, :3500])
+E   AssertionError: 
+E   Arrays are not equal
+E   
+E   Mismatched elements: 7000 / 7000 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.06759578734636307 (ACTUAL), 0.20000000298023224 (DESIRED)
+E    [0, 1]: 0.06759578734636307 (ACTUAL), 0.20000000298023224 (DESIRED)
+E    [0, 2]: 0.06759578734636307 (ACTUAL), 0.20000000298023224 (DESIRED)
+E    [0, 3]: 0.06759578734636307 (ACTUAL), 0.20000000298023224 (DESIRED)
+E    [0, 4]: 0.06759578734636307 (ACTUAL), 0.20000000298023224 (DESIRED)
+E   Max absolute difference among violations: 0.13240421
+E   Max relative difference among violations: 0.66202104
+E    ACTUAL: array([[0.067596, 0.067596, 0.067596, ..., 0.067596, 0.067596, 0.067596],
+E          [0.067596, 0.067596, 0.067596, ..., 0.067596, 0.067596, 0.067596]],
+E         shape=(2, 3500), dtype=float32)
+E    DESIRED: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]],
+E         shape=(2, 3500), dtype=float32)
+__________ test_master_guard_output_is_independent_of_block_partition __________
+tests/edit/test_audio_post_integration_master_guard.py:31: in test_master_guard_output_is_independent_of_block_partition
+    np.testing.assert_allclose(np.concatenate(pieces, axis=-1), reference,
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-12
+E   
+E   Mismatched elements: 15814 / 24000 (65.9%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.2 (ACTUAL), 0.05137338015078229 (DESIRED)
+E    [0, 1]: 0.06759578509321627 (ACTUAL), 0.05137338015078229 (DESIRED)
+E    [0, 2]: 0.06759578509321627 (ACTUAL), 0.05137338015078229 (DESIRED)
+E    [0, 3]: 0.06759578509321627 (ACTUAL), 0.05137338015078229 (DESIRED)
+E    [0, 4]: 0.06759578509321627 (ACTUAL), 0.05137338015078229 (DESIRED)
+E   Max absolute difference among violations: 0.49662304
+E   Max relative difference among violations: 2.89306679
+E    ACTUAL: array([[0.2     , 0.067596, 0.067596, ..., 0.067435, 0.067435, 0.067435],
+E          [0.2     , 0.067596, 0.067596, ..., 0.067435, 0.067435, 0.067435]],
+E         shape=(2, 12000))
+E    DESIRED: array([[0.051373, 0.051373, 0.051373, ..., 0.050486, 0.050486, 0.050486],
+E          [0.051373, 0.051373, 0.051373, ..., 0.050486, 0.050486, 0.050486]],
+E         shape=(2, 12000))
+____________ test_guard_preserves_stereo_ratio_at_overloaded_sample ____________
+tests/edit/test_audio_post_integration_master_guard.py:38: in test_guard_preserves_stereo_ratio_at_overloaded_sample
+    assert output[0, 0] == 1.0
+E   assert np.float64(0.9999999999999999) == 1.0
+=========================== short test summary info ============================
+FAILED tests/edit/test_audio_post_integration_master_guard.py::test_master_guard_is_causal_before_a_later_overload
+FAILED tests/edit/test_audio_post_integration_master_guard.py::test_master_guard_output_is_independent_of_block_partition
+FAILED tests/edit/test_audio_post_integration_master_guard.py::test_guard_preserves_stereo_ratio_at_overloaded_sample
+============================== 3 failed in 3.06s ===============================
