@@ -168,7 +168,7 @@ def _get_audio_default_params() -> dict:
                 from src.features.edit.core.timeline_v2 import (
                     StripEQParams, LimiterParams, CompressorParams, ReverbParams,
                     DelayParams, SaturationParams, ImagerParams, ExpanderParams,
-                    DynamicsParams,
+                    DynamicsParams, VoiceChangerParams, SpectralManglerParams,
                 )
                 # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
                 #（旧数据无损承接为 Gate），新增 expander 类型。
@@ -184,6 +184,9 @@ def _get_audio_default_params() -> dict:
                     "expander": ExpanderParams.default().to_dict(),
                     "noise_gate": gate_default,
                     "dynamics": DynamicsParams.default().to_dict(),
+                    # NF-01：两款新复合 FX 默认参数（新建 clip/Mixer 同源）
+                    "voice_changer": VoiceChangerParams.default().to_dict(),
+                    "spectral_mangler": SpectralManglerParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -194,6 +197,8 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "strip_eq", "limiter", "compressor", "reverb",
     "delay", "saturation", "imager", "expander", "noise_gate",
     "dynamics",  # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合）
+    # NF-01（2026-11-15 计划 §6.3）：两款新复合 FX
+    "voice_changer", "spectral_mangler",
 })
 
 
@@ -518,6 +523,536 @@ SPATIAL_PANNER_EFFECT = EffectDefinition(
 # Set of generator effect_types — drag of these creates a clip, not an effect.
 # Used by the Effects panel (startDrag MIME selection) and the timeline
 # dropEvent router to distinguish generator drops from regular effect drops.
+
+def _float_schema(default: float, lo: float, hi: float, step: float,
+                  label: str, unit: str = "") -> ParamSchema:
+    return ParamSchema(type="float", default=float(default),
+                       min_value=float(lo), max_value=float(hi),
+                       step=float(step), label=label, unit=unit)
+
+
+def _bool_schema(default: bool, label: str) -> ParamSchema:
+    return ParamSchema(type="bool", default=bool(default), label=label)
+
+
+def _choice_schema(default: str, choices: tuple, label: str) -> ParamSchema:
+    return ParamSchema(type="choice", default=str(default),
+                       choices=tuple(str(c) for c in choices), label=label)
+
+
+# ── NF-01（2026-11-15 计划 §6.3）：两款新复合 FX 的完整 ParamSchema ──
+# schema 与 timeline_v2 的 VoiceChangerParams/SpectralManglerParams 扁平键
+# 一一对应（默认值同源）；random_seed 等元数据不进 schema（不向普通
+# 连续 lane 暴露）。
+
+VOICE_CHANGER_EFFECT = EffectDefinition(
+    effect_type="voice_changer",
+    name="Voice Changer",
+    category="audio",
+    description="Formant / Pitch / Vocoder voice transform chain",
+    params_schema={
+        "pitch_semitones": _float_schema(0.0, -24.0, 24.0, 0.1,
+                                         "Semitones", "st"),
+        "formant_shift_st": _float_schema(0.0, -12.0, 12.0, 0.1,
+                                          "Formant Shift", "st"),
+        "vocoder_carrier": _choice_schema(
+            "saw", ("saw", "pulse", "choir", "noise"), "Carrier"),
+        "output_gain_db": _float_schema(0.0, -20.0, 20.0, 0.1,
+                                        "Output Gain", "dB"),
+    },
+    icon="audio_track",
+)
+
+SPECTRAL_MANGLER_EFFECT = EffectDefinition(
+    effect_type="spectral_mangler",
+    name="Spectral Mangler",
+    category="audio",
+    description="Ring / Granular / Distortion mangling topology",
+    params_schema={
+        "routing": _choice_schema(
+            "ring_grain_dist",
+            ("ring_grain_dist", "grain_ring_dist", "dist_grain_ring",
+             "parallel"), "Routing"),
+        "global_mix_pct": _float_schema(100.0, 0.0, 100.0, 1.0,
+                                        "Global Mix", "%"),
+        "dist_curve": _choice_schema(
+            "fold", ("tape", "fold", "hard_clip", "bitcrush"),
+            "Dist Curve"),
+        "output_gain_db": _float_schema(0.0, -24.0, 12.0, 0.1,
+                                        "Output Gain", "dB"),
+    },
+    icon="audio_track",
+)
+
+
+def _paramdef_to_schema(param_def) -> ParamSchema:
+    """Convert a composite ``ParamDef`` to an Edit ``ParamSchema``.
+
+    Lossy for non-MVP types (see ``_PARAM_TYPE_MAP``); raises never —
+    unknown ptypes fall back to ``float`` so a corrupt spec can't break
+    the panel.
+    """
+    ptype = _PARAM_TYPE_MAP.get(param_def.ptype, "float")
+    choices = tuple(param_def.labels) if param_def.labels else ()
+    # ParamSchema.__post_init__ requires choices for the 'choice' type.
+    if ptype == "choice" and not choices:
+        ptype = "string"
+    return ParamSchema(
+        type=ptype,
+        default=param_def.default,
+        min_value=float(param_def.min_val),
+        max_value=float(param_def.max_val),
+        step=float(param_def.step),
+        label=param_def.name.replace("_", " ").title(),
+        choices=choices,
+        unit="",
+    )
+
+
+def _spec_to_definition(spec) -> EffectDefinition:
+    """Convert an :class:`EffectSpec` to an :class:`EffectDefinition`.
+
+    Hidden params are included so that ``create_instance()`` seeds their
+    defaults (shaders may reference them); the panel hides them via the
+    hidden flag at the ParamDef level when it reads the spec directly in
+    Phase 2.
+    """
+    params_schema = {
+        pdef.name: _paramdef_to_schema(pdef)
+        for pdef in spec.param_defs
+    }
+    return EffectDefinition(
+        effect_type=spec.effect_type,
+        name=spec.name,
+        category=spec.category,
+        description=spec.description,
+        params_schema=params_schema,
+        icon=spec.icon,
+    )
+
+
+# ================================================================
+# Built-in Effect Definitions
+# ================================================================
+
+# T-P1-20（审计 P6-step-1 落地）：transform / crop / opacity / vignette 的
+# legacy FX 定义已从注册表移除——它们从未接任何渲染后端（attach 后零视觉
+# 效果），真实能力一直以 clip-native 形态存在（TransformParams /
+# CropParams / ClipInstance.opacity）。NON_ATTACHABLE_VIDEO_EFFECT_TYPES
+# 保留为旧工程数据防线；EffectInstance 反序列化时 ghost 实例会被迁移剔除
+# （见 effect_instance.from_dict）。
+
+# ================================================================
+# Audio Effect Definitions (clip-level mixer FX)
+#
+# These reuse the 8 CPU-DSP effects from the Audio Mixer
+# (src/features/edit/core/audio_dsp.py: _EFFECT_CLASS_REGISTRY) so they
+# can be dropped onto individual audio clips and processed per-clip.
+#
+# Each definition only declares 2-4 "basic" params for the inline slider
+# section; the full parameter set lives in the standalone dialog opened
+# via the "打开面板" button (clip_audio_effect_dialog_adapter.py).
+# Default params for create_instance() are seeded from the corresponding
+# *Params.default().to_dict() (see _AUDIO_DEFAULT_PARAMS below) so the
+# DSP always receives a complete dict.
+# ================================================================
+
+# Map mixer effect_type → factory returning the full default params dict.
+# Lazily built from timeline_v2 *Params to avoid a hard import cycle here.
+_AUDIO_DEFAULT_PARAMS: Optional[dict] = None
+# AUD-16807：惰性全局缓存与单例的初始化锁——check-then-act 必须原子，
+# 否则并发首调可能重复构建 dict / 单例（EffectRegistry 构造含 catalog
+# 注册，重复构造既浪费又可能让两次调用拿到不同实例）。
+_AUDIO_DEFAULT_PARAMS_LOCK = threading.Lock()
+
+
+def _get_audio_default_params() -> dict:
+    """Return the full default params dict for each mixer audio effect."""
+    global _AUDIO_DEFAULT_PARAMS
+    if _AUDIO_DEFAULT_PARAMS is None:
+        with _AUDIO_DEFAULT_PARAMS_LOCK:
+            if _AUDIO_DEFAULT_PARAMS is None:
+                from src.features.edit.core.timeline_v2 import (
+                    StripEQParams, LimiterParams, CompressorParams, ReverbParams,
+                    DelayParams, SaturationParams, ImagerParams, ExpanderParams,
+                    DynamicsParams, VoiceChangerParams, SpectralManglerParams,
+                )
+                # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
+                #（旧数据无损承接为 Gate），新增 expander 类型。
+                gate_default = {**ExpanderParams.default().to_dict(), "mode": "Gate"}
+                _AUDIO_DEFAULT_PARAMS = {
+                    "strip_eq": StripEQParams.default().to_dict(),
+                    "limiter": LimiterParams.default().to_dict(),
+                    "compressor": CompressorParams.default().to_dict(),
+                    "reverb": ReverbParams.default().to_dict(),
+                    "delay": DelayParams.default().to_dict(),
+                    "saturation": SaturationParams.default().to_dict(),
+                    "imager": ImagerParams.default().to_dict(),
+                    "expander": ExpanderParams.default().to_dict(),
+                    "noise_gate": gate_default,
+                    "dynamics": DynamicsParams.default().to_dict(),
+                    # NF-01：两款新复合 FX 默认参数（新建 clip/Mixer 同源）
+                    "voice_changer": VoiceChangerParams.default().to_dict(),
+                    "spectral_mangler": SpectralManglerParams.default().to_dict(),
+                }
+    return _AUDIO_DEFAULT_PARAMS
+
+
+# Set of mixer audio effect_types — used by the panel to show the
+# "打开面板" button and by the DSP layer to filter clip.effects.
+AUDIO_MIXER_EFFECT_TYPES = frozenset({
+    "strip_eq", "limiter", "compressor", "reverb",
+    "delay", "saturation", "imager", "expander", "noise_gate",
+    "dynamics",  # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合）
+    # NF-01（2026-11-15 计划 §6.3）：两款新复合 FX
+    "voice_changer", "spectral_mangler",
+})
+
+
+# Explicit ordering of video categories for the Effects panel.
+#
+# Without this, get_categories() returns dict-insertion order — a fragile
+# implicit contract that silently flips whenever registration order
+# changes (e.g. a new builtin is added before the catalog loop). The
+# panel reads this list to lay out its tree top-to-bottom, so a stable,
+# intentional order keeps the UI predictable. "audio" is listed last
+# (it has its own tab but the order also governs Favorites grouping);
+# unknown categories fall after the known ones, sorted alphabetically.
+_CATEGORY_ORDER: Tuple[str, ...] = (
+    "transform",  # Transform / Crop / Opacity — geometric, most used
+    "filter",     # Filter — Blur / Sharpen / Defocus / Denoise / Edge Detect / Erode·Dilate
+    "stylize",    # Stylize — Vignette / Glow
+    "generator",  # Generators — Adjustment Clip / Solid Color (no-source clip templates)
+    "plugin",     # Plugins — DCTL (.tglsl) plugins
+    "audio",      # Audio — 8 mixer FX (own tab, listed last)
+)
+
+
+STRIP_EQ_EFFECT = EffectDefinition(
+    effect_type="strip_eq",
+    name="Parametric EQ",
+    category="audio",
+    description="6-band parametric equalizer (open panel for full curve)",
+    # 频段形状复杂（每段形/频/增益/Q/斜率），基础区只暴露整体增益；
+    # 完整编辑在 ParametricEQDialog
+    params_schema={
+        "master_gain": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=-20.0,
+            max_value=20.0,
+            step=0.1,
+            label="Master Gain",
+            unit="dB",
+        ),
+    },
+    icon="audio_track",
+)
+
+LIMITER_EFFECT = EffectDefinition(
+    effect_type="limiter",
+    name="Limiter",
+    category="audio",
+    description="Brick-wall limiter to prevent clipping",
+    params_schema={
+        "threshold_db": ParamSchema(
+            type="float",
+            default=-6.0,
+            min_value=-30.0,
+            max_value=0.0,
+            step=0.1,
+            label="Threshold",
+            unit="dB",
+        ),
+        "release_ms": ParamSchema(
+            type="float",
+            default=93.0,
+            min_value=50.0,
+            max_value=4000.0,
+            step=1.0,
+            label="Release",
+            unit="ms",
+        ),
+    },
+    icon="audio_track",
+)
+
+COMPRESSOR_EFFECT = EffectDefinition(
+    effect_type="compressor",
+    name="Compressor",
+    category="audio",
+    description="Dynamic range compressor with sidechain",
+    params_schema={
+        "threshold_db": ParamSchema(
+            type="float",
+            default=-15.0,
+            min_value=-60.0,
+            max_value=0.0,
+            step=0.5,
+            label="Threshold",
+            unit="dB",
+        ),
+        "ratio": ParamSchema(
+            type="float",
+            default=2.5,
+            min_value=1.2,
+            max_value=20.0,
+            step=0.1,
+            label="Ratio",
+            unit=":1",
+        ),
+        "makeup_gain": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=0.0,
+            max_value=24.0,
+            step=0.1,
+            label="Makeup",
+            unit="dB",
+        ),
+    },
+    icon="audio_track",
+)
+
+REVERB_EFFECT = EffectDefinition(
+    effect_type="reverb",
+    name="Acoustic Reverb",
+    category="audio",
+    description="Acoustic room reverb (direct / ER / late FDN)",
+    params_schema={
+        "dry_wet": ParamSchema(
+            type="float",
+            default=100.0,
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+            label="Dry/Wet",
+            unit="%",
+        ),
+        "reverb_time": ParamSchema(
+            type="float",
+            default=2730.0,
+            min_value=100.0,
+            max_value=4000.0,
+            step=10.0,
+            label="Reverb Time",
+            unit="ms",
+        ),
+    },
+    icon="audio_track",
+)
+
+DELAY_EFFECT = EffectDefinition(
+    effect_type="delay",
+    name="Stereo Delay",
+    category="audio",
+    description="Dual-line stereo delay with cross feedback",
+    params_schema={
+        "left_delay": ParamSchema(
+            type="float",
+            default=121.0,
+            min_value=0.0,
+            max_value=1200.0,
+            step=1.0,
+            label="L Time",
+            unit="ms",
+        ),
+        "right_delay": ParamSchema(
+            type="float",
+            default=135.0,
+            min_value=0.0,
+            max_value=1200.0,
+            step=1.0,
+            label="R Time",
+            unit="ms",
+        ),
+        "dry_wet": ParamSchema(
+            type="float",
+            default=30.0,
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+            label="Dry/Wet",
+            unit="%",
+        ),
+    },
+    icon="audio_track",
+)
+
+SATURATION_EFFECT = EffectDefinition(
+    effect_type="saturation",
+    name="Saturation",
+    category="audio",
+    description="Harmonic saturation / waveshaper",
+    params_schema={
+        "drive": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+            label="Drive",
+            unit="%",
+        ),
+    },
+    icon="audio_track",
+)
+
+IMAGER_EFFECT = EffectDefinition(
+    effect_type="imager",
+    name="Stereo Imager",
+    category="audio",
+    description="Mid/Side stereo width control",
+    params_schema={
+        "width": ParamSchema(
+            type="float",
+            default=100.0,
+            min_value=0.0,
+            max_value=200.0,
+            step=0.5,
+            label="Width",
+            unit="%",
+        ),
+        "pan": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=-100.0,
+            max_value=100.0,
+            step=0.5,
+            label="Pan",
+            unit="",
+        ),
+    },
+    icon="audio_track",
+)
+
+EXPANDER_EFFECT = EffectDefinition(
+    effect_type="expander",
+    name="Expander / Gate",
+    category="audio",
+    description="Downward expander with gate mode",
+    params_schema={
+        "threshold_db": ParamSchema(
+            type="float",
+            default=-35.0,
+            min_value=-50.0,
+            max_value=0.0,
+            step=0.5,
+            label="Threshold",
+            unit="dB",
+        ),
+        "range_db": ParamSchema(
+            type="float",
+            default=18.0,
+            min_value=0.0,
+            max_value=60.0,
+            step=0.5,
+            label="Range",
+            unit="dB",
+        ),
+        "release_ms": ParamSchema(
+            type="float",
+            default=93.0,
+            min_value=50.0,
+            max_value=4000.0,
+            step=1.0,
+            label="Release",
+            unit="ms",
+        ),
+    },
+    icon="audio_track",
+)
+
+# CW-A1: noise_gate 类型键保留为 Expander(Gate) 别名——旧工程数据的
+# effect_type 不变，参数经 ExpanderParams.from_dict 无损承接。
+NOISE_GATE_EFFECT = EffectDefinition(
+    effect_type="noise_gate",
+    name="Expander / Gate",
+    category="audio",
+    description="Legacy noise gate (alias of expander in Gate mode)",
+    params_schema=dict(EXPANDER_EFFECT.params_schema),
+    icon="audio_track",
+)
+
+# CW-A1: Da Vinci Fairlight 式完整单元——Dynamics（Expander/Gate →
+# Compressor → Limiter 三合一）与 Spatial Panner（轨级声像器）。
+# 二者不进 AUDIO_MIXER_EFFECT_TYPES（DSP 链没有同名效果器）：拖放到音频
+# 轨时由 timeline_view 的 drop 路由特殊处理——dynamics 展开为三实例、
+# spatial_panner 写入轨的 panner 字段。
+DYNAMICS_EFFECT = EffectDefinition(
+    effect_type="dynamics",
+    name="Dynamics",
+    category="audio",
+    description="Expander/Gate + Compressor + Limiter as one Dynamics unit",
+    # 基础区只暴露 Make Up（EG/Comp/Lim 细项在完整 Dynamics 面板编辑）
+    params_schema={
+        "makeup": ParamSchema(
+            type="float",
+            default=0.0,
+            min_value=0.0,
+            max_value=24.0,
+            step=0.1,
+            label="Make Up",
+            unit="dB",
+        ),
+    },
+    icon="audio_track",
+)
+
+SPATIAL_PANNER_EFFECT = EffectDefinition(
+    effect_type="spatial_panner",
+    name="Spatial Panner",
+    category="audio",
+    description="2D/3D spatial panner (L/R, F/B, elevation, spread, boom)",
+    params_schema={},
+    icon="audio_track",
+)
+
+
+# ================================================================
+# Generator Clip Definitions
+#
+# These are NOT real video filters — they are "clip templates" the user
+# drags from the Effects panel to create a new generator clip (no source
+# media). Two initial generators ship:
+#
+#   adjustment_clip — an Adjustment Clip whose effect chain is applied to
+#                     all video tracks below it in the timeline.
+#   solid_color     — a Solid Color clip that paints a flat color frame.
+#
+# Because they are not filters, they are excluded from AUDIO_MIXER_EFFECT_TYPES
+# and are never consumed by _apply_clip_effects (the renderer recognises the
+# corresponding MediaAsset.media_type instead). Their effect_type values are
+# matched by the timeline drop handler to route to the generator-creation path
+# rather than the effect-attach path.
+# ================================================================
+
+# Set of generator effect_types — drag of these creates a clip, not an effect.
+# Used by the Effects panel (startDrag MIME selection) and the timeline
+# dropEvent router to distinguish generator drops from regular effect drops.
+
+def _float_schema(default: float, lo: float, hi: float, step: float,
+                  label: str, unit: str = "") -> ParamSchema:
+    return ParamSchema(type="float", default=float(default),
+                       min_value=float(lo), max_value=float(hi),
+                       step=float(step), label=label, unit=unit)
+
+
+def _bool_schema(default: bool, label: str) -> ParamSchema:
+    return ParamSchema(type="bool", default=bool(default), label=label)
+
+
+def _choice_schema(default: str, choices: tuple, label: str) -> ParamSchema:
+    return ParamSchema(type="choice", default=str(default),
+                       choices=tuple(str(c) for c in choices), label=label)
+
+
+# ── NF-01（2026-11-15 计划 §6.3）：两款新复合 FX 的完整 ParamSchema ──
+# schema 与 timeline_v2 的 VoiceChangerParams/SpectralManglerParams 扁平键
+# 一一对应（默认值同源）；random_seed 等元数据不进 schema（不向普通
+# 连续 lane 暴露）。
+
+
 GENERATOR_EFFECT_TYPES = frozenset({"adjustment_clip", "solid_color"})
 
 # FX-C06 → T-P1-20：ghost effect_types 已从注册表完全移除（审计 P6-step-1
@@ -631,6 +1166,9 @@ class EffectRegistry:
         # CW-A1: 完整单元条目（拖放路由特殊处理，见 timeline_view）
         self.register(DYNAMICS_EFFECT)
         self.register(SPATIAL_PANNER_EFFECT)
+        # NF-01：两款新复合 FX
+        self.register(VOICE_CHANGER_EFFECT)
+        self.register(SPECTRAL_MANGLER_EFFECT)
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an

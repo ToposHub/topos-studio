@@ -3255,6 +3255,9 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["noise_gate"] = ExpanderParams
         # Dynamics 完整单元（EG→Comp→Lim 单实例，clip 级不拆分）
         _EFFECT_PARAM_REGISTRY["dynamics"] = DynamicsParams
+        # NF-01（2026-11-15 计划 §6）：两款新复合 FX
+        _EFFECT_PARAM_REGISTRY["voice_changer"] = VoiceChangerParams
+        _EFFECT_PARAM_REGISTRY["spectral_mangler"] = SpectralManglerParams
     return _EFFECT_PARAM_REGISTRY
 
 
@@ -3279,6 +3282,317 @@ def _deep_copy_automation(automation: dict) -> dict:
         )
         for param, track in automation.items()
     }
+
+
+# NF-01（2026-11-15 计划 §7.1/§8.1）：两款新复合 FX 的扁平参数 schema。
+# UI 保留嵌套结构，模型层只存这份扁平键（双向 adapter 在对话框侧维护
+# 唯一映射表）；自动化键沿用 fx/{instance_id}/{param} 顶层键。
+
+_VC_FORMANT_MODES = ("natural", "crisp")
+_VC_TRACKING_MODES = ("vocal", "wide")
+_VC_CARRIERS = ("saw", "pulse", "choir", "noise")
+
+
+@dataclass(frozen=True)
+class VoiceChangerParams:
+    """Voice Changer（Formant → Pitch → Vocoder → OutputGain）参数。
+
+    默认 = 原型 ``default_voice_neutral()``（中性：Formant 恒等、
+    Pitch/Vocoder 关闭）。``default_*_demo()`` 是试听预设，不在新建实例
+    时自动加载。random_seed 为持久元数据（uint32；复制实例继承，Random
+    换新 seed 一次提交），不进连续自动化 lane。
+    """
+
+    enabled: bool = True
+    output_gain_db: float = 0.0
+    # Formant
+    formant_enabled: bool = True
+    formant_mode: str = "natural"
+    formant_shift_st: float = 0.0
+    formant_throat_pct: float = 0.0
+    formant_gender_pct: float = 0.0
+    formant_preserve_pct: float = 90.0
+    formant_timbre_pct: float = 0.0
+    formant_mix_pct: float = 100.0
+    # Pitch
+    pitch_enabled: bool = False
+    pitch_tracking: str = "vocal"
+    pitch_semitones: float = 0.0
+    pitch_fine_cents: float = 0.0
+    pitch_formant_link_pct: float = 0.0
+    pitch_glide_ms: float = 18.0
+    pitch_jitter_pct: float = 0.0
+    pitch_mix_pct: float = 100.0
+    # Vocoder
+    vocoder_enabled: bool = False
+    vocoder_carrier: str = "saw"
+    vocoder_bands: int = 16
+    vocoder_carrier_hz: float = 115.0
+    vocoder_formant_st: float = 0.0
+    vocoder_unvoiced_pct: float = 72.0
+    vocoder_release_ms: float = 24.0
+    vocoder_mix_pct: float = 100.0
+    # 元数据
+    random_seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.formant_mode not in _VC_FORMANT_MODES:
+            raise ValueError(f"formant_mode must be in {_VC_FORMANT_MODES}")
+        if self.pitch_tracking not in _VC_TRACKING_MODES:
+            raise ValueError(f"pitch_tracking must be in {_VC_TRACKING_MODES}")
+        if self.vocoder_carrier not in _VC_CARRIERS:
+            raise ValueError(f"vocoder_carrier must be in {_VC_CARRIERS}")
+        object.__setattr__(self, "random_seed",
+                           int(self.random_seed) & 0xFFFFFFFF)
+
+    @staticmethod
+    def default() -> "VoiceChangerParams":
+        return VoiceChangerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "output_gain_db": self.output_gain_db,
+            "formant_enabled": self.formant_enabled,
+            "formant_mode": self.formant_mode,
+            "formant_shift_st": self.formant_shift_st,
+            "formant_throat_pct": self.formant_throat_pct,
+            "formant_gender_pct": self.formant_gender_pct,
+            "formant_preserve_pct": self.formant_preserve_pct,
+            "formant_timbre_pct": self.formant_timbre_pct,
+            "formant_mix_pct": self.formant_mix_pct,
+            "pitch_enabled": self.pitch_enabled,
+            "pitch_tracking": self.pitch_tracking,
+            "pitch_semitones": self.pitch_semitones,
+            "pitch_fine_cents": self.pitch_fine_cents,
+            "pitch_formant_link_pct": self.pitch_formant_link_pct,
+            "pitch_glide_ms": self.pitch_glide_ms,
+            "pitch_jitter_pct": self.pitch_jitter_pct,
+            "pitch_mix_pct": self.pitch_mix_pct,
+            "vocoder_enabled": self.vocoder_enabled,
+            "vocoder_carrier": self.vocoder_carrier,
+            "vocoder_bands": self.vocoder_bands,
+            "vocoder_carrier_hz": self.vocoder_carrier_hz,
+            "vocoder_formant_st": self.vocoder_formant_st,
+            "vocoder_unvoiced_pct": self.vocoder_unvoiced_pct,
+            "vocoder_release_ms": self.vocoder_release_ms,
+            "vocoder_mix_pct": self.vocoder_mix_pct,
+            "random_seed": self.random_seed,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "VoiceChangerParams":
+        d = data or {}
+
+        def _b(key: str, default: bool) -> bool:
+            return bool(d.get(key, default))
+
+        def _f(key: str, default: float) -> float:
+            try:
+                return float(d.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _s(key: str, default: str, allowed: tuple) -> str:
+            v = str(d.get(key, default) or default)
+            return v if v in allowed else default
+
+        def _i(key: str, default: int, lo: int, hi: int) -> int:
+            try:
+                return max(lo, min(hi, int(d.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        return VoiceChangerParams(
+            enabled=_b("enabled", True),
+            output_gain_db=_f("output_gain_db", 0.0),
+            formant_enabled=_b("formant_enabled", True),
+            formant_mode=_s("formant_mode", "natural", _VC_FORMANT_MODES),
+            formant_shift_st=_f("formant_shift_st", 0.0),
+            formant_throat_pct=_f("formant_throat_pct", 0.0),
+            formant_gender_pct=_f("formant_gender_pct", 0.0),
+            formant_preserve_pct=_f("formant_preserve_pct", 90.0),
+            formant_timbre_pct=_f("formant_timbre_pct", 0.0),
+            formant_mix_pct=_f("formant_mix_pct", 100.0),
+            pitch_enabled=_b("pitch_enabled", False),
+            pitch_tracking=_s("pitch_tracking", "vocal", _VC_TRACKING_MODES),
+            pitch_semitones=_f("pitch_semitones", 0.0),
+            pitch_fine_cents=_f("pitch_fine_cents", 0.0),
+            pitch_formant_link_pct=_f("pitch_formant_link_pct", 0.0),
+            pitch_glide_ms=_f("pitch_glide_ms", 18.0),
+            pitch_jitter_pct=_f("pitch_jitter_pct", 0.0),
+            pitch_mix_pct=_f("pitch_mix_pct", 100.0),
+            vocoder_enabled=_b("vocoder_enabled", False),
+            vocoder_carrier=_s("vocoder_carrier", "saw", _VC_CARRIERS),
+            vocoder_bands=_i("vocoder_bands", 16, 8, 32),
+            vocoder_carrier_hz=_f("vocoder_carrier_hz", 115.0),
+            vocoder_formant_st=_f("vocoder_formant_st", 0.0),
+            vocoder_unvoiced_pct=_f("vocoder_unvoiced_pct", 72.0),
+            vocoder_release_ms=_f("vocoder_release_ms", 24.0),
+            vocoder_mix_pct=_f("vocoder_mix_pct", 100.0),
+            random_seed=int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF,
+        )
+
+
+_SM_ROUTINGS = ("ring_grain_dist", "grain_ring_dist", "dist_grain_ring",
+                "parallel")
+_SM_RING_MODES = ("sine", "dual", "fm_ring", "rectify")
+_SM_GRAIN_MODES = ("cloud", "reverse", "scatter")
+_SM_DIST_CURVES = ("tape", "fold", "hard_clip", "bitcrush")
+
+
+@dataclass(frozen=True)
+class SpectralManglerParams:
+    """Spectral Mangler（Ring／Grain／Dist 三模块 + 拓扑）参数。
+
+    默认 = 原型 ``default_mangler_init()``（三模块关闭、global_mix=100、
+    gain=0；其余保留 demo 数值作为再次开模块的起点）。
+    ``output_limiter_enabled`` 生产 Init=False（Demo 可开）。
+    """
+
+    enabled: bool = True
+    routing: str = "ring_grain_dist"
+    global_mix_pct: float = 100.0
+    output_gain_db: float = 0.0
+    output_limiter_enabled: bool = False
+    # Ring
+    ring_enabled: bool = False
+    ring_mode: str = "fm_ring"
+    ring_carrier_hz: float = 340.0
+    ring_lfo_rate_hz: float = 2.4
+    ring_lfo_depth_pct: float = 35.0
+    ring_warp_pct: float = 28.0
+    ring_spread_pct: float = 45.0
+    ring_mix_pct: float = 65.0
+    # Grain
+    grain_enabled: bool = False
+    grain_freeze: bool = False
+    grain_mode: str = "cloud"
+    grain_size_ms: float = 85.0
+    grain_density_hz: float = 24.0
+    grain_pitch_st: float = 7.0
+    grain_pitch_jitter_pct: float = 22.0
+    grain_position_pct: float = 30.0
+    grain_spray_pct: float = 45.0
+    grain_feedback_pct: float = 38.0
+    grain_mix_pct: float = 70.0
+    # Dist
+    dist_enabled: bool = False
+    dist_curve: str = "fold"
+    dist_drive_db: float = 14.5
+    dist_fold_pct: float = 42.0
+    dist_bias_pct: float = 12.0
+    dist_tone_hz: float = 5200.0
+    dist_resonance_pct: float = 25.0
+    dist_mix_pct: float = 80.0
+    # 元数据
+    random_seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.routing not in _SM_ROUTINGS:
+            raise ValueError(f"routing must be in {_SM_ROUTINGS}")
+        if self.ring_mode not in _SM_RING_MODES:
+            raise ValueError(f"ring_mode must be in {_SM_RING_MODES}")
+        if self.grain_mode not in _SM_GRAIN_MODES:
+            raise ValueError(f"grain_mode must be in {_SM_GRAIN_MODES}")
+        if self.dist_curve not in _SM_DIST_CURVES:
+            raise ValueError(f"dist_curve must be in {_SM_DIST_CURVES}")
+        object.__setattr__(self, "random_seed",
+                           int(self.random_seed) & 0xFFFFFFFF)
+
+    @staticmethod
+    def default() -> "SpectralManglerParams":
+        return SpectralManglerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "routing": self.routing,
+            "global_mix_pct": self.global_mix_pct,
+            "output_gain_db": self.output_gain_db,
+            "output_limiter_enabled": self.output_limiter_enabled,
+            "ring_enabled": self.ring_enabled,
+            "ring_mode": self.ring_mode,
+            "ring_carrier_hz": self.ring_carrier_hz,
+            "ring_lfo_rate_hz": self.ring_lfo_rate_hz,
+            "ring_lfo_depth_pct": self.ring_lfo_depth_pct,
+            "ring_warp_pct": self.ring_warp_pct,
+            "ring_spread_pct": self.ring_spread_pct,
+            "ring_mix_pct": self.ring_mix_pct,
+            "grain_enabled": self.grain_enabled,
+            "grain_freeze": self.grain_freeze,
+            "grain_mode": self.grain_mode,
+            "grain_size_ms": self.grain_size_ms,
+            "grain_density_hz": self.grain_density_hz,
+            "grain_pitch_st": self.grain_pitch_st,
+            "grain_pitch_jitter_pct": self.grain_pitch_jitter_pct,
+            "grain_position_pct": self.grain_position_pct,
+            "grain_spray_pct": self.grain_spray_pct,
+            "grain_feedback_pct": self.grain_feedback_pct,
+            "grain_mix_pct": self.grain_mix_pct,
+            "dist_enabled": self.dist_enabled,
+            "dist_curve": self.dist_curve,
+            "dist_drive_db": self.dist_drive_db,
+            "dist_fold_pct": self.dist_fold_pct,
+            "dist_bias_pct": self.dist_bias_pct,
+            "dist_tone_hz": self.dist_tone_hz,
+            "dist_resonance_pct": self.dist_resonance_pct,
+            "dist_mix_pct": self.dist_mix_pct,
+            "random_seed": self.random_seed,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SpectralManglerParams":
+        d = data or {}
+
+        def _b(key: str, default: bool) -> bool:
+            return bool(d.get(key, default))
+
+        def _f(key: str, default: float) -> float:
+            try:
+                return float(d.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _s(key: str, default: str, allowed: tuple) -> str:
+            v = str(d.get(key, default) or default)
+            return v if v in allowed else default
+
+        return SpectralManglerParams(
+            enabled=_b("enabled", True),
+            routing=_s("routing", "ring_grain_dist", _SM_ROUTINGS),
+            global_mix_pct=_f("global_mix_pct", 100.0),
+            output_gain_db=_f("output_gain_db", 0.0),
+            output_limiter_enabled=_b("output_limiter_enabled", False),
+            ring_enabled=_b("ring_enabled", False),
+            ring_mode=_s("ring_mode", "fm_ring", _SM_RING_MODES),
+            ring_carrier_hz=_f("ring_carrier_hz", 340.0),
+            ring_lfo_rate_hz=_f("ring_lfo_rate_hz", 2.4),
+            ring_lfo_depth_pct=_f("ring_lfo_depth_pct", 35.0),
+            ring_warp_pct=_f("ring_warp_pct", 28.0),
+            ring_spread_pct=_f("ring_spread_pct", 45.0),
+            ring_mix_pct=_f("ring_mix_pct", 65.0),
+            grain_enabled=_b("grain_enabled", False),
+            grain_freeze=_b("grain_freeze", False),
+            grain_mode=_s("grain_mode", "cloud", _SM_GRAIN_MODES),
+            grain_size_ms=_f("grain_size_ms", 85.0),
+            grain_density_hz=_f("grain_density_hz", 24.0),
+            grain_pitch_st=_f("grain_pitch_st", 7.0),
+            grain_pitch_jitter_pct=_f("grain_pitch_jitter_pct", 22.0),
+            grain_position_pct=_f("grain_position_pct", 30.0),
+            grain_spray_pct=_f("grain_spray_pct", 45.0),
+            grain_feedback_pct=_f("grain_feedback_pct", 38.0),
+            grain_mix_pct=_f("grain_mix_pct", 70.0),
+            dist_enabled=_b("dist_enabled", False),
+            dist_curve=_s("dist_curve", "fold", _SM_DIST_CURVES),
+            dist_drive_db=_f("dist_drive_db", 14.5),
+            dist_fold_pct=_f("dist_fold_pct", 42.0),
+            dist_bias_pct=_f("dist_bias_pct", 12.0),
+            dist_tone_hz=_f("dist_tone_hz", 5200.0),
+            dist_resonance_pct=_f("dist_resonance_pct", 25.0),
+            dist_mix_pct=_f("dist_mix_pct", 80.0),
+            random_seed=int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF,
+        )
 
 
 @dataclass(frozen=True)
