@@ -1151,16 +1151,31 @@ class ProManglerVisualizerWidget(QWidget):
             head_grad.setColorAt(1.0, QColor(182, 124, 248, 0))
             p.fillRect(QRectF(head_x - 24, plot.top(), 48, plot.height()), head_grad)
 
-            for pt in self._particles[:active_count]:
-                env = math.sin(max(0.0, min(1.0, pt["age"])) * math.pi)
-                alpha = int(155 * env * (g["mix"] / 100.0))
-                if alpha <= 4:
-                    continue
-                px = plot.left() + pt["x"] * plot.width()
-                py = plot.center().y() - pt["y"] * (plot.height() * 0.44)
-                p.setPen(QPen(QColor(215, 180, 255, min(220, alpha + 40)), 0.9))
-                p.setBrush(QColor(g_col.red(), g_col.green(), g_col.blue(), alpha // 2))
-                p.drawRoundedRect(QRectF(px - cap_w / 2.0, py - cap_h / 2.0, cap_w, cap_h), 2.0, 2.0)
+            # H11：真实颗粒事件优先（DSP 活跃声部快照；无数据时回退
+            # 演示粒子场）
+            real_pts = self._external_grains
+            if real_pts:
+                for pt in real_pts[:self._particles.__len__() * 4]:
+                    x = max(0.0, min(1.0, float(pt.get("x", 0.5))))
+                    y = max(-1.0, min(1.0, float(pt.get("y", 0.0))))
+                    alpha = int(170 * max(0.15, float(pt.get("env", 1.0)))
+                                * (g["mix"] / 100.0))
+                    px = plot.left() + x * plot.width()
+                    py = plot.center().y() - y * (plot.height() * 0.44)
+                    p.setPen(QPen(QColor(215, 180, 255, min(230, alpha + 50)), 0.9))
+                    p.setBrush(QColor(g_col.red(), g_col.green(), g_col.blue(), alpha // 2))
+                    p.drawRoundedRect(QRectF(px - cap_w / 2.0, py - cap_h / 2.0, cap_w, cap_h), 2.0, 2.0)
+            else:
+                for pt in self._particles[:active_count]:
+                    env = math.sin(max(0.0, min(1.0, pt["age"])) * math.pi)
+                    alpha = int(155 * env * (g["mix"] / 100.0))
+                    if alpha <= 4:
+                        continue
+                    px = plot.left() + pt["x"] * plot.width()
+                    py = plot.center().y() - pt["y"] * (plot.height() * 0.44)
+                    p.setPen(QPen(QColor(215, 180, 255, min(220, alpha + 40)), 0.9))
+                    p.setBrush(QColor(g_col.red(), g_col.green(), g_col.blue(), alpha // 2))
+                    p.drawRoundedRect(QRectF(px - cap_w / 2.0, py - cap_h / 2.0, cap_w, cap_h), 2.0, 2.0)
 
         # 4. 实时环形调制 + 波形折叠示波器
         cy = plot.center().y()
@@ -1202,15 +1217,26 @@ class ProManglerVisualizerWidget(QWidget):
             shimmer = 0.18 * (g["mix"] / 100.0) * math.sin(2.0 * math.pi * (8.0 + abs(g["pitch"]) * 0.8) * t_norm + self._phase * 1.9)
             return s_val * g_env + shimmer
 
+        # H11：真实波形优先（后端保峰抽稀采样）；无数据回退演示载波
+        ext = self._external_wave
+        ext_n = len(ext) if ext else 0
+
+        def _ext_at(t: float) -> float:
+            idx = min(ext_n - 1, max(0, int(t * (ext_n - 1))))
+            return max(-1.05, min(1.05, float(ext[idx])))
+
         for i in range(steps + 1):
             t = i / steps
             x = plot.left() + t * plot.width()
 
-            # 原始载波参考线
-            base_sig = (
-                0.65 * math.sin(2.0 * math.pi * 2.0 * t + self._phase * 0.5)
-                + 0.35 * math.cos(2.0 * math.pi * 3.0 * t - self._phase * 0.35)
-            )
+            # 原始载波参考线（真实数据或演示模拟）
+            if ext_n >= 8:
+                base_sig = _ext_at(t)
+            else:
+                base_sig = (
+                    0.65 * math.sin(2.0 * math.pi * 2.0 * t + self._phase * 0.5)
+                    + 0.35 * math.cos(2.0 * math.pi * 3.0 * t - self._phase * 0.35)
+                )
             dy = cy - base_sig * (amp * 0.65)
             if i == 0:
                 dry_path.moveTo(x, dy)
@@ -1948,6 +1974,9 @@ class StudioSpectralManglerWidget(QWidget):
     globalMixChanged = pyqtSignal(float)
     outputGainChanged = pyqtSignal(float)
     stateChanged = pyqtSignal(dict)
+    # H11：用户预设持久库挂钩
+    presetSaved = pyqtSignal(str, dict)
+    presetDeleted = pyqtSignal(str)
 
     def __init__(self, track_name: str = "Audio 1", parent=None,
                  demo: bool = False):
@@ -2592,6 +2621,17 @@ class StudioSpectralManglerWidget(QWidget):
         if cnt > 0:
             self.preset_combo.setCurrentIndex((self.preset_combo.currentIndex() + step) % cnt)
 
+    def set_user_presets(self, presets: dict) -> None:
+        """H11：宿主注入持久库的用户预设（合并显示，内置只读）。"""
+        existing = set(getattr(self, "_builtin_preset_names", set()))
+        for name in list(self._presets.keys()):
+            if name not in existing:
+                del self._presets[name]
+        for name, state in (presets or {}).items():
+            self._presets[str(name)] = copy.deepcopy(dict(state))
+            if self.preset_combo.findText(str(name)) < 0:
+                self.preset_combo.addItem(str(name))
+
     def _save_new_preset(self):
         name, ok = QInputDialog.getText(self, "保存声音设计预设", "输入预设名称:")
         if ok and name.strip():
@@ -2600,6 +2640,8 @@ class StudioSpectralManglerWidget(QWidget):
             if self.preset_combo.findText(clean) < 0:
                 self.preset_combo.addItem(clean)
             self.preset_combo.setCurrentText(clean)
+            # H11：同步发宿主持久化（effect_preset 用户库）
+            self.presetSaved.emit(clean, copy.deepcopy(self._presets[clean]))
 
     def _tick_demo_animation(self):
         self._demo_phase += 0.08

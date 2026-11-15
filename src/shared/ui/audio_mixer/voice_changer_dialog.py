@@ -144,6 +144,19 @@ class VoiceChangerDialog(QDialog):
         self._commit_timer.timeout.connect(self._emit_commit)
 
         self._widget.stateChanged.connect(self._on_widget_state)
+
+        # H11：用户预设持久库（effect_preset 服务；错误不吞整库）
+        self._widget.presetSaved.connect(self._persist_preset)
+        self._widget.presetDeleted.connect(self._forget_preset)
+        self._load_user_presets()
+
+        # H11：手势语义——按住控件（拖动中停顿）不提交；松手后单次提交。
+        # 事件过滤器覆盖 widget 内全部滑条/旋钮。
+        self._gesture_held = False
+        from PyQt6.QtCore import Qt as _Qt
+        from PyQt6.QtWidgets import QAbstractSlider as _Slider
+        for slider in self._widget.findChildren(_Slider):
+            slider.installEventFilter(self)
         self._updating = True
         try:
             self._widget.set_state(ui_state_from_params(initial_params or {}))
@@ -163,6 +176,8 @@ class VoiceChangerDialog(QDialog):
                                             self._current_params())
 
     def _emit_commit(self) -> None:
+        if self._gesture_held:
+            return  # H11：按住期间不提交（停顿 ≠ 停手）
         if not self._updating:
             self._preview_timer.stop()
             self._commit_timer.stop()
@@ -177,7 +192,11 @@ class VoiceChangerDialog(QDialog):
         self._has_pending_edit = True
         if not self._preview_timer.isActive():
             self._preview_timer.start()
-        self._commit_timer.start()
+        # H11：按住期间不启动提交计时（停顿不等于停手）
+        if self._gesture_held:
+            self._commit_timer.stop()
+        else:
+            self._commit_timer.start()
 
     def done(self, result: int) -> None:
         """Keep the last edit when closing this modeless, live-edit window."""
@@ -201,6 +220,62 @@ class VoiceChangerDialog(QDialog):
             self._widget.set_state(ui_state_from_params(data))
         finally:
             self._updating = False
+
+    def eventFilter(self, obj, event) -> bool:
+        """H11：滑条按下 → 冻结提交计时；松开 → 启动单次提交。"""
+        from PyQt6.QtCore import QEvent as _QEvent
+        if event.type() == _QEvent.Type.MouseButtonPress:
+            self._gesture_held = True
+            self._commit_timer.stop()
+        elif event.type() == _QEvent.Type.MouseButtonRelease:
+            self._gesture_held = False
+            if self._has_pending_edit:
+                self._commit_timer.start()
+        return super().eventFilter(obj, event)
+
+    def _persist_preset(self, name: str, state: dict) -> None:
+        try:
+            from src.features.edit.core.effect_preset import (
+                load_user_presets, save_user_preset)
+            params = params_from_ui_state(state)
+            pid = f"vc:{name}"
+            for entry in load_user_presets("voice_changer"):
+                if entry.get("name") == str(name):
+                    pid = entry.get("preset_id", pid)
+                    break
+            save_user_preset("voice_changer", str(name), params,
+                             preset_id=pid)
+        except Exception:  # noqa: BLE001 — 持久化失败不吞 UI 状态
+            logger.warning("voice changer preset persist failed",
+                           exc_info=True)
+
+    def _forget_preset(self, name: str) -> None:
+        try:
+            from src.features.edit.core.effect_preset import (
+                load_user_presets, remove_user_preset)
+            for entry in load_user_presets("voice_changer"):
+                if entry.get("name") == str(name):
+                    remove_user_preset("voice_changer",
+                                       entry.get("preset_id", ""))
+                    break
+        except Exception:  # noqa: BLE001
+            logger.warning("voice changer preset delete failed",
+                           exc_info=True)
+
+    def _load_user_presets(self) -> None:
+        try:
+            from src.features.edit.core.effect_preset import load_user_presets
+            lib = {}
+            for entry in load_user_presets("voice_changer"):
+                nm = str(entry.get("name", "")).removeprefix("vc:")
+                if nm:
+                    lib[nm] = ui_state_from_params(
+                        entry.get("params") or {})
+            if lib:
+                self._widget.set_user_presets(lib)
+        except Exception:  # noqa: BLE001 — 库不可用时保留内存预设
+            logger.debug("voice changer preset library unavailable",
+                         exc_info=True)
 
     def update_sample_rate(self, sample_rate: float) -> None:
         """F02 采样率通知（本效果 UI 无采样率相关曲线；占位）。"""
