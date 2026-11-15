@@ -717,9 +717,17 @@ class AudioGraphRenderer:
                 bus_inputs[bid] = np.zeros_like(output)
 
 
+        # H02：Bus 阶段逐帧块内处理——volume/pan/mute ramp 与 fx 参数自动化
+        # 按每帧块的起始帧求值（与实时 mix_samples 的帧粒度一致）。旧实现
+        # 对整段 buffer 只按 start_frame 采一次：f0=0、f10=−12dB 的电平曲线
+        # 在 Bus/Master 成片 f20 仍输出 ~0.2（复审 §5 H02 已复现）。
+        n_total = output.shape[-1]
+        chunk = max(1, int(round(self._sample_rate / max(1e-6, float(fps)))))
+        from src.features.edit.core.audio_dsp import balance_gains
+
         for bus_id in sorted_buses:
-            bus_input = bus_inputs.get(bus_id)
-            if bus_input is None:
+            bus_input_full = bus_inputs.get(bus_id)
+            if bus_input_full is None:
                 continue
             node = self._nodes.get(bus_id)
             if node is None or not node.enabled or node.muted:
@@ -728,123 +736,114 @@ class AudioGraphRenderer:
             if has_solo and bus_id not in audible_solo:
                 continue
 
-            # RMA-06: Bus automation（volume/pan/mute）逐样本求值。
-            # 此前 Bus 阶段只读静态 node.volume/node.pan，automation 被无声忽略。
-            bus_volume = node.volume
-            bus_pan = node.pan
             auto = node.automation if node.automation_mode != "off" else None
-            vol_ramp = None
-            pan_ramp = None
-            if auto:
-                vol_track = auto.get("volume")
-                if vol_track is not None and getattr(vol_track, "keyframes", None):
-                    vol_ramp = np.array(
-                        vol_track.get_value_ramp(
-                            float(start_frame), fps, output.shape[-1],
-                            self._sample_rate, bus_volume,
-                        ),
-                        dtype=output.dtype,
-                    )
-                pan_track = auto.get("pan")
-                if pan_track is not None and getattr(pan_track, "keyframes", None):
-                    pan_ramp = np.array(
-                        pan_track.get_value_ramp(
-                            float(start_frame), fps, output.shape[-1],
-                            self._sample_rate, bus_pan,
-                        ),
-                        dtype=output.dtype,
-                    )
-                mute_track = auto.get("mute")
-                if mute_track is not None and getattr(mute_track, "keyframes", None):
-                    # RMA-07: 逐样本 mute 门控 + de-click（与 master 一致）
+            vol_track = (auto or {}).get("volume")
+            pan_track = (auto or {}).get("pan")
+            mute_track = (auto or {}).get("mute")
+            has_vol = vol_track is not None and getattr(vol_track, "keyframes", None)
+            has_pan = pan_track is not None and getattr(pan_track, "keyframes", None)
+            has_mute = mute_track is not None and getattr(mute_track, "keyframes", None)
+
+            for c0 in range(0, n_total, chunk):
+                cN = min(n_total, c0 + chunk)
+                n = cN - c0
+                frame_c = float(start_frame) + c0 / max(
+                    1.0, self._sample_rate / max(1e-6, float(fps)))
+                bus_input = bus_input_full[:, c0:cN]
+
+                # RMA-06/RMA-07：逐帧块 automation（mute 门控 + de-click）
+                if has_mute:
                     mute_ramp = np.array(
                         mute_track.get_value_ramp(
-                            float(start_frame), fps, output.shape[-1],
-                            self._sample_rate, 0.0,
-                        ),
-                        dtype=output.dtype,
-                    )
+                            frame_c, fps, n, self._sample_rate, 0.0),
+                        dtype=output.dtype)
                     gate = (mute_ramp <= 0.5).astype(output.dtype)
                     gate = self._apply_declick_edges(gate, self._sample_rate)
                     bus_input = bus_input * gate[np.newaxis, :]
 
-            # volume（automation ramp 或静态）
-            if vol_ramp is not None:
-                bus_samples = bus_input * vol_ramp[np.newaxis, :]
-            else:
-                bus_samples = bus_input * bus_volume
-            # pan（RMA-08: Bus 输入是已混立体声，用 balance unity-center）
-            from src.features.edit.core.audio_dsp import balance_gains
-            if pan_ramp is not None and bus_samples.shape[0] >= 2:
-                bus_samples = bus_samples.copy()
-                for i in range(min(len(pan_ramp), bus_samples.shape[-1])):
-                    lg, rg = balance_gains(float(pan_ramp[i]))
-                    bus_samples[0, i] *= lg
-                    bus_samples[1, i] *= rg
-            else:
-                lg, rg = balance_gains(bus_pan)
-                bus_samples = bus_samples.copy()
-                bus_samples[0] *= lg
-                if bus_samples.shape[0] > 1:
-                    bus_samples[1] *= rg
-            # CW-A1: Bus 空间声像器（与 mix_samples Bus 阶段同级）
-            if node.panner is not None and node.panner.is_active:
-                bus_samples = node.panner.process(bus_samples, bus_pan)
-            # EQ
-            if node.eq_filter is not None and node.eq_filter.is_active:
-                bus_samples = node.eq_filter.process(bus_samples)
-            # FX（MX-08: 外部侧链检源透传，与普通轨同构）
-            if node.effect_chain is not None:
-                # R05: Bus fx 参数自动化——块边界按起始帧重设链参数
-                # （fx_sampler 在 _TrackNode 构建时就已存在，此前离线 Bus
-                # 阶段建而不消费；与普通轨 render_track_block 同型）
-                if node.fx_sampler is not None:
-                    try:
-                        node.effect_chain.set_params(
-                            node.fx_sampler(int(start_frame)),
-                            sample_rate=self._sample_rate)
-                    except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                # volume（automation ramp 或静态）
+                if has_vol:
+                    vol_ramp = np.array(
+                        vol_track.get_value_ramp(
+                            frame_c, fps, n, self._sample_rate, node.volume),
+                        dtype=output.dtype)
+                    bus_samples = bus_input * vol_ramp[np.newaxis, :]
+                else:
+                    bus_samples = bus_input * node.volume
+                # pan（RMA-08: balance unity-center；逐样本 ramp 或块起点标量）
+                if has_pan and bus_samples.shape[0] >= 2:
+                    pan_ramp = np.array(
+                        pan_track.get_value_ramp(
+                            frame_c, fps, n, self._sample_rate, node.pan),
+                        dtype=output.dtype)
+                    bus_samples = bus_samples.copy()
+                    for i in range(min(len(pan_ramp), bus_samples.shape[-1])):
+                        lg, rg = balance_gains(float(pan_ramp[i]))
+                        bus_samples[0, i] *= lg
+                        bus_samples[1, i] *= rg
+                    pan_scalar = float(pan_ramp[0]) if len(pan_ramp) else node.pan
+                else:
+                    lg, rg = balance_gains(node.pan)
+                    bus_samples = bus_samples.copy()
+                    bus_samples[0] *= lg
+                    if bus_samples.shape[0] > 1:
+                        bus_samples[1] *= rg
+                    pan_scalar = node.pan
+                # CW-A1: Bus 空间声像器（与 mix_samples Bus 阶段同级）
+                if node.panner is not None and node.panner.is_active:
+                    bus_samples = node.panner.process(bus_samples, pan_scalar)
+                # EQ
+                if node.eq_filter is not None and node.eq_filter.is_active:
+                    bus_samples = node.eq_filter.process(bus_samples)
+                # FX（MX-08: 外部侧链检源透传；R05/H02：fx 自动化按帧块采样）
+                if node.effect_chain is not None:
+                    if node.fx_sampler is not None:
+                        try:
+                            node.effect_chain.set_params(
+                                node.fx_sampler(int(round(frame_c))),
+                                sample_rate=self._sample_rate)
+                        except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                            logger.warning(
+                                "AudioGraphRenderer: fx automation sampler "
+                                "failed for bus %s", bus_id, exc_info=True)
+                            node.fx_sampler = None
+                    sc_map = None
+                    if sidechain_taps:
+                        raw_map = node.effect_chain.sidechain_map(sidechain_taps)
+                        if raw_map:
+                            sc_map = {iid: buf[:, c0:cN]
+                                      for iid, buf in raw_map.items()}
+                    bus_samples = node.effect_chain.process(
+                        bus_samples, sidechain_by_id=sc_map)
+                # 路由：Bus→Bus 或 →Master（output_bus_id）
+                target = node.output_bus_id
+                if target is not None and target in bus_inputs:
+                    bus_inputs[target][:, c0:cN] += bus_samples
+                else:
+                    if target is not None and not self._is_known_bus(target):
+                        # AUD-15402: Bus 输出指向未注册 bus——兜底进 master 并告警
                         logger.warning(
-                            "AudioGraphRenderer: fx automation sampler "
-                            "failed for bus %s", bus_id, exc_info=True)
-                        node.fx_sampler = None
-                sc_map = None
-                if sidechain_taps:
-                    raw_map = node.effect_chain.sidechain_map(sidechain_taps)
-                    if raw_map:
-                        cur_n = bus_samples.shape[-1]
-                        sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
-                bus_samples = node.effect_chain.process(bus_samples, sidechain_by_id=sc_map)
-            # 路由：Bus→Bus 或 →Master（output_bus_id）
-            target = node.output_bus_id
-            n = bus_samples.shape[-1]
-            if target is not None and target in bus_inputs:
-                bus_inputs[target][:, :n] += bus_samples
-            else:
-                if target is not None and not self._is_known_bus(target):
-                    # AUD-15402: Bus 输出指向未注册 bus——兜底进 master 并告警
-                    logger.warning(
-                        "AudioGraphRenderer: bus %r routes to unknown bus %r; "
-                        "falling back to master", bus_id, target,
-                    )
-                output[:, :n] += bus_samples
-            # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
-            # 此前 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
-            # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。
-            for send_entry in node.sends:
-                send_bus_id, send_level, send_tap, send_muted = (
-                    unpack_send(send_entry))
-                if send_level <= 0.0 or send_muted:
-                    continue
-                if send_bus_id in bus_inputs:
-                    send_src = bus_input if send_tap == "pre_fader" else bus_samples
-                    bus_inputs[send_bus_id][:, :send_src.shape[-1]] += send_src * send_level
-                elif not self._is_known_bus(send_bus_id):
-                    # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
-                    logger.warning(
-                        "AudioGraphRenderer: bus %r send targets unknown bus %r; "
-                        "send skipped", bus_id, send_bus_id,
-                    )
+                            "AudioGraphRenderer: bus %r routes to unknown bus %r; "
+                            "falling back to master", bus_id, target,
+                        )
+                    output[:, c0:cN] += bus_samples
+                # RMA-06: Bus sends（并行 tap；MX-14: pre_fader 取 Bus 输入）。
+                for send_entry in node.sends:
+                    send_bus_id, send_level, send_tap, send_muted = (
+                        unpack_send(send_entry))
+                    if send_level <= 0.0 or send_muted:
+                        continue
+                    if send_bus_id in bus_inputs:
+                        send_src = (bus_input if send_tap == "pre_fader"
+                                    else bus_samples)
+                        bus_inputs[send_bus_id][:, c0:cN] += \
+                            send_src * send_level
+                    elif not self._is_known_bus(send_bus_id):
+                        # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
+                        logger.warning(
+                            "AudioGraphRenderer: bus %r send targets unknown bus %r; "
+                            "send skipped", bus_id, send_bus_id,
+                        )
 
     # ── Master 阶段（与 mix_samples 阶段 3 一致）──
 
@@ -911,32 +910,36 @@ class AudioGraphRenderer:
                     output = output * vol_ramp[np.newaxis, :]
                 elif self._master_volume != 1.0:
                     output = output * self._master_volume
-        # MX-03: Master 条带——EQ → FX（音量后、限幅器前；与轨链
-        # strip_eq→track_fx 同构；与 mix_samples 阶段 3 parity）
+        # MX-03: Master 条带——EQ → FX（音量后、限幅器前）。H02：逐帧块内
+        # 处理，fx 参数自动化按每帧块起始帧采样（旧实现整段只采 start_frame
+        # 一次——变化曲线在成片/Stem 里冻结在起点值，复审 §5 H02 已复现）。
+        n_total = output.shape[-1]
+        _chunk = max(1, int(round(self._sample_rate / max(1e-6, float(fps)))))
         if self._master_eq is not None and self._master_eq.is_active:
             output = self._master_eq.process(output)
         if self._master_chain is not None:
-            # R05: Master fx 参数自动化——块边界按起始帧重设链参数
-            # （master_automation 的 fx/{instance_id}/{param} 键；
-            # 与轨级 render_track_block 的 fx_sampler 消费同型）
-            if self._master_fx_sampler is not None:
-                try:
-                    self._master_chain.set_params(
-                        self._master_fx_sampler(int(start_frame)),
-                        sample_rate=self._sample_rate)
-                except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
-                    logger.warning(
-                        "AudioGraphRenderer: master fx automation sampler "
-                        "failed", exc_info=True)
-                    self._master_fx_sampler = None
-            sc_map = None
-            if sidechain_taps:
-                raw_map = self._master_chain.sidechain_map(sidechain_taps)
-                if raw_map:
-                    cur_n = output.shape[-1]
-                    sc_map = {iid: buf[:, :cur_n]
-                              for iid, buf in raw_map.items()}
-            output = self._master_chain.process(output, sidechain_by_id=sc_map)
+            for c0 in range(0, n_total, _chunk):
+                cN = min(n_total, c0 + _chunk)
+                frame_c = float(start_frame) + c0 / max(
+                    1.0, self._sample_rate / max(1e-6, float(fps)))
+                if self._master_fx_sampler is not None:
+                    try:
+                        self._master_chain.set_params(
+                            self._master_fx_sampler(int(round(frame_c))),
+                            sample_rate=self._sample_rate)
+                    except Exception:  # noqa: BLE001 — 曲线求值失败回退静态
+                        logger.warning(
+                            "AudioGraphRenderer: master fx automation sampler "
+                            "failed", exc_info=True)
+                        self._master_fx_sampler = None
+                sc_map = None
+                if sidechain_taps:
+                    raw_map = self._master_chain.sidechain_map(sidechain_taps)
+                    if raw_map:
+                        sc_map = {iid: buf[:, c0:cN]
+                                  for iid, buf in raw_map.items()}
+                output[:, c0:cN] = self._master_chain.process(
+                    output[:, c0:cN], sidechain_by_id=sc_map)
         # Stateful effects can emit past audio even when their input is zero.
         # The final Master mute must gate those tails as well as direct audio.
         if static_muted:
