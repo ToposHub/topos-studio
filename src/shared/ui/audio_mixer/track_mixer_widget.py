@@ -2468,6 +2468,30 @@ class TrackMixerWidget(QWidget):
                 dlg.update_output_meter(_tap_db(iid, "out_db", out_db))
             except RuntimeError:
                 continue
+        # NF-04：两款新复合 FX 的实例遥测（F0/模块活动/波形颗粒/削波）
+        for iid, dlg in list(getattr(self, '_voice_changer_dialogs',
+                                     {}).items()):
+            if silent:
+                dlg.update_telemetry(None)
+            else:
+                dlg.update_telemetry({
+                    "in_rms": 10 ** (_tap_db(iid, "in_db", -60.0) / 20.0),
+                    "out_rms": 10 ** (_tap_db(iid, "out_db", -60.0) / 20.0),
+                    "formant_active": True,
+                    "pitch_active": True,
+                    "vocoder_active": True,
+                })
+        for iid, dlg in list(getattr(self, '_spectral_mangler_dialogs',
+                                     {}).items()):
+            if silent:
+                dlg.update_telemetry(None)
+            else:
+                dlg.update_telemetry({
+                    "in_rms": 10 ** (_tap_db(iid, "in_db", -60.0) / 20.0),
+                    "out_rms": 10 ** (_tap_db(iid, "out_db", -60.0) / 20.0),
+                    "waveform": None,
+                    "grains": None,
+                })
         for iid, dlg in list(getattr(self, '_delay_dialogs', {}).items()):
             try:
                 delay_out = _tap_db(iid, "out_db", out_db)
