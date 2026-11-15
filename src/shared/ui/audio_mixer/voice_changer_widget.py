@@ -1759,6 +1759,9 @@ class StudioVoiceChangerWidget(QWidget):
     outputGainChanged = pyqtSignal(float)
     auditionToggled = pyqtSignal(bool)
     stateChanged = pyqtSignal(dict)
+    # H11：用户预设持久库挂钩（宿主接 effect_preset 服务）
+    presetSaved = pyqtSignal(str, dict)
+    presetDeleted = pyqtSignal(str)
 
     def __init__(self, track_name: str = "Audio 1", parent=None,
                  demo: bool = False):
@@ -2085,6 +2088,10 @@ class StudioVoiceChangerWidget(QWidget):
             }
         """)
         self.audition_btn.toggled.connect(self.auditionToggled.emit)
+        # H11：Audition 尚未接 transport/素材通道——明确禁用（不留给
+        # 用户一个无源假按钮）；接入后移除本行即可恢复。
+        self.audition_btn.setEnabled(False)
+        self.audition_btn.setToolTip("Audition 将接入当前片段/选区回放（transport 打通后启用）")
         tb_lay.addWidget(self.audition_btn)
 
         reset_btn = QPushButton("Reset")
@@ -2318,6 +2325,17 @@ class StudioVoiceChangerWidget(QWidget):
         if cnt > 0:
             self.preset_combo.setCurrentIndex((self.preset_combo.currentIndex() + step) % cnt)
 
+    def set_user_presets(self, presets: dict) -> None:
+        """H11：宿主注入持久库的用户预设（合并显示，内置只读）。"""
+        existing = set(self._builtin_preset_names)
+        for name in list(self._presets.keys()):
+            if name not in existing:
+                del self._presets[name]
+        for name, state in (presets or {}).items():
+            self._presets[str(name)] = copy.deepcopy(dict(state))
+            if self.preset_combo.findText(str(name)) < 0:
+                self.preset_combo.addItem(str(name))
+
     def _save_new_preset(self):
         cur_name = self.preset_combo.currentText()
         default_name = "" if cur_name in self._builtin_preset_names else cur_name
@@ -2330,6 +2348,8 @@ class StudioVoiceChangerWidget(QWidget):
             self.preset_combo.blockSignals(True)
             self.preset_combo.setCurrentText(clean)
             self.preset_combo.blockSignals(False)
+            # H11：同步发宿主持久化（effect_preset 用户库）
+            self.presetSaved.emit(clean, copy.deepcopy(self._presets[clean]))
 
     def _delete_current_preset(self):
         cur_name = self.preset_combo.currentText()
@@ -2338,6 +2358,7 @@ class StudioVoiceChangerWidget(QWidget):
         del self._presets[cur_name]
         idx = self.preset_combo.currentIndex()
         self.preset_combo.removeItem(idx)
+        self.presetDeleted.emit(cur_name)
 
     # -----------------------------------------------------------------
     # 演示实时人声包络模拟（接入真实音频引擎后自动停止）
