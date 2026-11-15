@@ -2850,49 +2850,101 @@ class DelayEffect(AudioEffect):
             w = rpos - np.floor(rpos)
             return buf[i0] * (1.0 - w) + buf[i1] * w
 
+        def _read_head_nofb(in_seg: np.ndarray, buf: np.ndarray,
+                            idx: int, delay: float, m: int) -> np.ndarray:
+            """R08: 无反馈整段读头——块内历史直接取本块输入（无反馈时
+            slot j-delay 的值 = 滤波输入 j-delay，与旧按 int(delay) 分段
+            的"读上一段写入"逐位等价），块外取 ring 历史。近零延迟不再
+            每样本一次 Python 循环。"""
+            rpos = np.arange(m, dtype=np.float64) - delay
+            i0 = np.floor(rpos).astype(np.int64)
+            w = rpos - i0
+
+            def _src(k: np.ndarray) -> np.ndarray:
+                out = np.empty(m, dtype=np.float64)
+                neg = k < 0
+                if neg.any():
+                    out[neg] = buf[(idx + k[neg]) % size]
+                pos_k = ~neg
+                if pos_k.any():
+                    out[pos_k] = in_seg[k[pos_k]]
+                return out
+
+            return (1.0 - w) * _src(i0) + w * _src(i0 + 1)
+
         pos = 0
         idx = self._delay_idx
         size = self._delay_size
+        # R08: 无反馈快速路径——写值不依赖读值，整块单段向量化；
+        # 反馈非零时保持原按延迟切段语义（块内读自身先前写入）。
+        _no_feedback = (fb_l == 0.0 and fb_r == 0.0)
         while pos < n:
-            # 段长不得超过"两声道新旧读位"的最小整数延迟：保证段内所有
-            # 读位（含插值 pos+1 样本）落在段起始之前（先读后写完整）。
-            _min_l = min(int(self._cur_delay_l),
-                         int(self._old_delay_l) if self._fade_l_remaining > 0
-                         else int(self._cur_delay_l))
-            _min_r = min(int(self._cur_delay_r),
-                         int(self._old_delay_r) if self._fade_r_remaining > 0
-                         else int(self._cur_delay_r))
-            m = min(n - pos, _min_l, _min_r)
-            m = max(1, m)
+            if _no_feedback:
+                m = min(n - pos, size)
+            else:
+                # 段长不得超过"两声道新旧读位"的最小整数延迟：保证段内
+                # 所有读位（含插值 pos+1 样本）落在段起始之前（先读后写
+                # 语义完整）。
+                _min_l = min(int(self._cur_delay_l),
+                             int(self._old_delay_l) if self._fade_l_remaining > 0
+                             else int(self._cur_delay_l))
+                _min_r = min(int(self._cur_delay_r),
+                             int(self._old_delay_r) if self._fade_r_remaining > 0
+                             else int(self._cur_delay_r))
+                m = min(n - pos, _min_l, _min_r)
+                m = max(1, m)
             end = idx + m
-            base_idx = (idx + np.arange(m)) % size
-            # 1) 分数读头（R07：淡入中双头交叉淡化；静态时单头直读）
+            # 1) 分数读头（R07 淡化 + R08 无反馈快速路径）
+            _read = _read_head_nofb if _no_feedback else _read_head
+            _read_args_nofb = _no_feedback
             if self._fade_l_remaining > 0:
                 _g = np.clip(
                     1.0 - (self._fade_l_remaining - np.arange(m))
                     / float(self._fade_l_total), 0.0, 1.0)
-                wet_l[pos:pos + m] = (
-                    (1.0 - _g) * _read_head(self._buf_l, base_idx,
-                                            self._old_delay_l, m)
-                    + _g * _read_head(self._buf_l, base_idx,
-                                      self._cur_delay_l, m))
+                if _read_args_nofb:
+                    _seg = in_l[pos:pos + m]
+                    _b = self._buf_l
+                    _ro = _read(_seg, _b, idx, self._old_delay_l, m)
+                    _rn = _read(_seg, _b, idx, self._cur_delay_l, m)
+                else:
+                    base_idx = (idx + np.arange(m)) % size
+                    _ro = _read(self._buf_l, base_idx, self._old_delay_l, m)
+                    _rn = _read(self._buf_l, base_idx, self._cur_delay_l, m)
+                wet_l[pos:pos + m] = (1.0 - _g) * _ro + _g * _rn
                 self._fade_l_remaining = max(0, self._fade_l_remaining - m)
             else:
-                wet_l[pos:pos + m] = _read_head(
-                    self._buf_l, base_idx, self._cur_delay_l, m)
+                if _read_args_nofb:
+                    wet_l[pos:pos + m] = _read(
+                        in_l[pos:pos + m], self._buf_l, idx,
+                        self._cur_delay_l, m)
+                else:
+                    base_idx = (idx + np.arange(m)) % size
+                    wet_l[pos:pos + m] = _read(
+                        self._buf_l, base_idx, self._cur_delay_l, m)
             if self._fade_r_remaining > 0:
                 _g = np.clip(
                     1.0 - (self._fade_r_remaining - np.arange(m))
                     / float(self._fade_r_total), 0.0, 1.0)
-                wet_r[pos:pos + m] = (
-                    (1.0 - _g) * _read_head(self._buf_r, base_idx,
-                                            self._old_delay_r, m)
-                    + _g * _read_head(self._buf_r, base_idx,
-                                      self._cur_delay_r, m))
+                if _read_args_nofb:
+                    _seg = in_r[pos:pos + m]
+                    _b = self._buf_r
+                    _ro = _read(_seg, _b, idx, self._old_delay_r, m)
+                    _rn = _read(_seg, _b, idx, self._cur_delay_r, m)
+                else:
+                    base_idx = (idx + np.arange(m)) % size
+                    _ro = _read(self._buf_r, base_idx, self._old_delay_r, m)
+                    _rn = _read(self._buf_r, base_idx, self._cur_delay_r, m)
+                wet_r[pos:pos + m] = (1.0 - _g) * _ro + _g * _rn
                 self._fade_r_remaining = max(0, self._fade_r_remaining - m)
             else:
-                wet_r[pos:pos + m] = _read_head(
-                    self._buf_r, base_idx, self._cur_delay_r, m)
+                if _read_args_nofb:
+                    wet_r[pos:pos + m] = _read(
+                        in_r[pos:pos + m], self._buf_r, idx,
+                        self._cur_delay_r, m)
+                else:
+                    base_idx = (idx + np.arange(m)) % size
+                    wet_r[pos:pos + m] = _read(
+                        self._buf_r, base_idx, self._cur_delay_r, m)
             seg_l = wet_l[pos:pos + m]
             seg_r = wet_r[pos:pos + m]
 
