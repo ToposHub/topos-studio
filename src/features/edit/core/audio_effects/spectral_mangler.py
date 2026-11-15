@@ -129,10 +129,55 @@ class _GrainModule:
         self._fb_written = 0
         self.dropped_events = 0
         self._event_count = 0
+        self._last_p = None
 
     def set_seed(self, seed: int) -> None:
         self._seed = int(seed)
         self._rng = seeded_rng(self._seed, stream_id=0x5A1)
+
+    # ── H09：Freeze 捕获/装载（资产化重放）──
+
+    def capture_freeze(self) -> dict:
+        """H09：捕获当前历史环（freeze 锚定时刻的输入内容）。
+
+        返回资产 dict（id/anchor/seed/history/params）；由宿主经
+        ``FreezeCaptureStore`` 落盘——raw PCM 不进参数 JSON。
+        """
+        import time as _time
+        return {
+            "id": f"fz{int(_time.time() * 1000):x}-{self._seed:08x}",
+            "anchor": int(self._written),
+            "seed": int(self._seed),
+            "sample_rate": float(self._sr),
+            "history": self._hist.copy(),
+            "params": {
+                "grain_density_hz": float(getattr(
+                    self._last_p, "grain_density_hz", 24.0)),
+                "grain_size_ms": float(getattr(
+                    self._last_p, "grain_size_ms", 85.0)),
+            },
+            "created_at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+
+    def install_capture(self, capture: dict) -> bool:
+        """H09：装载捕获资产（确定性重放：历史/锚点/seed 逐一恢复）。"""
+        hist = capture.get("history")
+        if not isinstance(hist, np.ndarray) or hist.ndim != 2:
+            return False
+        ch, length = hist.shape[0], hist.shape[1]
+        self._hist = np.zeros((2, self._cap), dtype=np.float64)
+        n = min(length, self._cap)
+        self._hist[0, :n] = hist[0, :n]
+        self._hist[1, :n] = (hist[1, :n] if ch > 1 else hist[0, :n])
+        self._written = min(int(capture.get("anchor", n)), self._cap)
+        self.set_seed(int(capture.get("seed", self._seed)))
+        self._density_phase = 0.0
+        self._fb_ring = None
+        self._fb_written = 0
+        # 声部清空：重放 = 全新调度（残留活动声部的旧读位跨资产无意义）
+        for v in self._voices:
+            v.active = False
+        return True
 
     def reset(self) -> None:
         self._hist.fill(0.0)
@@ -187,6 +232,7 @@ class _GrainModule:
         channels = max(1, x.shape[0])
         fb = max(0.0, min(95.0, p.grain_feedback_pct)) / 100.0
         freeze = bool(p.grain_freeze)
+        self._last_p = p  # H09：捕获元数据引用
 
         sub = 256
         pos = 0
@@ -573,6 +619,16 @@ class SpectralManglerEffect:
                             for m in ("ring", "grain", "dist")}
         self._dry_align = (SampleDelayLine(), SampleDelayLine())
         self._par_align = (SampleDelayLine(), SampleDelayLine())
+
+    # ── H09：Freeze 资产化（捕获由宿主拉取；装载由宿主在渲染前注入）──
+
+    def take_freeze_capture(self) -> dict:
+        """宿主拉取当前冻结内容（实时窗口冻结按钮/导出前固化用）。"""
+        return self._grain.capture_freeze()
+
+    def install_freeze_capture(self, capture: dict) -> bool:
+        """装载捕获资产（重开工程/选区/Stem 重放的确定性恢复）。"""
+        return self._grain.install_capture(capture)
 
     # ── AudioEffect 契约 ──
     def set_params(self, params, sample_rate=None, algorithm_version=None):

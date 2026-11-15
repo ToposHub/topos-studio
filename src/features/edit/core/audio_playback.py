@@ -1715,6 +1715,8 @@ class AudioMixer:
         # 的 mixer audio 效果）。在 decoder 解码后、track volume/pan 之前
         # 应用（item-FX = pre-track-FX 语义）。key=clip_id。
         self._clip_effect_chains: Dict[str, EffectChain] = {}
+        # H09：Freeze 捕获资产注册表（set_freeze_registry 注入）
+        self._freeze_registry: Dict[str, dict] = {}
         # H03：clip 尾音 drain 记账（clip 结束帧 / 所属轨 / 剩余预算）
         self._clip_end_frames: Dict[str, int] = {}
         self._clip_track_of: Dict[str, str] = {}
@@ -2441,6 +2443,16 @@ class AudioMixer:
                 self._eq_filters[track_id] = StripEQFilter(self._sample_rate)
             self._eq_filters[track_id].set_params(params, sample_rate=self._sample_rate)
 
+    def set_freeze_registry(self, registry: Optional[dict]) -> None:
+        """H09：注入 Freeze 捕获资产注册表（{capture_id: capture_dict}）。
+
+        之后的 set_track/master_effect_chain 会按实例 ``freeze_capture_id``
+        自动装载；None 清空（切换工程）。实时窗口的冻结按钮经
+        ``take_freeze_capture`` 拉取捕获并由宿主落盘/入表。
+        """
+        with QMutexLocker(self._mutex):
+            self._freeze_registry = dict(registry or {})
+
     def set_track_effect_chain(self, track_id: str, chain_params: Optional[EffectChainParams],
                                animated_sampler: Optional[Any] = None) -> None:
         """设置某轨的 FX 机架效果器链（W26；MX-10 扩展采样器）。线程安全。
@@ -2459,6 +2471,13 @@ class AudioMixer:
             if track_id not in self._effect_chains:
                 self._effect_chains[track_id] = EffectChain(self._sample_rate)
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
+            # H09：Freeze 捕获资产（注册表存在且实例引用资产 → 装载）
+            if chain_params is not None and self._freeze_registry:
+                from src.features.edit.core.freeze_capture_store import (
+                    apply_freeze_registry,
+                )
+                apply_freeze_registry(self._effect_chains[track_id],
+                                      chain_params, self._freeze_registry)
             # CW-A1: 链参数变化可能改变侧链依赖 → 失效排序缓存
             self._sc_order_cache = None
             # MX-10: fx 参数自动化采样器（None/清链 → 移除）
@@ -2496,6 +2515,13 @@ class AudioMixer:
                 chain = EffectChain(self._sample_rate)
                 self._effect_chains[MASTER_BUS_KEY] = chain
             chain.set_params(entries, sample_rate=self._sample_rate)
+            # H09：Master 链的 Freeze 资产装载（与轨级同语义）
+            if chain_params is not None and self._freeze_registry:
+                from src.features.edit.core.freeze_capture_store import (
+                    apply_freeze_registry,
+                )
+                apply_freeze_registry(chain, chain_params,
+                                      self._freeze_registry)
             if animated_sampler is not None:
                 self._track_effect_samplers[MASTER_BUS_KEY] = animated_sampler
             else:
