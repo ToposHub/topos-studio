@@ -101,7 +101,10 @@ class AudioCapabilities:
         if not self.pyav.available:
             out.append("PyAV (音频解码/编码)")
         if not self.scipy.available:
-            out.append("SciPy (EQ/LUFS/重采样)")
+            # R12/NF（2026-11-15 计划 §6.3）：新复合 FX 同样依赖
+            # scipy.signal（WOLA/lfilter/倒谱）——导出 preflight 的组件
+            # 缺失说明覆盖 Voice Changer / Spectral Mangler
+            out.append("SciPy (EQ/LUFS/重采样/Voice Changer/Spectral Mangler)")
         if not self.output_device.available and not self.output_device.unknown:
             out.append("Audio Output Device (音频输出设备)")
         return out
