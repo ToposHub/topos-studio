@@ -687,3 +687,68 @@ def sine_ring_reference(x: np.ndarray, carrier_hz: float,
 ```
 
 参考判据：`parallel_reference(x,[x,x,x],[100,100,100]) == x`；`mix_aligned(x,y,0)==x`；+12st 的 ratio 为2；Ring 的正弦频谱有 f_input±f_carrier。算法单测用这些独立关系验证，不能拿 UI 的模拟曲线当真实音频 oracle。
+
+
+---
+
+## 11. 实施进度（2026-11-15 第二工作批次，bugfix 分支）
+
+本节由实施会话维护；§1–§10 为原复审内容，保持不变。**完成判定以本节
++ 各批提交的回归测试为准**；未列"已完成"的项仍按原计划口径执行。
+
+### R01–R09（结构性修复）
+
+| ID | 状态 | 交付摘要（提交见 git log） |
+|---|---|---|
+| R01 | ✅ 已完成 | fx_versioning（schema v2/兼容桶/能力三态/升级 helper）；实例 algorithm_version+未知类型 opaque 保留；EQ legacy 兼容处理器（df749759 HPF 逐位复现）；预设 777 无损往返；17 项回归 |
+| R02 | ✅ 已完成 | _advance_through 单调游标统一 flush/drain（帧序列严格递增，200ms 回声误差≤1采样，clip 存储顺序不变性）；SC 单份直写缓冲（内存增量≤1.6 份）；导出 preflight 接能力判定；6 项回归 |
+| R03 | ✅ 已完成 | Stem 两阶段（clip 阶段→求和→轨阶段单次过链）；pre/post send 语义与成片一致（probe 0→0.2 修复）；SC 检源闭包（非可听源照常渲染）；尾音跨块推进；MASTER stem 与成片 PCM≤1e-5；6 项回归 |
+| R04 | ✅ 已完成 | include_fx_tail 严格/含尾双模式（含尾=Bus/Master 链尾音预算延长，尾区有真实能量）；clip FX 尾音延续；master/bus_tail_estimate_samples 接口；5 项回归 |
+| R05 | ✅ 已完成 | Bus/Master fx 自动化消费（probe 0.2→0.050238 双路径精确）；ChannelStripPreset.explicit_fields 显式空=清除（legacy 五字段保留）；MixSnapshot Master EQ/FX 全字段（_unset 哨兵区分旧快照）；10 项回归 |
+| R06 | ✅ 已完成 | set_effect_chain 回填全部 8+2 类对话框字典（同 id 改参回填/删除关闭）；EQ 迟到提交防复活守卫；9 项回归 |
+| R07 | ✅ 已完成 | Delay 15ms 双读头交叉淡化（ALGORITHM_VERSION=4；10→10.25ms 边界跳变 ~0.44→稳态 1.6×内；静态与 v3 逐位一致；中淡改目标进度接续）；6 项回归 |
+| R08 | ✅ 已完成 | 无反馈整块单段向量化（0.01ms/2000样本 median 144.8→0.41ms；整块=分块逐位）；4 项回归 |
+| R09 | ✅ 已完成 | CompressorParams.makeup_post（None=legacy 声音不变/True=组后增益）；EffectChain 连续 dynamics 段组末统一施加（不双倍）；新建 DY 面板默认组后；7 项回归 |
+| R10 | ◐ 软件可测部分完成 | 线程 device_format_changed→manager sample_rate_changed 广播（2 项回归）；arm/record/monitor 分离、磁盘故障/自然退出清理仍**待硬件** |
+| R11 | ◐ 部分 | 导出 preflight 未知/降级实例汇总告警（R01 批）；实例 tap in/out 已进新 FX 对话框（NF-04 批）；Telemetry DTO 版本化/单位契约/频谱每实例分析点未完成 |
+| R12 | ◐ 部分 | 能力声明覆盖新 FX（scipy 缺失说明）；真实多声道图/Panner 5.1/7.1 主路径**未接**（仍 stereo 主域，UI 未标 stereo preview——已知缺口） |
+| R13 | 未开始 | 按原计划 P2 顺延 |
+
+### NF/VC/SM/E2E（新效果器接入）
+
+| ID | 状态 | 交付摘要 |
+|---|---|---|
+| NF-01 | ✅ | VoiceChangerParams(26 声音字段+seed)/SpectralManglerParams(31+LIM+seed) 扁平 schema；registry/默认值/健康检查 12 类型全绿 |
+| NF-02 | ✅ | 用户原型生产接入（demo=False 分离假数据）；两个 QDialog 适配器（唯一映射表/手势 preview+停手单 commit/静默回填）；Mixer 菜单/字典/分发/短名；clip 注册真窗口；12 项回归 |
+| NF-03 | ◐ | 绝对 sample context（效果内部计数器，R02 保证单调）；模块级 dry 时延对齐（Formant WOLA win 时延）；**全局 PDC/clip 四元组 effect_id 升级未完成**（audio_retime 三元组仍待迁移） |
+| NF-04 | ◐ | DSP collect_telemetry（F0/置信度/模块活动/波形/削波）；对话框消费 update_telemetry；update_track_telemetry 分发实例 tap；**clip 级 (clip_id,effect_id) 独立 tap 未接**（轨 tap 复用，重叠 clip 不区分） |
+| NF-05 | ◐ | effect_preset 用户库开箱即用（分桶/原子写/seed 往返）；**Freeze capture asset 持久化未实现**（freeze=进程内状态，保存重开后冻结内容不重现——已知边界，计划 §8.3 的 asset 方案留待后续）；事件自动化 lane 未实现 |
+| VC-01 | ◐ | 双读头 Doppler 型变速（±12st FFT 峰 ≤25 cents；极值 ≤60 cents，边界梳状伪影入契约）；时长保持/块不变/seed 确定性已测；**WSOLA/相位声码器升级（≤5 cents 目标）未达** |
+| VC-02 | ✅ | WOLA 倒谱包络 warp；中性恒等 1.85e-5；F0 保持±30 cents；包络峰 ×ρ 误差≤20%；Preserve 高频保护 |
+| VC-03 | ✅ | 8–32 带对数分布声码器；四载波（噪声=seed 确定性图案）；零 modulator 按 release 衰减至静默 |
+| VC-04 | ✅ | Formant→Pitch→Vocoder→OutputGain 组合；三模块旁路组合/Mix 0/50/100 端点；遥测字段 |
+| SM-01 | ✅ | 四模式连续相位载波；1k×200→800/1200Hz 边带；spread 语义 |
+| SM-02 | ◐ | 5s 有界历史+64 声部+绝对读位锚定（同 seed 块长无关≤1e-5）；freeze 停写（输入无关）；**feedback=上一块 wet 一块延迟回写（非采样精确）与 Freeze 资产持久化见 NF-05 边界** |
+| SM-03 | ✅ | 四曲线共享纯响应（tape 小信号增益=1→+6dB=×1.995）；bias 去 DC；2× 过采样（状态跨块）；bitcrush 位数+SH |
+| SM-04 | ✅ | 串行三序+并联 N 归一残差（全恒等/全 mix0 严格 unity）；路由切换 5ms 淡出；可选实例内限幅 |
+| E2E-01 | ✅ | 两 FX 实时/成片/MASTER Stem 三路径 PCM ≤2e-5；工程往返保 seed/参数 |
+| E2E-02 | ◐ | 合成信号长跑/取消路径经 R02–R04 结构性覆盖；**真实素材主窗全流程回归+性能基准报告未跑**（待用户视频实测） |
+
+### 剩余问题诚实清单（不宣称完成）
+
+1. VC-01 音高精度未达计划 ≤5 cents 目标（双读头 Doppler 型固有边带；
+   ±12st 内实测 ≤25 cents）。升级路径：WSOLA 或相位声码器后端。
+2. Freeze 语义为进程内（SM-02/NF-05）：保存重开后冻结内容不重现；
+   capture asset 事务（§8.3）未实现。
+3. 全局 PDC 未实现（NF-03）：新 FX 模块内 dry/wet 已对齐，但跨
+   Send/Bus 汇合的干湿时序对齐依赖 R02 结构，显式延迟补偿未做。
+4. clip 级新 FX 遥测复用轨末端 tap（NF-04 边界 3）。
+5. R10 硬件路径（arm/record 分离、磁盘故障、自然退出）、R12 真实
+   多声道图、R13 全部——维持原计划口径，未动。
+6. 随机性：VC jitter/SM grain 均由 (seed, 绝对采样/触发序) 驱动并经
+   块不变性测试；SM 反馈路径为块延迟近似（声音可闻差异微小，契约记录）。
+
+### 本批次测试基线
+
+清单 82 文件 + 新增回归（R01–R10/NF/E2E 共 ~90 项）：
+**1650 passed, 1 skipped**（见各提交；本节完成后最终数字以末次全量为准）。

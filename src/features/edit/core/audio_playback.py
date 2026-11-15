@@ -3873,6 +3873,9 @@ class AudioPlaybackThread(QThread):
     audio_level = pyqtSignal(list)  # [left_db, right_db]
     audio_track_levels = pyqtSignal(dict)  # {track_id: [left_db, right_db]} per-track 电平
     output_failed = pyqtSignal(str)  # AUD-15508
+    # R10：设备格式回退（requested≠actual）上报——manager 统一经
+    # sample_rate_changed 通知 UI/曲线/频谱重建（此前只同步线程内部状态）
+    device_format_changed = pyqtSignal(float, int)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -4103,6 +4106,9 @@ class AudioPlaybackThread(QThread):
                         new_channels=device_channels,
                         samples_per_frame=self._samples_per_frame,
                     )
+                    # R10：回报 manager（UI 曲线/频谱轴与解码/DSP 同源）
+                    self.device_format_changed.emit(float(device_rate),
+                                                    int(device_channels))
 
             if self._running and self._paused and self._output is not None:
                 self._output.suspend()
@@ -4977,6 +4983,29 @@ class AudioPlaybackManager(QObject):
 
         logger.debug(f"Sample rate set to {sample_rate}")
 
+    def _on_device_format_changed(self, actual_rate: float,
+                                  actual_channels: int) -> None:
+        """R10：播放线程设备回退回报（线程内已同步 clock/mixer/decoder）。
+
+        manager 侧只更新真源并广播 sample_rate_changed——线程重开设备
+        时以 manager._sample_rate 为 requested，避免递归重开（线程自身
+        不再从 manager 拉新率；下次显式 set_sample_rate 才重协商）。
+        """
+        if actual_rate <= 0:
+            return
+        changed = int(actual_rate) != int(self._sample_rate)
+        self._sample_rate = int(actual_rate)
+        self._clock.set_sample_rate(int(actual_rate))
+        if changed:
+            try:
+                self.sample_rate_changed.emit(float(actual_rate))
+            except (RuntimeError, AttributeError):
+                pass
+            logger.info(
+                "R10: device negotiated rate %d Hz (channels %d) "
+                "propagated via sample_rate_changed",
+                int(actual_rate), int(actual_channels))
+
     def set_timeline_fps(self, fps: float) -> None:
         """
         设置时间线帧率。
@@ -5460,6 +5489,10 @@ class AudioPlaybackManager(QObject):
         # AUD-15508: 播放线程上报输出失败（启动失败/设备中途丢失）。
         # 信号经队列投递回 manager 线程，stop() 在此执行不会与播放线程死锁。
         self._playback_thread.output_failed.connect(self._on_output_failed)
+        # R10：线程内设备协商回退 → manager 统一通知（区分 requested/actual：
+        # manager._sample_rate 更新为 actual；UI 经 sample_rate_changed 重建）
+        self._playback_thread.device_format_changed.connect(
+            self._on_device_format_changed)
         self._playback_thread.start()
 
     def _on_output_failed(self, reason: str) -> None:
