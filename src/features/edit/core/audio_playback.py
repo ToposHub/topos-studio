@@ -1715,6 +1715,10 @@ class AudioMixer:
         # 的 mixer audio 效果）。在 decoder 解码后、track volume/pan 之前
         # 应用（item-FX = pre-track-FX 语义）。key=clip_id。
         self._clip_effect_chains: Dict[str, EffectChain] = {}
+        # H03：clip 尾音 drain 记账（clip 结束帧 / 所属轨 / 剩余预算）
+        self._clip_end_frames: Dict[str, int] = {}
+        self._clip_track_of: Dict[str, str] = {}
+        self._clip_tail_left: Dict[str, int] = {}
         # D04（第六轮审计）：动画 FX 的逐帧参数采样器（frame -> entries）；
         # mix_samples 在处理该 clip 块前按当前帧更新链参数。
         self._clip_effect_samplers: Dict[str, Any] = {}
@@ -2121,6 +2125,9 @@ class AudioMixer:
             for cid in clip_ids_to_remove:
                 self._clip_effect_chains.pop(cid, None)
                 self._clip_effect_samplers.pop(cid, None)
+                self._clip_end_frames.pop(cid, None)
+                self._clip_track_of.pop(cid, None)
+                self._clip_tail_left.pop(cid, None)
                 self._clip_to_track.pop(cid, None)
             # W11: 清理 LUFS 响度计
             self._lufs_meters.pop(track_id, None)
@@ -2403,6 +2410,7 @@ class AudioMixer:
                 chain.reset_state()
             for clip_chain in self._clip_effect_chains.values():
                 clip_chain.reset_state()
+            self._clip_tail_left.clear()
             # CW-A1: 空间声像器 boom 滤波状态 / 侧链 tap / 频谱窗一并复位
             for panner in self._track_panners.values():
                 panner.reset_state()
@@ -2906,6 +2914,12 @@ class AudioMixer:
                     # 包络。与 clip fade 同级（源电平调整），在 clip-FX/volume 之前。
                     clip_id = getattr(decoder, "_clip_id", None)
                     if clip_id is not None:
+                        # H03：clip 生命周期记账——clip FX 尾音 drain 用
+                        self._clip_end_frames[clip_id] = (
+                            int(getattr(decoder, "_timeline_start", 0) or 0)
+                            + int(getattr(decoder, "_timeline_duration", 0) or 0))
+                        self._clip_track_of[clip_id] = track_id
+                    if clip_id is not None:
                         samples = self._apply_audio_crossfade(
                             samples, track_id, clip_id, current_frame, fps
                         )
@@ -2975,6 +2989,32 @@ class AudioMixer:
                     if samples.shape[-1] > num_samples:
                         samples = samples[..., :num_samples]
                     track_input[:, :samples.shape[-1]] += samples
+
+                # ── H03: clip FX 尾音 ──
+                # 已结束 clip 的 per-clip 链按其尾音预算继续喂零（实时/
+                # 成片/Stem 同语义；修前实时 clip Delay 回声整段丢失——
+                # 复审 clip_tail_peaks live=0 已复现）。输出汇入轨求和
+                # （pan/链语义同成片：尾音不再过 clip pan——成片同口径）。
+                for _cid, _cchain in self._clip_effect_chains.items():
+                    if self._clip_track_of.get(_cid) != track_id:
+                        continue
+                    _cend = self._clip_end_frames.get(_cid)
+                    if _cend is None or current_frame < _cend:
+                        continue
+                    if _cid not in self._clip_tail_left:
+                        self._clip_tail_left[_cid] = (
+                            _cchain.tail_estimate_samples()
+                            if _cchain is not None else 0)
+                    _cleft = self._clip_tail_left.get(_cid, 0)
+                    if _cleft <= 0 or _cchain is None or not _cchain.is_active:
+                        continue
+                    _ctail = _cchain.process(
+                        np.zeros((min(2, output_channels), num_samples),
+                                 dtype=np.float32))
+                    _cn = min(_ctail.shape[-1], track_input.shape[-1])
+                    track_input[:_ctail.shape[0], :_cn] += _ctail[:, :_cn]
+                    self._clip_tail_left[_cid] = max(0, _cleft - num_samples)
+                    any_clip_samples = True
 
                 # ── MX-07: 尾音调度 ──
                 # 本块无 clip 输入时按链尾音估计喂零推进（feed-zero drain）；
