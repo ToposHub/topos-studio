@@ -57,8 +57,13 @@ def _effect_default_params(effect_type: str) -> dict:
     from src.features.edit.core.timeline_v2 import (
         StripEQParams, LimiterParams, CompressorParams, ReverbParams,
         DelayParams, SaturationParams, ImagerParams, ExpanderParams,
+        VoiceChangerParams, SpectralManglerParams,
     )
-    if effect_type == "strip_eq":
+    if effect_type == "voice_changer":
+        return VoiceChangerParams.default().to_dict()
+    elif effect_type == "spectral_mangler":
+        return SpectralManglerParams.default().to_dict()
+    elif effect_type == "strip_eq":
         return StripEQParams.default().to_dict()
     elif effect_type == "limiter":
         return LimiterParams.default().to_dict()
@@ -94,6 +99,9 @@ def _effect_display_name(effect_type: str) -> str:
         "saturation": I18N.tr("audio.fx.saturation", "Saturation"),
         "imager": I18N.tr("audio.fx.imager", "Imager"),
         "noise_gate": I18N.tr("audio.fx.expander_gate", "Expander / Gate"),
+        # NF-02：两款新复合 FX（短名 + 完整 tooltip；紧凑轨宽不变）
+        "voice_changer": I18N.tr("audio.fx.voice_changer", "Voice"),
+        "spectral_mangler": I18N.tr("audio.fx.spectral_mangler", "Mangler"),
     }
     return names.get(effect_type, effect_type)
 
@@ -1298,6 +1306,10 @@ class TrackMixerWidget(QWidget):
             self._open_reverb_editor(inst)
         elif effect_type == "delay":
             self._open_delay_editor(inst)
+        elif inst.effect_type == "voice_changer":
+            self._open_voice_changer_editor(inst)
+        elif inst.effect_type == "spectral_mangler":
+            self._open_spectral_mangler_editor(inst)
         elif effect_type == "saturation":
             self._open_saturation_editor(inst)
         elif effect_type == "imager":
@@ -1585,6 +1597,7 @@ class TrackMixerWidget(QWidget):
         '_limiter_dialogs', '_compressor_dialogs', '_reverb_dialogs',
         '_delay_dialogs', '_saturation_dialogs', '_imager_dialogs',
         '_expander_dialogs', '_strip_eq_dialogs',
+        '_voice_changer_dialogs', '_spectral_mangler_dialogs',
     )
 
     # R06: 对话框字典属性 → 效果类型（外部链变化时按 id+类型回填/关闭）
@@ -1597,6 +1610,8 @@ class TrackMixerWidget(QWidget):
         '_imager_dialogs': 'imager',
         '_expander_dialogs': 'expander',
         '_strip_eq_dialogs': 'strip_eq',
+        '_voice_changer_dialogs': 'voice_changer',
+        '_spectral_mangler_dialogs': 'spectral_mangler',
     }
 
     def _close_dialogs_for_instance(self, instance_id: str) -> None:
@@ -1915,6 +1930,91 @@ class TrackMixerWidget(QWidget):
         if commit:
             # enabled 通过 params 流转（开关/右键旁路），刷新列表 [name]/灰色显示
             self._refresh_effect_list()
+            self.track_effects_committed.emit(self._track_id, self._effect_chain)
+        else:
+            self.track_effects_preview.emit(self._track_id, self._effect_chain)
+
+    def _open_voice_changer_editor(self, inst: Any) -> None:
+        """NF-02：打开 Voice Changer 对话框（用户原创 UI 宿主适配）。"""
+        from src.shared.ui.audio_mixer.voice_changer_dialog import (
+            VoiceChangerDialog,
+        )
+        existing = getattr(self, '_voice_changer_dialogs', {})
+        dlg = existing.get(inst.instance_id)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        dlg = VoiceChangerDialog(
+            track_id=self._track_id,
+            track_name=self._track_name,
+            instance_id=inst.instance_id,
+            initial_params=dict(inst.params) if inst.params else None,
+            parent=self.window(),
+        )
+        dlg.voice_changer_preview.connect(
+            lambda tid, p: self._on_generic_fx_edited(
+                inst, "voice_changer", p, commit=False)
+        )
+        dlg.voice_changer_committed.connect(
+            lambda tid, p: self._on_generic_fx_edited(
+                inst, "voice_changer", p, commit=True)
+        )
+        if not hasattr(self, '_voice_changer_dialogs'):
+            self._voice_changer_dialogs = {}
+        self._voice_changer_dialogs[inst.instance_id] = dlg
+        self._show_effect_dialog(dlg)
+
+    def _open_spectral_mangler_editor(self, inst: Any) -> None:
+        """NF-02：打开 Spectral Mangler 对话框。"""
+        from src.shared.ui.audio_mixer.spectral_mangler_dialog import (
+            SpectralManglerDialog,
+        )
+        existing = getattr(self, '_spectral_mangler_dialogs', {})
+        dlg = existing.get(inst.instance_id)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        dlg = SpectralManglerDialog(
+            track_id=self._track_id,
+            track_name=self._track_name,
+            instance_id=inst.instance_id,
+            initial_params=dict(inst.params) if inst.params else None,
+            parent=self.window(),
+        )
+        dlg.spectral_mangler_preview.connect(
+            lambda tid, p: self._on_generic_fx_edited(
+                inst, "spectral_mangler", p, commit=False)
+        )
+        dlg.spectral_mangler_committed.connect(
+            lambda tid, p: self._on_generic_fx_edited(
+                inst, "spectral_mangler", p, commit=True)
+        )
+        if not hasattr(self, '_spectral_mangler_dialogs'):
+            self._spectral_mangler_dialogs = {}
+        self._spectral_mangler_dialogs[inst.instance_id] = dlg
+        self._show_effect_dialog(dlg)
+
+    def _on_generic_fx_edited(self, inst: Any, effect_type: str,
+                              params: dict, commit: bool = True) -> None:
+        """NF 两款复合 FX 的统一提交路径（实例存在性守卫同其他类型）。"""
+        if not self._instance_in_chain(inst.instance_id):
+            return
+        effects = list(self._effect_chain.effects) if self._effect_chain else []
+        for i, e in enumerate(effects):
+            if e.instance_id == inst.instance_id and e.effect_type == effect_type:
+                from src.features.edit.core.timeline_v2 import TrackEffectInstance
+                effects[i] = TrackEffectInstance(
+                    effect_type=effect_type, params=dict(params),
+                    enabled=bool(e.enabled), order=e.order,
+                    instance_id=e.instance_id, panel=e.panel,
+                )
+                break
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        self._effect_chain = EffectChainParams(effects=tuple(effects)) if effects else None
+        self._update_badges_style()
+        if commit:
             self.track_effects_committed.emit(self._track_id, self._effect_chain)
         else:
             self.track_effects_preview.emit(self._track_id, self._effect_chain)
