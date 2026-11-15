@@ -3649,6 +3649,10 @@ class EffectChain:
         self._last_entries: Optional[list] = None
         # MX-02: 本块按实例 tap（process 时采样；tap_levels() 读取）
         self._tap_levels: dict = {}
+        # R09: {effect_index: group_post_gain_db}——panel="dynamics" 组的
+        # 组后 Make Up（在该组最后一个成员处理完后应用）。组内压缩器的
+        # makeup_gain 已在 set_params 时清零，增益不在 Limiter 前施加。
+        self._group_post_gain_db: dict = {}
 
     def set_params(self, entries: Optional[list], sample_rate: Optional[float] = None) -> None:
         """更新效果器链。
@@ -3674,6 +3678,11 @@ class EffectChain:
         new_effects: list = []
         new_flags: list = []
         new_ids: list = []
+        new_panels: list = []
+        # R09: 组后 Make Up——panel="dynamics" 的压缩器携带 makeup_post=
+        # True 时：实例参数的 makeup_gain 清零（不在 Limiter 前施加），
+        # 增益记到其所在 Dynamics 组（连续 panel="dynamics" 段）的末位。
+        group_post_gain: dict = {}
         # MX-06：实例身份池——优先按 (类型, instance_id) 精确匹配复用旧实例
         # （调序/删除/替换不串状态）；legacy 无 id 条目回退按类型匹配（旧工程
         # 语义：拖动参数不重建）。两类匹配都要求类型一致。
@@ -3688,6 +3697,8 @@ class EffectChain:
                 instance_id = ""
             # R01：5 元组携带 algorithm_version（0=未标注→legacy 桶）
             algorithm_version = int(entry[4]) if len(entry) >= 5 else 0
+            # R09：6 元组携带 panel（DY 面板实例标记）
+            panel = str(entry[5]) if len(entry) >= 6 else "fx"
             cls = registry.get(effect_type)
             if cls is None:
                 # 审计修复：未知效果类型不再静默跳过（预览/导出会无声
@@ -3717,11 +3728,38 @@ class EffectChain:
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
-            _apply_params_with_version(instance, params, self._sample_rate,
+            inst_params = params
+            _post_makeup_db = 0.0
+            if (panel == "dynamics" and effect_type == "compressor"
+                    and isinstance(params, dict)
+                    and params.get("makeup_post")):
+                try:
+                    _post_makeup_db = float(params.get("makeup_gain", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    _post_makeup_db = 0.0
+                if _post_makeup_db:
+                    inst_params = dict(params)
+                    inst_params["makeup_gain"] = 0.0
+            _apply_params_with_version(instance, inst_params, self._sample_rate,
                                        algorithm_version)
             new_effects.append(instance)
             new_flags.append(bool(enabled))
             new_ids.append(instance_id)
+            new_panels.append(panel)
+            if _post_makeup_db and bool(enabled):
+                group_post_gain[len(new_effects) - 1] = _post_makeup_db
+
+        # R09: 把组内成员的组后增益挪到 Dynamics 组（连续 panel="dynamics"
+        # 段）的最后一个成员之后
+        self._group_post_gain_db = {}
+        if group_post_gain:
+            n_eff = len(new_effects)
+            for i, db in group_post_gain.items():
+                j = i
+                while j + 1 < n_eff and new_panels[j + 1] == "dynamics":
+                    j += 1
+                self._group_post_gain_db[j] = \
+                    self._group_post_gain_db.get(j, 0.0) + db
 
         self._effects = new_effects
         self._enabled_flags = new_flags
@@ -3783,6 +3821,12 @@ class EffectChain:
                 if overshoot is not None:
                     tap["overshoot_db"] = float(overshoot)
                 self._tap_levels[iid] = tap
+            # R09: Dynamics 组组后 Make Up——组末成员处理完后统一施加
+            # （旁路的组不计：其压缩器的 enabled=False 时 set_params 已
+            # 不登记该增益；仍登记的是组内其他启用压缩器）
+            _gdb = self._group_post_gain_db.get(i)
+            if _gdb:
+                out = out * float(10.0 ** (_gdb / 20.0))
         return out
 
     def tap_levels(self) -> dict:

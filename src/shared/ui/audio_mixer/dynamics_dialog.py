@@ -1221,16 +1221,28 @@ class DynamicsDialog(QDialog):
         )
         if idx >= 0:
             old = effects[idx]
+            merged = dict(params_dict)
+            # R09：保留既有 makeup_post 标记（旧工程 legacy None 不被静默
+            # 升级——声音不变；已升级的组后语义不因编辑回退）
+            if effect_type == "compressor" and "makeup_post" not in merged:
+                prev = old.params.get("makeup_post") if old.params else None
+                if prev is not None:
+                    merged["makeup_post"] = bool(prev)
             effects[idx] = TrackEffectInstance(
-                effect_type=effect_type, params=dict(params_dict),
+                effect_type=effect_type, params=merged,
                 enabled=bool(old.enabled) if instance_enabled is None else bool(instance_enabled),
                 order=old.order, instance_id=old.instance_id,
                 panel="dynamics",
             )
         elif ensure_exists:
             new_order = max((e.order for e in effects), default=-1) + 1
+            created = dict(params_dict)
+            # R09：新建 DY 面板的压缩器默认组后 Make Up（与复合
+            # DynamicsEffect 同放置——两形态同参数同限幅声音）
+            if effect_type == "compressor":
+                created.setdefault("makeup_post", True)
             effects.append(TrackEffectInstance(
-                effect_type=effect_type, params=dict(params_dict),
+                effect_type=effect_type, params=created,
                 # 新建实例：实例级旁路默认开（总电源语义），模块级由 params 承载
                 enabled=True if instance_enabled is None else bool(instance_enabled),
                 order=new_order, panel="dynamics",
