@@ -266,14 +266,25 @@ class TestSMTopology:
                                         f"{m}_mix_pct": mix})
 
     def test_parallel_all_identity_modules_strict_unity(self):
-        """全部启用但模块恒等（mix=0）→ 严格 unity（计划 §10.2 oracle）。"""
+        """全部启用但模块恒等（mix=0）→ 严格 unity（计划 §10.2 oracle）。
+
+        H07：unity 指延迟对齐后逐位一致（wet 共享模块 max 时延时间轴），
+        模块 mix=0 的分支差不引入任何内容变化。
+        """
+        from src.features.edit.core.audio_effects.spectral_mangler import (
+            SpectralManglerEffect,
+        )
         x = _sine(int(SR), 440.0, 0.3)
         p = SpectralManglerParams(routing="parallel",
                                   ring_enabled=True, ring_mix_pct=0.0,
                                   grain_enabled=True, grain_mix_pct=0.0,
                                   dist_enabled=True, dist_mix_pct=0.0,
                                   global_mix_pct=100.0)
-        np.testing.assert_allclose(_run_sm(p, x), x, atol=1e-5)
+        fx = SpectralManglerEffect(SR)
+        fx.set_params(p.to_dict())
+        L = fx.latency_samples()
+        y = _run_sm(p, x)
+        np.testing.assert_allclose(y[:, L:], x[:, :int(SR) - L], atol=1e-5)
 
     def test_serial_order_matters(self):
         """非交换模块组合：dist→grain 与 grain→dist 输出不同。"""
@@ -297,10 +308,23 @@ class TestSMTopology:
         np.testing.assert_allclose(_run_sm(off, x), x, atol=1e-6)
 
     def test_global_mix_zero_identity(self):
+        """H07 契约更新：mix=0 = 时延对齐 dry（延迟 L 的逐位直通）。
+
+        旧断言（无时延直通）在 mix 自动化 0→100 扫动时引入 L 样本跳变；
+        对齐语义下 mix 全程连续。L 由 latency_samples() 报告（PDC 可补）。
+        """
+        from src.features.edit.core.audio_effects.spectral_mangler import (
+            SpectralManglerEffect,
+        )
         x = _sine(int(SR), 440.0, 0.3)
         p = SpectralManglerParams(ring_enabled=True, dist_enabled=True,
                                   grain_enabled=True, global_mix_pct=0.0)
-        np.testing.assert_allclose(_run_sm(p, x), x, atol=1e-6)
+        fx = SpectralManglerEffect(SR)
+        fx.set_params(p.to_dict())
+        L = fx.latency_samples()
+        y = _run_sm(p, x)
+        np.testing.assert_allclose(y[:, L:], x[:, :int(SR) - L], atol=1e-6)
+        np.testing.assert_allclose(y[:, :L], np.zeros((2, L)), atol=1e-6)
 
 
 class TestSMGrain:

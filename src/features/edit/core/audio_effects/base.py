@@ -32,6 +32,36 @@ def mix_aligned(dry: np.ndarray, wet: np.ndarray, mix_pct: float) -> np.ndarray:
     return dry + m * (wet - dry)
 
 
+class SampleDelayLine:
+    """样本时延线（模块 dry 对齐模块算法时延；H07/H10 拓扑对齐用）。"""
+
+    def __init__(self) -> None:
+        self._buf = np.zeros(0, dtype=np.float64)
+        self._latency = 0
+
+    def set_latency(self, latency: int) -> None:
+        latency = max(0, int(latency))
+        if latency != self._latency:
+            self._latency = latency
+            self._buf = np.zeros(latency, dtype=np.float64)
+
+    @property
+    def latency(self) -> int:
+        return self._latency
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        if self._latency == 0:
+            return x.astype(np.float64, copy=True)
+        buf = np.concatenate([self._buf, x.astype(np.float64)])
+        out = buf[:len(x)]
+        self._buf = buf[len(x):]
+        return out
+
+    def reset(self) -> None:
+        """清空滞留音频，保留对齐时延配置。"""
+        self._buf = np.zeros(self._latency, dtype=np.float64)
+
+
 class OnePoleDCBlocker:
     """去 DC 单极点：y[n] = x[n] - x[n-1] + a·y[n-1]（a≈0.9995@48k）。"""
 

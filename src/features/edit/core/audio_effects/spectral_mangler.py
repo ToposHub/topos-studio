@@ -248,7 +248,12 @@ class _GrainModule:
 
 
 def _apply_curve(u: np.ndarray, curve: str, fold: float) -> np.ndarray:
-    """四曲线共享纯响应（UI 曲线预览与 DSP 同源由对话框另行复用本表）。"""
+    """四曲线共享纯响应（UI 曲线预览与 DSP 同源由对话框另行复用本表）。
+
+    H07：本函数保持**无状态**（量化网格/位深与曲线形状的唯一来源）；
+    bitcrush 的 sample-hold 是时间域效果，由 ``_DistModule`` 按绝对流
+    索引逐声道应用（跨块相位连续，块长无关）。
+    """
     if curve == "tape":
         return np.tanh(u)  # 小信号增益恰为 1（+6dB drive → ×1.995）
     if curve == "fold":
@@ -257,41 +262,73 @@ def _apply_curve(u: np.ndarray, curve: str, fold: float) -> np.ndarray:
     if curve == "hard_clip":
         thresh = max(0.18, 1.0 - fold * 0.72)
         return np.clip(u, -thresh, thresh) / thresh
-    # bitcrush：量化位数 12→~2 + sample-hold 1→~5（fold 双语义）
+    # bitcrush 量化：位数 12→~2（fold 语义）；hold 1→~5 由模块应用
     levels = max(2.0, 12.0 * (1.0 - fold * 0.85))
-    hold = 1 + int(round(fold * 4.0))
-    q = np.round(np.clip(u, -1.0, 1.0) * levels) / levels
-    if hold > 1:
-        q = q[(np.arange(len(q)) // hold) * hold]
-    return q
+    return np.round(np.clip(u, -1.0, 1.0) * levels) / levels
 
 
 class _DistModule:
-    """SM-03：四曲线失真（Bias 前置 + 每声道去 DC + Tone/Q + 2× 过采样）。
+    """SM-03：四曲线失真（Bias 前置 + 逐声道去 DC + Tone/Q + 2× 过采样）。
 
-    过采样为历史衔接的 FIR 半带（63 阶）上/下变换，滤波状态跨块保留；
-    群延迟在上/下两级抵消（同 tap 数）。bitcrush 的有意 sample-hold
-    不做过采样（量化噪声是声音语义，计划 §8.4-4）。
+    H07 契约（复审 §5 H07）：
+    - **逐声道状态**：up/down FIR zi、tone zi、bitcrush hold 相位/保持值
+      逐声道维护（只共享不可变系数）——静音声道不再因另一声道输入
+      产生声音（复审测得 R 峰 0.0037..0.24 的串音源）。
+    - **有状态 2× 过采样**：零填充→FIR 插值→非线性→FIR 抗混叠→保相位
+      抽取；每声道输出 FIFO 以固定群延迟 ``(T−1)``@2× = ``(T−1)/2``@1×
+      样本对齐输入——不再按块裁未来样本后拿 0 补块尾（复审：每块尾
+      31 采样空洞，整块/256 块误差 ~2.1）。
+    - **bitcrush sample-hold 按绝对流索引**：跨块相位/保持值连续，
+      块长无关；有意不做过采样（量化噪声是声音语义，计划 §8.4-4）。
+    - ``latency`` 报告群延迟（31 样本@48k），供拓扑 dry 对齐。
     """
 
     def __init__(self, sample_rate: float) -> None:
         self._sr = float(sample_rate)
         self._dc = [OnePoleDCBlocker(sample_rate) for _ in range(2)]
         self._fir = firwin(_FIR_TAPS, 0.45)
-        self._up_zi: Optional[np.ndarray] = None
-        self._dn_zi: Optional[np.ndarray] = None
-        self._hist = np.zeros(32, dtype=np.float64)
+        self._nz = _FIR_TAPS - 1
+        self._up_zi: list = [None, None]
+        self._dn_zi: list = [None, None]
+        self._tone_zi: list = [None, None]
+        self._fifo: list = [np.zeros(0, dtype=np.float64)] * 2
+        self._abs_pos: list = [0, 0]      # bitcrush hold 相位基准
+        self._hold_idx: list = [-1, -1]   # 上一采样所处 hold 段号
+        self._hold_val: list = [0.0, 0.0] # 跨块沿用的保持值
         self._tone_b = np.array([1.0])
         self._tone_a = np.array([1.0])
-        self._tone_zi: Optional[np.ndarray] = None
+        self._tone_delay = 0
+        # 按默认 tone 初始化系数/群延迟（首个 process 前 latency 报告
+        # 即为真值，PDC/对齐不因"尚未处理"而少报 1 样本）
+        from src.features.edit.core.timeline_v2 import SpectralManglerParams
+        self._set_tone(SpectralManglerParams())
+
+    @property
+    def latency(self) -> int:
+        """模块总群延迟（1× 域样本）：两级 FIR (T−1)/2 + tone 低通群延迟。"""
+        return self._nz // 2 + int(getattr(self, "_tone_delay", 0))
+
+    def _ensure_channels(self, ch: int) -> None:
+        while ch >= len(self._dc):
+            self._dc.append(OnePoleDCBlocker(self._sr))
+            self._up_zi.append(None)
+            self._dn_zi.append(None)
+            self._tone_zi.append(None)
+            self._fifo.append(np.zeros(0, dtype=np.float64))
+            self._abs_pos.append(0)
+            self._hold_idx.append(-1)
+            self._hold_val.append(0.0)
 
     def reset(self) -> None:
         for d in self._dc:
             d.reset()
-        self._up_zi = None
-        self._dn_zi = None
-        self._tone_zi = None
-        self._hist = np.zeros(32, dtype=np.float64)
+        self._up_zi = [None] * len(self._up_zi)
+        self._dn_zi = [None] * len(self._dn_zi)
+        self._tone_zi = [None] * len(self._tone_zi)
+        self._fifo = [np.zeros(0, dtype=np.float64)] * len(self._fifo)
+        self._abs_pos = [0] * len(self._abs_pos)
+        self._hold_idx = [-1] * len(self._hold_idx)
+        self._hold_val = [0.0] * len(self._hold_val)
 
     def _set_tone(self, p) -> None:
         from src.features.edit.core.audio_effects.base import (
@@ -302,6 +339,19 @@ class _DistModule:
         f = max(200.0, min(16000.0, p.dist_tone_hz))
         f = min(f, self._sr * 0.45)
         self._tone_b, self._tone_a = biquad_lowpass_coeffs(f, q, self._sr)
+        # tone 低通群延迟（1kHz 处数值相位差分；H07 时延报告的一部分）
+        w = 2.0 * np.pi * 1000.0 / self._sr
+
+        def _ph(ww: float) -> float:
+            e1, e2 = np.exp(-1j * ww), np.exp(-2j * ww)
+            return float(np.angle((self._tone_b[0] + self._tone_b[1] * e1
+                                   + self._tone_b[2] * e2)
+                                  / (self._tone_a[0] + self._tone_a[1] * e1
+                                     + self._tone_a[2] * e2)))
+
+        dw = 1e-4
+        tau = -(_ph(w + dw) - _ph(w - dw)) / (2.0 * dw)
+        self._tone_delay = int(round(max(0.0, tau)))
 
     def process(self, x: np.ndarray, p) -> np.ndarray:
         self._set_tone(p)
@@ -309,49 +359,71 @@ class _DistModule:
         fold = max(0.0, min(100.0, p.dist_fold_pct)) / 100.0
         bias = (max(-100.0, min(100.0, p.dist_bias_pct)) / 100.0) * 0.45
         out = np.empty_like(x, dtype=np.float64)
+        tone_order = max(len(self._tone_a), len(self._tone_b)) - 1
         for ch in range(x.shape[0]):
+            self._ensure_channels(ch)
             u = x[ch].astype(np.float64) * drive + bias
             if p.dist_curve == "bitcrush":
-                y = _apply_curve(u, "bitcrush", fold)
+                y = self._bitcrush_hold(u, fold, ch)
             else:
-                y = self._oversample(u, p.dist_curve, fold)
+                y = self._oversample(u, p.dist_curve, fold, ch)
             y = self._dc[ch].process(y)
-            if self._tone_zi is None or ch == 0:
-                pass
-            yf, zf = lfilter(self._tone_b, self._tone_a, y,
-                             zi=(self._tone_zi
-                                 if self._tone_zi is not None
-                                 else np.zeros(max(len(self._tone_a),
-                                                   len(self._tone_b)) - 1)))
-            if ch == 0:
-                self._tone_zi = zf
+            zi = (self._tone_zi[ch] if self._tone_zi[ch] is not None
+                  else np.zeros(tone_order))
+            yf, zf = lfilter(self._tone_b, self._tone_a, y, zi=zi)
+            self._tone_zi[ch] = zf
             out[ch] = yf
         return out
 
-    def _oversample(self, u: np.ndarray, curve: str, fold: float) -> np.ndarray:
+    def _bitcrush_hold(self, u: np.ndarray, fold: float, ch: int) -> np.ndarray:
+        """量化（_apply_curve 同源网格）+ 绝对流索引 sample-hold。"""
         n = len(u)
-        padded = np.concatenate([self._hist, u])
-        up = np.zeros(2 * len(padded))
+        q = _apply_curve(u, "bitcrush", fold)
+        hold = 1 + int(round(fold * 4.0))
+        self._abs_pos[ch] += n
+        if hold <= 1 or n == 0:
+            return q
+        seg = (self._abs_pos[ch] - n + np.arange(n)) // hold
+        starts = np.empty(n, dtype=bool)
+        starts[0] = seg[0] != self._hold_idx[ch]
+        starts[1:] = seg[1:] != seg[:-1]
+        vals = q[starts]
+        starts_idx = np.flatnonzero(starts)
+        if not starts[0]:
+            # 首段延续上一块：段起点=0，值沿用跨块保持值
+            vals = np.concatenate([[self._hold_val[ch]], vals])
+            starts_idx = np.concatenate([[0], starts_idx])
+        counts = np.diff(np.append(starts_idx, n))
+        y = np.repeat(vals, counts)
+        self._hold_idx[ch] = int(seg[-1])
+        self._hold_val[ch] = float(y[-1])
+        return y
+
+    def _oversample(self, u: np.ndarray, curve: str, fold: float,
+                    ch: int) -> np.ndarray:
+        n = len(u)
+        up = np.zeros(2 * n)
         # ×2 增益补偿：零填充把基带能量均分给 L=2 份（插值器需乘 L）
-        up[::2] = padded * 2.0
-        if self._up_zi is None:
-            self._up_zi = np.zeros(len(self._fir) - 1)
-        up_f, zf = lfilter(self._fir, [1.0], up, zi=self._up_zi)
-        self._up_zi = zf[-(len(self._fir) - 1):]
+        up[::2] = u * 2.0
+        if self._up_zi[ch] is None:
+            self._up_zi[ch] = np.zeros(self._nz)
+        up_f, zf = lfilter(self._fir, [1.0], up, zi=self._up_zi[ch])
+        self._up_zi[ch] = zf
         y2 = _apply_curve(up_f, curve, fold)
-        if self._dn_zi is None:
-            self._dn_zi = np.zeros(len(self._fir) - 1)
-        dn_f, zf2 = lfilter(self._fir, [1.0], y2, zi=self._dn_zi)
-        self._dn_zi = zf2[-(len(self._fir) - 1):]
-        # 群延迟补偿：两级 FIR 各 (T-1)/2，上采样域总延迟 T-1；取 u 起点
-        # 之后的偶相位抽取
-        start = 2 * len(self._hist) + (_FIR_TAPS - 1)
-        y = dn_f[start:start + 2 * n:2]
-        if len(y) < n:
-            y = np.pad(y, (0, n - len(y)))
-        self._hist = (u[-32:].copy() if len(u) >= 32
-                      else np.concatenate([self._hist, u])[-32:])
-        return y[:n]
+        if self._dn_zi[ch] is None:
+            self._dn_zi[ch] = np.zeros(self._nz)
+        dn_f, zf2 = lfilter(self._fir, [1.0], y2, zi=self._dn_zi[ch])
+        self._dn_zi[ch] = zf2
+        # 保相位抽取（偶相位）：x[i] 内容位于 2× 索引 2i+2·latency →
+        # 抽取索引 i+latency；FIFO 使每块恰好弹 n 个（固定群延迟，
+        # 不裁未来样本/不补块尾零）
+        dec = dn_f[0::2]
+        fifo = np.concatenate([self._fifo[ch], dec])
+        out = fifo[:n]
+        self._fifo[ch] = fifo[n:]
+        if len(out) < n:  # 首块：延迟区补零（稳态每块恰 n 个）
+            out = np.pad(out, (0, n - len(out)))
+        return out
 
 
 class _MiniLimiter:
@@ -398,6 +470,13 @@ class SpectralManglerEffect:
         self._limiter = _MiniLimiter(self._sr)
         self._routing_fade = 0.0  # 路由切换短淡出保护（事件语义）
         self.last_clip = False
+        # H07：模块 dry 对齐线（dist 2× 过采样群延迟 31 样本）+ 总 wet 对齐。
+        # 逐声道成对——单线双声道会压 2/弹 2（同内容滞后减半、异内容互串）。
+        from src.features.edit.core.audio_effects.base import SampleDelayLine
+        self._module_dry = {m: (SampleDelayLine(), SampleDelayLine())
+                            for m in ("ring", "grain", "dist")}
+        self._dry_align = (SampleDelayLine(), SampleDelayLine())
+        self._par_align = (SampleDelayLine(), SampleDelayLine())
 
     # ── AudioEffect 契约 ──
     def set_params(self, params, sample_rate=None, algorithm_version=None):
@@ -434,7 +513,7 @@ class SpectralManglerEffect:
             ramp = np.arange(start, start + m, dtype=np.float64) / max(1, total - 1)
             wet[:, :m] *= ramp[np.newaxis, :]
             self._routing_fade -= m
-        wet = mix_aligned(x, wet, p.global_mix_pct)
+        wet = mix_aligned(self._aligned_dry(x, p), wet, p.global_mix_pct)
         gain = float(10.0 ** (max(-24.0, min(12.0, p.output_gain_db)) / 20.0))
         wet = wet * gain
         if p.output_limiter_enabled:
@@ -448,6 +527,13 @@ class SpectralManglerEffect:
         self._grain.reset()
         self._dist.reset()
         self._limiter.reset()
+        for pair in self._module_dry.values():
+            pair[0].reset()
+            pair[1].reset()
+        self._dry_align[0].reset()
+        self._dry_align[1].reset()
+        self._par_align[0].reset()
+        self._par_align[1].reset()
         self._samples_processed = 0
         self.last_clip = False
 
@@ -488,7 +574,7 @@ class SpectralManglerEffect:
             "sample_position": int(self._samples_processed),
         }
 
-    # ── 拓扑（SM-04）──
+    # ── 拓扑（SM-04；H07 dry 对齐）──
     def _module_wet(self, kind: str, x: np.ndarray, p) -> np.ndarray:
         if kind == "ring":
             return self._ring.process(x, p)
@@ -496,19 +582,55 @@ class SpectralManglerEffect:
             return self._grain.process(x, p, self._samples_processed)
         return self._dist.process(x, p)
 
+    def _module_latency(self, m: str) -> int:
+        """模块算法时延（当前仅 dist 的 2× FIR 群延迟非零）。"""
+        return self._dist.latency if m == "dist" else 0
+
+    @staticmethod
+    def _delay_2ch(dls, x: np.ndarray) -> np.ndarray:
+        """逐声道时延线对（L/R 各自独立推进）。"""
+        return np.vstack([dls[0].process(x[0]), dls[1].process(x[1])])
+
+    def _wet_latency(self, p) -> int:
+        """拓扑 wet 分支总时延：串行=Σ启用模块，并联=max。"""
+        enabled = [m for m in ("ring", "grain", "dist")
+                   if getattr(p, f"{m}_enabled")]
+        if not enabled:
+            return 0
+        lats = [self._module_latency(m) for m in enabled]
+        if p.routing == "parallel":
+            return max(lats)
+        return sum(lats)
+
+    def _aligned_dry(self, x: np.ndarray, p) -> np.ndarray:
+        lat = self._wet_latency(p)
+        self._dry_align[0].set_latency(lat)
+        self._dry_align[1].set_latency(lat)
+        return self._delay_2ch(self._dry_align, x)
+
     def _topology(self, x: np.ndarray, p) -> np.ndarray:
         enabled = [m for m in ("ring", "grain", "dist")
                    if getattr(p, f"{m}_enabled")]
         if not enabled:
             return x.copy()
         if p.routing == "parallel":
-            # y = x + Σ mᵢ(Fᵢ(x) − x)/N（启用但 mix=0 仍计入 N）
+            # y = delay_max(x) + Σ mᵢ(Fᵢ(x) − dryᵢ)/N（启用但 mix=0 仍计
+            # 入 N；H07：各支路 dry 按该模块时延对齐，直通分量也延迟到
+            # 公共 max 时延——整条 wet 共享同一时间轴，mix 扫动无跳变）
+            lat_max = max(self._module_latency(m) for m in enabled)
+            for i in (0, 1):
+                self._par_align[i].set_latency(lat_max)
             acc = np.zeros_like(x)
             for m in enabled:
+                lat_m = self._module_latency(m)
+                self._module_dry[m][0].set_latency(lat_m)
+                self._module_dry[m][1].set_latency(lat_m)
+                dry = self._delay_2ch(self._module_dry[m], x)
                 wet = self._module_wet(m, x, p)
-                acc += (getattr(p, f"{m}_mix_pct") / 100.0) * (wet - x)
-            return x + acc / float(len(enabled))
-        # 串行：按 routing 顺序；每模块 wet-only 后做模块 mix
+                acc += (getattr(p, f"{m}_mix_pct") / 100.0) * (wet - dry)
+            x_al = self._delay_2ch(self._par_align, x)
+            return x_al + acc / float(len(enabled))
+        # 串行：按 routing 顺序；每模块 dry 按模块时延对齐后做 mix
         order = {
             "ring_grain_dist": ("ring", "grain", "dist"),
             "grain_ring_dist": ("grain", "ring", "dist"),
@@ -518,9 +640,19 @@ class SpectralManglerEffect:
         for m in order:
             if m not in enabled:
                 continue
+            lat_m = self._module_latency(m)
+            self._module_dry[m][0].set_latency(lat_m)
+            self._module_dry[m][1].set_latency(lat_m)
+            dry = self._delay_2ch(self._module_dry[m], cur)
             wet = self._module_wet(m, cur, p)
-            cur = mix_aligned(cur, wet, getattr(p, f"{m}_mix_pct"))
+            cur = mix_aligned(dry, wet, getattr(p, f"{m}_mix_pct"))
         return cur
+
+    def latency_samples(self) -> int:
+        p = self._params
+        if p is None or not p.enabled:
+            return 0
+        return self._wet_latency(p)
 
     def _rebuild(self) -> None:
         self._ring = _RingModule(self._sr)
@@ -529,3 +661,8 @@ class SpectralManglerEffect:
         self._dist = _DistModule(self._sr)
         self._limiter = _MiniLimiter(self._sr)
         self._routing_fade = 0.0
+        from src.features.edit.core.audio_effects.base import SampleDelayLine
+        self._module_dry = {m: (SampleDelayLine(), SampleDelayLine())
+                            for m in ("ring", "grain", "dist")}
+        self._dry_align = (SampleDelayLine(), SampleDelayLine())
+        self._par_align = (SampleDelayLine(), SampleDelayLine())
