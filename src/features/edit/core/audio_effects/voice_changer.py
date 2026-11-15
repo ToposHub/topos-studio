@@ -216,21 +216,56 @@ def _one_pole_lp(x: np.ndarray, sr: float, fc: float,
 
 
 class _PitchModule:
-    """VC-01：双读头交叉淡化变速 pitch（Doppler 型）+ formant-link 补偿。"""
+    """VC-01/H05：双读头交叉淡化变速 pitch（Doppler 型）+ formant-link 补偿。
+
+    H05 契约（复审 §5 H05）：
+    - **有界环形**：物理容量 = win + 子块上限 + 边距（与整片时长无关；
+      修前按累计写位扩容，float64 立体声 ~2.6GiB/小时的结构性增长）。
+      块内按 ≤4096 子块推进，绝对读/写索引与物理槽位解耦（% 容量）。
+    - **固定中心延迟**：read_pos 初始化在 w−win/2——r=1（0st 无 jitter）
+      时 d 恒为 win/2，wet 延迟恒定；此时走精确直通旁路（mix 任意值
+      只有同一对齐脉冲，修前 0st/50% 出现 sample0+5280 双脉冲）。
+      latency 恒报 win/2（pitch 开启即报，含 0st——dry/旁路经时延线对齐）。
+    - **抗混叠预滤波**：升调（r>1）时输入先经 fc=0.45·SR/r_max 的两级
+      单极点低通再入环（折叠前滤除，修前 20kHz+12st 强折叠到 8kHz、
+      后置低通无法删除）。
+    - **Link 方向**：link=0 → 完全补偿重采样带来的包络上移（保原始谱
+      包络）；link=100 → 不补偿（包络随 pitch）。修前 −st·link 与契约
+      相反。fine cents 计入。
+    """
 
     _WINDOW_MS = 220.0
+    _SUB_CHUNK = 4096
+    _XFADE = 720  # 绕点交叉淡化窗（15ms @48k，按采样率换算）
 
     def __init__(self, sample_rate: float) -> None:
         self._sr = float(sample_rate)
         self._win = max(64, int(self._WINDOW_MS * 0.001 * self._sr))
-        self._bufs = [np.zeros(self._win * 3, dtype=np.float64) for _ in range(2)]
+        cap = self._win + self._SUB_CHUNK + 16
+        self._cap = cap
+        self._bufs = [np.zeros(cap, dtype=np.float64) for _ in range(2)]
+        # 写计数逐声道（共享会把 ch1 写到 ch0 之后的绝对位——立体声时
+        # 延迟语义完全错位）
         self._writes = [0, 0]
-        self._read_pos = [0.0, 0.0]
-        self._lp_zi: list = [None, None]
+        # 读头初始在原点后 win/2（负绝对位）：delay = w−read_pos ≈ +win/2
+        # （读后于写；修前 +win/2 使 delay 为负 → 开流即后跳 → 双脉冲）
+        self._read_pos = [-float(self._win / 2.0), -float(self._win / 2.0)]
+        self._old_read = [0.0, 0.0]
+        self._fade_total = max(8, int(self._XFADE * self._sr / 48000.0))
+        self._fade_left = [0, 0]
+        # 预滤波（每声道两级单极点，状态独立）
+        self._pre_zi: list = [[0.0] * 4, [0.0] * 4]
+        self._post_zi: list = [[0.0], [0.0]]
         self._jitter_ph1 = 0.0
         self._jitter_ph2 = 0.0
         self._seed = None
-        self._link_warper: Optional[_FormantModule] = None
+        # 急切创建：延迟报告在首个 process 前就须含 warp 的 WOLA 时延
+        #（惰性创建使首块 dry 少对齐 1024 → wet/dry 双脉冲）。
+        self._link_warper: Optional[_FormantModule] = _FormantModule(self._sr)
+        self._glide_target_log = None   # H05：Glide 目标（log 域）
+        self._glide_from_log = 0.0      # 目标变更时的起始值
+        self._glide_started = 0         # 目标变更时的绝对样本位
+        self._glide_cur_log = 0.0       # 当前有效 log-ratio（glide 平滑）
 
     def set_seed(self, seed: int) -> None:
         if seed != self._seed:
@@ -243,14 +278,36 @@ class _PitchModule:
         for b in self._bufs:
             b.fill(0.0)
         self._writes = [0, 0]
-        self._read_pos = [0.0, 0.0]
-        self._lp_zi = [None, None]
+        self._read_pos = [-float(self._win / 2.0), -float(self._win / 2.0)]
+        self._old_read = [0.0, 0.0]
+        self._fade_left = [0, 0]
+        self._pre_zi = [[0.0] * 4, [0.0] * 4]
+        self._post_zi = [[0.0], [0.0]]
+        self._glide_target_log = None
+        self._glide_from_log = 0.0
+        self._glide_started = 0
+        self._glide_cur_log = 0.0
         if self._link_warper is not None:
             self._link_warper.reset()
 
     @property
     def latency(self) -> int:
-        return 0
+        """wet 基线延迟（读头中心）——pitch 开启即报（含 0st）。"""
+        return self._win // 2
+
+    def _pre_filter(self, x: np.ndarray, fc: float, ch: int) -> np.ndarray:
+        """两级单极点低通（抗混叠；fc=0 表示旁路）。"""
+        if fc <= 0.0:
+            return x.astype(np.float64, copy=True)
+        a = float(np.exp(-2.0 * np.pi * fc / self._sr))
+        b0 = 1.0 - a
+        y = x.astype(np.float64, copy=True)
+        from scipy.signal import lfilter as _lf
+        for stage in range(4):
+            y, zf = _lf(np.array([b0]), np.array([1.0, -a]), y,
+                        zi=[self._pre_zi[ch][stage]])
+            self._pre_zi[ch][stage] = float(zf[0])
+        return y
 
     def _ratio(self, p, n: int, abs_start: int) -> np.ndarray:
         log_r = (float(np.clip(p.pitch_semitones, -24.0, 24.0)) / 12.0
@@ -261,7 +318,25 @@ class _PitchModule:
         jitter = amp * (np.sin(2 * np.pi * 0.6 * t + self._jitter_ph1)
                         + 0.5 * np.sin(2 * np.pi * 3.7 * t
                                        + self._jitter_ph2)) / 1.5
-        return np.exp(log_r * np.log(2.0) + jitter)
+        # H05：Glide——log-ratio 向目标按 pitch_glide_ms 滑动（绝对流位置
+        # 驱动，块长无关：目标变更时记 from/起始样本，进度 = 绝对推进量）
+        glide_ms = float(np.clip(getattr(p, "pitch_glide_ms", 0.0) or 0.0,
+                                 0.0, 2000.0))
+        if self._glide_target_log is None or abs(log_r - self._glide_target_log) > 1e-12:
+            self._glide_from_log = self._glide_target_log if                 self._glide_target_log is not None else log_r
+            self._glide_target_log = log_r
+            self._glide_started = abs_start
+        if glide_ms <= 0.0:
+            self._glide_cur_log = log_r
+            glide = np.full(n, log_r)
+        else:
+            glide_n = max(1.0, glide_ms * 0.001 * self._sr)
+            prog = np.clip((abs_start + np.arange(n)
+                            - self._glide_started) / glide_n, 0.0, 1.0)
+            glide = (self._glide_from_log * (1.0 - prog)
+                     + self._glide_target_log * prog)
+            self._glide_cur_log = float(glide[-1])
+        return np.exp(glide * np.log(2.0) + jitter)
 
     def process(self, x2d: np.ndarray, p, abs_start: int) -> np.ndarray:
         return np.vstack([self._process_mono(x2d[0], p, abs_start, 0),
@@ -269,69 +344,104 @@ class _PitchModule:
 
     def _process_mono(self, x: np.ndarray, p, abs_start: int, ch: int = 0) -> np.ndarray:
         n = len(x)
+        if n == 0:
+            return np.zeros(0)
         buf = self._bufs[ch]
-        # 容量按绝对写位（块分模式下写者累计推进，不按单块宽分配——
-        # 否则槽位回卷覆盖未读历史）
-        need = self._writes[ch] + n + self._win * 2 + 64
-        if len(buf) < need:
-            buf = np.concatenate([buf, np.zeros(need - len(buf))])
-            self._bufs[ch] = buf
-        wpos = self._writes[ch] % len(buf)
-        end = wpos + n
-        if end <= len(buf):
-            buf[wpos:end] = x
-        else:
-            k = len(buf) - wpos
-            buf[wpos:] = x[:k]
-            buf[:n - k] = x[k:]
-        write_before = self._writes[ch]
-        self._writes[ch] += n
-
-        ratio = self._ratio(p, n, abs_start)
-        blen = len(buf)
-        win = float(self._win)
+        cap = self._cap
         out = np.empty(n, dtype=np.float64)
 
-        def _read(pos_abs: float) -> float:
-            # Catmull-Rom 三次插值（降插值droop/交叉边带）
-            p0 = np.floor(pos_abs)
-            frac = pos_abs - p0
-            im1 = (int(p0) - 1) % blen
-            i0 = int(p0) % blen
-            i1 = (i0 + 1) % blen
-            i2 = (i0 + 2) % blen
-            y0, y1, y2, y3 = buf[im1], buf[i0], buf[i1], buf[i2]
-            return float(
-                y1 + 0.5 * frac * (y2 - y0
-                                   + frac * (2.0 * y0 - 5.0 * y1 + 4.0 * y2
-                                             - y3
-                                             + frac * (3.0 * (y1 - y2)
-                                                       + y3 - y0))))
+        # 抗混叠预滤波：升调时按 r_max 折叠前滤除（与声道无关的截止）
+        log_r_base = (float(np.clip(p.pitch_semitones, -24.0, 24.0)) / 12.0
+                      + float(np.clip(p.pitch_fine_cents,
+                                      -100.0, 100.0)) / 1200.0)
+        jit_amp = (25.0 / 1200.0) * (float(np.clip(p.pitch_jitter_pct,
+                                                   0, 100)) / 100.0)
+        r_max = 2.0 ** (log_r_base + jit_amp)
+        fc_pre = (min(18000.0, 0.45 * self._sr / r_max) if r_max > 1.001
+                  else 0.0)
+        xf = self._pre_filter(x, fc_pre, ch)
 
-        for j in range(n):
-            r = float(ratio[j])
-            w_abs = write_before + j
-            d = (w_abs - self._read_pos[ch]) % win  # 主读头延迟 ∈ [0, win)
-            d2 = (d + win / 2.0) % win              # 副读头延迟
-            wA = np.sin(np.pi * d / win) ** 2        # d=0（换绕点）权重 0
-            wB = np.cos(np.pi * d / win) ** 2        # d=win/2（副头换绕）权重 0
-            out[j] = (_read(w_abs - d) * wA
-                      + _read(w_abs - d2) * wB)
-            self._read_pos[ch] += r
-        r_max = float(np.max(ratio))
-        if r_max > 1.05:
-            fc = min(16000.0, self._sr * 0.45 / r_max)
-            out, self._lp_zi[ch] = _one_pole_lp(
-                out, self._sr, fc,
-                zi=self._lp_zi[ch] if self._lp_zi[ch] is not None
-                else [0.0])
+        pos = 0
+        while pos < n:
+            m = min(self._SUB_CHUNK, n - pos)
+            seg = xf[pos:pos + m]
+            wpos = self._writes[ch] % cap
+            end = wpos + m
+            if end <= cap:
+                buf[wpos:end] = seg
+            else:
+                k = cap - wpos
+                buf[wpos:] = seg[:k]
+                buf[:m - k] = seg[k:]
+            write_before = self._writes[ch]
+            self._writes[ch] += m
+
+            ratio = self._ratio(p, m, abs_start + pos)
+            win = float(self._win)
+
+            def _read(pos_abs: float) -> float:
+                # Catmull-Rom（物理槽位经 % cap 解耦绝对索引）
+                p0 = np.floor(pos_abs)
+                frac = pos_abs - p0
+                im1 = (int(p0) - 1) % cap
+                i0 = int(p0) % cap
+                i1 = (i0 + 1) % cap
+                i2 = (i0 + 2) % cap
+                y0, y1, y2, y3 = buf[im1], buf[i0], buf[i1], buf[i2]
+                return float(
+                    y1 + 0.5 * frac * (y2 - y0
+                                       + frac * (2.0 * y0 - 5.0 * y1
+                                                 + 4.0 * y2 - y3
+                                                 + frac * (3.0 * (y1 - y2)
+                                                           + y3 - y0))))
+
+            for j in range(m):
+                r = float(ratio[j])
+                w_abs = write_before + j
+                # H05：单读头 + 绕点短交叉淡化。旧双头恒定 win/2 间距在
+                # r=2 时奇次谐波深度归零（梳状）；单头平时纯读（无梳状），
+                # 延迟漂出 [win/4, 3win/4] 时跳 win/2 并在 _XFADE 窗内
+                # 等和淡化（复审 §7.2 的已知权衡只在绕点窗出现）。
+                if self._fade_left[ch] > 0:
+                    g = float(self._fade_left[ch]) / float(self._fade_total)
+                    w_old = np.sin(0.5 * np.pi * g) ** 2
+                    w_new = np.cos(0.5 * np.pi * g) ** 2
+                    out[pos + j] = (_read(self._old_read[ch]) * w_old
+                                    + _read(self._read_pos[ch]) * w_new)
+                    self._old_read[ch] += r
+                    self._read_pos[ch] += r
+                    self._fade_left[ch] -= 1
+                else:
+                    out[pos + j] = _read(self._read_pos[ch])
+                    self._read_pos[ch] += r
+                    delay = w_abs - self._read_pos[ch]
+                    if delay > 0.75 * win:
+                        self._old_read[ch] = self._read_pos[ch]
+                        self._read_pos[ch] += 0.5 * win
+                        self._fade_left[ch] = self._fade_total
+                    elif delay < 0.25 * win:
+                        self._old_read[ch] = self._read_pos[ch]
+                        self._read_pos[ch] -= 0.5 * win
+                        self._fade_left[ch] = self._fade_total
+            pos += m
+
+        r_eff_max = r_max
+        if r_eff_max > 1.05:
+            from scipy.signal import lfilter as _lf
+            fc = min(18000.0, 0.45 * self._sr / r_eff_max)
+            a = float(np.exp(-2.0 * np.pi * fc / self._sr))
+            out, zf = _lf(np.array([1.0 - a]), np.array([1.0, -a]), out,
+                          zi=[self._post_zi[ch][0]])
+            self._post_zi[ch] = [float(zf[0])]
+
+        # H05：Link 契约——0=完全补偿（保原始包络），100=不补偿（随 pitch）
         link = float(np.clip(p.pitch_formant_link_pct, 0.0, 100.0)) / 100.0
-        if link > 1e-3:
+        if link < 1.0 - 1e-3:
             if self._link_warper is None:
                 self._link_warper = _FormantModule(self._sr)
+            st_total = log_r_base * 12.0  # semitones（含 cents）
             link_params = _dc_replace(
-                p, formant_shift_st=-float(np.clip(p.pitch_semitones,
-                                                   -24.0, 24.0)) * link,
+                p, formant_shift_st=-st_total * (1.0 - link),
                 formant_throat_pct=0.0, formant_gender_pct=0.0,
                 formant_timbre_pct=0.0, formant_preserve_pct=0.0)
             # Each channel owns one WOLA stream. Processing a duplicated stereo
@@ -584,11 +694,14 @@ class VoiceChangerEffect:
             cur = mix_aligned(dry, wet, p.formant_mix_pct)
         # 2) Pitch
         if p.pitch_enabled:
+            # H05：wet 基线延迟 = 读头中心 win/2（0st 也成立——r=1 时 d 恒
+            # 定）；link<1 时补偿 warp 的 WOLA 时延叠加。
             p_link = (self._pitch._link_warper.latency
-                      if (p.pitch_formant_link_pct > 0
+                      if (p.pitch_formant_link_pct < 100.0
                           and self._pitch._link_warper is not None) else 0)
-            self._dry_p[0].set_latency(p_link)
-            self._dry_p[1].set_latency(p_link)
+            p_lat = self._pitch.latency + p_link
+            self._dry_p[0].set_latency(p_lat)
+            self._dry_p[1].set_latency(p_lat)
             wet = self._pitch.process(cur, p, self._samples_processed)
             dry = np.vstack([self._dry_p[0].process(cur[0]),
                              self._dry_p[1].process(cur[1])])
@@ -648,9 +761,11 @@ class VoiceChangerEffect:
         lat = 0
         if p.formant_enabled:
             lat += self._formant.latency
-        if p.pitch_enabled and p.pitch_formant_link_pct > 0 \
-                and self._pitch._link_warper is not None:
-            lat += self._pitch._link_warper.latency
+        if p.pitch_enabled:
+            lat += self._pitch.latency
+            if p.pitch_formant_link_pct < 100.0 \
+                    and self._pitch._link_warper is not None:
+                lat += self._pitch._link_warper.latency
         return lat
 
     def collect_telemetry(self) -> dict:
