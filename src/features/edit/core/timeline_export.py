@@ -4172,6 +4172,28 @@ class TimelineExporter:
                 len(audio_tracks), len(only_track_ids), total_samples,
             )
 
+        # R01/R02: 导出 preflight——预览与导出共用同一能力判定；未知/
+        # 降级实例汇总告警一次（不静默吞掉，渲染照常跳过 unsupported）。
+        try:
+            from src.features.edit.core.fx_versioning import collect_chain_diagnostics
+            _fx_diag = []
+            for _t in list(audio_tracks) + list(bus_tracks):
+                _chain = getattr(_t, "effect_chain", None)
+                if _chain is not None:
+                    _fx_diag.extend(collect_chain_diagnostics(_chain))
+            if audio_sequence.master_effect_chain is not None:
+                _fx_diag.extend(collect_chain_diagnostics(
+                    audio_sequence.master_effect_chain))
+            _bad = [d for d in _fx_diag if d["status"] != "supported"]
+            if _bad:
+                logger.warning(
+                    "audio export preflight: %d effect instance(s) not fully "
+                    "supported: %s", len(_bad),
+                    ", ".join(f"{d['effect_type']}({d['instance_id'][:8]})"
+                              f"[{d['status']}]" for d in _bad))
+        except Exception as exc:  # pragma: no cover - 诊断不阻断导出
+            logger.debug("audio export preflight diagnostics failed: %r", exc)
+
         logger.info(
             f"Rendering audio: {len(audio_tracks)} tracks + {len(bus_tracks)} buses, "
             f"{total_samples} samples, {sample_rate}Hz"
@@ -4180,9 +4202,13 @@ class TimelineExporter:
         # 混音输出缓冲区（master）+ bus 输入缓冲
         output = np.zeros((channels, total_samples), dtype=np.float32)
         bus_inputs: dict = {}
-        # MX-08: 跨轨共享的侧链检源帧缓存 {frame_idx: {source_track_id: block}}。
-        # 轨按 SC 依赖序 flush，被控轨在帧 f 能读到所有先处理检源轨的 f 帧输出。
-        sc_frame_outputs: dict = {}
+        # MX-08/R02: 跨轨共享的侧链检源缓冲——每源**单份**全长缓冲，检源轨
+        # flush 时按样本区间直写（取代旧的"逐帧 dict 缓存 + 结束前全长拼接"
+        # 双份拷贝）。轨按 SC 依赖序处理，被控轨在帧 f 读到先处理检源轨的
+        # f 帧输出切片；sc_written_until 记录各源已写到的样本位置——未覆盖
+        # 当前帧的源不进 taps（压缩器回退内部检源，与旧缺键语义一致）。
+        sc_tap_buffers: dict = {}
+        sc_written_until: dict = {}
 
         # 为每个 clip 打开 AudioDecoder 并解码
         decoders: Dict[str, AudioDecoder] = {}
@@ -4214,7 +4240,11 @@ class TimelineExporter:
                     if (_track_node is not None
                         and _track_node.effect_chain is not None) else 0)
                 _track_state = {"tail_left": 0}
-                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
+                # R02: 单调游标——本轨已通过 _render_and_route 推进到的下一帧。
+                # early flush 与 final drain 共用；drain 从 cursor 起步，禁止
+                # 把已处理旧帧再次喂入有状态节点（时序与写入位置分离缺陷）。
+                _track_state["next_frame"] = start_frame
+                _track_state["last_rendered"] = None                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
                 # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
                 _clip_starts = [c.timeline_start for c in track.clips]
                 _suffix_min_start = [0] * (len(_clip_starts) + 1)
@@ -4223,20 +4253,66 @@ class TimelineExporter:
                     _suffix_min_start[_i] = min(
                         _clip_starts[_i], _suffix_min_start[_i + 1])
 
+                def _advance_through(limit_frame: int) -> None:
+                    """R02: 单调游标连续推进到 limit_frame（不含）。
+
+                    帧升序逐帧处理：pending 帧出队渲染（刷新尾音预算）；
+                    间隙帧按尾音预算喂零推进；无内容且无尾音则跳过（游标
+                    照常前进）。early flush 与 final drain 共用本函数——
+                    存储顺序无关地覆盖同一组帧，时序与写入位置不再分离。
+                    """
+                    fidx = _track_state["next_frame"]
+                    while fidx < limit_frame:
+                        rel = fidx - start_frame
+                        if 0 <= rel and rel + 1 < len(frame_sample_bounds):
+                            block_len = (frame_sample_bounds[rel + 1]
+                                         - frame_sample_bounds[rel])
+                            if block_len > 0:
+                                if fidx in pending_frames:
+                                    _render_and_route(
+                                        fidx, pending_frames.pop(fidx))
+                                elif _track_state["tail_left"] > 0:
+                                    _track_state["tail_left"] = max(
+                                        0, _track_state["tail_left"] - block_len)
+                                    _render_and_route(
+                                        fidx,
+                                        np.zeros((channels, block_len),
+                                                 dtype=np.float32))
+                                # else：间隙且无尾音 → 跳过（游标前进）
+                        _track_state["next_frame"] = fidx + 1
+                        fidx += 1
+
                 def _render_and_route(fidx: int, summed: np.ndarray) -> None:
-                    """MX-04/MX-08: 对求和后的轨帧一次应用轨阶段并路由。"""
+                    """MX-04/MX-08/R02: 对求和后的轨帧一次应用轨阶段并路由。"""
                     rel = fidx - start_frame
                     if rel < 0 or rel + 1 >= len(frame_sample_bounds):
                         return
+                    # R02: 单调推进守卫——同帧重复或回退调用直接拒绝（状态时间
+                    # 与写入位置分离会让有状态节点把旧帧再吃一遍）。
+                    if _track_state["last_rendered"] is not None and \
+                            fidx <= _track_state["last_rendered"]:
+                        logger.warning(
+                            "audio export: non-monotonic frame %d after %d on "
+                            "track %s skipped (stateful DSP protection)",
+                            fidx, _track_state["last_rendered"], track.track_id)
+                        return
                     out_start = frame_sample_bounds[rel]
                     out_end = frame_sample_bounds[rel + 1]
-                    taps = sc_frame_outputs.get(fidx) or None
+                    # R02: 侧链 taps = 已完整写到本帧末的检源缓冲切片；
+                    # 未覆盖的源不提供（压缩器回退内部检源，与旧缺键语义一致）。
+                    taps = {
+                        _src: _buf[:, out_start:out_end]
+                        for _src, _buf in sc_tap_buffers.items()
+                        if sc_written_until.get(_src, 0) >= out_end
+                    } or None
                     processed = renderer.render_track_block(
                         track.track_id, summed, fidx,
                         fps=fps,
                         source_channels=int(track_first_src_ch or 2),
                         sidechain_taps=taps,
                     )
+                    _track_state["last_rendered"] = fidx
+                    _track_state["next_frame"] = fidx + 1
                     if processed is None:
                         return  # automation mute
                     node = renderer.get_node(track.track_id)
@@ -4269,13 +4345,16 @@ class TimelineExporter:
                             else:
                                 bus_inputs[send_bus_id][:, out_start:out_end] += \
                                     processed[:channels, :actual] * send_level
-                    # MX-08: 检源轨按帧缓存输出（块宽补齐，供被控轨 tap）
+                    # R02: 检源轨直写单份全长缓冲（不足块宽处保持零填充语义）
                     if track.track_id in export_sc_source_ids:
-                        blk = processed
-                        if blk.shape[-1] < out_end - out_start:
-                            blk = np.pad(blk, ((0, 0),
-                                               (0, out_end - out_start - blk.shape[-1])))
-                        sc_frame_outputs.setdefault(fidx, {})[track.track_id] = blk
+                        buf = sc_tap_buffers.get(track.track_id)
+                        if buf is None:
+                            buf = np.zeros((channels, total_samples),
+                                           dtype=np.float32)
+                            sc_tap_buffers[track.track_id] = buf
+                        buf[:, out_start:out_start + actual] += \
+                            processed[:channels, :actual]
+                        sc_written_until[track.track_id] = out_end
                     # MX-07: 内容帧刷新尾音预算
                     _track_state["tail_left"] = _track_tail_samples
 
@@ -4286,13 +4365,13 @@ class TimelineExporter:
                     overlap_start = max(clip_start, start_frame)
                     overlap_end = min(clip_end, end_frame)
 
-                    # MX-04: 提前 flush——早于 min(本 clip 起点, 未处理 clip
-                    # 最早起点) 的帧已不可能再被补充，按帧升序出队（限制
-                    # pending 内存；轨 DSP 状态按帧序推进不被乱序破坏）。
+                    # MX-04/R02: 提前 flush——早于 min(本 clip 起点, 未处理
+                    # clip 最早起点) 的帧已不可能再被补充，按帧升序出队（限制
+                    # pending 内存；轨 DSP 状态按帧序推进）。R02 起与 drain 共
+                    # 用连续游标推进：间隙按尾音预算喂零，clip 存储顺序不再
+                    # 改变帧覆盖集合。
                     _flush_bound = min(clip_start, _suffix_min_start[_clip_i + 1])
-                    for _pf in sorted(k for k in pending_frames
-                                      if k < _flush_bound):
-                        _render_and_route(_pf, pending_frames.pop(_pf))
+                    _advance_through(_flush_bound)
 
                     if overlap_start >= overlap_end:
                         continue
@@ -4687,32 +4766,19 @@ class TimelineExporter:
                         logger.warning(f"Failed to decode audio for clip {clip.clip_id}: {e}")
                         continue
 
-                # MX-04/MX-07: 轨收尾 flush——选区内按帧升序出队全部剩余
+                # MX-04/MX-07/R02: 轨收尾 drain——选区内按帧升序出队全部剩余
                 # pending；clip 间隙与选区尾部按尾音预算喂零推进（导出选区
                 # 内 drain；不扩展选区长度——跨选区尾音交付策略见计划 MX-07）。
+                # R02: 与 early flush 共用 _advance_through——从单调游标起步，
+                # 已处理帧绝不重喂（旧实现从 start_frame 重扫 + 尾音预算未清
+                # 零，帧 0/1 被二次喂入有状态节点，回声时序错位）。
                 _last_content_frame = max(pending_frames) if pending_frames else -1
                 _drain_end = min(
                     end_frame,
                     _last_content_frame + 1
                     + int(math.ceil(_track_tail_samples / max(1.0, float(sample_rate) / max(0.0001, float(fps))))),
                 )
-                for fidx in range(start_frame, _drain_end):
-                    rel = fidx - start_frame
-                    if rel < 0 or rel + 1 >= len(frame_sample_bounds):
-                        continue
-                    out_start = frame_sample_bounds[rel]
-                    out_end = frame_sample_bounds[rel + 1]
-                    block_len = out_end - out_start
-                    if block_len <= 0:
-                        continue
-                    if fidx in pending_frames:
-                        _render_and_route(fidx, pending_frames.pop(fidx))
-                    elif _track_state["tail_left"] > 0:
-                        _track_state["tail_left"] = max(
-                            0, _track_state["tail_left"] - block_len)
-                        _render_and_route(
-                            fidx, np.zeros((channels, block_len), dtype=np.float32))
-                    # 否则：间隙且无尾音 → 跳过（与实时无输入跳过一致）
+                _advance_through(_drain_end)
                 pending_frames.clear()
 
         finally:
@@ -4727,8 +4793,8 @@ class TimelineExporter:
         # AM-03/AM-14: Bus 阶段（拓扑序处理，支持多层 Bus→Bus）
         # RMA-04: 传入可听闭包，让 solo 普通轨必经的 Bus 也参与处理。
         # RMA-06: 传入 start_frame/fps 让 Bus automation（volume/pan/mute）逐样本求值。
-        # MX-08: Bus 阶段外部侧链 tap——把检源轨已 flush 的帧输出拼回
-        # 全选区缓冲（Bus 压缩器与普通轨同构消费）。
+        # R02: Bus/Master 阶段外部侧链 tap——直接取检源轨 flush 时直写的
+        # 单份全长缓冲（不再有第二份拼接拷贝；帧缓存 dict 已移除）。
         _bus_sc_taps: dict = {}
         _sc_needed_ids: set = set()
         if export_sc_source_ids and bus_tracks:
@@ -4740,21 +4806,8 @@ class TimelineExporter:
         if export_sc_source_ids:
             _sc_needed_ids |= renderer.master_sidechain_sources()
         for _src in _sc_needed_ids:
-            _buf = np.zeros((channels, total_samples), dtype=np.float32)
-            _has_any = False
-            for _f, _m in sc_frame_outputs.items():
-                _blk = _m.get(_src)
-                if _blk is None:
-                    continue
-                _rel = _f - start_frame
-                if 0 <= _rel < len(frame_sample_bounds):
-                    _s = frame_sample_bounds[_rel]
-                    _e = frame_sample_bounds[_rel + 1]
-                    _w = min(_blk.shape[-1], _e - _s)
-                    _buf[:, _s:_s + _w] += _blk[:, :_w].astype(
-                        np.float32, copy=False)
-                    _has_any = True
-            if _has_any:
+            _buf = sc_tap_buffers.get(_src)
+            if _buf is not None and sc_written_until.get(_src, 0) > 0:
                 _bus_sc_taps[_src] = _buf
         renderer.render_bus_stage(bus_inputs, output, has_solo=has_solo,
                                   audible_solo=audible_solo,
@@ -4766,6 +4819,11 @@ class TimelineExporter:
         # MX-03: sidechain_taps 供 Master FX 链外部检源（与 Bus 同一 tap 池）
         output = renderer.apply_master(output, start_frame=start_frame, fps=fps,
                                        sidechain_taps=_bus_sc_taps or None)
+        # R02: Bus/Master 消费完毕立即释放检源缓冲与路由输入——响度 pass /
+        # 编码阶段不再持有每源全长 tap 副本（del 解除本地引用，底层数组随之
+        # 回收；不用 clear() 原地清空——外部观察者持有的 dict 引用会看到数据
+        # 被抽走）。
+        del _bus_sc_taps, sc_tap_buffers, sc_written_until, bus_inputs
 
         # AM-10 阶段 3.4：离线响度交付。
         # 若指定 loudness_target_lufs，则扫描 master PCM：
