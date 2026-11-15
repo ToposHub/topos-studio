@@ -37,7 +37,7 @@ from PyQt6.QtCore import (
     Qt,
     pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QAction
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QAction, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -252,27 +252,48 @@ class VideoQueueModel(QAbstractTableModel):
 # =============================================================================
 
 
+class _QueueElidedLabel(QLabel):
+    """Recompute truncation after layout, keeping the original text intact."""
+
+    def __init__(self, mode: Qt.TextElideMode, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._elide_mode = mode
+        self._full_text = ""
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self._update_elision()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._update_elision()
+
+    def _update_elision(self) -> None:
+        super().setText(self.fontMetrics().elidedText(
+            self._full_text, self._elide_mode, max(0, self.contentsRect().width())))
+
+
 class _QueueThumbnail(QFrame):
     """Small neutral filmstrip placeholder used when no preview frame exists."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(40, 36)
+        self.setFixedSize(40, 30)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#19191d"))
-        painter.setPen(QPen(QColor("#777982"), 1))
-        painter.setBrush(QBrush(QColor("#44454d")))
+        painter.fillRect(self.rect(), QColor(C.BG_DARK))
+        painter.setPen(QPen(QColor(C.TEXT_HINT), 1))
+        painter.setBrush(QBrush(QColor(C.BG_BUTTON)))
         frame = self.rect().adjusted(5, 4, -5, -4)
         painter.drawRoundedRect(frame, 2, 2)
-        painter.setPen(QPen(QColor("#9a9ba2"), 1))
+        painter.setPen(QPen(QColor(C.TEXT_DIM), 1))
         for y in (7, 13, 19, 25):
             painter.drawLine(7, y, 10, y)
             painter.drawLine(self.width() - 10, y, self.width() - 7, y)
-        painter.setPen(QPen(QColor("#c8c9ce"), 1))
+        painter.setPen(QPen(QColor(C.TEXT_SECONDARY), 1))
         painter.drawLine(frame.left() + 7, frame.center().y(), frame.right() - 7, frame.center().y())
 
 
@@ -290,7 +311,7 @@ class _RenderQueueCard(QFrame):
         self._job = job
         self._number = number
         self.setObjectName("RenderQueueCard")
-        self.setMinimumHeight(96)
+        self.setMinimumHeight(88)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(f"""
             QFrame#RenderQueueCard {{
@@ -334,7 +355,7 @@ class _RenderQueueCard(QFrame):
         root.setSpacing(0)
 
         header = QWidget()
-        header.setFixedHeight(29)
+        header.setFixedHeight(28)
         header.setStyleSheet(f"background: {C.BG_PANEL}; border-bottom: 1px solid {C.BORDER_DARK};")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(9, 0, 6, 0)
@@ -349,6 +370,11 @@ class _RenderQueueCard(QFrame):
         self._job_label.setStyleSheet(f"color: {C.TEXT_BRIGHT}; background: transparent; font-size: 11px; font-weight: 600;")
         header_layout.addWidget(self._job_label)
         header_layout.addStretch()
+        self._status_label = _QueueElidedLabel(Qt.TextElideMode.ElideRight)
+        self._status_label.setObjectName("QueueCardStatus")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        header_layout.addWidget(self._status_label, 1)
 
         self._edit_button = QToolButton()
         self._edit_button.setObjectName("QueueCardAction")
@@ -371,7 +397,7 @@ class _RenderQueueCard(QFrame):
         body.setObjectName("QueueCardBody")
         body.setStyleSheet(f"background: {C.BG_PANEL};")
         body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(10, 8, 10, 8)
+        body_layout.setContentsMargins(12, 10, 20, 10)
         body_layout.setSpacing(10)
 
         body_layout.addWidget(_QueueThumbnail())
@@ -379,18 +405,18 @@ class _RenderQueueCard(QFrame):
         details = QVBoxLayout()
         details.setContentsMargins(0, 0, 0, 0)
         details.setSpacing(2)
-        self._title_label = QLabel()
+        self._title_label = _QueueElidedLabel(Qt.TextElideMode.ElideRight)
         self._title_label.setStyleSheet(f"color: {C.TEXT_PRIMARY}; background: transparent; font-size: 11px; font-weight: 600;")
         self._title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         details.addWidget(self._title_label)
-        self._path_label = QLabel()
+        self._path_label = _QueueElidedLabel(Qt.TextElideMode.ElideLeft)
         self._path_label.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; font-size: 10px;")
         self._path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         details.addWidget(self._path_label)
-        self._spec_label = QLabel()
+        self._spec_label = QLabel(self)
         self._spec_label.setStyleSheet(f"color: {C.TEXT_HINT}; background: transparent; font-size: 9px;")
         self._spec_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        details.addWidget(self._spec_label)
+        self._spec_label.hide()
         self._progress = QProgressBar()
         self._progress.setObjectName("QueueCardProgress")
         self._progress.setRange(0, 100)
@@ -402,11 +428,6 @@ class _RenderQueueCard(QFrame):
         status.setContentsMargins(0, 0, 0, 0)
         status.setSpacing(2)
         status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._status_label = QLabel()
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._status_label.setMinimumWidth(62)
-        self._status_label.setStyleSheet(f"font-size: 10px; color: {C.TEXT_DIM}; background: transparent;")
-        status.addWidget(self._status_label)
         self._percent_label = QLabel()
         self._percent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._percent_label.setStyleSheet(f"font-size: 9px; color: {C.TEXT_HINT}; background: transparent;")
@@ -426,10 +447,10 @@ class _RenderQueueCard(QFrame):
         timeline = job.timeline_name or job.name or job.timeline_id or I18N.tr("deliver.queue.untitled", "Untitled timeline")
         project = getattr(job, "project_name", "") or job.project_id
         title = f"{project} | {timeline}" if project else timeline
-        self._title_label.setText(self._elide(title, self._title_label))
+        self._title_label.setText(title)
         self._title_label.setToolTip(title)
         output = job.output_path or job.name or "—"
-        self._path_label.setText(self._elide(output, self._path_label))
+        self._path_label.setText(output)
         self._path_label.setToolTip(output)
 
         config = job.video_config
@@ -439,26 +460,37 @@ class _RenderQueueCard(QFrame):
         if config.fps:
             spec.append(f"{config.fps:g} fps")
         self._spec_label.setText(" · ".join(spec))
+        self._title_label.setToolTip(f"{title}\n{self._spec_label.text()}")
 
         status_color = STATUS_COLORS.get(job.status, C.TEXT_DIM)
         status_text = I18N.tr(
             STATUS_LABEL_KEYS.get(job.status, "deliver.queue.status_pending"),
             job.status.replace("_", " ").capitalize(),
         )
-        self._status_label.setText(f"● {status_text}")
+        self._status_label.setText(status_text)
+        self._status_label.setToolTip(status_text)
         self._status_label.setStyleSheet(
             f"font-size: 10px; color: {status_color}; background: transparent;"
         )
         progress = max(0.0, min(1.0, float(job.progress)))
         self._progress.setValue(round(progress * 100))
-        self._progress.setVisible(job.status in (VideoJobStatus.RUNNING, VideoJobStatus.DONE) or progress > 0)
-        self._percent_label.setText(f"{round(progress * 100)}%" if self._progress.isVisible() else "")
+        active_progress = job.status in (VideoJobStatus.RUNNING, VideoJobStatus.PAUSED)
+        self._progress.setVisible(active_progress)
+        self._percent_label.setText(f"{round(progress * 100)}%" if active_progress else "")
+        self._percent_label.setVisible(active_progress)
         fps = max(0.0, float(getattr(job, "export_fps", 0.0)))
         self._fps_label.setText(
             f"{fps:.1f} fps"
-            if fps > 0.0 and job.status in (VideoJobStatus.RUNNING, VideoJobStatus.DONE)
+            if fps > 0.0 and active_progress
             else ""
         )
+        self._fps_label.setVisible(bool(self._fps_label.text()))
+        if job.status == VideoJobStatus.DONE and job.started_at and job.finished_at:
+            seconds = max(0, round(job.finished_at - job.started_at))
+            elapsed = f"{seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}"
+            completed = I18N.tr("deliver.queue.completed_in", "Completed in {elapsed}", elapsed=elapsed)
+            self._status_label.setText(completed)
+            self._status_label.setToolTip(completed)
 
         self._edit_button.setVisible(
             job.status in (
@@ -484,14 +516,6 @@ class _RenderQueueCard(QFrame):
             I18N.tr("deliver.queue.action_cancel", "Cancel") if job.is_running
             else I18N.tr("deliver.queue.action_remove", "Remove")
         )
-
-    def _elide(self, text: str, label: QLabel) -> str:
-        width = max(80, label.width())
-        return label.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle, width)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
-        super().resizeEvent(event)
-        self.update_job(self._job, self._number)
 
     def _on_edit(self) -> None:
         if self._job.status == VideoJobStatus.DONE:
@@ -636,10 +660,11 @@ class VideoBatchExportPanel(QWidget):
     def _build_toolbar(self) -> QWidget:
         host = QWidget()
         host.setObjectName("VideoQueueToolbar")
+        host.setFixedHeight(28)
         host.setStyleSheet(f"""
             QWidget#VideoQueueToolbar {{
-                background-color: {C.BG_PANEL};
-                border-bottom: 1px solid {C.BORDER_DARK};
+                background-color: {C.BG_DARK};
+                border-bottom: 1px solid {C.PANEL_DIVIDER};
             }}
             QToolButton#QueueMoreButton {{
                 background: transparent;
@@ -661,7 +686,7 @@ class VideoBatchExportPanel(QWidget):
             }}
         """)
         layout = QHBoxLayout(host)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 0, 0, 0)
         layout.setSpacing(6)
 
         title = QLabel(I18N.tr("deliver.queue.title", "Render Queue"))
@@ -706,6 +731,7 @@ class VideoBatchExportPanel(QWidget):
         # More menu (float, retry-all, etc.)
         self._more_btn = QToolButton()
         self._more_btn.setObjectName("QueueMoreButton")
+        self._more_btn.setFixedHeight(27)
         self._more_btn.setText("⋯")
         self._more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more_menu = QMenu(self._more_btn)
@@ -750,16 +776,16 @@ class VideoBatchExportPanel(QWidget):
                 border-top: 1px solid {C.BORDER_DARK};
             }}
             QPushButton {{
-                background-color: {C.ORANGE_PRESS};
-                border: 1px solid {C.ORANGE_PRESS};
-                border-radius: 3px;
-                color: white;
-                padding: 5px 14px;
-                min-height: 26px;
+                background-color: {C.BG_BUTTON};
+                border: 1px solid {C.BORDER_MID};
+                border-radius: 4px;
+                color: {C.TEXT_BRIGHT};
+                padding: 3px 14px;
+                min-height: 18px;
                 font-size: 11px;
                 font-weight: 600;
             }}
-            QPushButton:hover {{ background-color: {C.ORANGE_HOVER}; }}
+            QPushButton:hover {{ background-color: {C.BG_BUTTON_HOVER}; border-color: {C.ORANGE}; }}
             QPushButton:disabled {{
                 background-color: {C.BG_BUTTON};
                 border-color: {C.BORDER_MID};
@@ -767,12 +793,12 @@ class VideoBatchExportPanel(QWidget):
             }}
         """)
         layout = QHBoxLayout(host)
-        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setContentsMargins(12, 10, 20, 10)
         layout.setSpacing(8)
 
-        self._footer_hint = QLabel(I18N.tr("deliver.queue.footer_hint", "Jobs render in order"))
+        self._footer_hint = QLabel(I18N.tr("deliver.queue.footer_hint", "Jobs render in order"), host)
         self._footer_hint.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; font-size: 10px;")
-        layout.addWidget(self._footer_hint)
+        self._footer_hint.hide()
         layout.addStretch()
 
         self._start_btn.setMinimumWidth(106)

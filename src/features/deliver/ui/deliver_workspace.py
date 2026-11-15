@@ -60,7 +60,7 @@ class DeliverWorkspace(QWidget):
         self.setObjectName("DeliverWorkspace")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "QWidget#DeliverWorkspace { background-color: #27272B; }"
+            f"QWidget#DeliverWorkspace {{ background-color: {C.BG_PANEL}; }}"
         )
         # The nested Deliver layout needs room for the settings inspector,
         # viewer and a readable queue while leaving a substantial timeline.
@@ -91,7 +91,7 @@ class DeliverWorkspace(QWidget):
         self._edit_preview_splitter.addWidget(self._batch_panel)
         self._edit_preview_splitter.setStretchFactor(0, 1)
         self._edit_preview_splitter.setStretchFactor(1, 0)
-        self._edit_preview_splitter.setSizes([620, 420])
+        self._edit_preview_splitter.setSizes([680, 370])
 
         # Bottom row: the timeline is deliberately outside the top splitter,
         # so it spans under both the viewer and the render queue.
@@ -105,7 +105,7 @@ class DeliverWorkspace(QWidget):
         self._right_splitter.addWidget(self._timeline_placeholder)
         self._right_splitter.setStretchFactor(0, 0)
         self._right_splitter.setStretchFactor(1, 1)
-        self._right_splitter.setSizes([470, 560])
+        self._right_splitter.setSizes([600, 430])
 
         self._edit_panels_attached = False
         self._shared_program_viewer: Optional[QWidget] = None
@@ -114,8 +114,8 @@ class DeliverWorkspace(QWidget):
         self._timeline_dock: Optional[Any] = None
         self._deliver_range_type: str = "entire"
 
-        self._settings_panel.setMinimumWidth(420)
-        self._batch_panel.setMinimumWidth(390)
+        self._settings_panel.setMinimumWidth(400)
+        self._batch_panel.setMinimumWidth(320)
 
         self._splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self._splitter.setObjectName("DeliverHorizontalSplitter")
@@ -176,14 +176,14 @@ class DeliverWorkspace(QWidget):
         """Restore the Resolve-style proportions after Qt state restore."""
         width = max(self._splitter.width(), self.minimumWidth())
         settings_width = 440
-        right_width = max(760, width - settings_width - 8)
+        right_width = max(760, width - settings_width - self._splitter.handleWidth())
         self._splitter.setSizes([settings_width, right_width])
         if self._edit_panels_attached:
             right_height = max(self._right_splitter.height(), 520)
-            top_height = max(360, int(right_height * 0.46))
+            top_height = max(360, int(right_height * 0.57))
             self._right_splitter.setSizes([top_height, max(240, right_height - top_height)])
             top_width = max(self._edit_preview_splitter.width(), 760)
-            queue_width = 420
+            queue_width = 370
             self._edit_preview_splitter.setSizes(
                 [max(420, top_width - queue_width), queue_width]
             )
@@ -387,10 +387,10 @@ class DeliverWorkspace(QWidget):
 
         self._edit_preview_splitter.setStretchFactor(0, 3)
         self._edit_preview_splitter.setStretchFactor(1, 0)
-        self._edit_preview_splitter.setSizes([620, 420])
+        self._edit_preview_splitter.setSizes([680, 370])
         self._right_splitter.setStretchFactor(0, 0)
         self._right_splitter.setStretchFactor(1, 1)
-        self._right_splitter.setSizes([470, 560])
+        self._right_splitter.setSizes([600, 430])
         self._edit_panels_attached = True
         timeline_changed = getattr(timeline_panel, "timeline_changed", None)
         if timeline_changed is not None:

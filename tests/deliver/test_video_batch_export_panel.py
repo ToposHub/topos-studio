@@ -192,7 +192,7 @@ class TestVideoExportSettingsPanel:
 
         # Subtitle delivery belongs to the video inspector, while the File
         # inspector changes from timeline naming to source naming.
-        assert panel._subtitle_combo.parent().objectName() == "VideoSettingsSection"
+        assert panel._subtitle_combo.parent().objectName() == "DeliverSubtitleBody"
         assert panel._unique_filenames_check.isHidden()
         panel._individual_clips_radio.setChecked(True)
         assert not panel._unique_filenames_check.isHidden()
@@ -319,6 +319,11 @@ class TestVideoExportSettingsPanel:
         panel._quality_mode_combo.setCurrentText("CRF")
         assert panel._estimated_size_label.isHidden()
 
+        panel._quality_mode_combo.setCurrentIndex(panel._quality_mode_combo.findData("vbr"))
+        panel._container_combo.setCurrentIndex(panel._container_combo.findData("mov"))
+        panel._codec_combo.setCurrentIndex(panel._codec_combo.findData("prores_422"))
+        assert panel._estimated_size_label.isHidden()
+
     def test_format_filters_encoder_choices(self, qapp):
         panel = VideoExportSettingsPanel()
 
@@ -430,6 +435,32 @@ class TestVideoExportSettingsPanel:
 
 
 # ── Controller integration ──
+
+
+def test_queue_card_preserves_actions_across_progress_and_completion(qapp):
+    from src.features.deliver.ui.video_batch_export_panel import _RenderQueueCard
+
+    job = VideoExportJob(timeline_name="Main", status=VideoJobStatus.RUNNING,
+                         progress=0.4, started_at=100.0)
+    card = _RenderQueueCard(job, 1)
+    assert not card._progress.isHidden()
+    assert card._progress.value() == 40
+    assert card._edit_button.isHidden()
+    cancelled = []
+    card.cancel_requested.connect(cancelled.append)
+    card._remove_button.click()
+    assert cancelled == [job.job_id]
+
+    job.status = VideoJobStatus.DONE
+    job.progress = 1.0
+    job.finished_at = 165.0
+    card.update_job(job, 1)
+    assert card._progress.isHidden()
+    assert "00:01:05" in card._status_label.text()
+    opened = []
+    card.open_requested.connect(opened.append)
+    card._edit_button.click()
+    assert opened == [job.job_id]
 
 
 class TestControllerIntegration:

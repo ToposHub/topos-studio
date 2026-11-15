@@ -8,6 +8,22 @@
 
 ---
 
+### Deliver 工作区 UI（2026-11-16）
+
+`DeliverWorkspace` 左侧固定设置检查器，右侧上方共享 Program Viewer 与渲染队列，
+下方时间线横跨 Viewer 和队列；默认设置宽 440、队列宽 370，上方约占 57%。
+继续借用 Edit 的真实 Viewer/Timeline，切页时归还原 dock，不复制播放或渲染状态。
+
+设置栏使用全局 `C` 颜色、`ChevronComboBox` 和 `DragValue`。预设下拉与可展开的
+多选卡片共享同一份选择状态；右上更多菜单提供预设浏览器、保存预设及“添加并开始”。
+Video/Audio/File 各自滚动，高级与字幕折叠只控制可见性，仍由既有草稿生成作业。
+预检和入队按钮固定在底栏；体积估算仅用于有目标码率的 VBR/CBR 编码器。
+队列卡片标题行呈现状态，正文显示工程/时间线和末尾文件路径，完整规格保留在 tooltip。
+
+独立预览：`tools/preview_deliver_ui.py`，截图与验证说明见
+`artifacts/deliver_resolve_ui/README.md`。预览使用隔离的临时配置、真实素材与待渲染作业，
+不启动导出；静态 Viewer 帧用于检查布局，未连接完整播放控制器。
+
 ## 1. 总览：五层结构
 
 ```

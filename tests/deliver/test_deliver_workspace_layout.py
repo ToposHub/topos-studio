@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 
 from src.features.deliver.ui.deliver_workspace import DeliverWorkspace
 from src.shared.ui.widgets import ChevronComboBox
-from src.shared.ui.panel_splitter import PANEL_RESIZE_EXTENT, PanelSplitter
+from src.shared.ui.panel_splitter import PANEL_RULE_WIDTH, PanelSplitter
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +79,7 @@ def test_deliver_workspace_contains_settings_left_of_queue(qapp):
         workspace.edit_preview_splitter,
     ):
         assert isinstance(splitter, PanelSplitter)
-        assert splitter.handleWidth() == PANEL_RESIZE_EXTENT
+        assert splitter.handleWidth() == PANEL_RULE_WIDTH
         assert "margin:" not in splitter.styleSheet()
     assert workspace.settings_panel.objectName() == "VideoDeliverSettingsPanel"
     assert workspace.batch_panel.objectName() == "VideoBatchExportPanel"
@@ -204,7 +204,8 @@ def test_video_settings_use_global_combos_and_mode_tabs(qapp):
     # R7：+2 = Topos pix_fmt 选择器 + alpha_budget_policy 策略 combo
     # v1.1 音频轨（plan M-A6）：+1 声道布局选择（2.0/5.1/7.1）
     # R17：+1（图像序列位深组合框）
-    assert len(settings.findChildren(ChevronComboBox)) == 20
+    # The compact preset selector uses the same shared control as parameters.
+    assert len(settings.findChildren(ChevronComboBox)) == 21
 
     tabs = settings.findChild(QTabBar, "DeliverModeTabs")
     assert tabs is not None
@@ -213,6 +214,75 @@ def test_video_settings_use_global_combos_and_mode_tabs(qapp):
     assert settings._mode_stack.currentIndex() == 0
     tabs.setCurrentIndex(1)
     assert settings._mode_stack.currentIndex() == 1
+
+
+def test_compact_preset_selector_replaces_multi_selection_with_one_draft(qapp):
+    workspace = DeliverWorkspace()
+    settings = workspace.settings_panel
+    settings._preset_cards["web_h264"].set_checked(True)
+    settings._preset_cards["mobile_h264"].set_checked(True)
+    assert settings._preset_combo.currentData() == "__multiple__"
+    settings._on_preset_activated(settings._preset_combo.currentIndex())
+    assert settings._selected_preset_ids == ["web_h264", "mobile_h264"]
+
+    settings._on_preset_activated(settings._preset_combo.findData("master_prores422"))
+    assert settings._selected_preset_ids == ["master_prores422"]
+    assert settings._codec_combo.currentData() == "prores_422"
+    assert settings._preset_combo.currentData() == "master_prores422"
+    assert not settings._preset_cards["web_h264"]._checked
+
+    settings._on_preset_activated(0)
+    assert settings._selected_preset_ids == []
+    assert settings._preset_combo.currentData() is None
+    # Custom Export keeps the draft the user was just editing.
+    assert settings._codec_combo.currentData() == "prores_422"
+
+
+def test_deliver_disclosures_keep_parameters_and_footer_reachable(qapp):
+    from PyQt6.QtWidgets import QScrollArea
+
+    workspace = DeliverWorkspace()
+    workspace.resize(1240, 620)
+    workspace.show()
+    qapp.processEvents()
+    settings = workspace.settings_panel
+    assert settings.findChild(QWidget, "DeliverAdvancedBody").isHidden()
+    assert settings.findChild(QWidget, "DeliverSubtitleBody").isHidden()
+    buttons = settings.findChildren(QToolButton, "DeliverDisclosure")
+    assert len(buttons) == 2
+    buttons[1].click()
+    settings._subtitle_combo.setCurrentIndex(1)
+    settings._mode_tabs.setCurrentIndex(2)
+    settings._mode_tabs.setCurrentIndex(0)
+    assert not settings._subtitle_combo.parent().isHidden()
+    assert settings._subtitle_combo.currentData() == "burn"
+    assert isinstance(settings._mode_stack.currentWidget(), QScrollArea)
+    footer = settings.findChild(QWidget, "DeliverSettingsFooter")
+    assert footer.isAncestorOf(settings._add_btn)
+    assert settings._add_btn.isVisible()
+    assert settings._add_and_start_btn.isHidden()
+    assert settings._unique_position_label.isHidden()
+    assert settings._stems_rows_label.isHidden()
+    settings._individual_clips_radio.setChecked(True)
+    assert not settings._unique_position_label.isHidden()
+    workspace.close()
+
+
+def test_reload_custom_preset_keeps_edited_draft_and_selection(qapp, monkeypatch):
+    from dataclasses import replace
+    from src.features.deliver.core import custom_export_presets
+    from src.features.deliver.core.video_export_presets import DEFAULT_VIDEO_PRESETS
+
+    preset = replace(DEFAULT_VIDEO_PRESETS[0], preset_id="user_review")
+    monkeypatch.setattr(custom_export_presets, "list_user_presets", lambda: [preset])
+    workspace = DeliverWorkspace()
+    settings = workspace.settings_panel
+    settings._preset_cards[preset.preset_id].set_checked(True)
+    settings._quality_value_spin.setValue(8765)
+    settings._reload_custom_presets()
+    assert settings._quality_value_spin.value() == 8765
+    assert settings._preset_cards[preset.preset_id]._checked
+    assert settings._preset_combo.currentData() == preset.preset_id
 
 
 def test_workspace_reads_timeline_mapping_values_and_promotes_active_sequence(

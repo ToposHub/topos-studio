@@ -738,7 +738,7 @@ class TimelinePanel(QWidget):
         toolbar.setStyleSheet(f"""
             QWidget#timelineToolbar {{
                 background: {EDIT_COLORS['bg_toolbar']};
-                border-bottom: 1px solid {EDIT_COLORS['border_subtle']};
+                border-bottom: 1px solid {EDIT_COLORS['timeline_divider']};
             }}
             QSlider::groove:horizontal {{ height: 3px; background: {EDIT_COLORS['border']}; }}
             QSlider::handle:horizontal {{ width: 9px; margin: -3px 0;
@@ -827,7 +827,7 @@ class TimelinePanel(QWidget):
             line = QFrame(toolbar)
             line.setFrameShape(QFrame.Shape.NoFrame)
             line.setFixedSize(1, 18)
-            line.setStyleSheet(f"background: {EDIT_COLORS['border_subtle']}; border: none;")
+            line.setStyleSheet(f"background: {EDIT_COLORS['timeline_divider']}; border: none;")
             line.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             self._toolbar_separators.append(line)
             add(line)
