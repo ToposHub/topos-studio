@@ -357,8 +357,7 @@ def _iter_stem_pcm_chunks(
         chunk_frames = max(1, int(round(fps)))  # ~1 秒/块
 
     # D05（第六轮审计）：per-clip FX 链与动画采样器——成片导出在
-    # render_track_block(clip_fx_chain=...) 应用 clip FX，Stem 此前完全不
-    # 传，Master stem 与成片 PCM 不一致。
+    # clip 求和前应用 clip FX（MX-04），Stem 与成片同一顺序。
     from src.features.edit.core.audio_dsp import EffectChain
     from src.features.edit.core.audio_retime import (
         animated_fx_sampler,
@@ -392,6 +391,92 @@ def _iter_stem_pcm_chunks(
                     "%d (%s); keeping previous params", clip_id, frame_idx, e)
         return chain
 
+    # ─────────────────────────────────────────────────────────────────────
+    # R03：Stem 复用成片调度语义（计划 2026-11-15 §5 R03）。
+    # - MX-04 求和优先：clip 阶段（fade/crossfade/clip-FX/gain）在解码循环
+    #   完成，轨阶段（volume/pan/EQ/FX）对**求和后的帧**每帧只跑一次——
+    #   多 clip 非线性 FX 不再逐 clip 各自过链（与成片/实时同构）。
+    # - Send tap 语义与成片一致：pre_fader 取求和帧（推子前），post_fader
+    #   取处理后输出；send mute 只断开该 send。
+    # - 侧链：Bus/Master 链引用的外部检源在本块内按帧收集 chunk 级 tap，
+    #   bus/master 阶段消费（此前 stem 完全不传 sidechain_taps）。
+    # - SC 检源闭包与可听闭包分开：不在本 stem 集合内的检源轨仍渲染供
+    #   tap（输出不进 stem 混音/路由，只喂 chunk_sc）。
+    # - 尾音：轨链 tail 预算跨块推进（无内容帧按预算喂零），选区内 drain。
+    # ─────────────────────────────────────────────────────────────────────
+    sc_needed_ids: set = set(renderer.master_sidechain_sources())
+    _sc_deps: Dict[str, set] = {}
+    for _t in audio_tracks:
+        _n = renderer.get_node(_t.track_id)
+        _srcs = (_n.effect_chain.sidechain_sources()
+                 if (_n is not None and _n.effect_chain is not None) else set())
+        sc_needed_ids |= _srcs
+        if not getattr(_t, "is_bus", False):
+            _sc_deps[_t.track_id] = {s for s in _srcs if s != _t.track_id}
+
+    # SC-only 轨：被本 stem 的轨/Bus/Master 链引用为检源、但不在 stem
+    # 集合内的普通轨——照常参与解码与轨阶段（供 tap），输出不入混音。
+    _sc_only_ids: set = set()
+    for _t in audio_tracks:
+        if getattr(_t, "is_bus", False) or _t.track_id in stem_ids:
+            continue
+        if _t.track_id in sc_needed_ids and len(getattr(_t, "clips", ())) > 0 \
+                and is_track_renderable(_t, has_solo):
+            _sc_only_ids.add(_t.track_id)
+            renderable_tracks.append(_t)
+            for _clip in getattr(_t, "clips", ()):
+                _cs = getattr(_clip, "timeline_start", 0)
+                _ce = _cs + getattr(_clip, "timeline_duration", 0)
+                _os, _oe = max(_cs, start_frame), min(_ce, end_frame)
+                if _os >= _oe:
+                    continue
+                if getattr(_clip, "freeze_source_frame", None) is not None:
+                    continue
+                work.append((_t, _clip, _os, _oe))
+    # 检源先于被控轨（与成片导出同一拓扑序；环按原序 + 告警）
+    _content_tracks = [t for t in renderable_tracks if not getattr(t, "is_bus", False)]
+    if _sc_deps and any(_sc_deps.values()):
+        _placed: set = set()
+        _ordered: List[Any] = []
+        _remaining = list(_content_tracks)
+        while _remaining:
+            _progressed = False
+            for _t in list(_remaining):
+                if _sc_deps.get(_t.track_id, set()) <= _placed:
+                    _ordered.append(_t)
+                    _placed.add(_t.track_id)
+                    _remaining.remove(_t)
+                    _progressed = True
+            if not _progressed:
+                _t = _remaining.pop(0)
+                logger.warning(
+                    "stem export sidechain dependency cycle at track %s; "
+                    "falling back to internal detection", _t.track_id)
+                _ordered.append(_t)
+                _placed.add(_t.track_id)
+        _content_tracks = _ordered
+
+    # 跨块状态：每轨尾音预算与单调游标（帧全局升序；块间连续）
+    _tail_budget: Dict[str, int] = {}
+    _tail_left: Dict[str, int] = {}
+    for _t in _content_tracks:
+        _n = renderer.get_node(_t.track_id)
+        _tail_budget[_t.track_id] = (
+            _n.effect_chain.tail_estimate_samples()
+            if (_n is not None and _n.effect_chain is not None) else 0)
+        _tail_left[_t.track_id] = 0
+
+    # work 按 (SC 序轨序, clip 序) 稳定重排——Phase 1 的求和顺序确定
+    _track_order_idx = {t.track_id: i for i, t in enumerate(_content_tracks)}
+    work.sort(key=lambda w: (_track_order_idx.get(w[0].track_id, 1 << 30),
+                             w[2]))
+
+    from src.features.edit.core.audio_dsp import (
+        apply_clip_fade as _apply_clip_fade,
+        apply_crossfade_block as _apply_xfade_block,
+    )
+    from src.features.edit.core.audio_playback import unpack_send
+
     # carry: 块边界处帧块尾部超出块尾的样本 (绝对样本位, 数据)。
     carry: List[Tuple[int, np.ndarray]] = []
 
@@ -418,12 +503,13 @@ def _iter_stem_pcm_chunks(
                 pending.append((pos + (end - rel), data[:, end - rel:]))
         carry = pending
 
+        # ── Phase 1：clip 解码 + clip 阶段 → (track, frame) 求和 ──
+        frame_sum: Dict[Tuple[str, int], np.ndarray] = {}
         for track, clip, ovl_start, ovl_end in work:
             frame_lo = max(ovl_start, f0)
             frame_hi = min(ovl_end, f1)
             for frame_idx in range(frame_lo, frame_hi):
-                # D06：块长用精确相邻样本边界差（与成片导出同源）——
-                # 固定 floor(sr/fps) 在非整数帧率下每帧留零样本洞。
+                # D06：块长用精确相邻样本边界差（与成片导出同源）。
                 out_start = frames_to_samples(frame_idx - start_frame, fps_exact, sample_rate)
                 out_next = frames_to_samples(
                     frame_idx + 1 - start_frame, fps_exact, sample_rate)
@@ -439,48 +525,44 @@ def _iter_stem_pcm_chunks(
                 if samples is None:
                     continue
 
-                # P1-15: 精确有理数换算（fps 为 Rational 时无浮点漂移）。
-                # 截断口径与整段渲染一致：以 total_samples 为上界。
                 actual = min(samples.shape[-1], total_samples - out_start)
                 if actual <= 0:
                     continue
 
-                # P1-09：与时间线导出同源的声道适配——标准布局走 BS.775
-                # downmix 矩阵（保留 Center/LFE/Surround 贡献），未知布局
-                # 回退截断/复制并留警告日志（替代此前静默 naive 截断）。
+                # P1-09：与时间线导出同源的声道适配。
                 samples = adapt_samples_for_delivery(
                     samples[:, :actual] if samples.ndim == 2 else samples,
                     channels,
                     context=f"stem {getattr(track, 'stem_group', '')} clip {getattr(clip, 'clip_id', '')}",
                 )
 
-                # C3: 片段级增益（与 timeline_export/实时播放同口径——
-                # 在 renderer 节点链之前乘线性增益；漏掉会使 Master stem
-                # 与成片音轨/主混音不一致）。
+                # C3: 片段级增益（renderer 节点链之前）。
                 _clip_gain_db = float(getattr(clip, "audio_gain_db", 0.0) or 0.0)
                 if abs(_clip_gain_db) > 1e-9:
                     samples = samples * (10.0 ** (_clip_gain_db / 20.0))
 
-                clip_fade = {
-                    "timeline_start": getattr(clip, "timeline_start", 0),
-                    "timeline_duration": getattr(clip, "timeline_duration", 0),
-                    "fade_in_frames": int(getattr(clip, "fade_in_duration", 0) or 0),
-                    "fade_out_frames": int(getattr(clip, "fade_out_duration", 0) or 0),
-                    "fps": fps,
-                    # B16：淡化曲线（预览/成片/Stem 同键）；R09：两端独立
-                    "fade_curve": getattr(clip, "fade_curve", None),
-                    "fade_curve_in": getattr(
-                        clip, "effective_fade_curve_in", None),
-                    "fade_curve_out": getattr(
-                        clip, "effective_fade_curve_out", None),
-                }
-                # D05：音频转场 crossfade 包络——与成片导出同一收集逻辑，
-                # Stem 此前完全缺失。
+                # MX-04/R03：clip 阶段（fade/crossfade/clip-FX）在求和前
+                # 完成——与成片导出同一调用序列。
+                samples = _apply_clip_fade(
+                    samples,
+                    clip_timeline_start=int(getattr(clip, "timeline_start", 0)),
+                    clip_timeline_duration=int(getattr(clip, "timeline_duration", 0)),
+                    current_frame=frame_idx,
+                    fade_in_frames=int(getattr(clip, "fade_in_duration", 0) or 0),
+                    fade_out_frames=int(getattr(clip, "fade_out_duration", 0) or 0),
+                    fps=fps,
+                    sample_rate=float(sample_rate),
+                    fade_in_samples_override=getattr(clip, "fade_in_samples", None),
+                    fade_out_samples_override=getattr(clip, "fade_out_samples", None),
+                    audio_sample_offset=int(getattr(clip, "audio_sample_offset", 0) or 0),
+                    fade_curve=getattr(clip, "fade_curve", None),
+                    fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
+                    fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
+                )
                 if getattr(track, "transitions", None):
                     from src.features.edit.core.audio_transition_catalog import (
                         audio_curve_for,
                     )
-                    xfades = []
                     for tr in track.transitions:
                         role = None
                         if tr.left_clip_id == clip.clip_id:
@@ -492,29 +574,82 @@ def _iter_stem_pcm_chunks(
                         curve = audio_curve_for(tr.transition_type)
                         if curve is None:
                             continue
-                        xfades.append({
-                            "role": role,
-                            "curve": curve,
-                            "start_frame": tr.start_frame,
-                            "duration": tr.duration,
-                        })
-                    if xfades:
-                        clip_fade["crossfade"] = xfades
+                        samples = _apply_xfade_block(
+                            samples,
+                            transition_start_frame=int(tr.start_frame),
+                            transition_duration_frames=int(tr.duration),
+                            current_frame=frame_idx,
+                            role=role,
+                            curve=str(curve),
+                            fps=fps,
+                            sample_rate=float(sample_rate),
+                        )
+                _clip_chain = _clip_fx_for(clip, frame_idx)
+                if _clip_chain is not None and _clip_chain.is_active:
+                    samples = _clip_chain.process(samples)
+
+                key = (track.track_id, frame_idx)
+                frame_buf = frame_sum.get(key)
+                if frame_buf is None:
+                    frame_buf = np.zeros((channels, block_len), dtype=np.float32)
+                    frame_sum[key] = frame_buf
+                _n = min(samples.shape[-1], frame_buf.shape[-1])
+                frame_buf[:, :_n] += samples[:channels, :_n].astype(
+                    np.float32, copy=False)
+
+        # ── Phase 2：轨阶段（求和帧一次过链）+ 路由 + sends + SC tap ──
+        chunk_sc: Dict[str, np.ndarray] = {}
+        chunk_sc_until: Dict[str, int] = {}
+        for track in _content_tracks:
+            node = renderer.get_node(track.track_id)
+            _track_frames = sorted(
+                f for (tid, f) in frame_sum if tid == track.track_id)
+            for frame_idx in range(f0, f1):
+                out_start = frames_to_samples(frame_idx - start_frame, fps_exact, sample_rate)
+                out_next = frames_to_samples(
+                    frame_idx + 1 - start_frame, fps_exact, sample_rate)
+                block_len = max(0, out_next - out_start)
+                if block_len <= 0:
+                    continue
+                summed = frame_sum.pop((track.track_id, frame_idx), None)
+                if summed is None:
+                    if _tail_left.get(track.track_id, 0) > 0:
+                        _tail_left[track.track_id] = max(
+                            0, _tail_left[track.track_id] - block_len)
+                        summed = np.zeros((channels, block_len), dtype=np.float32)
+                    else:
+                        continue  # 间隙且无尾音 → 冻结（与实时/成片一致）
+                else:
+                    _tail_left[track.track_id] = _tail_budget.get(
+                        track.track_id, 0)
+                # R03：轨级外部检源（同块内已处理的检源轨切片）
+                _taps = {
+                    _src: _buf[:, out_start - s0:out_next - s0]
+                    for _src, _buf in chunk_sc.items()
+                    if chunk_sc_until.get(_src, 0) >= out_next - s0
+                } or None
                 processed = renderer.render_track_block(
-                    track.track_id, samples, frame_idx,
-                    clip_fx_chain=_clip_fx_for(clip, frame_idx),
-                    clip_fade=clip_fade,
-                    fps=fps,
-                )
+                    track.track_id, summed, frame_idx, fps=fps,
+                    sidechain_taps=_taps)
                 if processed is None:
                     continue
+                actual = min(processed.shape[-1], block_len,
+                             total_samples - out_start)
+                if actual <= 0:
+                    continue
                 proc = processed[:channels, :actual]
-
-                # 块内落位；超出块尾的部分留给下一块（carry）
                 local = out_start - s0
                 take = min(actual, chunk_len - local)
+                if take > 0 and track.track_id in _sc_only_ids:
+                    # SC-only 轨：不入 stem 混音/路由/sends，只喂检源 tap
+                    _scbuf = chunk_sc.get(track.track_id)
+                    if _scbuf is None:
+                        _scbuf = np.zeros((channels, chunk_len), dtype=np.float32)
+                        chunk_sc[track.track_id] = _scbuf
+                    _scbuf[:, local:local + take] += proc[:, :take]
+                    chunk_sc_until[track.track_id] = out_next - s0
+                    continue
                 if take > 0:
-                    node = renderer.get_node(track.track_id)
                     target = node.output_bus_id if node else None
                     if target is not None and target in stem_ids:
                         if target not in bus_bufs:
@@ -522,29 +657,16 @@ def _iter_stem_pcm_chunks(
                                 (channels, chunk_len), dtype=np.float32)
                         bus_bufs[target][:, local:local + take] += proc[:, :take]
                     elif stem.stem_type == StemType.BUS:
-                        # F3.4 修复：BUS stem 的语义 = 该 Bus 的输出。
-                        # 路由到别处/直达 Master 的轨只经下方 send 贡献，
-                        # 干声不再落 stem 缓冲（旧实现把 send 源的干声
-                        # 直接混进 BUS stem，与成片路由语义不符）。
+                        # F3.4：BUS stem 语义 = 该 Bus 的输出；路由到别处/
+                        # 直达 Master 的轨只经 send 贡献，干声不落 stem 缓冲。
                         pass
                     else:
                         buf[:, local:local + take] += proc[:, :take]
-                    # F3.4 修复：sends 并行 tap 此前在 stem 路径整段丢失
-                    # （成片经 renderer.route_track_output 处理，stem 落位
-                    # 循环没有 send 分支）——任何带 send 的工程 Master
-                    # stem ≠ 成片。此处与 route_track_output 同语义：
-                    # post-fader 并行 tap × send_level，只认本 stem 集合
-                    # 内的已注册 bus（集合外的 send 落空，由 stem 语义
-                    # 决定——该 bus 不在本 stem 中）。
                     if node is not None:
                         for send_entry in node.sends:
-                            # MX-14: 4 元组 send（tap/muted）；stem 路径与
-                            # route_track_output 同语义取处理后的 post-fader
-                            # 输出，muted 只断开该 send
-                            from src.features.edit.core.audio_playback import (
-                                unpack_send,
-                            )
-                            send_bus_id, send_level, _tap, send_muted = (
+                            # R03/MX-14: pre_fader 取求和帧（推子前），
+                            # post_fader 取处理后输出；muted 只断开该 send。
+                            send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted \
                                     or send_bus_id not in stem_ids:
@@ -552,22 +674,42 @@ def _iter_stem_pcm_chunks(
                             if send_bus_id not in bus_bufs:
                                 bus_bufs[send_bus_id] = np.zeros(
                                     (channels, chunk_len), dtype=np.float32)
-                            bus_bufs[send_bus_id][
-                                :, local:local + take
-                            ] += proc[:, :take] * send_level
+                            if send_tap == "pre_fader":
+                                pre_take = min(summed.shape[-1], take)
+                                bus_bufs[send_bus_id][
+                                    :, local:local + pre_take] += \
+                                    summed[:channels, :pre_take] * send_level
+                            else:
+                                bus_bufs[send_bus_id][
+                                    :, local:local + take] += \
+                                    proc[:, :take] * send_level
+                    # R03：检源轨块内 tap（供后续被控轨与 bus/master 阶段）
+                    if track.track_id in sc_needed_ids:
+                        _scbuf = chunk_sc.get(track.track_id)
+                        if _scbuf is None:
+                            _scbuf = np.zeros((channels, chunk_len),
+                                              dtype=np.float32)
+                            chunk_sc[track.track_id] = _scbuf
+                        _scbuf[:, local:local + take] += proc[:, :take]
+                        chunk_sc_until[track.track_id] = out_next - s0
                 if take < actual and f1 < end_frame:
                     carry.append((out_start + take, proc[:, take:]))
+        frame_sum.clear()
 
         # Bus stage（仅本块的 Bus 输入；renderer 自动补零缓冲）
         # RMA-04: 传入可听闭包；RMA-06: 传入块起始帧/fps 让 Bus automation 求值
+        # R03: Bus 链外部检源 tap（与成片同一消费入口）
         renderer.render_bus_stage(bus_bufs, buf, has_solo=has_solo,
                                   audible_solo=audible_solo,
-                                  start_frame=f0, fps=fps)
+                                  start_frame=f0, fps=fps,
+                                  sidechain_taps=chunk_sc or None)
 
         # Master stage（可选；连续状态 limiter 跨块一致）
         # §3.1: 传入块起始帧/fps 供 master automation ramp
+        # R03: Master 链外部检源与 Bus 同一 tap 池
         if stem.include_master:
-            buf = renderer.apply_master(buf, start_frame=f0, fps=fps)
+            buf = renderer.apply_master(buf, start_frame=f0, fps=fps,
+                                        sidechain_taps=chunk_sc or None)
 
         yield buf
 
