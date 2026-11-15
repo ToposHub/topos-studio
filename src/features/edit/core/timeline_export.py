@@ -4170,6 +4170,7 @@ class TimelineExporter:
         renderer = AudioGraphRenderer(float(sample_rate))
         renderer.configure_from_sequence(audio_sequence)
 
+
         # R04：含尾导出模式——输出缓冲按 Bus/Master 链尾音预算延长。
         # 轨渲染仍限定在选区内（轨尾音选区内 drain 不变）；延长区的
         # 零输入由 bus/master 阶段的全长处理自然排空（Delay/Reverb 的
@@ -4197,6 +4198,46 @@ class TimelineExporter:
                         "frames (%d samples) for bus/master FX tails",
                         render_tail_frames, total_samples - (
                             frame_sample_bounds[frame_count]))
+        # H02：非零 start_frame 的确定性预卷。旧实现从选区起点冷启动，
+        # 区间前的 Delay/Reverb/包络状态全零——"从头渲染再裁 f4..10 峰
+        # 0.344，直接导出 f4..10 全零"（复审 §5 H02）。按全图 FX 尾音预算
+        # （轨/Bus/Master 链 tail_estimate 最大值）向前预渲染 pre_roll_frames
+        # 帧：解码/轨链/检源照常推进（feed 坐标），输出前 preroll_samples
+        # 在 Master 阶段后裁掉。随机/反馈类节点按同 seed 重放一致。
+        pre_roll_frames = 0
+        preroll_samples = 0
+        if start_frame > 0 and samples_per_frame > 0:
+            _pre_tail_samples = max(
+                renderer.master_tail_estimate_samples(),
+                renderer.bus_tail_estimate_samples(),
+            )
+            for _t in audio_sequence.audio_tracks:
+                _tn = renderer.get_node(_t.track_id)
+                if _tn is not None and _tn.effect_chain is not None:
+                    _pre_tail_samples = max(
+                        _pre_tail_samples,
+                        _tn.effect_chain.tail_estimate_samples())
+            if _pre_tail_samples > 0:
+                pre_roll_frames = min(
+                    int(start_frame),
+                    int(math.ceil(_pre_tail_samples / float(samples_per_frame))))
+                if pre_roll_frames > 0:
+                    preroll_samples = frames_to_samples(
+                        pre_roll_frames, fps_rational, sample_rate)
+                    logger.info(
+                        "audio export: non-zero selection pre-rolls %d frames "
+                        "(%d samples) to rebuild pre-selection FX state",
+                        pre_roll_frames, preroll_samples)
+        feed_start = start_frame - pre_roll_frames
+        if pre_roll_frames > 0:
+            # bounds 扩为 feed 坐标：[0, preroll] 为预卷帧，其后 = 原选区
+            # 边界整体平移 preroll_samples。
+            frame_sample_bounds = (
+                [frames_to_samples(f, fps_rational, sample_rate)
+                 for f in range(pre_roll_frames + 1)]
+                + [b + preroll_samples for b in frame_sample_bounds])
+        feed_total_samples = total_samples + preroll_samples
+
 
         # 收集可见的音频轨道（含 Bus 轨——Bus 无 clips 但需参与 bus stage）
         has_solo = any(t.is_solo for t in audio_sequence.audio_tracks)
@@ -4292,8 +4333,8 @@ class TimelineExporter:
             f"{total_samples} samples, {sample_rate}Hz"
         )
 
-        # 混音输出缓冲区（master）+ bus 输入缓冲
-        output = np.zeros((channels, total_samples), dtype=np.float32)
+        # 混音输出缓冲区（master）+ bus 输入缓冲（feed 长度 = 选区 + 预卷）
+        output = np.zeros((channels, feed_total_samples), dtype=np.float32)
         bus_inputs: dict = {}
         # MX-08/R02: 跨轨共享的侧链检源缓冲——每源**单份**全长缓冲，检源轨
         # flush 时按样本区间直写（取代旧的"逐帧 dict 缓存 + 结束前全长拼接"
@@ -4336,7 +4377,7 @@ class TimelineExporter:
                 # R02: 单调游标——本轨已通过 _render_and_route 推进到的下一帧。
                 # early flush 与 final drain 共用；drain 从 cursor 起步，禁止
                 # 把已处理旧帧再次喂入有状态节点（时序与写入位置分离缺陷）。
-                _track_state["next_frame"] = start_frame
+                _track_state["next_frame"] = feed_start
                 _track_state["last_rendered"] = None                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
                 # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
                 _clip_starts = [c.timeline_start for c in track.clips]
@@ -4356,7 +4397,7 @@ class TimelineExporter:
                     """
                     fidx = _track_state["next_frame"]
                     while fidx < limit_frame:
-                        rel = fidx - start_frame
+                        rel = fidx - feed_start
                         if 0 <= rel and rel + 1 < len(frame_sample_bounds):
                             block_len = (frame_sample_bounds[rel + 1]
                                          - frame_sample_bounds[rel])
@@ -4377,7 +4418,7 @@ class TimelineExporter:
 
                 def _render_and_route(fidx: int, summed: np.ndarray) -> None:
                     """MX-04/MX-08/R02: 对求和后的轨帧一次应用轨阶段并路由。"""
-                    rel = fidx - start_frame
+                    rel = fidx - feed_start
                     if rel < 0 or rel + 1 >= len(frame_sample_bounds):
                         return
                     # R02: 单调推进守卫——同帧重复或回退调用直接拒绝（状态时间
@@ -4414,7 +4455,7 @@ class TimelineExporter:
                     if target is not None:
                         if target not in bus_inputs:
                             bus_inputs[target] = np.zeros(
-                                (channels, total_samples), dtype=np.float32)
+                                (channels, feed_total_samples), dtype=np.float32)
                         bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
                     else:
                         output[:, out_start:out_end] += processed[:channels, :actual]
@@ -4428,7 +4469,7 @@ class TimelineExporter:
                                 continue
                             if send_bus_id not in bus_inputs:
                                 bus_inputs[send_bus_id] = np.zeros(
-                                    (channels, total_samples), dtype=np.float32)
+                                    (channels, feed_total_samples), dtype=np.float32)
                             if send_tap == "pre_fader":
                                 pre_actual = min(summed.shape[-1],
                                                  out_end - out_start)
@@ -4442,7 +4483,7 @@ class TimelineExporter:
                     if track.track_id in export_sc_source_ids:
                         buf = sc_tap_buffers.get(track.track_id)
                         if buf is None:
-                            buf = np.zeros((channels, total_samples),
+                            buf = np.zeros((channels, feed_total_samples),
                                            dtype=np.float32)
                             sc_tap_buffers[track.track_id] = buf
                         buf[:, out_start:out_start + actual] += \
@@ -4455,7 +4496,7 @@ class TimelineExporter:
                     clip_start = clip.timeline_start
                     clip_end = clip.timeline_start + clip.timeline_duration
 
-                    overlap_start = max(clip_start, start_frame)
+                    overlap_start = max(clip_start, feed_start)
                     overlap_end = min(clip_end, end_frame)
 
                     # MX-04/R02: 提前 flush——早于 min(本 clip 起点, 未处理
@@ -4637,7 +4678,7 @@ class TimelineExporter:
                                 return None
                             # D06：逐帧块长用精确相邻样本边界差（非整数 fps 时
                             # floor(sr/fps) 固定块长会在每帧边界留下零样本洞）。
-                            rel = frame_idx - start_frame
+                            rel = frame_idx - feed_start
                             out_start = frame_sample_bounds[rel]
                             out_end = frame_sample_bounds[rel + 1]
                             block_len = out_end - out_start
@@ -4939,14 +4980,18 @@ class TimelineExporter:
                 _bus_sc_taps[_src] = _buf
         renderer.render_bus_stage(bus_inputs, output, has_solo=has_solo,
                                   audible_solo=audible_solo,
-                                  start_frame=start_frame, fps=fps,
+                                  start_frame=feed_start, fps=fps,
                                   sidechain_taps=_bus_sc_taps or None)
 
         # AM-03: Master 阶段（volume/mute + Master 条带 + 软限幅）
-        # §3.1: 传入 start_frame/fps 供 master automation ramp
+        # §3.1: 传入 feed_start/fps 供 master automation ramp（H02：feed 坐标，
+        # 预卷段 master 曲线照常求值）
         # MX-03: sidechain_taps 供 Master FX 链外部检源（与 Bus 同一 tap 池）
-        output = renderer.apply_master(output, start_frame=start_frame, fps=fps,
+        output = renderer.apply_master(output, start_frame=feed_start, fps=fps,
                                        sidechain_taps=_bus_sc_taps or None)
+        # H02：裁掉预卷区（状态已进入 Bus/Master 链；交付只含选区）。
+        if preroll_samples > 0:
+            output = output[:, preroll_samples:preroll_samples + total_samples]
         # R02: Bus/Master 消费完毕立即释放检源缓冲与路由输入——响度 pass /
         # 编码阶段不再持有每源全长 tap 副本（del 解除本地引用，底层数组随之
         # 回收；不用 clear() 原地清空——外部观察者持有的 dict 引用会看到数据
