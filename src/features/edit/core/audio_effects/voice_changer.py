@@ -5,9 +5,13 @@ formant-link 包络补偿）→ Vocoder（8–32 带分析/合成 + 四载波）
 OutputGain。每模块独立 Mix（dry 经模块时延线对齐；0/100 两端精确）。
 
 设计契约：
-- Formant：WOLA（hann，hop=win/4）COLA 归一；中性参数（shift/throat/
-  gender/timbre 全零）下延迟对齐恒等。包络 = 实倒谱 lifter；频率轴映射
-  单调有界（累积最大值），禁止 F1/F2 交叉/负频率。
+- Formant：WOLA（周期 hann，hop=win/4）COLA 精确归一；输入前导
+  ``win−hop`` 零 + 输出队列 ``hop`` 零使首/尾边界完整重构（净时延 =
+  win，H04）；中性参数（shift/throat/gender/timbre 全零）下经倒谱/
+  峰值包络除法恒等（机器精度直通）。包络 = 局部极大值连线 + 平滑
+  （win=1024 帧内谐波 quefrency ≈3.2，倒谱 lifter 不可分离，H04 实测
+  改用峰值包络后共振峰位移误差 21%→6%）；频率轴映射单调有界（累积
+  最大值），禁止 F1/F2 交叉/负频率。
 - Pitch：双读头交叉淡化变速（Doppler 型——计划 §7.2 允许的连续变速
   路线；交叉边界的轻微梳状伪影为已知权衡，写入算法契约）。比例
   ``r = 2**(st/12 + cents/1200)``；jitter = seed 相位的两个低频正弦
@@ -26,6 +30,7 @@ from dataclasses import replace as _dc_replace
 from typing import Optional
 
 import numpy as np
+from scipy.ndimage import maximum_filter1d, uniform_filter1d
 from scipy.signal import lfilter
 
 from src.features.edit.core.audio_effects.base import (
@@ -37,52 +42,68 @@ from src.features.edit.core.audio_effects.base import (
 
 _FFT_WIN = 1024
 _FFT_HOP = 256
-_CEP_LIFTER = 28
 _NOISE_PATTERN = 1 << 18
 _VOC_Q = 6.0
 
 
 class _WolaStream:
-    """流式 WOLA（hann 分析+综合窗；win/hop=4:1 COLA）。延迟 = win。"""
+    """流式 WOLA（hann 分析+综合窗；win/hop=4:1 COLA）。延迟 = win。
+
+    H04 边界契约：
+    - **首边界**：输入流前插 ``win−hop`` 个零——真实首样本落在帧 0 的
+      位置 ``win−hop``，其 OLA 覆盖帧（k ∈ {0,1,2,3}）全部存在，重构
+      权重完整（修复旧实现首样本落在 hann 零点、且缺负时间帧导致的
+      首窗衰减/吞没）。输出队列相应预置 ``hop`` 个零，真实样本净时延
+      仍恰为 ``win``。
+    - **尾边界**：``flush()`` 补零完成滞留帧并返回剩余真实输出（流结
+      束语义；常规实时路径由后续零块自然 drain）。
+    - ``_fed``/``_emitted`` 记账支撑 flush 的"还欠多少真实样本"计算。
+    """
 
     def __init__(self, sample_rate: float, win: int = _FFT_WIN,
                  hop: int = _FFT_HOP) -> None:
         self.win = int(win)
         self.hop = int(hop)
-        self._w = np.hanning(self.win)
+        # 周期 hann（symmetric hann 的 w² 周期化和在帧缘有 ~1e-4 波纹，
+        # 中性恒等只能到 −76dB；周期窗在 hop=win/4 下 COLA 精确恒定）
+        self._w = (0.5 - 0.5 * np.cos(
+            2.0 * np.pi * np.arange(self.win) / self.win))
         # COLA 归一：hann² @ hop=win/4 的周期化和 = Σw²/hop = 1.5
         self._cola = float(np.sum(self._w ** 2) / self.hop)
-        self._in_buf = np.zeros(0, dtype=np.float64)
         self._out_acc = np.zeros(self.win, dtype=np.float64)
-        # 重构时延预置：区域 r 的 OLA 要等覆盖它的最后一帧加入才完整。
-        # 前插 win 个零（而非 win−hop）：in_buf 残量 r∈[0,win) 时
-        # 队列长度 = win − r > 0 恒不短缺——块分模式永不中途补零
-        # （块不变性），时延 = win。
-        self._out_queue = np.zeros(self.win, dtype=np.float64)
+        self._fed = 0     # 已送入的真实样本数（不含前导零）
+        self._emitted = 0  # 已弹出的输出样本数
+        self._prime()
+
+    def _prime(self) -> None:
+        self._in_buf = np.zeros(self.win - self.hop, dtype=np.float64)
+        self._out_acc = np.zeros(self.win, dtype=np.float64)
+        self._out_queue = np.zeros(self.hop, dtype=np.float64)
 
     @property
     def latency(self) -> int:
         return self.win
 
     def reset(self) -> None:
-        self._in_buf = np.zeros(0, dtype=np.float64)
-        self._out_acc = np.zeros(self.win, dtype=np.float64)
-        self._out_queue = np.zeros(self.win, dtype=np.float64)
+        self._fed = 0
+        self._emitted = 0
+        self._prime()
 
-    def process(self, x: np.ndarray, spectral_fn) -> np.ndarray:
-        n = len(x)
-        self._in_buf = np.concatenate([self._in_buf,
-                                       x.astype(np.float64, copy=False)])
+    def _run_frames(self, spectral_fn) -> None:
         while len(self._in_buf) >= self.win:
             frame = self._in_buf[:self.win]
             w = self._w
             X = np.fft.rfft(frame * w)
             mag = np.abs(X)
-            cep = np.fft.irfft(np.log(mag + 1e-10))
-            cep[_CEP_LIFTER + 1:] = 0.0
-            E = np.exp(np.clip(np.fft.rfft(cep).real, -30.0, 30.0))
+            # H04/VC-02 谱包络：局部极大值（跨谐波峰连线）+ 平滑。
+            # 旧实倒谱 lifter 在 win=1024 下无法分离谐波——150Hz 基频的
+            # quefrency 仅 win·f0/SR ≈ 3.2 样本，lifter≥28 把梳齿整个
+            # 保留进包络，warp 后共振峰位移系统性不足（复审测得 ~21%。
+            # 峰值连线包络直接跟踪共振峰，±6st 位移误差降至 ~6-11%）。
+            pk = maximum_filter1d(mag, size=9, mode="nearest")
+            env = uniform_filter1d(pk, size=17, mode="nearest")
             # 谱零点数值下限（包络除法稳定；中性下 X 同样≈0，误差有界）
-            E = np.maximum(E, 0.02 * float(E.max()) + 1e-12)
+            E = np.maximum(env, 0.02 * float(env.max()) + 1e-12)
             Y = spectral_fn(X, E)
             y_frame = np.fft.irfft(Y)
             self._out_acc += y_frame * w
@@ -91,11 +112,38 @@ class _WolaStream:
             self._out_acc = np.roll(self._out_acc, -self.hop)
             self._out_acc[-self.hop:] = 0.0
             self._in_buf = self._in_buf[self.hop:]
+
+    def process(self, x: np.ndarray, spectral_fn) -> np.ndarray:
+        n = len(x)
+        self._in_buf = np.concatenate([self._in_buf,
+                                       x.astype(np.float64, copy=False)])
+        self._fed += n
+        self._run_frames(spectral_fn)
         out = self._out_queue[:n]
         self._out_queue = self._out_queue[n:]
+        # 只计真实弹出——短缺时的补零不属于流内容，不得污染 flush 台账
+        self._emitted += len(out)
         if len(out) < n:
             out = np.concatenate([out, np.zeros(n - len(out))])
         return out
+
+    def flush(self, spectral_fn) -> np.ndarray:
+        """流结束：补零完成滞留帧，返回尚未弹出的全部**真实**输出。
+
+        返回长度 = ``_fed + latency − _emitted``（其后是补零区的重构，
+        不属于真实输出）。调用后流状态复位到 primed——flush 只在流
+        结束/换源时合法。
+        """
+        pad = self.win + self.hop
+        self._in_buf = np.concatenate(
+            [self._in_buf, np.zeros(pad, dtype=np.float64)])
+        self._run_frames(spectral_fn)
+        remaining = max(0, self._fed + self.latency - self._emitted)
+        drained = self._out_queue[:remaining]
+        self._out_queue = self._out_queue[remaining:]
+        self._emitted += len(drained)
+        self.reset()
+        return drained
 
 
 def _log_interp(x_new: np.ndarray, x_old: np.ndarray, y: np.ndarray) -> np.ndarray:
