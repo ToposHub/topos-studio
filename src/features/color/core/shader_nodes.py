@@ -23,12 +23,15 @@ vec3 hsv2rgb(vec3 c) {
 GRADING_SNIPPET = """
 uniform vec2 u_tex_size;
 
-vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure, float temp, float tint, float contrast, float saturation, float vibrance, float shadow, float highlights, float mid_detail, float sharpness, float hue_shift, float lift_saturation, float gamma_saturation, float gain_saturation) {
+vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure, float temp, float tint, float contrast, float saturation, float vibrance, float shadow, float highlights, float mid_detail, float sharpness, float hue_shift, float lift_saturation, float gamma_saturation, float gain_saturation, float pivot, vec3 offset, vec3 log_shadow, vec3 log_midtone, vec3 log_highlight, vec3 log_offset, float log_low_range, float log_high_range, float lum_mix) {
+    // 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
+    float luma_original = dot(color, vec3(0.299, 0.587, 0.114));
+
     // 1. Exposure - Reversible linear multiplier
     float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
     if (exposure < 0.0) exp_stops = -exp_stops;
     color *= pow(2.0, exp_stops);
-    
+
     // 2. White Balance (Simple Gain)
     vec3 wb = vec3(1.0);
     wb.r = 1.0 + temp / 200.0;
@@ -36,12 +39,12 @@ vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure,
     wb.g = 1.0 - tint / 200.0;
     color *= wb;
 
-    // 3. Contrast - Pivot around 0.18 (Physical Mid-Grey)
+    // 3. Contrast - Power curve around the pivot（默认 0.18 = 物理中间灰）
     if (contrast != 0.0) {
         // Map -100..100 to factor 0..2 (roughly)
         float c_factor = 1.0 + contrast / 100.0;
-        // Use natural power curve for contrast centered at 0.18
-        color = sign(color) * pow(abs(color) / 0.18, vec3(c_factor)) * 0.18;
+        // Use natural power curve for contrast centered at the pivot
+        color = sign(color) * pow(abs(color) / pivot, vec3(c_factor)) * pivot;
     }
 
     // 4. Lift / Gamma / Gain
@@ -88,6 +91,25 @@ vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure,
             float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
             color = mix(color, vec3(luma_post_grading), balance_factor);
         }
+    }
+
+    // 4.5 Offset（加性平衡轮）：uniform 已由 (h,s,b) 经
+    // params_to_offset_rgb 转为加性 RGB 偏移，中性 (0,0,0) 恒等。
+    color += offset;
+
+    // 4.6 Log 四轮（Shadow / Midtone / Highlight / Offset）：按亮度把
+    // 像素划入三个区间权重（Low/High Range 控制暗部上沿与亮部下沿），
+    // 再施加各区间加性偏移；log_offset 不分区、全帧等量平移。
+    if (log_shadow != vec3(0.0) || log_midtone != vec3(0.0) ||
+        log_highlight != vec3(0.0) || log_offset != vec3(0.0)) {
+        float log_lum = clamp(dot(color, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+        float log_lo = clamp(log_low_range, 0.05, 0.95);
+        float log_hi = clamp(log_high_range, 0.05, 0.95);
+        float log_w_shadow = 1.0 - smoothstep(log_lo * 0.5, log_lo, log_lum);
+        float log_w_high = smoothstep(log_hi, log_hi + (1.0 - log_hi) * 0.5, log_lum);
+        float log_w_mid = clamp(1.0 - log_w_shadow - log_w_high, 0.0, 1.0);
+        color += log_shadow * log_w_shadow + log_midtone * log_w_mid
+               + log_highlight * log_w_high + log_offset;
     }
 
     // 5. Shadows - Power Curve (Natural Lifting)
@@ -199,6 +221,17 @@ vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure,
     if (saturation != 0.0) {
         float gray = dot(color, vec3(0.299, 0.587, 0.114));
         color = mix(vec3(gray), color, 1.0 + saturation / 100.0);
+    }
+
+    // 11. Lum Mix（原亮度保留，0..100）：把结果亮度按 (100-lum_mix)/100
+    // 的比例向调色前原始亮度回拉。100 = 不干预（默认）；0 = 完全恢复
+    // 原始亮度（等效保持调色前影调、只取调色后的色度）。
+    if (lum_mix < 100.0) {
+        float graded_lum = dot(color, vec3(0.299, 0.587, 0.114));
+        if (graded_lum > 1e-5 && luma_original > 1e-5) {
+            color *= mix(1.0, luma_original / graded_lum,
+                         (100.0 - lum_mix) / 100.0);
+        }
     }
 
     return color;

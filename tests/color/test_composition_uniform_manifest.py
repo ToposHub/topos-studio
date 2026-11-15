@@ -107,6 +107,17 @@ _BODY_BASELINE_MINIMAL = [
     "uniform vec3 u_cs_low_soft;",
     "uniform vec3 u_cs_high_clip;",
     "uniform vec3 u_cs_high_soft;",
+    # 一级校色扩展参数（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）。
+    # 追加在清单末尾：既有 uniform 的 MSL 布局偏移全部保持不变。
+    "uniform vec3 u_offset;",
+    "uniform float u_pivot;",
+    "uniform vec3 u_log_shadow;",
+    "uniform vec3 u_log_midtone;",
+    "uniform vec3 u_log_highlight;",
+    "uniform vec3 u_log_offset;",
+    "uniform float u_log_low_range;",
+    "uniform float u_log_high_range;",
+    "uniform float u_lum_mix;",
 ]
 
 
@@ -125,9 +136,9 @@ def test_optional_and_grain_declarations():
         has_curves=True, has_hsl_curve=True, has_warper=True,
         has_lut3d=True, grain_enabled=True)
     body = m.declarations("body")
-    # 可选 sampler 段在基础段末尾（u_cs_* 四参数）之后、grain 段在其后
-    # （插件除外）
-    assert body[body.index("uniform vec3 u_cs_high_soft;") + 1:] == [
+    # 可选 sampler 段在基础段末尾（u_cs_* 四参数 + 扩展参数段）之后、
+    # grain 段在其后（插件除外）
+    assert body[body.index("uniform float u_lum_mix;") + 1:] == [
         "uniform sampler2D u_curves_tex;",
         "uniform sampler2D u_hsl_curve_tex;",
         "uniform sampler2D u_warper_tex;",

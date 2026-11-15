@@ -115,7 +115,7 @@ def test_master_dial_gesture_updates_preview_and_saves_once(qapp, image_engine, 
     panel.grading_changed.connect(host.on_grading_changed)
     host._setup_grading_save_callback("clip-a")
     wheel = getattr(panel, mode + "_wheel")
-    dial = wheel.brightness_slider
+    dial = wheel.master_jog
 
     def send(kind: QMouseEvent.Type, x: float) -> None:
         point = QPointF(x, 11.0)

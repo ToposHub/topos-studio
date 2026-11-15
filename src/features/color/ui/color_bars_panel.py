@@ -1,8 +1,14 @@
-"""
-达芬奇 Primaries - Color Bars 页（Lift/Gamma/Gain，无 Offset）。
+"""Topos Primaries - Color Bars 页（Lift/Gamma/Gain/Offset）。
 
-竖直 Y/R/G/B 条 + 通道数值格 + YRGB 联动拇指轮，与色轮页共享同一组
+竖直通道条 + 通道数值格 + 滚花主轮，与色轮页共享同一组
 (hue, sat, brightness) 状态和显示单位，双向同步。
+
+视觉（原创设计，非达芬奇复刻）：圆角内凹纯黑滑槽 + 通道渐变填充柱 +
+带通道描边的中空游标 + 水平中心基准线；Offset 列顶部/底部带微箭头
+标记（上=增、下=减）。
+
+加性列（Offset）显示单位为加性偏移 × 100（与色轮页一致），仅
+R/G/B 三条；乘性列（Lift/Gamma/Gain）保持 YRGB 四条与既有值域。
 """
 
 import math
@@ -17,21 +23,28 @@ from PyQt6.QtGui import (QPainter, QColor, QPen, QPainterPath, QLinearGradient,
 from src.shared.assets.icon_manager import icon_reset, IconColors
 from src.shared.ui.widgets.drag_value import drag_speed_per_pixel
 from src.shared.i18n.i18n import I18N
-from src.features.color.ui.color_wheel import (ColorWheel, _BrightnessDial,
-                                               _GradingValue)
+from src.features.color.ui.color_wheel import (
+    ColorWheel, KnurledJogWheel, _GradingValue,
+    offset_hsb_to_display, offset_display_to_hsb,
+)
 
-_TRACK_FILL = "#16171a"
-_TRACK_EDGE = "#232328"
-_DEFAULT_LINE = "#3a3a3a"
-_HANDLE_FILL = "#17171a"
-_GRADIENT_BLACK = "#0a0a0a"
-_CHANNEL_COLORS = {"Y": "#ffffff", "R": "#ff1a00", "G": "#0ad23a", "B": "#225cd7"}
-_FILL_COLORS = {"Y": "#ffffff", "R": "#db3a3b", "G": "#3adc3b", "B": "#3b3bdb"}
+_TRACK_FILL = "#0e0f12"
+_TRACK_EDGE = "#090a0c"
+_DEFAULT_LINE = "#32363f"
+_HANDLE_FILL = "#14161a"
+_GRADIENT_BLACK = "#0e0f12"
+_CHANNEL_COLORS = {"Y": "#e5e7eb", "R": "#ef4444", "G": "#22c55e", "B": "#3b82f6"}
+_FILL_COLORS = {"Y": "#e5e7eb", "R": "#db3a3b", "G": "#3adc3b", "B": "#3b3bdb"}
 _CHANNELS = ("Y", "R", "G", "B")
+_ADD_CHANNELS = ("R", "G", "B")
+# 加性列滑槽视觉范围（显示单位）：偏移理论极值约 ±150，视觉两端留余量。
+# 与数值框（±200）不对称沿用既有约定："bars clamp at visual range ends;
+# numbers keep the true value"——滑槽截断显示，数值框保留真实值。
+_ADD_BAR_RANGE = (-150.0, 150.0)
 
 
 class _ChannelBar(QWidget):
-    """Resolve-style vertical bar: relative drag, outline handle, value fill."""
+    """Vertical channel bar: relative drag, outlined handle, value gradient fill."""
 
     valueChanged = pyqtSignal(float)
     interaction_started = pyqtSignal()
@@ -51,7 +64,7 @@ class _ChannelBar(QWidget):
         self._engaged = False
         self._start_y = 0.0
         self._start_value = 0.0
-        self.setFixedWidth(14)
+        self.setFixedWidth(24)
         self.setMinimumHeight(110)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
@@ -78,13 +91,35 @@ class _ChannelBar(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = float(self.width()), float(self.height())
-        track = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
-        path = QPainterPath()
-        path.addRoundedRect(track, w / 2.0, w / 2.0)
+        track = QRectF(2.0, 2.0, w - 4.0, h - 4.0)
+        radius = track.width() / 2.0
+
+        # 1. 圆角内凹纯黑滑槽
         painter.setPen(QPen(QColor(_TRACK_EDGE), 1.0))
         painter.setBrush(QColor(_TRACK_FILL))
-        painter.drawPath(path)
-        painter.setClipPath(path)
+        painter.drawRoundedRect(track, radius, radius)
+
+        # 2. 水平中心基准刻度细线
+        mid_y = track.center().y()
+        painter.setPen(QPen(QColor(_DEFAULT_LINE), 0.8))
+        painter.drawLine(QPointF(track.left(), mid_y), QPointF(track.right(), mid_y))
+
+        # Offset 列：顶部/底部微箭头标记（上=增、下=减）
+        if self._is_offset_bar:
+            painter.setPen(QPen(QColor("#737985"), 1.1, Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap))
+            cx = track.center().x()
+            painter.drawLine(QPointF(cx - 2.5, 9.0), QPointF(cx, 6.5))
+            painter.drawLine(QPointF(cx + 2.5, 9.0), QPointF(cx, 6.5))
+            painter.drawLine(QPointF(cx - 2.5, h - 9.0), QPointF(cx, h - 6.5))
+            painter.drawLine(QPointF(cx + 2.5, h - 9.0), QPointF(cx, h - 6.5))
+
+        # 3. 裁剪圆角内部绘制通道渐变填充柱
+        clip = QPainterPath()
+        clip.addRoundedRect(track.adjusted(1.0, 1.0, -1.0, -1.0),
+                            radius - 1.0, radius - 1.0)
+        painter.setClipPath(clip)
+
         yv = self._y_for(self._value)
         y0 = self._y_for(self._zero)
         fill = QColor(_FILL_COLORS[self._channel])
@@ -94,25 +129,32 @@ class _ChannelBar(QWidget):
                 gradient = QLinearGradient(0.0, yv, 0.0, h)
                 gradient.setColorAt(0.0, fill)
                 gradient.setColorAt(1.0, black)
-                painter.fillRect(QRectF(0.0, yv, w, h - yv), gradient)
+                painter.fillRect(QRectF(track.left(), yv, track.width(),
+                                        track.bottom() - yv), gradient)
             else:
-                painter.fillRect(QRectF(0.0, yv, w, y0 - yv), fill)
+                painter.fillRect(QRectF(track.left(), yv, track.width(),
+                                        y0 - yv), fill)
         elif self._value < self._zero:
             gradient = QLinearGradient(0.0, y0, 0.0, h)
             gradient.setColorAt(0.0, fill)
             gradient.setColorAt(1.0, black)
-            painter.fillRect(QRectF(0.0, y0, w, yv - y0), gradient)
+            painter.fillRect(QRectF(track.left(), y0, track.width(),
+                                    yv - y0), gradient)
         painter.setClipping(False)
-        handle = QRectF(1.0, yv - 3.0, w - 2.0, 6.0)
-        painter.setPen(QPen(QColor(_CHANNEL_COLORS[self._channel]), 1.0))
+
+        # 4. 带通道高亮描边的中空精密游标块
+        handle = QRectF(track.left() - 0.5, yv - 3.0, track.width() + 1.0, 6.0)
+        painter.setPen(QPen(QColor(_CHANNEL_COLORS[self._channel]), 1.4))
         painter.setBrush(QColor(_HANDLE_FILL))
-        painter.drawRoundedRect(handle, 2.0, 2.0)
+        painter.drawRoundedRect(handle, 1.5, 1.5)
         dash = (QColor("#b9b9ba") if self._channel == "Y"
                 else QColor(_CHANNEL_COLORS[self._channel]).lighter(170))
         painter.setPen(QPen(dash, 1.4))
         painter.drawLine(QPointF(handle.left() + 3.0, yv),
                          QPointF(handle.right() - 3.0, yv))
         painter.end()
+
+    _is_offset_bar = False
 
     def _reset(self) -> None:
         if self._value != self._default:
@@ -192,16 +234,14 @@ class _ChannelBar(QWidget):
             self.interaction_ended.emit()
 
 
-class _BarsDial(_BrightnessDial):
-    """Compact YRGB-ganged master thumbwheel for the bars page."""
+class _OffsetBar(_ChannelBar):
+    """Offset 列通道条：带上下微箭头标记的加性偏移条。"""
 
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setFixedSize(148, 14)
+    _is_offset_bar = True
 
 
 class _BarRow(QWidget):
-    """The four bars plus the horizontal default-value reference line."""
+    """The bars plus the horizontal default-value reference line."""
 
     def __init__(self, bars: list[_ChannelBar], default: float,
                  parent: Optional[QWidget] = None) -> None:
@@ -210,7 +250,7 @@ class _BarRow(QWidget):
         self._default = default
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(15)
+        layout.setSpacing(14)
         layout.addStretch(1)
         for bar in bars:
             layout.addWidget(bar)
@@ -227,7 +267,7 @@ class _BarRow(QWidget):
 
 
 class _BarsColumn(QWidget):
-    """One Lift/Gamma/Gain bar group; mirrors the ColorWheel signal contract."""
+    """One Lift/Gamma/Gain/Offset bar group; mirrors the ColorWheel signal contract."""
 
     changed = pyqtSignal(float, float, float)
     interaction_started = pyqtSignal()
@@ -237,11 +277,10 @@ class _BarsColumn(QWidget):
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._mode = mode
-        self._offset = 0.0 if mode == "gain" else 1.0
-        neutral = 1.0 if mode == "gain" else 0.0
-        bar_min, bar_max = (0.0, 2.0) if mode == "gain" else (-1.0, 1.0)
-        num_min = 0.0 if mode == "gain" else -1.0
-        num_max = neutral + 191.0
+        self._math = "add" if mode in ("offset", "log_shadow", "log_midtone",
+                                       "log_highlight", "log_offset") else "mult"
+        self._channels = _ADD_CHANNELS if self._math == "add" else _CHANNELS
+        self._is_offset = (mode == "offset")
 
         self.hue = 0.0
         self.sat = 0.0
@@ -262,7 +301,7 @@ class _BarsColumn(QWidget):
         header.setContentsMargins(4, 0, 4, 0)
         header.addStretch(1)
         label = QLabel(title)
-        label.setStyleSheet("color: #e2e1e2; font-size: 12px; font-weight: 600;")
+        label.setStyleSheet("color: #d4d7dd; font-size: 12px; font-weight: 600;")
         header.addWidget(label)
         header.addStretch(1)
         self.reset_btn = QToolButton()
@@ -278,57 +317,93 @@ class _BarsColumn(QWidget):
         header.addWidget(self.reset_btn)
         layout.addLayout(header)
 
-        self._bars = {ch: _ChannelBar(ch, bar_min, bar_max, neutral) for ch in _CHANNELS}
-        self._bar_row = _BarRow([self._bars[ch] for ch in _CHANNELS], neutral)
+        if self._math == "add":
+            bar_min, bar_max = _ADD_BAR_RANGE
+            num_min, num_max = -200.0, 200.0
+            neutral = 0.0
+            # 加性轮无乘率显示偏移
+            self._display_offset = 0.0
+        else:
+            bar_min, bar_max = (0.0, 2.0) if mode == "gain" else (-1.0, 1.0)
+            num_min = 0.0 if mode == "gain" else -1.0
+            num_max = (1.0 if mode == "gain" else 0.0) + 191.0
+            neutral = 1.0 if mode == "gain" else 0.0
+            # 显示偏移 ≠ 中性值：lift/gamma 显示"乘率 − 1"，gain 显示绝对乘率
+            self._display_offset = 0.0 if mode == "gain" else 1.0
+        self._neutral = neutral
+
+        self._bars = {ch: self._make_bar(ch, bar_min, bar_max, neutral)
+                      for ch in self._channels}
+        self._bar_row = _BarRow([self._bars[ch] for ch in self._channels],
+                                neutral)
         layout.addWidget(self._bar_row, 1)
 
         num_row = QHBoxLayout()
         num_row.setContentsMargins(0, 0, 0, 0)
-        num_row.setSpacing(5)
+        num_row.setSpacing(4)
         num_row.addStretch(1)
         self._nums: dict[str, _GradingValue] = {}
-        for ch in _CHANNELS:
+        box_width = 52 if self._math == "add" else 34
+        box_span = 30.0 if self._math == "add" else 2.0
+        box_height = 24 if self._math == "add" else 22
+        for ch in self._channels:
             num = _GradingValue(num_min, num_max, neutral,
-                                accent=_CHANNEL_COLORS[ch], drag_span=2.0)
-            num.setFixedValueWidth(34)
-            num.setFixedHeight(22)
+                                accent=_CHANNEL_COLORS[ch], drag_span=box_span)
+            num.setFixedValueWidth(box_width)
+            num.setFixedHeight(box_height)
             num.layout().setContentsMargins(0, 0, 0, 2)
-            num._edit.setFixedHeight(18)
+            num._edit.setFixedHeight(box_height - 4)
             num.setToolTip(ch)
             self._nums[ch] = num
             num_row.addWidget(num)
         num_row.addStretch(1)
         layout.addLayout(num_row)
 
-        self._dial = _BarsDial(self)
+        self._dial = KnurledJogWheel(min_width=140)
         self._dial.setToolTip(I18N.tr("grading.brightness_dial_tooltip",
-            "Drag left/right to adjust master brightness; double-click to reset. Ctrl/⌘: fine, Shift: coarse."))
-        layout.addWidget(self._dial, 0, Qt.AlignmentFlag.AlignHCenter)
+            "Drag left/right to adjust master brightness; double-click to reset. Shift: fine."))
+        dial_row = QHBoxLayout()
+        dial_row.setContentsMargins(8, 0, 8, 0)
+        dial_row.addWidget(self._dial)
+        layout.addLayout(dial_row)
 
-        for ch in _CHANNELS:
+        for ch in self._channels:
             self._bars[ch].valueChanged.connect(lambda v, c=ch: self._on_channel(c, v))
             self._nums[ch].valueChanged.connect(lambda v, c=ch: self._on_channel(c, v))
             self._bars[ch].interaction_started.connect(self.interaction_started.emit)
             self._nums[ch].interaction_started.connect(self.interaction_started.emit)
             self._bars[ch].interaction_ended.connect(self._on_interaction_ended)
             self._nums[ch].interaction_ended.connect(self._on_interaction_ended)
-        self._dial.valueChanged.connect(self._on_dial)
-        self._dial.sliderPressed.connect(self.interaction_started.emit)
-        self._dial.sliderReleased.connect(self._on_interaction_ended)
+        self._dial.deltaMoved.connect(self._on_dial_delta)
+        self._dial.dragStarted.connect(self.interaction_started.emit)
+        self._dial.dragEnded.connect(self._on_interaction_ended)
+        self._dial.resetRequested.connect(self._on_dial_reset)
+
+    def _make_bar(self, channel: str, bar_min: float, bar_max: float,
+                  neutral: float) -> _ChannelBar:
+        if self._is_offset:
+            return _OffsetBar(channel, bar_min, bar_max, neutral)
+        return _ChannelBar(channel, bar_min, bar_max, neutral)
 
     # === state ===
 
     def _on_channel(self, channel: str, value: float) -> None:
         if self._updating:
             return
-        if channel == "Y":
-            multiplier = value + self._offset
+        if self._math == "add":
+            display = {ch: self._nums[ch].value() for ch in self._channels}
+            display[channel] = value
+            self.hue, self.sat, self.brightness = offset_display_to_hsb(
+                display.get("R", 0.0), display.get("G", 0.0),
+                display.get("B", 0.0))
+        elif channel == "Y":
+            multiplier = value + self._display_offset
             stops = math.log2(max(multiplier, 2.0 ** -6.0))
             self.brightness = math.copysign(math.sqrt(abs(stops) / 6.0), stops)
             self._rgb = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
         else:
             r, g, b = self._rgb
-            mult = value + self._offset
+            mult = value + self._display_offset
             if channel == "R":
                 r = max(0.0, mult)
             elif channel == "G":
@@ -342,26 +417,40 @@ class _BarsColumn(QWidget):
         if not self._update_timer.isActive():
             self._update_timer.start()
 
-    def _on_dial(self, value: int) -> None:
+    def _on_dial_delta(self, dx: float) -> None:
         if self._updating:
             return
-        self.brightness = value / _BrightnessDial.SCALE
-        self._rgb = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
+        self.brightness = max(-1.0, min(1.0, self.brightness + dx *
+                                        drag_speed_per_pixel(2.0, Qt.KeyboardModifier.NoModifier)))
         self._refresh_displays()
         self._pending = (self.hue, self.sat, self.brightness)
         if not self._update_timer.isActive():
             self._update_timer.start()
 
+    def _on_dial_reset(self) -> None:
+        if self.brightness == 0.0:
+            return
+        self.interaction_started.emit()
+        self.brightness = 0.0
+        self._refresh_displays()
+        self.changed.emit(self.hue, self.sat, self.brightness)
+        self.interaction_ended.emit()
+
     def _refresh_displays(self) -> None:
         self._updating = True
-        r, g, b = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
-        self._rgb = (r, g, b)
-        values = {"Y": (r + g + b) / 3.0 - self._offset,
-                  "R": r - self._offset, "G": g - self._offset, "B": b - self._offset}
-        for ch in _CHANNELS:
+        if self._math == "add":
+            rx, gy, bz = offset_hsb_to_display(self.hue, self.sat, self.brightness)
+            values = {"R": rx, "G": gy, "B": bz}
+        else:
+            r, g, b = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
+            self._rgb = (r, g, b)
+            values = {"Y": (r + g + b) / 3.0 - self._display_offset,
+                      "R": r - self._display_offset,
+                      "G": g - self._display_offset,
+                      "B": b - self._display_offset}
+        for ch in self._channels:
             self._bars[ch].setValue(values[ch])
             self._nums[ch].setValue(values[ch])
-        self._dial.setValue(round(self.brightness * _BrightnessDial.SCALE))
         self._updating = False
 
     def _emit_changed(self) -> None:
@@ -401,7 +490,7 @@ class _BarsColumn(QWidget):
         self.interaction_ended.emit()
 
     def blockSignals(self, block: bool) -> bool:
-        for ch in _CHANNELS:
+        for ch in self._channels:
             self._bars[ch].blockSignals(block)
             self._nums[ch].blockSignals(block)
         self._dial.blockSignals(block)
@@ -409,7 +498,7 @@ class _BarsColumn(QWidget):
 
 
 class ColorBarsPanel(QWidget):
-    """Lift/Gamma/Gain bar groups laid out like Resolve's Primaries bars."""
+    """Lift/Gamma/Gain/Offset bar groups laid out like Resolve's Primaries bars."""
 
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
@@ -417,19 +506,27 @@ class ColorBarsPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 6, 4, 8)
+        layout.setContentsMargins(10, 6, 10, 8)
         layout.setSpacing(12)
         self.lift = _BarsColumn(I18N.tr("grading.lift", "暗部"), "lift")
         self.gamma = _BarsColumn(I18N.tr("grading.gamma", "中灰"), "gamma")
         self.gain = _BarsColumn(I18N.tr("grading.gain", "亮部"), "gain")
+        self.offset = _BarsColumn(I18N.tr("grading.offset", "偏移"), "offset")
+        # Offset 列暂时隐藏（与色轮页一致）；控件保留并照常参与状态
+        # 同步 / flush / blockSignals，随时可恢复。列间不放纵向分割线
+        # （对齐达芬奇：仅用横向细线区分功能区）。
         for column in (self.lift, self.gamma, self.gain):
-            column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            column.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                 QSizePolicy.Policy.Expanding)
             column.interaction_started.connect(self.interaction_started.emit)
             column.interaction_ended.connect(self.interaction_ended.emit)
             layout.addWidget(column, 1)
+        self.offset.setParent(self)
+        self.offset.setVisible(False)
 
-    def columns(self) -> tuple[_BarsColumn, _BarsColumn, _BarsColumn]:
-        return self.lift, self.gamma, self.gain
+    def columns(self) -> tuple[_BarsColumn, _BarsColumn, _BarsColumn,
+                               _BarsColumn]:
+        return self.lift, self.gamma, self.gain, self.offset
 
     def flush_pending_changes(self) -> None:
         for column in self.columns():

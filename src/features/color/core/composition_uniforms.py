@@ -242,6 +242,18 @@ _BASE_DECLS = [
     ("u_cs_low_soft", "vec3"),
     ("u_cs_high_clip", "vec3"),
     ("u_cs_high_soft", "vec3"),
+    # 一级校色扩展参数（Offset 加性轮 / pivot 对比度枢轴 / Log 四轮 /
+    # Lum Mix）。追加在清单末尾：既有 uniform 的 MSL 布局偏移全部保持
+    # 不变，仅向后扩展（与上方 lift_saturation 追加惯例一致）。
+    ("u_offset", "vec3"),
+    ("u_pivot", "float"),
+    ("u_log_shadow", "vec3"),
+    ("u_log_midtone", "vec3"),
+    ("u_log_highlight", "vec3"),
+    ("u_log_offset", "vec3"),
+    ("u_log_low_range", "float"),
+    ("u_log_high_range", "float"),
+    ("u_lum_mix", "float"),
 ]
 
 _GRAIN_DECLS = [
@@ -350,6 +362,38 @@ def params_to_rgb(hue: float, sat: float, bright: float) -> List[float]:
     return [(r/avg) * b_mult, (g/avg) * b_mult, (b/avg) * b_mult]
 
 
+# Offset / Log 轮的加性偏移标定（与乘性色轮 params_to_rgb 分离）。
+# - 色度：轮盘 (h, s) 方向满偏（sat=1 纯红）≈ (0.5, -0.25, -0.25)；
+# - 主亮度：b ∈ [-1, 1] 等量平移全部通道（+1 满白 / -1 满黑）。
+_OFFSET_CHROMA_SCALE = 0.25
+_OFFSET_MASTER_SCALE = 1.0
+
+
+def params_to_offset_rgb(hue: float, sat: float, bright: float) -> List[float]:
+    """Converts wheel Hue/Sat/Brightness to an additive RGB bias (neutral 0).
+
+    Offset 轮与 Log 四轮的加性域转换。色度方向复用 params_to_rgb 的
+    HSV→RGB 均值归一（b=0 时返回均值 1 的色度向量），但亮度走线性主轮
+    平移而非 2^stops 乘性增益——加性域再乘 64 倍会瞬间爆表。中性
+    (h=0, s=0, b=0) 产出 (0, 0, 0)。UI 数值框的反向换算见
+    ``color_wheel.offset_bias_to_hsb``。
+    """
+    chroma = params_to_rgb(hue, sat, 0.0)
+    master = max(-1.0, min(1.0, float(bright)))
+    return [((c - 1.0) * _OFFSET_CHROMA_SCALE + master * _OFFSET_MASTER_SCALE)
+            for c in chroma]
+
+
+def offset_master_scale() -> float:
+    """主亮度平移标定（UI 数值框换算与测试断言共用）。"""
+    return _OFFSET_MASTER_SCALE
+
+
+def offset_chroma_scale() -> float:
+    """色度偏移标定（UI 数值框换算与测试断言共用）。"""
+    return _OFFSET_CHROMA_SCALE
+
+
 def _layer_get(layer: Any, key: str, default: Any = None) -> Any:
     """dict / Layer 对象双形态访问（与 shader_compiler 内部约定一致）。"""
     if isinstance(layer, dict):
@@ -367,6 +411,23 @@ def _wheel_rgb(p: Any, key: str) -> Tuple[float, float, float]:
     """取色轮 ``key`` 的 (hue, sat, bright) 三元组并映射为 RGB 增益。"""
     v = _get_v3(p, key, (0, 0, 0))
     return tuple(params_to_rgb(*v))
+
+
+def _wheel_offset_rgb(p: Any, key: str) -> Tuple[float, float, float]:
+    """取加性轮 ``key`` 的 (hue, sat, bright) 三元组并映射为 RGB 偏移。"""
+    v = _get_v3(p, key, (0, 0, 0))
+    return tuple(params_to_offset_rgb(*v))
+
+
+def _get_scalar(d: Mapping, k: str, default: float) -> float:
+    """取标量（显式 None 检查——0.0 是 pivot/lum_mix 的合法值，不能用 ``or``）。"""
+    v = d.get(k, default)
+    if v is None:
+        return float(default)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def composition_uniform_values(
@@ -415,6 +476,19 @@ def composition_uniform_values(
     values["u_lift_saturation"] = float(p.get("lift_saturation") or 0.0)
     values["u_gamma_saturation"] = float(p.get("gamma_saturation") or 0.0)
     values["u_gain_saturation"] = float(p.get("gain_saturation") or 0.0)
+    # 一级校色扩展参数（Offset / pivot / Log 四轮 / Lum Mix）。
+    # pivot 默认 0.18 = 旧 shader 硬编码的物理中间灰枢轴（保持既有工程
+    # 渲染不变），值域收窄到 0.05..1.0 防零枢轴除零；lum_mix 默认
+    # 100 = 不做原亮度回拉，值域 0..100。
+    values["u_offset"] = _wheel_offset_rgb(p, "offset")
+    values["u_pivot"] = min(max(_get_scalar(p, "pivot", 0.18), 0.05), 1.0)
+    values["u_log_shadow"] = _wheel_offset_rgb(p, "log_shadow")
+    values["u_log_midtone"] = _wheel_offset_rgb(p, "log_midtone")
+    values["u_log_highlight"] = _wheel_offset_rgb(p, "log_highlight")
+    values["u_log_offset"] = _wheel_offset_rgb(p, "log_offset")
+    values["u_log_low_range"] = _get_scalar(p, "log_low_range", 0.333)
+    values["u_log_high_range"] = _get_scalar(p, "log_high_range", 0.550)
+    values["u_lum_mix"] = min(max(_get_scalar(p, "lum_mix", 100.0), 0.0), 100.0)
 
     m = _layer_get(layer, "mixer_params")
     if not isinstance(m, Mapping):

@@ -10226,6 +10226,21 @@ class TimelineExporter:
             if any(abs(float(grading_params.get(name, 0.0) or 0.0)) > 1e-6
                    for name in coupled_controls):
                 return None
+            # 一级校色扩展参数：log 四轮与 lum_mix 为亮度耦合项，本质不可
+            # 逐通道分解，非中性即拒绝快路径（offset/pivot 逐通道可分解，
+            # 由 GradingMath + canary 交叉校验兜底）。三元组需逐分量检查，
+            # 不能走标量 float()（tuple 直接 TypeError 会把所有层都拒掉）。
+            for _log_name in ("log_shadow", "log_midtone", "log_highlight",
+                              "log_offset"):
+                _value = grading_params.get(_log_name)
+                if _value is None:
+                    continue
+                _triple = tuple(float(_item) for _item in _value)
+                if any(abs(_item) > 1e-6 for _item in _triple):
+                    return None
+            _lum_mix = grading_params.get("lum_mix")
+            if _lum_mix is not None and float(_lum_mix) < 100.0 - 1e-6:
+                return None
 
             key_parts = []
             for name, value in sorted(grading_params.items()):

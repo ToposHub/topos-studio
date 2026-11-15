@@ -316,6 +316,17 @@ GRADE_TRACK_FIELDS: Tuple[TrackFieldSpec, ...] = (
     TrackFieldSpec("lift_saturation", "scalar"),
     TrackFieldSpec("gamma_saturation", "scalar"),
     TrackFieldSpec("gain_saturation", "scalar"),
+    # 一级校色扩展参数（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）。
+    # 加性轮与乘性轮同为 (h, s, b) 三元组；pivot/log 区间为标量。
+    TrackFieldSpec("offset", "vec3"),
+    TrackFieldSpec("pivot", "scalar"),
+    TrackFieldSpec("log_shadow", "vec3"),
+    TrackFieldSpec("log_midtone", "vec3"),
+    TrackFieldSpec("log_highlight", "vec3"),
+    TrackFieldSpec("log_offset", "vec3"),
+    TrackFieldSpec("log_low_range", "scalar"),
+    TrackFieldSpec("log_high_range", "scalar"),
+    TrackFieldSpec("lum_mix", "scalar"),
 )
 
 #: 窗口域（mask.<shape_id>.<field>）。points/grad_points（点集）与离散

@@ -630,6 +630,17 @@ struct GraphGradingParams {
     float lift_x;  float lift_y;  float lift_z;
     float gamma_x; float gamma_y; float gamma_z;
     float gain_x;  float gain_y;  float gain_z;
+    // 一级校色扩展（Offset 轮 / pivot / Log 四轮 / Lum Mix）。
+    // 追加在既有字段之后：前面字段的结构布局偏移保持不变。
+    float pivot;
+    float offset_x;  float offset_y;  float offset_z;
+    float log_shadow_x;   float log_shadow_y;   float log_shadow_z;
+    float log_midtone_x;  float log_midtone_y;  float log_midtone_z;
+    float log_highlight_x; float log_highlight_y; float log_highlight_z;
+    float log_offset_x;   float log_offset_y;   float log_offset_z;
+    float log_low_range;
+    float log_high_range;
+    float lum_mix;
     float opacity;
     uint32_t mask_mode;   // 0 = 无 matte（k = opacity）；1 = matte buffer
     uint32_t has_curves;  // 0 = 跳过 curves
@@ -851,6 +862,9 @@ kernel void graph_masked_mix(
 // —— GRADING_SNIPPET.apply_grading 逐条翻译（点态基础域；mid_detail/
 //    sharpness 邻域位不在此 kernel——执行器 fail-closed 拒绝）——
 static inline float3 graph_apply_grading(float3 color, constant GraphGradingParams& p) {
+    // 0. 原始亮度（Lum Mix 用）
+    float luma_original = dot(color, float3(0.299, 0.587, 0.114));
+
     // 1. Exposure
     float exposure = p.exposure;
     float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
@@ -862,10 +876,10 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
                        1.0 - p.temp / 200.0);
     color *= wb;
 
-    // 3. Contrast（pivot 0.18）
+    // 3. Contrast（pivot 参数化，默认 0.18）
     if (p.contrast != 0.0) {
         float c_factor = 1.0 + p.contrast / 100.0;
-        color = sign(color) * pow(abs(color) / 0.18, float3(c_factor)) * 0.18;
+        color = sign(color) * pow(abs(color) / p.pivot, float3(c_factor)) * p.pivot;
     }
 
     // 4. Lift / Gamma / Gain（wheel 已转 RGB 增益）
@@ -902,6 +916,25 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
             float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
             color = mix(color, float3(luma_post_grading), balance_factor);
         }
+    }
+
+    // 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
+    float3 offset = float3(p.offset_x, p.offset_y, p.offset_z);
+    color += offset;
+    float3 log_shadow = float3(p.log_shadow_x, p.log_shadow_y, p.log_shadow_z);
+    float3 log_midtone = float3(p.log_midtone_x, p.log_midtone_y, p.log_midtone_z);
+    float3 log_highlight = float3(p.log_highlight_x, p.log_highlight_y, p.log_highlight_z);
+    float3 log_offset = float3(p.log_offset_x, p.log_offset_y, p.log_offset_z);
+    if (any(log_shadow != float3(0.0)) || any(log_midtone != float3(0.0)) ||
+        any(log_highlight != float3(0.0)) || any(log_offset != float3(0.0))) {
+        float log_lum = clamp(dot(color, float3(0.299, 0.587, 0.114)), 0.0, 1.0);
+        float log_lo = clamp(p.log_low_range, 0.05, 0.95);
+        float log_hi = clamp(p.log_high_range, 0.05, 0.95);
+        float log_w_shadow = 1.0 - smoothstep(log_lo * 0.5, log_lo, log_lum);
+        float log_w_high = smoothstep(log_hi, log_hi + (1.0 - log_hi) * 0.5, log_lum);
+        float log_w_mid = clamp(1.0 - log_w_shadow - log_w_high, 0.0, 1.0);
+        color += log_shadow * log_w_shadow + log_midtone * log_w_mid
+               + log_highlight * log_w_high + log_offset;
     }
 
     // 5. Shadows（power 曲线）
@@ -971,6 +1004,15 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
     if (p.saturation != 0.0) {
         float gray = dot(color, float3(0.299, 0.587, 0.114));
         color = mix(float3(gray), color, 1.0 + p.saturation / 100.0);
+    }
+
+    // 11. Lum Mix（原亮度保留，0..100；与 GLSL 同式）
+    if (p.lum_mix < 100.0) {
+        float graded_lum = dot(color, float3(0.299, 0.587, 0.114));
+        if (graded_lum > 1e-5 && luma_original > 1e-5) {
+            color *= mix(1.0, luma_original / graded_lum,
+                         (100.0 - p.lum_mix) / 100.0);
+        }
     }
     return color;
 }
@@ -1057,6 +1099,15 @@ GRAPH_GRADING_PARAMS_DTYPE = np.dtype([
     ("lift_x", "<f4"), ("lift_y", "<f4"), ("lift_z", "<f4"),
     ("gamma_x", "<f4"), ("gamma_y", "<f4"), ("gamma_z", "<f4"),
     ("gain_x", "<f4"), ("gain_y", "<f4"), ("gain_z", "<f4"),
+    # 一级校色扩展（与 MSL struct 同序追加）
+    ("pivot", "<f4"),
+    ("offset_x", "<f4"), ("offset_y", "<f4"), ("offset_z", "<f4"),
+    ("log_shadow_x", "<f4"), ("log_shadow_y", "<f4"), ("log_shadow_z", "<f4"),
+    ("log_midtone_x", "<f4"), ("log_midtone_y", "<f4"), ("log_midtone_z", "<f4"),
+    ("log_highlight_x", "<f4"), ("log_highlight_y", "<f4"), ("log_highlight_z", "<f4"),
+    ("log_offset_x", "<f4"), ("log_offset_y", "<f4"), ("log_offset_z", "<f4"),
+    ("log_low_range", "<f4"), ("log_high_range", "<f4"),
+    ("lum_mix", "<f4"),
     ("opacity", "<f4"),
     ("mask_mode", "<u4"), ("has_curves", "<u4"),
 ])
@@ -1079,11 +1130,22 @@ def make_graph_grading_params(
     hue_shift: float, lift_saturation: float, gamma_saturation: float,
     gain_saturation: float, lift, gamma, gain, opacity: float,
     mask_mode: int, has_curves: bool,
+    pivot: float = 0.18,
+    offset=(0.0, 0.0, 0.0),
+    log_shadow=(0.0, 0.0, 0.0),
+    log_midtone=(0.0, 0.0, 0.0),
+    log_highlight=(0.0, 0.0, 0.0),
+    log_offset=(0.0, 0.0, 0.0),
+    log_low_range: float = 0.333,
+    log_high_range: float = 0.550,
+    lum_mix: float = 100.0,
 ) -> np.ndarray:
     """打包 MSL ``GraphGradingParams``（字段与 struct 逐一对齐）。"""
     scalars = [exposure, temp, tint, contrast, saturation, vibrance, shadow,
                highlights, hue_shift, lift_saturation, gamma_saturation,
-               gain_saturation, *lift, *gamma, *gain, opacity]
+               gain_saturation, *lift, *gamma, *gain,
+               pivot, *offset, *log_shadow, *log_midtone, *log_highlight,
+               *log_offset, log_low_range, log_high_range, lum_mix, opacity]
     if not all(np.isfinite(float(v)) for v in scalars):
         raise ValueError(f"graph_grading: 参数含非有限值 {scalars!r}")
     params = np.zeros(1, dtype=GRAPH_GRADING_PARAMS_DTYPE)
@@ -1093,6 +1155,20 @@ def make_graph_grading_params(
     params["lift_x"], params["lift_y"], params["lift_z"] = map(float, lift)
     params["gamma_x"], params["gamma_y"], params["gamma_z"] = map(float, gamma)
     params["gain_x"], params["gain_y"], params["gain_z"] = map(float, gain)
+    params["pivot"] = float(pivot)
+    (params["offset_x"], params["offset_y"],
+     params["offset_z"]) = map(float, offset)
+    (params["log_shadow_x"], params["log_shadow_y"],
+     params["log_shadow_z"]) = map(float, log_shadow)
+    (params["log_midtone_x"], params["log_midtone_y"],
+     params["log_midtone_z"]) = map(float, log_midtone)
+    (params["log_highlight_x"], params["log_highlight_y"],
+     params["log_highlight_z"]) = map(float, log_highlight)
+    (params["log_offset_x"], params["log_offset_y"],
+     params["log_offset_z"]) = map(float, log_offset)
+    params["log_low_range"] = float(log_low_range)
+    params["log_high_range"] = float(log_high_range)
+    params["lum_mix"] = float(lum_mix)
     params["opacity"] = float(opacity)
     params["mask_mode"] = int(mask_mode)
     params["has_curves"] = 1 if has_curves else 0

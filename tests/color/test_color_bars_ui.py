@@ -1,34 +1,46 @@
-"""Color Bars page must mirror the wheels, share the primary rows and reset."""
+"""Color Bars page must mirror the wheels, share the param bars and reset."""
 from __future__ import annotations
 
-import math
+import pytest
 
-from src.features.color.ui.color_wheel import GradingPanel
+from src.features.color.ui.color_wheel import (
+    MODE_BARS, MODE_LOG, MODE_TONAL, MODE_WHEELS, GradingPanel,
+    offset_hsb_to_display,
+)
 
 
-def test_bars_tab_sits_between_wheel_and_tonal(qtbot):
+def test_bars_page_sits_between_wheel_and_log_pages(qtbot):
     panel = GradingPanel()
     qtbot.addWidget(panel)
-    tabs = panel._grading_tabs
-    assert tabs.count() == 3
-    assert tabs.widget(0) is panel._wheel_page
-    assert tabs.widget(1) is panel._bars_page
-    assert tabs.widget(2) is panel.tonal_saturation_panel
+    stack = panel.mode_stack
+    assert stack.count() == 4
+    assert stack.widget(MODE_WHEELS) is panel._wheel_page
+    assert stack.widget(MODE_BARS) is panel._bars_page
+    assert stack.widget(MODE_LOG) is panel._log_page
+    assert stack.widget(MODE_TONAL) is panel.tonal_saturation_panel
+    assert panel.color_bars_panel.parent() is panel._bars_page
 
 
-def test_primary_rows_follow_wheel_and_bars_tabs(qtbot):
+def test_mode_buttons_switch_stacks_and_param_bars(qtbot, qapp):
     panel = GradingPanel()
     qtbot.addWidget(panel)
-    assert panel._prim_top_row.parent() is panel._wheel_page
-    assert panel._prim_bottom_row.parent() is panel._wheel_page
-    panel._grading_tabs.setCurrentIndex(1)
-    assert panel._prim_top_row.parent() is panel._bars_page
-    assert panel._prim_bottom_row.parent() is panel._bars_page
-    panel._grading_tabs.setCurrentIndex(2)
-    assert panel._prim_top_row.parent() is None
-    assert panel._prim_bottom_row.parent() is None
-    panel._grading_tabs.setCurrentIndex(0)
-    assert panel._prim_top_row.parent() is panel._wheel_page
+    panel.show()
+    qapp.processEvents()
+    panel._switch_mode("bars")
+    assert panel.mode_stack.currentIndex() == MODE_BARS
+    assert panel.top_bar_stack.currentIndex() == 0
+    assert panel.bottom_bar_stack.currentIndex() == 0
+    panel._switch_mode("log")
+    assert panel.mode_stack.currentIndex() == MODE_LOG
+    assert panel.top_bar_stack.currentIndex() == 1
+    assert panel.bottom_bar_stack.currentIndex() == 1
+    panel._switch_mode("tonal")
+    assert panel.mode_stack.currentIndex() == MODE_TONAL
+    assert not panel.top_bar_stack.isVisible()
+    assert not panel.bottom_bar_stack.isVisible()
+    panel._switch_mode("wheels")
+    assert panel.mode_stack.currentIndex() == MODE_WHEELS
+    assert panel.top_bar_stack.isVisible()
 
 
 def test_bars_defaults_match_resolve(qtbot):
@@ -42,6 +54,12 @@ def test_bars_defaults_match_resolve(qtbot):
     for ch in ("Y", "R", "G", "B"):
         assert bars.gain._nums[ch].value() == 1.0
         assert bars.gain._bars[ch].value() == 1.0
+    # Offset 列：仅 RGB 三条，默认全 0
+    assert set(bars.offset._nums.keys()) == {"R", "G", "B"}
+    assert set(bars.offset._bars.keys()) == {"R", "G", "B"}
+    for ch in ("R", "G", "B"):
+        assert bars.offset._nums[ch].value() == 0.0
+        assert bars.offset._bars[ch].value() == 0.0
 
 
 def test_wheel_edit_syncs_bars(qtbot):
@@ -54,7 +72,11 @@ def test_wheel_edit_syncs_bars(qtbot):
     assert abs(lift._nums["R"].value() - expected) < 1e-6
     # bars clamp at their visual range ends; numbers keep the true value
     assert lift._bars["R"].value() == 1.0
-    assert lift._dial.value() == round(0.5 * 10000)
+    # Offset 列与加性轮同步（显示偏移×100）
+    panel.set_wheel_params("offset", (0.0, 1.0, 0.0), emit=True)
+    offset = panel.color_bars_panel.offset
+    assert abs(offset._nums["R"].value() - 50.0) < 1e-6
+    assert abs(offset._nums["G"].value() - (-25.0)) < 1e-6
 
 
 def test_bars_edit_syncs_wheel_and_engine(qtbot):
@@ -71,22 +93,37 @@ def test_bars_edit_syncs_wheel_and_engine(qtbot):
     assert abs(captured[-1][1][1] - panel.gamma_wheel.sat) < 1e-9
 
 
+def test_bars_edit_publishes_extended_signal_for_offset(qtbot):
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    extended = []
+    base = []
+    panel.grading_extended_changed.connect(extended.append)
+    panel.grading_changed.connect(lambda *args: base.append(args))
+    column = panel.color_bars_panel.offset
+    column._nums["R"].setValue(30.0)
+    column.flush_pending_changes()
+    assert extended, "offset bars edit must publish grading_extended_changed"
+    assert extended[-1]["offset"][1] > 0.0
+    assert base == []
+
+
 def test_bars_drag_is_relative_and_fine(qtbot):
     panel = GradingPanel()
     qtbot.addWidget(panel)
     bar = panel.color_bars_panel.lift._bars["Y"]
-    bar.resize(14, 170)
+    bar.resize(24, 170)
     from PyQt6.QtCore import QPointF, Qt
     from PyQt6.QtGui import QMouseEvent
     from PyQt6.QtCore import QEvent
 
     def press(y):
-        return QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(7, y),
+        return QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(12, y),
                            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
                            Qt.KeyboardModifier.NoModifier)
 
     def move(y):
-        return QMouseEvent(QEvent.Type.MouseMove, QPointF(7, y),
+        return QMouseEvent(QEvent.Type.MouseMove, QPointF(12, y),
                            Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
                            Qt.KeyboardModifier.NoModifier)
 
@@ -122,3 +159,24 @@ def test_set_params_and_reset_all_update_bars(qtbot):
     assert lift._nums["Y"].value() == 0.0
     assert panel.color_bars_panel.gain._nums["Y"].value() == 1.0
     assert panel.color_bars_panel.gain._bars["B"].value() == 1.0
+    assert panel.color_bars_panel.offset._nums["R"].value() == 0.0
+
+
+def test_set_extended_params_updates_offset_bars(qtbot):
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({"offset": (0.0, 0.6, 0.2),
+                               "pivot": 0.4,
+                               "lum_mix": 60.0})
+    offset = panel.color_bars_panel.offset
+    rx = offset._nums["R"].value()
+    gy = offset._nums["G"].value()
+    bz = offset._nums["B"].value()
+    # 回填与色轮页显示单位一致（偏移×100）
+    expected = offset_hsb_to_display(0.0, 0.6, 0.2)
+    assert rx == pytest.approx(expected[0], abs=1e-6)
+    assert gy == pytest.approx(expected[1], abs=1e-6)
+    assert bz == pytest.approx(expected[2], abs=1e-6)
+    assert panel.offset_wheel.brightness == pytest.approx(0.2)
+    assert panel.pivot_slider.value() == pytest.approx(0.4)
+    assert panel.lum_mix_slider.value() == pytest.approx(60.0)

@@ -639,6 +639,18 @@ class ColorStackHydrator:
             vibrance, mid_detail, hue_shift,
             highlights=params.get("highlights", 0),
         )
+        # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）：
+        # 独立窄路径回填，面板缺失该 API（旧面板/测试桩）时静默跳过。
+        # 默认值兜底单一权威 = DEFAULT_EXTENDED_GRADING_PARAMS。
+        if hasattr(panel, "set_extended_params"):
+            from src.features.color.core.layer import (
+                default_extended_grading_params,
+            )
+            extended = {
+                key: params.get(key, default)
+                for key, default in default_extended_grading_params().items()
+            }
+            panel.set_extended_params(extended, emit=False)
         panel.current_stack_id = stack.stack_id
 
     @staticmethod

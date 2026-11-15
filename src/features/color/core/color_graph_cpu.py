@@ -302,6 +302,9 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
             "mid_detail/sharpness 为邻域采样，不在 CPU 点态基础域")
     c = np.ascontiguousarray(color, dtype=_F32)
 
+    # 0. 原始亮度（Lum Mix 用）
+    luma_original = _luma601(c)
+
     # 1. Exposure
     exposure = _F32(values.get("u_exposure", 0.0))
     exp_stops = _F32((exposure / 100.0) * (exposure / 100.0)) * _F32(6.0)
@@ -316,12 +319,13 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
     c[..., 1] *= _F32(1.0 - tint / 200.0)
     c[..., 2] *= _F32(1.0 - temp / 200.0)
 
-    # 3. Contrast（pivot 0.18）
+    # 3. Contrast（pivot 参数化，默认 0.18）
     contrast = _F32(values.get("u_contrast", 0.0))
     if contrast != 0.0:
         factor = _F32(1.0 + contrast / 100.0)
-        c = (np.sign(c) * np.power(np.abs(c) / _F32(0.18), factor)
-             * _F32(0.18)).astype(_F32)
+        pivot = _F32(values.get("u_pivot", 0.18))
+        c = (np.sign(c) * np.power(np.abs(c) / pivot, factor)
+             * pivot).astype(_F32)
 
     # 4. Lift / Gamma / Gain（色轮已由 params_to_rgb 转为 RGB 增益）
     lift = np.asarray(values.get("u_lift", (1.0, 1.0, 1.0)), dtype=_F32)
@@ -354,6 +358,33 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
         mixed = (compressed * (_F32(1.0) - balance)[..., None]
                  + luma[..., None] * balance[..., None])
         c = np.where(need[..., None], mixed, compressed).astype(_F32)
+
+    # 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
+    offset = np.asarray(values.get("u_offset", (0.0, 0.0, 0.0)),
+                        dtype=_F32)
+    c = (c + offset).astype(_F32)
+    log_shadow = np.asarray(values.get("u_log_shadow", (0.0, 0.0, 0.0)),
+                            dtype=_F32)
+    log_midtone = np.asarray(values.get("u_log_midtone", (0.0, 0.0, 0.0)),
+                             dtype=_F32)
+    log_highlight = np.asarray(values.get("u_log_highlight", (0.0, 0.0, 0.0)),
+                               dtype=_F32)
+    log_offset = np.asarray(values.get("u_log_offset", (0.0, 0.0, 0.0)),
+                            dtype=_F32)
+    if (np.any(log_shadow != 0.0) or np.any(log_midtone != 0.0)
+            or np.any(log_highlight != 0.0) or np.any(log_offset != 0.0)):
+        log_lum = np.clip(_luma601(c), _F32(0.0), _F32(1.0))
+        log_lo = min(max(float(values.get("u_log_low_range", 0.333)), 0.05), 0.95)
+        log_hi = min(max(float(values.get("u_log_high_range", 0.550)), 0.05), 0.95)
+        w_shadow = _F32(1.0) - _smoothstep_np(_F32(log_lo * 0.5), _F32(log_lo),
+                                              log_lum)
+        w_high = _smoothstep_np(_F32(log_hi),
+                                _F32(log_hi + (1.0 - log_hi) * 0.5), log_lum)
+        w_mid = np.clip(_F32(1.0) - w_shadow - w_high, _F32(0.0), _F32(1.0))
+        c = (c + log_shadow * w_shadow[..., None]
+             + log_midtone * w_mid[..., None]
+             + log_highlight * w_high[..., None]
+             + log_offset).astype(_F32)
 
     # 5. Shadows（power 曲线，0/1 不动点）
     shadow = _F32(values.get("u_shadow", 0.0))
@@ -422,6 +453,20 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
         gray = _luma601(c)
         f = _F32(1.0 + saturation / 100.0)
         c = (gray[..., None] * (_F32(1.0) - f) + c * f).astype(_F32)
+
+    # 11. Lum Mix（原亮度保留，0..100；与 GLSL 同式）
+    lum_mix = _F32(values.get("u_lum_mix", 100.0))
+    if lum_mix < 100.0:
+        graded_lum = _luma601(c)
+        restore = (lum_mix < _F32(100.0)) & (graded_lum > _F32(1e-5)) \
+            & (luma_original > _F32(1e-5))
+        ratio = np.where(restore,
+                         _F32(luma_original) / np.where(restore, graded_lum,
+                                                        _F32(1.0)),
+                         _F32(1.0))
+        blend = _F32((100.0 - float(lum_mix)) / 100.0)
+        scale = _F32(1.0) + blend * (ratio - _F32(1.0))
+        c = (c * scale[..., None]).astype(_F32)
     return c
 
 
@@ -468,6 +513,10 @@ CPU_GRADING_BASIC_KEYS = frozenset({
     "shadow", "highlights", "mid_detail", "sharpness", "hue_shift",
     "lift_saturation", "gamma_saturation", "gain_saturation",
     "lift", "gamma", "gain",
+    # 一级校色扩展参数（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）：
+    # apply_grading_uniforms_cpu 已实现同序数学，CPU oracle 显式支持。
+    "offset", "pivot", "log_shadow", "log_midtone", "log_highlight",
+    "log_offset", "log_low_range", "log_high_range", "lum_mix",
 })
 
 #: GL composition 忽略的别名死键（Layer 默认 dict 携带；CPU 同样忽略，

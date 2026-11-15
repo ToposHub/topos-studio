@@ -511,6 +511,27 @@ _DEFAULT_QUALIFIER_PARAMS: Dict[str, Any] = {
 }
 
 
+# 一级校色扩展参数的默认值（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）。
+# `__init__` 与 `reset_params` 的默认表尾部即引用此处；image_engine 的
+# 扩展参数补丁白名单也以此为准（非扩展键一律拒绝）。
+DEFAULT_EXTENDED_GRADING_PARAMS: Dict[str, Any] = {
+    "offset": (0, 0, 0),
+    "pivot": 0.18,
+    "log_shadow": (0, 0, 0),
+    "log_midtone": (0, 0, 0),
+    "log_highlight": (0, 0, 0),
+    "log_offset": (0, 0, 0),
+    "log_low_range": 0.333,
+    "log_high_range": 0.550,
+    "lum_mix": 100,
+}
+
+
+def default_extended_grading_params() -> Dict[str, Any]:
+    """Return a fresh copy of the extended grading parameter defaults."""
+    return dict(DEFAULT_EXTENDED_GRADING_PARAMS)
+
+
 class Layer:
     """调色图层：非破坏性调色链的一个节点（状态 + 序列化）。
 
@@ -570,7 +591,10 @@ class Layer:
             # 与移动端 mega.frag tonal_saturation_adjust_g 对齐。
             "lift_saturation": 0,
             "gamma_saturation": 0,
-            "gain_saturation": 0
+            "gain_saturation": 0,
+            # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix），
+            # 权威默认见 DEFAULT_EXTENDED_GRADING_PARAMS。
+            **DEFAULT_EXTENDED_GRADING_PARAMS,
         }
         
         self.curves_lut = None # np.ndarray (256, 1, 3) or (256, 1)
@@ -727,7 +751,10 @@ class Layer:
             # 与移动端 mega.frag tonal_saturation_adjust_g 对齐。
             "lift_saturation": 0,
             "gamma_saturation": 0,
-            "gain_saturation": 0
+            "gain_saturation": 0,
+            # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix），
+            # 权威默认见 DEFAULT_EXTENDED_GRADING_PARAMS。
+            **DEFAULT_EXTENDED_GRADING_PARAMS,
         }
         # P1-COLOR-03: 重置连关键帧轨道一起清空，否则下一次 seek 会经
         # apply_grade_keyframes 把已重置的调色值"复活"。
@@ -1091,13 +1118,23 @@ class Layer:
             bool: 是否有调色效果
         """
         # 检查色轮参数（默认值都是 0 或 (0,0,0)）
-        for key in ["lift", "gamma", "gain"]:
+        for key in ["lift", "gamma", "gain", "offset", "log_shadow",
+                    "log_midtone", "log_highlight", "log_offset"]:
             val = self.grading_params.get(key, (0, 0, 0))
             if val != (0, 0, 0):
                 return True
         for key in ["exposure", "temp", "tint", "contrast", "shadow", "highlights", "saturation", "vibrance", "mid_detail", "sharpness", "hue_shift"]:
             if self.grading_params.get(key, 0) != 0:
                 return True
+        # 非零默认的扩展参数：偏离默认即视为有调色
+        if self.grading_params.get("pivot", 0.18) != 0.18:
+            return True
+        if self.grading_params.get("lum_mix", 100) != 100:
+            return True
+        if self.grading_params.get("log_low_range", 0.333) != 0.333:
+            return True
+        if self.grading_params.get("log_high_range", 0.550) != 0.550:
+            return True
 
         # 检查曲线数据 - 只有当有实际的曲线数据时才认为有调色
         # RGB 曲线默认值是 [(0, 255), (255, 0)]（像素坐标，从左上到右下的直线）
@@ -1399,7 +1436,9 @@ class Layer:
                     type(gp).__name__)
                 gp = {}
             for k, v in gp.items():
-                if k in ["lift", "gamma", "gain"] and isinstance(v, list):
+                if k in ("lift", "gamma", "gain", "offset", "log_shadow",
+                         "log_midtone", "log_highlight", "log_offset") \
+                        and isinstance(v, list):
                     layer.grading_params[k] = tuple(v)
                 else:
                     layer.grading_params[k] = v

@@ -123,10 +123,17 @@ def _payload_provider(graph):
 class TestStructural:
     def test_param_dtypes_match_msl_structs(self) -> None:
         assert GRAPH_SIZE_PARAMS_DTYPE.itemsize == 16
-        assert GRAPH_GRADING_PARAMS_DTYPE.itemsize == 96  # 22 f4 + 2 u4
+        # 41 f4 + 2 u4：原 22 f4 + 扩展参数（pivot + 4×vec3 + log 双区间 +
+        # lum_mix，共 19 f4）。与 MSL GraphGradingParams 字段逐一对应。
+        assert GRAPH_GRADING_PARAMS_DTYPE.itemsize == 172
         for name in GRAPH_GRADING_PARAMS_DTYPE.names:
             offset = GRAPH_GRADING_PARAMS_DTYPE.fields[name][1]
             assert offset % 4 == 0, name
+        # 扩展字段位次守卫：追加在 gain_z 之后、opacity 之前（既有字段
+        # 偏移不得漂移）
+        names = GRAPH_GRADING_PARAMS_DTYPE.names
+        assert names.index("gain_z") < names.index("pivot")
+        assert names.index("lum_mix") < names.index("opacity")
 
     def test_all_kernels_present_in_msl_source(self) -> None:
         for kernel in GRAPH_KERNELS:

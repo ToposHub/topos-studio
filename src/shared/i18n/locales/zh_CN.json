@@ -381,7 +381,16 @@
     "gamma_sat": "中间饱和",
     "gain_sat": "亮部饱和",
     "tonal_saturation_reset": "重置全部色调区间饱和度",
-    "reset_all_tooltip": "重置全部调色参数"
+    "reset_all_tooltip": "重置全部调色参数",
+    "offset": "偏移",
+    "pivot": "Pivot",
+    "log_shadow": "Shadow",
+    "log_midtone": "Midtone",
+    "log_highlight": "Highlight",
+    "log_offset": "Offset",
+    "log_low_range": "Low Range",
+    "log_high_range": "High Range",
+    "lum_mix": "Lum Mix"
   },
   "clipstrip": {
     "filter_menu": "镜头过滤",
@@ -433,7 +442,8 @@
     "ai_edit_assistant": "AI assistant",
     "image_export": "图片导出",
     "gallery": "画廊",
-    "tonal_saturation": "色调饱和度"
+    "tonal_saturation": "色调饱和度",
+    "log_wheels": "Log 色轮"
   },
   "lut": {
     "intensity": "强度:",

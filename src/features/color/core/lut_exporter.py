@@ -556,11 +556,14 @@ class LutExportWorker(QObject):
         wb = np.array([1.0 + temp / 200.0, 1.0 - tint / 200.0, 1.0 - temp / 200.0])
         result *= wb
 
-        # Contrast (pivot around 0.18)
+        # Contrast (pivot parameterized; default 0.18 physical mid-grey)
         contrast = params.get('contrast', 0)
         if contrast != 0:
             c_factor = 1.0 + contrast / 100.0
-            result = np.sign(result) * np.power(np.abs(result) / 0.18, c_factor) * 0.18
+            pivot = params.get('pivot')
+            pivot = 0.18 if pivot is None else float(pivot)
+            pivot = min(max(pivot, 0.05), 1.0)  # 与 UI 值域一致，防 0 枢轴除零
+            result = np.sign(result) * np.power(np.abs(result) / pivot, c_factor) * pivot
 
         # Lift / Gamma / Gain
         lift_hsb = params.get('lift', (0, 0, 0))
@@ -586,6 +589,59 @@ class LutExportWorker(QObject):
         result = np.where(mask_sdr, np.power(np.maximum(result, 1e-10), gm),
                  np.where(mask_hdr, gm * (result - 1.0) + 1.0,
                           gm * result))
+
+        # 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 shader 同序同式）
+        def _hsb_or_neutral(value: Any) -> Tuple[float, float, float]:
+            """list/tuple/None 归一为三元组（list != tuple 恒 True 陷阱）。"""
+            if value is None:
+                return (0.0, 0.0, 0.0)
+            try:
+                triple = tuple(float(item) for item in value)
+            except (TypeError, ValueError):
+                return (0.0, 0.0, 0.0)
+            return triple[:3] if len(triple) >= 3 else (0.0, 0.0, 0.0)
+
+        offset_hsb = _hsb_or_neutral(params.get('offset'))
+        log_shadow_hsb = _hsb_or_neutral(params.get('log_shadow'))
+        log_midtone_hsb = _hsb_or_neutral(params.get('log_midtone'))
+        log_highlight_hsb = _hsb_or_neutral(params.get('log_highlight'))
+        log_offset_hsb = _hsb_or_neutral(params.get('log_offset'))
+        if any(hsb != (0.0, 0.0, 0.0) for hsb in
+               (offset_hsb, log_shadow_hsb, log_midtone_hsb,
+                log_highlight_hsb, log_offset_hsb)):
+            from src.features.color.core.composition_uniforms import (
+                params_to_offset_rgb,
+            )
+            offset_bias = np.array(params_to_offset_rgb(*offset_hsb),
+                                   dtype=result.dtype)
+            result = result + offset_bias
+            if any(hsb != (0.0, 0.0, 0.0) for hsb in
+                   (log_shadow_hsb, log_midtone_hsb, log_highlight_hsb,
+                    log_offset_hsb)):
+                lum = np.clip(np.sum(
+                    result * [0.299, 0.587, 0.114], axis=-1), 0.0, 1.0)
+                lo = min(max(float(params.get('log_low_range', 0.333)),
+                             0.05), 0.95)
+                hi = min(max(float(params.get('log_high_range', 0.550)),
+                             0.05), 0.95)
+
+                def _smoothstep_np_local(edge0, edge1, x):
+                    t = np.clip((x - edge0) / max(edge1 - edge0, 1e-6),
+                                0.0, 1.0)
+                    return t * t * (3.0 - 2.0 * t)
+
+                w_shadow = 1.0 - _smoothstep_np_local(lo * 0.5, lo, lum)
+                w_high = _smoothstep_np_local(hi, hi + (1.0 - hi) * 0.5, lum)
+                w_mid = np.clip(1.0 - w_shadow - w_high, 0.0, 1.0)
+                result = (result
+                          + np.array(params_to_offset_rgb(*log_shadow_hsb),
+                                     dtype=result.dtype) * w_shadow[..., np.newaxis]
+                          + np.array(params_to_offset_rgb(*log_midtone_hsb),
+                                     dtype=result.dtype) * w_mid[..., np.newaxis]
+                          + np.array(params_to_offset_rgb(*log_highlight_hsb),
+                                     dtype=result.dtype) * w_high[..., np.newaxis]
+                          + np.array(params_to_offset_rgb(*log_offset_hsb),
+                                     dtype=result.dtype))
 
         # Shadows (power curve lift)
         shadow = params.get('shadow', 0)
@@ -631,6 +687,19 @@ class LutExportWorker(QObject):
         if saturation != 0:
             gray = np.sum(result * [0.299, 0.587, 0.114], axis=-1)
             result = gray[..., np.newaxis] + (result - gray[..., np.newaxis]) * (1.0 + saturation / 100.0)
+
+        # Lum Mix（原亮度保留，0..100；与 shader 同式）
+        lum_mix = params.get('lum_mix')
+        lum_mix = 100 if lum_mix is None else float(lum_mix)
+        if lum_mix < 100:
+            luma_original = np.sum(color * [0.299, 0.587, 0.114], axis=-1)
+            graded_lum = np.sum(result * [0.299, 0.587, 0.114], axis=-1)
+            restore = (graded_lum > 1e-5) & (luma_original > 1e-5)
+            ratio = np.where(restore,
+                             luma_original / np.where(restore, graded_lum, 1.0),
+                             1.0)
+            blend = (100.0 - lum_mix) / 100.0
+            result = result * (1.0 + blend * (ratio - 1.0))[..., np.newaxis]
 
         return result
 

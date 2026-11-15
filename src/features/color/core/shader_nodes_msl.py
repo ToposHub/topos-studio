@@ -93,7 +93,20 @@ float3 msl_apply_grading(float3 color, float2 v_texcoord,
     float lift_saturation = p.u_lift_saturation;
     float gamma_saturation = p.u_gamma_saturation;
     float gain_saturation = p.u_gain_saturation;
+    // 一级校色扩展参数（Offset / pivot / Log 四轮 / Lum Mix）。
+    float pivot = p.u_pivot;
+    float3 offset = float3(p.u_offset_x, p.u_offset_y, p.u_offset_z);
+    float3 log_shadow = float3(p.u_log_shadow_x, p.u_log_shadow_y, p.u_log_shadow_z);
+    float3 log_midtone = float3(p.u_log_midtone_x, p.u_log_midtone_y, p.u_log_midtone_z);
+    float3 log_highlight = float3(p.u_log_highlight_x, p.u_log_highlight_y, p.u_log_highlight_z);
+    float3 log_offset = float3(p.u_log_offset_x, p.u_log_offset_y, p.u_log_offset_z);
+    float log_low_range = p.u_log_low_range;
+    float log_high_range = p.u_log_high_range;
+    float lum_mix = p.u_lum_mix;
     float2 u_tex_size = float2(p.u_tex_size_x, p.u_tex_size_y);
+
+    // 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
+    float luma_original = dot(color, float3(0.299, 0.587, 0.114));
 
     // 1. Exposure - Reversible linear multiplier
     float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
@@ -107,10 +120,10 @@ float3 msl_apply_grading(float3 color, float2 v_texcoord,
     wb.g = 1.0 - tint / 200.0;
     color *= wb;
 
-    // 3. Contrast - Pivot around 0.18 (Physical Mid-Grey)
+    // 3. Contrast - Power curve around the pivot（默认 0.18 物理中间灰）
     if (contrast != 0.0) {
         float c_factor = 1.0 + contrast / 100.0;
-        color = sign(color) * pow(abs(color) / 0.18, float3(c_factor)) * 0.18;
+        color = sign(color) * pow(abs(color) / pivot, float3(c_factor)) * pivot;
     }
 
     // 4. Lift / Gamma / Gain
@@ -138,6 +151,24 @@ float3 msl_apply_grading(float3 color, float2 v_texcoord,
             float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
             color = mix(color, float3(luma_post_grading), balance_factor);
         }
+    }
+
+    // 4.5 Offset（加性平衡轮）：uniform 为 params_to_offset_rgb 的加性偏移
+    color += offset;
+
+    // 4.6 Log 四轮（与 GLSL 同序同式：亮度区间权重 + 各区间加性偏移）
+    if (log_shadow.x != 0.0 || log_shadow.y != 0.0 || log_shadow.z != 0.0 ||
+        log_midtone.x != 0.0 || log_midtone.y != 0.0 || log_midtone.z != 0.0 ||
+        log_highlight.x != 0.0 || log_highlight.y != 0.0 || log_highlight.z != 0.0 ||
+        log_offset.x != 0.0 || log_offset.y != 0.0 || log_offset.z != 0.0) {
+        float log_lum = clamp(dot(color, float3(0.299, 0.587, 0.114)), 0.0, 1.0);
+        float log_lo = clamp(log_low_range, 0.05, 0.95);
+        float log_hi = clamp(log_high_range, 0.05, 0.95);
+        float log_w_shadow = 1.0 - smoothstep(log_lo * 0.5, log_lo, log_lum);
+        float log_w_high = smoothstep(log_hi, log_hi + (1.0 - log_hi) * 0.5, log_lum);
+        float log_w_mid = clamp(1.0 - log_w_shadow - log_w_high, 0.0, 1.0);
+        color += log_shadow * log_w_shadow + log_midtone * log_w_mid
+               + log_highlight * log_w_high + log_offset;
     }
 
     // 5. Shadows - Power Curve (Natural Lifting)
@@ -236,6 +267,15 @@ float3 msl_apply_grading(float3 color, float2 v_texcoord,
     if (saturation != 0.0) {
         float gray = dot(color, float3(0.299, 0.587, 0.114));
         color = mix(float3(gray), color, 1.0 + saturation / 100.0);
+    }
+
+    // 11. Lum Mix（原亮度保留，0..100；与 GLSL 同式）
+    if (lum_mix < 100.0) {
+        float graded_lum = dot(color, float3(0.299, 0.587, 0.114));
+        if (graded_lum > 1e-5 && luma_original > 1e-5) {
+            color *= mix(1.0, luma_original / graded_lum,
+                         (100.0 - lum_mix) / 100.0);
+        }
     }
 
     return color;
