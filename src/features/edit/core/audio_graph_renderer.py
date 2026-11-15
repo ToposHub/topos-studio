@@ -788,12 +788,14 @@ class AudioGraphRenderer:
         阶段 3 同构）；sidechain_taps 为 {source_track_id: ndarray} 检源池。
 
         Args:
-            skip_volume: 跳过 master volume/mute/automation，仅应用条带+限幅。
-                用于 AM-10 阶段 3.4 normalize 二次过 limiter（避免重复施加 master 增益）。
+            skip_volume: 跳过 master volume/mute/automation，仍应用条带和限幅。
+                已处理母带的归一化保护应调用 limit_master_output，避免重复运行效果链。
             start_frame: output 起始帧（master automation ramp 用）
             fps: 帧率（master automation ramp 用）
             sidechain_taps: Master FX 链的外部侧链检源输出（导出方拼接）
         """
+        master_gate: Optional[np.ndarray] = None
+        static_muted = False
         if not skip_volume:
             # §3.1: master automation
             auto_mode = self._master_automation_mode
@@ -818,9 +820,8 @@ class AudioGraphRenderer:
                             dtype=output.dtype,
                         )
                         # >0.5 静音；边界 de-click（1ms 线性 ramp，避免阶跃 click）
-                        gate = (mute_ramp <= 0.5).astype(output.dtype)
-                        gate = self._apply_declick_edges(gate, self._sample_rate)
-                        output = output * gate[np.newaxis, :]
+                        master_gate = (mute_ramp <= 0.5).astype(output.dtype)
+                        master_gate = self._apply_declick_edges(master_gate, self._sample_rate)
                 # volume automation 逐样本 ramp（原已正确）
                 vol_ramp = None
                 if master_auto:
@@ -850,6 +851,23 @@ class AudioGraphRenderer:
                     sc_map = {iid: buf[:, :cur_n]
                               for iid, buf in raw_map.items()}
             output = self._master_chain.process(output, sidechain_by_id=sc_map)
+        # Stateful effects can emit past audio even when their input is zero.
+        # The final Master mute must gate those tails as well as direct audio.
+        if static_muted:
+            output = output * 0.0
+        elif master_gate is not None:
+            output = output * master_gate[np.newaxis, :]
         # AM-09: 连续状态限幅
-        output = self._master_limiter.process(output)
-        return output
+        return self.limit_master_output(output)
+
+    def limit_master_output(self, output: np.ndarray, *,
+                            reset_state: bool = False) -> np.ndarray:
+        """Protect rendered PCM without reapplying Master gain, EQ, or effects.
+
+        A separate offline pass (for example after loudness normalization)
+        starts at sample zero and must not inherit the previous pass's final
+        gain envelope. Streaming callers keep the continuous state by default.
+        """
+        if reset_state:
+            self._master_limiter.reset()
+        return self._master_limiter.process(output)

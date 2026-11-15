@@ -96,6 +96,7 @@ class AudioMixerPanel(QWidget):
         # MX-01: 当前播放代数（audio_telemetry_reset 更新；低于它的
         # 排队遥测载荷直接丢弃，旧代事件不得回亮表计/频谱）
         self._telemetry_generation: int = 0
+        self._engine_sample_rate: float = 48000.0
 
         self._init_ui()
 
@@ -277,6 +278,7 @@ class AudioMixerPanel(QWidget):
             track_tag=track_tag or "",
             parent=self
         )
+        mixer.set_engine_sample_rate(self._engine_sample_rate)
         mixer.setContentsMargins(MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER)
         # 外边距会影响 strip 的可用内容宽度；先重算，再统一到 Master 宽度，
         # 保证子轨的推子不会被右缘裁切。
@@ -550,6 +552,7 @@ class AudioMixerPanel(QWidget):
 
     def on_engine_sample_rate(self, sample_rate: float) -> None:
         """MX-09: 引擎采样率下发（设备/工程切换）——推送到全部 strip。"""
+        self._engine_sample_rate = float(sample_rate)
         for mixer in self._track_mixers.values():
             try:
                 mixer.set_engine_sample_rate(float(sample_rate))

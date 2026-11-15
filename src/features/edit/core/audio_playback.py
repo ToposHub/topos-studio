@@ -3378,6 +3378,8 @@ class AudioMixer:
             # 改为逐样本门控（>0.5 静音 + 边界 de-click），与导出 apply_master 一致。
             master_auto_mode = self._master_automation_mode
             master_auto = self._master_automation if master_auto_mode != "off" else None
+            master_pre_peak = float(np.max(np.abs(output))) if output.size else 0.0
+            master_gate: Optional[np.ndarray] = None
             static_muted = self._master_muted
             if static_muted:
                 output *= 0.0
@@ -3394,9 +3396,8 @@ class AudioMixer:
                             ),
                             dtype=output.dtype,
                         )
-                        gate = (mute_ramp <= 0.5).astype(output.dtype)
-                        gate = self._apply_declick(gate, float(self._sample_rate))
-                        output = output * gate[np.newaxis, :]
+                        master_gate = (mute_ramp <= 0.5).astype(output.dtype)
+                        master_gate = self._apply_declick(master_gate, float(self._sample_rate))
                 # volume automation ramp（逐样本）或静态增益
                 vol_ramp = None
                 if master_auto:
@@ -3431,6 +3432,13 @@ class AudioMixer:
                                          for iid, buf in raw_map.items()}
                 output = master_chain.process(
                     output, sidechain_by_id=master_sc_map)
+
+            # Mute gates the complete Master output, including existing FX tails.
+            # Apply the automation envelope once, after the user effect chain.
+            if static_muted:
+                output *= 0.0
+            elif master_gate is not None:
+                output *= master_gate[np.newaxis, :]
 
             # AM-09: 连续状态 Master 限幅器（替代无状态逐 buffer 峰值归一化）。
             # 跨 buffer 平滑增益包络，避免相邻 buffer 缩放比例不同造成的 pumping。
@@ -3467,6 +3475,7 @@ class AudioMixer:
                     per_track_peaks[MASTER_BUS_KEY] = TrackLevel(
                         peak_l=m_peak_l, peak_r=m_peak_r,
                         rms_l=m_rms_l, rms_r=m_rms_r, lufs=m_lufs,
+                        pre_peak=master_pre_peak,
                         gr=(master_chain.collect_gain_reduction()
                             if master_chain is not None else {}),
                         sc=(master_chain.collect_detector_levels()
@@ -3863,6 +3872,9 @@ class AudioPlaybackThread(QThread):
         # Mixer per-track 电平：由 prefill/direct-mix 路径写入最新峰值，
         # 主循环按节流频率 emit 出去（供 AudioMixerPanel 各轨电平表）。
         self._latest_per_track_peaks: Dict[str, tuple] = {}
+        # An empty measurement is real silence, distinct from no new mix.
+        self._track_levels_pending: bool = False
+        self._last_emitted_track_ids: set[str] = set()
         self._last_track_level_emit_ms: float = 0.0
 
         # 小数帧累积器，消除 int() 截断导致的累积漂移
@@ -4177,6 +4189,9 @@ class AudioPlaybackThread(QThread):
         self._fractional_frame = 0.0
         self._sample_chunk_fraction = 0.0
         self._prefill_chunk_fraction = 0.0
+        self._latest_per_track_peaks = {}
+        self._track_levels_pending = False
+        self._last_emitted_track_ids.clear()
         if self._output:
             self._output.reset_buffer(
                 keep_suspended=self._paused if keep_suspended is None else keep_suspended
@@ -4285,8 +4300,8 @@ class AudioPlaybackThread(QThread):
                 self.msleep(5)
                 return False
             # 直接 mix 路径可获得 per-track 峰值，更新最新缓存（供主循环 emit）
-            if _direct_per_track:
-                self._latest_per_track_peaks = _direct_per_track
+            self._latest_per_track_peaks = _direct_per_track
+            self._track_levels_pending = True
             # ring 中的残留旧样本已被本分支跳过，若不清空会在后续周期被
             # 先于新数据消费（重复播放旧段）。清空后把直混结果写入 ring，统一
             # 经 peek→write→commit 消费：写失败（written==0）时样本留在 ring，
@@ -4386,7 +4401,7 @@ class AudioPlaybackThread(QThread):
         # 发射 per-track 电平（节流 ~33Hz，避免 UI 过载）
         try:
             now_ms = time.perf_counter() * 1000.0
-            if (self._latest_per_track_peaks
+            if (self._track_levels_pending
                     and now_ms - self._last_track_level_emit_ms >= 30.0):
                 self._last_track_level_emit_ms = now_ms
                 track_levels: Dict[str, dict] = {}
@@ -4447,10 +4462,22 @@ class AudioPlaybackThread(QThread):
                                     "freqs": freqs, "db": dbs}
                     except Exception:
                         pass
-                # 清空缓存：电平表靠下次填充刷新，无信号时由 UI 侧衰减归零
+                # Missing tracks need complete silence, not only an empty dict:
+                # effect editors consume telemetry while strip meters can reset
+                # on absence. Include Master so its FX also clear in natural gaps.
+                for tid in self._last_emitted_track_ids - track_levels.keys():
+                    track_levels[tid] = {
+                        "peak": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
+                        "rms": [LEVEL_SILENT_DB, LEVEL_SILENT_DB],
+                        "lufs": [-70.0, -70.0], "pre": LEVEL_SILENT_DB,
+                        "gr": {}, "sc": {}, "taps": {}, "spectrum": None,
+                        "silent": True,
+                        "generation": int(getattr(self._mixer, "_telemetry_generation", 0)),
+                    }
+                self._last_emitted_track_ids = set(self._latest_per_track_peaks)
                 self._latest_per_track_peaks = {}
-                if track_levels:
-                    self.audio_track_levels.emit(track_levels)
+                self._track_levels_pending = False
+                self.audio_track_levels.emit(track_levels)
         except Exception:
             pass
 
@@ -4531,11 +4558,10 @@ class AudioPlaybackThread(QThread):
                 n,
                 self._channels,
             )
+            self._latest_per_track_peaks = per_track
+            self._track_levels_pending = True
             if samples is None or samples.size == 0:
                 break
-            # prefill 是稳态播放路径：缓存最新 per-track 峰值，供主循环节流 emit。
-            if per_track:
-                self._latest_per_track_peaks = per_track
             written = self._ring.write(samples)
             if written <= 0:
                 break

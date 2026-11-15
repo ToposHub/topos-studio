@@ -528,12 +528,13 @@ class TestDl02FractionalDelay:
     def test_fractional_time_accuracy(self):
         """分数延迟时间误差 ≤ 1 采样（冲激回声峰位对齐）。"""
         sr = SR
-        d = self._delay(60.5)  # 0.5 采样分数
+        delay_ms = 60.51  # 2904.48 samples at 48 kHz: genuinely fractional.
+        d = self._delay(delay_ms)
         block = int(sr)  # 1 秒块（> 延迟：回声在本块内）
         x = np.zeros((2, block))
         x[0, 0] = 1.0
         y = d.process(x)
-        expected = int(round(60.5 * 0.001 * sr))  # 2904
+        expected = int(round(delay_ms * 0.001 * sr))
         # 跳过输入滤波的起始冲激区，在回声窗内找峰
         window = np.abs(y[0][expected - 64:expected + 64])
         peak_idx = int(np.argmax(window)) + expected - 64
@@ -549,18 +550,16 @@ class TestDl02FractionalDelay:
         d = self._delay(10.0, fb=-60.0)
         x = np.zeros((2, 2048))
         x[0, 0] = 1.0
-        d.process(x)
-        y2 = d.process(np.zeros((2, 2048)))
+        y = np.concatenate((d.process(x), d.process(np.zeros((2, 2048)))), axis=-1)
         # 第二回声（≈20ms 处）应与第一回声反相
-        first = y2[0, 480 - 8:480 + 8]
-        second = y2[0, 960 - 8:960 + 8]
+        first = y[0, 480 - 8:480 + 8]
+        second = y[0, 960 - 8:960 + 8]
         e1 = float(np.max(np.abs(first)))
         e2 = float(np.max(np.abs(second)))
-        if e1 > 1e-3 and e2 > 1e-3:
-            # 峰值符号相反
-            s1 = first[int(np.argmax(np.abs(first)))]
-            s2 = second[int(np.argmax(np.abs(second)))]
-            assert s1 * s2 < 0, "negative feedback must alternate echo polarity"
+        assert e1 > 1e-3 and e2 > 1e-3, "both echoes must actually be present"
+        s1 = first[int(np.argmax(np.abs(first)))]
+        s2 = second[int(np.argmax(np.abs(second)))]
+        assert s1 * s2 < 0, "negative feedback must alternate echo polarity"
 
     def test_high_feedback_stays_finite(self):
         """谱半径 <1 的反馈长跑有限（无爆音/发散）。"""

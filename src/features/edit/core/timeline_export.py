@@ -4133,7 +4133,9 @@ class TimelineExporter:
         # MX-08: 外部侧链——检源集合与轨处理顺序（检源先于被控轨，与实时
         # _sidechain_track_order 同语义）。环依赖按原序放置（tap 不命中 →
         # 压缩器回退内部检源）并告警一次。
-        export_sc_source_ids: set = set()
+        # A source used only by the Master chain still needs its per-frame tap
+        # retained; otherwise the final Master stage silently self-detects.
+        export_sc_source_ids: set = renderer.master_sidechain_sources()
         _sc_deps: Dict[str, set] = {}
         for _t in list(audio_tracks) + list(bus_tracks):
             _n = renderer.get_node(_t.track_id)
@@ -4797,7 +4799,7 @@ class TimelineExporter:
                     scale = float(10.0 ** (gain_db / 20.0))
                     output = output * scale
                     # 安全限幅：normalize 后峰值可能超 1.0，过 master limiter
-                    output = renderer.apply_master(output, skip_volume=True)
+                    output = renderer.limit_master_output(output, reset_state=True)
                     logger.info(
                         f"Loudness normalize: {report.integrated_lufs:.1f} → "
                         f"{config.loudness_target_lufs:.1f} LUFS "

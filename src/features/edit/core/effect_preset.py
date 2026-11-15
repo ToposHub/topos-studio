@@ -68,10 +68,17 @@ def load_user_presets(effect_type: str) -> list[dict[str, Any]]:
         if not name or not isinstance(params, dict):
             logger.warning("effect preset: skip corrupted entry in %s", effect_type)
             continue
+        # R01：algorithm_version 原样读回（0=未标注→legacy 兼容桶），
+        # 应用方据此选择 DSP 路径；不再只在保存时写、加载时丢。
+        try:
+            av = max(0, int(item.get("algorithm_version", 0) or 0))
+        except (TypeError, ValueError):
+            av = 0
         out.append({
             "preset_id": str(item.get("preset_id", "")),
             "name": str(name),
             "params": params,
+            "algorithm_version": av,
         })
     return out
 

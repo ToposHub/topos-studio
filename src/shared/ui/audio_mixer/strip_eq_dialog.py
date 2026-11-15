@@ -1523,6 +1523,7 @@ class ParametricEQDialog(QDialog):
         graph_row.setSpacing(6)
 
         self.eq_graph = ProEQGraphWidget()
+        self.eq_graph._sample_rate = self._sample_rate
         self.eq_graph.nodeDragged.connect(self._on_graph_node_dragged)
         self.eq_graph.nodeDragEnded.connect(self._on_drag_released)
         self.eq_graph.nodeQScrolled.connect(self._on_graph_node_q_scrolled)

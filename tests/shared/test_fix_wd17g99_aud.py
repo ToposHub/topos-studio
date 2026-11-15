@@ -312,7 +312,7 @@ def _eq_chain():
     """构造含启用 EQ 胶囊实例（panel="eq"）的最小 chain 桩。"""
     inst = SimpleNamespace(
         effect_type="strip_eq", params={"enabled": True},
-        panel="eq", instance_id="eq-1", order=0,
+        enabled=True, panel="eq", instance_id="eq-1", order=0,
     )
     return SimpleNamespace(effects=(inst,))
 
