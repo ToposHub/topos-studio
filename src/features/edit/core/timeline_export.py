@@ -503,6 +503,11 @@ class TimelineExportConfig:
     audio_channel_layout: str = ""
     # v1.6 M-B8：stems 追加音轨声明（空 = 单音轨行为逐字节不变）。
     # 仅 topos MOV 容器生效；编码器不支持时整体降级单轨并记录警告。
+    # R04：导出尾音模式——False（默认）= 严格选区（输出长度 = 选区帧数，
+    # 选区外 FX 尾音截断，与历史行为逐字节一致）；True = 包含效果尾音
+    # （输出按 Bus/Master 链尾音预算延长，音频长于视频末帧；轨级尾音
+    # 始终在选区内 drain，不受本开关影响）。
+    include_fx_tail: bool = False
     audio_stems: Tuple[AudioStemExportTrack, ...] = ()
     output_path: str = ""
     selected_clip_ids: Optional[List[str]] = None
@@ -4105,6 +4110,34 @@ class TimelineExporter:
         renderer = AudioGraphRenderer(float(sample_rate))
         renderer.configure_from_sequence(audio_sequence)
 
+        # R04：含尾导出模式——输出缓冲按 Bus/Master 链尾音预算延长。
+        # 轨渲染仍限定在选区内（轨尾音选区内 drain 不变）；延长区的
+        # 零输入由 bus/master 阶段的全长处理自然排空（Delay/Reverb 的
+        # IIR 状态在全长 buffer 上连续推进）。严格模式（默认）不加长，
+        # 输出长度与选区逐字节一致。
+        render_tail_frames = 0
+        if getattr(config, "include_fx_tail", False):
+            _tail_samples = max(
+                renderer.master_tail_estimate_samples(),
+                renderer.bus_tail_estimate_samples(),
+            )
+            if _tail_samples > 0 and samples_per_frame > 0:
+                render_tail_frames = int(math.ceil(
+                    _tail_samples / float(samples_per_frame)))
+                if render_tail_frames > 0:
+                    total_samples = frames_to_samples(
+                        end_frame + render_tail_frames - start_frame,
+                        fps_rational, sample_rate)
+                    frame_sample_bounds.extend(
+                        frames_to_samples(f, fps_rational, sample_rate)
+                        for f in range(frame_count + 1,
+                                       frame_count + render_tail_frames + 1))
+                    logger.info(
+                        "audio export: include_fx_tail extends output by %d "
+                        "frames (%d samples) for bus/master FX tails",
+                        render_tail_frames, total_samples - (
+                            frame_sample_bounds[frame_count]))
+
         # 收集可见的音频轨道（含 Bus 轨——Bus 无 clips 但需参与 bus stage）
         has_solo = any(t.is_solo for t in audio_sequence.audio_tracks)
         # RMA-04: 计算 solo 可听闭包（替代 is_track_renderable 的旧 solo 分支）。
@@ -4760,6 +4793,41 @@ class TimelineExporter:
                             if track_first_src_ch is None:
                                 track_first_src_ch = int(
                                     getattr(decoder, "_channels", 2) or 2)
+
+                        # R04：clip FX 尾音——clip 结束后按其链尾音预算
+                        # 继续喂零块（保持链状态连续），输出汇入轨 pending；
+                        # 限选区内（不扩展选区）。帧与该 clip 最后一帧紧邻，
+                        # 链状态不跳跃；后续 clip 的内容帧与尾音帧在
+                        # pending 求和（MX-04 语义）。
+                        if clip_chain is not None and clip_chain.is_active:
+                            _cf_tail = int(clip_chain.tail_estimate_samples())
+                            if _cf_tail > 0 and samples_per_frame > 0:
+                                _cf_frames = int(math.ceil(
+                                    _cf_tail / float(samples_per_frame)))
+                                for _tf in range(clip_end,
+                                                  min(end_frame,
+                                                      clip_end + _cf_frames)):
+                                    _trel = _tf - start_frame
+                                    if _trel < 0 or \
+                                            _trel + 1 >= len(frame_sample_bounds):
+                                        break
+                                    _ts = frame_sample_bounds[_trel]
+                                    _te = frame_sample_bounds[_trel + 1]
+                                    _tbl = _te - _ts
+                                    if _tbl <= 0:
+                                        continue
+                                    _tblock = clip_chain.process(
+                                        np.zeros((channels, _tbl),
+                                                 dtype=np.float32))
+                                    _tfbuf = pending_frames.get(_tf)
+                                    if _tfbuf is None or \
+                                            _tfbuf.shape[-1] != _tbl:
+                                        _tfbuf = np.zeros(
+                                            (channels, _tbl), dtype=np.float32)
+                                        pending_frames[_tf] = _tfbuf
+                                    _tn = min(_tblock.shape[-1],
+                                              _tfbuf.shape[-1])
+                                    _tfbuf[:, :_tn] += _tblock[:channels, :_tn]
 
 
                     except Exception as e:
