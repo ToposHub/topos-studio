@@ -905,7 +905,12 @@ class TrackMixerWidget(QWidget):
         return EffectChainParams(effects=tuple(effects))
 
     def _on_eq_committed_from_badge(self, track_id: str, eq_params: Any) -> None:
-        """EQ 对话框提交：更新 chain 中 EQ 胶囊管理的 strip_eq 实例 + emit。"""
+        """EQ 对话框提交：更新 chain 中 EQ 胶囊管理的 strip_eq 实例 + emit。
+
+        R06: 外部已移除 panel="eq" 实例（且窗口未被回填关闭的竞态窗口内）
+        的迟到提交不再复活该实例——只允许"链里已有实例的更新"与
+        "对话框绑定实例 id 的首次创建"两种路径。
+        """
         from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
         effects = list(self._effect_chain.effects) if self._effect_chain is not None else []
         new_params = eq_params.to_dict() if eq_params is not None else None
@@ -931,6 +936,17 @@ class TrackMixerWidget(QWidget):
                 # None 表示禁用 → 从 chain 移除 EQ
                 effects.pop(idx)
         elif new_params is not None:
+            # R06 守卫：链里已无 EQ 实例时，仅当对话框绑定过实例 id
+            # （=它创建过该实例，实例随后被外部移除）才拒绝迟到提交，
+            # 避免旧窗把已删除的效果重新写回链。
+            bound_id = getattr(self._eq_dialog, "_instance_id", "") \
+                if self._eq_dialog is not None else ""
+            if bound_id and not self._instance_in_chain(bound_id):
+                logger.info(
+                    "R06: EQ 窗口迟到提交被拒绝（实例 %s 已被外部移除，"
+                    "track=%s）", bound_id, self._track_id)
+                self._update_badges_style()
+                return
             # 创建新 strip_eq 实例（追加到链尾，EQ 胶囊管理）
             new_order = max((e.order for e in effects), default=-1) + 1
             effects.append(TrackEffectInstance(
@@ -995,7 +1011,11 @@ class TrackMixerWidget(QWidget):
             self.track_effects_preview.emit(self._track_id, self._effect_chain)
 
     def set_effect_chain(self, chain: Any) -> None:
-        """W26: 外部静默回填 FX 机架效果器链（timeline 变化后同步显示）。
+        """W26/R06: 外部静默回填 FX 机架效果器链（timeline 变化后同步显示）。
+
+        R06: 回填范围扩展到全部已开对话框——同 id 实例参数变化回填窗口
+        （外部 800ms 后窗口不再显示旧 100ms，旧窗提交也不再写回旧参数）；
+        实例被外部移除/链清空时关闭对应窗口（旧窗不能复活已删效果）。
 
         Args:
             chain: EffectChainParams | None
@@ -1027,6 +1047,12 @@ class TrackMixerWidget(QWidget):
                 if eq_inst is not None and eq_inst.params:
                     self._eq_dialog.set_current_params(
                         StripEQParams.from_dict(eq_inst.params))
+                elif eq_inst is None:
+                    # R06: EQ 实例被外部移除 → 关闭旧窗（迟到提交不再复活）
+                    logger.info(
+                        "R06: EQ 实例已被外部移除，关闭 EQ 窗口（track=%s）",
+                        self._track_id)
+                    self._eq_dialog.close()
             except (AttributeError, KeyError, TypeError, ValueError):
                 # AUD-37903: 同上 —— 具体异常类型 + 日志，不再静默吞掉
                 logger.warning(
@@ -1034,9 +1060,56 @@ class TrackMixerWidget(QWidget):
                     self._track_id,
                     exc_info=True,
                 )
+        elif self._eq_dialog is not None and chain is None:
+            # R06: 外部清空整条链 → 关闭 EQ 窗口
+            logger.info(
+                "R06: 外部清空效果链，关闭 EQ 窗口（track=%s）", self._track_id)
+            self._eq_dialog.close()
+        # R06: FX 列表 8 类对话框字典回填/关闭（此前完全不被通知）
+        self._backfill_open_effect_dialogs(chain)
         # 同步胶囊高亮（EQ/DY 激活状态依赖 chain）
         if hasattr(self, '_eq_badge'):
             self._update_badges_style()
+
+    def _backfill_open_effect_dialogs(self, chain: Any) -> None:
+        """R06: 外部链变化 → 已开 FX 对话框按 instance_id 回填或关闭。
+
+        - 同 id 同类型实例仍存在：set_current_params 静默回填新参数
+          （对话框实现保证不回发信号）；
+        - 实例已不存在（外部删除/替换/清空链）：关闭并注销窗口
+          （复用 _close_dialogs_for_instance 的按 id 清理）。
+        """
+        from src.features.edit.core.timeline_v2 import StripEQParams
+        live: dict = {}
+        if chain is not None:
+            for e in chain.effects:
+                live[e.instance_id] = e
+        for attr, effect_type in self._EFFECT_DIALOG_TYPES.items():
+            dialogs = getattr(self, attr, None)
+            if not dialogs:
+                continue
+            for instance_id, dialog in list(dialogs.items()):
+                inst = live.get(instance_id)
+                if inst is not None and inst.effect_type == effect_type \
+                        and hasattr(dialog, "set_current_params"):
+                    try:
+                        params = dict(inst.params) if inst.params else {}
+                        if effect_type == "strip_eq":
+                            params = StripEQParams.from_dict(params)
+                        dialog.set_current_params(params)
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        logger.warning(
+                            "R06: 对话框 %s 回填失败（track=%s instance=%s）",
+                            effect_type, self._track_id, instance_id,
+                            exc_info=True,
+                        )
+                elif inst is None or inst.effect_type != effect_type:
+                    # 实例被移除/类型变化 → 关闭旧窗（防复活）
+                    logger.info(
+                        "R06: 实例 %s 不在新链中，关闭其已开窗口（track=%s）",
+                        instance_id, self._track_id,
+                    )
+                    self._close_dialogs_for_instance(instance_id)
 
     def _refresh_effect_list(self) -> None:
         """根据 self._effect_chain 刷新内嵌效果器列表 UI。
@@ -1513,6 +1586,18 @@ class TrackMixerWidget(QWidget):
         '_delay_dialogs', '_saturation_dialogs', '_imager_dialogs',
         '_expander_dialogs', '_strip_eq_dialogs',
     )
+
+    # R06: 对话框字典属性 → 效果类型（外部链变化时按 id+类型回填/关闭）
+    _EFFECT_DIALOG_TYPES = {
+        '_limiter_dialogs': 'limiter',
+        '_compressor_dialogs': 'compressor',
+        '_reverb_dialogs': 'reverb',
+        '_delay_dialogs': 'delay',
+        '_saturation_dialogs': 'saturation',
+        '_imager_dialogs': 'imager',
+        '_expander_dialogs': 'expander',
+        '_strip_eq_dialogs': 'strip_eq',
+    }
 
     def _close_dialogs_for_instance(self, instance_id: str) -> None:
         """AUD-37902: 关闭并移除某效果器实例的编辑对话框。

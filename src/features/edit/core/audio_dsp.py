@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover
 #     从未实现，迁移为 Stereo，声音不变）
 #   - MX-04: 同轨多 clip 先求和、轨 DSP 一次处理（重叠 clip 区间声音改变
 #     ——这是缺陷修复而非回归）
-ALGORITHM_VERSION = 3
+ALGORITHM_VERSION = 4
 
 ALGORITHM_CHANGELOG = {
     1: "初始版本（CW-A1）",
@@ -60,6 +60,9 @@ ALGORITHM_CHANGELOG = {
     3: "EQ-02 非 Clean Voicing 的带宽/增益耦合（boost→Q 窄/cut→Q 宽；"
        "Clean 与 0dB 不变）；DY-03 Limiter 过冲遥测；RV-02 image-source "
        "ER/负 Pre Delay 传播/Distance 只动 ER",
+    4: "R07：Delay 延迟时间热改走 15ms 双读头线性交叉淡化（旧/新读头共享"
+       "历史，反馈消费淡化后湿信号；淡化中改目标只更新目标、进度接续）。"
+       "静态参数渲染与 v3 逐位一致，仅热改过渡行为变化。",
 }
 
 
@@ -2635,6 +2638,16 @@ class DelayEffect(AudioEffect):
         self._damp_prev: np.ndarray = np.zeros(2, dtype=np.float64)
         self._damp_b: np.ndarray = np.array([1.0])
         self._damp_a: np.ndarray = np.array([1.0, 0.0])
+        # R07: 双读头交叉淡化状态（延迟时间热改平滑）。_cur_delay_* 为
+        # 当前目标读位（样本）；淡入中改目标只更新目标、进度接续，不重置。
+        self._cur_delay_l: Optional[float] = None
+        self._cur_delay_r: Optional[float] = None
+        self._old_delay_l: float = 0.0   # 淡化起点读位（fade 开始时快照）
+        self._old_delay_r: float = 0.0
+        self._fade_l_remaining: int = 0
+        self._fade_r_remaining: int = 0
+        self._fade_l_total: int = 1
+        self._fade_r_total: int = 1
         self._rebuild_delay_line()
         self._rebuild_input_filters()
         self._recompute_damp_coeff()
@@ -2642,6 +2655,10 @@ class DelayEffect(AudioEffect):
     # DL-02: 环形缓冲按最大延迟（1200ms）一次性预分配——参数时间变化
     # 不再重建（拖动不清空整段历史/尾音）；容量只在采样率变化时重置。
     _MAX_DELAY_MS = 1200.0
+    # R07: 延迟时间热改的读头交叉淡化窗（ms）。固定值写入算法契约
+    # （ALGORITHM_VERSION 4）：旧/新读头共享同一历史，线性等和交叉
+    # 淡化（两端 unity），反馈路径消费淡化后的湿信号。
+    _XFADE_MS = 15.0
 
     def _rebuild_delay_line(self) -> None:
         """按最大延迟容量预分配环形缓冲（仅采样率变化/首建时调用）。"""
@@ -2794,6 +2811,27 @@ class DelayEffect(AudioEffect):
         # 的读位=写位决定，此处钳到 1.0 保持段切分正确性）。
         delay_l = max(1.0, self._left_delay * 0.001 * sr)
         delay_r = max(1.0, self._right_delay * 0.001 * sr)
+        # R07: 双读头交叉淡化——延迟时间热改时旧/新读头短窗交叉淡化，
+        # 消除读位跳变（10→10.25ms 旧实现边界跳变 ~0.44 @ 振幅 0.5）。
+        # 淡入中再次改目标：只更新目标读位，进度接续，不重置回旧头。
+        if self._cur_delay_l is None:
+            self._cur_delay_l = delay_l
+        elif delay_l != self._cur_delay_l:
+            if self._fade_l_remaining <= 0:
+                self._old_delay_l = self._cur_delay_l
+                self._fade_l_total = max(
+                    1, int(self._XFADE_MS * 0.001 * sr))
+                self._fade_l_remaining = self._fade_l_total
+            self._cur_delay_l = delay_l
+        if self._cur_delay_r is None:
+            self._cur_delay_r = delay_r
+        elif delay_r != self._cur_delay_r:
+            if self._fade_r_remaining <= 0:
+                self._old_delay_r = self._cur_delay_r
+                self._fade_r_total = max(
+                    1, int(self._XFADE_MS * 0.001 * sr))
+                self._fade_r_remaining = self._fade_r_total
+            self._cur_delay_r = delay_r
         fb_l = self._left_fb / 100.0
         fb_r = self._right_fb / 100.0
         blend = self._blend / 100.0
@@ -2802,26 +2840,59 @@ class DelayEffect(AudioEffect):
         wet_l = np.empty(n, dtype=np.float64)
         wet_r = np.empty(n, dtype=np.float64)
 
+        def _read_head(buf: np.ndarray, base_idx: np.ndarray,
+                       delay: float, m: int) -> np.ndarray:
+            """分数读头：读位 = (段起始写位 + j - delay) mod size，
+            i0/i0+1 线性插值（i0+1 ≤ 段起始，读先于写）。"""
+            rpos = (base_idx - delay).astype(np.float64)
+            i0 = np.floor(rpos).astype(np.int64) % size
+            i1 = (i0 + 1) % size
+            w = rpos - np.floor(rpos)
+            return buf[i0] * (1.0 - w) + buf[i1] * w
+
         pos = 0
         idx = self._delay_idx
         size = self._delay_size
         while pos < n:
-            # 段长不得超过最小整数延迟：保证段内所有读位（含插值的
-            # pos+1 样本）落在段起始之前（先读后写语义完整）。
-            m = min(n - pos, int(delay_l), int(delay_r))
+            # 段长不得超过"两声道新旧读位"的最小整数延迟：保证段内所有
+            # 读位（含插值 pos+1 样本）落在段起始之前（先读后写完整）。
+            _min_l = min(int(self._cur_delay_l),
+                         int(self._old_delay_l) if self._fade_l_remaining > 0
+                         else int(self._cur_delay_l))
+            _min_r = min(int(self._cur_delay_r),
+                         int(self._old_delay_r) if self._fade_r_remaining > 0
+                         else int(self._cur_delay_r))
+            m = min(n - pos, _min_l, _min_r)
             m = max(1, m)
             end = idx + m
-            # 1) 分数读头：读位 = (段起始写位 + j - delay) mod size，
-            #    i0/i0+1 线性插值（i0+1 ≤ 段起始，读先于写）。
             base_idx = (idx + np.arange(m)) % size
-            for buf, delay, out_seg in (
-                    (self._buf_l, delay_l, wet_l),
-                    (self._buf_r, delay_r, wet_r)):
-                rpos = (base_idx - delay).astype(np.float64)
-                i0 = np.floor(rpos).astype(np.int64) % size
-                i1 = (i0 + 1) % size
-                w = rpos - np.floor(rpos)
-                out_seg[pos:pos + m] = buf[i0] * (1.0 - w) + buf[i1] * w
+            # 1) 分数读头（R07：淡入中双头交叉淡化；静态时单头直读）
+            if self._fade_l_remaining > 0:
+                _g = np.clip(
+                    1.0 - (self._fade_l_remaining - np.arange(m))
+                    / float(self._fade_l_total), 0.0, 1.0)
+                wet_l[pos:pos + m] = (
+                    (1.0 - _g) * _read_head(self._buf_l, base_idx,
+                                            self._old_delay_l, m)
+                    + _g * _read_head(self._buf_l, base_idx,
+                                      self._cur_delay_l, m))
+                self._fade_l_remaining = max(0, self._fade_l_remaining - m)
+            else:
+                wet_l[pos:pos + m] = _read_head(
+                    self._buf_l, base_idx, self._cur_delay_l, m)
+            if self._fade_r_remaining > 0:
+                _g = np.clip(
+                    1.0 - (self._fade_r_remaining - np.arange(m))
+                    / float(self._fade_r_total), 0.0, 1.0)
+                wet_r[pos:pos + m] = (
+                    (1.0 - _g) * _read_head(self._buf_r, base_idx,
+                                            self._old_delay_r, m)
+                    + _g * _read_head(self._buf_r, base_idx,
+                                      self._cur_delay_r, m))
+                self._fade_r_remaining = max(0, self._fade_r_remaining - m)
+            else:
+                wet_r[pos:pos + m] = _read_head(
+                    self._buf_r, base_idx, self._cur_delay_r, m)
             seg_l = wet_l[pos:pos + m]
             seg_r = wet_r[pos:pos + m]
 
@@ -2865,7 +2936,10 @@ class DelayEffect(AudioEffect):
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
-        """重置延迟线/滤波器/阻尼状态（seek/暂停后调用）。"""
+        """重置延迟线/滤波器/阻尼状态（seek/暂停后调用）。
+
+        R07：seek 是显式重建（清旧历史），交叉淡化状态一并清除。
+        """
         if self._buf_l is not None:
             self._buf_l.fill(0.0)
         if self._buf_r is not None:
@@ -2873,6 +2947,10 @@ class DelayEffect(AudioEffect):
         self._delay_idx = 0
         self._damp_prev = np.zeros(2, dtype=np.float64)
         self._in_zi = None
+        self._cur_delay_l = None
+        self._cur_delay_r = None
+        self._fade_l_remaining = 0
+        self._fade_r_remaining = 0
 
     def tail_estimate_samples(self) -> int:
         """MX-07：延迟尾音估计——最大延迟 × 反馈衰减到 -60dB 的圈数。

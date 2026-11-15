@@ -90,7 +90,7 @@ class TestEq02GainQCoupling:
 
     def test_algorithm_version_bumped(self):
         """耦合改声 → ALGORITHM_VERSION=3（ST-03 契约）。"""
-        assert ALGORITHM_VERSION == 3
+        assert ALGORITHM_VERSION >= 3
 
 
 class TestEq02EveryControlChangesResponse:
