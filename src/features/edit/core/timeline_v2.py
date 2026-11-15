@@ -3569,6 +3569,9 @@ class SpectralManglerParams:
     dist_mix_pct: float = 80.0
     # 元数据
     random_seed: int = 0
+    #: H09：Freeze 捕获资产引用（项目侧 id；空 = 无资产。raw PCM 不进
+    #: 参数 JSON；automation kind = never）
+    freeze_capture_id: str = ""
 
     def __post_init__(self) -> None:
         if self.routing not in _SM_ROUTINGS:
@@ -3621,6 +3624,7 @@ class SpectralManglerParams:
             "dist_resonance_pct": self.dist_resonance_pct,
             "dist_mix_pct": self.dist_mix_pct,
             "random_seed": self.random_seed,
+            "freeze_capture_id": self.freeze_capture_id,
         }
 
     @staticmethod
@@ -3678,6 +3682,7 @@ class SpectralManglerParams:
             dist_resonance_pct=_f("dist_resonance_pct", 25.0),
             dist_mix_pct=_f("dist_mix_pct", 80.0),
             random_seed=_seed_of(d),
+            freeze_capture_id=str(d.get("freeze_capture_id", "") or ""),
         )
 
 
@@ -4578,7 +4583,7 @@ def parse_fx_automation_key(key: str) -> Optional[tuple]:
 #:               边界重设天然支持（每块一次，无中间插值意义）；
 #: continuous = 连续参数（浮点，单位各异；块边界求值 + DSP 侧平滑/淡化）。
 FX_AUTOMATION_NEVER = frozenset({
-    "random_seed", "enabled", "algorithm_version",
+    "random_seed", "enabled", "algorithm_version", "freeze_capture_id",
 })
 FX_AUTOMATION_EVENT = frozenset({
     "routing", "formant_mode", "pitch_tracking", "vocoder_carrier",

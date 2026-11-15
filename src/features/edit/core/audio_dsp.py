@@ -3802,6 +3802,20 @@ class EffectChain:
         self._enabled_flags = new_flags
         self._instance_ids = new_ids
 
+    def install_freeze_capture_by_id(self, instance_id: str,
+                                     capture: dict) -> bool:
+        """H09：向指定实例装载 Freeze 捕获资产（仅 spectral_mangler 适配
+        器支持；找不到实例/类型不符返回 False）。"""
+        for i, iid in enumerate(self._instance_ids):
+            if iid != instance_id:
+                continue
+            inst = self._effects[i] if i < len(self._effects) else None
+            installer = getattr(inst, "install_freeze_capture", None)
+            if callable(installer):
+                return bool(installer(capture))
+            return False
+        return False
+
     def process(self, samples: np.ndarray,
                 sidechain_by_id: Optional[dict] = None) -> np.ndarray:
         """依次应用链中每个启用的效果器。

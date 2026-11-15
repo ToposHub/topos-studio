@@ -45,6 +45,14 @@ class _CompositeAdapterBase(AudioEffect):
     def latency_samples(self) -> int:
         return int(getattr(self._impl, "latency_samples", lambda: 0)())
 
+    def take_freeze_capture(self) -> dict:
+        """H09：透传捕获拉取（宿主落盘）。"""
+        return self._impl.take_freeze_capture()
+
+    def install_freeze_capture(self, capture: dict) -> bool:
+        """H09：透传捕获装载（确定性重放）。"""
+        return bool(self._impl.install_freeze_capture(capture))
+
     def collect_telemetry(self) -> dict:
         return dict(self._impl.collect_telemetry())
 

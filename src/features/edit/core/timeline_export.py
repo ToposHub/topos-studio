@@ -4170,6 +4170,30 @@ class TimelineExporter:
         renderer = AudioGraphRenderer(float(sample_rate))
         renderer.configure_from_sequence(audio_sequence)
 
+        # H09：Freeze 捕获资产装载（项目注册表 → 各节点 DSP 链；缺资产
+        # 逐条诊断，重放退化为当前历史——不静默伪造）
+        try:
+            from src.features.edit.core.freeze_capture_store import (
+                apply_freeze_registry,
+                freeze_registry_from_project,
+            )
+            _freeze_reg = freeze_registry_from_project(self._project)
+            if _freeze_reg:
+                for _t in audio_sequence.audio_tracks:
+                    _tn = renderer.get_node(_t.track_id)
+                    if _tn is not None and _tn.effect_chain is not None:
+                        apply_freeze_registry(_tn.effect_chain,
+                                              getattr(_t, "effect_chain", None),
+                                              _freeze_reg)
+                if renderer._master_chain is not None:
+                    apply_freeze_registry(
+                        renderer._master_chain,
+                        getattr(audio_sequence, "master_effect_chain", None),
+                        _freeze_reg)
+        except Exception:  # pragma: no cover — 资产装载不阻断导出
+            logger.debug("freeze capture registry apply failed",
+                         exc_info=True)
+
 
         # R04/H03：含尾导出模式——输出缓冲按**全路径**尾音预算延长。
         # H03 修正：预算 = 各轨"轨链尾 + 沿 output_bus 路径的 Bus 链尾之和
