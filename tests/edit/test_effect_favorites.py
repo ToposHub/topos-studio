@@ -186,9 +186,12 @@ class TestAudioEffectsTreePopulation:
             audio_cat = tree.topLevelItem(0)
             assert audio_cat is not None
 
-            # Category should have children (the 8 mixer audio effects)
+            # Category should have children. CW-A1: Dynamics 三合一替代
+            # 拆分的 limiter/compressor/expander——Audio 页为
+            # strip_eq, reverb, delay, saturation, imager, dynamics,
+            # spatial_panner 共 7 项。
             child_count = audio_cat.childCount()
-            assert child_count >= 8  # strip_eq, limiter, compressor, reverb, ...
+            assert child_count >= 7
 
     def test_audio_effects_draggable(self, qapp):
         """Test audio effects tree has drag enabled."""

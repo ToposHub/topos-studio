@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 _DIALOG_REGISTRY: Optional[dict] = None
 
 
+_DIALOG_REGISTRY: Optional[dict] = None
+
+
+_DIALOG_REGISTRY: Optional[dict] = None
+
+
+_DIALOG_REGISTRY: Optional[dict] = None
+
+
 def _ensure_dialog_registry() -> dict:
     """惰性构建 effect_type → dialog 元数据映射。"""
     global _DIALOG_REGISTRY
@@ -43,28 +52,45 @@ def _ensure_dialog_registry() -> dict:
 
     from src.features.edit.core.timeline_v2 import (
         StripEQParams, LimiterParams, CompressorParams, ReverbParams,
-        DelayParams, SaturationParams, ImagerParams, NoiseGateParams,
+        DelayParams, SaturationParams, ImagerParams, ExpanderParams,
+        DynamicsParams, VoiceChangerParams, SpectralManglerParams,
     )
-    from src.shared.ui.audio_mixer.strip_eq_dialog import StripEQDialog
+    from src.shared.ui.audio_mixer.strip_eq_dialog import ParametricEQDialog
     from src.shared.ui.audio_mixer.limiter_dialog import LimiterDialog
     from src.shared.ui.audio_mixer.compressor_dialog import CompressorDialog
     from src.shared.ui.audio_mixer.reverb_dialog import ReverbDialog
     from src.shared.ui.audio_mixer.delay_dialog import DelayDialog
     from src.shared.ui.audio_mixer.saturation_dialog import SaturationDialog
     from src.shared.ui.audio_mixer.imager_dialog import ImagerDialog
-    from src.shared.ui.audio_mixer.noise_gate_dialog import NoiseGateDialog
+    from src.shared.ui.audio_mixer.expander_dialog import ExpanderDialog
+    from src.shared.ui.audio_mixer.dynamics_dialog import ClipDynamicsDialog
+    from src.shared.ui.audio_mixer.voice_changer_dialog import (
+        VoiceChangerDialog,
+    )
+    from src.shared.ui.audio_mixer.spectral_mangler_dialog import (
+        SpectralManglerDialog,
+    )
 
     # 每项: (DialogClass, ParamsClass, committed_signal_name, has_instance_id)
-    # StripEQDialog 是胶囊单例式构造（无 instance_id 参数），其余 7 个有。
+    # CW-A1: 全部对话框统一带 instance_id 构造；expander/noise_gate 共用
+    # ExpanderDialog（旧 gate 参数经 ExpanderParams.from_dict 无损转 Gate）。
     _DIALOG_REGISTRY = {
-        "strip_eq":    (StripEQDialog,    StripEQParams,    "strip_eq_committed",    False),
+        "strip_eq":    (ParametricEQDialog, StripEQParams,   "strip_eq_committed",   True),
         "limiter":     (LimiterDialog,    LimiterParams,    "limiter_committed",     True),
         "compressor":  (CompressorDialog, CompressorParams, "compressor_committed",  True),
         "reverb":      (ReverbDialog,     ReverbParams,     "reverb_committed",      True),
         "delay":       (DelayDialog,      DelayParams,      "delay_committed",       True),
         "saturation":  (SaturationDialog, SaturationParams, "saturation_committed",  True),
         "imager":      (ImagerDialog,     ImagerParams,     "imager_committed",      True),
-        "noise_gate":  (NoiseGateDialog,  NoiseGateParams,  "noise_gate_committed",  True),
+        "expander":    (ExpanderDialog,   ExpanderParams,   "expander_committed",    True),
+        "noise_gate":  (ExpanderDialog,   ExpanderParams,   "expander_committed",    True),
+        # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合，不拆分）
+        "dynamics":    (ClipDynamicsDialog, DynamicsParams, "dynamics_committed",    True),
+        # NF-02（2026-11-15 计划 §6.3）：两款新复合 FX 的完整窗口
+        "voice_changer": (VoiceChangerDialog, VoiceChangerParams,
+                          "voice_changer_committed", True),
+        "spectral_mangler": (SpectralManglerDialog, SpectralManglerParams,
+                             "spectral_mangler_committed", True),
     }
     return _DIALOG_REGISTRY
 
@@ -146,23 +172,15 @@ class ClipAudioEffectDialogManager(QObject):
 
         # 构造 dialog。track_id/track_name 槽位借用 clip_id/clip_name 仅用于
         # 窗口标题与信号 payload 的占位（dialog 内部不做 track 级 DSP）。
+        # CW-A1: 全部对话框统一带 instance_id 构造。
         win_parent = parent if parent is not None else self.parent()
-        if has_instance_id:
-            dialog = dialog_cls(
-                track_id=clip_id,
-                track_name=clip_name or clip_id,
-                instance_id=effect_id,
-                initial_params=initial_params,
-                parent=win_parent,
-            )
-        else:
-            # StripEQDialog 胶囊式构造（无 instance_id）
-            dialog = dialog_cls(
-                track_id=clip_id,
-                track_name=clip_name or clip_id,
-                initial_params=initial_params,
-                parent=win_parent,
-            )
+        dialog = dialog_cls(
+            track_id=clip_id,
+            track_name=clip_name or clip_id,
+            instance_id=effect_id,
+            initial_params=initial_params,
+            parent=win_parent,
+        )
 
         # 连接 committed 信号 → 转 dict → emit clip_effect_params_committed
         committed_signal = getattr(dialog, committed_attr, None)

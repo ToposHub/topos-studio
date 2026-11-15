@@ -1,0 +1,133 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 6 items
+
+tests/edit/test_audio_post_integration_automation_wakeup.py FFFFFF       [100%]
+
+=================================== FAILURES ===================================
+__________ test_playback_wakes_and_suspends_numeric_automation[track] __________
+tests/edit/test_audio_post_integration_automation_wakeup.py:81: in test_playback_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+___________ test_playback_wakes_and_suspends_numeric_automation[bus] ___________
+tests/edit/test_audio_post_integration_automation_wakeup.py:81: in test_playback_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+_________ test_playback_wakes_and_suspends_numeric_automation[master] __________
+tests/edit/test_audio_post_integration_automation_wakeup.py:81: in test_playback_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+__________ test_renderer_wakes_and_suspends_numeric_automation[track] __________
+tests/edit/test_audio_post_integration_automation_wakeup.py:104: in test_renderer_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+___________ test_renderer_wakes_and_suspends_numeric_automation[bus] ___________
+tests/edit/test_audio_post_integration_automation_wakeup.py:104: in test_renderer_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+_________ test_renderer_wakes_and_suspends_numeric_automation[master] __________
+tests/edit/test_audio_post_integration_automation_wakeup.py:104: in test_renderer_wakes_and_suspends_numeric_automation
+    np.testing.assert_allclose(actual, _expected(frame), atol=1e-6, rtol=0.0)
+E   AssertionError: 
+E   Not equal to tolerance rtol=0, atol=1e-06
+E   
+E   Mismatched elements: 1920 / 1920 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 1]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 2]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 3]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E    [0, 4]: 0.20000000298023224 (ACTUAL), 0.8999999761581421 (DESIRED)
+E   Max absolute difference among violations: 0.7
+E   Max relative difference among violations: 0.7777778
+E    ACTUAL: array([[0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2],
+E          [0.2, 0.2, 0.2, ..., 0.2, 0.2, 0.2]], shape=(2, 960), dtype=float32)
+E    DESIRED: array([[0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9],
+E          [0.9, 0.9, 0.9, ..., 0.9, 0.9, 0.9]], shape=(2, 960), dtype=float32)
+=========================== short test summary info ============================
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_playback_wakes_and_suspends_numeric_automation[track]
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_playback_wakes_and_suspends_numeric_automation[bus]
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_playback_wakes_and_suspends_numeric_automation[master]
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_renderer_wakes_and_suspends_numeric_automation[track]
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_renderer_wakes_and_suspends_numeric_automation[bus]
+FAILED tests/edit/test_audio_post_integration_automation_wakeup.py::test_renderer_wakes_and_suspends_numeric_automation[master]
+============================== 6 failed in 1.07s ===============================

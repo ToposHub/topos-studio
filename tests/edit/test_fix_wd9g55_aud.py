@@ -424,9 +424,12 @@ class TestAud16206RemoveBusRestoresSends:
         timeline = self._timeline()
         _, updated = RemoveBusCommand.create("bus1").apply(timeline)
         payload = updated.to_dict()
+        # MX-14: Send v2 序列化含 tap/muted（默认 post_fader/False）
         assert payload["rerouted_tracks"][0][2] == [
-            {"send_id": "s1", "target_bus_id": "bus1", "level": 0.35, "enabled": True},
-            {"send_id": "s2", "target_bus_id": "other", "level": 0.8, "enabled": False},
+            {"send_id": "s1", "target_bus_id": "bus1", "level": 0.35,
+             "enabled": True, "tap": "post_fader", "muted": False},
+            {"send_id": "s2", "target_bus_id": "other", "level": 0.8,
+             "enabled": False, "tap": "post_fader", "muted": False},
         ]
 
         restored_cmd = RemoveBusCommand.from_dict(payload)

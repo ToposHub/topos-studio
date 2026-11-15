@@ -1,0 +1,12 @@
+{
+  "input_frequency_hz": 250.0,
+  "input_peak": 1.0,
+  "sample_rate": 48000.0,
+  "cutoff_hz": 1000.0,
+  "nominal_slope_db_oct": 12,
+  "steady_rms_dbfs": {
+    "df749759": -51.2553613756555,
+    "working_tree": -27.132820321811092
+  },
+  "difference_db": 24.122541053844405
+}

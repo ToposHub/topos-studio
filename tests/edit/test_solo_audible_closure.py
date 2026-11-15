@@ -177,7 +177,8 @@ class TestRealtimeSoloClosure:
 
         output, peaks = self._mix(mixer)
         assert float(np.max(np.abs(output))) == pytest.approx(0.3, abs=1e-5)
-        assert set(peaks) == {"Solo", "Bus"}
+        # MX-03: master 遥测条目（"-1"=MASTER_BUS_KEY）随有声输出进入 peaks
+        assert set(peaks) == {"Solo", "Bus", "-1"}
 
     def test_solo_bus_keeps_upstream_track(self, qapp):
         """solo Bus → 其上游普通轨保留，Bus 收到信号（旧 bug：上游被剔除→Bus 无声）。"""

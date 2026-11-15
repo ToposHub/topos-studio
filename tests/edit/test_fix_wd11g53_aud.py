@@ -107,30 +107,42 @@ def _make_thread_with_mocks(*, output_is_playing: bool = True,
 
 
 class TestAud15301DelaySetParamsStaleLowcut:
-    def test_simultaneous_time_and_lowcut_change_uses_new_lowcut(self):
-        """time 与 low_cut 同时偏离默认值：HP 系数必须用**新** low_cut_hz 计算。"""
-        fx = DelayEffect(48000.0)
-        # 默认 time=300ms / low_cut=100Hz；一次性下发全量参数（工程加载/预设恢复）
-        fx.set_params({"time_ms": 500.0, "low_cut_hz": 500.0, "enabled": True})
-        expected = float(np.exp(-2.0 * np.pi * 500.0 / 48000.0))
-        assert fx._hp_coeff == pytest.approx(expected, rel=1e-9), (
-            "rebuild 分支应用本次新 low_cut_hz，而非旧值 100Hz"
-        )
+    """CW-A1: 立体声双线延迟的参数生效路径（对应旧 AUD-15301 的回归意图）。"""
 
-    def test_repeat_same_params_keeps_coefficient(self):
-        """同值重放不再触发重建路径时，系数仍应保持新值（差值判据为 0）。"""
+    def test_simultaneous_time_and_filter_change_uses_new_values(self):
+        """延迟时间与输入滤波同时偏离默认值：延迟抽头与滤波系数都用新值。"""
         fx = DelayEffect(48000.0)
-        fx.set_params({"time_ms": 500.0, "low_cut_hz": 500.0, "enabled": True})
-        fx.set_params({"time_ms": 500.0, "low_cut_hz": 500.0, "enabled": True})
-        expected = float(np.exp(-2.0 * np.pi * 500.0 / 48000.0))
-        assert fx._hp_coeff == pytest.approx(expected, rel=1e-9)
+        fx.set_params({"enabled": True, "left_delay": 500.0, "right_delay": 500.0,
+                       "low_cut": 500.0, "high_cut": 20000.0,
+                       "left_feedback": 0.0, "right_feedback": 0.0,
+                       "stereo_blend": 0.0, "dry_wet": 100.0, "level_db": 0.0,
+                       "high_ratio": 0.0})
+        imp = np.zeros((2, int(48000 * 0.7)))
+        imp[0, 10] = 1.0
+        out = fx.process(imp)
+        pk = np.argmax(np.abs(out[0])) / 48000 * 1000
+        assert 495.0 <= pk <= 506.0, f"延迟抽头应使用新时间 500ms，实测 {pk:.1f}ms"
 
-    def test_sample_rate_change_branch_uses_new_lowcut(self):
+    def test_repeat_same_params_keeps_behavior(self):
+        """同值重放行为不变（差值判据为 0，不触发重建）。"""
         fx = DelayEffect(48000.0)
-        fx.set_params({"time_ms": 300.0, "low_cut_hz": 800.0, "enabled": True},
+        params = {"enabled": True, "left_delay": 500.0, "right_delay": 500.0,
+                  "low_cut": 500.0, "high_cut": 20000.0,
+                  "left_feedback": 0.0, "right_feedback": 0.0,
+                  "stereo_blend": 0.0, "dry_wet": 100.0, "level_db": 0.0,
+                  "high_ratio": 0.0}
+        fx.set_params(params)
+        fx.set_params(params)
+        assert fx._left_delay == 500.0
+        assert fx._low_cut == 500.0
+
+    def test_sample_rate_change_branch_uses_new_values(self):
+        fx = DelayEffect(48000.0)
+        fx.set_params({"enabled": True, "left_delay": 300.0, "right_delay": 300.0,
+                       "low_cut": 800.0, "high_cut": 20000.0},
                       sample_rate=96000.0)
-        expected = float(np.exp(-2.0 * np.pi * 800.0 / 96000.0))
-        assert fx._hp_coeff == pytest.approx(expected, rel=1e-9)
+        assert fx._sample_rate == 96000.0
+        assert fx._low_cut == 800.0
 
 
 class TestAud15303DelayPingPongOddChannels:
@@ -138,10 +150,10 @@ class TestAud15303DelayPingPongOddChannels:
     def test_odd_channels_no_index_error(self, channels):
         """ping-pong 奇数声道（≥3）不再 IndexError，末声道映射到自身。"""
         fx = DelayEffect(48000.0)
-        fx.set_params({
-            "time_ms": 10.0, "feedback": 30.0, "mix": 40.0,
-            "ping_pong": True, "low_cut_hz": 100.0, "enabled": True,
-        })
+        fx.set_params({"enabled": True, "left_delay": 10.0, "right_delay": 10.0,
+                       "left_feedback": 30.0, "right_feedback": 30.0,
+                       "stereo_blend": 100.0, "dry_wet": 40.0, "level_db": 0.0,
+                       "high_ratio": 0.0, "low_cut": 100.0, "high_cut": 20000.0})
         samples = np.random.default_rng(7).uniform(
             -0.5, 0.5, size=(channels, 256)).astype(np.float32)
         out = fx.process(samples)  # 旧实现：seg[swap] 索引越界
@@ -149,23 +161,22 @@ class TestAud15303DelayPingPongOddChannels:
         assert np.all(np.isfinite(out))
 
     def test_even_channels_cross_feed_unchanged(self):
-        """偶数（4）声道交换语义保持 ch^1：ch0 信号经延迟后喂给 ch1。"""
+        """CW-A1: 交叉反馈语义由 stereo_blend 承担——ch0 信号经左延迟线
+        交叉（blend=100%）进入右线，右声道湿信号非零。"""
         fx = DelayEffect(48000.0)
-        fx.set_params({"time_ms": 5.0, "feedback": 50.0, "mix": 50.0,
-                       "ping_pong": True, "low_cut_hz": 100.0, "enabled": True})
-        # delay_size = 5ms*48 = 240 样本；每块 240 样本，3 块覆盖一个延迟周期
+        fx.set_params({"enabled": True, "left_delay": 5.0, "right_delay": 5.0,
+                       "left_feedback": 50.0, "right_feedback": 0.0,
+                       "stereo_blend": 100.0, "dry_wet": 100.0, "level_db": 0.0,
+                       "high_ratio": 0.0, "low_cut": 100.0, "high_cut": 20000.0})
         t = np.arange(720) / 48000.0
         sig = 0.5 * np.sin(2.0 * np.pi * 1000.0 * t).astype(np.float32)
-        samples = np.zeros((4, 720), dtype=np.float32)
+        samples = np.zeros((2, 720), dtype=np.float32)
         samples[0] = sig  # 仅 ch0 有信号
-        out = fx.process(samples.reshape(4, -1)[:, :240].copy())
-        assert np.allclose(out[1], 0.0, atol=1e-9), "首块 ch1 尚未到延迟期"
-        out = fx.process(samples[:, 240:480].copy())
+        fx.process(samples[:, :240].copy())
+        fx.process(samples[:, 240:480].copy())
         out = fx.process(samples[:, 480:720].copy())
-        # 第三块：ch1 的延迟线在第二块经 swap(ch1←ch0) 收到反馈，湿信号非零
-        assert float(np.max(np.abs(out[1]))) > 1e-4, "ch0→ch1 乒乓交叉反馈应存在"
-        # ch2/ch3 交换对（2↔3）不受 ch0 信号影响
-        assert np.allclose(out[3], 0.0, atol=1e-9)
+        # 第三块：右线经 blend 交叉收到左线反馈，ch1 湿信号非零
+        assert float(np.max(np.abs(out[1]))) > 1e-4, "ch0→ch1 交叉反馈应存在"
 
 
 class TestAud15304FxParamClamping:
@@ -173,7 +184,7 @@ class TestAud15304FxParamClamping:
         """ratio=0（损坏工程文件）不再在渲染热路径抛 ZeroDivisionError。"""
         fx = CompressorEffect(48000.0)
         fx.set_params({"ratio": 0.0, "threshold_db": -20.0, "enabled": True})
-        assert fx._ratio == 1.0  # 钳到 CompressorParams 下界
+        assert fx._ratio == 1.2  # 钳到 CompressorParams 下界（CW-A1: 1.2）
         samples = np.full((2, 128), 0.9, dtype=np.float32)
         out = fx.process(samples)  # 旧实现：1.0 / 0 → ZeroDivisionError
         assert np.all(np.isfinite(out))
@@ -181,54 +192,66 @@ class TestAud15304FxParamClamping:
     def test_compressor_ratio_negative_clamped(self):
         fx = CompressorEffect(48000.0)
         fx.set_params({"ratio": -5.0, "enabled": True})
-        assert fx._ratio == 1.0
+        assert fx._ratio == 1.2
 
     def test_compressor_nan_falls_back_to_default(self):
         fx = CompressorEffect(48000.0)
         fx.set_params({"ratio": float("nan"), "threshold_db": float("nan"),
                       "enabled": True})
-        assert fx._ratio == 4.0
-        assert fx._threshold_db == -24.0
+        assert fx._ratio == 2.5   # CW-A1 新默认
+        assert fx._threshold_db == -15.0
 
     def test_compressor_non_numeric_falls_back(self):
         fx = CompressorEffect(48000.0)
         fx.set_params({"ratio": "bogus", "enabled": True})
-        assert fx._ratio == 4.0
+        assert fx._ratio == 2.5
 
     def test_all_fx_clamp_ranges(self):
-        """各 FX 机架效果器 dict 参数按 dataclass 声明范围钳位。"""
+        """各 FX 机架效果器 dict 参数按 dataclass 声明范围钳位（CW-A1 新范围）。"""
         comp = CompressorEffect(48000.0)
         comp.set_params({"threshold_db": -1000.0, "release_ms": 1.0,
-                         "knee_db": 100.0, "makeup_gain": 99.0, "enabled": True})
+                         "knee": 100.0, "makeup_gain": 99.0, "ratio": 0.0,
+                         "enabled": True})
         assert comp._threshold_db == -60.0
-        assert comp._release_ms == 10.0
-        assert comp._knee_db == 40.0
+        assert comp._release_ms == 50.0
+        assert comp._knee == 100.0
         assert comp._makeup_db == 24.0
+        assert comp._ratio == 1.2
 
         delay = DelayEffect(48000.0)
-        delay.set_params({"time_ms": 99999.0, "feedback": 200.0, "mix": -5.0,
+        delay.set_params({"left_delay": 99999.0, "right_delay": 99999.0,
+                          "left_feedback": 200.0, "right_feedback": -200.0,
+                          "dry_wet": -5.0, "low_cut": 2.0, "high_cut": 99999.0,
                           "enabled": True})
-        assert delay._time_ms == 2000.0
-        assert delay._feedback == 90.0
-        assert delay._mix == 0.0
+        assert delay._left_delay == 1200.0
+        assert delay._right_delay == 1200.0
+        assert delay._left_fb == 99.0
+        assert delay._right_fb == -99.0
+        assert delay._dry_wet == 0.0
+        assert delay._low_cut == 20.0
+        assert delay._high_cut == 20000.0
 
         from src.features.edit.core.audio_dsp import (
             ImagerEffect,
             LimiterEffect,
-            NoiseGateEffect,
+            ExpanderEffect,
             ReverbEffect,
             SaturationEffect,
         )
         lim = LimiterEffect(48000.0)
-        lim.set_params({"threshold_db": -100.0, "release_ms": 1.0, "enabled": True})
-        assert lim._threshold_db == -20.0
-        assert lim._release_ms == 10.0
+        lim.set_params({"threshold_db": -100.0, "release_ms": 1.0,
+                        "attack_ms": 0.1, "enabled": True})
+        assert lim._threshold_db == -30.0
+        assert lim._release_ms == 50.0
+        assert lim._attack_ms == 0.7
 
         rev = ReverbEffect(48000.0)
-        rev.set_params({"mix": 300.0, "decay": 0.0, "damping_hz": 10.0, "enabled": True})
-        assert rev._mix == 100.0
-        assert rev._decay == 0.1
-        assert rev._damping_hz == 1000.0
+        rev.set_params({"dry_wet": 300.0, "reverb_time": 10.0,
+                        "pre_delay": 999.0, "distance": -5.0, "enabled": True})
+        assert rev._params["dry_wet"] == 100.0
+        assert rev._params["reverb_time"] == 100.0
+        assert rev._params["pre_delay"] == 200.0
+        assert rev._params["distance"] == 0.0
 
         sat = SaturationEffect(48000.0)
         sat.set_params({"drive": 500.0, "enabled": True})
@@ -239,28 +262,49 @@ class TestAud15304FxParamClamping:
         assert img._pan == 100.0
         assert img._width == 0.0
 
-        gate = NoiseGateEffect(48000.0)
+        gate = ExpanderEffect(48000.0)
         gate.set_params({"threshold_db": -200.0, "attack_ms": 999.0,
-                         "release_ms": 1.0, "enabled": True})
-        assert gate._threshold_db == -60.0
-        assert gate._attack_ms == 50.0
-        assert gate._release_ms == 10.0
+                         "release_ms": 1.0, "ratio": 0.0, "range_db": -5.0,
+                         "enabled": True})
+        assert gate._threshold_db == -50.0
+        assert gate._attack_ms == 100.0
+        assert gate._release_ms == 50.0
+        assert gate._ratio == 1.1
+        assert gate._range_db == 0.0
 
 
 class TestAud15302EqModeSwitchState:
-    def test_mode_switch_keeps_lc_hc_drops_bands(self):
-        """mode 切换保留 lc/hc 状态，丢弃频段状态（旧条件恒为空集）。"""
+    def test_shape_switch_keeps_identity_keyed_state(self):
+        """CW-A1: 参数化 EQ 的 IIR 状态按频段身份（b{index}）组织。
+
+        形状切换（Bell → Notch）不产生 lc/hc 时代的残留键；状态字典
+        的键集恒为当前启用频段的身份键子集。平直 EQ 无增益段时为空。
+        """
+        from src.features.edit.core.timeline_v2 import default_eq_bands_flat
         fx = StripEQFilter(48000.0)
-        fx.set_params(StripEQParams(mode="3-band", low_cut_enable=True,
-                                    high_cut_enable=True, enabled=True))
-        zi = np.full((2, 2), 0.25)
-        fx._zi_by_key = {"lc": zi.copy(), "hc": zi.copy(), "b0": zi.copy()}
-        fx.set_params(StripEQParams(mode="10-band", low_cut_enable=True,
-                                    high_cut_enable=True, enabled=True))
-        assert "lc" in fx._zi_by_key, "Low-Cut 状态应保留"
-        assert "hc" in fx._zi_by_key, "High-Cut 状态应保留"
-        assert "b0" not in fx._zi_by_key, "频段状态应丢弃（频段身份变化）"
-        assert fx._zi_by_key["lc"][0, 0] == 0.25
+        bands = [dict(b) for b in default_eq_bands_flat()]
+        # 平直（全 0dB shelf/bell 无滤波段）→ 无状态键
+        fx.set_params({"enabled": True, "bands": bands})
+        fx.process(np.zeros((2, 64), dtype=np.float32))
+        assert fx._zi_by_key == {}
+        # 启用 HPF（Band 1）→ 状态键 = b1（含斜率级联段也归到 b1 身份）
+        bands2 = [dict(b) for b in bands]
+        bands2[0] = {**bands2[0], "filter_type": "HPF", "freq": 100.0,
+                     "slope": 18, "enabled": True}
+        fx.set_params({"enabled": True, "bands": bands2})
+        fx.process(np.zeros((2, 64), dtype=np.float32))
+        # EQ-01: 18dB/oct = 3 阶真 Butterworth → 2 行 SOS（一阶段+二阶段），
+        # 全部归 Band 1 身份（旧实现是 3 个相同 biquad 级联 = 6 阶错误）
+        assert set(fx._zi_by_key.keys()) == {"b1h0", "b1h1"}
+        # 切换为 LPF 12dB/oct（身份不变 Band 1）：状态键仍归 b1 前缀
+        bands3 = [dict(b) for b in bands]
+        bands3[0] = {**bands3[0], "filter_type": "LPF", "freq": 8000.0,
+                     "slope": 12, "enabled": True}
+        fx.set_params({"enabled": True, "bands": bands3})
+        fx.process(np.zeros((2, 64), dtype=np.float32))
+        # 12dB/oct = 2 阶 → 1 行 SOS（b1h0）；旧键按身份对位保留
+        #（b1h1 残留但不再被引用），新链只用 b1h0
+        assert {"b1h0"} <= set(fx._zi_by_key.keys())
 
 
 # ================================================================
@@ -776,18 +820,20 @@ class TestClampPreservesValidValues:
     def test_valid_params_pass_through(self):
         fx = CompressorEffect(48000.0)
         fx.set_params({"threshold_db": -12.0, "ratio": 4.0, "attack_ms": 3.0,
-                       "release_ms": 250.0, "knee_db": 6.0, "makeup_gain": 3.0,
-                       "enabled": True})
+                       "release_ms": 250.0, "knee": 25.0, "makeup_gain": 3.0,
+                       "mix": 60.0, "enabled": True})
         assert fx._threshold_db == -12.0
         assert fx._ratio == 4.0
         assert fx._attack_ms == 3.0
         assert fx._release_ms == 250.0
-        assert fx._knee_db == 6.0
+        assert fx._knee == 25.0
         assert fx._makeup_db == 3.0
+        assert fx._wet_mix == 0.6
 
-    def test_delay_lowcut_zero_keeps_disable_semantics(self):
-        """low_cut_hz <= 0 的"禁用反馈"DSP 语义保留（不被钳成 20）。"""
+    def test_delay_high_ratio_zero_is_passthrough(self):
+        """CW-A1: high_ratio=0 → 反馈阻尼截止频率≈20kHz（近直通）。"""
+        from src.features.edit.core.audio_dsp import _high_ratio_to_damp_hz
+        assert _high_ratio_to_damp_hz(0.0) == pytest.approx(20000.0)
         fx = DelayEffect(48000.0)
-        fx.set_params({"time_ms": 100.0, "low_cut_hz": 0.0, "enabled": True})
-        assert fx._low_cut_hz == 0.0
-        assert fx._hp_coeff == 0.0  # 反馈信号被完全抑制（与旧实现一致）
+        fx.set_params({"high_ratio": 0.0, "enabled": True})
+        assert fx._high_ratio == 0.0

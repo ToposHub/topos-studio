@@ -2195,6 +2195,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             mp.track_volume_preview.connect(self._on_mixer_volume_preview)
             mp.track_balance_changed.connect(self._on_mixer_balance_committed)
             mp.track_balance_preview.connect(self._on_mixer_balance_preview)
+            # CW-A1: 空间声像器（pan+panner 聚合提交，单步 undo）
+            mp.track_panner_committed.connect(self._on_mixer_panner_committed)
+            mp.track_panner_preview.connect(self._on_mixer_panner_preview)
             mp.track_mute_toggled.connect(self._on_mixer_mute_toggled)
             mp.track_solo_toggled.connect(self._on_mixer_solo_toggled)
             mp.track_record_arm_toggled.connect(self._on_mixer_record_arm_toggled)

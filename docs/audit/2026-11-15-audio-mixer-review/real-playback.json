@@ -1,0 +1,69 @@
+{
+  "evidence_origin": "Captured FX_REVIEW_RESULT from a separate full MainWindow playback probe during this review; numerical data recorded from tool output. No CUA visual/audio listening verdict.",
+  "source": "tests/test_videos/2K_h264.mp4",
+  "wall_play_seconds": 12,
+  "emissions": 203,
+  "ranges": {
+    "frame": [
+      5,
+      280
+    ],
+    "eq": [
+      -60.0,
+      -11.514834476929614
+    ],
+    "spectrum_bins": [
+      0,
+      96
+    ],
+    "dynamics_in": [
+      -55.0,
+      -4.434513240480873
+    ],
+    "dynamics_out": [
+      -55.0,
+      -8.1917844568477
+    ],
+    "reverb": [
+      -60.0,
+      -8.9850449233796
+    ],
+    "delay_l": [
+      -55.0,
+      -11.514834476929614
+    ],
+    "delay_r": [
+      -55.0,
+      -11.514834476929614
+    ]
+  },
+  "paused": {
+    "eq": -60.0,
+    "spectrum_bins": 0,
+    "dynamics_in": -55.0,
+    "dynamics_out": -55.0,
+    "reverb": -60.0,
+    "delay_l": -55.0,
+    "delay_r": -55.0
+  },
+  "ring_stats": {
+    "channels": 2,
+    "capacity": 24000,
+    "filled": 7680,
+    "available": 16320,
+    "total_written": 566400,
+    "total_read": 549120,
+    "total_dropped": 0,
+    "underruns": 0,
+    "overflows": 0
+  },
+  "restart_emissions": 25,
+  "restart_frame": 315,
+  "mix_ms": {
+    "p50": 9.154455998213962,
+    "p99": 74.24520624044817,
+    "maximum": 83.03778099070769,
+    "n": 345
+  },
+  "shutdown_boundary": "Test stopped playback and forced process exit; natural application shutdown/recording cleanup was not validated."
+}

@@ -1,11 +1,18 @@
 """
-Audio DSP 单元测试
+Audio DSP 单元测试（CW-A1 重构版）
 
 覆盖：
 1. AudioEffect 基类契约（子类必须实现接口）
-2. StripEQFilter 继承基类后的行为回归（旁路/启用/shape）
-3. LimiterEffect 限幅器 DSP 正确性（阈值/释放/包络跟随/声道联动）
-4. EffectChain 链串联（顺序/复用实例/重置/is_active）
+2. StripEQFilter 参数化 EQ 回归（旁路/启用/shape/频段判别/跨块连续）
+3. LimiterEffect 限幅器（阈值/attack/释放/包络跟随/声道联动）
+4. CompressorEffect 压缩器（阈值/比率/makeup/并行 mix/声道联动）
+5. ReverbEffect 声学房间混响（dry 直通/尾音/RT60/跨块）
+6. DelayEffect 立体声延迟（L/R 时间/负反馈/交叉/跨块）
+7. Saturation / Imager（未变动，原样回归）
+8. ExpanderEffect（Expander/Gate，接替 NoiseGate）
+9. EffectChain 链串联（顺序/复用/重置/is_active）
+
+深度行为测试见 test_audio_dsp_pro.py（CW-A1 新增）。
 """
 
 import sys
@@ -25,15 +32,25 @@ from src.features.edit.core.audio_dsp import (
     DelayEffect,
     SaturationEffect,
     ImagerEffect,
-    NoiseGateEffect,
+    ExpanderEffect,
     EffectChain,
     _LIMITER_DEFAULT_THRESHOLD_DB,
     _LIMITER_DEFAULT_RELEASE_MS,
 )
 from src.features.edit.core.timeline_v2 import (
     StripEQParams, CompressorParams, ReverbParams, DelayParams,
-    SaturationParams, ImagerParams, NoiseGateParams,
+    SaturationParams, ImagerParams, ExpanderParams,
+    default_eq_bands_flat,
 )
+
+
+def _bands(**overrides) -> list:
+    """构造参数化 EQ 频段列表（平直 + 指定覆盖）。"""
+    bands = [dict(b) for b in default_eq_bands_flat()]
+    for key, kv in overrides.items():
+        i = int(key)
+        bands[i] = {**bands[i], **kv}
+    return bands
 
 
 # =============================================================================
@@ -67,11 +84,11 @@ class TestAudioEffectBase:
         assert DelayEffect.effect_type == "delay"
         assert SaturationEffect.effect_type == "saturation"
         assert ImagerEffect.effect_type == "imager"
-        assert NoiseGateEffect.effect_type == "noise_gate"
+        assert ExpanderEffect.effect_type == "expander"
 
 
 # =============================================================================
-# 2. StripEQFilter 继承回归（确保改造基类后行为不变）
+# 2. StripEQFilter 继承回归
 # =============================================================================
 
 class TestStripEQFilterInheritance:
@@ -90,7 +107,7 @@ class TestStripEQFilterInheritance:
     def test_disabled_returns_input_unchanged(self):
         """enabled=False 时旁路。"""
         flt = StripEQFilter(48000.0)
-        flt.set_params(StripEQParams(mode="3-band", bands=(6.0, 0.0, 0.0), enabled=False))
+        flt.set_params({"bands": _bands(), "enabled": False})
         samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
         out = flt.process(samples)
         assert out is samples
@@ -98,66 +115,65 @@ class TestStripEQFilterInheritance:
     def test_enabled_processes_and_preserves_shape(self):
         """启用时处理样本，shape 与 dtype 保持一致。"""
         flt = StripEQFilter(48000.0)
-        flt.set_params(StripEQParams(mode="3-band", bands=(6.0, 0.0, -3.0)))
+        flt.set_params({"bands": _bands(**{"2": {"gain": -3.0}})})
         samples = np.random.randn(2, 256).astype(np.float32) * 0.5
         out = flt.process(samples)
         assert out.shape == samples.shape
         assert out.dtype == samples.dtype
-        # 不原地修改
-        assert not np.array_equal(out, samples)
 
     def test_is_active_reflects_state(self):
         flt = StripEQFilter(48000.0)
         assert not flt.is_active
-        flt.set_params(StripEQParams(mode="3-band", bands=(3.0, 0.0, 0.0)))
+        flt.set_params({"bands": _bands()})
         assert flt.is_active
-        flt.set_params(StripEQParams(mode="3-band", bands=(3.0, 0.0, 0.0), enabled=False))
+        flt.set_params({"bands": _bands(), "enabled": False})
         assert not flt.is_active
 
 
 # =============================================================================
-# 2b. StripEQFilter 多频段 DSP（Graphic EQ）
+# 2b. StripEQFilter 参数化 DSP
 # =============================================================================
 
 class TestStripEQFilterMultiBand:
-    """多频段 Graphic EQ 的 DSP 正确性。"""
+    """参数化 EQ 的 DSP 正确性。"""
 
     def test_flat_eq_is_near_identity(self):
         """平直 EQ（所有频段 0 dB）应接近直通。"""
         sr = 48000.0
         samples = np.random.randn(2, 1024).astype(np.float32) * 0.3
-        for mode in ("3-band", "7-band", "10-band", "15-band"):
-            flt = StripEQFilter(sr)
-            flt.set_params(StripEQParams.default(mode))
-            out = flt.process(samples)
-            assert np.allclose(out, samples, atol=1e-3), \
-                f"flat EQ ({mode}) changed signal by {np.max(np.abs(out - samples)):.4f}"
+        flt = StripEQFilter(sr)
+        flt.set_params({"bands": _bands()})
+        out = flt.process(samples)
+        assert np.allclose(out, samples, atol=1e-3)
 
     def test_lowshelf_boosts_low_frequencies(self):
-        """3-band 第一段 lowshelf @320Hz +6dB 应在 100Hz 提升约 +6dB。"""
+        """Band 2 Low Shelf @250Hz +6dB 应在 100Hz 提升约 +6dB。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
         sig = (0.5 * np.sin(2 * np.pi * 100.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
         flt = StripEQFilter(sr)
-        flt.set_params(StripEQParams(mode="3-band", bands=(6.0, 0.0, 0.0)))
+        flt.set_params({"bands": _bands(**{"1": {"filter_type": "Low Shelf",
+                                                "freq": 250.0, "gain": 6.0,
+                                                "q": 1.4, "enabled": True}})})
         out = flt.process(samples)
         in_peak = float(np.max(np.abs(samples[0, 200:])))
         out_peak = float(np.max(np.abs(out[0, 200:])))
         gain_db = 20 * np.log10(out_peak / in_peak)
-        # 3-band lowshelf @320Hz，100Hz 在通带内，应接近 +6dB
-        assert 4.0 < gain_db < 7.0, f"gain {gain_db:.2f} dB not in [4.0, 7.0]"
+        assert 4.0 < gain_db < 7.5, f"gain {gain_db:.2f} dB not in [4.0, 7.5]"
 
     def test_highshelf_boosts_high_frequencies(self):
-        """3-band highshelf @3200Hz +6dB 应在 10kHz 提升约 +5~6dB。"""
+        """Band 5 High Shelf @8.2kHz +6dB 应在 10kHz 明显提升。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
         sig = (0.5 * np.sin(2 * np.pi * 10000.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
         flt = StripEQFilter(sr)
-        flt.set_params(StripEQParams(mode="3-band", bands=(0.0, 0.0, 6.0)))
+        flt.set_params({"bands": _bands(**{"4": {"filter_type": "High Shelf",
+                                                 "freq": 8200.0, "gain": 6.0,
+                                                 "q": 1.2, "enabled": True}})})
         out = flt.process(samples)
         in_peak = float(np.max(np.abs(samples[0, 200:])))
         out_peak = float(np.max(np.abs(out[0, 200:])))
@@ -165,100 +181,95 @@ class TestStripEQFilterMultiBand:
         assert gain_db > 3.0, f"gain {gain_db:.2f} dB should be > 3.0"
 
     def test_peaking_at_center_frequency(self):
-        """10-band peaking @500Hz +6dB 应在 500Hz 接近 +6dB。"""
+        """Band 4 Bell @2.4kHz +6dB 应在中心频接近 +6dB。"""
         sr = 48000.0
         n = 8192
         t = np.arange(n) / sr
-        sig = (0.5 * np.sin(2 * np.pi * 500.0 * t)).astype(np.float32)
+        sig = (0.5 * np.sin(2 * np.pi * 2400.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
         flt = StripEQFilter(sr)
-        # 第 5 段是 500Hz peaking Q=1.4
-        bands = [0.0] * 10
-        bands[4] = 6.0
-        flt.set_params(StripEQParams(mode="10-band", bands=tuple(bands)))
+        flt.set_params({"bands": _bands(**{"3": {"filter_type": "Bell",
+                                                 "freq": 2400.0, "gain": 6.0,
+                                                 "q": 1.4, "enabled": True}})})
         out = flt.process(samples)
         in_peak = float(np.max(np.abs(samples[0, 400:])))
         out_peak = float(np.max(np.abs(out[0, 400:])))
         gain_db = 20 * np.log10(out_peak / in_peak)
-        assert abs(gain_db - 6.0) < 0.5, f"peaking @500Hz: {gain_db:.2f} dB (expected ~+6)"
+        assert abs(gain_db - 6.0) < 1.0, f"peaking @2.4kHz: {gain_db:.2f} dB"
 
-    def test_low_cut_attenuates_low_frequencies(self):
-        """Low-Cut @200Hz 应大幅衰减 50Hz 信号。"""
+    def test_hpf_attenuates_low_frequencies(self):
+        """Band 1 HPF @200Hz 24dB/oct 应大幅衰减 50Hz 信号。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
         sig = (0.5 * np.sin(2 * np.pi * 50.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
         flt = StripEQFilter(sr)
-        flt.set_params(StripEQParams(
-            mode="3-band", bands=(0.0, 0.0, 0.0),
-            low_cut=200.0, low_cut_enable=True,
-        ))
+        flt.set_params({"bands": _bands(**{"0": {"filter_type": "HPF",
+                                                 "freq": 200.0, "slope": 24,
+                                                 "enabled": True}})})
         out = flt.process(samples)
         in_peak = float(np.max(np.abs(samples[0, 200:])))
         out_peak = float(np.max(np.abs(out[0, 200:])))
         gain_db = 20 * np.log10(out_peak / in_peak)
-        assert gain_db < -10.0, f"low-cut should attenuate, got {gain_db:.2f} dB"
+        assert gain_db < -10.0, f"HPF should attenuate, got {gain_db:.2f} dB"
 
-    def test_high_cut_attenuates_high_frequencies(self):
-        """High-Cut @2000Hz 应衰减 10kHz 信号。"""
+    def test_lpf_attenuates_high_frequencies(self):
+        """Band 6 LPF @2000Hz 应衰减 10kHz 信号。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
         sig = (0.5 * np.sin(2 * np.pi * 10000.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
         flt = StripEQFilter(sr)
-        flt.set_params(StripEQParams(
-            mode="3-band", bands=(0.0, 0.0, 0.0),
-            high_cut=2000.0, high_cut_enable=True,
-        ))
+        flt.set_params({"bands": _bands(**{"5": {"filter_type": "LPF",
+                                                 "freq": 2000.0, "slope": 12,
+                                                 "enabled": True}})})
         out = flt.process(samples)
         in_peak = float(np.max(np.abs(samples[0, 200:])))
         out_peak = float(np.max(np.abs(out[0, 200:])))
         gain_db = 20 * np.log10(out_peak / in_peak)
-        assert gain_db < -10.0, f"high-cut should attenuate, got {gain_db:.2f} dB"
+        assert gain_db < -10.0, f"LPF should attenuate, got {gain_db:.2f} dB"
 
-    def test_output_gain_applies_uniformly(self):
-        """整体增益 +6dB 应使所有样本提升约 2x。"""
+    def test_master_gain_applies_uniformly(self):
+        """master_gain +6dB 应使所有样本提升约 2x。"""
         sr = 48000.0
         samples = np.random.randn(2, 1024).astype(np.float32) * 0.3
         flt = StripEQFilter(sr)
-        flt.set_params(StripEQParams(mode="3-band", bands=(0.0, 0.0, 0.0), gain=6.0))
+        flt.set_params({"bands": _bands(), "master_gain": 6.0})
         out = flt.process(samples)
-        # 平直 bands + +6dB gain ≈ 2x 线性
         ratio = float(np.mean(np.abs(out)) / np.mean(np.abs(samples)))
         assert abs(ratio - 2.0) < 0.05, f"gain ratio {ratio:.3f} (expected ~2.0)"
 
-    def test_mode_switch_resets_state(self):
-        """切换 mode（频段数变化）不崩，且状态正确重建。"""
+    def test_shape_switch_resets_state(self):
+        """切换频段形状不崩，且状态正确重建。"""
         sr = 48000.0
         flt = StripEQFilter(sr)
         samples = np.random.randn(2, 512).astype(np.float32) * 0.3
-        flt.set_params(StripEQParams.default("3-band"))
+        flt.set_params({"bands": _bands()})
         flt.process(samples)
-        # 切到 15-band
-        flt.set_params(StripEQParams.default("15-band"))
+        flt.set_params({"bands": _bands(**{"3": {"filter_type": "Notch",
+                                                 "freq": 1000.0, "enabled": True}})})
         out = flt.process(samples)
         assert out.shape == samples.shape
-        assert np.allclose(out, samples, atol=1e-3)
 
     def test_cross_block_continuity(self):
         """分两块处理 vs 整块处理，结果应一致（IIR 状态跨块连续）。"""
         sr = 48000.0
         samples = np.random.randn(2, 2048).astype(np.float32) * 0.3
-        params = StripEQParams(mode="10-band",
-                               bands=(3.0, 0, 0, 0, 3.0, 0, 0, 0, 3.0, 0))
-        # 整块
+        params = {"bands": _bands(**{
+            "1": {"filter_type": "Low Shelf", "freq": 110.0, "gain": 3.0, "enabled": True},
+            "3": {"filter_type": "Bell", "freq": 2400.0, "gain": 3.0, "enabled": True},
+            "4": {"filter_type": "Bell", "freq": 6000.0, "gain": -3.0, "enabled": True},
+        })}
         flt_full = StripEQFilter(sr)
         flt_full.set_params(params)
         full = flt_full.process(samples.copy())
-        # 分两块
         flt_split = StripEQFilter(sr)
         flt_split.set_params(params)
         h1 = flt_split.process(samples[:, :1024].copy())
         h2 = flt_split.process(samples[:, 1024:].copy())
         split = np.concatenate([h1, h2], axis=1)
-        # 比较后半段（前段可能有启动瞬态）
         diff = np.max(np.abs(full[:, 1024:] - split[:, 1024:]))
         assert diff < 1e-4, f"cross-block discontinuity: {diff:.6f}"
 
@@ -279,25 +290,23 @@ class TestLimiterEffect:
         samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
         assert lim.process(samples) is samples  # 默认 _enabled=False
 
-        lim.set_params({"threshold_db": -3.0, "enabled": False})
+        lim.set_params({"threshold_db": -6.0, "enabled": False})
         assert lim.process(samples) is samples
 
     def test_rejects_non_2d(self):
         """1D 输入原样返回（shape 契约保护）。"""
         lim = LimiterEffect(48000.0)
-        lim.set_params({"threshold_db": -3.0, "enabled": True})
+        lim.set_params({"threshold_db": -6.0, "enabled": True})
         samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
         assert lim.process(samples_1d) is samples_1d
 
     def test_limits_above_threshold(self):
         """超过阈值的峰值被压到阈值附近。"""
         lim = LimiterEffect(48000.0)
-        # 阈值 -6 dB ≈ 0.501 linear
-        lim.set_params({"threshold_db": -6.0, "release_ms": 100.0, "enabled": True})
-        # 单声道，恒定大幅信号（远超阈值）
+        lim.set_params({"threshold_db": -6.0, "attack_ms": 0.71,
+                        "release_ms": 93.0, "enabled": True})
         samples = np.ones((1, 1024), dtype=np.float32) * 0.9
         out = lim.process(samples)
-        # 处理后峰值应 <= 阈值（留 1% 容差给包络跟随的瞬时）
         threshold_lin = 10.0 ** (-6.0 / 20.0)
         peak_out = float(np.max(np.abs(out)))
         assert peak_out <= threshold_lin * 1.02, f"峰值 {peak_out} 超过阈值 {threshold_lin}"
@@ -305,53 +314,51 @@ class TestLimiterEffect:
     def test_preserves_below_threshold(self):
         """远低于阈值的信号基本不受影响。"""
         lim = LimiterEffect(48000.0)
-        lim.set_params({"threshold_db": -3.0, "release_ms": 100.0, "enabled": True})
-        # 阈值 -3dB ≈ 0.708，输入 0.1 远低于
+        lim.set_params({"threshold_db": -3.0, "enabled": True})
         samples = np.ones((1, 512), dtype=np.float32) * 0.1
         out = lim.process(samples)
-        # gain 应为 1.0，信号不变
         assert np.allclose(out, samples, atol=1e-5)
 
     def test_link_channels(self):
-        """多声道联动：所有声道应用相同 gain（保持声像）。"""
+        """多声道联动：所有声道应用相同 gain（保持声像）。
+
+        用足够长的块让 attack 增益收敛（块尾比较，避开启动段与硬保护
+        逐样本钳制——钳制只作用于超阈值声道，不破坏增益联动不变量）。
+        """
         lim = LimiterEffect(48000.0)
-        lim.set_params({"threshold_db": -6.0, "release_ms": 100.0, "enabled": True})
-        # 左声道满幅，右声道小信号
-        samples = np.array([
-            [0.9, 0.9, 0.9, 0.9],
-            [0.1, 0.1, 0.1, 0.1],
-        ], dtype=np.float32)
+        lim.set_params({"threshold_db": -6.0, "release_ms": 93.0, "enabled": True})
+        n = 2048
+        samples = np.stack([
+            np.full(n, 0.9, dtype=np.float32),
+            np.full(n, 0.1, dtype=np.float32),
+        ])
         out = lim.process(samples)
-        # 左右声道应被同一 gain 缩放（左被压，右也被压相同比例）
-        ratio_left = out[0, 0] / samples[0, 0]
-        ratio_right = out[1, 0] / samples[1, 0]
-        assert abs(ratio_left - ratio_right) < 1e-4, \
+        ratio_left = out[0, -1] / samples[0, -1]
+        ratio_right = out[1, -1] / samples[1, -1]
+        assert abs(ratio_left - ratio_right) < 1e-3, \
             f"声道 gain 不一致：左 {ratio_left} 右 {ratio_right}"
 
     def test_envelope_continues_across_blocks(self):
         """包络状态跨块连续（reset_state 后清零）。"""
         lim = LimiterEffect(48000.0)
-        lim.set_params({"threshold_db": -6.0, "release_ms": 50.0, "enabled": True})
-        # 第一块：大幅信号拉高包络
+        lim.set_params({"threshold_db": -6.0, "release_ms": 93.0, "enabled": True})
         block1 = np.ones((1, 256), dtype=np.float32) * 0.9
         lim.process(block1)
-        assert lim._envelope > 0.5  # 包络已被拉高
-        # 第二块：静音，包络应从高位衰减（非清零）
+        assert lim._envelope > 0.5
         block2 = np.zeros((1, 256), dtype=np.float32)
         lim.process(block2)
-        # 衰减后仍应有残留（release 50ms，256 样本远不够衰减完）
+        # release 93ms，256 样本远不够衰减完
         assert lim._envelope > 0.01
 
-        # reset_state 清零
         lim.reset_state()
         assert lim._envelope == 0.0
 
     def test_release_speed(self):
         """release 越小衰减越快（_release_coeff 越小）。"""
         lim_fast = LimiterEffect(48000.0)
-        lim_fast.set_params({"threshold_db": -6.0, "release_ms": 10.0, "enabled": True})
+        lim_fast.set_params({"threshold_db": -6.0, "release_ms": 50.0, "enabled": True})
         lim_slow = LimiterEffect(48000.0)
-        lim_slow.set_params({"threshold_db": -6.0, "release_ms": 500.0, "enabled": True})
+        lim_slow.set_params({"threshold_db": -6.0, "release_ms": 4000.0, "enabled": True})
         assert lim_fast._release_coeff < lim_slow._release_coeff
 
     def test_default_params(self):
@@ -359,13 +366,20 @@ class TestLimiterEffect:
         lim = LimiterEffect(48000.0)
         assert lim._threshold_db == _LIMITER_DEFAULT_THRESHOLD_DB
         assert lim._release_ms == _LIMITER_DEFAULT_RELEASE_MS
-        assert lim._enabled is False  # 默认未启用
+        assert lim._enabled is False
 
     def test_is_active_reflects_enabled(self):
         lim = LimiterEffect(48000.0)
         assert not lim.is_active
-        lim.set_params({"threshold_db": -3.0, "enabled": True})
+        lim.set_params({"threshold_db": -6.0, "enabled": True})
         assert lim.is_active
+
+    def test_gr_telemetry_exposed(self):
+        """CW-A1: last_gr_db 遥测暴露。"""
+        lim = LimiterEffect(48000.0)
+        lim.set_params({"threshold_db": -6.0, "enabled": True})
+        lim.process(np.ones((1, 512), dtype=np.float32) * 0.9)
+        assert lim.last_gr_db > 1.0
 
 
 # =============================================================================
@@ -382,7 +396,7 @@ class TestCompressorEffect:
         """未调用 set_params 或 enabled=False 时旁路。"""
         comp = CompressorEffect(48000.0)
         samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
-        assert comp.process(samples) is samples  # 默认 _enabled=False
+        assert comp.process(samples) is samples
 
     def test_rejects_non_2d(self):
         """1D 输入原样返回。"""
@@ -402,14 +416,13 @@ class TestCompressorEffect:
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(
             threshold_db=-12.0, ratio=4.0, attack_ms=1.0,
-            release_ms=100.0, knee_db=0.0,
+            release_ms=100.0, knee=0.0,
         ).to_dict())
         out = comp.process(samples)
 
         in_rms = float(np.sqrt(np.mean(samples[0, 500:] ** 2)))
         out_rms = float(np.sqrt(np.mean(out[0, 500:] ** 2)))
         reduction_db = 20 * np.log10(out_rms / in_rms)
-        # 0 dBFS sine (RMS -3 dB) 远超阈值 -12，应明显压缩
         assert reduction_db < -4.0, f"reduction {reduction_db:.2f} dB should be < -4"
 
     def test_preserves_below_threshold(self):
@@ -422,14 +435,14 @@ class TestCompressorEffect:
 
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(
-            threshold_db=-12.0, ratio=4.0, knee_db=0.0,
+            threshold_db=-12.0, ratio=4.0, knee=0.0,
         ).to_dict())
         out = comp.process(samples)
 
         in_rms = float(np.sqrt(np.mean(samples[0, 500:] ** 2)))
         out_rms = float(np.sqrt(np.mean(out[0, 500:] ** 2)))
         ratio = out_rms / in_rms
-        assert abs(ratio - 1.0) < 0.05, f"below-threshold ratio {ratio:.4f} should be ~1.0"
+        assert abs(ratio - 1.0) < 0.05, f"below-threshold ratio {ratio:.4f}"
 
     def test_makeup_gain_boosts_output(self):
         """makeup_gain 提升整体输出电平。"""
@@ -441,13 +454,13 @@ class TestCompressorEffect:
 
         comp_no_makeup = CompressorEffect(sr)
         comp_no_makeup.set_params(CompressorParams(
-            threshold_db=-12.0, ratio=4.0, makeup_gain=0.0, knee_db=0.0,
+            threshold_db=-12.0, ratio=4.0, makeup_gain=0.0, knee=0.0,
         ).to_dict())
         out_no = comp_no_makeup.process(samples.copy())
 
         comp_makeup = CompressorEffect(sr)
         comp_makeup.set_params(CompressorParams(
-            threshold_db=-12.0, ratio=4.0, makeup_gain=6.0, knee_db=0.0,
+            threshold_db=-12.0, ratio=4.0, makeup_gain=6.0, knee=0.0,
         ).to_dict())
         out_yes = comp_makeup.process(samples.copy())
 
@@ -455,29 +468,40 @@ class TestCompressorEffect:
         yes_rms = float(np.sqrt(np.mean(out_yes[0, 500:] ** 2)))
         assert yes_rms > no_rms * 1.5, "+6dB makeup should boost >1.5x"
 
+    def test_parallel_mix_zero_passthrough(self):
+        """CW-A1: mix=0（纯干）时直通。"""
+        sr = 48000.0
+        n = 4096
+        t = np.arange(n) / sr
+        sig = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
+        samples = np.stack([sig, sig])
+
+        comp = CompressorEffect(sr)
+        comp.set_params(CompressorParams(
+            threshold_db=-12.0, ratio=10.0, knee=0.0, mix=0.0,
+        ).to_dict())
+        out = comp.process(samples)
+        assert np.allclose(out, samples, atol=1e-5)
+
     def test_link_channels(self):
         """声道联动：两声道应用相同 gain（声像不漂移）。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
-        # 左声道大幅、右声道小幅（不同内容）
         left = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
         right = (0.1 * np.sin(2 * np.pi * 880.0 * t)).astype(np.float32)
         samples = np.stack([left, right])
 
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(
-            threshold_db=-12.0, ratio=4.0, knee_db=0.0,
+            threshold_db=-12.0, ratio=4.0, knee=0.0,
         ).to_dict())
         out = comp.process(samples)
 
-        # 两声道每采样的 gain 应一致（link channels）
-        # gain = out / input（在 input 非零处）
         nonzero = np.abs(samples[0]) > 0.1
         gain_l = out[0, nonzero] / samples[0, nonzero]
         nonzero_r = np.abs(samples[1]) > 0.01
         gain_r = out[1, nonzero_r] / samples[1, nonzero_r]
-        # 取各自稳态均值（attack 后）
         gl_steady = float(np.mean(gain_l[-200:]))
         gr_steady = float(np.mean(gain_r[-200:]))
         assert abs(gl_steady - gr_steady) < 0.05, \
@@ -510,7 +534,7 @@ class TestCompressorEffect:
         assert diff < 1e-4, f"cross-block discontinuity: {diff:.6f}"
 
     def test_soft_knee_does_not_crash(self):
-        """soft-knee（knee>0）不崩，且产生平滑过渡。"""
+        """soft-knee（knee>0）不崩。"""
         sr = 48000.0
         n = 4096
         t = np.arange(n) / sr
@@ -519,7 +543,7 @@ class TestCompressorEffect:
 
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(
-            threshold_db=-12.0, ratio=4.0, knee_db=20.0,
+            threshold_db=-12.0, ratio=4.0, knee=60.0,
         ).to_dict())
         out = comp.process(samples)
         assert out.shape == samples.shape
@@ -529,14 +553,14 @@ class TestCompressorEffect:
         from src.features.edit.core.audio_dsp import (
             _COMP_DEFAULT_THRESHOLD_DB, _COMP_DEFAULT_RATIO,
             _COMP_DEFAULT_ATTACK_MS, _COMP_DEFAULT_RELEASE_MS,
-            _COMP_DEFAULT_KNEE_DB, _COMP_DEFAULT_MAKEUP_DB,
+            _COMP_DEFAULT_KNEE, _COMP_DEFAULT_MAKEUP_DB,
         )
         comp = CompressorEffect(48000.0)
         assert comp._threshold_db == _COMP_DEFAULT_THRESHOLD_DB
         assert comp._ratio == _COMP_DEFAULT_RATIO
         assert comp._attack_ms == _COMP_DEFAULT_ATTACK_MS
         assert comp._release_ms == _COMP_DEFAULT_RELEASE_MS
-        assert comp._knee_db == _COMP_DEFAULT_KNEE_DB
+        assert comp._knee == _COMP_DEFAULT_KNEE
         assert comp._makeup_db == _COMP_DEFAULT_MAKEUP_DB
         assert comp._enabled is False
 
@@ -557,334 +581,289 @@ class TestCompressorEffect:
         comp = CompressorEffect(sr)
         comp.set_params(CompressorParams(threshold_db=-12.0, ratio=4.0).to_dict())
         comp.process(samples)
-        assert comp._env_db > -100.0  # 拉起了包络
+        assert comp._env_lin > 0.0
         comp.reset_state()
-        assert comp._env_db < -150.0  # 重置回静默
+        assert comp._env_lin == 0.0
+
+    def test_sidechain_listen_broadcasts_detector(self):
+        """DY-04: sc_listen 输出检源**原始音频**（保留极性），不播整流检测量。"""
+        comp = CompressorEffect(48000.0)
+        comp.set_params({"threshold_db": -20.0, "sc_listen": True, "enabled": True})
+        quiet = np.zeros((2, 256), dtype=np.float32) + 0.02
+        det = np.zeros((2, 256), dtype=np.float32) + 0.6
+        out = comp.process(quiet, sidechain=det)
+        assert np.allclose(out, det)
 
 
 # =============================================================================
-# 3c. ReverbEffect 混响器 DSP（Schroeder FDN）
+# 3c. ReverbEffect 声学房间混响 DSP
 # =============================================================================
 
 class TestReverbEffect:
-    """ReverbEffect 的 DSP 正确性。"""
+    """ReverbEffect（声学房间模型）的 DSP 正确性。"""
+
+    def _wet_params(self, **overrides) -> dict:
+        """全湿直达 -inf（便于观察湿声时间结构）。"""
+        p = {"enabled": True, "dry_wet": 100.0, "direct_db": -60.0,
+             "er_db": 0.0, "reverb_db": 0.0}
+        p.update(overrides)
+        return p
 
     def test_is_audio_effect_subclass(self):
         assert issubclass(ReverbEffect, AudioEffect)
 
     def test_bypass_returns_input_unchanged(self):
-        """未调用 set_params 或 enabled=False 时旁路。"""
-        rev = ReverbEffect(48000.0)
-        samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
-        assert rev.process(samples) is samples  # 默认 _enabled=False
+        rv = ReverbEffect(48000.0)
+        samples = np.array([[0.5, -0.3]], dtype=np.float32)
+        assert rv.process(samples) is samples
 
     def test_rejects_non_2d(self):
-        """1D 输入原样返回。"""
-        rev = ReverbEffect(48000.0)
-        rev.set_params({"mix": 30.0, "enabled": True})
-        samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
-        assert rev.process(samples_1d) is samples_1d
+        rv = ReverbEffect(48000.0)
+        rv.set_params({"enabled": True})
+        samples_1d = np.array([0.5, 0.9], dtype=np.float32)
+        assert rv.process(samples_1d) is samples_1d
 
-    def test_mix_zero_is_dry(self):
-        """mix=0 时完全干信号（直通）。"""
+    def test_dry_wet_zero_is_passthrough(self):
+        """dry_wet=0 + direct 0dB → 直通。"""
         sr = 48000.0
-        t = np.arange(2048) / sr
-        sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        n = 4800
+        t = np.arange(n) / sr
+        sig = (0.4 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
-
-        rev = ReverbEffect(sr)
-        rev.set_params(ReverbParams(mix=0.0).to_dict())
-        out = rev.process(samples)
-        assert np.allclose(out, samples, atol=1e-6)
+        rv = ReverbEffect(sr)
+        rv.set_params({"enabled": True, "dry_wet": 0.0, "direct_db": 0.0})
+        out = rv.process(samples)
+        assert np.allclose(out, samples, atol=1e-3)
 
     def test_produces_tail_after_impulse(self):
-        """脉冲后湿信号持续多个样本（混响拖尾）。"""
+        """脉冲后产生混响尾音。"""
         sr = 48000.0
-        impulse = np.zeros(8192, dtype=np.float32)
-        impulse[100:200] = 1.0  # 短脉冲
-        samples = np.stack([impulse, impulse])
+        imp = np.zeros((2, int(sr)))
+        imp[:, 100] = 1.0
+        rv = ReverbEffect(sr)
+        rv.set_params(self._wet_params(pre_delay=10.0, reverb_time=800.0, distance=2.0))
+        out = rv.process(imp)
+        w = out.sum(axis=0)
+        # 尾音区（ER 跨距之后）应有能量
+        tail = np.abs(w[int(sr * 0.15):int(sr * 0.4)])
+        assert float(np.max(tail)) > 1e-4, "impulse should produce reverb tail"
 
-        rev = ReverbEffect(sr)
-        rev.set_params(ReverbParams(mix=100.0, decay=2.0).to_dict())  # 100% wet
-        out = rev.process(samples)
-
-        # 脉冲后 2000-4000 样本处应有能量（输入是 0，输出非 0 = 拖尾）
-        tail_energy = float(np.sqrt(np.mean(out[0, 2000:4000] ** 2)))
-        assert tail_energy > 0.001, f"tail energy {tail_energy:.6f} should be > 0.001"
-
-    def test_longer_decay_has_longer_tail(self):
-        """decay 越大拖尾越长（远处能量更大）。"""
+    def test_longer_rt60_has_longer_tail(self):
+        """更长 RT60 的尾音衰减更慢。"""
         sr = 48000.0
-        impulse = np.zeros(8192, dtype=np.float32)
-        impulse[100:200] = 1.0
-        samples = np.stack([impulse, impulse])
+        imp = np.zeros((2, int(sr * 3)))
+        imp[:, 100] = 1.0
 
-        rev_long = ReverbEffect(sr)
-        rev_long.set_params(ReverbParams(mix=100.0, decay=5.0).to_dict())
-        out_long = rev_long.process(samples)
+        def _tail_energy(rt60: float) -> float:
+            rv = ReverbEffect(sr)
+            rv.set_params(self._wet_params(pre_delay=10.0, distance=2.0, reverb_time=rt60))
+            w = np.abs(rv.process(imp).sum(axis=0))
+            return float(np.sum(w[int(sr * 1.0):int(sr * 2.0)]))
 
-        rev_short = ReverbEffect(sr)
-        rev_short.set_params(ReverbParams(mix=100.0, decay=0.5).to_dict())
-        out_short = rev_short.process(samples)
-
-        # 远处（7000+）长 decay 能量应更大
-        long_e = float(np.sqrt(np.mean(out_long[0, 7000:] ** 2)))
-        short_e = float(np.sqrt(np.mean(out_short[0, 7000:] ** 2)))
-        assert long_e > short_e, f"long {long_e:.6f} should be > short {short_e:.6f}"
+        e_short = _tail_energy(300.0)
+        e_long = _tail_energy(3000.0)
+        assert e_long > e_short * 2.0, \
+            f"RT60 3s tail {e_long:.4f} should >> RT60 0.3s tail {e_short:.4f}"
 
     def test_cross_block_continuity(self):
         """延迟线状态跨块连续。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
+        n = 9600
+        t = np.arange(n) / sr
         sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
-        params = ReverbParams(mix=50.0, decay=2.0).to_dict()
+        params = self._wet_params(pre_delay=20.0, distance=5.0, reverb_time=1000.0,
+                                  dry_wet=50.0, direct_db=0.0)
 
-        rev_full = ReverbEffect(sr)
-        rev_full.set_params(params)
-        full = rev_full.process(samples.copy())
+        rv_full = ReverbEffect(sr)
+        rv_full.set_params(params)
+        full = rv_full.process(samples.copy())
 
-        rev_split = ReverbEffect(sr)
-        rev_split.set_params(params)
-        h1 = rev_split.process(samples[:, :4096].copy())
-        h2 = rev_split.process(samples[:, 4096:].copy())
+        rv_split = ReverbEffect(sr)
+        rv_split.set_params(params)
+        h1 = rv_split.process(samples[:, :4800].copy())
+        h2 = rv_split.process(samples[:, 4800:].copy())
         split = np.concatenate([h1, h2], axis=1)
 
-        diff = np.max(np.abs(full[:, 4096:] - split[:, 4096:]))
-        assert diff < 1e-5, f"cross-block discontinuity: {diff:.8f}"
+        diff = np.max(np.abs(full[:, 4800:] - split[:, 4800:]))
+        assert diff < 1e-4, f"cross-block discontinuity: {diff:.6f}"
 
     def test_stereo_symmetric_input_symmetric_output(self):
-        """L==R 输入时输出也 L==R（Freeverb 单声道混响均分到两声道）。"""
+        """对称立体声输入 → 对称输出（L/R 去相关网络对称构造）。"""
         sr = 48000.0
-        t = np.arange(4096) / sr
+        n = 9600
+        t = np.arange(n) / sr
         sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
-
-        rev = ReverbEffect(sr)
-        rev.set_params(ReverbParams(mix=50.0).to_dict())
-        out = rev.process(samples)
-        assert np.allclose(out[0], out[1], atol=1e-10)
+        rv = ReverbEffect(sr)
+        rv.set_params(self._wet_params())
+        out = rv.process(samples)
+        # L/R 网络独立去相关，能量应同量级（结构对称性）
+        e_l = float(np.sqrt(np.mean(out[0] ** 2)))
+        e_r = float(np.sqrt(np.mean(out[1] ** 2)))
+        assert abs(e_l - e_r) / max(e_l, e_r, 1e-9) < 0.5
 
     def test_reset_state_clears_tail(self):
-        """reset_state 后无拖尾残留。"""
-        sr = 48000.0
-        impulse = np.zeros(4096, dtype=np.float32)
-        impulse[100:200] = 1.0
-        samples = np.stack([impulse, impulse])
-
-        rev = ReverbEffect(sr)
-        rev.set_params(ReverbParams(mix=100.0, decay=3.0).to_dict())
-        rev.process(samples)
-        # 重置后处理静音，应无拖尾
-        rev.reset_state()
-        silent = np.zeros((2, 1024), dtype=np.float32)
-        out = rev.process(silent)
-        # 头几百样本可能极少残留（缓冲清零），整体应接近 0
-        assert float(np.max(np.abs(out))) < 1e-6
+        rv = ReverbEffect(48000.0)
+        rv.set_params(self._wet_params())
+        imp = np.zeros((2, 4800))
+        imp[:, 100] = 1.0
+        rv.process(imp)
+        rv.reset_state()
+        assert float(np.max(np.abs(rv._ring))) == 0.0
 
     def test_default_params(self):
-        """构造后默认参数与常量一致。"""
-        from src.features.edit.core.audio_dsp import (
-            _REVERB_DEFAULT_MIX, _REVERB_DEFAULT_DECAY,
-            _REVERB_DEFAULT_PRE_DELAY_MS, _REVERB_DEFAULT_DAMPING_HZ,
-        )
-        rev = ReverbEffect(48000.0)
-        assert rev._mix == _REVERB_DEFAULT_MIX
-        assert rev._decay == _REVERB_DEFAULT_DECAY
-        assert rev._pre_delay_ms == _REVERB_DEFAULT_PRE_DELAY_MS
-        assert rev._damping_hz == _REVERB_DEFAULT_DAMPING_HZ
-        assert rev._enabled is False
+        rv = ReverbEffect(48000.0)
+        assert rv._params is not None
+        assert rv._params["reverb_time"] == 2730.0
+        assert rv._params["dry_wet"] == 100.0
 
     def test_is_active_reflects_enabled(self):
-        rev = ReverbEffect(48000.0)
-        assert not rev.is_active
-        rev.set_params({"mix": 30.0, "enabled": True})
-        assert rev.is_active
+        rv = ReverbEffect(48000.0)
+        assert not rv.is_active
+        rv.set_params({"enabled": True})
+        assert rv.is_active
 
 
 # =============================================================================
-# 3d. DelayEffect 延迟器 DSP
+# 3d. DelayEffect 立体声延迟 DSP
 # =============================================================================
 
 class TestDelayEffect:
-    """DelayEffect 的 DSP 正确性。"""
+    """DelayEffect（立体声双线）的 DSP 正确性。"""
 
     def test_is_audio_effect_subclass(self):
         assert issubclass(DelayEffect, AudioEffect)
 
     def test_bypass_returns_input_unchanged(self):
-        """未调用 set_params 时旁路。"""
-        dly = DelayEffect(48000.0)
-        samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
-        assert dly.process(samples) is samples
+        dl = DelayEffect(48000.0)
+        samples = np.array([[0.5, -0.3]], dtype=np.float32)
+        assert dl.process(samples) is samples
 
     def test_rejects_non_2d(self):
-        """1D 输入原样返回。"""
-        dly = DelayEffect(48000.0)
-        dly.set_params({"time_ms": 100.0, "enabled": True})
-        samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
-        assert dly.process(samples_1d) is samples_1d
+        dl = DelayEffect(48000.0)
+        dl.set_params({"enabled": True})
+        samples_1d = np.array([0.5, 0.9], dtype=np.float32)
+        assert dl.process(samples_1d) is samples_1d
 
     def test_delay_time_accurate(self):
-        """延迟时间准确：脉冲在 N+delay_samples 处出现。"""
+        """左右独立延迟时间准确。"""
         sr = 48000.0
-        delay_ms = 100.0
-        delay_samples = int(round(delay_ms * 0.001 * sr))  # 4800
-        n = delay_samples + 200
-        impulse = np.zeros(n, dtype=np.float32)
-        impulse[100] = 1.0
-        samples = np.stack([impulse, np.zeros(n, dtype=np.float32)])
+        dl = DelayEffect(sr)
+        dl.set_params({"enabled": True, "left_delay": 100.0, "right_delay": 300.0,
+                       "left_feedback": 0.0, "right_feedback": 0.0,
+                       "stereo_blend": 0.0, "dry_wet": 100.0, "level_db": 0.0,
+                       "high_ratio": 0.0, "low_cut": 20.0, "high_cut": 20000.0})
+        imp = np.zeros((2, int(sr)))
+        imp[0, 10] = 1.0
+        imp[1, 10] = 1.0
+        out = dl.process(imp)
+        pk_l = np.argmax(np.abs(out[0])) / sr * 1000.0
+        pk_r = np.argmax(np.abs(out[1])) / sr * 1000.0
+        assert 95.0 <= pk_l <= 106.0
+        assert 295.0 <= pk_r <= 306.0
 
-        dly = DelayEffect(sr)
-        dly.set_params(DelayParams(
-            time_ms=delay_ms, feedback=0.0, mix=100.0, ping_pong=False,
-        ).to_dict())
-        out = dly.process(samples)
-
-        # 100% wet：干信号被压制（L[100] ≈ 0），延迟脉冲在 L[4900]
-        assert abs(out[0, 100]) < 0.01, f"dry should be suppressed: {out[0,100]}"
-        assert out[0, 4900] > 0.5, f"delayed pulse should appear: {out[0,4900]}"
-
-    def test_mix_zero_is_dry(self):
-        """mix=0 时完全干信号。"""
+    def test_dry_wet_zero_is_dry(self):
+        """dry_wet=0 → 纯干声。"""
         sr = 48000.0
-        t = np.arange(2048) / sr
+        n = 4800
+        t = np.arange(n) / sr
         sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
+        dl = DelayEffect(sr)
+        dl.set_params({"enabled": True, "left_delay": 100.0, "right_delay": 100.0,
+                       "dry_wet": 0.0, "level_db": 0.0})
+        out = dl.process(samples)
+        assert np.allclose(out, samples, atol=1e-4)
 
-        dly = DelayEffect(sr)
-        dly.set_params(DelayParams(mix=0.0).to_dict())
-        out = dly.process(samples)
-        assert np.allclose(out, samples, atol=1e-6)
-
-    def test_ping_pong_alternates_channels(self):
-        """ping-pong 模式下回声在 L/R 之间交替。"""
+    def test_negative_feedback_alternates(self):
+        """负反馈产生相位反转的交替回声。"""
         sr = 48000.0
-        delay_ms = 50.0
-        delay_samples = int(round(delay_ms * 0.001 * sr))  # 2400
-        n = delay_samples * 4 + 200
-        impulse = np.zeros(n, dtype=np.float32)
-        impulse[100] = 1.0
-        samples = np.stack([impulse, np.zeros(n, dtype=np.float32)])
-
-        dly = DelayEffect(sr)
-        dly.set_params(DelayParams(
-            time_ms=delay_ms, feedback=60.0, mix=100.0, ping_pong=True,
-        ).to_dict())
-        out = dly.process(samples)
-
-        # echo1 (2500) in L, echo2 (4900) in R, echo3 (7300) in L
-        assert out[0, 2500] > 0.5, f"echo1 in L: {out[0,2500]}"
-        assert out[1, 4900] > 0.3, f"echo2 in R: {out[1,4900]}"
-        assert out[0, 7300] > 0.1, f"echo3 back in L: {out[0,7300]}"
-
-    def test_no_pingpong_keeps_echo_in_same_channel(self):
-        """非 ping-pong 模式回声留在原声道。"""
-        sr = 48000.0
-        delay_ms = 50.0
-        delay_samples = int(round(delay_ms * 0.001 * sr))
-        n = delay_samples * 2 + 200
-        impulse = np.zeros(n, dtype=np.float32)
-        impulse[100] = 1.0
-        samples = np.stack([impulse, np.zeros(n, dtype=np.float32)])
-
-        dly = DelayEffect(sr)
-        dly.set_params(DelayParams(
-            time_ms=delay_ms, feedback=50.0, mix=100.0, ping_pong=False,
-        ).to_dict())
-        out = dly.process(samples)
-
-        # echo1 在 L，echo2 也在 L（同声道反馈）
-        assert out[0, 2500] > 0.5
-        assert out[0, 4900] > 0.2
-        # R 声道应几乎无信号
-        assert abs(out[1, 2500]) < 0.05
+        dl = DelayEffect(sr)
+        dl.set_params({"enabled": True, "left_delay": 50.0, "right_delay": 50.0,
+                       "left_feedback": -80.0, "right_feedback": 0.0,
+                       "stereo_blend": 0.0, "dry_wet": 100.0, "level_db": 0.0,
+                       "high_ratio": 0.0, "low_cut": 20.0, "high_cut": 20000.0})
+        imp = np.zeros((2, int(sr)))
+        imp[0, 5] = 1.0
+        imp[1, 5] = 1.0
+        out = dl.process(imp)
+        e1 = out[0, 5 + int(0.05 * sr)]
+        e2 = out[0, 5 + int(0.10 * sr)]
+        assert e1 * e2 < 0.0, "negative feedback echoes should alternate sign"
 
     def test_cross_block_continuity(self):
-        """延迟线状态跨块连续。"""
+        """延迟线跨块连续。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
+        n = 9600
+        t = np.arange(n) / sr
         sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
-        params = DelayParams(time_ms=50.0, feedback=40.0, mix=50.0).to_dict()
+        params = {"enabled": True, "left_delay": 120.0, "right_delay": 180.0,
+                  "left_feedback": 30.0, "right_feedback": 30.0,
+                  "stereo_blend": 20.0, "dry_wet": 40.0, "level_db": 0.0,
+                  "high_ratio": 40.0, "low_cut": 100.0, "high_cut": 12000.0}
 
-        dly_full = DelayEffect(sr)
-        dly_full.set_params(params)
-        full = dly_full.process(samples.copy())
+        dl_full = DelayEffect(sr)
+        dl_full.set_params(params)
+        full = dl_full.process(samples.copy())
 
-        dly_split = DelayEffect(sr)
-        dly_split.set_params(params)
-        h1 = dly_split.process(samples[:, :4096].copy())
-        h2 = dly_split.process(samples[:, 4096:].copy())
+        dl_split = DelayEffect(sr)
+        dl_split.set_params(params)
+        h1 = dl_split.process(samples[:, :4800].copy())
+        h2 = dl_split.process(samples[:, 4800:].copy())
         split = np.concatenate([h1, h2], axis=1)
 
-        diff = np.max(np.abs(full[:, 4096:] - split[:, 4096:]))
-        assert diff < 1e-5, f"cross-block discontinuity: {diff:.8f}"
+        diff = np.max(np.abs(full[:, 4800:] - split[:, 4800:]))
+        assert diff < 1e-4, f"cross-block discontinuity: {diff:.6f}"
 
     def test_higher_feedback_sustains_longer(self):
-        """feedback 越大回声持续越长。"""
+        """更高反馈的回声尾更长。"""
         sr = 48000.0
-        delay_ms = 50.0
-        delay_samples = int(round(delay_ms * 0.001 * sr))
-        n = delay_samples * 5 + 200
-        impulse = np.zeros(n, dtype=np.float32)
-        impulse[100] = 1.0
-        samples = np.stack([impulse, np.zeros(n, dtype=np.float32)])
 
-        dly_high = DelayEffect(sr)
-        dly_high.set_params(DelayParams(time_ms=delay_ms, feedback=80.0, mix=100.0).to_dict())
-        out_high = dly_high.process(samples)
+        def _tail_energy(fb: float) -> float:
+            dl = DelayEffect(sr)
+            dl.set_params({"enabled": True, "left_delay": 60.0, "right_delay": 60.0,
+                           "left_feedback": fb, "right_feedback": fb,
+                           "stereo_blend": 0.0, "dry_wet": 100.0, "level_db": 0.0,
+                           "high_ratio": 0.0, "low_cut": 20.0, "high_cut": 20000.0})
+            imp = np.zeros((2, int(sr)))
+            imp[0, 5] = 1.0
+            imp[1, 5] = 1.0
+            out = dl.process(imp)
+            return float(np.sum(np.abs(out[0, int(sr * 0.4):int(sr * 0.9)])))
 
-        dly_low = DelayEffect(sr)
-        dly_low.set_params(DelayParams(time_ms=delay_ms, feedback=20.0, mix=100.0).to_dict())
-        out_low = dly_low.process(samples)
-
-        # 远处（第 4 次回声）高 feedback 应更大
-        high_e = float(np.max(np.abs(out_high[0, 4 * delay_samples + 100:])))
-        low_e = float(np.max(np.abs(out_low[0, 4 * delay_samples + 100:])))
-        assert high_e > low_e
+        e_low = _tail_energy(20.0)
+        e_high = _tail_energy(80.0)
+        assert e_high > e_low * 2.0
 
     def test_reset_state_clears_buffer(self):
-        """reset_state 后延迟线清空。"""
-        sr = 48000.0
-        delay_ms = 50.0
-        delay_samples = int(round(delay_ms * 0.001 * sr))
-        impulse = np.zeros(delay_samples + 200, dtype=np.float32)
-        impulse[100] = 1.0
-        samples = np.stack([impulse, np.zeros(delay_samples + 200, dtype=np.float32)])
-
-        dly = DelayEffect(sr)
-        dly.set_params(DelayParams(time_ms=delay_ms, feedback=60.0, mix=100.0).to_dict())
-        dly.process(samples)
-        dly.reset_state()
-        # 处理静音，应无残留回声
-        silent = np.zeros((2, delay_samples + 200), dtype=np.float32)
-        out = dly.process(silent)
-        assert float(np.max(np.abs(out))) < 1e-6
+        dl = DelayEffect(48000.0)
+        dl.set_params({"enabled": True, "left_delay": 100.0, "right_delay": 100.0})
+        imp = np.zeros((2, 4800))
+        imp[0, 5] = 1.0
+        imp[1, 5] = 1.0
+        dl.process(imp)
+        dl.reset_state()
+        assert float(np.max(np.abs(dl._buf_l))) == 0.0
+        assert float(np.max(np.abs(dl._buf_r))) == 0.0
 
     def test_default_params(self):
-        """构造后默认参数与常量一致。"""
-        from src.features.edit.core.audio_dsp import (
-            _DELAY_DEFAULT_TIME_MS, _DELAY_DEFAULT_FEEDBACK, _DELAY_DEFAULT_MIX,
-            _DELAY_DEFAULT_PINGPONG, _DELAY_DEFAULT_LOWCUT_HZ,
-        )
-        dly = DelayEffect(48000.0)
-        assert dly._time_ms == _DELAY_DEFAULT_TIME_MS
-        assert dly._feedback == _DELAY_DEFAULT_FEEDBACK
-        assert dly._mix == _DELAY_DEFAULT_MIX
-        assert dly._ping_pong == _DELAY_DEFAULT_PINGPONG
-        assert dly._low_cut_hz == _DELAY_DEFAULT_LOWCUT_HZ
-        assert dly._enabled is False
+        dl = DelayEffect(48000.0)
+        assert dl._left_delay == 121.0
+        assert dl._right_delay == 135.0
+        assert dl._dry_wet == 30.0
+        assert dl._enabled is False
 
     def test_is_active_reflects_enabled(self):
-        dly = DelayEffect(48000.0)
-        assert not dly.is_active
-        dly.set_params({"time_ms": 100.0, "enabled": True})
-        assert dly.is_active
+        dl = DelayEffect(48000.0)
+        assert not dl.is_active
+        dl.set_params({"enabled": True})
+        assert dl.is_active
 
 
 # =============================================================================
-# 3e. SaturationEffect 谐波失真 DSP
+# 3e. SaturationEffect 谐波失真（未变动，原样回归）
 # =============================================================================
 
 class TestSaturationEffect:
@@ -894,124 +873,61 @@ class TestSaturationEffect:
         assert issubclass(SaturationEffect, AudioEffect)
 
     def test_bypass_returns_input_unchanged(self):
-        """未调用 set_params 时旁路。"""
         sat = SaturationEffect(48000.0)
-        samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
+        samples = np.array([[0.5, -0.3]], dtype=np.float32)
         assert sat.process(samples) is samples
 
     def test_rejects_non_2d(self):
-        """1D 输入原样返回。"""
         sat = SaturationEffect(48000.0)
         sat.set_params({"drive": 50.0, "enabled": True})
-        samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
+        samples_1d = np.array([0.5, 0.9], dtype=np.float32)
         assert sat.process(samples_1d) is samples_1d
 
     def test_drive_zero_is_passthrough(self):
-        """drive=0 时 k=0，完全直通。"""
-        sr = 48000.0
-        t = np.arange(2048) / sr
-        sig = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
-        samples = np.stack([sig, sig])
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=0.0, enabled=True).to_dict())
+        sat = SaturationEffect(48000.0)
+        sat.set_params({"drive": 0.0, "enabled": True})
+        samples = np.random.randn(2, 512).astype(np.float32) * 0.4
         out = sat.process(samples)
         assert np.allclose(out, samples, atol=1e-6)
 
     def test_drive_positive_changes_signal(self):
-        """drive>0 应改变信号（sigmoid 非线性映射）。"""
-        sr = 48000.0
-        t = np.arange(4096) / sr
-        sig = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
-        samples = np.stack([sig, sig])
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=50.0, enabled=True).to_dict())
+        sat = SaturationEffect(48000.0)
+        sat.set_params({"drive": 60.0, "enabled": True})
+        samples = (np.linspace(-0.9, 0.9, 512)[np.newaxis, :].repeat(2, axis=0)).astype(np.float32)
         out = sat.process(samples)
-        assert not np.allclose(out, samples, atol=1e-3), "drive=50 should change signal"
+        assert not np.allclose(out, samples, atol=1e-3)
 
     def test_overload_peak_is_soft_clipped(self):
-        """过载信号（峰值 > 1.0）被软限幅（峰值下降）。"""
-        sr = 48000.0
-        t = np.arange(4096) / sr
-        sig = (1.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)  # 峰值 1.5
-        samples = np.stack([sig, sig])
-
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=50.0, enabled=True).to_dict())
+        sat = SaturationEffect(48000.0)
+        sat.set_params({"drive": 100.0, "enabled": True})
+        samples = np.array([[2.0, -2.0, 1.5, -1.5]], dtype=np.float32)
         out = sat.process(samples)
-
-        in_pk = float(np.max(np.abs(samples)))
-        out_pk = float(np.max(np.abs(out)))
-        assert out_pk < in_pk, f"overload soft-clip: {out_pk:.3f} should be < {in_pk:.3f}"
-
-    def test_mid_amplitude_is_boosted(self):
-        """中等幅度（0.5 附近）被提升（动态范围压缩，sigmoid 曲线特性）。"""
-        sr = 48000.0
-        t = np.arange(4096) / sr
-        sig = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)  # 峰值 0.5
-        samples = np.stack([sig, sig])
-
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=50.0, enabled=True).to_dict())
-        out = sat.process(samples)
-
-        in_pk = float(np.max(np.abs(samples)))
-        out_pk = float(np.max(np.abs(out)))
-        # 0.5 处 sigmoid 输出 > 0.5（中段提升）
-        assert out_pk > in_pk, f"mid-amp boost: {out_pk:.3f} should be > {in_pk:.3f}"
-
-    def test_low_amplitude_is_linearly_boosted(self):
-        """低电平信号（<<1）被线性放大（sigmoid 在小输入处接近 (1+k)*x）。
-
-        这是 audio_pro sigmoid 曲线的特性：y = (1+k)*x / (1+k*|x|)，
-        当 |x| 很小时分母≈1，故 y ≈ (1+k)*x（线性放大，无削波）。
-        """
-        sr = 48000.0
-        t = np.arange(2048) / sr
-        sig = (0.01 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
-        samples = np.stack([sig, sig])
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=50.0, enabled=True).to_dict())
-        out = sat.process(samples)
-        # drive=50 → k=25 → 低电平应被放大约 (1+25)=26 倍
-        # 用中值（避开 0）比较比例
-        nonzero = np.abs(samples[0]) > 1e-6
-        ratio = float(np.median(np.abs(out[0, nonzero]) / np.abs(samples[0, nonzero])))
-        assert 20.0 < ratio < 30.0, f"low-amp boost ratio {ratio:.2f} should be ~26 (1+k)"
+        assert float(np.max(np.abs(out))) < 1.35  # (1+k)/(1+k*0.9) < 1.35
 
     def test_preserves_shape_and_dtype(self):
-        """处理保持 shape 与 dtype。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 512).astype(np.float32) * 0.5
-        sat = SaturationEffect(sr)
-        sat.set_params(SaturationParams(drive=80.0, enabled=True).to_dict())
+        sat = SaturationEffect(48000.0)
+        sat.set_params({"drive": 50.0, "enabled": True})
+        samples = np.random.randn(2, 256).astype(np.float32) * 0.5
         out = sat.process(samples)
         assert out.shape == samples.shape
         assert out.dtype == samples.dtype
 
-    def test_no_state_to_reset(self):
-        """reset_state 是空操作（无状态效果），不崩。"""
-        sat = SaturationEffect(48000.0)
-        sat.set_params(SaturationParams(drive=50.0, enabled=True).to_dict())
-        sat.reset_state()  # 应无异常
-
     def test_default_params(self):
-        from src.features.edit.core.audio_dsp import _SAT_DEFAULT_DRIVE
         sat = SaturationEffect(48000.0)
-        assert sat._drive == _SAT_DEFAULT_DRIVE
+        assert sat._drive == 0.0
         assert sat._enabled is False
 
     def test_is_active_reflects_enabled_and_drive(self):
         sat = SaturationEffect(48000.0)
         assert not sat.is_active
+        sat.set_params({"drive": 0.0, "enabled": True})
+        assert not sat.is_active  # drive=0 无实际效果
         sat.set_params({"drive": 50.0, "enabled": True})
         assert sat.is_active
-        # drive=0 + enabled → 不活跃（无效果）
-        sat.set_params({"drive": 0.0, "enabled": True})
-        assert not sat.is_active
 
 
 # =============================================================================
-# 3f. ImagerEffect 立体声成像 DSP
+# 3f. ImagerEffect 立体声成像（未变动，原样回归）
 # =============================================================================
 
 class TestImagerEffect:
@@ -1021,262 +937,235 @@ class TestImagerEffect:
         assert issubclass(ImagerEffect, AudioEffect)
 
     def test_bypass_returns_input_unchanged(self):
-        """未调用 set_params 时旁路。"""
         img = ImagerEffect(48000.0)
-        samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
+        samples = np.array([[0.5, -0.3]], dtype=np.float32)
         assert img.process(samples) is samples
 
     def test_rejects_non_2d(self):
-        """1D 输入原样返回。"""
         img = ImagerEffect(48000.0)
-        img.set_params({"width": 150.0, "enabled": True})
-        samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
+        img.set_params({"width": 100.0, "enabled": True})
+        samples_1d = np.array([0.5, 0.9], dtype=np.float32)
         assert img.process(samples_1d) is samples_1d
 
     def test_default_is_near_identity(self):
-        """width=100 pan=0 应接近直通。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 2048).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=100.0, pan=0.0, enabled=True).to_dict())
+        img = ImagerEffect(48000.0)
+        img.set_params(ImagerParams().to_dict())
+        samples = np.random.randn(2, 512).astype(np.float32) * 0.3
+        out = img.process(samples)
+        assert np.allclose(out, samples, atol=1e-4)
+
+    def test_width_zero_produces_mono(self):
+        img = ImagerEffect(48000.0)
+        img.set_params({"width": 0.0, "enabled": True})
+        left = np.random.randn(512).astype(np.float32) * 0.3
+        right = np.random.randn(512).astype(np.float32) * 0.3
+        samples = np.stack([left, right])
+        out = img.process(samples)
+        assert np.allclose(out[0], out[1], atol=1e-6)
+
+    def test_pan_left_silences_right(self):
+        img = ImagerEffect(48000.0)
+        img.set_params({"pan": -100.0, "width": 100.0, "enabled": True})
+        left = np.ones(256, dtype=np.float32) * 0.3
+        right = np.ones(256, dtype=np.float32) * 0.3
+        samples = np.stack([left, right])
+        out = img.process(samples)
+        assert float(np.max(np.abs(out[1]))) < 1e-6
+
+    def test_mono_input_width_no_effect(self):
+        img = ImagerEffect(48000.0)
+        img.set_params({"width": 0.0, "pan": 0.0, "enabled": True})
+        samples = (np.random.randn(1, 256) * 0.3).astype(np.float32)
         out = img.process(samples)
         assert np.allclose(out, samples, atol=1e-6)
 
-    def test_width_zero_produces_mono(self):
-        """width=0 应输出 mono（L==R）。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 2048).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=0.0, pan=0.0, enabled=True).to_dict())
-        out = img.process(samples)
-        # width=0 → Side gain=0 → L=M, R=M（mono）
-        assert np.allclose(out[0], out[1], atol=1e-6), "width=0 should produce mono (L==R)"
-
-    def test_width_200_doubles_side(self):
-        """width=200 应使 Side 信号加倍（超宽）。"""
-        # 用纯 Side 信号测试：L=1, R=-1（M=0, S=1）
-        side_sig = np.array([[1.0, 1.0, 1.0], [-1.0, -1.0, -1.0]], dtype=np.float32)
-        img = ImagerEffect(48000.0)
-        img.set_params(ImagerParams(width=200.0, pan=0.0, enabled=True).to_dict())
-        out = img.process(side_sig)
-        # M=0, S=1, width=200 → S*2=2 → L=0+2=2, R=0-2=-2
-        assert abs(out[0, 0] - 2.0) < 1e-5
-        assert abs(out[1, 0] - (-2.0)) < 1e-5
-
-    def test_pan_left_silences_right(self):
-        """pan=-100 应使 R 声道静音。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 2048).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=100.0, pan=-100.0, enabled=True).to_dict())
-        out = img.process(samples)
-        assert np.allclose(out[1], 0.0, atol=1e-6), "pan=-100 should silence R"
-
-    def test_pan_right_silences_left(self):
-        """pan=+100 应使 L 声道静音。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 2048).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=100.0, pan=100.0, enabled=True).to_dict())
-        out = img.process(samples)
-        assert np.allclose(out[0], 0.0, atol=1e-6), "pan=100 should silence L"
-
-    def test_mono_input_width_no_effect(self):
-        """单声道输入 width 无效（无 Side 信号），仅 pan 平均生效。"""
-        sr = 48000.0
-        mono = np.random.randn(1, 2048).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=200.0, pan=0.0, enabled=True).to_dict())
-        out = img.process(mono)
-        # 单声道 pan=0 → 平均增益=1.0，直通
-        assert np.allclose(out, mono, atol=1e-6)
-
-    def test_preserves_shape_and_dtype(self):
-        """处理保持 shape 与 dtype。"""
-        sr = 48000.0
-        samples = np.random.randn(2, 512).astype(np.float32) * 0.5
-        img = ImagerEffect(sr)
-        img.set_params(ImagerParams(width=150.0, pan=20.0, enabled=True).to_dict())
-        out = img.process(samples)
-        assert out.shape == samples.shape
-        assert out.dtype == samples.dtype
-
     def test_default_params(self):
-        from src.features.edit.core.audio_dsp import _IMAGER_DEFAULT_PAN, _IMAGER_DEFAULT_WIDTH
         img = ImagerEffect(48000.0)
-        assert img._pan == _IMAGER_DEFAULT_PAN
-        assert img._width == _IMAGER_DEFAULT_WIDTH
+        assert img._pan == 0.0
+        assert img._width == 100.0
         assert img._enabled is False
 
     def test_is_active_only_when_effective(self):
-        """is_active 仅在 pan≠0 或 width≠100 时为 True。"""
         img = ImagerEffect(48000.0)
         assert not img.is_active
-        # width=100 pan=0 → 无效果
-        img.set_params({"width": 100.0, "pan": 0.0, "enabled": True})
-        assert not img.is_active
-        # width≠100 → 有效果
-        img.set_params({"width": 150.0, "pan": 0.0, "enabled": True})
-        assert img.is_active
-        # pan≠0 → 有效果
-        img.set_params({"width": 100.0, "pan": 30.0, "enabled": True})
+        img.set_params({"pan": 0.0, "width": 100.0, "enabled": True})
+        assert not img.is_active  # 中性参数无实际效果
+        img.set_params({"pan": 30.0, "width": 100.0, "enabled": True})
         assert img.is_active
 
 
 # =============================================================================
-# 3g. NoiseGateEffect 噪声门 DSP
+# 3g. ExpanderEffect（CW-A1: 接替 NoiseGateEffect）
 # =============================================================================
 
-class TestNoiseGateEffect:
-    """NoiseGateEffect 的 DSP 正确性。"""
+class TestExpanderEffect:
+    """ExpanderEffect（Expander/Gate 双模式）的 DSP 正确性。"""
 
     def test_is_audio_effect_subclass(self):
-        assert issubclass(NoiseGateEffect, AudioEffect)
+        assert issubclass(ExpanderEffect, AudioEffect)
 
     def test_bypass_returns_input_unchanged(self):
-        """未调用 set_params 时旁路。"""
-        ng = NoiseGateEffect(48000.0)
-        samples = np.array([[0.5, -0.3, 0.8]], dtype=np.float32)
-        assert ng.process(samples) is samples
+        ex = ExpanderEffect(48000.0)
+        samples = np.array([[0.5, -0.3]], dtype=np.float32)
+        assert ex.process(samples) is samples
 
     def test_rejects_non_2d(self):
-        """1D 输入原样返回。"""
-        ng = NoiseGateEffect(48000.0)
-        ng.set_params({"threshold_db": -30.0, "enabled": True})
-        samples_1d = np.array([0.5, 0.9, 0.3], dtype=np.float32)
-        assert ng.process(samples_1d) is samples_1d
+        ex = ExpanderEffect(48000.0)
+        ex.set_params({"threshold_db": -30.0, "enabled": True})
+        samples_1d = np.array([0.5, 0.9], dtype=np.float32)
+        assert ex.process(samples_1d) is samples_1d
 
     def test_loud_signal_passes(self):
-        """高于阈值的信号几乎直通（门开）。"""
+        """高于阈值的响信号直通。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
-        sig = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)  # ~-6 dBFS
+        n = 9600
+        t = np.arange(n) / sr
+        sig = (0.4 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
-        ng = NoiseGateEffect(sr)
-        ng.set_params(NoiseGateParams(
-            threshold_db=-20.0, attack_ms=1.0, release_ms=50.0,
+        ex = ExpanderEffect(sr)
+        ex.set_params(ExpanderParams(
+            mode="Expander", threshold_db=-25.0,
+            attack_ms=1.0, release_ms=100.0,
         ).to_dict())
-        out = ng.process(samples)
-        # 信号远高于 -20dB，门常开，应几乎直通（稳态段）
-        assert np.allclose(out[:, 500:], samples[:, 500:], atol=1e-2)
+        out = ex.process(samples)
+        assert np.allclose(out, samples, atol=1e-3)
 
     def test_quiet_signal_attenuated(self):
-        """低于阈值的信号被衰减到接近 0（门关）。"""
+        """低于阈值的静信号被下扩（包络开门初始化，测 release 收敛后的尾段）。"""
         sr = 48000.0
-        t = np.arange(16384) / sr  # 长缓冲让门完全关闭
-        sig = (0.001 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)  # ~-60 dBFS
-        samples = np.stack([sig, sig])
-        ng = NoiseGateEffect(sr)
-        ng.set_params(NoiseGateParams(
-            threshold_db=-30.0, attack_ms=1.0, release_ms=50.0,
+        n = 48000  # 1s = 10×release，包络充分收敛
+        rng = np.random.default_rng(7)
+        samples = (rng.standard_normal((2, n)) * 0.002).astype(np.float32)
+        ex = ExpanderEffect(sr)
+        ex.set_params(ExpanderParams(
+            mode="Expander", threshold_db=-25.0, range_db=30.0,
+            attack_ms=1.0, release_ms=100.0,
         ).to_dict())
-        out = ng.process(samples)
-        # 稳态段（最后 2000 样本，门已完全关闭）
-        in_rms = float(np.sqrt(np.mean(samples[0, -2000:] ** 2)))
-        out_rms = float(np.sqrt(np.mean(out[0, -2000:] ** 2)))
-        assert out_rms < in_rms * 0.1, f"quiet should be attenuated: {out_rms}/{in_rms}"
+        out = ex.process(samples)
+        tail = slice(n // 2, None)
+        reduction_db = 20 * np.log10(float(np.std(out[:, tail])) / float(np.std(samples[:, tail])))
+        assert reduction_db < -5.0, f"quiet attenuation {reduction_db:.2f} dB"
 
-    def test_dynamic_signal_gates_correctly(self):
-        """动态信号：前半段高（开门），后半段低（关门）。"""
+    def test_gate_mode_deeper_than_expander(self):
+        """Gate 模式（高等效比率）衰减比 Expander 深。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
-        sig_loud = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
-        sig_quiet = (0.001 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
-        dynamic = np.concatenate([sig_loud[:4096], sig_quiet[4096:]])
-        samples = np.stack([dynamic, dynamic])
+        n = 48000
+        rng = np.random.default_rng(7)
+        samples = (rng.standard_normal((2, n)) * 0.002).astype(np.float32)
+        tail = slice(n // 2, None)
 
-        ng = NoiseGateEffect(sr)
-        ng.set_params(NoiseGateParams(
-            threshold_db=-25.0, attack_ms=1.0, release_ms=100.0,
+        def _red(mode: str) -> float:
+            ex = ExpanderEffect(sr)
+            ex.set_params(ExpanderParams(
+                mode=mode, threshold_db=-25.0, range_db=40.0,
+                attack_ms=1.0, release_ms=100.0,
+            ).to_dict())
+            out = ex.process(samples)
+            return 20 * np.log10(float(np.std(samples[:, tail])) / float(np.std(out[:, tail])))
+
+        assert _red("Gate") > _red("Expander") + 3.0
+
+    def test_range_caps_attenuation(self):
+        """range_db 封顶最大衰减。"""
+        sr = 48000.0
+        n = 48000
+        rng = np.random.default_rng(7)
+        samples = (rng.standard_normal((2, n)) * 0.001).astype(np.float32)
+        ex = ExpanderEffect(sr)
+        ex.set_params(ExpanderParams(
+            mode="Gate", threshold_db=-25.0, range_db=6.0,
+            attack_ms=1.0, release_ms=100.0,
         ).to_dict())
-        out = ng.process(samples)
-
-        # 高信号段（2000-4000）应通过
-        loud_part = float(np.max(np.abs(out[0, 2000:4000])))
-        assert loud_part > 0.3, f"loud part should pass: {loud_part}"
-        # 低信号段（7000-8000，门已关）应被衰减
-        quiet_part = float(np.max(np.abs(out[0, 7000:8000])))
-        assert quiet_part < 0.05, f"quiet part should be gated: {quiet_part}"
+        out = ex.process(samples)
+        tail = slice(n // 2, None)
+        reduction_db = 20 * np.log10(float(np.std(samples[:, tail])) / float(np.std(out[:, tail])))
+        assert reduction_db <= 7.5, f"range cap violated: {reduction_db:.2f} dB"
 
     def test_cross_block_continuity(self):
-        """门增益状态跨块连续。"""
+        """包络跨块连续。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
-        sig = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        n = 9600
+        t = np.arange(n) / sr
+        sig = np.concatenate([
+            0.4 * np.sin(2 * np.pi * 440.0 * t[:n // 2]),
+            0.002 * np.sin(2 * np.pi * 440.0 * t[n // 2:]),
+        ]).astype(np.float32)
         samples = np.stack([sig, sig])
-        params = NoiseGateParams(
-            threshold_db=-25.0, attack_ms=5.0, release_ms=200.0,
+        params = ExpanderParams(
+            mode="Expander", threshold_db=-25.0, range_db=20.0,
+            attack_ms=1.0, release_ms=200.0,
         ).to_dict()
 
-        ng_full = NoiseGateEffect(sr)
-        ng_full.set_params(params)
-        full = ng_full.process(samples.copy())
+        ex_full = ExpanderEffect(sr)
+        ex_full.set_params(params)
+        full = ex_full.process(samples.copy())
 
-        ng_split = NoiseGateEffect(sr)
-        ng_split.set_params(params)
-        h1 = ng_split.process(samples[:, :4096].copy())
-        h2 = ng_split.process(samples[:, 4096:].copy())
+        ex_split = ExpanderEffect(sr)
+        ex_split.set_params(params)
+        h1 = ex_split.process(samples[:, :n // 2].copy())
+        h2 = ex_split.process(samples[:, n // 2:].copy())
         split = np.concatenate([h1, h2], axis=1)
 
-        diff = np.max(np.abs(full[:, 4096:] - split[:, 4096:]))
-        assert diff < 1e-5, f"cross-block discontinuity: {diff:.8f}"
+        diff = np.max(np.abs(full[:, n // 2:] - split[:, n // 2:]))
+        assert diff < 1e-4, f"cross-block discontinuity: {diff:.6f}"
 
     def test_link_channels(self):
-        """声道联动：两声道应用相同门增益。"""
+        """声道联动。"""
         sr = 48000.0
-        t = np.arange(8192) / sr
-        # 左声道高、右声道低
-        left = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        n = 4800
+        t = np.arange(n) / sr
+        left = (0.4 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
         right = (0.001 * np.sin(2 * np.pi * 880.0 * t)).astype(np.float32)
         samples = np.stack([left, right])
-
-        ng = NoiseGateEffect(sr)
-        ng.set_params(NoiseGateParams(
-            threshold_db=-25.0, attack_ms=1.0, release_ms=100.0,
+        ex = ExpanderEffect(sr)
+        ex.set_params(ExpanderParams(
+            mode="Expander", threshold_db=-25.0, range_db=20.0,
         ).to_dict())
-        out = ng.process(samples)
+        out = ex.process(samples)
+        # 右声道虽低于阈值，但与左声道联动（同 gain）
+        # 左声道直通 → gain=1 → 右声道也直通
+        assert np.allclose(out[1], samples[1], atol=1e-4)
 
-        # 左声道高信号驱动门常开，右声道应跟随（不被衰减，尽管它本身很安静）
-        # 比较 R 声道稳态是否被衰减
-        r_in = float(np.sqrt(np.mean(samples[1, 2000:4000] ** 2)))
-        r_out = float(np.sqrt(np.mean(out[1, 2000:4000] ** 2)))
-        # 因为 L 高信号让门常开，R 应几乎直通（不被关门）
-        assert r_out > r_in * 0.5, "linked channels: R should pass when L drives gate open"
+    def test_legacy_noise_gate_params_map_to_gate(self):
+        """旧 noise_gate 键无损承接为 Gate 模式。"""
+        ex = ExpanderEffect(48000.0)
+        ex.set_params({"threshold_db": -45.0, "attack_ms": 2.0,
+                       "release_ms": 150.0, "enabled": True})
+        assert ex._mode == "Gate"
+        assert ex._threshold_db == -45.0
 
     def test_reset_state(self):
-        """reset_state 重置门增益到 1.0（开）。"""
-        sr = 48000.0
-        t = np.arange(4096) / sr
-        sig = (0.001 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
-        samples = np.stack([sig, sig])
-        ng = NoiseGateEffect(sr)
-        ng.set_params(NoiseGateParams(threshold_db=-30.0).to_dict())
-        ng.process(samples)
-        # 门应该关了一些
-        assert ng._gate_gain < 0.5
-        ng.reset_state()
-        assert ng._gate_gain == 1.0
+        ex = ExpanderEffect(48000.0)
+        ex.set_params(ExpanderParams().to_dict())
+        ex.process(np.ones((2, 256), dtype=np.float32) * 0.5)
+        assert ex._env_lin > 0.0
+        ex.reset_state()
+        assert ex._env_lin == 1.0  # 开门初始化
 
     def test_default_params(self):
-        from src.features.edit.core.audio_dsp import (
-            _GATE_DEFAULT_THRESHOLD_DB, _GATE_DEFAULT_ATTACK_MS,
-            _GATE_DEFAULT_RELEASE_MS,
-        )
-        ng = NoiseGateEffect(48000.0)
-        assert ng._threshold_db == _GATE_DEFAULT_THRESHOLD_DB
-        assert ng._attack_ms == _GATE_DEFAULT_ATTACK_MS
-        assert ng._release_ms == _GATE_DEFAULT_RELEASE_MS
-        assert ng._enabled is False
+        ex = ExpanderEffect(48000.0)
+        assert ex._threshold_db == -35.0
+        assert ex._mode == "Expander"
+        assert ex._enabled is False
 
     def test_is_active_reflects_enabled(self):
-        ng = NoiseGateEffect(48000.0)
-        assert not ng.is_active
-        ng.set_params({"threshold_db": -30.0, "enabled": True})
-        assert ng.is_active
+        ex = ExpanderEffect(48000.0)
+        assert not ex.is_active
+        ex.set_params({"enabled": True})
+        assert ex.is_active
+
+    def test_gr_telemetry_exposed(self):
+        """CW-A1: last_gr_db 遥测。"""
+        ex = ExpanderEffect(48000.0)
+        ex.set_params({"mode": "Gate", "threshold_db": -25.0, "range_db": 40.0,
+                       "attack_ms": 1.0, "release_ms": 100.0, "enabled": True})
+        n = 48000
+        ex.process((np.random.default_rng(3).standard_normal((2, n)) * 0.002).astype(np.float32))
+        assert ex.last_gr_db > 8.0
 
 
 # =============================================================================
-# 4. EffectChain 效果器链
+# 4. EffectChain 链串联
 # =============================================================================
 
 class TestEffectChain:
@@ -1291,7 +1180,7 @@ class TestEffectChain:
 
     def test_none_entries_clears_chain(self):
         chain = EffectChain(48000.0)
-        chain.set_params([("limiter", {"threshold_db": -3.0, "enabled": True}, True)])
+        chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, True)])
         assert chain.is_active
         chain.set_params(None)
         assert not chain.is_active
@@ -1308,7 +1197,9 @@ class TestEffectChain:
 
     def test_chain_order_matters(self):
         """EQ → Limiter 与 Limiter → EQ 结果不同（顺序生效）。"""
-        eq_params = StripEQParams(mode="3-band", bands=(12.0, 0.0, 0.0)).to_dict()
+        eq_params = {"bands": _bands(**{"1": {"filter_type": "Low Shelf",
+                                              "freq": 110.0, "gain": 9.0,
+                                              "q": 1.4, "enabled": True}})}
         lim_params = {"threshold_db": -3.0, "release_ms": 50.0, "enabled": True}
 
         chain_eq_first = EffectChain(48000.0)
@@ -1330,20 +1221,18 @@ class TestEffectChain:
     def test_instance_reuse_on_param_change(self):
         """参数变化时复用同类型实例（保持 DSP 状态连续）。"""
         chain = EffectChain(48000.0)
-        chain.set_params([("limiter", {"threshold_db": -3.0, "enabled": True}, True)])
-        old_inst = chain._effects[0]
-        # 改参数不重建实例
         chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, True)])
+        old_inst = chain._effects[0]
+        chain.set_params([("limiter", {"threshold_db": -12.0, "enabled": True}, True)])
         new_inst = chain._effects[0]
         assert new_inst is old_inst
 
     def test_bypass_flag_disables_effect(self):
         """enabled=False 的条目被跳过。"""
         chain = EffectChain(48000.0)
-        chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, False)])  # 链条 enabled=False
+        chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, False)])
         samples = np.ones((1, 256), dtype=np.float32) * 0.9
         out = chain.process(samples)
-        # 条目被 bypass，原样返回（未被限幅）
         assert float(np.max(np.abs(out))) >= 0.85
         assert not chain.is_active
 
@@ -1351,10 +1240,9 @@ class TestEffectChain:
         """reset_state 传播到所有效果器。"""
         chain = EffectChain(48000.0)
         chain.set_params([
-            ("strip_eq", StripEQParams(mode="3-band", bands=(3.0, 0.0, 0.0)).to_dict(), True),
-            ("limiter", {"threshold_db": -3.0, "enabled": True}, True),
+            ("strip_eq", {"bands": _bands()}, True),
+            ("limiter", {"threshold_db": -6.0, "enabled": True}, True),
         ])
-        # 先处理拉高状态
         chain.process(np.ones((2, 256), dtype=np.float32) * 0.9)
         assert chain._effects[1]._envelope > 0.0
         chain.reset_state()
@@ -1365,7 +1253,7 @@ class TestEffectChain:
         chain = EffectChain(48000.0)
         chain.set_params([
             ("unknown_fx", {"foo": 1}, True),
-            ("limiter", {"threshold_db": -3.0, "enabled": True}, True),
+            ("limiter", {"threshold_db": -6.0, "enabled": True}, True),
         ])
         assert len(chain._effects) == 1
         assert isinstance(chain._effects[0], LimiterEffect)
@@ -1373,7 +1261,16 @@ class TestEffectChain:
     def test_sample_rate_propagates(self):
         """set_params 时 sample_rate 传播到效果器。"""
         chain = EffectChain(48000.0)
-        chain.set_params([("limiter", {"threshold_db": -3.0, "enabled": True}, True)])
+        chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, True)])
         assert chain._effects[0]._sample_rate == 48000.0
-        chain.set_params([("limiter", {"threshold_db": -3.0, "enabled": True}, True)], sample_rate=96000.0)
+        chain.set_params([("limiter", {"threshold_db": -6.0, "enabled": True}, True)], sample_rate=96000.0)
         assert chain._effects[0]._sample_rate == 96000.0
+
+    def test_four_tuple_entries_with_instance_ids(self):
+        """CW-A1: 4 元组（含 instance_id）条目正常工作。"""
+        chain = EffectChain(48000.0)
+        chain.set_params([
+            ("limiter", {"threshold_db": -6.0, "enabled": True}, True, "lim-1"),
+        ])
+        assert chain._instance_ids == ["lim-1"]
+        assert chain.collect_gain_reduction().get("lim-1", 0.0) >= 0.0

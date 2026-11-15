@@ -2714,16 +2714,28 @@ class EditControllerMixin:
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
                 "effect_chain": getattr(track, 'effect_chain', None),
+                # CW-A1: 空间声像器（空 dict=未使用）
+                "panner": getattr(track, 'panner', None),
                 # W16: 轨道颜色
                 "color": getattr(track, 'color', None),
             })
         try:
             panel.sync_tracks(tracks)
+            # CW-A1: 侧链源列表下发（压缩器外部检源选择器：任意轨可选）
+            if hasattr(panel, 'set_sidechain_sources_all'):
+                panel.set_sidechain_sources_all([
+                    (t["track_id"], t["name"]) for t in tracks
+                ])
             # W12: 同步 Master 总线音量/静音（持久化字段，重开恢复）
             if hasattr(panel, 'set_master_volume_linear'):
                 panel.set_master_volume_linear(float(getattr(timeline, 'master_volume', 1.0)))
             if hasattr(panel, 'set_master_muted'):
                 panel.set_master_muted(bool(getattr(timeline, 'master_muted', False)))
+            # MX-03: Master 条带（EQ/FX）回填（undo/重开后 master strip 与模型一致）
+            if hasattr(panel, 'set_master_strip_state'):
+                panel.set_master_strip_state(
+                    getattr(timeline, 'master_strip_eq', None),
+                    getattr(timeline, 'master_effect_chain', None))
             mgr = self._get_mixer_audio_manager()
             # AM-05: 引擎同步的真相源现在是 edit_page._sync_audio_tracks_from_timeline
             # （它已同步 master/automation/routing/EQ/FX 到引擎）。此处的引擎同步是
@@ -2745,7 +2757,10 @@ class EditControllerMixin:
                         logger.debug("automation sync failed: %s", e)
                     # W24/W25: 同步路由信息（output_bus_id + sends + is_bus）
                     try:
-                        sends_list = [(s.target_bus_id, s.level) for s in track.sends if s.enabled]
+                        sends_list = [(s.target_bus_id, s.level,
+                                       str(getattr(s, 'tap', 'post_fader') or 'post_fader'),
+                                       bool(getattr(s, 'muted', False)))
+                                      for s in track.sends if s.enabled]
                         mgr.set_track_routing(track.track_id, track.output_bus_id,
                                               sends_list, is_bus=track.is_bus)
                     except Exception as e:
@@ -2960,6 +2975,46 @@ class EditControllerMixin:
             logger.warning("Invalid mixer balance %s: %s", balance, e)
             return
         tview._execute_command(cmd)
+
+    def _on_mixer_panner_preview(self, track_id: str, payload: dict) -> None:
+        """CW-A1: 空间声像器拖动期——实时听感预览（不进命令栈）。
+
+        payload {"pan": -1..1, "panner": dict}：pan 部分走引擎 set_track_pan
+        （含自动化录制采集），panner 部分走 set_track_panner。
+        """
+        if not isinstance(payload, dict):
+            return
+        pan = max(-1.0, min(1.0, float(payload.get("pan", 0.0))))
+        # §3.1: 自动化录制采集 pan
+        self._record_fader_sample(track_id, "pan", pan, fader_down=True)
+        mgr = self._get_mixer_audio_manager()
+        if mgr is not None:
+            try:
+                mgr.set_track_pan(track_id, pan)
+                set_panner = getattr(mgr, "set_track_panner", None)
+                if callable(set_panner):
+                    set_panner(track_id, payload.get("panner") or None)
+            except Exception as e:
+                logger.debug("mixer panner preview failed: %s", e)
+
+    def _on_mixer_panner_committed(self, track_id: str, payload: dict) -> None:
+        """CW-A1: 空间声像器松手——SetTrackPanCommand + SetTrackPannerCommand
+        聚合为单个 MacroCommand（一次 undo）。"""
+        if not isinstance(payload, dict):
+            return
+        tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+        if tview is None:
+            return
+        from src.features.edit.core.commands import (
+            SetTrackPanCommand, SetTrackPannerCommand, MacroCommand,
+        )
+        pan = max(-1.0, min(1.0, float(payload.get("pan", 0.0))))
+        panner = dict(payload.get("panner") or {})
+        macro = MacroCommand.create("Set Spatial Panner", [
+            SetTrackPanCommand.create(track_id, pan),
+            SetTrackPannerCommand.create(track_id, panner),
+        ])
+        tview._execute_command(macro)
 
     def _on_mixer_mute_toggled(self, track_id: str, muted: bool) -> None:
         """混音器 M 按钮：实时听感 + 提交 SetTrackMuteCommand。
@@ -3909,7 +3964,9 @@ class EditControllerMixin:
                 track_name = track.name or track_id
             total_frames = max(1, getattr(timeline, 'duration_frames', 1000) or 1000)
 
-        dlg = AutomationLane(track_id, track_name, total_frames=total_frames, parent=self._main_window_ref())
+        dlg = AutomationLane(track_id, track_name, total_frames=total_frames,
+                             parent=self._main_window_ref(),
+                             fx_param_specs=self._collect_fx_param_specs(track_id))
         # 连接信号
         dlg.add_keyframe.connect(self._on_mixer_automation_add)
         dlg.remove_keyframe.connect(self._on_mixer_automation_remove)
@@ -3933,15 +3990,70 @@ class EditControllerMixin:
         """获取主窗口引用（Automation Lane 的 parent）。"""
         return getattr(self, 'main_window', None) or None
 
+    def _collect_fx_param_specs(self, track_id: str) -> list:
+        """MX-10: 枚举该轨效果链的可自动化参数（Automation Lane 用）。
+
+        规格 = [("fx/{instance_id}/{param_key}", label, min, max), ...]，
+        值域优先 effect_registry 的 ParamSchema（min/max/step 数值型）；
+        schema 缺失时用实例当前值做保守数值域（0..max(2|v|,1)）。
+        仅数值型参数进入；bool/choice 等离散参数不开放曲线（事件语义，
+        计划 MX-10："离散开关使用事件"——后续任务）。
+        """
+        timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
+        if timeline is None:
+            return []
+        track = timeline.get_track_by_id(track_id)
+        chain = getattr(track, "effect_chain", None) if track is not None else None
+        if chain is None:
+            return []
+        try:
+            from src.features.edit.core.effect_registry import get_effect_definition
+        except ImportError:
+            return []
+        specs = []
+        for inst in getattr(chain, "effects", ()) or ():
+            etype = getattr(inst, "effect_type", "")
+            iid = getattr(inst, "instance_id", "")
+            if not etype or not iid:
+                continue
+            definition = get_effect_definition(etype)
+            schema = getattr(definition, "params_schema", None) or {}
+            params = getattr(inst, "params", None) or {}
+            for key, current in params.items():
+                if not isinstance(current, (int, float)) or isinstance(current, bool):
+                    continue
+                ps = schema.get(key)
+                if ps is not None and getattr(ps, "min_value", None) is not None \
+                        and getattr(ps, "max_value", None) is not None \
+                        and ps.min_value != ps.max_value:
+                    mn, mx = float(ps.min_value), float(ps.max_value)
+                else:
+                    mn = 0.0
+                    mx = max(abs(float(current)) * 2.0, 1.0)
+                specs.append((
+                    f"fx/{iid}/{key}",
+                    f"{etype}.{key} [{iid[:8]}]", mn, mx))
+        return specs
+
+    def _fx_param_bounds(self, track_id: str, param: str) -> tuple:
+        """MX-10: fx/* 参数键的值域（与 Lane 规格同源）。"""
+        for key, _label, mn, mx in self._collect_fx_param_specs(track_id):
+            if key == param:
+                return mn, mx
+        return (0.0, 1.0)
+
     def _on_mixer_automation_add(self, track_id: str, param: str, frame: int, value: float) -> None:
-        """W20: 添加 automation 关键帧。"""
+        """W20: 添加 automation 关键帧（MX-10: fx/* 键同样走命令栈）。"""
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
         if tview is None:
             return
         try:
             from src.features.edit.core.commands import AddAutomationKeyframeCommand
             # 参数值域
-            min_v, max_v = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}.get(param, (0.0, 1.0))
+            if param.startswith("fx/"):
+                min_v, max_v = self._fx_param_bounds(track_id, param)
+            else:
+                min_v, max_v = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}.get(param, (0.0, 1.0))
             cmd = AddAutomationKeyframeCommand.create(track_id, param, frame, value,
                                                      min_val=min_v, max_val=max_v)
             tview._execute_command(cmd)
@@ -4019,8 +4131,16 @@ class EditControllerMixin:
         """Strip EQ 对话框拖动期：实时更新 AudioPlaybackManager 的 EQ 滤波器（听感）。
 
         不进命令栈，参数变化时 DSP 系数立即重算。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）走 Master 条带入口。
         """
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_strip_eq'):
+                try:
+                    mgr.set_master_strip_eq(params)
+                except Exception as e:
+                    logger.debug("mixer master strip eq preview failed: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_strip_eq'):
             try:
                 mgr.set_track_strip_eq(track_id, params)
@@ -4031,9 +4151,26 @@ class EditControllerMixin:
         """Strip EQ 松手/关闭：提交 SetTrackStripEQCommand（一次 undo）。
 
         同时更新 AudioPlaybackManager 做实时听感（与命令栈解耦）。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）提交 Master 版命令。
         """
         # 实时听感
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_strip_eq'):
+                try:
+                    mgr.set_master_strip_eq(params)
+                except Exception as e:
+                    logger.debug("mixer master strip eq apply failed: %s", e)
+            tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+            if tview is None:
+                logger.warning("No timeline_view for master strip eq commit")
+                return
+            try:
+                from src.features.edit.core.commands import SetMasterStripEQCommand
+                tview._execute_command(SetMasterStripEQCommand.create(params))
+            except Exception as e:
+                logger.warning("Failed to execute master strip eq command: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_strip_eq'):
             try:
                 mgr.set_track_strip_eq(track_id, params)
@@ -4088,7 +4225,9 @@ class EditControllerMixin:
             t.track_id: {
                 "output_bus_id": getattr(t, "output_bus_id", None),
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in (getattr(t, "sends", ()) or ())
                     if getattr(s, "enabled", True)
                 ],
@@ -4132,7 +4271,9 @@ class EditControllerMixin:
         self._routing_dialog_baseline = {
             "output_bus_id": getattr(track, "output_bus_id", None),
             "sends": [
-                (s.target_bus_id, s.level)
+                (s.target_bus_id, s.level,
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)))
                 for s in (getattr(track, "sends", ()) or ())
                 if getattr(s, "enabled", True)
             ],
@@ -4159,7 +4300,9 @@ class EditControllerMixin:
             routing[t.track_id] = {
                 "output_bus_id": getattr(t, "output_bus_id", None),
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in (getattr(t, "sends", ()) or ())
                     if getattr(s, "enabled", True)
                 ],
@@ -4169,7 +4312,9 @@ class EditControllerMixin:
         routing[track_id] = {
             "output_bus_id": output_bus_id,
             "sends": [
-                (s.target_bus_id, s.level)
+                (s.target_bus_id, s.level,
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)))
                 for s in (sends or ())
                 if getattr(s, "enabled", True)
             ],
@@ -4208,7 +4353,12 @@ class EditControllerMixin:
         mgr = self._get_mixer_audio_manager()
         if mgr is not None and hasattr(mgr, 'set_track_routing'):
             try:
-                sends_list = [(s.target_bus_id, s.level) for s in new_sends if getattr(s, "enabled", True)]
+                sends_list = [
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
+                    for s in new_sends if getattr(s, "enabled", True)
+                ]
                 mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
                 self._routing_dialog_preview_dirty = True
             except Exception as e:
@@ -4252,7 +4402,9 @@ class EditControllerMixin:
             self._routing_dialog_baseline = {
                 "output_bus_id": output_bus_id,
                 "sends": [
-                    (s.target_bus_id, s.level)
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
                     for s in new_sends if getattr(s, "enabled", True)
                 ],
             }
@@ -4289,11 +4441,16 @@ class EditControllerMixin:
                 ), 5000)
             return
 
-        # 实时听感
+        # 实时听感（MX-14: 4 元组带 tap/muted）
         mgr = self._get_mixer_audio_manager()
         if mgr is not None and hasattr(mgr, 'set_track_routing'):
             try:
-                sends_list = [(s.target_bus_id, s.level) for s in new_sends if getattr(s, "enabled", True)]
+                sends_list = [
+                    (s.target_bus_id, s.level,
+                     str(getattr(s, "tap", "post_fader") or "post_fader"),
+                     bool(getattr(s, "muted", False)))
+                    for s in new_sends if getattr(s, "enabled", True)
+                ]
                 mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
             except Exception as e:
                 logger.debug("routing apply failed: %s", e)
@@ -4327,19 +4484,26 @@ class EditControllerMixin:
             track = tview.timeline.get_track_by_id(track_id)
             old_sends = {s.target_bus_id: s for s in (track.sends or ())}
 
-            # 添加新的 + 更新已变化的
+            # 添加新的 + 更新已变化的（MX-14: tap/muted 参与 diff 与提交）
             for target, new_s in new_sends_map.items():
+                new_tap = str(getattr(new_s, "tap", "post_fader") or "post_fader")
+                new_muted = bool(getattr(new_s, "muted", False))
                 if target not in old_sends:
-                    cmd = AddSendCommand.create(track_id, target, level=float(new_s.level))
+                    cmd = AddSendCommand.create(
+                        track_id, target, level=float(new_s.level),
+                        tap=new_tap, muted=new_muted)
                     tview._execute_command(cmd)
                 else:
                     old_s = old_sends[target]
                     if (abs(old_s.level - new_s.level) > 1e-6
-                            or old_s.enabled != new_s.enabled):
+                            or old_s.enabled != new_s.enabled
+                            or str(getattr(old_s, "tap", "post_fader")) != new_tap
+                            or bool(getattr(old_s, "muted", False)) != new_muted):
                         cmd = UpdateSendCommand.create(
                             track_id, old_s.send_id,
                             level=float(new_s.level),
                             enabled=bool(new_s.enabled),
+                            tap=new_tap, muted=new_muted,
                         )
                         tview._execute_command(cmd)
         except Exception as e:
@@ -4349,8 +4513,16 @@ class EditControllerMixin:
         """W26: FX 机架拖动期：实时更新 AudioPlaybackManager 的效果器链（听感）。
 
         不进命令栈，参数变化时 DSP 立即重算。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）走 Master 条带入口。
         """
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_effect_chain'):
+                try:
+                    mgr.set_master_effect_chain(chain)
+                except Exception as e:
+                    logger.debug("mixer master effects preview failed: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_effect_chain'):
             try:
                 mgr.set_track_effect_chain(track_id, chain)
@@ -4361,9 +4533,26 @@ class EditControllerMixin:
         """W26: FX 机架松手/关闭：提交 SetTrackEffectChainCommand（一次 undo）。
 
         同时更新 AudioPlaybackManager 做实时听感（与命令栈解耦）。
+        MX-03: track_id == "-1"（MASTER_TRACK_ID）提交 Master 版命令。
         """
         # 实时听感
         mgr = self._get_mixer_audio_manager()
+        if track_id == "-1":
+            if mgr is not None and hasattr(mgr, 'set_master_effect_chain'):
+                try:
+                    mgr.set_master_effect_chain(chain)
+                except Exception as e:
+                    logger.debug("mixer master effects apply failed: %s", e)
+            tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+            if tview is None:
+                logger.warning("No timeline_view for master effects commit")
+                return
+            try:
+                from src.features.edit.core.commands import SetMasterEffectChainCommand
+                tview._execute_command(SetMasterEffectChainCommand.create(chain))
+            except Exception as e:
+                logger.warning("Failed to execute master effects command: %s", e)
+            return
         if mgr is not None and hasattr(mgr, 'set_track_effect_chain'):
             try:
                 mgr.set_track_effect_chain(track_id, chain)

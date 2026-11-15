@@ -1,5 +1,5 @@
 """
-Audio Mixer Panel - 完整复刻 Kdenlive Audio Mixer
+Topos Audio Mixer - compact track strips with a pinned master.
 
 完整的音频混音器面板，包含：
 - Master 主混音器
@@ -14,7 +14,7 @@ import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QApplication
+    QFrame, QApplication, QVBoxLayout, QToolButton, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -41,6 +41,10 @@ class AudioMixerPanel(QWidget):
     master_volume_changed = pyqtSignal(float)          # dB
     # W11: 是否存在 LUFS 模式的表（AudioMixer 据此开/关 K-weighting 计算）
     lufs_metering_changed = pyqtSignal(bool)
+    # CW-A1: 空间声像器（payload {"pan": -1..1, "panner": dict}）+ 频谱门控
+    track_panner_preview = pyqtSignal(str, object)    # 实时听感
+    track_panner_committed = pyqtSignal(str, object)  # 命令栈
+    spectrum_metering_changed = pyqtSignal(bool)
     track_mute_toggled = pyqtSignal(str, bool)
     track_solo_toggled = pyqtSignal(str, bool)
     track_volume_changed = pyqtSignal(str, float)      # dB（松手时最终提交）
@@ -84,16 +88,58 @@ class AudioMixerPanel(QWidget):
         # W15: 逐轨隐藏 + 窄/宽布局
         self._hidden_track_ids: set[str] = set()
         self._narrow_layout: bool = False
+        self._inserts_visible = True
         # AUD-37621: LUFS 后端（scipy）可用性缓存。None=未探测。热路径
         # （update_per_track_levels 每帧逐轨）不再重复 import + 探测；
         # 进程内 scipy 可用性不会变化，探测一次即可。
         self._lufs_backend_ok: Optional[bool] = None
+        # MX-01: 当前播放代数（audio_telemetry_reset 更新；低于它的
+        # 排队遥测载荷直接丢弃，旧代事件不得回亮表计/频谱）
+        self._telemetry_generation: int = 0
+        self._engine_sample_rate: float = 48000.0
 
         self._init_ui()
 
     def _init_ui(self) -> None:
         """初始化 UI"""
-        main_layout = QHBoxLayout(self)
+        panel_layout = QVBoxLayout(self)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        toolbar = QWidget(self)
+        toolbar.setObjectName("mixer_toolbar")
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(6, 3, 4, 3)
+        toolbar_layout.setSpacing(4)
+        self._track_count_label = QLabel()
+        self._track_count_label.setStyleSheet("color: #919ba9; font-size: 10px;")
+        toolbar_layout.addWidget(self._track_count_label)
+        toolbar_layout.addStretch()
+        self._inserts_btn = QToolButton()
+        self._inserts_btn.setText(I18N.tr("audio.mixer.inserts", "Inserts"))
+        self._inserts_btn.setCheckable(True)
+        self._inserts_btn.setChecked(True)
+        self._inserts_btn.setToolTip(I18N.tr("audio.mixer.inserts_visibility", "Show / hide insert racks"))
+        self._inserts_btn.toggled.connect(self.set_inserts_visible)
+        toolbar_layout.addWidget(self._inserts_btn)
+        self._compact_btn = QToolButton()
+        self._compact_btn.setText(I18N.tr("audio.mixer.compact", "Compact"))
+        self._compact_btn.setCheckable(True)
+        self._compact_btn.setToolTip(I18N.tr("audio.mixer.compact_tip", "Compact strips · keep more tracks in view"))
+        self._compact_btn.toggled.connect(self.set_narrow_layout)
+        toolbar_layout.addWidget(self._compact_btn)
+        self._options_btn = QToolButton()
+        self._options_btn.setText("⋯")
+        self._options_btn.setAccessibleName(I18N.tr("audio.mixer.options", "Mixer options"))
+        self._options_btn.setToolTip(I18N.tr("audio.mixer.options", "Mixer options"))
+        self._options_btn.clicked.connect(lambda: self._show_batch_menu(
+            self._options_btn.mapTo(self, self._options_btn.rect().bottomLeft())))
+        toolbar_layout.addWidget(self._options_btn)
+        for button in (self._inserts_btn, self._compact_btn, self._options_btn):
+            button.setFixedHeight(22)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+        panel_layout.addWidget(toolbar)
+        main_layout = QHBoxLayout()
+        panel_layout.addLayout(main_layout, 1)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -102,7 +148,9 @@ class AudioMixerPanel(QWidget):
         self._scroll_area.setContentsMargins(0, 0, 0, 0)
         self._scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll_area.setWidgetResizable(True)
-        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Reserve the same footer at every track count so fader travel never jumps.
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # 滚动区域容器
         scroll_container = QWidget()
@@ -110,9 +158,8 @@ class AudioMixerPanel(QWidget):
         self._tracks_layout = QHBoxLayout(scroll_container)
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
         self._tracks_layout.setSpacing(0)
-        # 子轨道靠右排列：strip 是 Fixed 宽度，多余空间留在左侧，
-        # 使所有轨道（含 Master）视觉上右对齐、紧凑排列。
-        self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        # Start tracks at the leading edge; Master remains pinned outside the scroll area.
+        self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self._scroll_area.setWidget(scroll_container)
         main_layout.addWidget(self._scroll_area, 1)
@@ -141,16 +188,44 @@ class AudioMixerPanel(QWidget):
         self._uniform_strip_width = self._master_mixer.maximumWidth()
         self._setup_master_connections()
         master_container.addWidget(self._master_mixer)
-        main_layout.addLayout(master_container)
+        master_column = QVBoxLayout()
+        master_column.setContentsMargins(0, 0, 0, 0)
+        master_column.setSpacing(0)
+        master_column.addLayout(master_container, 1)
+        self._master_scroll_gutter = QWidget()
+        master_column.addWidget(self._master_scroll_gutter)
+        main_layout.addLayout(master_column)
 
         self._apply_styles()
+        self._scroll_area.ensurePolished()
+        self._master_scroll_gutter.setFixedHeight(
+            self._scroll_area.horizontalScrollBar().sizeHint().height())
+        self._update_minimum_width()
 
     def _setup_master_connections(self) -> None:
-        """设置主混音器信号连接"""
+        """设置主混音器信号连接。
+
+        MX-03: Master strip 与普通轨同一信号集——EQ/FX 条带信号经 panel
+        转发（controller 按 track_id=="-1" 分流到 Master 命令），频谱/
+        LUFS 门控把 Master 纳入遍历。
+        """
         if self._master_mixer:
             self._master_mixer.mute_toggled.connect(lambda tid, muted: self.master_mute_toggled.emit(muted))
             self._master_mixer.volume_changed.connect(lambda tid, db: self.master_volume_changed.emit(db))
             self._master_mixer.show_effects.connect(lambda tid: self.show_effects_for_track.emit(tid))
+            # MX-03: Master EQ/FX 条带（与普通轨同一转发路径）
+            self._master_mixer.strip_eq_preview.connect(lambda tid, p: self.track_strip_eq_preview.emit(tid, p))
+            self._master_mixer.strip_eq_committed.connect(lambda tid, p: self.track_strip_eq_committed.emit(tid, p))
+            self._master_mixer.track_effects_preview.connect(lambda tid, c: self.track_effects_preview.emit(tid, c))
+            self._master_mixer.track_effects_committed.connect(lambda tid, c: self.track_effects_committed.emit(tid, c))
+            # MX-03: Master EQ 对话框打开 → 频谱门控包含 Master
+            self._master_mixer.spectrum_metering_changed.connect(
+                lambda on: self._recompute_spectrum_metering())
+            # MX-03: Master 表模式 → LUFS 门控包含 Master
+            master_meter = getattr(self._master_mixer, "_meter", None)
+            if master_meter is not None and hasattr(master_meter, "meter_mode_changed"):
+                master_meter.meter_mode_changed.connect(
+                    lambda _name: self._recompute_lufs_metering())
 
         # C4: panel 右键菜单提供批量操作
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -169,12 +244,20 @@ class AudioMixerPanel(QWidget):
             QWidget#mixer_tracks {{
                 background-color: {C.BG_PANEL};
             }}
-            QWidget#mixer_base {{
-                background-color: {C.BG_PANEL};
-            }}
             QWidget#mixer_alternate {{
-                background-color: {C.BG_PANEL};
+                background-color: #20242b;
             }}
+            QWidget#mixer_base {{ background-color: #1c2027; }}
+            QWidget#mixer_toolbar {{ background-color: #1d232b; border-bottom: 1px solid #303944; }}
+            QWidget#mixer_toolbar QToolButton {{ color: #aab5c2; background: #272f39;
+                border: 1px solid #37424e; border-radius: 4px; padding: 0 5px; font-size: 10px; }}
+            QWidget#mixer_toolbar QToolButton:checked {{ background: #203d45; color: #9ce3e4;
+                border-color: #3a626b; }}
+            QWidget#mixer_toolbar QToolButton:hover, QWidget#mixer_toolbar QToolButton:focus {{
+                border-color: #66848e; color: #ffffff; }}
+            QScrollBar:horizontal {{ height: 7px; background: #1a1f25; margin: 0; }}
+            QScrollBar::handle:horizontal {{ background: #4a5663; border-radius: 3px; min-width: 20px; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
         """)
 
     # ========== 公共接口 ==========
@@ -195,6 +278,7 @@ class AudioMixerPanel(QWidget):
             track_tag=track_tag or "",
             parent=self
         )
+        mixer.set_engine_sample_rate(self._engine_sample_rate)
         mixer.setContentsMargins(MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER)
         # 外边距会影响 strip 的可用内容宽度；先重算，再统一到 Master 宽度，
         # 保证子轨的推子不会被右缘裁切。
@@ -206,6 +290,7 @@ class AudioMixerPanel(QWidget):
         # 应用，窄布局流中会插入一条按宽模式固定宽度的异常宽 strip。
         if self._narrow_layout:
             self._apply_layout_mode(mixer, True)
+        mixer.set_inserts_visible(self._inserts_visible)
 
         # 交替背景色
         color_role = "base" if len(self._track_mixers) % 2 == 0 else "alternate"
@@ -220,6 +305,13 @@ class AudioMixerPanel(QWidget):
         # 添加到布局末尾（tracks 从左到右排列，新轨道在最右、靠近 Master）
         self._tracks_layout.addWidget(mixer)
         self._track_mixers[track_id] = mixer
+        # Undo can re-register a previously hidden track with the same identity.
+        # Preserve that view preference and keep the count consistent with the widgets.
+        if track_id in self._hidden_track_ids:
+            mixer.hide()
+            separator = self._track_separators.get(track_id)
+            if separator is not None:
+                separator.hide()
 
         # 设置信号连接
         self._setup_track_connections(track_id, mixer)
@@ -233,6 +325,12 @@ class AudioMixerPanel(QWidget):
             return
 
         mixer = self._track_mixers[track_id]
+        # MX-12: 先关闭该 strip 的全部效果器对话框（孤儿窗/订阅泄漏防护），
+        # 再拆除 widget 本体。
+        try:
+            mixer.close_all_dialogs()
+        except (AttributeError, RuntimeError):
+            pass
         self._tracks_layout.removeWidget(mixer)
         mixer.deleteLater()
 
@@ -249,6 +347,8 @@ class AudioMixerPanel(QWidget):
 
         # LUFS 消费状态可能随 strip 移除而关闭
         self._recompute_lufs_metering()
+        # CW-A1: 频谱门控同理——strip 移除后其 EQ 对话框不再参与聚合
+        self._recompute_spectrum_metering()
 
         # 更新背景色
         self._update_alternating_colors()
@@ -322,6 +422,9 @@ class AudioMixerPanel(QWidget):
         act_clear_solo.setEnabled(has_tracks and bool(self._solo_tracks))
         act_mute_all.setEnabled(has_tracks)
         act_unmute_all.setEnabled(has_tracks)
+        menu.addSeparator()
+        act_show_all = menu.addAction(I18N.tr("audio.mixer.show_all_tracks", "Show all tracks"))
+        act_show_all.setEnabled(bool(self._hidden_track_ids))
 
         chosen = menu.exec(self.mapToGlobal(pos))
         if chosen is act_clear_solo:
@@ -330,6 +433,8 @@ class AudioMixerPanel(QWidget):
             self.mute_all()
         elif chosen is act_unmute_all:
             self.unmute_all()
+        elif chosen is act_show_all:
+            self.show_all_tracks()
 
     def set_track_name(self, track_id: str, name: str) -> None:
         """设置轨道名称"""
@@ -419,10 +524,63 @@ class AudioMixerPanel(QWidget):
         if self._master_mixer:
             self._master_mixer.update_audio_level(levels)
 
+    def on_telemetry_reset(self, generation: int) -> None:
+        """MX-01: 播放代数复位（stop/pause/seek）——统一清表。
+
+        所有当前电平/GR/SC/频谱立即清零（两 UI 周期内可见），并记录
+        新代数：后续到达的旧代排队载荷在 update_per_track_levels 丢弃。
+        """
+        self._telemetry_generation = max(self._telemetry_generation, int(generation))
+        silent_payload = {
+            "peak": [-100.0, -100.0], "rms": [-100.0, -100.0],
+            "lufs": -70.0, "pre": -100.0,
+            "gr": {}, "sc": {}, "spectrum": None,
+            "silent": True, "generation": int(generation),
+        }
+        for track_id, mixer in self._track_mixers.items():
+            mixer.reset_meter()
+            try:
+                mixer.update_track_telemetry(dict(silent_payload))
+            except (AttributeError, RuntimeError):
+                pass
+        if self._master_mixer is not None:
+            self._master_mixer.reset_meter()
+            try:
+                self._master_mixer.update_track_telemetry(dict(silent_payload))
+            except (AttributeError, RuntimeError):
+                pass
+
+    def on_engine_sample_rate(self, sample_rate: float) -> None:
+        """MX-09: 引擎采样率下发（设备/工程切换）——推送到全部 strip。"""
+        self._engine_sample_rate = float(sample_rate)
+        for mixer in self._track_mixers.values():
+            try:
+                mixer.set_engine_sample_rate(float(sample_rate))
+            except (AttributeError, RuntimeError):
+                continue
+        if self._master_mixer is not None:
+            try:
+                self._master_mixer.set_engine_sample_rate(float(sample_rate))
+            except (AttributeError, RuntimeError):
+                pass
+
     def set_master_volume_linear(self, volume: float) -> None:
         """W12: 用线性增益(0.0-1.0)静默回填 Master 推子（不发信号）。"""
         if self._master_mixer:
             self._master_mixer.set_volume_linear(volume)
+
+    def set_master_strip_state(self, strip_eq, effect_chain) -> None:
+        """MX-03: 静默回填 Master 条带（EQ/FX 列表与打开中的对话框）。"""
+        if not self._master_mixer:
+            return
+        try:
+            self._master_mixer.set_strip_eq(strip_eq)
+        except (AttributeError, RuntimeError):
+            pass
+        try:
+            self._master_mixer.set_effect_chain(effect_chain)
+        except (AttributeError, RuntimeError):
+            pass
 
     def set_master_muted(self, muted: bool) -> None:
         """W12: 静默回填 Master 静音状态（不发信号）。"""
@@ -438,6 +596,8 @@ class AudioMixerPanel(QWidget):
                     电平表清零（衰减），实现"无信号时表归零"。
 
                     向后兼容：若值为 list [l_db, r_db]（旧格式），直接用。
+                    MX-01：载荷携带 generation 时低于当前代的事件直接丢弃
+                    （stop/pause/seek 后排队的旧代静音/读数不得回亮）。
         """
         for track_id, mixer in self._track_mixers.items():
             vals = levels.get(track_id)
@@ -445,6 +605,18 @@ class AudioMixerPanel(QWidget):
                 # 该轨无信号（静音/非 solo），清零电平表
                 mixer.reset_meter()
             else:
+                # MX-01: 旧代排队事件丢弃（含 silent payload 的迟到回放）
+                if isinstance(vals, dict):
+                    evt_gen = vals.get("generation")
+                    if evt_gen is not None and int(evt_gen) < self._telemetry_generation:
+                        continue
+                    # 审查容错：lufs 异常标量（应为 [l, r]）归一为列表，
+                    # 不让单个坏载荷中断批量清表循环
+                    if isinstance(vals.get("lufs"), float):
+                        vals = {**vals, "lufs": [vals["lufs"], vals["lufs"]]}
+                # 容错：异常载荷的 lufs 标量（应为 [l, r] 列表）不中断批量清表
+                if isinstance(vals, dict) and isinstance(vals.get("lufs"), float):
+                    vals = {**vals, "lufs": [vals["lufs"], vals["lufs"]]}
                 # W9/W11: 根据 meter_mode 选择 peak / rms / lufs
                 if isinstance(vals, dict):
                     # 获取该 strip 的电平表模式
@@ -471,6 +643,26 @@ class AudioMixerPanel(QWidget):
                 else:
                     meter_vals = vals
                 mixer.update_audio_level(list(meter_vals))
+                # CW-A1: 遥测分发给已打开对话框。任何 dict 载荷都要派发——
+                # Reverb/Delay/EQ 输出表只吃 peak，Dynamics Input 表吃 pre；
+                # 仅按 gr/sc/spectrum 存在与否派发会让这些表在无动态链的轨上
+                # 永久冻结。
+                if isinstance(vals, dict):
+                    try:
+                        mixer.update_track_telemetry(vals)
+                    except (AttributeError, RuntimeError):
+                        pass
+
+        # MX-03: Master 遥测路由（payload 键 "-1"；只派发对话框读数，
+        # 电平表真源仍是 audio_level——两者同为 post-limiter，不双轨）
+        master_vals = levels.get(MASTER_TRACK_ID)
+        if (isinstance(master_vals, dict) and self._master_mixer is not None):
+            evt_gen = master_vals.get("generation")
+            if evt_gen is None or int(evt_gen) >= self._telemetry_generation:
+                try:
+                    self._master_mixer.update_track_telemetry(master_vals)
+                except (AttributeError, RuntimeError):
+                    pass
 
     def _probe_lufs_backend(self) -> bool:
         """探测 LUFS DSP 后端（scipy）是否可用（AUD-37621）。
@@ -492,6 +684,7 @@ class AudioMixerPanel(QWidget):
         """折叠/展开混音器"""
         self._collapsed = collapse
         self._scroll_area.setVisible(not collapse)
+        self._master_scroll_gutter.setVisible(not collapse)
         if self._master_separator:
             self._master_separator.setVisible(not collapse)
 
@@ -523,6 +716,7 @@ class AudioMixerPanel(QWidget):
             mixer.setVisible(False)
         if sep is not None:
             sep.setVisible(False)
+        self._update_minimum_width()
 
     def show_track(self, track_id: str) -> None:
         """显示之前隐藏的 strip。"""
@@ -535,6 +729,7 @@ class AudioMixerPanel(QWidget):
             mixer.setVisible(True)
         if sep is not None:
             sep.setVisible(True)
+        self._update_minimum_width()
 
     def show_all_tracks(self) -> None:
         """显示所有被隐藏的 strip。"""
@@ -551,15 +746,30 @@ class AudioMixerPanel(QWidget):
     def set_narrow_layout(self, narrow: bool) -> None:
         """切换窄/宽 strip 布局（W15）。
 
-        窄布局：strip 宽度收缩到紧凑模式（~60px），适合多轨项目；
-        宽布局：完整模式（~110px），所有控件可见。
+        窄布局：70px，隐藏轨名/Pan，显示两行 inserts；
+        标准布局：112px，显示完整控制区与三行 inserts。
         """
         self._narrow_layout = narrow
+        self._compact_btn.blockSignals(True)
+        self._compact_btn.setChecked(narrow)
+        self._compact_btn.blockSignals(False)
         # 遍历所有 strip 应用窄/宽
         for mixer in self._track_mixers.values():
             self._apply_layout_mode(mixer, narrow)
         if self._master_mixer is not None:
             self._apply_layout_mode(self._master_mixer, narrow)
+        self._update_minimum_width()
+
+    def set_inserts_visible(self, visible: bool) -> None:
+        """Change rack visibility without bypassing or changing any effect."""
+        self._inserts_visible = visible
+        self._inserts_btn.blockSignals(True)
+        self._inserts_btn.setChecked(visible)
+        self._inserts_btn.blockSignals(False)
+        for mixer in self._track_mixers.values():
+            mixer.set_inserts_visible(visible)
+        if self._master_mixer is not None:
+            self._master_mixer.set_inserts_visible(visible)
 
     def _apply_layout_mode(self, mixer: TrackMixerWidget, narrow: bool) -> None:
         """对单个 strip 应用窄/宽布局。"""
@@ -660,6 +870,9 @@ class AudioMixerPanel(QWidget):
             # W8: Strip EQ 回填（若 timeline 提供 strip_eq 字段）
             if "strip_eq" in t:
                 mixer.set_strip_eq(t.get("strip_eq"))
+            # CW-A1: 空间声像器回填（pan + panner dict）
+            if "panner" in t:
+                mixer.set_pan_and_panner(new_pan, t.get("panner") or {})
             # W26: FX 机架效果器链回填（EQ/Dynamics/FX 列表效果器都存这里）
             if "effect_chain" in t:
                 mixer.set_effect_chain(t.get("effect_chain"))
@@ -711,6 +924,12 @@ class AudioMixerPanel(QWidget):
         mixer.show_automation.connect(lambda tid: self.track_show_automation.emit(tid))
         # AM-08 阶段 4.2: Routing 请求转发（panel 打开 RoutingDialog）
         mixer.show_routing.connect(lambda tid: self.track_show_routing.emit(tid))
+        # CW-A1: 空间声像器信号转发
+        mixer.panner_preview.connect(lambda tid, p: self.track_panner_preview.emit(tid, p))
+        mixer.panner_committed.connect(lambda tid, p: self.track_panner_committed.emit(tid, p))
+        # CW-A1: 频谱仪门控（任一 EQ 对话框打开 → 引擎开 FFT）
+        mixer.spectrum_metering_changed.connect(
+            lambda on: self._recompute_spectrum_metering())
         # W15: 隐藏 strip 请求
         mixer.hide_requested.connect(self.hide_track)
         # W11: 表模式变化 → 汇总 LUFS 消费状态（AudioMixer 按需计算）
@@ -726,7 +945,10 @@ class AudioMixerPanel(QWidget):
         有则开启。状态未变化时不重复 emit。
         """
         active = False
-        for mixer in self._track_mixers.values():
+        mixers = list(self._track_mixers.values())
+        if self._master_mixer is not None:
+            mixers.append(self._master_mixer)  # MX-03: Master 表纳入汇总
+        for mixer in mixers:
             meter = getattr(mixer, "_meter", None)
             mode = getattr(meter, "meter_mode", None)
             if mode is not None and getattr(mode, "name", "") == "LUFS":
@@ -739,6 +961,41 @@ class AudioMixerPanel(QWidget):
     def is_lufs_metering_active(self) -> bool:
         """当前是否有 strip 处于 LUFS 表模式（供初始化时同步开关）。"""
         return bool(getattr(self, "_lufs_metering_active", False))
+
+    def _recompute_spectrum_metering(self) -> None:
+        """CW-A1: 汇总所有 strip 的 EQ 对话框打开状态，通知频谱计算开关。
+
+        无任何 EQ 对话框时关闭（FFT 占播放线程表计点开销），
+        有则开启。状态未变化时不重复 emit。
+        """
+        active = False
+        mixers = list(self._track_mixers.values())
+        if self._master_mixer is not None:
+            mixers.append(self._master_mixer)  # MX-03: Master EQ 对话框纳入汇总
+        for mixer in mixers:
+            try:
+                has_dlg = bool(mixer._iter_eq_dialogs())
+            except (AttributeError, RuntimeError):
+                has_dlg = False
+            if has_dlg:
+                active = True
+                break
+        if active != getattr(self, "_spectrum_metering_active", False):
+            self._spectrum_metering_active = active
+            self.spectrum_metering_changed.emit(active)
+
+    def is_spectrum_metering_active(self) -> bool:
+        """当前是否有 EQ 对话框打开（供初始化时同步开关）。"""
+        return bool(getattr(self, "_spectrum_metering_active", False))
+
+    def set_sidechain_sources_all(self, sources: list) -> None:
+        """CW-A1: 把侧链源列表 [(track_id, name), ...] 下发到所有 strip 的
+        动态对话框（压缩器外部检源选择用）。轨列表变化时由宿主调用。"""
+        for mixer in self._track_mixers.values():
+            try:
+                mixer.set_sidechain_sources(sources)
+            except (AttributeError, RuntimeError):
+                continue
 
     def _on_solo_toggled(self, track_id: str, solo: bool) -> None:
         """处理独奏切换"""
@@ -772,14 +1029,13 @@ class AudioMixerPanel(QWidget):
 
     def _update_minimum_width(self) -> None:
         """更新最小宽度"""
-        if self._track_mixers:
-            first_mixer = next(iter(self._track_mixers.values()))
-            mixer_width = first_mixer.minimumWidth() + 1
-            visible_count = min(2, len(self._track_mixers))
-            recommended_width = mixer_width * visible_count + 3
-
-            if not self._collapsed:
-                self._scroll_area.setMinimumWidth(recommended_width)
+        visible = [mixer for tid, mixer in self._track_mixers.items()
+                   if tid not in self._hidden_track_ids]
+        count = len(visible)
+        self._track_count_label.setText(str(count))
+        self._track_count_label.setToolTip(I18N.tr("audio.mixer.visible_tracks", "Visible audio tracks"))
+        # One scrollable strip is enough; Master always stays pinned outside.
+        self._scroll_area.setMinimumWidth(visible[0].minimumWidth() + 2 if visible else 30)
 
     def sizeHint(self) -> QSize:
         if self._track_mixers:

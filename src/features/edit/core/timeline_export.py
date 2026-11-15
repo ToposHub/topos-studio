@@ -64,6 +64,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.proxy_policy import export_source_path
+from src.features.edit.core.audio_playback import unpack_send
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
@@ -502,6 +503,16 @@ class TimelineExportConfig:
     audio_channel_layout: str = ""
     # v1.6 M-B8：stems 追加音轨声明（空 = 单音轨行为逐字节不变）。
     # 仅 topos MOV 容器生效；编码器不支持时整体降级单轨并记录警告。
+    # R04：导出尾音模式——False（默认）= 严格选区（输出长度 = 选区帧数，
+    # 选区外 FX 尾音截断，与历史行为逐字节一致）；True = 包含效果尾音
+    # （输出按 Bus/Master 链尾音预算延长，音频长于视频末帧；轨级尾音
+    # 始终在选区内 drain，不受本开关影响）。
+    include_fx_tail: bool = False
+    # H01：算法版本降级显式授权。工程含 future（> 本地 algorithm_version）
+    # 或 DSP 后端缺失实例时，preflight 产出结构化阻断；调用方确认降级
+    # 策略（按当前算法渲染/无声跳过）后置 True 才放行。默认 False——
+    # 只打日志不等于用户已选择丢弃或改声。
+    allow_algorithm_degraded: bool = False
     audio_stems: Tuple[AudioStemExportTrack, ...] = ()
     output_path: str = ""
     selected_clip_ids: Optional[List[str]] = None
@@ -783,11 +794,58 @@ def preflight_audio_export(
 
     当 scipy 缺失且本次导出依赖 EQ/LUFS 时，返回 ok=False 并给出结构化阻断原因，
     调用方应据此阻止导出或提示用户修复，而不是静默产出未处理文件。
+
+    H01：同时检查效果链逐实例能力（future 算法版本 / 缺 DSP 后端 /
+    未知类型）。``TimelineExportConfig.allow_algorithm_degraded=False``
+    （默认）时这类实例产出结构化阻断项（``effect_algorithm_degraded``），
+    调用方显式确认降级策略后置 True 才降级为非阻断提示。
     """
     from src.features.edit.core.audio_capabilities import get_audio_capabilities
 
     blocking: List[str] = []
     degraded: List[str] = []
+    blockers: List[Any] = []
+
+    # H01：FX 链逐实例能力（future 版本 / 后端缺失 / 未知类型）。
+    # 预览与导出共用 collect_chain_diagnostics 同一判断。Bus 与普通轨
+    # 同在 audio_tracks（is_bus 区分），外加 master 链。
+    if sequence is not None and config.include_audio:
+        try:
+            from src.features.edit.core.fx_versioning import (
+                collect_chain_diagnostics,
+            )
+            _chains: List[Any] = []
+            for _t in list(getattr(sequence, "audio_tracks", ()) or ()):
+                if getattr(_t, "effect_chain", None) is not None:
+                    _chains.append(_t.effect_chain)
+            if getattr(sequence, "master_effect_chain", None) is not None:
+                _chains.append(sequence.master_effect_chain)
+            _bad = [d for d in (
+                diag for c in _chains for diag in collect_chain_diagnostics(c)
+            ) if d["status"] != "supported"]
+            if _bad:
+                _msg = (
+                    "效果链含 %d 个非完全支持实例（%s）。未获显式降级授权"
+                    "（allow_algorithm_degraded=False）前不导出：future 版本"
+                    "会按当前算法渲染（声音可能与制作时不同），缺后端实例"
+                    "会被跳过。" % (
+                        len(_bad),
+                        ", ".join(f"{d['effect_type']}[{d['compat_bucket']}]"
+                                  for d in _bad[:6]))
+                )
+                for d in _bad:
+                    blockers.append(ExportEffectBlocker(
+                        effect_type=d["effect_type"],
+                        code="effect_algorithm_degraded",
+                        message=f"{d['effect_type']}({d['instance_id'][:8]}): "
+                                f"{d['status']}: {d['reason']}",
+                    ))
+                if config.allow_algorithm_degraded:
+                    degraded.append(_msg)
+                else:
+                    blocking.append(_msg)
+        except Exception:  # pragma: no cover - 诊断不阻断导出
+            pass
 
     # T-P0-31：能力探测惰性化——仅当本次导出真的声明依赖 scipy DSP
     # （loudness_target 或启用 EQ）时才探测。不依赖 EQ/LUFS 的导出此前
@@ -795,7 +853,13 @@ def preflight_audio_export(
     # FPS 被固定成本淹没）。RMA-01 语义不变：loudness_target 即使
     # include_audio=False 也依旧阻断（用户显式要求不得静默丢弃）。
     if not config.requires_scipy_backend(sequence):
-        return ExportPreflightResult(ok=True)
+        if blocking:
+            return ExportPreflightResult(ok=False, blocking=tuple(blocking),
+                                         degraded=tuple(degraded),
+                                         blockers=tuple(blockers))
+        # H01：已授权降级 / 无阻断——degraded 提示与结构化项仍须带回。
+        return ExportPreflightResult(ok=True, degraded=tuple(degraded),
+                                     blockers=tuple(blockers))
     caps = get_audio_capabilities(check_output_device=False)
     if config.requires_scipy_backend(sequence) and not caps.eq_lufs_available:
         needs = []
@@ -815,7 +879,9 @@ def preflight_audio_export(
             "或在导出设置中关闭 EQ/响度归一化。"
             % "；".join(needs)
         )
-    return ExportPreflightResult(ok=not blocking, blocking=tuple(blocking), degraded=tuple(degraded))
+    return ExportPreflightResult(ok=not blocking, blocking=tuple(blocking),
+                                 degraded=tuple(degraded),
+                                 blockers=tuple(blockers))
 
 
 def preflight_video_effects_export(
@@ -4104,6 +4170,129 @@ class TimelineExporter:
         renderer = AudioGraphRenderer(float(sample_rate))
         renderer.configure_from_sequence(audio_sequence)
 
+        # H09：Freeze 捕获资产装载（项目注册表 → 各节点 DSP 链；缺资产
+        # 逐条诊断，重放退化为当前历史——不静默伪造）
+        try:
+            from src.features.edit.core.freeze_capture_store import (
+                apply_freeze_registry,
+                freeze_registry_from_project,
+            )
+            _freeze_reg = freeze_registry_from_project(self._project)
+            if _freeze_reg:
+                for _t in audio_sequence.audio_tracks:
+                    _tn = renderer.get_node(_t.track_id)
+                    if _tn is not None and _tn.effect_chain is not None:
+                        apply_freeze_registry(_tn.effect_chain,
+                                              getattr(_t, "effect_chain", None),
+                                              _freeze_reg)
+                if renderer._master_chain is not None:
+                    apply_freeze_registry(
+                        renderer._master_chain,
+                        getattr(audio_sequence, "master_effect_chain", None),
+                        _freeze_reg)
+        except Exception:  # pragma: no cover — 资产装载不阻断导出
+            logger.debug("freeze capture registry apply failed",
+                         exc_info=True)
+
+
+        # R04/H03：含尾导出模式——输出缓冲按**全路径**尾音预算延长。
+        # H03 修正：预算 = 各轨"轨链尾 + 沿 output_bus 路径的 Bus 链尾之和
+        # + Master 链尾"的最大值（汇合串联累计，不再对 Bus/Master 简单取
+        # max——旧预算漏掉轨级 Delay 尾音：200ms Track Delay 在 include_
+        # fx_tail 模式只输出 160ms 且全零）。轨 drain 同步延长到扩展区
+        # （对已结束 clip 的轨链持续喂零）。严格模式（默认）不加长。
+        # H03：全路径尾音预算（轨链 + 沿途 Bus 链 + Master 链，串联累计）。
+        # 含尾导出延长与非零选区预卷共用。
+        _master_tail = renderer.master_tail_estimate_samples()
+        _bus_tail_by_id: dict = {}
+        for _n in renderer._nodes.values():
+            if getattr(_n, "is_bus", False) and _n.effect_chain is not None:
+                _bus_tail_by_id[_n.track_id] = (
+                    _n.effect_chain.tail_estimate_samples())
+
+        def _downstream_bus_tail(bus_id):
+            seen = set()
+            total = 0
+            while bus_id is not None and bus_id not in seen:
+                seen.add(bus_id)
+                total += _bus_tail_by_id.get(bus_id, 0)
+                node = renderer.get_node(bus_id)
+                bus_id = node.output_bus_id if node else None
+            return total
+
+        _full_path_tail_samples = _master_tail
+        for _n in renderer._nodes.values():
+            if getattr(_n, "is_bus", False):
+                _full_path_tail_samples = max(
+                    _full_path_tail_samples,
+                    _bus_tail_by_id.get(_n.track_id, 0)
+                    + _downstream_bus_tail(
+                        renderer.get_node(_n.track_id).output_bus_id)
+                    + _master_tail)
+        for _t in audio_sequence.audio_tracks:
+            if getattr(_t, "is_bus", False):
+                continue
+            _tn = renderer.get_node(_t.track_id)
+            if _tn is None:
+                continue
+            _track_tail = (_tn.effect_chain.tail_estimate_samples()
+                           if _tn.effect_chain is not None else 0)
+            _full_path_tail_samples = max(
+                _full_path_tail_samples,
+                _track_tail + _downstream_bus_tail(_tn.output_bus_id)
+                + _master_tail)
+
+        render_tail_frames = 0
+        if getattr(config, "include_fx_tail", False):
+            _tail_samples = _full_path_tail_samples
+            if _tail_samples > 0 and samples_per_frame > 0:
+                render_tail_frames = int(math.ceil(
+                    _tail_samples / float(samples_per_frame)))
+                if render_tail_frames > 0:
+                    total_samples = frames_to_samples(
+                        end_frame + render_tail_frames - start_frame,
+                        fps_rational, sample_rate)
+                    frame_sample_bounds.extend(
+                        frames_to_samples(f, fps_rational, sample_rate)
+                        for f in range(frame_count + 1,
+                                       frame_count + render_tail_frames + 1))
+                    logger.info(
+                        "audio export: include_fx_tail extends output by %d "
+                        "frames (%d samples) for full-path FX tails",
+                        render_tail_frames, total_samples - (
+                            frame_sample_bounds[frame_count]))
+        # H02：非零 start_frame 的确定性预卷。旧实现从选区起点冷启动，
+        # 区间前的 Delay/Reverb/包络状态全零——"从头渲染再裁 f4..10 峰
+        # 0.344，直接导出 f4..10 全零"（复审 §5 H02）。按全图 FX 尾音预算
+        # （轨/Bus/Master 链 tail_estimate 最大值）向前预渲染 pre_roll_frames
+        # 帧：解码/轨链/检源照常推进（feed 坐标），输出前 preroll_samples
+        # 在 Master 阶段后裁掉。随机/反馈类节点按同 seed 重放一致。
+        pre_roll_frames = 0
+        preroll_samples = 0
+        if start_frame > 0 and samples_per_frame > 0:
+            _pre_tail_samples = _full_path_tail_samples
+            if _pre_tail_samples > 0:
+                pre_roll_frames = min(
+                    int(start_frame),
+                    int(math.ceil(_pre_tail_samples / float(samples_per_frame))))
+                if pre_roll_frames > 0:
+                    preroll_samples = frames_to_samples(
+                        pre_roll_frames, fps_rational, sample_rate)
+                    logger.info(
+                        "audio export: non-zero selection pre-rolls %d frames "
+                        "(%d samples) to rebuild pre-selection FX state",
+                        pre_roll_frames, preroll_samples)
+        feed_start = start_frame - pre_roll_frames
+        if pre_roll_frames > 0:
+            # bounds 扩为 feed 坐标：[0, preroll] 为预卷帧，其后 = 原选区
+            # 边界整体平移 preroll_samples。
+            frame_sample_bounds = (
+                [frames_to_samples(f, fps_rational, sample_rate)
+                 for f in range(pre_roll_frames + 1)]
+                + [b + preroll_samples for b in frame_sample_bounds])
+        feed_total_samples = total_samples + preroll_samples
+
+
         # 收集可见的音频轨道（含 Bus 轨——Bus 无 clips 但需参与 bus stage）
         has_solo = any(t.is_solo for t in audio_sequence.audio_tracks)
         # RMA-04: 计算 solo 可听闭包（替代 is_track_renderable 的旧 solo 分支）。
@@ -4129,20 +4318,85 @@ class TimelineExporter:
             logger.info("No renderable audio tracks, skipping audio export")
             return
 
+        # MX-08: 外部侧链——检源集合与轨处理顺序（检源先于被控轨，与实时
+        # _sidechain_track_order 同语义）。环依赖按原序放置（tap 不命中 →
+        # 压缩器回退内部检源）并告警一次。
+        # A source used only by the Master chain still needs its per-frame tap
+        # retained; otherwise the final Master stage silently self-detects.
+        export_sc_source_ids: set = renderer.master_sidechain_sources()
+        _sc_deps: Dict[str, set] = {}
+        for _t in list(audio_tracks) + list(bus_tracks):
+            _n = renderer.get_node(_t.track_id)
+            _srcs = (_n.effect_chain.sidechain_sources()
+                     if (_n is not None and _n.effect_chain is not None) else set())
+            export_sc_source_ids |= _srcs
+            if _t in audio_tracks:
+                _sc_deps[_t.track_id] = {s for s in _srcs if s != _t.track_id}
+        if _sc_deps and any(_sc_deps.values()):
+            _placed: set = set()
+            _ordered: List[Any] = []
+            _remaining = list(audio_tracks)
+            while _remaining:
+                _progressed = False
+                for _t in list(_remaining):
+                    if _sc_deps.get(_t.track_id, set()) <= _placed:
+                        _ordered.append(_t)
+                        _placed.add(_t.track_id)
+                        _remaining.remove(_t)
+                        _progressed = True
+                if not _progressed:
+                    _t = _remaining.pop(0)
+                    logger.warning(
+                        "audio export sidechain dependency cycle at track %s; "
+                        "falling back to internal detection", _t.track_id,
+                    )
+                    _ordered.append(_t)
+                    _placed.add(_t.track_id)
+            audio_tracks = _ordered
+
         if only_track_ids is not None:
             logger.info(
                 "Rendering audio stem: %d tracks (%d total), %d samples",
                 len(audio_tracks), len(only_track_ids), total_samples,
             )
 
+        # R01/R02: 导出 preflight——预览与导出共用同一能力判定；未知/
+        # 降级实例汇总告警一次（不静默吞掉，渲染照常跳过 unsupported）。
+        try:
+            from src.features.edit.core.fx_versioning import collect_chain_diagnostics
+            _fx_diag = []
+            for _t in list(audio_tracks) + list(bus_tracks):
+                _chain = getattr(_t, "effect_chain", None)
+                if _chain is not None:
+                    _fx_diag.extend(collect_chain_diagnostics(_chain))
+            if audio_sequence.master_effect_chain is not None:
+                _fx_diag.extend(collect_chain_diagnostics(
+                    audio_sequence.master_effect_chain))
+            _bad = [d for d in _fx_diag if d["status"] != "supported"]
+            if _bad:
+                logger.warning(
+                    "audio export preflight: %d effect instance(s) not fully "
+                    "supported: %s", len(_bad),
+                    ", ".join(f"{d['effect_type']}({d['instance_id'][:8]})"
+                              f"[{d['status']}]" for d in _bad))
+        except Exception as exc:  # pragma: no cover - 诊断不阻断导出
+            logger.debug("audio export preflight diagnostics failed: %r", exc)
+
         logger.info(
             f"Rendering audio: {len(audio_tracks)} tracks + {len(bus_tracks)} buses, "
             f"{total_samples} samples, {sample_rate}Hz"
         )
 
-        # 混音输出缓冲区（master）+ bus 输入缓冲
-        output = np.zeros((channels, total_samples), dtype=np.float32)
+        # 混音输出缓冲区（master）+ bus 输入缓冲（feed 长度 = 选区 + 预卷）
+        output = np.zeros((channels, feed_total_samples), dtype=np.float32)
         bus_inputs: dict = {}
+        # MX-08/R02: 跨轨共享的侧链检源缓冲——每源**单份**全长缓冲，检源轨
+        # flush 时按样本区间直写（取代旧的"逐帧 dict 缓存 + 结束前全长拼接"
+        # 双份拷贝）。轨按 SC 依赖序处理，被控轨在帧 f 读到先处理检源轨的
+        # f 帧输出切片；sc_written_until 记录各源已写到的样本位置——未覆盖
+        # 当前帧的源不进 taps（压缩器回退内部检源，与旧缺键语义一致）。
+        sc_tap_buffers: dict = {}
+        sc_written_until: dict = {}
 
         # 为每个 clip 打开 AudioDecoder 并解码
         decoders: Dict[str, AudioDecoder] = {}
@@ -4153,13 +4407,159 @@ class TimelineExporter:
                 clip_fx_cache: dict = {}
                 # D04：动画 FX 的逐帧参数采样器缓存（None=静态，无逐帧更新）
                 _clip_fx_cache_fx: dict = {}
+                # MX-04: 轨帧求和缓存——clip-major 解码后把 clip 阶段输出按帧
+                # 汇入 pending_frames，轨阶段（音量/pan/panner/EQ/FX）在 flush
+                # 时对求和后的输入**每帧只运行一次**（与实时 mix_samples 同构）。
+                # flush 按帧升序出队（内存 = 尚未 flush 的帧跨度，通常 = 最长
+                # 单 clip；见下方 suffix-min 提前 flush）。
+                pending_frames: dict = {}
+                # MX-07: 导出尾音 drain（选区内；不扩展选区长度）
+                track_tail_left = 0
+                # RMA-08: 轨级 pan 法则按轨内首个 clip 的源声道数选
+                # （同布局轨——绝大多数场景——与实时逐 clip 法则一致；
+                # 混合布局轨为显式近似，MX-15 声道矩阵统一后消除）
+                track_first_src_ch: Optional[int] = None
 
-                for clip in track.clips:
+                # MX-08: 本轨作为侧链检源时按帧缓存输出（供后续被控轨消费；
+                # dict 跨轨共享——见轨循环前的定义）
+                _track_node = renderer.get_node(track.track_id)
+                _track_tail_samples = (
+                    _track_node.effect_chain.tail_estimate_samples()
+                    if (_track_node is not None
+                        and _track_node.effect_chain is not None) else 0)
+                _track_state = {"tail_left": 0}
+                # R02: 单调游标——本轨已通过 _render_and_route 推进到的下一帧。
+                # early flush 与 final drain 共用；drain 从 cursor 起步，禁止
+                # 把已处理旧帧再次喂入有状态节点（时序与写入位置分离缺陷）。
+                _track_state["next_frame"] = feed_start
+                _track_state["last_rendered"] = None                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
+                # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
+                _clip_starts = [c.timeline_start for c in track.clips]
+                _suffix_min_start = [0] * (len(_clip_starts) + 1)
+                _suffix_min_start[len(_clip_starts)] = end_frame
+                for _i in range(len(_clip_starts) - 1, -1, -1):
+                    _suffix_min_start[_i] = min(
+                        _clip_starts[_i], _suffix_min_start[_i + 1])
+
+                def _advance_through(limit_frame: int) -> None:
+                    """R02: 单调游标连续推进到 limit_frame（不含）。
+
+                    帧升序逐帧处理：pending 帧出队渲染（刷新尾音预算）；
+                    间隙帧按尾音预算喂零推进；无内容且无尾音则跳过（游标
+                    照常前进）。early flush 与 final drain 共用本函数——
+                    存储顺序无关地覆盖同一组帧，时序与写入位置不再分离。
+                    """
+                    fidx = _track_state["next_frame"]
+                    while fidx < limit_frame:
+                        rel = fidx - feed_start
+                        if 0 <= rel and rel + 1 < len(frame_sample_bounds):
+                            block_len = (frame_sample_bounds[rel + 1]
+                                         - frame_sample_bounds[rel])
+                            if block_len > 0:
+                                if fidx in pending_frames:
+                                    _render_and_route(
+                                        fidx, pending_frames.pop(fidx))
+                                elif _track_state["tail_left"] > 0:
+                                    _track_state["tail_left"] = max(
+                                        0, _track_state["tail_left"] - block_len)
+                                    _render_and_route(
+                                        fidx,
+                                        np.zeros((channels, block_len),
+                                                 dtype=np.float32))
+                                # else：间隙且无尾音 → 跳过（游标前进）
+                        _track_state["next_frame"] = fidx + 1
+                        fidx += 1
+
+                def _render_and_route(fidx: int, summed: np.ndarray) -> None:
+                    """MX-04/MX-08/R02: 对求和后的轨帧一次应用轨阶段并路由。"""
+                    rel = fidx - feed_start
+                    if rel < 0 or rel + 1 >= len(frame_sample_bounds):
+                        return
+                    # R02: 单调推进守卫——同帧重复或回退调用直接拒绝（状态时间
+                    # 与写入位置分离会让有状态节点把旧帧再吃一遍）。
+                    if _track_state["last_rendered"] is not None and \
+                            fidx <= _track_state["last_rendered"]:
+                        logger.warning(
+                            "audio export: non-monotonic frame %d after %d on "
+                            "track %s skipped (stateful DSP protection)",
+                            fidx, _track_state["last_rendered"], track.track_id)
+                        return
+                    out_start = frame_sample_bounds[rel]
+                    out_end = frame_sample_bounds[rel + 1]
+                    # R02: 侧链 taps = 已完整写到本帧末的检源缓冲切片；
+                    # 未覆盖的源不提供（压缩器回退内部检源，与旧缺键语义一致）。
+                    taps = {
+                        _src: _buf[:, out_start:out_end]
+                        for _src, _buf in sc_tap_buffers.items()
+                        if sc_written_until.get(_src, 0) >= out_end
+                    } or None
+                    processed = renderer.render_track_block(
+                        track.track_id, summed, fidx,
+                        fps=fps,
+                        source_channels=int(track_first_src_ch or 2),
+                        sidechain_taps=taps,
+                    )
+                    _track_state["last_rendered"] = fidx
+                    _track_state["next_frame"] = fidx + 1
+                    if processed is None:
+                        return  # automation mute
+                    node = renderer.get_node(track.track_id)
+                    target = node.output_bus_id if node else None
+                    actual = min(processed.shape[-1], out_end - out_start)
+                    if target is not None:
+                        if target not in bus_inputs:
+                            bus_inputs[target] = np.zeros(
+                                (channels, feed_total_samples), dtype=np.float32)
+                        bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
+                    else:
+                        output[:, out_start:out_end] += processed[:channels, :actual]
+                    # sends（并行；MX-14: pre_fader tap 取 clip 求和块 summed，
+                    # post_fader 取处理后输出；独立 mute 只断开 send）
+                    if node is not None:
+                        for send_entry in node.sends:
+                            send_bus_id, send_level, send_tap, send_muted = (
+                                unpack_send(send_entry))
+                            if send_level <= 0.0 or send_muted:
+                                continue
+                            if send_bus_id not in bus_inputs:
+                                bus_inputs[send_bus_id] = np.zeros(
+                                    (channels, feed_total_samples), dtype=np.float32)
+                            if send_tap == "pre_fader":
+                                pre_actual = min(summed.shape[-1],
+                                                 out_end - out_start)
+                                bus_inputs[send_bus_id][
+                                    :, out_start:out_start + pre_actual] += \
+                                    summed[:channels, :pre_actual] * send_level
+                            else:
+                                bus_inputs[send_bus_id][:, out_start:out_end] += \
+                                    processed[:channels, :actual] * send_level
+                    # R02: 检源轨直写单份全长缓冲（不足块宽处保持零填充语义）
+                    if track.track_id in export_sc_source_ids:
+                        buf = sc_tap_buffers.get(track.track_id)
+                        if buf is None:
+                            buf = np.zeros((channels, feed_total_samples),
+                                           dtype=np.float32)
+                            sc_tap_buffers[track.track_id] = buf
+                        buf[:, out_start:out_start + actual] += \
+                            processed[:channels, :actual]
+                        sc_written_until[track.track_id] = out_end
+                    # MX-07: 内容帧刷新尾音预算
+                    _track_state["tail_left"] = _track_tail_samples
+
+                for _clip_i, clip in enumerate(track.clips):
                     clip_start = clip.timeline_start
                     clip_end = clip.timeline_start + clip.timeline_duration
 
-                    overlap_start = max(clip_start, start_frame)
+                    overlap_start = max(clip_start, feed_start)
                     overlap_end = min(clip_end, end_frame)
+
+                    # MX-04/R02: 提前 flush——早于 min(本 clip 起点, 未处理
+                    # clip 最早起点) 的帧已不可能再被补充，按帧升序出队（限制
+                    # pending 内存；轨 DSP 状态按帧序推进）。R02 起与 drain 共
+                    # 用连续游标推进：间隙按尾音预算喂零，clip 存储顺序不再
+                    # 改变帧覆盖集合。
+                    _flush_bound = min(clip_start, _suffix_min_start[_clip_i + 1])
+                    _advance_through(_flush_bound)
 
                     if overlap_start >= overlap_end:
                         continue
@@ -4332,7 +4732,7 @@ class TimelineExporter:
                                 return None
                             # D06：逐帧块长用精确相邻样本边界差（非整数 fps 时
                             # floor(sr/fps) 固定块长会在每帧边界留下零样本洞）。
-                            rel = frame_idx - start_frame
+                            rel = frame_idx - feed_start
                             out_start = frame_sample_bounds[rel]
                             out_end = frame_sample_bounds[rel + 1]
                             block_len = out_end - out_start
@@ -4395,6 +4795,7 @@ class TimelineExporter:
                                         clip.clip_id, frame_idx, exc_info=True,
                                     )
 
+
                             # AM-08 阶段 4.1：声道映射用标准 downmix（替代 naive 截断）。
                             # 此前 samples[:channels] 直接丢弃 Center/LFE/Surround，
                             # 现用 ChannelLayout.downmix 保留全部声道贡献（ITUR BS.775）。
@@ -4447,7 +4848,9 @@ class TimelineExporter:
                             if abs(_clip_gain_db) > 1e-9:
                                 samples = samples * (10.0 ** (_clip_gain_db / 20.0))
 
-                            # AM-03/AM-06: 用共享 renderer 处理节点（clip 淡化/automation/clip-FX/volume/pan/EQ/FX）
+                            # MX-04: clip 阶段在 clip 循环内完成（fade/crossfade/
+                            # clip-FX 是 clip 级操作）；轨阶段（音量/pan/panner/
+                            # EQ/FX）延迟到 flush 对求和帧一次执行。
                             clip_fade = {
                                 "timeline_start": clip.timeline_start,
                                 "timeline_duration": clip.timeline_duration,
@@ -4468,9 +4871,8 @@ class TimelineExporter:
                                 "fade_curve_out": getattr(
                                     clip, "effective_fade_curve_out", None),
                             }
-                            # AT: 若该 clip 参与音频转场，附加 crossfade 参数供 renderer
-                            # 在 clip fade 之后叠加。一个 clip 理论上可能在多个转场中
-                            # 出现（一左一右），这里收集所有命中实例。
+                            # AT: 若该 clip 参与音频转场，附加 crossfade 参数。
+                            # 一个 clip 理论上可能在多个转场中出现（一左一右）。
                             if getattr(track, "transitions", None):
                                 from src.features.edit.core.audio_transition_catalog import (
                                     audio_curve_for,
@@ -4495,38 +4897,117 @@ class TimelineExporter:
                                     })
                                 if xfades:
                                     clip_fade["crossfade"] = xfades
-                            processed = renderer.render_track_block(
-                                track.track_id, samples, frame_idx,
-                                clip_fx_chain=clip_chain,
-                                clip_fade=clip_fade,
-                                fps=fps,
-                            )
-                            if processed is None:
-                                continue  # automation mute
 
-                            # 路由到该帧对应的 output 位置（bus_inputs 或 master）。
-                            # 直接累积到全局缓冲的 [out_start:out_end] 切片，避免每帧
-                            # 分配全长度缓冲（O(total_samples) per frame 的低效）。
-                            node = renderer.get_node(track.track_id)
-                            target = node.output_bus_id if node else None
-                            if target is not None:
-                                if target not in bus_inputs:
-                                    bus_inputs[target] = np.zeros((channels, total_samples), dtype=np.float32)
-                                bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
-                            else:
-                                output[:, out_start:out_end] += processed[:channels, :actual]
-                            # sends（并行）
-                            if node is not None:
-                                for send_bus_id, send_level in node.sends:
-                                    if send_level <= 0.0:
+                            from src.features.edit.core.audio_dsp import (
+                                apply_clip_fade as _apply_clip_fade,
+                                apply_crossfade_block as _apply_xfade_block,
+                            )
+                            samples = _apply_clip_fade(
+                                samples,
+                                clip_timeline_start=int(clip_fade.get("timeline_start", 0)),
+                                clip_timeline_duration=int(clip_fade.get("timeline_duration", 0)),
+                                current_frame=frame_idx,
+                                fade_in_frames=int(clip_fade.get("fade_in_frames", 0)),
+                                fade_out_frames=int(clip_fade.get("fade_out_frames", 0)),
+                                fps=float(clip_fade.get("fps", 24.0)),
+                                sample_rate=float(sample_rate),
+                                fade_in_samples_override=clip_fade.get("fade_in_samples"),
+                                fade_out_samples_override=clip_fade.get("fade_out_samples"),
+                                audio_sample_offset=int(
+                                    clip_fade.get("audio_sample_offset", 0) or 0),
+                                fade_curve=clip_fade.get("fade_curve"),
+                                fade_curve_in=clip_fade.get("fade_curve_in"),
+                                fade_curve_out=clip_fade.get("fade_curve_out"),
+                            )
+                            for xf in clip_fade.get("crossfade", ()) or ():
+                                samples = _apply_xfade_block(
+                                    samples,
+                                    transition_start_frame=int(xf.get("start_frame", 0)),
+                                    transition_duration_frames=int(xf.get("duration", 0)),
+                                    current_frame=frame_idx,
+                                    role=str(xf.get("role", "")),
+                                    curve=str(xf.get("curve", "constant_power")),
+                                    fps=float(clip_fade.get("fps", 24.0)),
+                                    sample_rate=float(sample_rate),
+                                )
+                            # clip FX（pre-fader，在轨阶段 volume 之前）
+                            if clip_chain is not None and clip_chain.is_active:
+                                samples = clip_chain.process(samples)
+
+                            # 汇入该轨该帧的求和缓冲（MX-04）
+                            frame_buf = pending_frames.get(frame_idx)
+                            if frame_buf is None:
+                                frame_buf = np.zeros(
+                                    (channels, out_end - out_start),
+                                    dtype=np.float32,
+                                )
+                                pending_frames[frame_idx] = frame_buf
+                            _n = min(samples.shape[-1], frame_buf.shape[-1])
+                            frame_buf[:, :_n] += samples[:channels, :_n].astype(
+                                np.float32, copy=False)
+                            if track_first_src_ch is None:
+                                track_first_src_ch = int(
+                                    getattr(decoder, "_channels", 2) or 2)
+
+                        # R04：clip FX 尾音——clip 结束后按其链尾音预算
+                        # 继续喂零块（保持链状态连续），输出汇入轨 pending；
+                        # 限选区内（不扩展选区）。帧与该 clip 最后一帧紧邻，
+                        # 链状态不跳跃；后续 clip 的内容帧与尾音帧在
+                        # pending 求和（MX-04 语义）。
+                        if clip_chain is not None and clip_chain.is_active:
+                            _cf_tail = int(clip_chain.tail_estimate_samples())
+                            if _cf_tail > 0 and samples_per_frame > 0:
+                                _cf_frames = int(math.ceil(
+                                    _cf_tail / float(samples_per_frame)))
+                                # H03：含尾模式 clip 尾音延伸进扩展区
+                                #（clip 结束于选区末时不再截断首回声）
+                                for _tf in range(clip_end,
+                                                  min(end_frame + render_tail_frames,
+                                                      clip_end + _cf_frames)):
+                                    _trel = _tf - feed_start
+                                    if _trel < 0 or \
+                                            _trel + 1 >= len(frame_sample_bounds):
+                                        break
+                                    _ts = frame_sample_bounds[_trel]
+                                    _te = frame_sample_bounds[_trel + 1]
+                                    _tbl = _te - _ts
+                                    if _tbl <= 0:
                                         continue
-                                    if send_bus_id not in bus_inputs:
-                                        bus_inputs[send_bus_id] = np.zeros((channels, total_samples), dtype=np.float32)
-                                    bus_inputs[send_bus_id][:, out_start:out_end] += processed[:channels, :actual] * send_level
+                                    _tblock = clip_chain.process(
+                                        np.zeros((channels, _tbl),
+                                                 dtype=np.float32))
+                                    _tfbuf = pending_frames.get(_tf)
+                                    if _tfbuf is None or \
+                                            _tfbuf.shape[-1] != _tbl:
+                                        _tfbuf = np.zeros(
+                                            (channels, _tbl), dtype=np.float32)
+                                        pending_frames[_tf] = _tfbuf
+                                    _tn = min(_tblock.shape[-1],
+                                              _tfbuf.shape[-1])
+                                    _tfbuf[:, :_tn] += _tblock[:channels, :_tn]
+
 
                     except Exception as e:
                         logger.warning(f"Failed to decode audio for clip {clip.clip_id}: {e}")
                         continue
+
+                # MX-04/MX-07/R02/H03: 轨收尾 drain——按帧升序出队全部剩余
+                # pending；clip 间隙与选区尾部按尾音预算喂零推进。
+                # H03：include_fx_tail 模式下轨 drain 延长进扩展区（轨级
+                # Delay/Reverb 尾音随全路径预算交付，不再截在选区末——
+                # "200ms Track Delay 只输出 160ms 且全零"已复现）；严格模式
+                # 仍止于 end_frame。
+                # R02: 与 early flush 共用 _advance_through——从单调游标起步，
+                # 已处理帧绝不重喂（旧实现从 start_frame 重扫 + 尾音预算未清
+                # 零，帧 0/1 被二次喂入有状态节点，回声时序错位）。
+                _last_content_frame = max(pending_frames) if pending_frames else -1
+                _drain_end = min(
+                    end_frame + render_tail_frames,
+                    _last_content_frame + 1
+                    + int(math.ceil(_track_tail_samples / max(1.0, float(sample_rate) / max(0.0001, float(fps))))),
+                )
+                _advance_through(_drain_end)
+                pending_frames.clear()
 
         finally:
             # D07（第六轮审计）：取消（循环内 return None）与异常路径
@@ -4540,13 +5021,41 @@ class TimelineExporter:
         # AM-03/AM-14: Bus 阶段（拓扑序处理，支持多层 Bus→Bus）
         # RMA-04: 传入可听闭包，让 solo 普通轨必经的 Bus 也参与处理。
         # RMA-06: 传入 start_frame/fps 让 Bus automation（volume/pan/mute）逐样本求值。
+        # R02: Bus/Master 阶段外部侧链 tap——直接取检源轨 flush 时直写的
+        # 单份全长缓冲（不再有第二份拼接拷贝；帧缓存 dict 已移除）。
+        _bus_sc_taps: dict = {}
+        _sc_needed_ids: set = set()
+        if export_sc_source_ids and bus_tracks:
+            for _b in bus_tracks:
+                _bn = renderer.get_node(_b.track_id)
+                if _bn is not None and _bn.effect_chain is not None:
+                    _sc_needed_ids |= _bn.effect_chain.sidechain_sources()
+        # MX-03: Master 链的外部检源与 Bus 同一 tap 池
+        if export_sc_source_ids:
+            _sc_needed_ids |= renderer.master_sidechain_sources()
+        for _src in _sc_needed_ids:
+            _buf = sc_tap_buffers.get(_src)
+            if _buf is not None and sc_written_until.get(_src, 0) > 0:
+                _bus_sc_taps[_src] = _buf
         renderer.render_bus_stage(bus_inputs, output, has_solo=has_solo,
                                   audible_solo=audible_solo,
-                                  start_frame=start_frame, fps=fps)
+                                  start_frame=feed_start, fps=fps,
+                                  sidechain_taps=_bus_sc_taps or None)
 
-        # AM-03: Master 阶段（volume/mute + 软限幅，替代此前的硬削波 np.clip）
-        # §3.1: 传入 start_frame/fps 供 master automation ramp
-        output = renderer.apply_master(output, start_frame=start_frame, fps=fps)
+        # AM-03: Master 阶段（volume/mute + Master 条带 + 软限幅）
+        # §3.1: 传入 feed_start/fps 供 master automation ramp（H02：feed 坐标，
+        # 预卷段 master 曲线照常求值）
+        # MX-03: sidechain_taps 供 Master FX 链外部检源（与 Bus 同一 tap 池）
+        output = renderer.apply_master(output, start_frame=feed_start, fps=fps,
+                                       sidechain_taps=_bus_sc_taps or None)
+        # H02：裁掉预卷区（状态已进入 Bus/Master 链；交付只含选区）。
+        if preroll_samples > 0:
+            output = output[:, preroll_samples:preroll_samples + total_samples]
+        # R02: Bus/Master 消费完毕立即释放检源缓冲与路由输入——响度 pass /
+        # 编码阶段不再持有每源全长 tap 副本（del 解除本地引用，底层数组随之
+        # 回收；不用 clear() 原地清空——外部观察者持有的 dict 引用会看到数据
+        # 被抽走）。
+        del _bus_sc_taps, sc_tap_buffers, sc_written_until, bus_inputs
 
         # AM-10 阶段 3.4：离线响度交付。
         # 若指定 loudness_target_lufs，则扫描 master PCM：
@@ -4580,7 +5089,7 @@ class TimelineExporter:
                     scale = float(10.0 ** (gain_db / 20.0))
                     output = output * scale
                     # 安全限幅：normalize 后峰值可能超 1.0，过 master limiter
-                    output = renderer.apply_master(output, skip_volume=True)
+                    output = renderer.limit_master_output(output, reset_state=True)
                     logger.info(
                         f"Loudness normalize: {report.integrated_lufs:.1f} → "
                         f"{config.loudness_target_lufs:.1f} LUFS "

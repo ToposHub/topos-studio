@@ -1,0 +1,12 @@
+{
+  "voice": {
+    "nan_gain_survives_params": true,
+    "nonfinite_output_samples": 3840,
+    "bad_seed_error": "ValueError"
+  },
+  "mangler": {
+    "nan_gain_survives_params": true,
+    "nonfinite_output_samples": 0,
+    "bad_seed_error": "ValueError"
+  }
+}

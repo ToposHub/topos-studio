@@ -27,20 +27,28 @@ from src.features.edit.core.effect_registry import (
     DELAY_EFFECT,
     SATURATION_EFFECT,
     IMAGER_EFFECT,
+    EXPANDER_EFFECT,
     NOISE_GATE_EFFECT,
 )
 
 
 # effect_type → 期望出现在基础 params_schema 里的部分关键参数名
+# CW-A1: 参数化 EQ / 声学混响 / 立体声延迟 / Expander（noise_gate 为其别名）
 _EXPECTED_BASIC_PARAMS = {
-    "strip_eq": {"gain"},
+    "strip_eq": {"master_gain"},
     "limiter": {"threshold_db", "release_ms"},
     "compressor": {"threshold_db", "ratio", "makeup_gain"},
-    "reverb": {"mix", "decay"},
-    "delay": {"time_ms", "feedback", "mix"},
+    "reverb": {"dry_wet", "reverb_time"},
+    "delay": {"left_delay", "right_delay", "dry_wet"},
     "saturation": {"drive"},
     "imager": {"width", "pan"},
-    "noise_gate": {"threshold_db", "release_ms"},
+    "expander": {"threshold_db", "range_db", "release_ms"},
+    "noise_gate": {"threshold_db", "range_db", "release_ms"},
+    # CW-A1: Dynamics 完整单元——基础区只暴露 Make Up（细项在完整面板编辑）
+    "dynamics": {"makeup"},
+    # NF-01：两款新复合 FX——基础区暴露核心身份参数（细项在完整面板）
+    "voice_changer": {"pitch_semitones", "formant_shift_st", "vocoder_carrier"},
+    "spectral_mangler": {"routing", "global_mix_pct", "dist_curve"},
 }
 
 _ALL_DEFINITIONS = {
@@ -51,6 +59,7 @@ _ALL_DEFINITIONS = {
     "delay": DELAY_EFFECT,
     "saturation": SATURATION_EFFECT,
     "imager": IMAGER_EFFECT,
+    "expander": EXPANDER_EFFECT,
     "noise_gate": NOISE_GATE_EFFECT,
 }
 
@@ -88,13 +97,16 @@ class TestAudioEffectDefinitions:
         registry = get_effect_registry()
         assert "audio" in registry.get_categories()
 
-    def test_eight_audio_effects(self):
-        """Exactly the 8 mixer audio effects are in the audio category."""
+    def test_all_audio_effects(self):
+        """CW-A1: mixer 音频效果（8 基础 + noise_gate 别名）+ 2 个完整单元
+        （dynamics / spatial_panner，拖放路由特殊处理）注册在 audio 分类。"""
         registry = get_effect_registry()
         audio_effects = registry.get_effects_by_category("audio")
         effect_types = {e.effect_type for e in audio_effects}
-        assert effect_types == set(AUDIO_MIXER_EFFECT_TYPES)
-        assert len(audio_effects) == 8
+        assert effect_types == set(AUDIO_MIXER_EFFECT_TYPES) | {
+            "spatial_panner",
+        }
+        assert len(audio_effects) == len(AUDIO_MIXER_EFFECT_TYPES) + 1
 
 
 class TestLegacyPlaceholdersRemoved:
@@ -133,18 +145,23 @@ class TestCreateEffectInstanceFullDefaults:
 
     def test_reverb_full_defaults(self):
         instance = create_effect_instance("reverb")
+        # CW-A1: 声学房间模型完整键集
         assert set(instance.params.keys()) == {
-            "mix", "decay", "pre_delay_ms", "damping_hz", "enabled",
+            "height", "length", "width", "pre_delay", "reverb_time",
+            "distance", "brightness", "modulation",
+            "er_lo_freq", "er_hi_freq", "er_lo_gain", "er_hi_gain",
+            "rev_lo_freq", "rev_hi_freq", "rev_lo_gain", "rev_hi_gain",
+            "dry_wet", "direct_db", "er_db", "reverb_db", "enabled",
         }
-        # 默认值与 ReverbParams.default() 一致
-        assert instance.params["mix"] == 30.0
-        assert instance.params["decay"] == 2.0
+        assert instance.params["reverb_time"] == 2730.0
+        assert instance.params["dry_wet"] == 100.0
 
     def test_compressor_full_defaults(self):
         instance = create_effect_instance("compressor")
         assert set(instance.params.keys()) == {
-            "threshold_db", "ratio", "attack_ms", "release_ms",
-            "knee_db", "makeup_gain", "enabled",
+            "threshold_db", "ratio", "attack_ms", "hold_ms", "release_ms",
+            "knee", "mix", "makeup_gain", "sc_on", "sc_listen",
+            "sc_source", "enabled",
         }
 
 
@@ -156,13 +173,13 @@ class TestAudioEffectParameterUpdate:
         updated = instance.with_param("threshold_db", -30.0)
         assert updated.params["threshold_db"] == -30.0
         # 其它字段保留
-        assert updated.params["ratio"] == 4.0
+        assert updated.params["ratio"] == 2.5
 
-    def test_reverb_mix_update(self):
+    def test_reverb_dry_wet_update(self):
         instance = create_effect_instance("reverb")
-        updated = instance.with_param("mix", 75.0)
-        assert updated.params["mix"] == 75.0
-        assert updated.params["decay"] == 2.0
+        updated = instance.with_param("dry_wet", 75.0)
+        assert updated.params["dry_wet"] == 75.0
+        assert updated.params["reverb_time"] == 2730.0
 
 
 class TestAudioEffectSearch:
