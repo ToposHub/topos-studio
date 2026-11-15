@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal  # noqa: F401（占位对话框用）
 from PyQt6.QtWidgets import QDialog, QWidget
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,55 @@ logger = logging.getLogger(__name__)
 # effect_type → (DialogClass, ParamsClass, committed_signal_attr, preview_signal_attr)
 # 延迟构建避免循环 import（dialog 模块在 import 时拉起大量 UI 依赖）。
 _DIALOG_REGISTRY: Optional[dict] = None
+
+
+class _NFPlaceholderDialog(QDialog):
+    """NF 两款新 FX 的过渡参数对话框（NF-02 换正式窗口）。
+
+    通用键值编辑器：列出 params dict 的键，可编辑数值/布尔/字符串，
+    提交时整体回发 committed 信号。满足 clip 级试听/提交契约，不冒充
+    完整 UI（正式版见 NF-02 voice_changer_dialog/spectral_mangler_dialog）。
+    """
+
+    nf_committed = pyqtSignal(str, object)
+
+    def __init__(self, track_id, track_name, instance_id, initial_params=None,
+                 parent=None, **kwargs):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import (
+            QDialogButtonBox, QFormLayout, QLineEdit,
+        )
+        self._track_id = track_id
+        self._instance_id = instance_id
+        self.value_committed = None
+        self.setWindowTitle(f"{track_name} · FX")
+        form = QFormLayout(self)
+        self._edits: dict = {}
+        params = dict(initial_params or {})
+        for key in sorted(params):
+            edit = QLineEdit(str(params[key]))
+            form.addRow(str(key), edit)
+            self._edits[key] = edit
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        form.addRow(buttons)
+        buttons.accepted.connect(self._commit)
+        buttons.rejected.connect(self.reject)
+
+    def _commit(self):
+        params = {}
+        for key, edit in self._edits.items():
+            text = edit.text().strip()
+            try:
+                params[key] = float(text) if ("." in text or "e" in text.lower()) else (
+                    int(text) if text.lstrip("-").isdigit()
+                    else (True if text.lower() == "true"
+                          else (False if text.lower() == "false" else text)))
+            except ValueError:
+                params[key] = text
+        self.nf_committed.emit(self._track_id, params)
+        self.accept()
 
 
 def _ensure_dialog_registry() -> dict:
@@ -44,7 +93,7 @@ def _ensure_dialog_registry() -> dict:
     from src.features.edit.core.timeline_v2 import (
         StripEQParams, LimiterParams, CompressorParams, ReverbParams,
         DelayParams, SaturationParams, ImagerParams, ExpanderParams,
-        DynamicsParams,
+        DynamicsParams, VoiceChangerParams, SpectralManglerParams,
     )
     from src.shared.ui.audio_mixer.strip_eq_dialog import ParametricEQDialog
     from src.shared.ui.audio_mixer.limiter_dialog import LimiterDialog
@@ -71,6 +120,12 @@ def _ensure_dialog_registry() -> dict:
         "noise_gate":  (ExpanderDialog,   ExpanderParams,   "expander_committed",    True),
         # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合，不拆分）
         "dynamics":    (ClipDynamicsDialog, DynamicsParams, "dynamics_committed",    True),
+        # NF（2026-11-15 计划 §6.3）：两款新复合 FX——NF-02 批次接入
+        # 完整窗口；当前注册轻量参数对话框占位（可打开/提交，样式后补）。
+        "voice_changer": (_NFPlaceholderDialog, VoiceChangerParams,
+                          "nf_committed", True),
+        "spectral_mangler": (_NFPlaceholderDialog, SpectralManglerParams,
+                             "nf_committed", True),
     }
     return _DIALOG_REGISTRY
 

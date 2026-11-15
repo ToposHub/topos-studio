@@ -46,6 +46,9 @@ _EXPECTED_BASIC_PARAMS = {
     "noise_gate": {"threshold_db", "range_db", "release_ms"},
     # CW-A1: Dynamics 完整单元——基础区只暴露 Make Up（细项在完整面板编辑）
     "dynamics": {"makeup"},
+    # NF-01：两款新复合 FX——基础区暴露核心身份参数（细项在完整面板）
+    "voice_changer": {"pitch_semitones", "formant_shift_st", "vocoder_carrier"},
+    "spectral_mangler": {"routing", "global_mix_pct", "dist_curve"},
 }
 
 _ALL_DEFINITIONS = {

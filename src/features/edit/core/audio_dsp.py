@@ -3621,6 +3621,14 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["noise_gate"] = ExpanderEffect
         # Dynamics 完整单元（EG→Comp→Lim 单实例复合）
         _EFFECT_CLASS_REGISTRY["dynamics"] = DynamicsEffect
+        # NF（2026-11-15 计划 §6.3）：两款新复合 FX（适配器惰性导入，
+        # 顶层无环）
+        from src.features.edit.core.audio_effects.adapters import (
+            SpectralManglerAdapter,
+            VoiceChangerAdapter,
+        )
+        _EFFECT_CLASS_REGISTRY["spectral_mangler"] = SpectralManglerAdapter
+        _EFFECT_CLASS_REGISTRY["voice_changer"] = VoiceChangerAdapter
     return _EFFECT_CLASS_REGISTRY
 
 
