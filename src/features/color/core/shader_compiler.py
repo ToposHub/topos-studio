@@ -488,7 +488,7 @@ class ShaderPipeline:
         # Apply Blur / Sharpen first to allow subsequent grading
         shader_code.append("    vec3 graded = apply_blur_sharpen(color, u_input_tex, v_texcoord, u_fx_mode, u_fx_sharpen, u_fx_texture, u_fx_halo, u_fx_radius, u_fx_iterations, u_tex_size, u_fx_enabled, u_blur_enabled, u_blur_mode, u_blur_intensity, u_blur_detail, u_blur_radius, u_blur_bokeh, u_blur_angle);")
 
-        shader_code.append("    graded = apply_grading(graded, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation);")
+        shader_code.append("    graded = apply_grading(graded, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation, u_pivot, u_offset, u_log_shadow, u_log_midtone, u_log_highlight, u_log_offset, u_log_low_range, u_log_high_range, u_lum_mix);")
 
         if has_curves: shader_code.append("    graded = apply_curves(graded, u_curves_tex);")
         if has_hsl_curve: shader_code.append("    graded = apply_hsl_curve(graded, u_hsl_curve_tex);")

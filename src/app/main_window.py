@@ -1924,6 +1924,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.export_panel.batch_pause_requested.connect(self._pause_batch_export)
         self.export_panel.batch_resume_requested.connect(self._resume_batch_export)
         self.grading_panel.grading_changed.connect(self.on_grading_changed)
+        # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）
+        self.grading_panel.grading_extended_changed.connect(
+            self.on_grading_extended_changed)
         self.grading_panel.interaction_started.connect(self.on_interaction_started)
         # P1-COLOR-03: 调色关键帧（模式 / 当前帧快照 / 删除）
         self.grading_panel.keyframe_mode_changed.connect(self.on_keyframe_mode_toggled)

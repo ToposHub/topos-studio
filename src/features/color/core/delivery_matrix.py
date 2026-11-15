@@ -40,11 +40,20 @@ _WHEEL_DEFAULTS = {
     "lift": (0.0, 0.0, 0.0),
     "gamma": (0.0, 0.0, 0.0),
     "gain": (0.0, 0.0, 0.0),
+    # 一级校色扩展加性轮（Offset / Log 四轮），默认同为 (0, 0, 0)
+    "offset": (0.0, 0.0, 0.0),
+    "log_shadow": (0.0, 0.0, 0.0),
+    "log_midtone": (0.0, 0.0, 0.0),
+    "log_highlight": (0.0, 0.0, 0.0),
+    "log_offset": (0.0, 0.0, 0.0),
 }
 _SCALAR_DEFAULTS = {
     "exposure": 0.0, "temp": 0.0, "tint": 0.0, "contrast": 0.0,
     "shadow": 0.0, "highlights": 0.0, "saturation": 0.0, "vibrance": 0.0,
     "mid_detail": 0.0, "sharpness": 0.0, "hue_shift": 0.0,
+    # 非零默认的扩展标量（pivot / log 区间 / lum_mix）：偏离默认即 primary
+    "pivot": 0.18, "log_low_range": 0.333, "log_high_range": 0.550,
+    "lum_mix": 100.0,
 }
 _TEXTURE_KEYS = ("mid_detail", "sharpness")
 

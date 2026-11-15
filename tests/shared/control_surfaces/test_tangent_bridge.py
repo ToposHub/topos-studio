@@ -627,7 +627,7 @@ def test_color_wheel_reset_cancels_queued_drag_update(qapp):
     wheel._pending_val = 0.5
     wheel._update_timer.start()
 
-    wheel._wheel_canvas.reset_btn.click()
+    wheel.reset_btn.click()
     wheel._emit_changed_signal()
 
     assert not wheel._update_timer.isActive()

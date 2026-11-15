@@ -35,6 +35,8 @@
   都会使摘要失配并自动解冻（P0-COL-04）。
 """
 
+import math
+
 import cv2
 import numpy as np
 from weakref import WeakKeyDictionary
@@ -1741,6 +1743,44 @@ class ImageEngine(QObject, WindowRasterizer):
             # Preserve their existing highlights until explicitly supplied.
             if highlights is not None:
                 layer.grading_params["highlights"] = highlights
+
+    def update_grading_params(self, patch) -> None:
+        """合并写入一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）。
+
+        与 ``grade_image`` 的"面板全量权威"语义不同：本方法只对给定键
+        打补丁，不动其他键，也不触发渲染（渲染时机由 UI 层统一控制）。
+        旧工程缺键时先补默认值，保证 hydrator 回填前的拖动不会写坏
+        半初始化状态。
+        """
+        if not patch:
+            return
+        layer = self.get_active_layer()
+        if not layer:
+            return
+        from src.features.color.core.layer import default_extended_grading_params
+        defaults = default_extended_grading_params()
+        for key, value in patch.items():
+            if key not in defaults:
+                continue  # 非扩展键一律拒绝：全量键走 grade_image
+            # 形状校验（与 Metal 侧 make_graph_grading_params 的 isfinite
+            # 守卫同口径）：标量键收 tuple、vec3 键收标量都会污染下游
+            # uniform 提取，入库前显式拒绝。
+            default = defaults[key]
+            if isinstance(default, tuple):
+                if not isinstance(value, (tuple, list)) or len(value) != 3:
+                    continue
+                if not all(isinstance(v, (int, float))
+                           and math.isfinite(float(v)) for v in value):
+                    continue
+            else:
+                if isinstance(value, (tuple, list)):
+                    continue
+                try:
+                    if not math.isfinite(float(value)):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            layer.grading_params[key] = value
 
     def set_tonal_saturation(self, lift_sat, gamma_sat, gain_sat) -> None:
         """仅更新三个色调区间饱和度（merge），不触发渲染。

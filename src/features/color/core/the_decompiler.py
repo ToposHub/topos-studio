@@ -129,15 +129,18 @@ class GradingMath:
         # 3. Contrast
         contrast = params.get('contrast', 0.0)
         c_factor = 1.0 + contrast / 100.0
+        pivot = params.get('pivot')
+        pivot = 0.18 if pivot is None else min(max(float(pivot), 0.05), 1.0)
         if contrast != 0.0:
-            # sign(res) * power(|res|/0.18 + 1e-10, c) * 0.18，单临时量
+            # sign(res) * power(|res|/pivot + 1e-10, c) * pivot，单临时量
+            # （pivot 默认 0.18 = 旧硬编码物理中间灰，既有行为不变）
             mag = np.abs(res)
-            mag /= dt.type(0.18)
+            mag /= dt.type(pivot)
             mag += dt.type(1e-10)
             np.power(mag, dt.type(c_factor), out=mag)
             np.sign(res, out=res)
             res *= mag
-            res *= dt.type(0.18)
+            res *= dt.type(pivot)
 
         # 4. Lift / Gamma / Gain
         l_hsv = params.get('lift', (0,0,0))
@@ -189,7 +192,16 @@ class GradingMath:
         运算顺序与原实现逐条对应（同公式、同次序），仅联乘结合方式
         与 numpy 广播实现细节可能有 ~1ulp float 差异（atol=1e-6 测试
         基准内）。
+
+        一级校色扩展参数（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）
+        与 GLSL GRADING_SNIPPET 同位序：0（原亮度捕获）→ 1/2/3 → 4 →
+        暗部保护 → 4.5 Offset → 4.6 Log 四轮 → 5/6/6.5/7 → 9/10 →
+        11 Lum Mix。
         """
+        # 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
+        luma_weights_in = np.array([0.299, 0.587, 0.114], dtype=color.dtype)
+        luma_original = color @ luma_weights_in
+
         res = GradingMath.apply_grading_prefix(color, params)
         dt = res.dtype
 
@@ -234,6 +246,51 @@ class GradingMath:
                     res * (1.0 - t) + luma_expanded * t,
                     res,
                 )
+
+        # 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
+        offset_hsb = params.get('offset', (0, 0, 0))
+        shadow_hsb, mid_hsb, high_hsb, log_offset_hsb = (
+            params.get(name, (0, 0, 0))
+            for name in ('log_shadow', 'log_midtone', 'log_highlight',
+                         'log_offset'))
+        log_hsbs = (shadow_hsb, mid_hsb, high_hsb, log_offset_hsb)
+
+        def _hsb_active(hsb) -> bool:
+            return hsb is not None and tuple(hsb) != (0, 0, 0)
+
+        if _hsb_active(offset_hsb) or any(_hsb_active(h) for h in log_hsbs):
+            from src.features.color.core.composition_uniforms import (
+                params_to_offset_rgb,
+            )
+            if _hsb_active(offset_hsb):
+                res += np.asarray(params_to_offset_rgb(*offset_hsb), dtype=dt)
+            if any(_hsb_active(h) for h in log_hsbs):
+                lum = np.clip(res @ luma_weights, dt.type(0.0), dt.type(1.0))
+                log_lo = min(max(float(params.get('log_low_range', 0.333)
+                                      or 0.333), 0.05), 0.95)
+                log_hi = min(max(float(params.get('log_high_range', 0.550)
+                                      or 0.550), 0.05), 0.95)
+
+                def _smoothstep(edge0: float, edge1: float, x: np.ndarray
+                                ) -> np.ndarray:
+                    t = np.clip((x - dt.type(edge0))
+                                / dt.type(max(edge1 - edge0, 1e-6)),
+                                0.0, 1.0)
+                    return t * t * (dt.type(3.0) - dt.type(2.0) * t)
+
+                w_shadow = dt.type(1.0) - _smoothstep(log_lo * 0.5, log_lo, lum)
+                w_high = _smoothstep(log_hi, log_hi + (1.0 - log_hi) * 0.5, lum)
+                w_mid = np.clip(dt.type(1.0) - w_shadow - w_high,
+                                dt.type(0.0), dt.type(1.0))
+                for hsb, weight in ((shadow_hsb, w_shadow),
+                                    (mid_hsb, w_mid), (high_hsb, w_high)):
+                    if _hsb_active(hsb):
+                        res += np.asarray(params_to_offset_rgb(*hsb),
+                                          dtype=dt) * weight[..., np.newaxis]
+                if _hsb_active(log_offset_hsb):
+                    # log_offset：不分区、全帧等量平移
+                    res += np.asarray(params_to_offset_rgb(*log_offset_hsb),
+                                      dtype=dt)
 
         # 5. Shadows
         shadow = params.get('shadow', 0.0)
@@ -292,6 +349,17 @@ class GradingMath:
             res -= gray
             res *= dt.type(1.0 + saturation / 100.0)
             res += gray
+
+        # 11. Lum Mix（原亮度保留，0..100；与 GLSL 同式）
+        lum_mix = params.get('lum_mix')
+        lum_mix = 100 if lum_mix is None else float(lum_mix)
+        if lum_mix < 100.0:
+            graded_lum = res @ luma_weights
+            restore = (graded_lum > dt.type(1e-5)) & (luma_original > dt.type(1e-5))
+            safe_lum = np.where(restore, graded_lum, dt.type(1.0))
+            ratio = np.where(restore, luma_original / safe_lum, dt.type(1.0))
+            blend = dt.type((100.0 - lum_mix) / 100.0)
+            res *= (dt.type(1.0) + blend * (ratio - dt.type(1.0)))[..., np.newaxis]
 
         return res
 

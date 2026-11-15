@@ -381,7 +381,16 @@
     "gamma_sat": "Midtone Sat",
     "gain_sat": "Highlight Sat",
     "tonal_saturation_reset": "Reset all tonal saturations",
-    "reset_all_tooltip": "Reset All Grading Parameters"
+    "reset_all_tooltip": "Reset All Grading Parameters",
+    "offset": "Offset",
+    "pivot": "Pivot",
+    "log_shadow": "Shadow",
+    "log_midtone": "Midtone",
+    "log_highlight": "Highlight",
+    "log_offset": "Offset",
+    "log_low_range": "Low Range",
+    "log_high_range": "High Range",
+    "lum_mix": "Lum Mix"
   },
   "clipstrip": {
     "filter_menu": "Clip Filter",
@@ -433,7 +442,8 @@
     "ai_edit_assistant": "AI assistant",
     "image_export": "Image Export",
     "gallery": "Gallery",
-    "tonal_saturation": "Tonal Saturation"
+    "tonal_saturation": "Tonal Saturation",
+    "log_wheels": "Log Wheels"
   },
   "qualifier": {
     "matte_finesse": "Matte Finesse",

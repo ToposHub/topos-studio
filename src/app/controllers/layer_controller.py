@@ -59,7 +59,9 @@ import numpy as np
 from PyQt6.QtWidgets import QMessageBox, QGraphicsScene
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 
-from src.features.color.core.layer import MaskShape, MaskGroup
+from src.features.color.core.layer import (
+    DEFAULT_EXTENDED_GRADING_PARAMS, MaskShape, MaskGroup,
+)
 
 
 def _scope_diag():
@@ -185,6 +187,15 @@ class LayerOpsMixin:
             p["tint"], p["contrast"], p["shadow"], p["saturation"],
             p.get("vibrance", 0), p.get("mid_detail", 0), p.get("hue_shift", 0),
             highlights=p.get("highlights", 0),
+        )
+        # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）必须
+        # 随层回填：缺失键补默认值。否则切层/撤销/切节点后扩展控件残留
+        # 上一目标的值，下一次交互会把陈旧整包写进新层（跨目标污染）。
+        from src.features.color.core.layer import default_extended_grading_params
+        defaults = default_extended_grading_params()
+        self.grading_panel.set_extended_params(
+            {key: p.get(key, default) for key, default in defaults.items()},
+            emit=False,
         )
         tonal_panel = getattr(self.grading_panel, 'tonal_saturation_panel', None)
         if tonal_panel is not None:
@@ -2678,6 +2689,22 @@ class LayerOpsMixin:
         "mid_detail", "hue_shift", "highlights",
     )
 
+    # grading_extended_changed 字典的合法键（扩展参数白名单）。单一权威
+    # 是 layer.DEFAULT_EXTENDED_GRADING_PARAMS 的键序，此处直接派生。
+    _GRADING_EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
+
+    @staticmethod
+    def _grade_value_equal(graph_value, panel_value) -> bool:
+        """图侧（常存 list）与面板（常发 tuple）的等值比较。
+
+        list == tuple 恒 False 会让每次手势对全部键提交冗余 grade_patch
+        （事务合并不出错，纯浪费）；三元组统一 tuple 后比较。
+        """
+        if isinstance(graph_value, (list, tuple)) \
+                and isinstance(panel_value, (list, tuple)):
+            return tuple(graph_value) == tuple(panel_value)
+        return graph_value == panel_value
+
     def on_grading_changed(self, *args) -> None:
         """调色面板参数变化：写入引擎并按播放态选择渲染策略。
 
@@ -2733,7 +2760,7 @@ class LayerOpsMixin:
             graph_host.begin_grade_gesture(self._graph_gesture_tid)
         current = graph_host.panel_grade_params() or {}
         for name, value in zip(self._GRADING_SIGNAL_KEYS, args):
-            if current.get(name) == value:
+            if self._grade_value_equal(current.get(name), value):
                 continue
             patch_value = (value if isinstance(value, (tuple, list))
                            else float(value))
@@ -2747,6 +2774,81 @@ class LayerOpsMixin:
         else:
             self.request_render()
         return True
+
+    def on_grading_extended_changed(self, params: dict) -> None:
+        """调色面板扩展参数变化（Offset 轮 / pivot / Log 四轮 / Lum Mix）。
+
+        与 ``on_grading_changed`` 相同的路由策略：图编辑上下文优先走
+        图事务（同值 legacy 通道预览），否则引擎合并补丁 + 关键帧录制。
+        """
+        if self.engine.get_current_image() is None:
+            return
+        patch = {key: params[key] for key in self._GRADING_EXTENDED_KEYS
+                 if key in params}
+        if not patch:
+            return
+        graph_host = getattr(self, 'color_graph_host', None)
+        if graph_host is not None and graph_host.graph_edit_context_active():
+            if self._route_grading_extended_to_graph(graph_host, patch):
+                return
+        self.engine.update_grading_params(patch)
+        self._maybe_record_grade_keyframes_extended(patch)
+        self._invalidate_video_render_params_if_playing()
+        if self._is_video_playing():
+            self._debounce_grading_render()
+        else:
+            self.request_render()
+
+    def _route_grading_extended_to_graph(self, graph_host, patch: dict) -> bool:
+        """扩展参数的图手势路由（与 _route_grading_to_graph 同约定）。"""
+        node_id = graph_host.active_grade_node_id()
+        if not node_id:
+            return False
+        if not graph_host.grade_gesture_open():
+            counter = int(getattr(self, '_graph_gesture_counter', 0)) + 1
+            self._graph_gesture_counter = counter
+            self._graph_gesture_tid = f"grading-{counter}"
+            graph_host.begin_grade_gesture(self._graph_gesture_tid)
+        current = graph_host.panel_grade_params() or {}
+        for name, value in patch.items():
+            if self._grade_value_equal(current.get(name), value):
+                continue
+            patch_value = (value if isinstance(value, (tuple, list))
+                           else float(value))
+            graph_host.submit_grade_change(
+                node_id, name, patch_value, self._graph_gesture_tid)
+        graph_host.align_engine_active_layer(node_id)
+        self.engine.update_grading_params(patch)
+        self._invalidate_video_render_params_if_playing()
+        if self._is_video_playing():
+            self._debounce_grading_render()
+        else:
+            self.request_render()
+        return True
+
+    def _maybe_record_grade_keyframes_extended(self, patch: dict) -> None:
+        """扩展参数的关键帧录制（与 _maybe_record_grade_keyframes 同语义）。"""
+        if getattr(self, "_color_keyframes_host", None) is not None:
+            return  # centralized recorder commits with the graph gesture
+        engine = self.engine
+        frame = getattr(engine, 'current_grade_frame', None)
+        if frame is None:
+            return
+        layer = engine.get_active_layer() if hasattr(engine, 'get_active_layer') else None
+        if layer is None:
+            return
+        panel = getattr(self, 'grading_panel', None)
+        record_mode = bool(getattr(panel, 'keyframe_mode', False))
+        tracks = getattr(layer, 'grade_keyframes', None) or {}
+        wrote = False
+        for name, value in patch.items():
+            if name not in self._GRADING_EXTENDED_KEYS:
+                continue
+            if record_mode or name in tracks:
+                if engine.record_grade_keyframe(frame, name, value):
+                    wrote = True
+        if wrote:
+            self._refresh_grade_keyframe_ui()
 
     def on_tonal_saturation_changed(self, lift_sat: float,
                                     gamma_sat: float,

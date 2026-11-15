@@ -188,7 +188,16 @@ def main() -> int:
                 app.processEvents()
             log(f"PASS real version {op.value} {scope.value}")
         drive(Op.CREATE, name="Audit A")
-        mw.grading_panel.exp_slider.setValue(1.25)
+        # 曝光已不再有独立滑条（UI 位置由 Pivot 取代）：经 set_params
+        # 全量透传路径写入曝光并触发 grading_changed（其余参数保持现值）。
+        _params = dict(mw.grading_panel.get_current_params())
+        _params["exposure"] = 1.25
+        mw.grading_panel.set_params(
+            _params["lift"], _params["gamma"], _params["gain"],
+            _params["exposure"], _params["temp"], _params["tint"],
+            _params["contrast"], _params["shadow"], _params["saturation"],
+            _params["vibrance"], _params["mid_detail"], _params["hue_shift"],
+            highlights=_params["highlights"], emit=True)
         drive(Op.CREATE, name="Audit Bright")
         assert mw.engine.layers[0].grading_params["exposure"] == 1.25
         drive(Op.LOAD, version_id="Audit A", discard_unsaved=True)
@@ -218,7 +227,14 @@ def main() -> int:
         capture = Path(os.environ.get("TOPOS_VERSION_AUDIT_CAPTURE", str(Path(tempfile.gettempdir()) / "topos-version-audit-real.png")))
         capture.parent.mkdir(parents=True, exist_ok=True)
         mw.grab().save(str(capture))
-        mw.grading_panel.exp_slider.setValue(0.75)
+        _params = dict(mw.grading_panel.get_current_params())
+        _params["exposure"] = 0.75
+        mw.grading_panel.set_params(
+            _params["lift"], _params["gamma"], _params["gain"],
+            _params["exposure"], _params["temp"], _params["tint"],
+            _params["contrast"], _params["shadow"], _params["saturation"],
+            _params["vibrance"], _params["mid_detail"], _params["hue_shift"],
+            highlights=_params["highlights"], emit=True)
         drive(Op.CREATE, Scope.REMOTE, name="After Remote Edit")
         assert mw.engine.layers[0].grading_params["exposure"] == 0.75
         assert mw._current_edit_project.color_stacks[remote].grading_params["exposure"] == 0.75

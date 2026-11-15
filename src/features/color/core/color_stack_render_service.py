@@ -141,6 +141,9 @@ class ColorStackRenderService:
     @staticmethod
     def _default_grading_params() -> Dict[str, Any]:
         """Return default (no-op) grading parameters."""
+        from src.features.color.core.layer import (
+            DEFAULT_EXTENDED_GRADING_PARAMS,
+        )
         return {
             "lift": (0, 0, 0),
             "gamma": (0, 0, 0),
@@ -155,4 +158,6 @@ class ColorStackRenderService:
             "vibrance": 0,
             "mid_detail": 0,
             "hue_shift": 0,
+            # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）
+            **DEFAULT_EXTENDED_GRADING_PARAMS,
         }

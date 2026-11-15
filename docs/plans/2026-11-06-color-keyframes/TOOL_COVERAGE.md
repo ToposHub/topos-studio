@@ -37,6 +37,15 @@
 | lift_saturation | scalar | — | — |
 | gamma_saturation | scalar | — | — |
 | gain_saturation | scalar | — | — |
+| offset | vec3 | — | — |
+| pivot | scalar | — | — |
+| log_shadow | vec3 | — | — |
+| log_midtone | vec3 | — | — |
+| log_highlight | vec3 | — | — |
+| log_offset | vec3 | — | — |
+| log_low_range | scalar | — | — |
+| log_high_range | scalar | — | — |
+| lum_mix | scalar | — | — |
 
 ### Window 窗口子轨（window）
 
