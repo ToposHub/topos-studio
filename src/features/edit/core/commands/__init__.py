@@ -914,6 +914,7 @@ from .audio_commands import (
     SetTrackPannerCommand,
     SetTrackStripEQCommand,
     SetTrackEffectChainCommand,
+    UpgradeTrackEffectAlgorithmCommand,
     SetMasterStripEQCommand,
     SetMasterEffectChainCommand,
     SetMasterVolumeCommand,
@@ -1162,6 +1163,8 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "SetTrackPannerCommand": SetTrackPannerCommand.from_dict,
     "SetTrackStripEQCommand": SetTrackStripEQCommand.from_dict,
     "SetTrackEffectChainCommand": SetTrackEffectChainCommand.from_dict,
+    "UpgradeTrackEffectAlgorithmCommand":
+        UpgradeTrackEffectAlgorithmCommand.from_dict,
     "SetMasterStripEQCommand": SetMasterStripEQCommand.from_dict,
     "SetMasterEffectChainCommand": SetMasterEffectChainCommand.from_dict,
     "SetMasterVolumeCommand": SetMasterVolumeCommand.from_dict,

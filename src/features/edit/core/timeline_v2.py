@@ -2424,7 +2424,68 @@ def _normalize_eq_band(band: Any, idx: int) -> dict[str, Any]:
     }
 
 
+def preserves_param_extras(cls, extra_known: tuple = ()):
+    """H01：效果参数 dataclass 的**参数内部未知字段**保留装饰器。
+
+    复审 H01-4：实例 ``params`` dict 里的未来/未知键不能因
+    ``XParams.from_dict(...).to_dict()`` 往返而丢失（与
+    ``TrackEffectInstance._extra_fields`` 同契约，作用在参数层）。
+
+    机制：
+    - 已知键 = dataclass 字段名 ∪ ``cls.default().to_dict()`` 键 ∪
+      ``extra_known``（legacy 别名）；
+    - ``from_dict`` 把未知键存到实例 ``_extra_fields``（类级默认 {}，
+      frozen 实例经 ``object.__setattr__``）；
+    - ``to_dict`` 在末尾合并 ``_extra_fields``；
+    - ``@preserves_extras`` 使 ``with_*``/``copy`` 派生方法携带 extras。
+
+    相等性不含 extras（非 dataclass 字段）；``dataclasses.replace`` 不
+    携带（参数对象一律经 from_dict 重建，关键往返路径已覆盖）。
+    """
+    import dataclasses as _dc
+    import functools as _ft
+
+    orig_from_dict = cls.from_dict
+    orig_to_dict = cls.to_dict
+    known_cache: list = []
+
+    def _known() -> frozenset:
+        if not known_cache:
+            keys = {f.name for f in _dc.fields(cls)}
+            try:
+                probe = cls.default() if hasattr(cls, "default") else None
+            except Exception:
+                probe = None
+            if probe is not None:
+                keys.update(orig_to_dict(probe).keys())
+            keys.update(extra_known)
+            known_cache.append(frozenset(keys))
+        return known_cache[0]
+
+    @_ft.wraps(orig_from_dict)
+    def from_dict(data):
+        inst = orig_from_dict(data)
+        extras = split_extras(data or {}, _known())
+        if extras:
+            object.__setattr__(inst, "_extra_fields", extras)
+        return inst
+
+    @_ft.wraps(orig_to_dict)
+    def to_dict(self):
+        out = orig_to_dict(self)
+        extras = getattr(self, "_extra_fields", None)
+        if extras:
+            out.update(extras)
+        return out
+
+    cls.from_dict = staticmethod(from_dict)
+    cls.to_dict = to_dict
+    cls._extra_fields = {}
+    return preserves_extras(cls)
+
+
 @dataclass(frozen=True)
+@preserves_param_extras
 class StripEQParams:
     """轨道级参数化 EQ（6 频段全参量，CW-A1 重构）。
 
@@ -2498,6 +2559,7 @@ class StripEQParams:
 # ── FX 机架数据模型（W26）─────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class LimiterParams:
     """限幅器参数（FX 机架效果器之一，CW-A1 重构）。
 
@@ -2611,6 +2673,7 @@ class DynamicsParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class CompressorParams:
     """压缩器参数（FX 机架效果器之一，CW-A1 重构：并行混合 + 保持 + 侧链）。
 
@@ -2713,6 +2776,7 @@ class CompressorParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ReverbParams:
     """声学房间混响器参数（FX 机架效果器之一，CW-A1 重构）。
 
@@ -2848,6 +2912,7 @@ _DELAY_LEGACY_INPUT_FORMATS = ("LCR", "Quad", "5.0", "5.1", "7.1")
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class DelayParams:
     """立体声双线延迟器参数（FX 机架效果器之一，CW-A1 重构）。
 
@@ -2950,6 +3015,7 @@ class DelayParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class SaturationParams:
     """谐波失真饱和器参数（FX 机架效果器之一）。
 
@@ -2985,6 +3051,7 @@ class SaturationParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ImagerParams:
     """立体声成像器参数（FX 机架效果器之一）。
 
@@ -3028,6 +3095,7 @@ class ImagerParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ExpanderParams:
     """扩展器/门限参数（FX 机架效果器之一，CW-A1 重构）。
 
@@ -3294,6 +3362,7 @@ _VC_CARRIERS = ("saw", "pulse", "choir", "noise")
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class VoiceChangerParams:
     """Voice Changer（Formant → Pitch → Vocoder → OutputGain）参数。
 
@@ -3442,6 +3511,7 @@ _SM_DIST_CURVES = ("tape", "fold", "hard_clip", "bitcrush")
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class SpectralManglerParams:
     """Spectral Mangler（Ring／Grain／Dist 三模块 + 拓扑）参数。
 
@@ -3674,24 +3744,33 @@ class TrackEffectInstance:
             "effect_type", "params", "enabled", "order",
             "instance_id", "panel", "algorithm_version",
         })
-        # R01：旧数据（无版本键）映射为明确的 legacy 版本，不解释成最新版；
-        # 未标注的 EQ 实例由此继续按 v3 之前的系数设计渲染。
-        from src.features.edit.core.fx_versioning import LEGACY_ALGORITHM_MAX
+        # H01：旧数据（无版本键）映射为 0 = 未标注（早于版本标注的工程，
+        # era 跨 43dfb2e3..1016a3cd 有历史歧义）——按最旧可复现语义渲染
+        # 并在诊断中说明；不再猜测成 v2，显式升级走 command。
+        from src.features.edit.core.fx_versioning import (
+            UNSPECIFIED_ALGORITHM_VERSION,
+        )
         try:
-            raw_av = int(data.get("algorithm_version", LEGACY_ALGORITHM_MAX)
-                         or LEGACY_ALGORITHM_MAX)
+            raw_av = int(data.get("algorithm_version",
+                                  UNSPECIFIED_ALGORITHM_VERSION)
+                         or UNSPECIFIED_ALGORITHM_VERSION)
         except (TypeError, ValueError):
-            raw_av = LEGACY_ALGORITHM_MAX
-        return TrackEffectInstance(
+            raw_av = UNSPECIFIED_ALGORITHM_VERSION
+        inst = TrackEffectInstance(
             effect_type=str(data.get("effect_type", "")),
             params=dict(data.get("params", {}) or {}),
             enabled=bool(data.get("enabled", True)),
             order=int(data.get("order", 0)),
             instance_id=str(data.get("instance_id", "")),
             panel=str(data.get("panel", "fx")),
-            algorithm_version=max(0, raw_av),
+            # 占位 1 避开 post_init 的 0→current 归一化；数据路径的
+            # 0 = 未标注（era 歧义）须原样保留，与 UI 新建实例区分（H01）。
+            algorithm_version=max(1, raw_av),
             _extra_fields=split_extras(data, known),
         )
+        if raw_av <= 0:
+            object.__setattr__(inst, "algorithm_version", 0)
+        return inst
 
 
 @dataclass(frozen=True)

@@ -466,6 +466,96 @@ class SetTrackEffectChainCommand:
 
 
 @dataclass(frozen=True)
+class UpgradeTrackEffectAlgorithmCommand:
+    """H01：显式把轨道 FX 链的 algorithm_version 升级到目标版本。
+
+    语义（fx_versioning.upgrade_chain_algorithm_version）：
+    - 只改 ``algorithm_version``，不动声音参数——升级后实例按新版本算法
+      渲染（声音可能改变，这正是"显式升级"的含义）；
+    - future（> 本地版本）实例原样保留，不伪装成本地版本；
+    - 经 CommandStack 执行 → 天然 undo / 保存重开可核对。
+
+    Attributes:
+        target_version: 目标算法版本（None = 本地当前版本）
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    target_version: Optional[int] = None
+    _old_effect_chain: Optional[Any] = None
+
+    def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "UpgradeTrackEffectAlgorithmCommand"]:
+        from src.features.edit.core.fx_versioning import (
+            upgrade_chain_algorithm_version,
+        )
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        old_chain = track.effect_chain
+        if old_chain is None or not old_chain.effects:
+            # 空链：无操作（保留原时间线对象）
+            return timeline, UpgradeTrackEffectAlgorithmCommand(
+                command_id=self.command_id, label=self.label,
+                track_id=self.track_id,
+                target_version=self.target_version,
+                _old_effect_chain=old_chain)
+        upgraded = upgrade_chain_algorithm_version(
+            old_chain, target=self.target_version)
+        new_track = track.with_effect_chain(upgraded)
+        new_timeline = timeline.with_track_updated(new_track)
+        logger.debug(
+            "UpgradeTrackEffectAlgorithmCommand applied: track %s -> v%s",
+            self.track_id,
+            self.target_version or "current")
+        return new_timeline, UpgradeTrackEffectAlgorithmCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id,
+            target_version=self.target_version,
+            _old_effect_chain=old_chain)
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        new_track = track.with_effect_chain(self._old_effect_chain)
+        return timeline.with_track_updated(new_track)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UpgradeTrackEffectAlgorithmCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "target_version": self.target_version,
+            "old_effect_chain": self._old_effect_chain.to_dict()
+            if self._old_effect_chain is not None else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "UpgradeTrackEffectAlgorithmCommand":
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        old = data.get("old_effect_chain")
+        return UpgradeTrackEffectAlgorithmCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Upgrade FX Algorithm"),
+            track_id=data.get("track_id", ""),
+            target_version=data.get("target_version"),
+            _old_effect_chain=EffectChainParams.from_dict(old) if old else None,
+        )
+
+    @staticmethod
+    def create(track_id: str,
+               target_version: Optional[int] = None) -> "UpgradeTrackEffectAlgorithmCommand":
+        return UpgradeTrackEffectAlgorithmCommand(
+            command_id=str(uuid.uuid4()),
+            label="Upgrade FX Algorithm",
+            track_id=track_id,
+            target_version=target_version,
+        )
+
+
+@dataclass(frozen=True)
 class SetMasterStripEQCommand:
     """Command to set the Master bus Strip EQ (MX-03).
 
