@@ -2643,6 +2643,11 @@ class CompressorParams:
     sc_listen: bool = False
     sc_source: str = "internal"
     enabled: bool = True
+    # R09：Make Up 位置（三实例 DY 面板形态）。None = legacy（v3 语义：
+    # makeup 在压缩器内部、Limiter 之前——旧工程声音不变）；True = 组后
+    # 增益（整个 Dynamics 组（EG→Comp→Lim）处理完后再乘，与复合
+    # DynamicsEffect 的放置一致——两形态同参数不再产生不同限幅声音）。
+    makeup_post: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if not (-60.0 <= self.threshold_db <= 0.0):
@@ -2667,7 +2672,7 @@ class CompressorParams:
         return CompressorParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "threshold_db": self.threshold_db,
             "ratio": self.ratio,
             "attack_ms": self.attack_ms,
@@ -2681,6 +2686,11 @@ class CompressorParams:
             "sc_source": self.sc_source,
             "enabled": self.enabled,
         }
+        # R09：makeup_post 仅在显式设置时持久化（None=legacy 不写键，
+        # 旧工程往返不出现新字段）
+        if self.makeup_post is not None:
+            result["makeup_post"] = bool(self.makeup_post)
+        return result
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "CompressorParams":
@@ -2697,6 +2707,8 @@ class CompressorParams:
             sc_listen=bool(data.get("sc_listen", False)),
             sc_source=str(data.get("sc_source", "internal") or "internal"),
             enabled=bool(data.get("enabled", True)),
+            makeup_post=(None if data.get("makeup_post") is None
+                         else bool(data.get("makeup_post"))),
         )
 
 
@@ -3421,7 +3433,7 @@ class EffectChainParams:
         """
         return [
             (e.effect_type, dict(e.params) if e.params else None, e.enabled,
-             e.instance_id, e.algorithm_version)
+             e.instance_id, e.algorithm_version, e.panel)
             for e in sorted(self.effects, key=lambda x: x.order)
         ]
 
@@ -4188,7 +4200,8 @@ def build_track_fx_sampler(track: Any) -> Optional[Any]:
                         p[pkey] = kt.get_value(int(frame), p[pkey])
                     except (TypeError, ValueError, KeyError):
                         pass
-            entries.append((etype, p, enabled, iid, av))
+            entries.append((etype, p, enabled, iid, av,
+                            entry[5] if len(entry) > 5 else "fx"))
         return entries
 
     return _sampler
