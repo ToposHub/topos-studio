@@ -3361,6 +3361,14 @@ _VC_TRACKING_MODES = ("vocal", "wide")
 _VC_CARRIERS = ("saw", "pulse", "choir", "noise")
 
 
+def _seed_of(d: dict) -> int:
+    """H12：seed 宽容解析（坏字符串/浮点 → 0，不再抛 ValueError）。"""
+    try:
+        return int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass(frozen=True)
 @preserves_param_extras
 class VoiceChangerParams:
@@ -3457,10 +3465,14 @@ class VoiceChangerParams:
             return bool(d.get(key, default))
 
         def _f(key: str, default: float) -> float:
+            # H12：非有限值（NaN/±Inf）→ 默认（修前 NaN 增益穿透 DSP
+            # 产生整块非有限输出；数值范围由 DSP np.clip 统一兜底）
             try:
-                return float(d.get(key, default))
+                v = float(d.get(key, default))
             except (TypeError, ValueError):
                 return default
+            import math as _math
+            return v if _math.isfinite(v) else default
 
         def _s(key: str, default: str, allowed: tuple) -> str:
             v = str(d.get(key, default) or default)
@@ -3499,7 +3511,7 @@ class VoiceChangerParams:
             vocoder_unvoiced_pct=_f("vocoder_unvoiced_pct", 72.0),
             vocoder_release_ms=_f("vocoder_release_ms", 24.0),
             vocoder_mix_pct=_f("vocoder_mix_pct", 100.0),
-            random_seed=int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF,
+            random_seed=_seed_of(d),
         )
 
 
@@ -3619,10 +3631,14 @@ class SpectralManglerParams:
             return bool(d.get(key, default))
 
         def _f(key: str, default: float) -> float:
+            # H12：非有限值（NaN/±Inf）→ 默认（修前 NaN 增益穿透 DSP
+            # 产生整块非有限输出；数值范围由 DSP np.clip 统一兜底）
             try:
-                return float(d.get(key, default))
+                v = float(d.get(key, default))
             except (TypeError, ValueError):
                 return default
+            import math as _math
+            return v if _math.isfinite(v) else default
 
         def _s(key: str, default: str, allowed: tuple) -> str:
             v = str(d.get(key, default) or default)
@@ -3661,7 +3677,7 @@ class SpectralManglerParams:
             dist_tone_hz=_f("dist_tone_hz", 5200.0),
             dist_resonance_pct=_f("dist_resonance_pct", 25.0),
             dist_mix_pct=_f("dist_mix_pct", 80.0),
-            random_seed=int(d.get("random_seed", 0) or 0) & 0xFFFFFFFF,
+            random_seed=_seed_of(d),
         )
 
 
@@ -4556,6 +4572,71 @@ def parse_fx_automation_key(key: str) -> Optional[tuple]:
     return iid, pkey
 
 
+#: H12：参数自动化类别（automation_kind 真源）。
+#: never      = 元数据/资源引用（seed、总开关）——不得进入数值 lane；
+#: event      = 离散事件语义（routing/模式/曲线/Freeze）——fx_sampler 块
+#:               边界重设天然支持（每块一次，无中间插值意义）；
+#: continuous = 连续参数（浮点，单位各异；块边界求值 + DSP 侧平滑/淡化）。
+FX_AUTOMATION_NEVER = frozenset({
+    "random_seed", "enabled", "algorithm_version",
+})
+FX_AUTOMATION_EVENT = frozenset({
+    "routing", "formant_mode", "pitch_tracking", "vocoder_carrier",
+    "ring_mode", "grain_mode", "dist_curve", "grain_freeze",
+})
+
+
+def automation_param_kind(param_key: str) -> str:
+    """H12：自动化 eligibility（UI 键列表与采样消费共用）。"""
+    if param_key in FX_AUTOMATION_NEVER:
+        return "never"
+    if param_key in FX_AUTOMATION_EVENT:
+        return "event"
+    return "continuous"
+
+
+def validate_effect_params(effect_type: str, params: dict) -> tuple:
+    """H12：参数统一校验（预览/导出/保存前共用）。
+
+    Returns:
+        (cleaned_dict, diagnostics)：cleaned 为经 ``XParams.from_dict``
+        归一化的 dict（非有限值/坏类型回退默认，未知键保留）；diagnostics
+        为被替换字段列表 ``[(key, raw, replacement), ...]``。未知
+        effect_type 返回 (原 dict, [])（opaque payload 原样，调用方走
+        fx_versioning 诊断）。
+    """
+    registry = _ensure_effect_param_registry()
+    cls = registry.get(effect_type)
+    if cls is None or not isinstance(params, dict):
+        return dict(params or {}), []
+    try:
+        cleaned_obj = cls.from_dict(params)
+    except Exception:
+        return dict(params or {}), [("__all__", "unparsable", "raw kept")]
+    cleaned = cleaned_obj.to_dict()
+    diags = []
+    for key, raw in (params or {}).items():
+        if key not in cleaned:
+            continue
+        try:
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                import math as _math
+                if not _math.isfinite(float(raw)):
+                    diags.append((key, raw, cleaned[key]))
+                    continue
+            if cleaned.get(key) != raw and str(cleaned.get(key)) != str(raw):
+                # 类型/枚举/范围归一（int("3")→3 等静默归一不计；只报
+                # 数值被替换与枚举回退）
+                if isinstance(raw, (int, float)) and isinstance(
+                        cleaned.get(key), (int, float)):
+                    if float(raw) == float(cleaned[key]):
+                        continue
+                diags.append((key, raw, cleaned[key]))
+        except Exception:
+            pass
+    return cleaned, diags
+
+
 def build_track_fx_sampler(track: Any) -> Optional[Any]:
     """MX-10: 从 track.automation 的 fx/* 键构建 ``frame -> entries`` 采样器。
 
@@ -4589,6 +4670,9 @@ def build_track_fx_sampler(track: Any) -> Optional[Any]:
             p = dict(params) if params else {}
             for (eid, pkey), kt in fx_tracks.items():
                 if eid == iid and pkey in p:
+                    # H12：never 类参数（seed/enabled/版本）不进数值 lane
+                    if automation_param_kind(pkey) == "never":
+                        continue
                     try:
                         p[pkey] = kt.get_value(int(frame), p[pkey])
                     except (TypeError, ValueError, KeyError):
