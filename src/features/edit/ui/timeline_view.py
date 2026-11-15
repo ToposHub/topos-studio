@@ -462,8 +462,9 @@ class _TimelineTimecodeLabel(QLabel):
             cell = QRectF(left, 0, width, self.height())
             painter.drawText(cell, Qt.AlignmentFlag.AlignCenter, character)
             left += width
-        painter.setPen(QPen(QColor(get_color("timecode_panel_bottom_line")), 1))
-        painter.drawLine(0, self.height() - 1, self.width() - 1, self.height() - 1)
+        divider = QColor(get_color("timeline_divider"))
+        painter.fillRect(0, self.height() - 1, self.width(), 1, divider)
+        painter.fillRect(self.width() - 1, 0, 1, self.height(), divider)
         painter.end()
 
 
@@ -1095,41 +1096,44 @@ class TimelineView(QGraphicsView):
         # crash inside QGraphicsView::paintEvent. Keep OpenGL for the actual
         # preview viewers, but use Qt's default raster viewport here so item
         # replacement and overlay painting have one stable paint target.
-        self._video_v_scroll = QScrollBar(Qt.Orientation.Vertical, self.viewport())
-        self._audio_v_scroll = QScrollBar(Qt.Orientation.Vertical, self.viewport())
+        # Fixed chrome belongs to the view, not its scrolling viewport:
+        # QWidget.scroll() also translates viewport children during bitblt.
+        self._video_v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
+        self._audio_v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
         # SUB-P1-06: dedicated subtitle-area scrollbar so multi-language cue
         # stacks can be browsed when they overflow the subtitle lane.
-        self._subtitle_v_scroll = QScrollBar(Qt.Orientation.Vertical, self.viewport())
+        self._subtitle_v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
         for bar in (self._video_v_scroll, self._audio_v_scroll, self._subtitle_v_scroll):
             bar.setObjectName("timelineSplitVerticalScrollBar")
-            bar.setFixedWidth(11)
+            bar.setFixedWidth(8)
             bar.setVisible(False)
-            bar.setStyleSheet("""
-                QScrollBar:vertical {
-                    background: #202025;
-                    border: 1px solid #34343A;
-                    width: 11px;
+            bar.setStyleSheet(f"""
+                QScrollBar:vertical {{
+                    background: {get_color('bg_app')};
+                    border: none;
+                    width: 8px;
                     margin: 0;
-                }
-                QScrollBar::handle:vertical {
-                    background: #5A6068;
-                    border: 1px solid #777E88;
-                    border-radius: 2px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background: {get_color('border')};
+                    border: none;
+                    border-radius: 3px;
+                    margin: 1px;
                     min-height: 28px;
-                }
-                QScrollBar::handle:vertical:hover {
-                    background: #747B84;
-                }
+                }}
+                QScrollBar::handle:vertical:hover {{
+                    background: {get_color('text_muted')};
+                }}
                 QScrollBar::add-line:vertical,
-                QScrollBar::sub-line:vertical {
+                QScrollBar::sub-line:vertical {{
                     height: 0;
                     border: none;
                     background: transparent;
-                }
+                }}
                 QScrollBar::add-page:vertical,
-                QScrollBar::sub-page:vertical {
+                QScrollBar::sub-page:vertical {{
                     background: transparent;
-                }
+                }}
             """)
         self._video_v_scroll.valueChanged.connect(self._on_video_scrollbar_changed)
         self._audio_v_scroll.valueChanged.connect(self._on_audio_scrollbar_changed)
@@ -1806,7 +1810,8 @@ class TimelineView(QGraphicsView):
         self._configure_layout_engine()
         area = self._layout_engine.area_layout()
         bar_w = self._video_v_scroll.width()
-        right_x = max(0, self.viewport().width() - bar_w - 2)
+        vp = self.viewport()
+        right_x = max(0, vp.width() - bar_w - 1)
 
         self._syncing_split_scrollbars = True
         try:
@@ -1836,10 +1841,13 @@ class TimelineView(QGraphicsView):
                     self._layout_state.audio_scroll_offset = current
                     rect = area.audio_area
 
-                top = self.mapFromScene(QPointF(0, rect.top())).y()
-                bottom = self.mapFromScene(QPointF(0, rect.bottom())).y()
+                # The bars are siblings of the viewport, so map its local
+                # geometry explicitly and clip away the fixed ruler band.
+                top = max(RULER_HEIGHT, self.mapFromScene(QPointF(0, rect.top())).y())
+                bottom = min(vp.height(), self.mapFromScene(QPointF(0, rect.bottom())).y())
                 height = max(0, int(bottom - top))
-                bar.setGeometry(right_x, int(top), bar_w, height)
+                origin = vp.mapTo(self, QPoint(right_x, int(top)))
+                bar.setGeometry(origin.x(), origin.y(), bar_w, height)
                 bar.setRange(minimum, maximum)
                 bar.setSingleStep(24)
                 bar.setPageStep(page_step)
@@ -14130,6 +14138,9 @@ class TimelineView(QGraphicsView):
         _invalidate_playhead_strips），所有 clip/ruler item 都不必重绘。
         PlayheadItem 本体不在场景中，仅作几何与命中测试参照。
         """
+        # Content stays continuous between tracks. Only the ruler and V/A
+        # boundaries span it; individual track rules belong to the headers.
+        self._paint_timeline_dividers(painter)
         playhead = self._playhead_item
         if playhead is None:
             return
@@ -14190,8 +14201,6 @@ class TimelineView(QGraphicsView):
         # 2. Top-left timecode panel is a dedicated child widget
         #    (self._corner_timecode_widget) — do NOT paint it here.
         ruler_h = int(RULER_HEIGHT * sy)
-        painter.setPen(QPen(QColor("#0A0A0C"), 1))
-        painter.drawLine(col_w - 1, 0, col_w - 1, vp.height())
 
         if self._timeline is None:
             # Keep the empty project state structurally recognizable: the
@@ -14200,10 +14209,6 @@ class TimelineView(QGraphicsView):
             track_top = ruler_h
             track_bottom = vp.height()
             split_y = track_top + max(0, track_bottom - track_top) // 2
-            divider_pen = QPen(QColor(get_color("track_header_divider")), 1)
-            painter.setPen(divider_pen)
-            painter.drawLine(0, split_y, col_w, split_y)
-
             label_font = QFont("SF Mono, Menlo, Consolas, Courier New, monospace", 12)
             label_font.setStyleHint(QFont.StyleHint.Monospace)
             label_font.setBold(True)
@@ -14219,10 +14224,12 @@ class TimelineView(QGraphicsView):
                 Qt.AlignmentFlag.AlignVCenter,
                 "A1",
             )
+            self._paint_timeline_dividers(painter, header_column=True)
             painter.end()
             return
 
         if not self._track_headers:
+            self._paint_timeline_dividers(painter, header_column=True)
             painter.end()
             return
 
@@ -14252,7 +14259,64 @@ class TimelineView(QGraphicsView):
                 continue
         painter.restore()
 
+        self._paint_timeline_dividers(painter, header_column=True)
         painter.end()
+
+    def _paint_timeline_dividers(
+        self, painter: QPainter, *, header_column: bool = False,
+    ) -> None:
+        """Join functional boundaries in viewport pixels, independent of scroll.
+
+        Header items are pinned at rounded viewport Y positions. Per-track
+        rules stay in that column; only ruler/V/A boundaries cross content.
+        Clip track rules to their V/A/S area when scrolling.
+        Neither layout geometry nor resize hit targets change here.
+        """
+        vp = self.viewport()
+        sy = self.transform().m22()
+        col_w = int(TRACK_HEADER_WIDTH * self.transform().m11())
+        ruler_h = int(RULER_HEIGHT * sy)
+        left = 0 if header_column else col_w
+        width = col_w if header_column else max(0, vp.width() - col_w)
+        rows = {ruler_h - 1}
+        if self._timeline is None:
+            rows.add(ruler_h + max(0, vp.height() - ruler_h) // 2)
+        else:
+            engine = self._layout_engine
+            area = engine.area_layout()
+            if header_column:
+                seen_types: set[str] = set()
+                for track in engine.all_ordered_tracks():
+                    track_rect = engine.track_rect(track.track_id)
+                    clip_area = (area.audio_area if track.track_type == "audio"
+                                 else area.subtitle_area if track.track_type == "subtitle"
+                                 else area.video_area)
+                    top = self.mapFromScene(QPointF(0, track_rect.top())).y()
+                    bottom = top + int(track_rect.height() * sy)
+                    clip_top = max(ruler_h, math.ceil(self.viewportTransform().map(
+                        QPointF(0, clip_area.top())).y()))
+                    clip_bottom = math.ceil(self.viewportTransform().map(
+                        QPointF(0, clip_area.bottom())).y())
+                    if clip_top <= bottom <= clip_bottom:
+                        rows.add(bottom)
+                    if track.track_type not in seen_types and clip_top - 1 <= top - 1 < clip_bottom:
+                        rows.add(top - 1)
+                    seen_types.add(track.track_type)
+            splitter = area.splitter_rect
+            if splitter.isValid():
+                rows.add(self.mapFromScene(QPointF(0, splitter.top())).y())
+                rows.add(self.mapFromScene(QPointF(0, splitter.bottom())).y() - 1)
+
+        painter.save()
+        painter.resetTransform()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        divider = QColor(get_color("timeline_divider"))
+        for y in rows:
+            if 0 <= y < vp.height():
+                painter.fillRect(left, y, width, 1, divider)
+        if header_column:
+            painter.fillRect(col_w - 1, 0, 1, vp.height(), divider)
+        painter.restore()
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         """
@@ -14325,10 +14389,8 @@ class TimelineView(QGraphicsView):
                 painter.setPen(QPen(Qt.PenStyle.NoPen))
                 painter.drawRect(track_rect)
 
-        # Keep the V/A splitter's generous hit target, while making its visible
-        # boundaries continuous with the two dark divider lines in the pinned
-        # track-header column.  This leaves the panel visually quiet without
-        # making the V/A resize affordance harder to use.
+        # Keep the V/A splitter's existing layout and generous hit target.
+        # Its two boundaries are drawn above items by the foreground pass.
         sr = area.splitter_rect
         if sr.isValid() and rect.intersects(sr):
             # The interior blends into the timeline canvas; only its two
@@ -14340,21 +14402,6 @@ class TimelineView(QGraphicsView):
                 min(rect.right(), sr.right()) - max(TRACK_HEADER_WIDTH, rect.left()),
                 sr.height(),
             ))
-
-            # Match TrackHeaderItem's top/bottom separators exactly.  The
-            # lines stop at the content boundary because the fixed header
-            # overlay paints the matching segments in the header column.
-            divider_pen = QPen(QColor(get_color("track_header_divider")), 1)
-            painter.setPen(divider_pen)
-            painter.drawLine(
-                QPointF(TRACK_HEADER_WIDTH, sr.top() - 0.5),
-                QPointF(rect.right(), sr.top() - 0.5),
-            )
-            painter.drawLine(
-                QPointF(TRACK_HEADER_WIDTH, sr.bottom() + 0.5),
-                QPointF(rect.right(), sr.bottom() + 0.5),
-            )
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
 
         # Draw vertical time markers
         self._draw_vertical_time_markers(painter, rect)
@@ -14380,10 +14427,6 @@ class TimelineView(QGraphicsView):
         painter.drawRect(
             QRectF(content_left, split_y, content_right - content_left, track_bottom - split_y)
         )
-
-        divider_pen = QPen(QColor(get_color("track_header_divider")), 1)
-        painter.setPen(divider_pen)
-        painter.drawLine(QPointF(content_left, split_y), QPointF(content_right, split_y))
 
         self._draw_vertical_time_markers(
             painter, QRectF(content_left, track_top, content_right - content_left, track_bottom - track_top)

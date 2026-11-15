@@ -9,6 +9,8 @@ Topos Color - Edit 模块专属设计 Token
 
 from __future__ import annotations
 
+from src.shared.ui.style_sheet import C
+
 # ============================================================================
 # 设计 Token - 颜色
 # ============================================================================
@@ -23,6 +25,7 @@ EDIT_COLORS = {
     # 边框 — 半透明线条
     "border": "#34363E",        # 标准边框
     "border_subtle": "#282A31", # 细微边框
+    "timeline_divider": C.PANEL_DIVIDER,  # 功能区边界，与工作区面板黑线一致
 
     # 文字
     "text": "#D6D8DE",          # 主文字颜色
@@ -60,7 +63,7 @@ EDIT_COLORS = {
 
     # 时间刻度尺专用 (DaVinci-like 层级)
     "ruler_bg": "#202025",              # 刻度尺背景
-    "ruler_bottom_line": "#34343A",     # ruler 底部分隔线
+    "ruler_bottom_line": C.PANEL_DIVIDER,
     "ruler_major_tick": "#5C606A",      # 主刻度线
     "ruler_medium_tick": "#3C4049",     # 中刻度线
     "ruler_minor_tick": "#2D3037",      # 小刻度线
@@ -73,7 +76,7 @@ EDIT_COLORS = {
     "track_header_bg": "#242429",           # 轨道头背景
     "track_header_bg_alt": "#202025",       # 轨道头交替背景
     "track_header_bg_selected": "#2A2A30",
-    "track_header_divider": "#17171B",      # 轨道头分隔线
+    "track_header_divider": C.PANEL_DIVIDER,
     "track_header_target_bar": "#D8872B",   # 目标轨指示条
     "track_header_badge_video": "#743841",  # 视频轨 badge (红褐色)
     "track_header_badge_audio": "#743841",  # 音频轨 badge (红褐色)
@@ -81,7 +84,7 @@ EDIT_COLORS = {
     # 左上 timecode 面板
     "timecode_panel_bg": "#202025",     # timecode 面板背景
     "timecode_panel_text": "#D8D9DE",   # timecode 文字色
-    "timecode_panel_bottom_line": "#34343A",  # 面板底部分隔线
+    "timecode_panel_bottom_line": C.PANEL_DIVIDER,
 
     # 波形专用
     "waveform_bg_dark": "#152D24",

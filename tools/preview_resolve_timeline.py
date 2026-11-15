@@ -15,6 +15,7 @@ from fractions import Fraction
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 from typing import Any
 
@@ -83,8 +84,18 @@ def main() -> int:
     parser.add_argument("--project-only", action="store_true")
     parser.add_argument("--speed-dialog", action="store_true", help="Open the real speed dialog for visual review")
     parser.add_argument("--viewer", action="store_true", help="Include the real Program Viewer and an isolated trim-preview trigger")
+    parser.add_argument("--screenshot", type=Path, help="Save the review window and exit")
+    parser.add_argument("--size", default="1420x660", help="Review window WIDTHxHEIGHT")
+    parser.add_argument("--extra-tracks", type=int, default=0,
+                        help="Add empty video/audio tracks to review overflow scrolling")
     args = parser.parse_args()
-    media = args.media or [ROOT / "tests/test_videos/2K_h264.mp4", ROOT / "tests/test_videos/测试素材01.mov"]
+    with tempfile.TemporaryDirectory(prefix="topos-timeline-review-") as config:
+        os.environ["TOPOS_CONFIG_PATH"] = str(Path(config) / "config.json")
+        return _show_preview(args)
+
+
+def _show_preview(args: argparse.Namespace) -> int:
+    media = args.media or [ROOT / "tests/test_videos/2K_h264.mp4", ROOT / "tests/test_videos/2K_H265.mov"]
     from PyQt6.QtWidgets import QApplication, QMainWindow
     from PyQt6.QtCore import QTimer
     from src.features.edit.ui.timeline_panel import TimelinePanel
@@ -94,6 +105,16 @@ def main() -> int:
     app.setStyle("Fusion")
     app.setStyleSheet(DARK_THEME)
     project, sequence = build_review_project(media)
+    if args.extra_tracks > 0:
+        from src.features.edit.core.timeline_v2 import EditTrack
+        sequence = replace(sequence, **{
+            f"{kind}_tracks": getattr(sequence, f"{kind}_tracks") + tuple(
+                EditTrack(f"{prefix}{index + 1}", f"{kind.title()} {index + 1}", kind, index)
+                for index in range(len(getattr(sequence, f"{kind}_tracks")),
+                                   len(getattr(sequence, f"{kind}_tracks")) + args.extra_tracks)
+            )
+            for kind, prefix in (("video", "v"), ("audio", "a"))
+        })
     if args.save_project:
         from src.features.edit.core.edit_project_io import EditProjectIO
         args.save_project.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +136,8 @@ def main() -> int:
         return 0
     window = QMainWindow()
     window.setWindowTitle("Topos — Resolve Timeline UI Review")
-    window.resize(1420, 660)
+    width, height = (int(value) for value in args.size.split("x"))
+    window.resize(width, height)
     panel = TimelinePanel()
     panel.set_project(project)
     panel.load_timeline(sequence)
@@ -148,6 +170,16 @@ def main() -> int:
     QTimer.singleShot(200, lambda: panel.set_playhead_frame(round(float(sequence.fps) * 4)))
     if args.speed_dialog:
         QTimer.singleShot(300, lambda: panel.timeline_view._on_change_clip_speed_dialog_requested("v1-0", "v1"))
+    if args.screenshot:
+        def capture() -> None:
+            args.screenshot.parent.mkdir(parents=True, exist_ok=True)
+            if not window.grab().save(str(args.screenshot.resolve())):
+                raise RuntimeError(f"Could not save {args.screenshot}")
+            print(args.screenshot.resolve(), flush=True)
+            window.close()
+            app.quit()
+
+        QTimer.singleShot(3000, capture)
     return app.exec()
 
 

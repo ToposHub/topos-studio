@@ -7447,32 +7447,22 @@ class TrackHeaderItem(QGraphicsObject):
         painter.setPen(QPen(Qt.PenStyle.NoPen))
         painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, self._track_height))
 
-        # Subtle top-row band, like Resolve's control strip inside each header.
+        # Resolve's control strip has its own continuous black lower edge.
         if use_two_rows:
             painter.setBrush(QBrush(QColor(get_color("track_header_bg_alt"))))
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, min(26, self._track_height)))
-            painter.setPen(QPen(QColor(255, 255, 255, 10), 1))
-            painter.drawLine(QPointF(0, 25.5), QPointF(TRACK_HEADER_WIDTH, 25.5))
+            painter.fillRect(0, 25, TRACK_HEADER_WIDTH, 1,
+                             QColor(get_color("timeline_divider")))
 
-        # Bottom separator line (#0A0A0C)
-        painter.setPen(QPen(QColor(get_color("track_header_divider")), 1))
-        painter.drawLine(
-            QPointF(0, self._track_height - 0.5),
-            QPointF(TRACK_HEADER_WIDTH, self._track_height - 0.5)
-        )
+        # Structural borders use the same black as the surrounding panels.
+        divider = QColor(get_color("timeline_divider"))
+        # The existing resize/gap area is part of boundingRect(). Keep the
+        # rule there so a full-height clip's selection outline stays visible.
+        painter.fillRect(0, self._track_height, TRACK_HEADER_WIDTH, 1, divider)
 
         # Strong right boundary: the timeline ruler/content starts immediately after this.
-        painter.setPen(QPen(QColor("#0A0A0C"), 1))
-        painter.drawLine(
-            QPointF(TRACK_HEADER_WIDTH - 0.5, 0),
-            QPointF(TRACK_HEADER_WIDTH - 0.5, self._track_height),
-        )
-
-        # Top separator line for the topmost track
-        if self._is_topmost:
-            painter.setPen(QPen(QColor(get_color("track_header_divider")), 1))
-            painter.drawLine(QPointF(0, 0.5), QPointF(TRACK_HEADER_WIDTH, 0.5))
+        painter.fillRect(TRACK_HEADER_WIDTH - 1, 0, 1, self._track_height, divider)
 
         # Clip hover highlight: keep the relationship visible without drawing
         # a bright rectangle around every header touched by linked clips.
@@ -8961,13 +8951,10 @@ class TimecodeRulerItem(QGraphicsObject):
         painter.setPen(QPen(Qt.PenStyle.NoPen))
         painter.drawRect(self.boundingRect())
 
-        # Bottom separator line: #292B31 1px
-        bottom_line_color = QColor(get_color("ruler_bottom_line"))
-        painter.setPen(QPen(bottom_line_color, 1))
-        painter.drawLine(
-            int(self.boundingRect().left()), self._ruler_height - 1,
-            int(self.boundingRect().right()), self._ruler_height - 1,
-        )
+        # One logical pixel joins the pinned timecode panel's lower edge.
+        painter.fillRect(QRectF(self.boundingRect().left(), self._ruler_height - 1,
+                               self.boundingRect().width(), 1),
+                         QColor(get_color("timeline_divider")))
 
         # Get visible rect for efficient rendering
         exposed_rect = option.exposedRect.intersected(self.boundingRect())

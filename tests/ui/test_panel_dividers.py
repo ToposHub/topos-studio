@@ -5,9 +5,9 @@ import sys
 
 import pytest
 
-from PyQt6.QtCore import QPoint, QRect, Qt
-from PyQt6.QtGui import QColor, QImage, QPainter, QPaintEvent
-from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStyleFactory, QTabBar, QTabWidget, QWidget
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PyQt6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPaintEvent
+from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStyle, QStyleFactory, QTabBar, QTabWidget, QWidget
 
 from src.shared.ui.style_sheet import C, DARK_THEME
 from src.shared.ui.dock_tab_style import apply_dock_tab_bar_style
@@ -29,12 +29,12 @@ def test_dock_panels_disable_platform_borders_for_custom_painting() -> None:
     assert "border: none" in dock_style
 
 
-def test_dock_divider_keeps_the_resize_hit_area_transparent() -> None:
+def test_dock_divider_reserves_only_the_visible_boundary() -> None:
     divider_style = _style_block("QMainWindow::separator")
 
     assert "background-color: transparent" in divider_style
-    assert "width: 8px" in divider_style
-    assert "height: 8px" in divider_style
+    assert "width: 1px" in divider_style
+    assert "height: 1px" in divider_style
     assert "border: none" in divider_style
     assert C.ORANGE_PRESS not in divider_style
 
@@ -67,6 +67,87 @@ def test_panel_dock_paints_the_custom_divider_overlay(qapp) -> None:
     assert dock._divider_overlay.isVisible()
     assert divider_pixels >= max(2, (image.width() + image.height()) // 2)
     host.close()
+
+
+@pytest.mark.parametrize("dpr", [1, 2])
+@pytest.mark.parametrize("orientation", [Qt.Orientation.Horizontal, Qt.Orientation.Vertical])
+def test_dock_surfaces_reach_the_rule_and_keep_native_edge_drag(
+    qapp, qtbot, dpr: int, orientation: Qt.Orientation,
+) -> None:
+    class Window(QMainWindow):
+        def paintEvent(self, event: QPaintEvent) -> None:
+            super().paintEvent(event)
+            painter = QPainter(self)
+            paint_shared_dock_dividers(self, painter)
+            painter.end()
+
+    host = Window()
+    qtbot.addWidget(host)
+    host.resize(600, 400)
+    host.setStyleSheet(DARK_THEME)
+    colors = ("#433145", "#244c48")
+    docks = []
+    for color in colors:
+        dock = PanelDockWidget("Panel", host)
+        content = QWidget()
+        content.setMinimumSize(80, 80)
+        content.setStyleSheet(f"background: {color};")
+        dock.setWidget(content)
+        title = QWidget()
+        title.setFixedHeight(0)
+        dock.setTitleBarWidget(title)
+        host.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        docks.append(dock)
+    host.splitDockWidget(*docks, orientation)
+    host.show()
+    qapp.processEvents()
+    assert host.style().pixelMetric(QStyle.PixelMetric.PM_DockWidgetSeparatorExtent, None, host) == 1
+
+    def check_surfaces() -> QPoint:
+        first, second = [dock.geometry() for dock in docks]
+        image = QImage(host.width() * dpr, host.height() * dpr, QImage.Format.Format_RGB32)
+        image.setDevicePixelRatio(dpr)
+        image.fill(QColor("#ee00ee"))
+        painter = QPainter(image)
+        host.render(painter)
+        painter.end()
+        if orientation == Qt.Orientation.Horizontal:
+            assert second.left() - first.right() == 2
+            seam = QPoint(first.right() + 1, first.center().y())
+            offsets = (QPoint(-1, 0), QPoint(), QPoint(1, 0))
+        else:
+            assert second.top() - first.bottom() == 2
+            seam = QPoint(first.center().x(), first.bottom() + 1)
+            offsets = (QPoint(0, -1), QPoint(), QPoint(0, 1))
+        for offset, color in zip(offsets, (colors[0], C.PANEL_DIVIDER, colors[1])):
+            pixel = (seam + offset) * dpr
+            assert image.pixelColor(pixel).name() == color
+        return seam
+
+    seam = check_surfaces()
+    # Native Qt dock separators extend two pixels into each adjacent pane.
+    point = seam + (QPoint(2, 0) if orientation == Qt.Orientation.Horizontal else QPoint(0, 2))
+    target = host.childAt(point)
+    assert target is host.childAt(seam)
+    assert target not in (docks[0], docks[1], docks[0].widget(), docks[1].widget())
+    before = docks[0].size()
+    local = target.mapFrom(host, point)
+    delta = QPoint(35, 0) if orientation == Qt.Orientation.Horizontal else QPoint(0, 35)
+    qtbot.mousePress(target, Qt.MouseButton.LeftButton, pos=local)
+    move = QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(local + delta),
+        QPointF(target.mapToGlobal(local + delta)), Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(target, move)
+    qapp.processEvents()
+    qtbot.mouseRelease(target, Qt.MouseButton.LeftButton, pos=local + delta)
+    qapp.processEvents()
+    assert docks[0].size() != before
+    check_surfaces()
+    host.resize(640, 440)
+    qapp.processEvents()
+    check_surfaces()
 
 
 @pytest.mark.skipif(

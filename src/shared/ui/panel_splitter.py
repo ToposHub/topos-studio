@@ -1,7 +1,8 @@
-"""Thin panel rules with a separate, generous native resize hit area.
+"""One-pixel panel boundaries with Qt's overlapping native resize target.
 
-The handle owns its line and the short branches of nested splitters that end
-at that handle. Content widgets, headers and margins are never painted over.
+Only the rule occupies layout space. Qt expands a narrow splitter handle over
+the adjacent panes for dragging, while its contents/mask stay on the boundary.
+Panel backgrounds and header rules therefore meet at the visible black line.
 """
 
 from __future__ import annotations
@@ -9,14 +10,14 @@ from __future__ import annotations
 from weakref import WeakSet
 
 from PyQt6 import sip
-from PyQt6.QtCore import QByteArray, QPoint, QRect, Qt
+from PyQt6.QtCore import QByteArray, QRect, Qt
 from PyQt6.QtGui import QColor, QHideEvent, QPaintEvent, QResizeEvent, QShowEvent
 from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QSplitter, QSplitterHandle, QWidget
 
 from src.shared.ui.style_sheet import C
 
-PANEL_RESIZE_EXTENT = 8
+PANEL_RULE_WIDTH = 1
 
 _splitters: WeakSet[PanelSplitter] = WeakSet()
 
@@ -30,15 +31,8 @@ def splitter_rules(window: QWidget) -> list[tuple[Qt.Orientation, QRect]]:
         for index in range(1, splitter.count()):
             handle = splitter.handle(index)
             if handle is not None and handle.isVisible():
-                origin = handle.mapTo(window, QPoint())
-                rect = QRect(origin, handle.size())
-                if splitter.orientation() == Qt.Orientation.Horizontal:
-                    rect = QRect(rect.left() + (rect.width() - 1) // 2,
-                                 rect.top(), 1, rect.height())
-                else:
-                    rect = QRect(rect.left(),
-                                 rect.top() + (rect.height() - 1) // 2,
-                                 rect.width(), 1)
+                content = handle.contentsRect()
+                rect = QRect(handle.mapTo(window, content.topLeft()), content.size())
                 if window.rect().intersects(rect):
                     rules.append((splitter.orientation(), rect))
     return rules
@@ -53,37 +47,11 @@ class _PanelSplitterHandle(QSplitterHandle):
         del event
         painter = QPainter(self)
         color = QColor(C.PANEL_DIVIDER)
-        vertical = self.orientation() == Qt.Orientation.Horizontal
-        center = (self.width() - 1) // 2 if vertical else (self.height() - 1) // 2
-        if vertical:
-            painter.fillRect(center, 0, 1, self.height(), color)
-        else:
-            painter.fillRect(0, center, self.width(), 1, color)
-
-        # A nested rule that actually reaches this gutter gets one branch to
-        # its center. Rules separated by a toolbar or padding do not qualify.
-        window = self.window()
-        origin = self.mapTo(window, QPoint())
-        bounds = QRect(origin, self.size())
-        for orientation, rule in splitter_rules(window):
-            if orientation == self.orientation():
-                continue
-            if vertical and bounds.top() <= rule.top() <= bounds.bottom():
-                y = rule.top() - origin.y()
-                if rule.right() == bounds.left() - 1:
-                    painter.fillRect(0, y, center + 1, 1, color)
-                elif rule.left() == bounds.right() + 1:
-                    painter.fillRect(center, y, self.width() - center, 1, color)
-            elif not vertical and bounds.left() <= rule.left() <= bounds.right():
-                x = rule.left() - origin.x()
-                if rule.bottom() == bounds.top() - 1:
-                    painter.fillRect(x, 0, 1, center + 1, color)
-                elif rule.top() == bounds.bottom() + 1:
-                    painter.fillRect(x, center, 1, self.height() - center, color)
+        painter.fillRect(self.contentsRect(), color)
 
 
 class PanelSplitter(QSplitter):
-    """Native QSplitter dragging with an eight-pixel target and a 1px rule."""
+    """A 1px layout seam; Qt supplies the wider overlapping drag target."""
 
     def __init__(
         self,
@@ -91,7 +59,7 @@ class PanelSplitter(QSplitter):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(orientation, parent)
-        self.setHandleWidth(PANEL_RESIZE_EXTENT)
+        self.setHandleWidth(PANEL_RULE_WIDTH)
         _splitters.add(self)
         self.splitterMoved.connect(self._refresh_rules)
 
@@ -100,9 +68,9 @@ class PanelSplitter(QSplitter):
 
     def restoreState(self, state: QByteArray) -> bool:
         restored = super().restoreState(state)
-        # Qt persists handleWidth alongside pane sizes. Old 1px states must
-        # not shrink the new hit target after a workspace has been restored.
-        self.setHandleWidth(PANEL_RESIZE_EXTENT)
+        # Old states persist the former 8px gutter. Keep restored panel
+        # surfaces adjacent instead of reintroducing the parent background.
+        self.setHandleWidth(PANEL_RULE_WIDTH)
         self._refresh_rules()
         return restored
 

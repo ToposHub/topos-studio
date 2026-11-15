@@ -1,6 +1,6 @@
-"""Video export settings panel — the "compose a task" area above the queue.
+"""Video export settings inspector — compose a task beside the viewer.
 
-This panel is the upper half of the Deliver workspace. It owns the live
+This panel is the left sidebar of the Deliver workspace. It owns the live
 draft of a video task (timeline / range / codec / audio / output) and
 exposes two commands the workspace wires to the controller:
 
@@ -18,12 +18,12 @@ Layout:
     ├─ File name / Location                                        │
     ├─ Video / Audio / File                                        │
     ├──────────────────────────────────────────────────────────────┤
-    │ preflight message                         [Add] [Add & Start] │
+    │ preflight message                       [Add to Render Queue] │
     └──────────────────────────────────────────────────────────────┘
 
 The settings are deliberately stacked like the Deliver sidebar in DaVinci
-Resolve.  The sections use the same collapsible export-section shell as the
-existing image batch / Quick Export panels, while the action bar stays pinned
+Resolve. Advanced and subtitle parameters live in collapsible groups, while
+the action bar stays pinned
 below the scroll area so it is never hidden inside an advanced section.
 
 The panel itself performs **no** export work and holds no queue reference
@@ -37,7 +37,7 @@ import logging
 import os
 from typing import Any, List, Optional, Tuple
 
-from PyQt6.QtCore import QStandardPaths, Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, QStandardPaths, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -59,6 +59,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QTabBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -294,7 +295,7 @@ def _pix_fmt_display_name(name: str) -> str:
 
 
 class VideoExportSettingsPanel(QWidget):
-    """Upper Deliver panel: compose one or more video tasks.
+    """Left Deliver inspector: compose one or more video tasks.
 
     Signals:
         add_to_queue_requested(list): the user clicked "Add to queue". Carries
@@ -363,104 +364,105 @@ class VideoExportSettingsPanel(QWidget):
 
     def _setup_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # Resolve-style preset strip is the visual header of this inspector.
+        header = QWidget()
+        header.setObjectName("DeliverSettingsHeader")
+        header.setFixedHeight(28)
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(10, 0, 0, 0)
+        self._settings_title = QLabel()
+        self._settings_title.setObjectName("DeliverSettingsTitle")
+        self._settings_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        header_row.addWidget(self._settings_title, 1)
+        more = QToolButton()
+        more.setObjectName("DeliverSettingsMore")
+        more.setText("⋯")
+        more.setToolTip(I18N.tr("deliver.queue.more", "More"))
+        more.setFixedSize(34, 27)
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._settings_menu = QMenu(more)
+        more.setMenu(self._settings_menu)
+        header_row.addWidget(more)
+        outer.addWidget(header)
         outer.addWidget(self._build_preset_bar())
-        # Resolve keeps the output identity immediately below the preset
-        # strip.  It must not be hidden in the File tab because it is the
-        # first thing users need to confirm before adding a render job.
         outer.addWidget(self._build_output_header())
         outer.addWidget(self._build_render_mode_selector())
-        # Timeline and range are rendered by the live Deliver timeline panel.
-        # Keep the real controls here as the draft owner, then reparent this
-        # compact bar into TimelinePanel only while Deliver is active.
         self._deliver_timeline_controls = self._build_timeline_range_controls()
         self._deliver_timeline_controls.hide()
 
-        # Stack the sections vertically inside the Deliver dock.  The old
-        # three-column implementation required ~950 px and consequently
-        # showed only a narrow slice when the Deliver dock was placed on the
-        # right side of the main window.  A vertical settings scroll matches
-        # the existing Quick Export / image batch panels and keeps every
-        # video control reachable at normal dock widths.
-        settings_scroll = QScrollArea()
-        settings_scroll.setWidgetResizable(True)
-        settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        settings_scroll.setObjectName("VideoSettingsScroll")
-
-        sections_host = QWidget()
-        sections_layout = QVBoxLayout(sections_host)
-        sections_layout.setContentsMargins(0, 0, 4, 0)
-        sections_layout.setSpacing(10)
-        # Resolve-style mode tabs: video and audio/delivery are two related
-        # inspectors, not two long sections competing for vertical space.
+        # Tabs stay pinned while the active inspector scrolls beneath them.
+        tab_host = QWidget()
+        tabs_row = QHBoxLayout(tab_host)
+        tabs_row.setContentsMargins(44, 10, 44, 10)
+        tabs_row.setSpacing(0)
         self._mode_tabs = QTabBar()
         self._mode_tabs.setObjectName("DeliverModeTabs")
-        self._mode_tabs.setExpanding(False)
+        self._mode_tabs.setExpanding(True)
         self._mode_tabs.setDrawBase(False)
         self._mode_tabs.addTab(I18N.tr("deliver.video.video_settings", "Video"))
         self._mode_tabs.addTab(I18N.tr("deliver.video.audio", "Audio"))
         self._mode_tabs.addTab(I18N.tr("deliver.video.file", "File"))
-        self._mode_tabs.setCurrentIndex(0)
-        self._mode_tabs.currentChanged.connect(self._on_mode_tab_changed)
-        sections_layout.addWidget(self._mode_tabs)
+        tabs_row.addWidget(self._mode_tabs)
+        outer.addWidget(tab_host)
 
         self._mode_stack = QStackedWidget()
         self._mode_stack.setObjectName("DeliverModeStack")
-        self._mode_stack.addWidget(
-            self._make_tab_page(self._build_video_section(), "VideoTabPage")
-        )
-        self._mode_stack.addWidget(self._make_tab_page(self._build_audio_section(), "AudioTabPage"))
-        self._mode_stack.addWidget(self._make_tab_page(self._build_file_section(), "FileTabPage"))
-        sections_layout.addWidget(self._mode_stack, 1)
+        for content, name in (
+            (self._build_video_section(), "VideoTabPage"),
+            (self._build_audio_section(), "AudioTabPage"),
+            (self._build_file_section(), "FileTabPage"),
+        ):
+            # Each page owns its scroll area, so a long inactive File/Audio
+            # inspector cannot force a scrollbar on a collapsed Video page.
+            scroll = QScrollArea()
+            scroll.setObjectName("VideoSettingsScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setWidget(self._make_tab_page(content, name))
+            scroll.viewport().setStyleSheet(f"background: {C.BG_PANEL};")
+            self._mode_stack.addWidget(scroll)
+        self._mode_tabs.currentChanged.connect(self._on_mode_tab_changed)
+        outer.addWidget(self._mode_stack, 1)
 
-        # Forms should read like a real Deliver inspector at both dock and
-        # full-page widths.  The previous fixed-size fields floated in the
-        # middle of a very wide group box, creating the large empty gutters
-        # visible in the page screenshot.
-        for widget_type in (QComboBox, QLineEdit, QSpinBox):
-            for field in sections_host.findChildren(widget_type):
-                field.setSizePolicy(
-                    QSizePolicy.Policy.Expanding,
-                    QSizePolicy.Policy.Fixed,
-                )
-                field.setMaximumWidth(360)
-
-        settings_scroll.setWidget(sections_host)
-        settings_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        settings_scroll.viewport().setStyleSheet(
-            f"background-color: {C.BG_PANEL};"
-        )
-        outer.addWidget(settings_scroll, 1)
-
-        # Keep actions outside the scroll area.  This is important when the
-        # user collapses Audio & Delivery or works in a short Deliver dock.
+        footer = QWidget()
+        footer.setObjectName("DeliverSettingsFooter")
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(12, 8, 12, 8)
+        footer_layout.setSpacing(6)
         self._preflight_label = QLabel("")
         self._preflight_label.setObjectName("PreflightSummary")
         self._preflight_label.setWordWrap(True)
-        self._preflight_label.setStyleSheet("color: #9AA0A6; font-size: 12px;")
-        outer.addWidget(self._preflight_label)
-
+        footer_layout.addWidget(self._preflight_label)
         action_bar = QHBoxLayout()
-        action_bar.setContentsMargins(0, 0, 0, 0)
         action_bar.setSpacing(8)
+        # Reuse the actual estimate and its codec/quality visibility rules.
+        action_bar.addWidget(self._estimated_size_label)
         action_bar.addStretch(1)
         self._add_btn = QPushButton(
-            I18N.tr("deliver.video.add_to_queue", "Add to Video Queue")
+            I18N.tr("deliver.video.add_render_queue", "Add to Render Queue")
         )
         self._add_btn.setObjectName("PrimaryButton")
-        self._add_btn.setMinimumHeight(32)
+        self._add_btn.setMinimumHeight(26)
         self._add_and_start_btn = QPushButton(
-            I18N.tr("deliver.video.add_and_start", "Add & Start")
+            I18N.tr("deliver.video.add_and_start", "Add & Start"), self
         )
-        self._add_and_start_btn.setMinimumHeight(32)
+        self._add_and_start_btn.hide()
+        add_start = self._settings_menu.addAction(self._add_and_start_btn.text())
+        add_start.triggered.connect(self._add_and_start_btn.click)
+        self._settings_menu.addSeparator()
+        self._preset_browser_action = self._settings_menu.addAction(
+            I18N.tr("deliver.preset.show_browser", "Show Preset Browser")
+        )
+        self._preset_browser_action.setCheckable(True)
+        self._preset_browser_action.toggled.connect(self._preset_browser.setVisible)
+        save = self._settings_menu.addAction(self._save_preset_btn.text())
+        save.triggered.connect(self._on_save_as_preset)
         action_bar.addWidget(self._add_btn)
-        action_bar.addWidget(self._add_and_start_btn)
-        outer.addLayout(action_bar)
+        footer_layout.addLayout(action_bar)
+        outer.addWidget(footer)
 
     def _make_tab_page(self, content: QWidget, object_name: str) -> QWidget:
         """Create a compact tab content frame using the panel surface tokens."""
@@ -470,7 +472,8 @@ class VideoExportSettingsPanel(QWidget):
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
-        page_layout.addWidget(content, 1)
+        page_layout.addWidget(content)
+        page_layout.addStretch(1)
         return page
 
     def _on_mode_tab_changed(self, index: int) -> None:
@@ -498,163 +501,119 @@ class VideoExportSettingsPanel(QWidget):
         return section
 
     def _apply_panel_style(self) -> None:
-        """Match the image batch and Quick Export dark/orange visual system."""
-        self.setStyleSheet(
-            f"""
-            QWidget#VideoDeliverSettingsPanel {{
-                background-color: {C.BG_PANEL};
-                color: {C.TEXT_SECONDARY};
+        """Use shared theme tokens with Resolve's compact inspector hierarchy."""
+        self.setStyleSheet(f"""
+            QWidget#VideoDeliverSettingsPanel, QFrame#VideoTabPage,
+            QFrame#AudioTabPage, QFrame#FileTabPage {{
+                background: {C.BG_PANEL}; color: {C.TEXT_SECONDARY}; border: none;
             }}
-            ExportSectionWidget#DeliverCollapsibleSection {{
-                background-color: {C.BG_PANEL};
-                border: 1px solid {C.BORDER_DARK};
-                border-radius: 4px;
+            QWidget#DeliverSettingsHeader {{
+                background: {C.BG_DARK}; border-bottom: 1px solid {C.PANEL_DIVIDER};
             }}
-            QTabBar#DeliverModeTabs {{
-                background-color: {C.BG_PANEL};
-                qproperty-drawBase: 0;
-                border: none;
+            QLabel#DeliverSettingsTitle {{ color: {C.TEXT_BRIGHT}; font-size: 12px; font-weight: 600; }}
+            QToolButton#DeliverSettingsMore {{
+                color: {C.TEXT_HINT}; background: transparent; border: none;
+                border-left: 1px solid {C.PANEL_DIVIDER}; font-size: 18px;
             }}
+            QToolButton#DeliverSettingsMore::menu-indicator {{ image: none; }}
+            QWidget#DeliverOutputHeader, QWidget#DeliverRenderMode,
+            QWidget#VideoPresetBar {{ border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QWidget#DeliverSettingsFooter {{ border-top: 1px solid {C.PANEL_DIVIDER}; }}
+            QTabBar#DeliverModeTabs {{ background: transparent; border: none; }}
             QTabBar#DeliverModeTabs::tab {{
-                background-color: {C.BG_BUTTON};
-                color: {C.TEXT_LABEL};
-                border: 1px solid {C.BORDER_MID};
-                border-bottom: none;
-                border-radius: 4px 4px 0 0;
-                padding: 5px 10px;
-                min-width: 72px;
-                font-size: 11px;
-                font-weight: 600;
+                background: {C.BG_DARK}; color: {C.TEXT_HINT};
+                border: 1px solid {C.PANEL_DIVIDER}; border-left: none;
+                padding: 3px 8px; font-size: 11px; min-height: 16px; border-radius: 0;
             }}
-            QTabBar#DeliverModeTabs::tab:hover:!selected {{
-                background-color: {C.BG_BUTTON_HOVER};
-                color: {C.TEXT_BRIGHT};
+            QTabBar#DeliverModeTabs::tab:first {{ border-left: 1px solid {C.PANEL_DIVIDER}; }}
+            QTabBar#DeliverModeTabs::tab:selected {{ background: {C.BG_DEEPEST}; color: {C.TEXT_BRIGHT}; }}
+            QTabBar#DeliverModeTabs::tab:hover:!selected {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
+            QGroupBox#VideoSettingsSection, QGroupBox#AudioSection, QGroupBox#FileSection {{
+                background: {C.BG_PANEL}; border: none; margin: 0; padding: 0;
             }}
-            QTabBar#DeliverModeTabs::tab:selected {{
-                background-color: {C.ORANGE_PRESS};
-                border-color: {C.ORANGE_PRESS};
-                color: #ffffff;
-            }}
-            QFrame#VideoTabPage, QFrame#AudioTabPage, QFrame#FileTabPage {{
-                background-color: {C.BG_PANEL};
-                border: 1px solid {C.BORDER_DARK};
-                border-radius: 0 4px 4px 4px;
-            }}
-            QGroupBox#VideoSettingsSection,
-            QGroupBox#AudioDeliverySection,
-            QGroupBox#AudioSection,
-            QGroupBox#FileSection {{
-                background-color: {C.BG_PANEL};
-                border: none;
-                margin: 0;
-                padding: 0;
-            }}
-            QGroupBox::title {{
-                height: 0;
-                padding: 0;
-                color: transparent;
-            }}
+            QGroupBox::title {{ height: 0; padding: 0; color: transparent; }}
             QLineEdit, QSpinBox {{
-                min-height: 26px;
-                background-color: {C.BG_INPUT};
-                color: {C.TEXT_BRIGHT};
-                border: 1px solid {C.BORDER};
-                border-radius: 3px;
-                padding: 2px 6px;
+                min-height: 18px; max-height: 18px; padding: 2px 6px;
+                background: {C.BG_INPUT}; color: {C.TEXT_BRIGHT};
+                border: 1px solid {C.BORDER}; border-radius: 4px;
             }}
-            QLineEdit:focus, QSpinBox:focus {{
-                border-color: {C.ORANGE};
-            }}
+            QLineEdit:focus, QSpinBox:focus {{ border-color: {C.ORANGE}; }}
             QPushButton {{
-                background-color: {C.BG_BUTTON};
-                color: {C.TEXT_BRIGHT};
-                border: 1px solid {C.BORDER_MID};
-                border-radius: 3px;
-                padding: 5px 10px;
+                background: {C.BG_BUTTON}; color: {C.TEXT_BRIGHT};
+                border: 1px solid {C.BORDER_MID}; border-radius: 4px; padding: 3px 10px;
             }}
-            QPushButton:hover {{
-                background-color: {C.BG_BUTTON_HOVER};
-                border-color: {C.ORANGE};
+            QPushButton:hover {{ background: {C.BG_BUTTON_HOVER}; border-color: {C.ORANGE}; }}
+            QPushButton#PrimaryButton {{ background: {C.ORANGE_PRESS}; border-color: {C.ORANGE_PRESS}; color: white; }}
+            QPushButton#PrimaryButton:hover {{ background: {C.ORANGE_HOVER}; }}
+            QScrollArea#VideoSettingsScroll {{ background: {C.BG_PANEL}; border: none; }}
+            QLabel {{ color: {C.TEXT_LABEL}; font-size: 11px; background: transparent; }}
+            QLabel#EstimatedFileSize {{ color: {C.TEXT_PRIMARY}; font-size: 10px; }}
+            QFrame#DeliverSectionRule {{ background: {C.PANEL_DIVIDER}; border: none; }}
+            QToolButton#DeliverDisclosure {{
+                color: {C.TEXT_LABEL}; background: transparent; border: none;
+                text-align: left; padding: 0; font-size: 11px;
             }}
-            QPushButton#PrimaryButton {{
-                background-color: {C.ORANGE_PRESS};
-                color: white;
-                border: none;
-                font-weight: 600;
-            }}
-            QPushButton#PrimaryButton:hover {{
-                background-color: {C.ORANGE_HOVER};
-            }}
-            QScrollArea#VideoSettingsScroll {{
-                background-color: {C.BG_PANEL};
-                border: none;
-            }}
-            QLabel {{ color: {C.TEXT_SECONDARY}; }}
-            QLabel#VideoSettingsTitle {{
-                color: {C.TEXT_BRIGHT};
-                font-size: 13px;
-                font-weight: 600;
-            }}
-            """
-        )
+            QToolButton#DeliverDisclosure:hover {{ color: {C.TEXT_BRIGHT}; }}
+        """)
 
-        # ExportSectionWidget intentionally owns its own compact content
-        # stylesheet, and QComboBox uses a Fusion style for reliable macOS
-        # popup rendering.  Apply the shared input tokens directly as well so
-        # every field keeps the same visible shell inside the collapsible
-        # sections, not just the same popup list.
-        input_style = f"""
-            QLineEdit, QSpinBox {{
-                background-color: {C.BG_INPUT};
-                color: {C.TEXT_BRIGHT};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-                padding: 3px 7px;
-                min-height: 26px;
-            }}
-            QLineEdit:hover, QSpinBox:hover {{
-                background-color: {C.BG_ACTIVE};
-                border-color: {C.BORDER_HOVER};
-            }}
-            QLineEdit:focus, QSpinBox:focus {{
-                border-color: {C.ORANGE};
-            }}
-            QSpinBox::up-button, QSpinBox::down-button {{
-                width: 16px;
-                border: none;
-                background: transparent;
-            }}
-            QCheckBox {{ color: {C.TEXT_SECONDARY}; spacing: 6px; }}
-            QCheckBox::indicator {{
-                width: 13px;
-                height: 13px;
-                border: 1px solid {C.BORDER_MID};
-                border-radius: 2px;
-                background: {C.BG_INPUT};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {C.ORANGE_PRESS};
-                border-color: {C.ORANGE};
-            }}
-        """
-        for widget_type in (QLineEdit, QSpinBox):
-            for field in self.findChildren(widget_type):
-                # DragValue owns a compact inline editor with its own focus
-                # border and height.  Applying the regular panel input style
-                # here adds padding/min-height and clips that editor inside
-                # its 24px value cell.
-                if field.objectName() == "DragValueInlineEdit":
-                    continue
-                field.setStyleSheet(input_style)
+    def _section_rule(self) -> QFrame:
+        rule = QFrame()
+        rule.setObjectName("DeliverSectionRule")
+        rule.setFixedHeight(1)
+        rule.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        rule.setStyleSheet(f"border-top: 1px solid {C.PANEL_DIVIDER};")
+        return rule
+
+    def _inspector_form(self, host: QWidget) -> QFormLayout:
+        form = QFormLayout(host)
+        form.setContentsMargins(12, 10, 38, 10)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        return form
+
+    def _make_disclosure(self, title: str, body: QWidget) -> QWidget:
+        """Collapse a real parameter group without changing its draft state."""
+        host = QWidget()
+        column = QVBoxLayout(host)
+        column.setContentsMargins(12, 0, 12, 0)
+        column.setSpacing(0)
+        row = QHBoxLayout()
+        button = QToolButton()
+        button.setObjectName("DeliverDisclosure")
+        button.setText(title)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setArrowType(Qt.ArrowType.RightArrow)
+        button.setCheckable(True)
+        button.setFixedHeight(28)
+        button.toggled.connect(body.setVisible)
+        button.toggled.connect(lambda expanded: button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow))
+        row.addWidget(button)
+        row.addWidget(self._section_rule(), 1)
+        column.addLayout(row)
+        column.addWidget(body)
+        body.hide()
+        return host
 
     # ── Preset bar ──
 
     def _build_preset_bar(self) -> QWidget:
         host = QWidget()
         host.setObjectName("VideoPresetBar")
-        layout = QHBoxLayout(host)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(12, 14, 38, 14)
         layout.setSpacing(8)
+        selector = QWidget()
+        preset_form = QFormLayout(selector)
+        preset_form.setContentsMargins(0, 0, 0, 0)
+        preset_form.setHorizontalSpacing(10)
+        self._preset_combo = ChevronComboBox()
+        self._preset_combo.setObjectName("DeliverPresetCombo")
+        preset_form.addRow(self._label("Preset"), self._preset_combo)
+        layout.addWidget(selector)
+        self._preset_combo.activated.connect(self._on_preset_activated)
 
         # Horizontal scroll so the bar doesn't compress text on narrow windows
         scroll = QScrollArea()
@@ -711,8 +670,45 @@ class VideoExportSettingsPanel(QWidget):
         cards_host.setStyleSheet(
             f"background-color: {C.BG_PANEL}; border: none;"
         )
+        self._preset_browser = scroll
+        scroll.hide()
         layout.addWidget(scroll)
+        self._sync_preset_selector()
         return host
+
+    def _on_preset_activated(self, index: int) -> None:
+        preset_id = self._preset_combo.itemData(index)
+        if preset_id == "__multiple__":
+            return
+        self._reset_preset_selection()
+        if preset_id in self._preset_cards:
+            self._preset_cards[preset_id].set_checked(True)
+        self._sync_preset_selector()
+        self._on_draft_changed()
+
+    def _sync_preset_selector(self) -> None:
+        if not hasattr(self, "_preset_combo"):
+            return
+        custom = I18N.tr("deliver.preset.custom_export", "Custom Export")
+        selected = [pid for pid in self._selected_preset_ids if pid in self._preset_cards]
+        self._preset_combo.blockSignals(True)
+        try:
+            self._preset_combo.clear()
+            self._preset_combo.addItem(custom, None)
+            for pid, card in self._preset_cards.items():
+                preset = card.preset
+                self._preset_combo.addItem(I18N.tr(preset.title_key, preset.fallback_title), pid)
+            if len(selected) == 1:
+                self._preset_combo.setCurrentIndex(self._preset_combo.findData(selected[0]))
+            elif selected:
+                self._preset_combo.addItem(I18N.tr(
+                    "deliver.preset.multiple", "Multiple Presets ({count})", count=len(selected)), "__multiple__")
+                self._preset_combo.setCurrentIndex(self._preset_combo.count() - 1)
+        finally:
+            self._preset_combo.blockSignals(False)
+        title = I18N.tr("deliver.render_settings", "Render Settings")
+        self._settings_title.setText(f"{title} - {self._preset_combo.currentText()}")
+        self._settings_title.setToolTip(self._settings_title.text())
 
     def _reload_custom_presets(self) -> None:
         """Rebuild the custom preset cards from disk (B6)."""
@@ -743,6 +739,9 @@ class VideoExportSettingsPanel(QWidget):
             self._preset_cards[preset.preset_id] = card
             self._custom_card_ids.append(preset.preset_id)
             layout.insertWidget(layout.indexOf(anchor) + 1 + len(self._custom_card_ids), card)
+            with QSignalBlocker(card):
+                card.set_checked(preset.preset_id in self._selected_preset_ids)
+        self._sync_preset_selector()
 
     def _show_custom_preset_menu(self, preset_id: str) -> None:
         """Rename / Delete context menu for a user preset card (B6)."""
@@ -825,7 +824,7 @@ class VideoExportSettingsPanel(QWidget):
         host = QWidget()
         host.setObjectName("DeliverOutputHeader")
         form = QFormLayout(host)
-        form.setContentsMargins(0, 2, 0, 2)
+        form.setContentsMargins(12, 10, 12, 10)
         form.setSpacing(6)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -856,9 +855,10 @@ class VideoExportSettingsPanel(QWidget):
     def _build_render_mode_selector(self) -> QWidget:
         """Build the Resolve-style Single Clip / Individual Clips choice."""
         host = QWidget()
+        host.setObjectName("DeliverRenderMode")
         row = QHBoxLayout(host)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setContentsMargins(12, 12, 12, 12)
+        row.setSpacing(10)
         row.addWidget(self._label("Render"))
 
         self._render_mode_group = QButtonGroup(host)
@@ -901,7 +901,7 @@ class VideoExportSettingsPanel(QWidget):
         apply_combo_dropdown_style(self._timeline_combo)
         self._timeline_combo.hide()
 
-        range_label = self._label("Range")
+        range_label = self._label("Render")
         range_label.setMinimumWidth(0)
         row.addWidget(range_label)
         self._range_combo = ChevronComboBox()
@@ -945,12 +945,12 @@ class VideoExportSettingsPanel(QWidget):
     def _build_video_section(self) -> QWidget:
         group = QGroupBox(I18N.tr("deliver.video.video_settings", "Video"))
         group.setObjectName("VideoSettingsSection")
-        group.setMinimumWidth(390)
-        form = QFormLayout(group)
-        form.setSpacing(8)
-        form.setContentsMargins(10, 14, 10, 10)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        column = QVBoxLayout(group)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        main = QWidget()
+        form = self._inspector_form(main)
+        column.addWidget(main)
 
         self._container_combo = ChevronComboBox()
         for c in CONTAINER_ORDER:
@@ -965,7 +965,7 @@ class VideoExportSettingsPanel(QWidget):
         for entry in _CODEC_CATALOGUE:
             self._codec_combo.addItem(entry["label"], entry["codec"])
         apply_combo_dropdown_style(self._codec_combo)
-        form.addRow(self._label("Encoder"), self._codec_combo)
+        form.addRow(self._label("Codec"), self._codec_combo)
 
         self._profile_combo = ChevronComboBox()
         apply_combo_dropdown_style(self._profile_combo)
@@ -976,6 +976,8 @@ class VideoExportSettingsPanel(QWidget):
         self._profile_combo.setToolTip(profile_tooltip)
         self._profile_label = self._label("Profile")
         self._profile_label.setToolTip(profile_tooltip)
+        form.addRow(self._profile_label, self._profile_combo)
+        form.addRow(self._section_rule())
 
         self._resolution_combo = ChevronComboBox()
         self._resolution_combo.addItem(I18N.tr("deliver.resolution_original", "Timeline Resolution"), None)
@@ -1029,6 +1031,8 @@ class VideoExportSettingsPanel(QWidget):
         self._fps_combo.addItem(I18N.tr("deliver.fps_custom", "Custom"), "custom")
         apply_combo_dropdown_style(self._fps_combo)
         form.addRow(self._label("Frame rate"), self._fps_combo)
+        self._fps_value_label = QLabel()
+        form.addRow("", self._fps_value_label)
 
         self._custom_fps_spin = QSpinBox()
         self._custom_fps_spin.setRange(1, 240)
@@ -1103,6 +1107,7 @@ class VideoExportSettingsPanel(QWidget):
                   self._image_overwrite_label, self._image_overwrite_check):
             w.setVisible(False)
 
+        form.addRow(self._section_rule())
         # Quality
         self._quality_mode_combo = ChevronComboBox()
         self._quality_mode_combo.addItem(
@@ -1128,6 +1133,7 @@ class VideoExportSettingsPanel(QWidget):
             suffix=" kbps",
         )
         self._quality_value_spin.setFixedValueWidth(100)
+        self._quality_value_spin.setFixedWidth(100)
         self._quality_label = self._label("Quality")
         self._quality_value_spin.setToolTip(
             I18N.tr(
@@ -1158,7 +1164,8 @@ class VideoExportSettingsPanel(QWidget):
         quality_value_layout = QHBoxLayout(quality_value_host)
         quality_value_layout.setContentsMargins(0, 0, 0, 0)
         quality_value_layout.addWidget(self._quality_value_spin)
-        quality_value_layout.addWidget(self._crf_combo)
+        quality_value_layout.addWidget(self._crf_combo, 1)
+        quality_value_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._estimated_size_label = QLabel()
         self._estimated_size_label.setObjectName("EstimatedFileSize")
         self._estimated_size_label.setAlignment(
@@ -1171,13 +1178,14 @@ class VideoExportSettingsPanel(QWidget):
                 "Estimated from output duration × video bitrate ÷ 8; audio and container overhead are not included.",
             )
         )
-        quality_value_layout.addWidget(self._estimated_size_label)
         self._quality_value_host = quality_value_host
         form.addRow(self._quality_label, quality_value_host)
 
-        # Resolve exposes the encoder profile with the other quality controls,
-        # not between the format and resolution fields.
-        form.addRow(self._profile_label, self._profile_combo)
+        advanced = QWidget()
+        advanced.setObjectName("DeliverAdvancedBody")
+        form = self._inspector_form(advanced)
+        column.addWidget(self._make_disclosure(
+            I18N.tr("deliver.video.advanced_settings", "Advanced Settings"), advanced))
 
         # These legacy fields remain as hidden compatibility state for queued
         # jobs and presets.  The actual TimelineExportConfig derives color
@@ -1231,14 +1239,19 @@ class VideoExportSettingsPanel(QWidget):
         self._alpha_budget_policy_label = self._label("Alpha Policy")
         form.addRow(self._alpha_budget_policy_label, self._alpha_budget_policy_combo)
 
-        # Subtitles affect the rendered picture, so keep this beside the
-        # video controls rather than hiding it among filename options.
+        advanced_form = form
+        subtitles = QWidget()
+        subtitles.setObjectName("DeliverSubtitleBody")
+        form = self._inspector_form(subtitles)
+        column.addWidget(self._make_disclosure(
+            I18N.tr("deliver.video.subtitle_settings", "Subtitle Settings"), subtitles))
         self._subtitle_combo = ChevronComboBox()
         self._subtitle_combo.addItem(I18N.tr("deliver.subtitle.off", "Off"), SubtitleMode.OFF)
         self._subtitle_combo.addItem(I18N.tr("deliver.subtitle.burn", "Burn in"), SubtitleMode.BURN)
         apply_combo_dropdown_style(self._subtitle_combo)
         form.addRow(self._label("Subtitles"), self._subtitle_combo)
 
+        form = advanced_form
         # Resolve adds handles in Video > Advanced Settings for Individual
         # Clips.  One value deliberately applies to both head and tail.
         self._frame_handles_spin = QSpinBox()
@@ -1277,11 +1290,7 @@ class VideoExportSettingsPanel(QWidget):
         group = QGroupBox(I18N.tr("deliver.video.audio", "Audio"))
         group.setObjectName("AudioSection")
         group.setMinimumWidth(300)
-        form = QFormLayout(group)
-        form.setSpacing(8)
-        form.setContentsMargins(10, 14, 10, 10)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form = self._inspector_form(group)
 
         self._audio_check = QCheckBox(I18N.tr("deliver.include_audio", "Include audio"))
         self._audio_check.setChecked(True)
@@ -1343,7 +1352,8 @@ class VideoExportSettingsPanel(QWidget):
             "时间线暂无角色标注（音频轨 stem_group 为空）"))
         self._stems_empty_label.setStyleSheet("color: gray;")
         self._stems_rows_layout.addWidget(self._stems_empty_label)
-        form.addRow(self._label("Stems 轨"), self._stems_rows_host)
+        self._stems_rows_label = self._label("Stems")
+        form.addRow(self._stems_rows_label, self._stems_rows_host)
         self._stems_rows: List[dict] = []
         self._refresh_stem_rows()
 
@@ -1356,11 +1366,7 @@ class VideoExportSettingsPanel(QWidget):
         group = QGroupBox(I18N.tr("deliver.video.file", "File"))
         group.setObjectName("FileSection")
         group.setMinimumWidth(300)
-        form = QFormLayout(group)
-        form.setSpacing(8)
-        form.setContentsMargins(10, 14, 10, 10)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form = self._inspector_form(group)
 
         name_use_host = QWidget()
         name_use_layout = QVBoxLayout(name_use_host)
@@ -1419,7 +1425,8 @@ class VideoExportSettingsPanel(QWidget):
         unique_position_layout.addWidget(self._unique_prefix_radio)
         unique_position_layout.addWidget(self._unique_suffix_radio)
         unique_position_layout.addStretch(1)
-        form.addRow(self._label("Unique ID"), self._unique_position_host)
+        self._unique_position_label = self._label("Unique ID")
+        form.addRow(self._unique_position_label, self._unique_position_host)
 
         self._unique_digits_spin = QSpinBox()
         self._unique_digits_spin.setRange(2, 10)
@@ -1476,7 +1483,7 @@ class VideoExportSettingsPanel(QWidget):
 
     def _label(self, text: str) -> QLabel:
         lbl = QLabel(I18N.tr(f"deliver.video.{text.lower().replace(' ', '_')}", text))
-        lbl.setMinimumWidth(88)
+        lbl.setFixedWidth(116)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return lbl
 
@@ -1920,6 +1927,7 @@ class VideoExportSettingsPanel(QWidget):
             card = self._preset_cards.get(preset_id)
             if card is not None:
                 self._apply_preset_to_draft(card.preset)
+        self._sync_preset_selector()
         self._on_draft_changed()
 
     def _on_range_changed(self, _idx: int) -> None:
@@ -1969,6 +1977,7 @@ class VideoExportSettingsPanel(QWidget):
         self._timeline_or_source_name_radio.setText(source_label)
         self._unique_filenames_check.setVisible(individual)
         self._unique_position_host.setVisible(individual)
+        self._unique_position_label.setVisible(individual)
         self._unique_digits_label.setVisible(individual)
         self._unique_digits_spin.setVisible(individual)
         self._source_frame_count_check.setVisible(individual)
@@ -2162,6 +2171,7 @@ class VideoExportSettingsPanel(QWidget):
         stems_visible = is_topos
         self._stems_check.setVisible(stems_visible)
         self._stems_rows_host.setVisible(stems_visible)
+        self._stems_rows_label.setVisible(stems_visible)
         if not stems_visible and self._stems_check.isChecked():
             self._stems_check.setChecked(False)
         if is_hevc:
@@ -2463,6 +2473,7 @@ class VideoExportSettingsPanel(QWidget):
     def _on_draft_changed(self, *_args: Any) -> None:
         if self._building_ui:
             return
+        self._update_frame_rate_hint()
         self._update_file_size_estimate()
         self._apply_draft_to_preview()
         self._refresh_preflight()
@@ -2541,8 +2552,10 @@ class VideoExportSettingsPanel(QWidget):
 
     def _reset_preset_selection(self) -> None:
         for card in self._preset_cards.values():
-            card.set_checked(False)
+            with QSignalBlocker(card):
+                card.set_checked(False)
         self._selected_preset_ids.clear()
+        self._sync_preset_selector()
 
     def _apply_preset_to_draft(self, preset: VideoPreset) -> None:
         """Mirror a preset's video/audio settings into the draft controls."""
@@ -2970,11 +2983,13 @@ class VideoExportSettingsPanel(QWidget):
         return f"{size_mb:.2f} MB"
 
     def _update_file_size_estimate(self) -> None:
-        """Refresh the target-bitrate estimate shown beside the bitrate field."""
+        """Refresh the footer estimate only for codecs with a target bitrate."""
         if not hasattr(self, "_estimated_size_label"):
             return
         mode = self._normalize_quality_mode(self._quality_mode_combo.currentData())
-        if mode not in ("vbr", "cbr"):
+        codec = self._codec_combo.currentData()
+        entry = next((entry for entry in _CODEC_CATALOGUE if entry["codec"] == codec), None)
+        if mode not in ("vbr", "cbr") or not entry or not entry["crf"]:
             self._estimated_size_label.setVisible(False)
             return
 
@@ -2991,18 +3006,25 @@ class VideoExportSettingsPanel(QWidget):
         seq = self._sequence
         if seq is None:
             return
-        fps = getattr(seq, "fps", None)
-        if fps is not None:
-            try:
-                self._fps_combo.setItemText(0, f"{float(fps):g} fps")
-            except (TypeError, ValueError):
-                pass
+        self._update_frame_rate_hint()
         if self._resolution_combo.currentData() is None:
             width = getattr(seq, "width", None)
             height = getattr(seq, "height", None)
             if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
                 self._width_spin.setValue(width)
                 self._height_spin.setValue(height)
+
+    def _update_frame_rate_hint(self) -> None:
+        fps = self._read_fps_from_draft()
+        if fps is None:
+            fps = getattr(self._sequence, "fps", None)
+        try:
+            value = float(fps) if fps is not None else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        self._fps_value_label.setVisible(value > 0.0)
+        self._fps_value_label.setText(I18N.tr(
+            "deliver.video.frame_rate_hint", "{fps} frames per second", fps=f"{value:g}"))
 
     def _browse_output_dir(self) -> None:
         cur = self._output_dir_edit.text() or self._default_output_dir()
@@ -3136,7 +3158,7 @@ class VideoExportSettingsPanel(QWidget):
             # so the user understands why the preview went away.
             logger.warning("Video export draft build failed in preflight preview: %s", e)
             self._preflight_label.setText(f"⚠ {e}")
-            self._preflight_label.setStyleSheet("color: #E05A5A; font-size: 12px;")
+            self._preflight_label.setStyleSheet("color: #E05A5A; font-size: 10px;")
             return
         if not jobs:
             self._preflight_label.setText("")
@@ -3164,7 +3186,7 @@ class VideoExportSettingsPanel(QWidget):
             color = "#51B56A"
             parts.append("✓ " + I18N.tr("deliver.video.preflight_ok", "Ready to add"))
         self._preflight_label.setText("   ".join(parts))
-        self._preflight_label.setStyleSheet(f"color: {color}; font-size: 12px;")
+        self._preflight_label.setStyleSheet(f"color: {color}; font-size: 10px;")
 
     def _show_preflight_block(self, result: PreflightResult) -> None:
         # The workspace listens to preflight_updated; here we just emit a
@@ -3180,22 +3202,16 @@ class _PresetCard(QFrame):
 
     selection_toggled = pyqtSignal(str, bool)  # preset_id, now_checked
 
-    _STYLE_UNSELECTED = """
-        QFrame#PresetCard {
-            background-color: #20232A;
-            border: 1px solid #3A3F48;
-            border-radius: 6px;
-        }
-        QFrame#PresetCard:hover {
-            border-color: #D47A2C;
-        }
+    _STYLE_UNSELECTED = f"""
+        QFrame#PresetCard {{
+            background-color: {C.BG_DARK}; border: 1px solid {C.BORDER}; border-radius: 4px;
+        }}
+        QFrame#PresetCard:hover {{ border-color: {C.ORANGE}; }}
     """
-    _STYLE_SELECTED = """
-        QFrame#PresetCard {
-            background-color: rgba(212, 122, 44, 0.18);
-            border: 1px solid #D47A2C;
-            border-radius: 6px;
-        }
+    _STYLE_SELECTED = f"""
+        QFrame#PresetCard {{
+            background-color: {C.BG_ACTIVE}; border: 1px solid {C.ORANGE}; border-radius: 4px;
+        }}
     """
 
     def __init__(self, preset: VideoPreset) -> None:

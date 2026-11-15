@@ -1565,17 +1565,17 @@ QGraphicsView {
 */
 
 QSplitter::handle {
-    /* PanelSplitter paints one center rule inside this transparent hit area. */
+    /* One layout pixel; Qt expands the native mouse target over both panes. */
     background-color: transparent;
     border: none;
 }
 
 QSplitter::handle:horizontal {
-    width: 8px;
+    width: 1px;
 }
 
 QSplitter::handle:vertical {
-    height: 8px;
+    height: 1px;
 }
 
 /* ============================================
@@ -1636,11 +1636,18 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 */
 
 QMainWindow::separator {
-    /* Keep the wide resize hit area transparent; MainWindow paints one center line. */
+    /* A 1px seam keeps panel surfaces adjacent. Qt expands native hit testing. */
     background-color: transparent;
     border: none;
-    width: 8px;
-    height: 8px;
+    width: 1px;
+    height: 1px;
+}
+
+/* Qt creates this overlapping mouse target for 1px dock separators. It must
+   not inherit QWidget's panel fill and cover the adjacent pane surfaces. */
+QWidget#qt_qmainwindow_extended_splitter {
+    background: transparent;
+    border: none;
 }
 
 /* === Dock 标签栏 === */

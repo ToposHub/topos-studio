@@ -296,7 +296,36 @@ assert_sequences_consistent（ref 层 key == sequence 层 key，把保存期校�
 
 ---
 
-## 8. 依据的源文件
+## 8. 时间线功能区边界（2026-11-16）
+
+时间线结构线统一引用 `EDIT_COLORS["timeline_divider"] = C.PANEL_DIVIDER`：
+工具栏底边及组间线、时间码与标尺底边、轨道头控制行/底边/右边，以及音视频
+分隔条的上下边界。逐轨黑线只保留在轨道头，编辑区域保持连续背景。
+时间网格继续使用弱色，避免与功能区边界混淆。
+
+`TimelineView._paint_timeline_dividers()` 按现有布局引擎取轨道位置，在 viewport
+逻辑像素中绘制 1px 实线，与固定 header 的整数 Y 定位一致。轨道线位于既有
+轨道头间隔，音视频边界位于分隔条内部，保留片段的完整选中轮廓。标尺和音视频
+公共边界在 `drawForeground()` 中先绘制，再绘制播放头。固定 header 完成重绘后
+调用同一方法补齐轨道头边界与右竖边；独立不透明的时间码
+子控件自行绘制右下边界。滚出所属视频/音频/字幕区域的轨道线不参与绘制。
+
+保留轨道几何：`TRACK_GAP=2`、音视频分隔条 `SPLITTER_HEIGHT=6`、命中测试、
+轨高、分区滚动和编辑命令沿用原实现。保持 `MinimalViewportUpdate` 与独立
+时间码控件，播放时继续只更新播放头的新旧窄条。
+
+视频/音频/字幕的溢出滑条是 `TimelineView` 的直接子控件，与 viewport 同级，
+通过 `viewport.mapTo(view, ...)` 定位到面板右缘并裁剪到标尺以下的所属区域。
+不能将固定滑条放在 viewport 内：Qt 的 raster bitblt 滚动会同时平移其子控件。
+滑条保持 8px 中性样式，只在对应区域溢出时显示，值仍走既有分区滚动状态和防递归锁。
+
+`tools/preview_resolve_timeline.py --screenshot <path> --size 1420x660` 可使用
+仓库真实素材生成独立审阅图，配置文件使用临时目录；不修改用户工程或队列。
+加 `--extra-tracks 4` 可预览视频/音频轨道溢出。
+
+---
+
+## 9. 依据的源文件
 
 本文全部内容基于以下源文件（路径相对仓库根 `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/`）：
 

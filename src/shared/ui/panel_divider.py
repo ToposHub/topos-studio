@@ -1,8 +1,9 @@
 """Cross-platform custom borders for dock panels.
 
 The dock overlay paints exposed panel edges. Shared edges are omitted there
-and drawn once by the main window through the separator's wider resize hit
-area. Both drawing paths stay transparent to mouse input.
+and drawn once by the main window in the single-pixel layout seam. Qt expands
+the native resize target over adjacent docks without reserving a color gutter.
+Both drawing paths stay transparent to mouse input.
 """
 
 from functools import lru_cache
@@ -16,7 +17,7 @@ from src.shared.ui.panel_splitter import splitter_rules
 
 __all__ = ["PanelDockWidget", "paint_shared_dock_dividers"]
 
-_FALLBACK_SEPARATOR_EXTENT = 8
+_FALLBACK_SEPARATOR_EXTENT = 1
 
 
 def _dock_layout(main_window: QMainWindow) -> list[tuple[QWidget, QRect]]:

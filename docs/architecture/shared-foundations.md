@@ -275,7 +275,27 @@ SQLite（`topos.db`）四张表：`settings`（KV）、`layouts`（name+work_mod
 
 ---
 
-## 7. 依据的源文件
+## 7. 面板边界与原生拖动（2026-11-16）
+
+`shared/ui/panel_splitter.py` 的 `PanelSplitter` 与全局
+`QMainWindow::separator` 只占 1 个逻辑像素，使用 `C.PANEL_DIVIDER`。
+每个 pane 的背景和标题栏横线都直接贴到该边界，不再预留显示父容器底色的
+8px gutter。Qt 将原生鼠标命中区向两侧各扩展 2px，拖动仍由 Qt 处理。
+
+`QSplitterHandle` 的绘制和 `splitter_rules()` 快照使用 `contentsRect()`，
+不能使用包含扩大命中区的整个 handle 几何，否则会覆盖相邻 pane。
+恢复旧 splitter 状态后重新固定 1px 布局宽度；不改变面板顺序或持久化格式。
+Dock 的 `qt_qmainwindow_extended_splitter` 鼠标代理必须保持透明，避免继承
+全局 QWidget 背景而遮住 pane 和黑线。Dock 外框由 overlay 绘制，共享边界由
+主窗口绘制；内部 splitter 自己绘制边界，交点由实际相邻的 1px 边界自然连接。
+
+像素回归位于 `tests/ui/test_panel_splitter.py` 与 `test_panel_dividers.py`，
+覆盖不同 pane/标题栏底色、横纵分隔、嵌套交点、DPR 1/2、窗口缩放、状态恢复、
+边缘命中拖动和浮动归位。
+
+---
+
+## 8. 依据的源文件
 
 以下文件均在仓库 `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/` 下（相对路径省略前缀）：
 
