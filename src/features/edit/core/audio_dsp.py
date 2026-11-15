@@ -284,11 +284,16 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
     Notch 走 RBJ 系数（Shelf 消费 Q）。scipy 不可用时 HPF/LPF 回退 legacy
     级联（降级可解释，不静默改变斜率语义——响应服务用同一函数求值）。
 
-    R01 兼容处理器：``algorithm_version ≤ 2`` 时走 v3 之前的 legacy 系数
-    设计——HPF/LPF 级联 ``slope//6`` 个相同 Q=0.7071 biquad、Shelf 固定
-    S=1（不消费 Q）、无 EQ-02 增益-Q 耦合。旧工程（df749759 时代）的
-    HPF 稳态响应由此在容差内重现，不随本地版本升级漂移。
-    ``None``（默认）= 无版本上下文的直用（测试/UI 新建实例）→ current 桶；
+    H01 兼容处理器（逐版本精确分发，冻结基线见
+    docs/audit/2026-11-15-audio-fx-post-integration/h01/baseline-historical.json）：
+    - ``v ≤ 1``（含未标注 0）：v1 legacy 系数——HPF/LPF 级联 ``slope//6``
+      个相同 Q=0.7071 biquad、Shelf 固定 S=1（不消费 Q）、无 EQ-02 耦合
+      （df749759/CW-A1 时代语义）。
+    - ``v == 2``：302b88b6 语义——EQ-01 真 N 阶 Butterworth + Shelf 消费
+      Q，但**无 EQ-02 增益-Q 耦合**（EQ-02 属 v3 变更；v2 工程 HPF/ Shelf
+      响应与历史 PCM 对齐）。
+    - ``v ≥ 3`` 或 ``None``（无版本上下文的直用，测试/UI 新建实例）：
+      现行（Butterworth + EQ-02 耦合）。
     legacy 判定只认模型层显式传入的整数版本。
 
     系数按频段内容 LRU 缓存（UI 曲线每次重绘 ~2000 次求值，缓存后只做
@@ -301,14 +306,17 @@ def strip_eq_band_sections(band: dict, sample_rate: float,
     freq = min(max(10.0, float(band.get("freq", 1000.0))), sample_rate * 0.45)
     gain = float(band.get("gain", 0.0))
     q = max(0.1, float(band.get("q", 1.1))) * VOICING_Q_SCALE.get(voicing, 1.0)
-    legacy = algorithm_version is not None and int(algorithm_version) <= 2
-    if not legacy:
+    # H01 三分桶：legacy（v≤1 级联）/ v2（Butterworth 无 EQ-02）/ current。
+    _v = None if algorithm_version is None else int(algorithm_version)
+    legacy = _v is not None and _v <= 1
+    v2_era = _v is not None and _v == 2
+    if not legacy and not v2_era:
         # EQ-02: 带宽/增益耦合（非 Clean voicing；带增益形状；0dB/无耦合直通）
         q = _effective_band_q(q, gain, voicing, ftype)
     slope = int(band.get("slope", 12))
 
     cache_key = (ftype, round(freq, 6), round(gain, 6), round(q, 6),
-                 slope, round(sample_rate, 3), voicing, legacy)
+                 slope, round(sample_rate, 3), voicing, _v)
     cached = _EQ_SECTION_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -2648,6 +2656,8 @@ class DelayEffect(AudioEffect):
         self._fade_r_remaining: int = 0
         self._fade_l_total: int = 1
         self._fade_r_total: int = 1
+        # H01: v ≤ 3 实例保留直接切换语义（crossfade 属 v4 算法契约变更）。
+        self._algorithm_version: Optional[int] = None
         self._rebuild_delay_line()
         self._rebuild_input_filters()
         self._recompute_damp_coeff()
@@ -2690,16 +2700,26 @@ class DelayEffect(AudioEffect):
         self._damp_a = np.array([1.0, -a], dtype=np.float64)
         self._damp_b = np.array([1.0 - a], dtype=np.float64)
 
-    def set_params(self, params: Optional[dict], sample_rate: Optional[float] = None) -> None:
+    def set_params(self, params: Optional[dict], sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
         """更新延迟器参数。
 
         Args:
             params: dict 形式的 DelayParams，None 表示旁路。
             sample_rate: 可选新采样率
+            algorithm_version: H01 兼容分发——v ≤ 3 走 v4 之前的直接读头
+                切换（延迟时间热改无 15ms 交叉淡化），v ≥ 4 / None 现行。
         """
         sr_changed = sample_rate is not None and sample_rate != self._sample_rate
         if sr_changed:
             self._sample_rate = float(sample_rate)
+        if algorithm_version is None:
+            self._algorithm_version = None
+        else:
+            try:
+                self._algorithm_version = max(0, int(algorithm_version))
+            except (TypeError, ValueError):
+                self._algorithm_version = None
 
         if params is None:
             self._enabled = False
@@ -2752,6 +2772,11 @@ class DelayEffect(AudioEffect):
         self._mono_input = fmt == "Mono"
         self._input_mode: str = fmt if fmt in ("Stereo", "Mono", "Left", "Right") else "Stereo"
         self._enabled = bool(params.get("enabled", True))
+
+    def _legacy_direct_switch(self) -> bool:
+        """H01：v ≤ 3 实例的延迟时间热改直接切读头（无 v4 交叉淡化）。"""
+        v = self._algorithm_version
+        return v is not None and v <= 3
 
     def _apply_input_filters(self, out: np.ndarray) -> np.ndarray:
         """输入 low_cut/high_cut SOS 滤波（跨块 zi 连续）。"""
@@ -2817,7 +2842,9 @@ class DelayEffect(AudioEffect):
         if self._cur_delay_l is None:
             self._cur_delay_l = delay_l
         elif delay_l != self._cur_delay_l:
-            if self._fade_l_remaining <= 0:
+            if self._legacy_direct_switch():
+                self._fade_l_remaining = 0  # H01: v≤3 直接切读头
+            elif self._fade_l_remaining <= 0:
                 self._old_delay_l = self._cur_delay_l
                 self._fade_l_total = max(
                     1, int(self._XFADE_MS * 0.001 * sr))
@@ -2826,7 +2853,9 @@ class DelayEffect(AudioEffect):
         if self._cur_delay_r is None:
             self._cur_delay_r = delay_r
         elif delay_r != self._cur_delay_r:
-            if self._fade_r_remaining <= 0:
+            if self._legacy_direct_switch():
+                self._fade_r_remaining = 0  # H01: v≤3 直接切读头
+            elif self._fade_r_remaining <= 0:
                 self._old_delay_r = self._cur_delay_r
                 self._fade_r_total = max(
                     1, int(self._XFADE_MS * 0.001 * sr))

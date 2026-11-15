@@ -5,7 +5,8 @@
 - 未知实例夹在两个 Delay 中间，已知实例与 metadata 不丢、链不清空；
 - 预设 algorithm_version 777 存盘再读回仍是 777（不再被写成本地 3）；
 - 损坏条目保留诊断，Master 链遇未知实例不再整链丢弃；
-- 旧 HPF PCM（df749759 系数设计）在容差内重现，当前实例仍走 v3 设计；
+- 旧 HPF PCM（df749759 系数设计，v1 桶）在容差内重现；v2 桶走历史
+  Butterworth（302b88b6），当前实例仍走 v3 设计（H01 三分桶）；
 - 显式升级改变声音且（经 SetTrackEffectChain）可 undo。
 """
 
@@ -76,8 +77,8 @@ class TestFixtureRoundtrip:
         again = EffectChainParams.from_dict(reloaded.to_dict())
         assert [e.instance_id for e in again.effects] == ["d1", "d2", "d3"]
         assert [e.params["left_delay"] for e in again.effects] == [80.0, 100.0, 120.0]
-        # legacy 无版本键 → 加载时映射为明确 legacy 版本，且稳定保持
-        assert again.effects[0].algorithm_version == 2
+        # legacy 无版本键 → 0 = 未标注（era 歧义），且稳定保持（H01）
+        assert again.effects[0].algorithm_version == 0
         assert reloaded.effects[0].algorithm_version == again.effects[0].algorithm_version
         assert again.effects[1].algorithm_version == ALGORITHM_VERSION
         # future 版本数据原样保留（无损往返，不伪装成本地版本）
@@ -236,7 +237,7 @@ class TestLegacyHpfCompat:
         band = {"filter_type": "HPF", "freq": 1000.0, "gain": 0.0,
                 "q": 1.1, "slope": 12, "enabled": True}
         legacy_sos = np.array(strip_eq_band_sections(
-            band, SR, "Clean", algorithm_version=2))
+            band, SR, "Clean", algorithm_version=1))
         legacy_rms = _steady_rms_db(sosfilt(legacy_sos, x), n // 2)
         assert abs(legacy_rms - oracle_rms) <= 0.01
 
@@ -255,7 +256,7 @@ class TestLegacyHpfCompat:
         x = (0.5 * np.sin(2 * np.pi * 250.0 * np.arange(n) / SR)).reshape(1, -1)
 
         eq_legacy = StripEQFilter(SR)
-        eq_legacy.set_params(params, sample_rate=SR, algorithm_version=2)
+        eq_legacy.set_params(params, sample_rate=SR, algorithm_version=1)
         y_legacy = np.asarray(eq_legacy.process(x.astype(np.float32)))
 
         eq_current = StripEQFilter(SR)
@@ -275,7 +276,7 @@ class TestLegacyHpfCompat:
         legacy_chain = EffectChainParams(effects=(
             TrackEffectInstance.from_dict(_delay_instance(80.0, "d1")),
         ))
-        assert legacy_chain.effects[0].algorithm_version == 2
+        assert legacy_chain.effects[0].algorithm_version == 0
 
         upgraded = upgrade_chain_algorithm_version(legacy_chain)
         assert upgraded.effects[0].algorithm_version == ALGORITHM_VERSION

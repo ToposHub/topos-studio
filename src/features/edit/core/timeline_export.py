@@ -508,6 +508,11 @@ class TimelineExportConfig:
     # （输出按 Bus/Master 链尾音预算延长，音频长于视频末帧；轨级尾音
     # 始终在选区内 drain，不受本开关影响）。
     include_fx_tail: bool = False
+    # H01：算法版本降级显式授权。工程含 future（> 本地 algorithm_version）
+    # 或 DSP 后端缺失实例时，preflight 产出结构化阻断；调用方确认降级
+    # 策略（按当前算法渲染/无声跳过）后置 True 才放行。默认 False——
+    # 只打日志不等于用户已选择丢弃或改声。
+    allow_algorithm_degraded: bool = False
     audio_stems: Tuple[AudioStemExportTrack, ...] = ()
     output_path: str = ""
     selected_clip_ids: Optional[List[str]] = None
@@ -789,11 +794,58 @@ def preflight_audio_export(
 
     当 scipy 缺失且本次导出依赖 EQ/LUFS 时，返回 ok=False 并给出结构化阻断原因，
     调用方应据此阻止导出或提示用户修复，而不是静默产出未处理文件。
+
+    H01：同时检查效果链逐实例能力（future 算法版本 / 缺 DSP 后端 /
+    未知类型）。``TimelineExportConfig.allow_algorithm_degraded=False``
+    （默认）时这类实例产出结构化阻断项（``effect_algorithm_degraded``），
+    调用方显式确认降级策略后置 True 才降级为非阻断提示。
     """
     from src.features.edit.core.audio_capabilities import get_audio_capabilities
 
     blocking: List[str] = []
     degraded: List[str] = []
+    blockers: List[Any] = []
+
+    # H01：FX 链逐实例能力（future 版本 / 后端缺失 / 未知类型）。
+    # 预览与导出共用 collect_chain_diagnostics 同一判断。Bus 与普通轨
+    # 同在 audio_tracks（is_bus 区分），外加 master 链。
+    if sequence is not None and config.include_audio:
+        try:
+            from src.features.edit.core.fx_versioning import (
+                collect_chain_diagnostics,
+            )
+            _chains: List[Any] = []
+            for _t in list(getattr(sequence, "audio_tracks", ()) or ()):
+                if getattr(_t, "effect_chain", None) is not None:
+                    _chains.append(_t.effect_chain)
+            if getattr(sequence, "master_effect_chain", None) is not None:
+                _chains.append(sequence.master_effect_chain)
+            _bad = [d for d in (
+                diag for c in _chains for diag in collect_chain_diagnostics(c)
+            ) if d["status"] != "supported"]
+            if _bad:
+                _msg = (
+                    "效果链含 %d 个非完全支持实例（%s）。未获显式降级授权"
+                    "（allow_algorithm_degraded=False）前不导出：future 版本"
+                    "会按当前算法渲染（声音可能与制作时不同），缺后端实例"
+                    "会被跳过。" % (
+                        len(_bad),
+                        ", ".join(f"{d['effect_type']}[{d['compat_bucket']}]"
+                                  for d in _bad[:6]))
+                )
+                for d in _bad:
+                    blockers.append(ExportEffectBlocker(
+                        effect_type=d["effect_type"],
+                        code="effect_algorithm_degraded",
+                        message=f"{d['effect_type']}({d['instance_id'][:8]}): "
+                                f"{d['status']}: {d['reason']}",
+                    ))
+                if config.allow_algorithm_degraded:
+                    degraded.append(_msg)
+                else:
+                    blocking.append(_msg)
+        except Exception:  # pragma: no cover - 诊断不阻断导出
+            pass
 
     # T-P0-31：能力探测惰性化——仅当本次导出真的声明依赖 scipy DSP
     # （loudness_target 或启用 EQ）时才探测。不依赖 EQ/LUFS 的导出此前
@@ -801,7 +853,13 @@ def preflight_audio_export(
     # FPS 被固定成本淹没）。RMA-01 语义不变：loudness_target 即使
     # include_audio=False 也依旧阻断（用户显式要求不得静默丢弃）。
     if not config.requires_scipy_backend(sequence):
-        return ExportPreflightResult(ok=True)
+        if blocking:
+            return ExportPreflightResult(ok=False, blocking=tuple(blocking),
+                                         degraded=tuple(degraded),
+                                         blockers=tuple(blockers))
+        # H01：已授权降级 / 无阻断——degraded 提示与结构化项仍须带回。
+        return ExportPreflightResult(ok=True, degraded=tuple(degraded),
+                                     blockers=tuple(blockers))
     caps = get_audio_capabilities(check_output_device=False)
     if config.requires_scipy_backend(sequence) and not caps.eq_lufs_available:
         needs = []
@@ -821,7 +879,9 @@ def preflight_audio_export(
             "或在导出设置中关闭 EQ/响度归一化。"
             % "；".join(needs)
         )
-    return ExportPreflightResult(ok=not blocking, blocking=tuple(blocking), degraded=tuple(degraded))
+    return ExportPreflightResult(ok=not blocking, blocking=tuple(blocking),
+                                 degraded=tuple(degraded),
+                                 blockers=tuple(blockers))
 
 
 def preflight_video_effects_export(
