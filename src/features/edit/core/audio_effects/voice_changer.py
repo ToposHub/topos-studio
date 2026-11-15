@@ -456,8 +456,11 @@ class _VocoderModule:
     def __init__(self, sample_rate: float) -> None:
         self._sr = float(sample_rate)
         self._n_bands = 0
+        self._syn_ratio = 1.0
         self._bb = []
         self._ba = []
+        self._sbb = []
+        self._sba = []
         self._ana_zi = None
         self._syn_zi = None
         self._env_fast_zi = None
@@ -473,8 +476,9 @@ class _VocoderModule:
             self._noise = seeded_rng(seed, 0x0FF).standard_normal(
                 _NOISE_PATTERN)
 
-    def _ensure_bands(self, n_bands: int) -> None:
-        if n_bands == self._n_bands:
+    def _ensure_bands(self, n_bands: int, syn_ratio: float = 1.0) -> None:
+        """分析/合成频带系数（H06：合成轴可独立于载波按 formant_st 缩放）。"""
+        if n_bands == self._n_bands and syn_ratio == self._syn_ratio:
             return
         centers = log_spaced_bands(n_bands, 150.0, 8000.0, self._sr)
         self._bb, self._ba = [], []
@@ -482,7 +486,18 @@ class _VocoderModule:
             b, a = biquad_bandpass_coeffs(float(c), _VOC_Q, self._sr)
             self._bb.append(b)
             self._ba.append(a)
+        # H06：vocoder_formant_st —— 合成频带中心整体缩放（声码器"嗓音
+        # 共振"位移；不改载波基频）。上限受 Nyquist 钳制。
+        self._sbb, self._sba = [], []
+        syn_lo = 80.0
+        syn_hi = self._sr * 0.45
+        for c in centers:
+            sc = min(max(float(c) * syn_ratio, syn_lo), syn_hi)
+            b, a = biquad_bandpass_coeffs(sc, _VOC_Q, self._sr)
+            self._sbb.append(b)
+            self._sba.append(a)
         self._n_bands = n_bands
+        self._syn_ratio = syn_ratio
         self._ana_zi = None
         self._syn_zi = None
         self._env_fast_zi = None
@@ -535,7 +550,21 @@ class _VocoderModule:
 
     def process(self, x: np.ndarray, p, abs_start: int) -> np.ndarray:
         n_bands = int(np.clip(p.vocoder_bands, 8, 32))
-        self._ensure_bands(n_bands)
+        syn_ratio = float(2.0 ** (float(np.clip(
+            getattr(p, "vocoder_formant_st", 0.0), -12.0, 12.0)) / 12.0))
+        self._ensure_bands(n_bands, syn_ratio)
+        # H06：清音门控——按输入高频占比决定 unvoiced 残差注入量
+        # （纯浊音不再被无条件叠加高通嘶声）
+        hp_share = 0.0
+        for ch in range(x.shape[0]):
+            seg = x[ch]
+            if seg.size >= 16:
+                X = np.abs(np.fft.rfft(seg * np.hanning(seg.size)))
+                fr = np.fft.rfftfreq(seg.size, 1.0 / self._sr)
+                hi = float(np.sum(X[fr > 4000.0] ** 2))
+                tot = float(np.sum(X ** 2)) + 1e-12
+                hp_share = max(hp_share, hi / tot)
+        unvoiced_gate = float(np.clip(hp_share * 3.0, 0.0, 1.0))
         n = x.shape[-1]
         chs = x.shape[0]
         if self._ana_zi is None or self._ana_zi.shape != (n_bands, chs, 2):
@@ -566,7 +595,9 @@ class _VocoderModule:
                 self._env_fast_zi[bi, ch] = fast_zf
                 self._env_slow_zi[bi, ch] = slow_zf
                 env = np.maximum(env_fast, env_slow)
-                csyn, zfs = lfilter(b, a, carriers[ch], zi=self._syn_zi[bi, ch])
+                sb, sa_ = self._sbb[bi], self._sba[bi]
+                csyn, zfs = lfilter(sb, sa_, carriers[ch],
+                                    zi=self._syn_zi[bi, ch])
                 self._syn_zi[bi, ch] = zfs
                 out[ch] += csyn * env
         phase_step = (2.0 * np.pi * float(np.clip(
@@ -574,7 +605,8 @@ class _VocoderModule:
         self._carrier_phases = (self._carrier_phases + phase_step
                                 * np.array([1.0, 1.003, 0.997])) % (2.0 * np.pi)
         out /= max(1.0, np.sqrt(n_bands) * 0.35)
-        unv = float(np.clip(p.vocoder_unvoiced_pct, 0, 100)) / 100.0
+        unv = (float(np.clip(p.vocoder_unvoiced_pct, 0, 100)) / 100.0
+               * unvoiced_gate)
         hp_b = np.array([0.95, -0.95])
         hp_a = np.array([1.0, -0.9])
         for ch in range(chs):
@@ -610,9 +642,21 @@ class _DelayLine:
         self._buf = np.zeros(self._latency, dtype=np.float64)
 
 
+#: H06：pitch_tracking 模式 → F0 分析范围（vocal=人声域，wide=扩展域）
+_F0_RANGES = {"vocal": (70.0, 500.0), "wide": (50.0, 1500.0)}
+
+
 def _estimate_f0(x: np.ndarray, sr: float, lo: float = 70.0,
                  hi: float = 500.0) -> tuple:
-    """自相关 F0 估计（单声道；返回 (f0_hz|None, 置信度 0..1)）。"""
+    """自相关 F0 估计（单声道；返回 (f0_hz|None, 检测置信度 0..1)）。
+
+    H06：
+    - 八度保护——在峰 ≥ 0.9·max 的候选里取**最长 lag**（基频而非谐波；
+      修前固定 70–500Hz 只看左声道，880/1760Hz 输入都报 ~440 谐波陷阱）；
+    - ``confidence`` 是**检测置信度**（归一化自相关），不是语言可懂度
+      或声音质量百分比；
+    - 范围由 pitch_tracking 决定（vocal 70–500 / wide 50–1500）。
+    """
     seg = x[-int(0.05 * sr):] if len(x) > int(0.05 * sr) else x
     if len(seg) < 256:
         return None, 0.0
@@ -626,7 +670,21 @@ def _estimate_f0(x: np.ndarray, sr: float, lo: float = 70.0,
     lag_hi = min(len(ac) - 1, int(sr / lo))
     if lag_hi <= lag_lo:
         return None, 0.0
-    lag = lag_lo + int(np.argmax(ac[lag_lo:lag_hi]))
+    band = ac[lag_lo:lag_hi + 1]
+    # 局部极大检测（斜肩穿越会造成 ~7% 高估——只认真峰）
+    if band.size < 3:
+        return None, 0.0
+    is_peak = (band[1:-1] > band[:-2]) & (band[1:-1] >= band[2:])
+    peaks = np.flatnonzero(is_peak) + 1
+    if peaks.size == 0:
+        return None, 0.0
+    vals = band[peaks]
+    peak = float(np.max(vals))
+    # 八度保护：≥0.9·max 的局部极大里取最短 lag（域内最高频基频；
+    # 纯周期信号的多重周期峰是自相关固有歧义，wide 模式扩真值域）
+    strong = peaks[vals >= 0.9 * peak]
+    sel = int(strong[0]) if strong.size else int(peaks[int(np.argmax(vals))])
+    lag = lag_lo + sel
     conf = float(np.clip(ac[lag], 0.0, 1.0))
     if conf < 0.3:
         return None, conf
@@ -677,9 +735,18 @@ class VoiceChangerEffect:
             return samples
         n = samples.shape[-1]
         x = samples.astype(np.float64, copy=True)
-        # 遥测（NF-04）：F0 in/out 与电平（30Hz 合并由窗口端负责）
+        # 遥测（NF-04）：F0 in/out 与电平（30Hz 合并由窗口端负责）。
+        # H06：参考声道按能量选择（修前恒用左声道——仅右声道人声报
+        # 无声）；分析范围由 pitch_tracking 决定。
         self._last_in_rms = float(np.sqrt(np.mean(x[0] ** 2))) if n else 0.0
-        f0, conf = _estimate_f0(x[0], self._sr)
+        f0_lo, f0_hi = _F0_RANGES.get(
+            str(getattr(p, "pitch_tracking", "vocal")), _F0_RANGES["vocal"])
+        ref_ch = 0
+        if x.shape[0] > 1:
+            e0 = float(np.mean(x[0, -int(0.05 * self._sr):] ** 2))
+            e1 = float(np.mean(x[1, -int(0.05 * self._sr):] ** 2))
+            ref_ch = 1 if e1 > e0 * 1.5 else 0
+        f0, conf = _estimate_f0(x[ref_ch], self._sr, lo=f0_lo, hi=f0_hi)
         self._last_f0_in = f0
         self._last_conf = conf
 
