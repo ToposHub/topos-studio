@@ -379,50 +379,84 @@ class _PitchModule:
             ratio = self._ratio(p, m, abs_start + pos)
             win = float(self._win)
 
-            def _read(pos_abs: float) -> float:
-                # Catmull-Rom（物理槽位经 % cap 解耦绝对索引）
-                p0 = np.floor(pos_abs)
-                frac = pos_abs - p0
-                im1 = (int(p0) - 1) % cap
-                i0 = int(p0) % cap
+            # H13：向量化读取（逐样本 Python 循环曾占整链块预算 ~42%）。
+            # Catmull-Rom 四抽头 gather；段内非 fade 全向量，fade 窗内双
+            # 头亦向量（sin/cos 等和权重）。跳点只在延迟越界的采样发生，
+            # 段切分按跳点/ fade 边界推进。
+            def _read_vec(positions: np.ndarray) -> np.ndarray:
+                p0 = np.floor(positions)
+                frac = positions - p0
+                i0 = p0.astype(np.int64) % cap
+                im1 = (i0 - 1) % cap
                 i1 = (i0 + 1) % cap
                 i2 = (i0 + 2) % cap
-                y0, y1, y2, y3 = buf[im1], buf[i0], buf[i1], buf[i2]
-                return float(
-                    y1 + 0.5 * frac * (y2 - y0
-                                       + frac * (2.0 * y0 - 5.0 * y1
-                                                 + 4.0 * y2 - y3
-                                                 + frac * (3.0 * (y1 - y2)
-                                                           + y3 - y0))))
+                y0 = buf[im1]
+                y1 = buf[i0]
+                y2 = buf[i1]
+                y3 = buf[i2]
+                return (y1 + 0.5 * frac * (
+                    y2 - y0
+                    + frac * (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3
+                              + frac * (3.0 * (y1 - y2) + y3 - y0))))
 
-            for j in range(m):
-                r = float(ratio[j])
-                w_abs = write_before + j
-                # H05：单读头 + 绕点短交叉淡化。旧双头恒定 win/2 间距在
-                # r=2 时奇次谐波深度归零（梳状）；单头平时纯读（无梳状），
-                # 延迟漂出 [win/4, 3win/4] 时跳 win/2 并在 _XFADE 窗内
-                # 等和淡化（复审 §7.2 的已知权衡只在绕点窗出现）。
+            j = 0
+            while j < m:
                 if self._fade_left[ch] > 0:
-                    g = float(self._fade_left[ch]) / float(self._fade_total)
-                    w_old = np.sin(0.5 * np.pi * g) ** 2
-                    w_new = np.cos(0.5 * np.pi * g) ** 2
-                    out[pos + j] = (_read(self._old_read[ch]) * w_old
-                                    + _read(self._read_pos[ch]) * w_new)
-                    self._old_read[ch] += r
-                    self._read_pos[ch] += r
-                    self._fade_left[ch] -= 1
-                else:
-                    out[pos + j] = _read(self._read_pos[ch])
-                    self._read_pos[ch] += r
-                    delay = w_abs - self._read_pos[ch]
-                    if delay > 0.75 * win:
-                        self._old_read[ch] = self._read_pos[ch]
-                        self._read_pos[ch] += 0.5 * win
-                        self._fade_left[ch] = self._fade_total
-                    elif delay < 0.25 * win:
-                        self._old_read[ch] = self._read_pos[ch]
-                        self._read_pos[ch] -= 0.5 * win
-                        self._fade_left[ch] = self._fade_total
+                    # fade 段：向量处理到 fade 结束/子块尾
+                    f = min(self._fade_left[ch], m - j)
+                    g_end = self._fade_left[ch]
+                    idx = np.arange(f, dtype=np.float64)
+                    prog = (g_end - idx) / float(self._fade_total)
+                    w_old = np.sin(0.5 * np.pi * prog) ** 2
+                    w_new = np.cos(0.5 * np.pi * prog) ** 2
+                    adv = np.cumsum(ratio[j:j + f]) - ratio[j]
+                    old_pos = self._old_read[ch] + adv
+                    new_pos = self._read_pos[ch] + adv
+                    out[pos + j:pos + j + f] = (
+                        _read_vec(old_pos) * w_old
+                        + _read_vec(new_pos) * w_new)
+                    self._old_read[ch] = float(old_pos[-1]) + float(ratio[j + f - 1])
+                    self._read_pos[ch] = float(new_pos[-1]) + float(ratio[j + f - 1])
+                    self._fade_left[ch] -= f
+                    j += f
+                    continue
+                # 干净段：直到延迟越界或子块尾
+                adv = np.cumsum(ratio[j:j + m - j]) - ratio[j]
+                positions = self._read_pos[ch] + adv
+                w_abs = write_before + j + np.arange(m - j, dtype=np.float64)
+                delay = w_abs - (positions + float(ratio[j + m - j - 1]))
+                # 近似：用段末延迟判定（延迟漂移率 = 1−r ≤ 1/样本）
+                seg = m - j
+                # 找首个越界采样（延迟超 [win/4, 3win/4]）
+                delays = w_abs - positions
+                over = np.flatnonzero((delays > 0.75 * win)
+                                      | (delays < 0.25 * win))
+                if over.size:
+                    k = int(over[0])
+                    seg = k  # 该采样走跳点分支
+                if seg > 0:
+                    out[pos + j:pos + j + seg] = _read_vec(positions[:seg])
+                    if seg > 1:
+                        self._read_pos[ch] = float(positions[seg - 1]) \
+                            + float(ratio[j + seg - 1])
+                    else:
+                        self._read_pos[ch] = float(positions[0])
+                    j += seg
+                    continue
+                # 跳点：本采样先按旧位读出，再移位并开 fade
+                out[pos + j] = _read_vec(
+                    np.array([self._read_pos[ch]]))[0]
+                delay_now = (write_before + j) - self._read_pos[ch]
+                self._read_pos[ch] += float(ratio[j])
+                if delay_now > 0.75 * win:
+                    self._old_read[ch] = self._read_pos[ch]
+                    self._read_pos[ch] += 0.5 * win
+                    self._fade_left[ch] = self._fade_total
+                elif delay_now < 0.25 * win:
+                    self._old_read[ch] = self._read_pos[ch]
+                    self._read_pos[ch] -= 0.5 * win
+                    self._fade_left[ch] = self._fade_total
+                j += 1
             pos += m
 
         r_eff_max = r_max
@@ -664,8 +698,12 @@ def _estimate_f0(x: np.ndarray, sr: float, lo: float = 70.0,
     energy = float(np.mean(seg ** 2))
     if energy < 1e-8:
         return None, 0.0
-    ac = np.correlate(seg, seg, "full")[len(seg) - 1:]
-    ac /= max(ac[0], 1e-12)
+    # H13：FFT 自相关（O(n log n)）；np.correlate O(n²) 曾占块预算 ~5%
+    nfft = 1 << int(np.ceil(np.log2(2 * len(seg))))
+    spec = np.fft.rfft(seg, nfft)
+    ac_full = np.fft.irfft(spec * np.conj(spec), nfft)
+    ac = ac_full[:len(seg)]
+    ac /= max(float(ac[0]), 1e-12)
     lag_lo = max(1, int(sr / hi))
     lag_hi = min(len(ac) - 1, int(sr / lo))
     if lag_hi <= lag_lo:
