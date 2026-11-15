@@ -626,7 +626,12 @@ class VoiceChangerEffect:
         self._last_out_rms = 0.0
 
     def tail_estimate_samples(self) -> int:
-        return 0  # 全模块有限冲激（WOLA/包络尾 < 1s 由后续块自然收敛）
+        """H03：尾音预算 = 报告时延（WOLA/FIFO 滞留内容的 flush 需求）。
+
+        修前返回 0：末端脉冲滞留在 win 长度的 WOLA 队列里，drain 不喂零
+        就永远丢失（复审测得"末端脉冲下一零块 0.50002，节点报 tail=0"）。
+        """
+        return self.latency_samples()
 
     @property
     def is_active(self) -> bool:

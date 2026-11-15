@@ -33,6 +33,7 @@ Stem Export — 分轨/分组导出（AM-10 阶段 3.5）。
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 from src.features.edit.core.interchange import frames_to_samples
@@ -266,6 +267,7 @@ def _iter_stem_pcm_chunks(
         (channels, n) float32 PCM 块，顺序拼接即完整 stem。
     """
     from src.features.edit.core.audio_graph_renderer import AudioGraphRenderer
+    from src.features.edit.core.audio_dsp import EffectChain
     from src.features.edit.core.timeline_render_plan import is_track_renderable
     from src.features.edit.core.channel_layout import adapt_samples_for_delivery
 
@@ -290,6 +292,7 @@ def _iter_stem_pcm_chunks(
         max(0, int(end_frame) - int(start_frame)), fps_exact, int(sample_rate))
     if total_samples <= 0:
         return
+    _stem_end_before_tail = int(end_frame)
 
     # P1-02: 嵌套序列音频展开（可选；与实时/导出共用同一纯函数）。
     # 必须先于 stem_ids——MASTER 的"全部轨"要含虚拟轨。
@@ -312,6 +315,67 @@ def _iter_stem_pcm_chunks(
     # 构建 renderer（从原始 sequence 配置，保持 EQ/FX/routing/master 参数）
     renderer = AudioGraphRenderer(float(sample_rate))
     renderer.configure_from_sequence(sequence)
+
+    # H03 辅助：clip FX 条目 → 链尾音估算（预算用，不建持久链）
+    from src.features.edit.core.audio_retime import clip_fx_entries as _cfe
+
+    def _chain_tail_from_entries(entries) -> int:
+        try:
+            probe = EffectChain(float(sample_rate))
+            probe.set_params(entries, sample_rate=float(sample_rate))
+            return int(probe.tail_estimate_samples())
+        except Exception:
+            return 0
+
+    # H03：尾音延伸——stem 输出长度按全路径 FX 尾音预算延长（轨链 + 沿途
+    # Bus 链 + Master 链，串联累计）。修前 stem 长度 = 时间线时长：clip
+    # Delay 的 200ms 回声落在内容帧之外被整段截断（成片 0.344 / stem 0）。
+    _master_tail = renderer.master_tail_estimate_samples()
+    _bus_tails = {n.track_id: n.effect_chain.tail_estimate_samples()
+                  for n in renderer._nodes.values()
+                  if getattr(n, "is_bus", False) and n.effect_chain is not None}
+
+    def _down_bus_tail(bid):
+        seen, total = set(), 0
+        while bid is not None and bid not in seen:
+            seen.add(bid)
+            total += _bus_tails.get(bid, 0)
+            node = renderer.get_node(bid)
+            bid = node.output_bus_id if node else None
+        return total
+
+    _tail_max = _master_tail
+    for _n in renderer._nodes.values():
+        if getattr(_n, "is_bus", False):
+            _tail_max = max(_tail_max, _bus_tails.get(_n.track_id, 0)
+                            + _down_bus_tail(
+                                renderer.get_node(_n.track_id).output_bus_id)
+                            + _master_tail)
+    for _t in getattr(sequence, "audio_tracks", ()) or ():
+        if getattr(_t, "is_bus", False):
+            continue
+        _tn = renderer.get_node(_t.track_id)
+        if _tn is None:
+            continue
+        _tt = (_tn.effect_chain.tail_estimate_samples()
+               if _tn.effect_chain is not None else 0)
+        _tail_max = max(_tail_max, _tt + _down_bus_tail(_tn.output_bus_id)
+                        + _master_tail)
+    # clip 级 FX 链尾音也计入预算（clip Delay 的回声落在内容帧之外）
+    for _t in getattr(sequence, "audio_tracks", ()) or ():
+        for _c in getattr(_t, "clips", ()) or ():
+            _cfx = _cfe(getattr(_c, "effects", ()) or (), None)
+            if _cfx:
+                _tail_max = max(_tail_max, _chain_tail_from_entries(_cfx))
+    if _tail_max > 0:
+        _spf = max(1.0, float(sample_rate) / max(1e-6, fps))
+        _tail_frames = int(math.ceil(_tail_max / _spf))
+        if _tail_frames > 0:
+            end_frame = end_frame + _tail_frames
+            # 长度按扩展后范围重算（后续 actual/切片都以 total_samples 为界）
+            total_samples = frames_to_samples(
+                max(0, int(end_frame) - int(start_frame)),
+                fps_exact, int(sample_rate))
 
     audio_tracks = [t for t in getattr(sequence, "audio_tracks", ()) or ()]
     has_solo = any(getattr(t, "is_solo", False) for t in audio_tracks)
@@ -596,6 +660,39 @@ def _iter_stem_pcm_chunks(
                 _n = min(samples.shape[-1], frame_buf.shape[-1])
                 frame_buf[:, :_n] += samples[:channels, :_n].astype(
                     np.float32, copy=False)
+
+            # H03：clip FX 尾音——clip 在本 chunk 内结束时按链尾音预算
+            # 继续喂零（与成片导出同语义；修前 stem 的 clip Delay 尾音
+            # 为 0而成片 0.344，复审 clip_tail_peaks 已复现）。帧紧邻
+            # clip 末帧，链状态连续；帧块汇入轨求和（MX-04 语义）。
+            _clip_end = int(clip.timeline_start) + int(clip.timeline_duration)
+            if f0 <= _clip_end < f1:
+                _chain = fx_chains.get(getattr(clip, "clip_id", ""))
+                if _chain is not None and _chain.is_active:
+                    _ctail = int(_chain.tail_estimate_samples())
+                    if _ctail > 0:
+                        _spf = max(1.0, sample_rate / max(1e-6, float(fps)))
+                        _ctail_frames = int(math.ceil(_ctail / _spf))
+                        for _tf in range(_clip_end,
+                                         min(f1, _clip_end + _ctail_frames)):
+                            _ts = frames_to_samples(
+                                _tf - start_frame, fps_exact, sample_rate)
+                            _tn = frames_to_samples(
+                                _tf + 1 - start_frame, fps_exact, sample_rate)
+                            _tbl = _tn - _ts
+                            if _tbl <= 0:
+                                continue
+                            _tblock = _chain.process(
+                                np.zeros((channels, _tbl), dtype=np.float32))
+                            _key = (track.track_id, _tf)
+                            _tbuf = frame_sum.get(_key)
+                            if _tbuf is None:
+                                _tbuf = np.zeros((channels, _tbl),
+                                                 dtype=np.float32)
+                                frame_sum[_key] = _tbuf
+                            _m = min(_tblock.shape[-1], _tbuf.shape[-1])
+                            _tbuf[:, :_m] += _tblock[:channels, :_m].astype(
+                                np.float32, copy=False)
 
         # ── Phase 2：轨阶段（求和帧一次过链）+ 路由 + sends + SC tap ──
         chunk_sc: Dict[str, np.ndarray] = {}

@@ -4171,17 +4171,56 @@ class TimelineExporter:
         renderer.configure_from_sequence(audio_sequence)
 
 
-        # R04：含尾导出模式——输出缓冲按 Bus/Master 链尾音预算延长。
-        # 轨渲染仍限定在选区内（轨尾音选区内 drain 不变）；延长区的
-        # 零输入由 bus/master 阶段的全长处理自然排空（Delay/Reverb 的
-        # IIR 状态在全长 buffer 上连续推进）。严格模式（默认）不加长，
-        # 输出长度与选区逐字节一致。
+        # R04/H03：含尾导出模式——输出缓冲按**全路径**尾音预算延长。
+        # H03 修正：预算 = 各轨"轨链尾 + 沿 output_bus 路径的 Bus 链尾之和
+        # + Master 链尾"的最大值（汇合串联累计，不再对 Bus/Master 简单取
+        # max——旧预算漏掉轨级 Delay 尾音：200ms Track Delay 在 include_
+        # fx_tail 模式只输出 160ms 且全零）。轨 drain 同步延长到扩展区
+        # （对已结束 clip 的轨链持续喂零）。严格模式（默认）不加长。
+        # H03：全路径尾音预算（轨链 + 沿途 Bus 链 + Master 链，串联累计）。
+        # 含尾导出延长与非零选区预卷共用。
+        _master_tail = renderer.master_tail_estimate_samples()
+        _bus_tail_by_id: dict = {}
+        for _n in renderer._nodes.values():
+            if getattr(_n, "is_bus", False) and _n.effect_chain is not None:
+                _bus_tail_by_id[_n.track_id] = (
+                    _n.effect_chain.tail_estimate_samples())
+
+        def _downstream_bus_tail(bus_id):
+            seen = set()
+            total = 0
+            while bus_id is not None and bus_id not in seen:
+                seen.add(bus_id)
+                total += _bus_tail_by_id.get(bus_id, 0)
+                node = renderer.get_node(bus_id)
+                bus_id = node.output_bus_id if node else None
+            return total
+
+        _full_path_tail_samples = _master_tail
+        for _n in renderer._nodes.values():
+            if getattr(_n, "is_bus", False):
+                _full_path_tail_samples = max(
+                    _full_path_tail_samples,
+                    _bus_tail_by_id.get(_n.track_id, 0)
+                    + _downstream_bus_tail(
+                        renderer.get_node(_n.track_id).output_bus_id)
+                    + _master_tail)
+        for _t in audio_sequence.audio_tracks:
+            if getattr(_t, "is_bus", False):
+                continue
+            _tn = renderer.get_node(_t.track_id)
+            if _tn is None:
+                continue
+            _track_tail = (_tn.effect_chain.tail_estimate_samples()
+                           if _tn.effect_chain is not None else 0)
+            _full_path_tail_samples = max(
+                _full_path_tail_samples,
+                _track_tail + _downstream_bus_tail(_tn.output_bus_id)
+                + _master_tail)
+
         render_tail_frames = 0
         if getattr(config, "include_fx_tail", False):
-            _tail_samples = max(
-                renderer.master_tail_estimate_samples(),
-                renderer.bus_tail_estimate_samples(),
-            )
+            _tail_samples = _full_path_tail_samples
             if _tail_samples > 0 and samples_per_frame > 0:
                 render_tail_frames = int(math.ceil(
                     _tail_samples / float(samples_per_frame)))
@@ -4195,7 +4234,7 @@ class TimelineExporter:
                                        frame_count + render_tail_frames + 1))
                     logger.info(
                         "audio export: include_fx_tail extends output by %d "
-                        "frames (%d samples) for bus/master FX tails",
+                        "frames (%d samples) for full-path FX tails",
                         render_tail_frames, total_samples - (
                             frame_sample_bounds[frame_count]))
         # H02：非零 start_frame 的确定性预卷。旧实现从选区起点冷启动，
@@ -4207,16 +4246,7 @@ class TimelineExporter:
         pre_roll_frames = 0
         preroll_samples = 0
         if start_frame > 0 and samples_per_frame > 0:
-            _pre_tail_samples = max(
-                renderer.master_tail_estimate_samples(),
-                renderer.bus_tail_estimate_samples(),
-            )
-            for _t in audio_sequence.audio_tracks:
-                _tn = renderer.get_node(_t.track_id)
-                if _tn is not None and _tn.effect_chain is not None:
-                    _pre_tail_samples = max(
-                        _pre_tail_samples,
-                        _tn.effect_chain.tail_estimate_samples())
+            _pre_tail_samples = _full_path_tail_samples
             if _pre_tail_samples > 0:
                 pre_roll_frames = min(
                     int(start_frame),
@@ -4905,10 +4935,12 @@ class TimelineExporter:
                             if _cf_tail > 0 and samples_per_frame > 0:
                                 _cf_frames = int(math.ceil(
                                     _cf_tail / float(samples_per_frame)))
+                                # H03：含尾模式 clip 尾音延伸进扩展区
+                                #（clip 结束于选区末时不再截断首回声）
                                 for _tf in range(clip_end,
-                                                  min(end_frame,
+                                                  min(end_frame + render_tail_frames,
                                                       clip_end + _cf_frames)):
-                                    _trel = _tf - start_frame
+                                    _trel = _tf - feed_start
                                     if _trel < 0 or \
                                             _trel + 1 >= len(frame_sample_bounds):
                                         break
@@ -4935,15 +4967,18 @@ class TimelineExporter:
                         logger.warning(f"Failed to decode audio for clip {clip.clip_id}: {e}")
                         continue
 
-                # MX-04/MX-07/R02: 轨收尾 drain——选区内按帧升序出队全部剩余
-                # pending；clip 间隙与选区尾部按尾音预算喂零推进（导出选区
-                # 内 drain；不扩展选区长度——跨选区尾音交付策略见计划 MX-07）。
+                # MX-04/MX-07/R02/H03: 轨收尾 drain——按帧升序出队全部剩余
+                # pending；clip 间隙与选区尾部按尾音预算喂零推进。
+                # H03：include_fx_tail 模式下轨 drain 延长进扩展区（轨级
+                # Delay/Reverb 尾音随全路径预算交付，不再截在选区末——
+                # "200ms Track Delay 只输出 160ms 且全零"已复现）；严格模式
+                # 仍止于 end_frame。
                 # R02: 与 early flush 共用 _advance_through——从单调游标起步，
                 # 已处理帧绝不重喂（旧实现从 start_frame 重扫 + 尾音预算未清
                 # 零，帧 0/1 被二次喂入有状态节点，回声时序错位）。
                 _last_content_frame = max(pending_frames) if pending_frames else -1
                 _drain_end = min(
-                    end_frame,
+                    end_frame + render_tail_frames,
                     _last_content_frame + 1
                     + int(math.ceil(_track_tail_samples / max(1.0, float(sample_rate) / max(0.0001, float(fps))))),
                 )

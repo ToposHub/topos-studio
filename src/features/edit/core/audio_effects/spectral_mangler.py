@@ -541,16 +541,21 @@ class SpectralManglerEffect:
         p = self._params
         if p is None or not p.enabled:
             return 0
-        # 颗粒 = 有界尾音（最大粒长 + 反馈衰减圈）；其他模块无尾音
+        tails = [0]
+        # 颗粒 = 有界尾音（最大粒长 + 反馈衰减圈）
         if p.grain_enabled:
             size = int(max(4.0, p.grain_size_ms * 0.001 * self._sr))
             fb = max(0.0, min(95.0, p.grain_feedback_pct)) / 100.0
             if fb >= 0.01:
                 import math
                 circles = 3.0 / max(0.01, -math.log10(fb)) if fb < 1.0 else 8.0
-                return int(min(4.0 * self._sr, size * max(1.0, circles)))
-            return size
-        return 0
+                tails.append(int(min(4.0 * self._sr, size * max(1.0, circles))))
+            else:
+                tails.append(size)
+        # H03：dist 过采样 FIFO/滤波滞留（时延即 flush 需求）
+        if p.dist_enabled:
+            tails.append(self._dist.latency)
+        return max(tails)
 
     @property
     def is_active(self) -> bool:
