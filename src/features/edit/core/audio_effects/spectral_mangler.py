@@ -32,7 +32,7 @@ from src.features.edit.core.audio_effects.base import (
     seeded_rng,
 )
 
-_HISTORY_SECONDS = 5.0
+_HISTORY_SECONDS = 8.0
 _GRAIN_VOICES = 64
 _FIR_TAPS = 63
 
@@ -124,6 +124,11 @@ class _GrainModule:
         self._rng = seeded_rng(self._seed, stream_id=0x5A1)
         self._window = np.hanning(2048)
         self._prev_out: Optional[np.ndarray] = None
+        # H08：反馈环（wet 的 D=size_n 样本延迟回写）+ 丢弃计数
+        self._fb_ring: Optional[np.ndarray] = None
+        self._fb_written = 0
+        self.dropped_events = 0
+        self._event_count = 0
 
     def set_seed(self, seed: int) -> None:
         self._seed = int(seed)
@@ -136,6 +141,10 @@ class _GrainModule:
             v.active = False
         self._density_phase = 0.0
         self._prev_out = None
+        self._fb_ring = None
+        self._fb_written = 0
+        self.dropped_events = 0
+        self._event_count = 0
         self.set_seed(self._seed)
 
     def _hist_read(self, ch: int, positions: np.ndarray) -> np.ndarray:
@@ -151,6 +160,21 @@ class _GrainModule:
         return a * (1.0 - frac) + b * frac
 
     def process(self, x: np.ndarray, p, n_abs: int) -> np.ndarray:
+        """H08：事件驱动的颗粒调度。
+
+        修前缺陷（复审 §5 H08）：
+        - 整块先触发后渲染——1s 块 @80 grains/s 一次触发 80 粒，64 池满
+          丢 16、物理重叠只有 40。现按 **子块推进**（≤256 样本）：子块内
+          先按密度相位触发到子块边界，再渲染子块——触发/渲染按采样时间
+          交错，池占用 = 真实重叠；触发时刻与随机消耗顺序不变（块长
+          无关，事件序号不依赖块数量）。
+        - feedback「上块同 shape 才反馈」→ 固定**样本延迟** D=size_n 的
+          wet 环形回写（因果、有界、定义明确）。
+        - 读头年龄上限显式覆盖 ring 容量（不足历史 → 延后触发并计数，
+          不 clamp 到常量采样、不读已覆盖数据）。
+        - Cloud/Scatter 分离：cloud=高斯年龄抖动+随机声道；
+          scatter=均匀宽撒+交替声道+增益抖动。
+        """
         n = x.shape[-1]
         out = np.zeros_like(x, dtype=np.float64)
         if n <= 0:
@@ -164,52 +188,79 @@ class _GrainModule:
         fb = max(0.0, min(95.0, p.grain_feedback_pct)) / 100.0
         freeze = bool(p.grain_freeze)
 
-        # 1) 触发调度（密度绝对相位累积；随机消耗顺序只依赖触发序；
-        #    读位锚定触发时刻写者位置——块边界无关）
-        written_start = self._written
-        for j in range(n):
-            self._density_phase += rate / self._sr
-            while self._density_phase >= 1.0:
-                self._density_phase -= 1.0
-                self._trigger(p, size_n, base_ratio, jitter_cents, channels,
-                              written_start + j, n_abs + j)
-        # 2) 历史写入（先写后读——声部读位指向已写入区域；反馈为上一块
-        #    wet 的一块延迟回写：因果、有界、契约记录）
-        if not freeze:
-            write_src = x.astype(np.float64, copy=True)
-            if fb > 0.0 and self._prev_out is not None \
-                    and self._prev_out.shape[-1] == n:
-                write_src = write_src + self._prev_out * fb
-            slots = (self._written + np.arange(n)) % self._cap
-            self._hist[0, slots] = write_src[0]
-            self._hist[1, slots] = write_src[1] if channels > 1 else write_src[0]
-            self._written += n
-        # 3) 渲染活跃声部（读位为距写者的年龄——写入完成后全部可读；
-        #    不读未来：年龄 ≥ 0 即可，插值 +1 由 min(., written−2) 钳制）
-        for v in self._voices:
-            if not v.active:
-                continue
-            local0 = max(0, v.start_out + int(v.phase) - n_abs)
-            m = min(v.length - int(v.phase), n - local0)
-            if m <= 0:
-                if v.start_out + int(v.phase) >= n_abs + n:
+        sub = 256
+        pos = 0
+        while pos < n:
+            m = min(sub, n - pos)
+            xb = x[:, pos:pos + m]
+            out_b = out[:, pos:pos + m]
+            # 1) 触发到子块边界（密度绝对相位按样本推进）
+            written_start = self._written
+            for j in range(m):
+                self._density_phase += rate / self._sr
+                while self._density_phase >= 1.0:
+                    self._density_phase -= 1.0
+                    self._trigger(p, size_n, base_ratio, jitter_cents,
+                                  channels, written_start + j,
+                                  n_abs + pos + j)
+            # 2) 历史写入（freeze 停写；反馈 = wet 经 D=size_n 样本延迟
+            #    的环形回读——不再依赖"上块同 shape"）
+            if not freeze:
+                write_src = xb.astype(np.float64, copy=True)
+                if fb > 0.0:
+                    # wet 延迟 D=size_n：当前块 [w, w+m) 回读 [w−D, w−D+m)
+                    fb_delay = size_n
+                    fb_pos = (np.arange(m) + self._fb_written - fb_delay)
+                    fb_val = self._fb_read(fb_pos)
+                    write_src = write_src + fb_val * fb
+                slots = (self._written + np.arange(m)) % self._cap
+                self._hist[0, slots] = write_src[0]
+                self._hist[1, slots] = write_src[1] if channels > 1 else write_src[0]
+                self._written += m
+            # 3) 渲染活跃声部到子块（读位随声部绝对进度推进）
+            for v in self._voices:
+                if not v.active:
+                    continue
+                local0 = max(0, v.start_out + int(v.phase) - (n_abs + pos))
+                m2 = min(v.length - int(v.phase), m - local0)
+                if m2 <= 0:
+                    if v.start_out + int(v.phase) >= n_abs + pos + m:
+                        v.active = False
+                    continue
+                idx = np.arange(m2)
+                gpos = v.read_pos + (v.phase + idx) * v.ratio
+                wpos = np.interp((v.phase + idx) / max(1, v.length),
+                                 np.linspace(0.0, 1.0, len(self._window)),
+                                 self._window)
+                seg = self._hist_read(
+                    v.channel % channels,
+                    np.minimum(gpos, getattr(v, "max_pos", np.inf)))
+                out_b[v.channel % channels, local0:local0 + m2] += \
+                    seg * wpos * v.gain
+                v.phase += m2
+                if v.phase >= v.length:
                     v.active = False
-                continue
-            idx = np.arange(m)
-            # 读位随声部绝对进度推进（v.phase + idx）——跨块续渲不回卷
-            gpos = v.read_pos + (v.phase + idx) * v.ratio
-            wpos = np.interp((v.phase + idx) / max(1, v.length),
-                             np.linspace(0.0, 1.0, len(self._window)),
-                             self._window)
-            seg = self._hist_read(
-                v.channel % channels,
-                np.minimum(gpos, getattr(v, "max_pos", np.inf)))
-            out[v.channel % channels, local0:local0 + m] += seg * wpos * v.gain
-            v.phase += m
-            if v.phase >= v.length:
-                v.active = False
+            # 4) wet 写入反馈环（绝对位推进）
+            if self._fb_ring is None or self._fb_ring.shape[-1] != self._cap:
+                self._fb_ring = np.zeros((2, self._cap), dtype=np.float64)
+            fslots = (self._fb_written + np.arange(m)) % self._cap
+            self._fb_ring[0, fslots] = out_b[0]
+            self._fb_ring[1, fslots] = out_b[1] if channels > 1 else out_b[0]
+            self._fb_written += m
+            pos += m
         self._prev_out = out
         np.clip(out, -8.0, 8.0, out=out)
+        return out
+
+    def _fb_read(self, abs_positions: np.ndarray) -> np.ndarray:
+        """反馈环读取（绝对位 → (2, n)；未写区域返回零）。"""
+        cap = self._cap
+        out = np.zeros((2, len(abs_positions)), dtype=np.float64)
+        valid = (abs_positions >= 0) & (abs_positions < self._fb_written)
+        if valid.any():
+            idx = abs_positions[valid].astype(np.int64) % cap
+            out[0, valid] = self._fb_ring[0, idx]
+            out[1, valid] = self._fb_ring[1, idx]
         return out
 
     def _trigger(self, p, size_n: int, base_ratio: float, jitter_cents: float,
@@ -217,20 +268,44 @@ class _GrainModule:
                  out_pos: int = 0) -> None:
         v = next((gv for gv in self._voices if not gv.active), None)
         if v is None:
-            return  # 有界池满：丢弃并计数（策略写入契约）
+            self.dropped_events += 1  # 有界池满（真实重叠超 64 才发生）
+            return
         if writer_now < 0:
             writer_now = self._written
-        jitter = float(self._rng.uniform(-jitter_cents, jitter_cents))
         spray = max(0.0, min(100.0, p.grain_spray_pct)) / 100.0
         position = max(0.0, min(100.0, p.grain_position_pct)) / 100.0
         max_age = float(max(0, writer_now - 2))
         need = size_n * base_ratio
         newest_age = 2.0
-        oldest_age = min(max(newest_age + need, 0.0), max_age)
+        # H08：历史容量守恒——读头跨度（含 position/spray 回看）必须落在
+        # ring 覆盖内；不足历史（容量 < 跨度）→ 延后触发（丢弃计数），
+        # 不 clamp 到常量采样、不读已覆盖数据
+        oldest_age = min(max(newest_age + need, 0.0), max_age,
+                         float(self._cap) - need - 8.0)
+        if oldest_age <= newest_age:
+            self.dropped_events += 1
+            return
         span = max(0.0, oldest_age - newest_age)
-        base_age = newest_age + position * span
-        jitter_age = float(self._rng.uniform(0.0, spray * span)) if span > 0 else 0.0
+        # H08：Cloud/Scatter 契约——不同的事件/位置分布：
+        # - cloud：以 position 为中心的高斯年龄抖动（σ=spray·span/2），
+        #   随机声道，音高抖动；
+        # - scatter：全程均匀撒布（忽略 position 中心），交替声道，
+        #   额外增益抖动（散粒更稀疏对比）。
+        mode = str(getattr(p, "grain_mode", "cloud"))
+        if mode == "scatter":
+            base_age = newest_age
+            jitter_age = (float(self._rng.uniform(0.0, max(1e-6, span)))
+                          if span > 0 else 0.0)
+        else:
+            base_age = newest_age + position * span
+            sigma = spray * span * 0.5
+            jitter_age = (float(abs(self._rng.standard_normal()) * sigma)
+                          if span > 0 else 0.0)
         age = min(max_age, base_age + jitter_age)
+        if mode == "scatter":
+            jitter = float(self._rng.uniform(-jitter_cents, jitter_cents))
+        else:
+            jitter = float(self._rng.uniform(-jitter_cents, jitter_cents))
         ratio = base_ratio * float(2.0 ** (jitter / 1200.0))
         v.active = True
         # 读位钳制：完整粒跨度（|ratio|·len）必须落在触发时刻写者之前——
@@ -244,7 +319,12 @@ class _GrainModule:
         v.length = size_n
         v.phase = 0.0
         v.gain = 1.0 / max(1.0, np.sqrt(max(1.0, p.grain_density_hz) * 0.5))
-        v.channel = int(self._rng.integers(0, channels))
+        if mode == "scatter":
+            self._event_count += 1
+            v.channel = self._event_count % channels
+            v.gain *= float(self._rng.uniform(0.6, 1.0))
+        else:
+            v.channel = int(self._rng.integers(0, channels))
 
 
 def _apply_curve(u: np.ndarray, curve: str, fold: float) -> np.ndarray:
