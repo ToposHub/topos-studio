@@ -74,7 +74,8 @@ class TestNF01Registration:
             assert t in by and by[t].registered and by[t].has_backend
         defaults = _get_audio_default_params()
         assert len(defaults["voice_changer"]) == 27
-        assert len(defaults["spectral_mangler"]) == 33
+        # H09：+freeze_capture_id（元数据引用，34 字段）
+        assert len(defaults["spectral_mangler"]) == 34
 
     def test_params_roundtrip_and_enum_guards(self):
         vc = VoiceChangerParams.default()
