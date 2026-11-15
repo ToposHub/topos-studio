@@ -1,0 +1,31 @@
+{
+  "temporary_folder": "/var/folders/j2/m4dcthbx3h5086ywnnplqwmc0000gn/T/topos-fx-post-integration-u9_hlg89",
+  "source_video": "/Users/heng/Documents/vscode/topos-studio/tests/test_videos/2K_h264.mp4",
+  "mode": "none",
+  "opened_editors": [],
+  "emissions": 0,
+  "first": null,
+  "last": null,
+  "level_ranges": {},
+  "mix_ms": {
+    "p50": 1.9139479991281405,
+    "p99": 7.592383921728468,
+    "max": 13.196611998864682,
+    "n": 203
+  },
+  "ring_stats": {
+    "channels": 2,
+    "capacity": 24000,
+    "filled": 9600,
+    "available": 14400,
+    "total_written": 395520,
+    "total_read": 385920,
+    "total_dropped": 0,
+    "underruns": 0,
+    "overflows": 0
+  },
+  "paused_meters": {
+    "voice": null,
+    "mangler": null
+  }
+}

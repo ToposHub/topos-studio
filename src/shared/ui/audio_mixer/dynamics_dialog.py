@@ -25,6 +25,8 @@ Input / GR×3 / Make Up / Output / Sidechain 六表计 + 三张模块卡片：
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import copy
 import math
 from typing import Any, Optional
@@ -1228,11 +1230,9 @@ class DynamicsDialog(QDialog):
                 prev = old.params.get("makeup_post") if old.params else None
                 if prev is not None:
                     merged["makeup_post"] = bool(prev)
-            effects[idx] = TrackEffectInstance(
-                effect_type=effect_type, params=merged,
+            effects[idx] = replace(
+                old, params=merged,
                 enabled=bool(old.enabled) if instance_enabled is None else bool(instance_enabled),
-                order=old.order, instance_id=old.instance_id,
-                panel="dynamics",
             )
         elif ensure_exists:
             new_order = max((e.order for e in effects), default=-1) + 1

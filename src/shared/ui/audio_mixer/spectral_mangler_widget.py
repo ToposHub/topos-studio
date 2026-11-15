@@ -2164,6 +2164,8 @@ class StudioSpectralManglerWidget(QWidget):
         self._demo_timer.timeout.connect(self._tick_demo_animation)
         if self._demo_mode:
             self._demo_timer.start(40)
+        else:
+            self.reset_telemetry()
 
     def _setup_ui(self, track_name: str):
         self.setStyleSheet("""
@@ -2636,3 +2638,10 @@ class StudioSpectralManglerWidget(QWidget):
             self._demo_timer.stop()
         self.master_strip.setLevels(input_db, output_db)
         self.visualizer.setTelemetry(wave_samples, grains)
+
+    def reset_telemetry(self) -> None:
+        """Discard stale levels and analysis, preserving the current FX state."""
+        self.master_strip.setLevels(-60.0, -60.0)
+        self.master_strip._clipped = False
+        self.master_strip.update()
+        self.visualizer.setTelemetry([], [])

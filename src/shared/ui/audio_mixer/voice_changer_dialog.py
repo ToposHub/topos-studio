@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import copy
 from typing import Any, Optional
 
 from PyQt6.QtCore import QTimer, pyqtSignal
@@ -121,6 +122,8 @@ class VoiceChangerDialog(QDialog):
         self._track_id = track_id
         self._instance_id = instance_id
         self._updating = False
+        self._base_params = copy.deepcopy(initial_params or {})
+        self._has_pending_edit = False
         self.setWindowTitle(f"Voice Changer — {track_name}")
         self.resize(980, 690)
 
@@ -148,7 +151,11 @@ class VoiceChangerDialog(QDialog):
             self._updating = False
 
     def _current_params(self) -> dict:
-        return params_from_ui_state(self._widget.get_state())
+        edited = params_from_ui_state(self._widget.get_state())
+        params = {**edited, **copy.deepcopy(self._base_params)}
+        for key in _VC_FIELD_MAP:
+            params[key] = edited[key]
+        return params
 
     def _emit_preview(self) -> None:
         if not self._updating:
@@ -157,20 +164,38 @@ class VoiceChangerDialog(QDialog):
 
     def _emit_commit(self) -> None:
         if not self._updating:
-            self.voice_changer_committed.emit(self._track_id,
-                                              self._current_params())
+            self._preview_timer.stop()
+            self._commit_timer.stop()
+            self._has_pending_edit = False
+            params = self._current_params()
+            self._base_params = copy.deepcopy(params)
+            self.voice_changer_committed.emit(self._track_id, params)
 
     def _on_widget_state(self, _state: dict) -> None:
         if self._updating:
             return
-        self._preview_timer.start()
+        self._has_pending_edit = True
+        if not self._preview_timer.isActive():
+            self._preview_timer.start()
         self._commit_timer.start()
+
+    def done(self, result: int) -> None:
+        """Keep the last edit when closing this modeless, live-edit window."""
+        if self._has_pending_edit:
+            self._emit_commit()
+        self._preview_timer.stop()
+        self._commit_timer.stop()
+        super().done(result)
 
     # ── 外部回填（R06：timeline/undo/preset 同步；锁内静默） ──
     def set_current_params(self, params: Any) -> None:
         if params is None:
             return
         data = params.to_dict() if hasattr(params, "to_dict") else dict(params)
+        self._preview_timer.stop()
+        self._commit_timer.stop()
+        self._has_pending_edit = False
+        self._base_params = copy.deepcopy(data)
         self._updating = True
         try:
             self._widget.set_state(ui_state_from_params(data))
@@ -183,6 +208,7 @@ class VoiceChangerDialog(QDialog):
     # ── 遥测（NF-04）──
     def update_telemetry(self, telemetry: Optional[dict]) -> None:
         if not telemetry:
+            self._widget.reset_telemetry()
             return
         freqs = telemetry.get("spectrum_hz")
         in_spec = telemetry.get("input_spectrum_db")
@@ -190,20 +216,23 @@ class VoiceChangerDialog(QDialog):
         f0_in = telemetry.get("f0_in_hz")
         f0_out = telemetry.get("f0_out_hz")
         conf = float(telemetry.get("confidence", 0.0) or 0.0)
-        if freqs and in_spec and out_spec:
-            self._widget.update_analysis(
-                freqs, in_spec, out_spec,
-                float(f0_in) if f0_in else 0.0,
-                float(f0_out) if f0_out else 0.0,
-                clarity_pct=max(0.0, min(100.0, conf * 100.0)))
+        graph = self._widget.voice_visualizer
+        if freqs is None or in_spec is None or out_spec is None:
+            freqs, in_spec, out_spec = graph._freqs, graph._in_spec, graph._out_spec
+        confidence_pct = max(0.0, min(100.0, conf * 100.0))
+        self._widget.update_analysis(
+            freqs, in_spec, out_spec,
+            float(f0_in) if f0_in else 0.0,
+            float(f0_out) if f0_out else 0.0,
+            clarity_pct=confidence_pct)
         in_rms = telemetry.get("in_rms", 0.0)
         out_rms = telemetry.get("out_rms", 0.0)
         # CLR 不沿用原型合成百分比（§6.2-6）——voiced=false 时 0（N/A）
         self._widget.update_meters(
-            _to_db(in_rms) if in_rms else -60.0,
-            _to_db(out_rms) if out_rms else -60.0,
+            float(telemetry.get("input_peak_db", _to_db(in_rms) if in_rms else -60.0)),
+            float(telemetry.get("output_peak_db", _to_db(out_rms) if out_rms else -60.0)),
             formant_activity=100.0 if telemetry.get("formant_active") else 0.0,
             pitch_activity=100.0 if telemetry.get("pitch_active") else 0.0,
             vocoder_activity=100.0 if telemetry.get("vocoder_active") else 0.0,
-            clarity_pct=0.0,
+            clarity_pct=confidence_pct,
         )

@@ -3828,6 +3828,12 @@ class EffectChain:
                 overshoot = getattr(inst, "last_overshoot_db", None)
                 if overshoot is not None:
                     tap["overshoot_db"] = float(overshoot)
+                collect_analysis = getattr(inst, "collect_telemetry", None)
+                if callable(collect_analysis):
+                    # Processor snapshots contain measured scalar analysis;
+                    # keep them tied to this instance instead of inventing
+                    # module activity from the track's final output meter.
+                    tap["analysis"] = dict(collect_analysis())
                 self._tap_levels[iid] = tap
             # R09: Dynamics 组组后 Make Up——组末成员处理完后统一施加
             # （旁路的组不计：其压缩器的 enabled=False 时 set_params 已
@@ -4237,6 +4243,12 @@ class MasterLimiter:
         # 完全消除需 look-ahead buffer）。末端钳制确保绝对不削波，
         # 但因增益已平滑，钳制极少触发（仅 attack 瞬态）。
         peak = float(np.max(np.abs(out))) if out.size > 0 else 0.0
-        if peak > self._threshold * 1.0:
-            out = out * (self._threshold / peak)
+        if peak > self._threshold:
+            # Guard each sample with a channel-linked gain. Scaling the whole
+            # block by its largest peak attenuates earlier samples based on a
+            # future transient and makes export depend on block partitioning.
+            sample_peak = (np.max(np.abs(out), axis=0)
+                           if out.ndim > 1 else np.abs(out))
+            guard = self._threshold / np.maximum(sample_peak, self._threshold)
+            out = out * guard
         return out

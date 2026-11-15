@@ -552,7 +552,9 @@ class AudioGraphRenderer:
             samples = node.eq_filter.process(samples)
 
         # track FX（post-EQ；CW-A1: 外部侧链检源透传）
-        if node.effect_chain is not None and node.effect_chain.is_active:
+        # A neutral chain may become active at this block's keyframe. Sample
+        # first; process() itself skips inactive nodes and clears stale taps.
+        if node.effect_chain is not None:
             # MX-10: fx 参数自动化——块边界按当前帧重设链参数（与实时
             # mix_samples / clip FX 的 animated_sampler 同型）
             if node.fx_sampler is not None:
@@ -792,7 +794,7 @@ class AudioGraphRenderer:
             if node.eq_filter is not None and node.eq_filter.is_active:
                 bus_samples = node.eq_filter.process(bus_samples)
             # FX（MX-08: 外部侧链检源透传，与普通轨同构）
-            if node.effect_chain is not None and node.effect_chain.is_active:
+            if node.effect_chain is not None:
                 # R05: Bus fx 参数自动化——块边界按起始帧重设链参数
                 # （fx_sampler 在 _TrackNode 构建时就已存在，此前离线 Bus
                 # 阶段建而不消费；与普通轨 render_track_block 同型）
@@ -913,7 +915,7 @@ class AudioGraphRenderer:
         # strip_eq→track_fx 同构；与 mix_samples 阶段 3 parity）
         if self._master_eq is not None and self._master_eq.is_active:
             output = self._master_eq.process(output)
-        if self._master_chain is not None and self._master_chain.is_active:
+        if self._master_chain is not None:
             # R05: Master fx 参数自动化——块边界按起始帧重设链参数
             # （master_automation 的 fx/{instance_id}/{param} 键；
             # 与轨级 render_track_block 的 fx_sampler 消费同型）

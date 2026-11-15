@@ -15,6 +15,8 @@ Master 条用 "-1" 作为保留 id。UI 内部用 dB / balance（-50..50），
 两者通过下方模块级换算函数转换。
 """
 
+from dataclasses import replace
+
 import logging
 import math
 from typing import Optional, Any
@@ -896,10 +898,9 @@ class TrackMixerWidget(QWidget):
         )
         if idx >= 0:
             old = effects[idx]
-            effects[idx] = TrackEffectInstance(
-                effect_type="strip_eq", params=new_params or old.params,
+            effects[idx] = replace(
+                old, params=new_params or old.params,
                 enabled=bool(getattr(eq_params, 'enabled', old.enabled)),
-                order=old.order, instance_id=old.instance_id, panel="eq",
             )
         elif create:
             new_order = max((e.order for e in effects), default=-1) + 1
@@ -931,11 +932,9 @@ class TrackMixerWidget(QWidget):
         if idx >= 0:
             old = effects[idx]
             if new_params is not None:
-                effects[idx] = TrackEffectInstance(
-                    effect_type="strip_eq", params=new_params,
+                effects[idx] = replace(
+                    old, params=new_params,
                     enabled=bool(getattr(eq_params, 'enabled', old.enabled)),
-                    order=old.order, instance_id=old.instance_id,
-                    panel="eq",
                 )
                 # 同步对话框的 instance_id（首次提交新建实例后回填）
                 if self._eq_dialog is not None and not getattr(self._eq_dialog, "_instance_id", ""):
@@ -1253,17 +1252,14 @@ class TrackMixerWidget(QWidget):
         any_enabled = any(_is_enabled(e) for e in fx_effects)
         target_enabled = not any_enabled  # 有启用的→全关；全关→全开
 
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         # 只改 panel="fx" 的实例，其余（dynamics/eq）原样保留（含 panel 字段）
         changed_ids = set()
         new_effects = []
         for e in effects:
             if getattr(e, "panel", "fx") == "fx":
-                new_effects.append(TrackEffectInstance(
-                    effect_type=e.effect_type,
-                    params={**(e.params or {}), "enabled": target_enabled},
-                    enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                    panel="fx",
+                new_effects.append(replace(
+                    e, params={**(e.params or {}), "enabled": target_enabled},
                 ))
                 changed_ids.add(e.instance_id)
             else:
@@ -1438,17 +1434,10 @@ class TrackMixerWidget(QWidget):
         if not dyn:
             return
         target_enabled = not any(bool(e.enabled) for e in dyn)
-        from src.features.edit.core.timeline_v2 import (
-            TrackEffectInstance, EffectChainParams,
-        )
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=e.params,
-                enabled=target_enabled, order=e.order,
-                instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) if getattr(e, "panel", "fx") == "dynamics" else e
+            replace(e, enabled=target_enabled)
+            if getattr(e, "panel", "fx") == "dynamics" else e
             for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
@@ -1578,15 +1567,11 @@ class TrackMixerWidget(QWidget):
         # 的实例，后续编辑被静默丢弃（instance_id 不再命中 chain 中任何条目），
         # 且每次编辑都向命令栈发出无变化链的重复提交。
         self._close_dialogs_for_instance(inst.instance_id)
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         effects = tuple(e for e in self._effect_chain.effects if e.instance_id != inst.instance_id)
         # 重新编号 order
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type, params=e.params, enabled=e.enabled,
-                order=i, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for i, e in enumerate(effects)
+            replace(e, order=i) for i, e in enumerate(effects)
         )
         self._effect_chain = EffectChainParams(effects=effects) if effects else None
         self._refresh_effect_list()
@@ -1679,7 +1664,7 @@ class TrackMixerWidget(QWidget):
         """上移/下移一个效果器（调整 order）。"""
         if self._effect_chain is None:
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         effects = list(self._effect_chain.effects)
         idx = next((i for i, e in enumerate(effects) if e.instance_id == inst.instance_id), -1)
         if idx < 0:
@@ -1689,11 +1674,7 @@ class TrackMixerWidget(QWidget):
             return
         effects[idx], effects[new_idx] = effects[new_idx], effects[idx]
         effects = [
-            TrackEffectInstance(
-                effect_type=e.effect_type, params=e.params, enabled=e.enabled,
-                order=i, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for i, e in enumerate(effects)
+            replace(e, order=i) for i, e in enumerate(effects)
         ]
         self._effect_chain = EffectChainParams(effects=tuple(effects))
         self._refresh_effect_list()
@@ -1707,7 +1688,7 @@ class TrackMixerWidget(QWidget):
         """
         if self._effect_chain is None:
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         cur_enabled = bool(inst.params.get("enabled", True)) if inst.params else True
         new_enabled = not cur_enabled
         # 仅修改命中实例的 params.enabled，其余字段（含 chain-level enabled）保持不变
@@ -1716,11 +1697,7 @@ class TrackMixerWidget(QWidget):
             if e.instance_id == inst.instance_id:
                 new_params = dict(e.params) if e.params else {}
                 new_params["enabled"] = new_enabled
-                effects.append(TrackEffectInstance(
-                    effect_type=e.effect_type, params=new_params,
-                    enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                    panel=getattr(e, "panel", "fx"),
-                ))
+                effects.append(replace(e, params=new_params))
             else:
                 effects.append(e)
         self._effect_chain = EffectChainParams(effects=tuple(effects))
@@ -1804,15 +1781,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = limiter_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -1861,15 +1834,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = comp_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -1916,15 +1885,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = reverb_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2004,12 +1969,7 @@ class TrackMixerWidget(QWidget):
         effects = list(self._effect_chain.effects) if self._effect_chain else []
         for i, e in enumerate(effects):
             if e.instance_id == inst.instance_id and e.effect_type == effect_type:
-                from src.features.edit.core.timeline_v2 import TrackEffectInstance
-                effects[i] = TrackEffectInstance(
-                    effect_type=effect_type, params=dict(params),
-                    enabled=bool(e.enabled), order=e.order,
-                    instance_id=e.instance_id, panel=e.panel,
-                )
+                effects[i] = replace(e, params=dict(params))
                 break
         from src.features.edit.core.timeline_v2 import EffectChainParams
         self._effect_chain = EffectChainParams(effects=tuple(effects)) if effects else None
@@ -2056,15 +2016,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = delay_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2111,15 +2067,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = sat_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2166,15 +2118,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = imager_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2220,15 +2168,11 @@ class TrackMixerWidget(QWidget):
         # AUD-37902: 实例已被删除（对话框在删除前打开）—— 丢弃编辑
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = exp_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2294,15 +2238,11 @@ class TrackMixerWidget(QWidget):
         # 避免重建出无变化链并向命令栈发出重复提交。
         if not self._instance_in_chain(inst.instance_id):
             return
-        from src.features.edit.core.timeline_v2 import TrackEffectInstance, EffectChainParams
+        from src.features.edit.core.timeline_v2 import EffectChainParams
         new_params = eq_params.to_dict()
         effects = tuple(
-            TrackEffectInstance(
-                effect_type=e.effect_type,
-                params=new_params if e.instance_id == inst.instance_id else e.params,
-                enabled=e.enabled, order=e.order, instance_id=e.instance_id,
-                panel=getattr(e, "panel", "fx"),
-            ) for e in self._effect_chain.effects
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
         )
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
@@ -2471,27 +2411,24 @@ class TrackMixerWidget(QWidget):
         # NF-04：两款新复合 FX 的实例遥测（F0/模块活动/波形颗粒/削波）
         for iid, dlg in list(getattr(self, '_voice_changer_dialogs',
                                      {}).items()):
-            if silent:
+            tap = taps.get(iid)
+            if silent or not tap or tap.get("bypassed"):
                 dlg.update_telemetry(None)
             else:
-                dlg.update_telemetry({
-                    "in_rms": 10 ** (_tap_db(iid, "in_db", -60.0) / 20.0),
-                    "out_rms": 10 ** (_tap_db(iid, "out_db", -60.0) / 20.0),
-                    "formant_active": True,
-                    "pitch_active": True,
-                    "vocoder_active": True,
-                })
+                analysis = dict(tap.get("analysis") or {})
+                analysis["input_peak_db"] = _tap_db(iid, "in_db", -100.0)
+                analysis["output_peak_db"] = _tap_db(iid, "out_db", -100.0)
+                dlg.update_telemetry(analysis)
         for iid, dlg in list(getattr(self, '_spectral_mangler_dialogs',
                                      {}).items()):
-            if silent:
+            tap = taps.get(iid)
+            if silent or not tap or tap.get("bypassed"):
                 dlg.update_telemetry(None)
             else:
-                dlg.update_telemetry({
-                    "in_rms": 10 ** (_tap_db(iid, "in_db", -60.0) / 20.0),
-                    "out_rms": 10 ** (_tap_db(iid, "out_db", -60.0) / 20.0),
-                    "waveform": None,
-                    "grains": None,
-                })
+                analysis = dict(tap.get("analysis") or {})
+                analysis["input_peak_db"] = _tap_db(iid, "in_db", -100.0)
+                analysis["output_peak_db"] = _tap_db(iid, "out_db", -100.0)
+                dlg.update_telemetry(analysis)
         for iid, dlg in list(getattr(self, '_delay_dialogs', {}).items()):
             try:
                 delay_out = _tap_db(iid, "out_db", out_db)

@@ -48,10 +48,14 @@ class _RingModule:
     def __init__(self, sample_rate: float) -> None:
         self._sr = float(sample_rate)
         self._phase = 0.0
+        self._dual_phase = 0.0
+        self._fm_phase = 0.0
         self._lfo_phase = 0.0
 
     def reset(self) -> None:
         self._phase = 0.0
+        self._dual_phase = 0.0
+        self._fm_phase = 0.0
         self._lfo_phase = 0.0
 
     def process(self, x: np.ndarray, p) -> np.ndarray:
@@ -66,24 +70,33 @@ class _RingModule:
         fc = max(0.01, p.ring_carrier_hz) * np.power(2.0, cents / 1200.0)
         dphi = 2.0 * np.pi * np.cumsum(fc) / self._sr
         phi = self._phase + dphi
+        dual_phi = self._dual_phase + 1.035 * dphi
+        fm_phi = self._fm_phase + 1.5 * dphi
         self._phase = float((self._phase + dphi[-1]) % (2.0 * np.pi))
+        # Noninteger frequency ratios cannot be reconstructed from a wrapped
+        # fundamental phase. Keep each oscillator continuous across blocks.
+        self._dual_phase = float(dual_phi[-1] % (2.0 * np.pi))
+        self._fm_phase = float(fm_phi[-1] % (2.0 * np.pi))
         spread_rad = (max(0.0, min(100.0, p.ring_spread_pct)) / 100.0) * np.pi
         warp_idx = (max(0.0, min(100.0, p.ring_warp_pct)) / 100.0) * 3.2
         mode = p.ring_mode
 
-        def _carrier(phase: np.ndarray) -> np.ndarray:
+        def _carrier(phase: np.ndarray, dual_phase: np.ndarray,
+                     fm_phase: np.ndarray) -> np.ndarray:
             if mode == "sine":
                 return np.sin(phase)
             if mode == "dual":
-                return 0.5 * (np.sin(phase) + np.sin(1.035 * phase + 0.8))
+                return 0.5 * (np.sin(phase) + np.sin(dual_phase + 0.8))
             if mode == "fm_ring":
-                return np.sin(phase + warp_idx * np.sin(1.5 * phase))
+                return np.sin(phase + warp_idx * np.sin(fm_phase))
             return 2.0 * np.abs(np.sin(phase)) - 1.0
 
         out = np.empty_like(x, dtype=np.float64)
-        out[0] = x[0] * _carrier(phi)
+        out[0] = x[0] * _carrier(phi, dual_phi, fm_phi)
         if x.shape[0] > 1:
-            out[1] = x[1] * _carrier(phi + spread_rad)
+            out[1] = x[1] * _carrier(phi + spread_rad,
+                                     dual_phi + 1.035 * spread_rad,
+                                     fm_phi + 1.5 * spread_rad)
         return out
 
 
@@ -107,12 +120,14 @@ class _GrainModule:
             v.start_out = 0
             self._voices.append(v)
         self._density_phase = 0.0
-        self._rng = seeded_rng(0, stream_id=0x5A1)
+        self._seed = 0
+        self._rng = seeded_rng(self._seed, stream_id=0x5A1)
         self._window = np.hanning(2048)
         self._prev_out: Optional[np.ndarray] = None
 
     def set_seed(self, seed: int) -> None:
-        self._rng = seeded_rng(seed, stream_id=0x5A1)
+        self._seed = int(seed)
+        self._rng = seeded_rng(self._seed, stream_id=0x5A1)
 
     def reset(self) -> None:
         self._hist.fill(0.0)
@@ -121,6 +136,7 @@ class _GrainModule:
             v.active = False
         self._density_phase = 0.0
         self._prev_out = None
+        self.set_seed(self._seed)
 
     def _hist_read(self, ch: int, positions: np.ndarray) -> np.ndarray:
         """向量化分数读。positions = 绝对样本位置（写入槽 = pos % cap，
@@ -392,11 +408,11 @@ class SpectralManglerEffect:
         if params is None:
             self._params = None
             return
+        old_routing = getattr(self._params, "routing", None)
         if isinstance(params, dict):
-            old_routing = getattr(self._params, "routing", None)
             params = SpectralManglerParams.from_dict(params)
-            if old_routing is not None and params.routing != old_routing:
-                self._routing_fade = 0.005 * self._sr  # 5ms 淡出保护
+        if old_routing is not None and params.routing != old_routing:
+            self._routing_fade = max(1, int(round(0.005 * self._sr)))
         self._params = params
         if params.random_seed != self._seed:
             self._seed = params.random_seed
@@ -408,13 +424,16 @@ class SpectralManglerEffect:
             return samples
         n = samples.shape[-1]
         x = samples.astype(np.float64, copy=True)
-        # 路由切换淡出（事件边界防爆音；v1 短窗淡出）
+        wet = self._topology(x, p)
+        # Keep routing protection on the wet branch: global_mix=0 must remain
+        # dry. Use one continuous ramp, including one-sample output blocks.
         if self._routing_fade > 0:
             m = min(n, int(self._routing_fade))
-            ramp = np.linspace(0.0, 1.0, max(2, m))
-            x[:, :m] *= ramp[np.newaxis, :]
+            total = max(1, int(round(0.005 * self._sr)))
+            start = total - int(self._routing_fade)
+            ramp = np.arange(start, start + m, dtype=np.float64) / max(1, total - 1)
+            wet[:, :m] *= ramp[np.newaxis, :]
             self._routing_fade -= m
-        wet = self._topology(x, p)
         wet = mix_aligned(x, wet, p.global_mix_pct)
         gain = float(10.0 ** (max(-24.0, min(12.0, p.output_gain_db)) / 20.0))
         wet = wet * gain
@@ -453,7 +472,7 @@ class SpectralManglerEffect:
         if p is None or not p.enabled:
             return False
         return (p.ring_enabled or p.grain_enabled or p.dist_enabled
-                or abs(p.output_gain_db) > 1e-9)
+                or p.output_limiter_enabled or abs(p.output_gain_db) > 1e-9)
 
     def collect_telemetry(self) -> dict:
         """NF-04：模块活动/削波指示（窗口端 30Hz 合并消费）。"""
@@ -506,5 +525,7 @@ class SpectralManglerEffect:
     def _rebuild(self) -> None:
         self._ring = _RingModule(self._sr)
         self._grain = _GrainModule(self._sr)
+        self._grain.set_seed(self._seed)
         self._dist = _DistModule(self._sr)
         self._limiter = _MiniLimiter(self._sr)
+        self._routing_fade = 0.0

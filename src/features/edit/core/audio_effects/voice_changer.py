@@ -13,7 +13,7 @@ OutputGain。每模块独立 Mix（dry 经模块时延线对齐；0/100 两端�
   ``r = 2**(st/12 + cents/1200)``；jitter = seed 相位的两个低频正弦
   （绝对采样时间驱动，块长无关）；r>1 时后置低通作 alias 保护；
   Formant Link 经共享 STFT warp 补偿 link 比例的包络漂移。
-- Vocoder：对数分布频带（150Hz..min(8k, 0.45·Nyquist)），逐带包络
+- Vocoder：对数分布频带（150Hz..min(8k, 0.45·sample_rate)），逐带包络
   （attack 2ms / release 参数的双单极近似：max(快路径, 慢路径)——
   上升由快路径主导、下降由 release 主导，写入契约）× 同带带通载波；
   载波相位跨块连续；Noise 载波用 seed 预生成确定性图案（绝对采样
@@ -43,7 +43,7 @@ _VOC_Q = 6.0
 
 
 class _WolaStream:
-    """流式 WOLA（hann 分析+综合窗；win/hop=4:1 COLA）。延迟 = win−hop。"""
+    """流式 WOLA（hann 分析+综合窗；win/hop=4:1 COLA）。延迟 = win。"""
 
     def __init__(self, sample_rate: float, win: int = _FFT_WIN,
                  hop: int = _FFT_HOP) -> None:
@@ -286,8 +286,9 @@ class _PitchModule:
                                                    -24.0, 24.0)) * link,
                 formant_throat_pct=0.0, formant_gender_pct=0.0,
                 formant_timbre_pct=0.0, formant_preserve_pct=0.0)
-            out = self._link_warper.process(
-                np.vstack([out, out]), link_params)[0]
+            # Each channel owns one WOLA stream. Processing a duplicated stereo
+            # block here advances both streams twice and leaks L history into R.
+            out = self._link_warper._process_mono(out, link_params, ch)
         return out
 
 
@@ -301,7 +302,10 @@ class _VocoderModule:
         self._ba = []
         self._ana_zi = None
         self._syn_zi = None
-        self._carrier_phase = 0.0
+        self._env_fast_zi = None
+        self._env_slow_zi = None
+        self._unvoiced_zi = None
+        self._carrier_phases = np.zeros(3, dtype=np.float64)
         self._noise = seeded_rng(0, 0x0FF).standard_normal(_NOISE_PATTERN)
         self._seed = None
 
@@ -323,11 +327,16 @@ class _VocoderModule:
         self._n_bands = n_bands
         self._ana_zi = None
         self._syn_zi = None
+        self._env_fast_zi = None
+        self._env_slow_zi = None
 
     def reset(self) -> None:
         self._ana_zi = None
         self._syn_zi = None
-        self._carrier_phase = 0.0
+        self._env_fast_zi = None
+        self._env_slow_zi = None
+        self._unvoiced_zi = None
+        self._carrier_phases.fill(0.0)
 
     @property
     def latency(self) -> int:
@@ -335,17 +344,23 @@ class _VocoderModule:
 
     def _carrier(self, p, n: int, abs_start: int, ch: int) -> np.ndarray:
         f0 = float(np.clip(p.vocoder_carrier_hz, 50.0, 440.0))
-        t = (abs_start + np.arange(n)) / self._sr
-        ph = self._carrier_phase + ch * 0.7
+        # Phases are advanced once per audio block below, not once per band or
+        # channel. Combining accumulated phase with absolute time counts the
+        # previous blocks twice and makes the carrier depend on block size.
+        t = np.arange(n) / self._sr
+        channel_phase = ch * 0.7
+        base_phase = self._carrier_phases[0] + 2.0 * np.pi * f0 * t
         kind = p.vocoder_carrier
         if kind == "noise":
             idx = (abs_start + np.arange(n) + ch * 7919) % _NOISE_PATTERN
             return self._noise[idx] * 0.5
         nyq_lim = min(8000.0, self._sr * 0.45)
         if kind == "choir":
-            sig = (np.sin(2 * np.pi * f0 * t + ph)
-                   + np.sin(2 * np.pi * f0 * 1.003 * t + ph * 0.9 + 0.7)
-                   + np.sin(2 * np.pi * f0 * 0.997 * t + 1.9)) / 3.0
+            sig = (np.sin(base_phase + channel_phase)
+                   + np.sin(2 * np.pi * f0 * 1.003 * t
+                            + self._carrier_phases[1] + channel_phase * 0.9 + 0.7)
+                   + np.sin(2 * np.pi * f0 * 0.997 * t
+                            + self._carrier_phases[2] + 1.9)) / 3.0
         else:
             sig = np.zeros(n)
             k = 1.0 if kind == "saw" else 1.0
@@ -356,7 +371,7 @@ class _VocoderModule:
                        else (0.0 if harm % 2 == 0 else
                              4.0 / (np.pi * harm)))
                 if amp != 0.0:
-                    sig += amp * np.sin(2 * np.pi * f0 * harm * t + ph)
+                    sig += amp * np.sin(harm * base_phase + channel_phase)
                 harm += 1.0
         return sig
 
@@ -368,6 +383,10 @@ class _VocoderModule:
         if self._ana_zi is None or self._ana_zi.shape != (n_bands, chs, 2):
             self._ana_zi = np.zeros((n_bands, chs, 2))
             self._syn_zi = np.zeros((n_bands, chs, 2))
+            self._env_fast_zi = np.zeros((n_bands, chs, 1))
+            self._env_slow_zi = np.zeros((n_bands, chs, 1))
+        if self._unvoiced_zi is None or self._unvoiced_zi.shape != (chs, 1):
+            self._unvoiced_zi = np.zeros((chs, 1))
         rel_a = float(np.exp(-1.0 / (0.002 * self._sr)))
         rel_r = float(np.exp(-1.0 / (max(5.0, p.vocoder_release_ms)
                                       * 0.001 * self._sr)))
@@ -376,30 +395,34 @@ class _VocoderModule:
         rel_b = np.array([1.0 - rel_r])
         rel_a_c = np.array([1.0, -rel_r])
         out = np.zeros_like(x, dtype=np.float64)
+        carriers = [self._carrier(p, n, abs_start, ch) for ch in range(chs)]
         for bi in range(n_bands):
             b, a = self._bb[bi], self._ba[bi]
             for ch in range(chs):
                 band, zf = lfilter(b, a, x[ch], zi=self._ana_zi[bi, ch])
                 self._ana_zi[bi, ch] = zf
-                env_fast = lfilter(att_b, att_a, np.abs(band))
-                env_slow = lfilter(rel_b, rel_a_c, np.abs(band))
+                env_fast, fast_zf = lfilter(
+                    att_b, att_a, np.abs(band), zi=self._env_fast_zi[bi, ch])
+                env_slow, slow_zf = lfilter(
+                    rel_b, rel_a_c, np.abs(band), zi=self._env_slow_zi[bi, ch])
+                self._env_fast_zi[bi, ch] = fast_zf
+                self._env_slow_zi[bi, ch] = slow_zf
                 env = np.maximum(env_fast, env_slow)
-                carrier = self._carrier(p, n, abs_start, ch)
-                csyn, zfs = lfilter(b, a, carrier, zi=self._syn_zi[bi, ch])
+                csyn, zfs = lfilter(b, a, carriers[ch], zi=self._syn_zi[bi, ch])
                 self._syn_zi[bi, ch] = zfs
                 out[ch] += csyn * env
-        self._carrier_phase = (self._carrier_phase
-                               + 2 * np.pi * float(np.clip(
-                                   p.vocoder_carrier_hz, 50.0, 440.0))
-                               * n / self._sr) % (2 * np.pi)
+        phase_step = (2.0 * np.pi * float(np.clip(
+            p.vocoder_carrier_hz, 50.0, 440.0)) * n / self._sr)
+        self._carrier_phases = (self._carrier_phases + phase_step
+                                * np.array([1.0, 1.003, 0.997])) % (2.0 * np.pi)
         out /= max(1.0, np.sqrt(n_bands) * 0.35)
         unv = float(np.clip(p.vocoder_unvoiced_pct, 0, 100)) / 100.0
-        if unv > 0:
-            hp_b = np.array([0.95, -0.95])
-            hp_a = np.array([1.0, -0.9])
-            for ch in range(chs):
-                resid = lfilter(hp_b, hp_a, x[ch])
-                out[ch] += resid * unv * 0.7
+        hp_b = np.array([0.95, -0.95])
+        hp_a = np.array([1.0, -0.9])
+        for ch in range(chs):
+            resid, hp_zf = lfilter(hp_b, hp_a, x[ch], zi=self._unvoiced_zi[ch])
+            self._unvoiced_zi[ch] = hp_zf
+            out[ch] += resid * unv * 0.7
         return out
 
 
@@ -423,6 +446,10 @@ class _DelayLine:
         out = buf[:len(x)]
         self._buf = buf[len(x):]
         return out
+
+    def reset(self) -> None:
+        """Clear queued audio while keeping the configured alignment delay."""
+        self._buf = np.zeros(self._latency, dtype=np.float64)
 
 
 def _estimate_f0(x: np.ndarray, sr: float, lo: float = 70.0,
@@ -541,11 +568,14 @@ class VoiceChangerEffect:
         self._pitch.reset()
         self._vocoder.reset()
         for d in (self._dry_f, self._dry_p, self._dry_v):
-            d[0].set_latency(d[0]._latency)
-            d[1].set_latency(d[1]._latency)
+            d[0].reset()
+            d[1].reset()
         self._samples_processed = 0
         self._last_f0_in = None
         self._last_f0_out = None
+        self._last_conf = 0.0
+        self._last_in_rms = 0.0
+        self._last_out_rms = 0.0
 
     def tail_estimate_samples(self) -> int:
         return 0  # 全模块有限冲激（WOLA/包络尾 < 1s 由后续块自然收敛）

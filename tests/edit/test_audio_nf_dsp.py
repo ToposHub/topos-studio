@@ -412,8 +412,16 @@ class TestSMDist:
                                   dist_fold_pct=90.0, dist_drive_db=6.0,
                                   dist_mix_pct=100.0, global_mix_pct=100.0)
         out = _run_sm(p, xb)
-        levels = np.unique(np.round(out[0, int(SR):], decimals=4))
-        assert len(levels) <= 8, f"quantization missing: {len(levels)} levels"
+        assert out.shape == xb.shape and out.size > 0
+        assert np.max(np.abs(out)) > 0.01
+        # Quantization is measured before DC/tone filters, whose output is
+        # continuous. The old [SR:] slice of a one-second output was empty.
+        from src.features.edit.core.audio_effects.spectral_mangler import _apply_curve
+        quantized = _apply_curve(x * 10.0 ** (6.0 / 20.0), "bitcrush", 0.9)
+        assert quantized.size == x.size
+        levels = np.unique(np.round(quantized, decimals=7))
+        assert 1 < len(levels) <= 8, f"quantization missing: {len(levels)} levels"
+        np.testing.assert_allclose(np.diff(levels), np.diff(levels)[0], atol=1e-7)
 
     def test_limiter_clips(self):
         rng = np.random.default_rng(2)

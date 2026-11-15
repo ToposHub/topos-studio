@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+import copy
 from typing import Any, Optional
 
 from PyQt6.QtCore import QTimer, pyqtSignal
@@ -137,6 +138,8 @@ class SpectralManglerDialog(QDialog):
         self._track_id = track_id
         self._instance_id = instance_id
         self._updating = False
+        self._base_params = copy.deepcopy(initial_params or {})
+        self._has_pending_edit = False
         self.setWindowTitle(f"Spectral Mangler — {track_name}")
         self.resize(1000, 690)
 
@@ -163,7 +166,11 @@ class SpectralManglerDialog(QDialog):
             self._updating = False
 
     def _current_params(self) -> dict:
-        return params_from_ui_state(self._widget.get_state())
+        edited = params_from_ui_state(self._widget.get_state())
+        params = {**edited, **copy.deepcopy(self._base_params)}
+        for key in _SM_FIELD_MAP:
+            params[key] = edited[key]
+        return params
 
     def _emit_preview(self) -> None:
         if not self._updating:
@@ -172,19 +179,38 @@ class SpectralManglerDialog(QDialog):
 
     def _emit_commit(self) -> None:
         if not self._updating:
+            self._preview_timer.stop()
+            self._commit_timer.stop()
+            self._has_pending_edit = False
+            params = self._current_params()
+            self._base_params = copy.deepcopy(params)
             self.spectral_mangler_committed.emit(
-                self._track_id, self._current_params())
+                self._track_id, params)
 
     def _on_widget_state(self, _state: dict) -> None:
         if self._updating:
             return
-        self._preview_timer.start()
+        self._has_pending_edit = True
+        if not self._preview_timer.isActive():
+            self._preview_timer.start()
         self._commit_timer.start()
+
+    def done(self, result: int) -> None:
+        """Keep the final user edit before releasing this modeless editor."""
+        if self._has_pending_edit:
+            self._emit_commit()
+        self._preview_timer.stop()
+        self._commit_timer.stop()
+        super().done(result)
 
     def set_current_params(self, params: Any) -> None:
         if params is None:
             return
         data = params.to_dict() if hasattr(params, "to_dict") else dict(params)
+        self._preview_timer.stop()
+        self._commit_timer.stop()
+        self._has_pending_edit = False
+        self._base_params = copy.deepcopy(data)
         self._updating = True
         try:
             self._widget.set_state(ui_state_from_params(data))
@@ -197,14 +223,13 @@ class SpectralManglerDialog(QDialog):
     def update_telemetry(self, telemetry: Optional[dict]) -> None:
         """NF-04：真实波形/模块活动/削波指示（demo 定时器自动停）。"""
         if not telemetry:
+            self._widget.reset_telemetry()
             return
         wave = telemetry.get("waveform")
         grains = telemetry.get("grains")
-        if wave is not None or grains is not None:
-            self._widget.setTelemetry(wave, grains)
         in_rms = telemetry.get("in_rms", 0.0)
         out_rms = telemetry.get("out_rms", 0.0)
-        if in_rms or out_rms:
-            self._widget.master_strip.setLevels(
-                _to_db(in_rms) if in_rms else -60.0,
-                _to_db(out_rms) if out_rms else -60.0)
+        self._widget.update_telemetry(
+            float(telemetry.get("input_peak_db", _to_db(in_rms) if in_rms else -60.0)),
+            float(telemetry.get("output_peak_db", _to_db(out_rms) if out_rms else -60.0)),
+            wave_samples=wave, grains=grains)

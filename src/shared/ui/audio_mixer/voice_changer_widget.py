@@ -505,6 +505,12 @@ class ProVerticalMeter(QWidget):
             self._active = active
             self.update()
 
+    def reset(self) -> None:
+        self._value = -55.0 if self._mode == "level" else 0.0
+        self._peak = self._value
+        self._clipped = False
+        self.update()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._clipped = False
@@ -1095,7 +1101,7 @@ class ProVoiceVisualizerWidget(QWidget):
         hud_str = (
             f"Formant {f_val:+.1f} st  •  Pitch {p_val:+.1f} st  •  "
             f"F0: {int(self._f0_in_hz)}→{int(self._f0_out_hz)}Hz ({freq_to_note(self._f0_out_hz)})  •  "
-            f"Clarity {int(self._clarity_pct)}%"
+            f"Confidence {int(self._clarity_pct)}%"
         )
         hud_rect = QRectF(plot.left() + 8, plot.top() + 8, 355, 19)
         p.setPen(QPen(QColor("#323642"), 1.0))
@@ -1924,6 +1930,8 @@ class StudioVoiceChangerWidget(QWidget):
         self._demo_timer.timeout.connect(self._tick_demo_analysis)
         if self._demo_mode:
             self._demo_timer.start(42)
+        else:
+            self.reset_telemetry()
 
     def _setup_ui(self, track_name: str):
         self.setStyleSheet("""
@@ -2116,7 +2124,7 @@ class StudioVoiceChangerWidget(QWidget):
         self.meter_fmt = ProVerticalMeter(title="FMT", mode="activity", show_ticks=False, accent_color=COLORS["formant"])
         self.meter_pch = ProVerticalMeter(title="PCH", mode="activity", show_ticks=False, accent_color=COLORS["pitch"])
         self.meter_voc = ProVerticalMeter(title="VOC", mode="activity", show_ticks=False, accent_color=COLORS["vocoder"])
-        self.meter_clr = ProVerticalMeter(title="CLR", mode="activity", show_ticks=False, accent_color=COLORS["cyan"])
+        self.meter_clr = ProVerticalMeter(title="CONF", mode="activity", show_ticks=False, accent_color=COLORS["cyan"])
         for m in (self.meter_fmt, self.meter_pch, self.meter_voc, self.meter_clr):
             stat_row.addWidget(m)
         stat_col.addLayout(stat_row, 1)
@@ -2437,6 +2445,15 @@ class StudioVoiceChangerWidget(QWidget):
         if self._demo_timer.isActive():
             self._demo_timer.stop()
         self.voice_visualizer.updateAnalysis(freqs_hz, input_spec_db, output_spec_db, f0_in_hz, f0_out_hz, clarity_pct)
+
+    def reset_telemetry(self) -> None:
+        """Clear measurements without changing any sound parameters or banks."""
+        graph = self.voice_visualizer
+        floor = [-65.0] * len(graph._freqs)
+        graph.updateAnalysis(graph._freqs, floor, list(floor), 0.0, 0.0, 0.0)
+        for meter in (self.meter_input, self.meter_output, self.meter_fmt,
+                      self.meter_pch, self.meter_voc, self.meter_clr):
+            meter.reset()
 
     def update_meters(
         self,
