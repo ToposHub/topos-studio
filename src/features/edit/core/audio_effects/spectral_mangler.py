@@ -507,26 +507,42 @@ class _DistModule:
 
 
 class _MiniLimiter:
-    """实例内峰值限幅：attack 即时、release 50ms 指数（固定，契约）。"""
+    """实例内峰值限幅：attack 即时、release 50ms 指数（固定，契约）。
+
+    H10：逐采样包络（修前"每块一个采样系数"——1 秒静音后增益按块长
+    0.5..1 漂移：block=1 → ≈1，48000 → 0.5002）。声道联动（同增益），
+    向量化精确实现 min-decay 扫描：
+    ``E[n] = min(E[n-1]·rel, target[n]) = min_k target[k]·rel^(n-k)``，
+    log 域 running-min 一次 accumulate 完成，块长无关、逐位一致。
+    """
 
     def __init__(self, sample_rate: float) -> None:
-        self._rel = float(np.exp(-1.0 / (0.05 * max(1.0, sample_rate))))
-        self._gain = 1.0
+        self._sr = float(sample_rate)
+        # release 增长率（每样本）：E 向 1 恢复
+        self._d = 1.0 / (0.05 * max(1.0, sample_rate))
+        self._log_e0 = 0.0  # log(E[−1])，E=1 起步
 
     def reset(self) -> None:
-        self._gain = 1.0
+        self._log_e0 = 0.0
 
     def process(self, x: np.ndarray) -> np.ndarray:
-        peak = float(np.max(np.abs(x))) if x.size else 0.0
-        if peak > 1.0:
-            target = 1.0 / peak
-            self._gain = min(self._gain, target)
-        else:
-            self._gain = self._gain * self._rel + 1.0 * (1.0 - self._rel)
-        if self._gain >= 0.999:
-            self._gain = 1.0
+        if x.size == 0 or x.ndim != 2:
             return x
-        return x * self._gain
+        n = x.shape[-1]
+        # 声道联动目标：target = 1/peak（peak ≤ 1 → 1）
+        peak = np.max(np.abs(x), axis=0)
+        log_t = np.where(peak > 1.0, -np.log(np.maximum(peak, 1e-12)), 0.0)
+        # E[n] = min(1, min_{k≤n} t[k]·e^{(n−k)d})——逐采样恢复的精确包络：
+        # log 域 running-min（u[k]=logt[k]−k·d 有负漂移，数值有界）
+        j = np.arange(n, dtype=np.float64)
+        u = log_t - j * self._d
+        c = np.minimum.accumulate(u)
+        inner = c + j * self._d
+        outer = self._log_e0 + (j + 1.0) * self._d
+        log_e = np.minimum(np.minimum(outer, inner), 0.0)
+        self._log_e0 = float(log_e[-1])
+        env = np.exp(np.clip(log_e, -40.0, 0.0))
+        return x * env[np.newaxis, :]
 
 
 class SpectralManglerEffect:

@@ -73,7 +73,8 @@ def test_limiter_only_instance_is_processed_by_effect_chain() -> None:
     samples = np.full((2, 256), 2.0, dtype=np.float64)
     assert chain.is_active
     limited = chain.process(samples)
-    np.testing.assert_array_equal(limited, np.ones_like(samples))
+    # H10：逐采样包络下 unity 信号 E=exp(0) 有 ±1ulp 舍入——容差断言
+    np.testing.assert_allclose(limited, np.ones_like(samples), atol=1e-9)
 
 
 def test_limiter_disabled_neutral_instance_remains_inactive() -> None:
