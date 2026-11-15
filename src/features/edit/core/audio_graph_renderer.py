@@ -269,6 +269,29 @@ class AudioGraphRenderer:
                 return set()
         return set()
 
+    def master_tail_estimate_samples(self) -> int:
+        """R04: Master FX 链尾音预算（样本；无链/旁路 = 0）。
+
+        含尾导出模式据此延长输出缓冲；严格选区模式不消费本值。
+        """
+        if self._master_chain is not None:
+            try:
+                return int(self._master_chain.tail_estimate_samples())
+            except Exception:  # noqa: BLE001 — 诊断性查询失败按 0 处理
+                return 0
+        return 0
+
+    def bus_tail_estimate_samples(self) -> int:
+        """R04: 全部 Bus 节点链尾音预算的最大值（样本；并联汇合取 max）。"""
+        best = 0
+        for node in self._nodes.values():
+            if node.is_bus and node.effect_chain is not None:
+                try:
+                    best = max(best, int(node.effect_chain.tail_estimate_samples()))
+                except Exception:  # noqa: BLE001
+                    continue
+        return best
+
     def _build_routing_dict(self) -> dict:
         """从 self._nodes 构建 routing dict（供闭包/拓扑排序复用）。"""
         return {
