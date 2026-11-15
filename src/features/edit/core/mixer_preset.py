@@ -74,6 +74,10 @@ class ChannelStripPreset:
     # 当前值造成的数据——无法区分，按 legacy 兼容渲染）。存盘原样写回存储
     # 值，不再无脑写当前 ALGORITHM_VERSION（777 → 3 的无损往返破坏）。
     algorithm_version: int = 0
+    # R05：字段存在性（schema v2）——区分"预设没存该字段"（应用时保留
+    # 目标轨现状）与"显式捕获为空"（应用时清除）。from_track 捕获的预设
+    # 全字段显式；旧预设文件（无 explicit_fields 键）只有基础五字段语义。
+    explicit_fields: frozenset = frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         # strip_eq / effect_chain 延迟序列化（避免 import 循环）
@@ -98,6 +102,8 @@ class ChannelStripPreset:
             "sends": [s.to_dict() if hasattr(s, 'to_dict') else s for s in self.sends],
             "is_bus": self.is_bus,
             "created_at": self.created_at,
+            # R05：字段存在性随预设持久化（显式空 = 清除语义）
+            "explicit_fields": sorted(self.explicit_fields),
         }
 
     @staticmethod
@@ -137,6 +143,17 @@ class ChannelStripPreset:
             algorithm_version = max(0, int(data.get("algorithm_version", 0) or 0))
         except (TypeError, ValueError):
             algorithm_version = 0
+        # R05：字段存在性——v2 的 explicit_fields 列表为权威来源；legacy
+        # 文件（无该键）只把"键存在且值非空"视为显式捕获（旧 to_dict 总写
+        # None/空占位，不能当作显式清除，否则旧预设应用会清掉目标轨状态）
+        explicit_raw = data.get("explicit_fields")
+        if isinstance(explicit_raw, (list, tuple, set)):
+            explicit = frozenset(str(f) for f in explicit_raw)
+        else:
+            explicit = frozenset(
+                k for k in ("strip_eq", "effect_chain", "panner",
+                            "output_bus_id", "sends")
+                if k in data and data.get(k) not in (None, [], ()))
         return ChannelStripPreset(
             preset_id=data.get("preset_id", str(uuid.uuid4())),
             name=data.get("name", "Untitled Preset"),
@@ -152,6 +169,7 @@ class ChannelStripPreset:
             is_bus=bool(data.get("is_bus", False)),
             created_at=data.get("created_at", ""),
             algorithm_version=algorithm_version,
+            explicit_fields=explicit,
         )
 
     @staticmethod
@@ -176,6 +194,10 @@ class ChannelStripPreset:
             created_at=datetime.now().isoformat(),
             # R01：新捕获标记当前算法版本（区分"捕获时就地未标注"的旧预设）
             algorithm_version=_current_algorithm_version(),
+            # R05：全量捕获——所有可清除字段显式（应用时空值=清除）
+            explicit_fields=frozenset((
+                "strip_eq", "effect_chain", "panner",
+                "output_bus_id", "sends")),
         )
 
 
@@ -302,7 +324,7 @@ def remove_preset(preset_id: str) -> list[ChannelStripPreset]:
 
 @dataclass(frozen=True)
 class MixSnapshot:
-    """整个混音器的状态快照（W14）。
+    """整个混音器的状态快照（W14；R05 补齐 Master 条带）。
 
     包含所有音频轨的 strip 参数 + Master 参数。存到 timeline 的
     mixer_snapshots 字段，用于 A/B 对比切换。
@@ -313,6 +335,9 @@ class MixSnapshot:
         track_states: {track_id: ChannelStripPreset-like dict}
         master_volume: Master 总线音量（0.0-1.0）
         master_muted: Master 静音
+        master_strip_eq: Master EQ 参数 dict（R05；None=捕获时无 EQ，
+            "_unset"=旧快照未捕获该字段——应用时保留现状）
+        master_effect_chain: Master FX 链 dict（R05；语义同上）
     """
 
     snapshot_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -320,15 +345,30 @@ class MixSnapshot:
     track_states: dict[str, dict] = field(default_factory=dict)
     master_volume: float = 1.0
     master_muted: bool = False
+    # R05：Master 条带全字段。"_unset" 哨兵区分"未捕获"（旧快照）与
+    # "捕获为空"（无 EQ/FX）——前者应用时保留现状，后者才清除。
+    master_strip_eq: Any = "_unset"
+    master_effect_chain: Any = "_unset"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "snapshot_id": self.snapshot_id,
             "name": self.name,
             "track_states": dict(self.track_states),
             "master_volume": self.master_volume,
             "master_muted": self.master_muted,
         }
+        if self.master_strip_eq != "_unset":
+            d["master_strip_eq"] = (
+                self.master_strip_eq.to_dict()
+                if hasattr(self.master_strip_eq, "to_dict")
+                else self.master_strip_eq)
+        if self.master_effect_chain != "_unset":
+            d["master_effect_chain"] = (
+                self.master_effect_chain.to_dict()
+                if hasattr(self.master_effect_chain, "to_dict")
+                else self.master_effect_chain)
+        return d
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "MixSnapshot":
@@ -338,6 +378,8 @@ class MixSnapshot:
             track_states=dict(data.get("track_states", {})),
             master_volume=float(data.get("master_volume", 1.0)),
             master_muted=bool(data.get("master_muted", False)),
+            master_strip_eq=data.get("master_strip_eq", "_unset"),
+            master_effect_chain=data.get("master_effect_chain", "_unset"),
         )
 
     @staticmethod
@@ -352,4 +394,8 @@ class MixSnapshot:
             track_states=track_states,
             master_volume=float(getattr(timeline, 'master_volume', 1.0)),
             master_muted=bool(getattr(timeline, 'master_muted', False)),
+            # R05：Master EQ/FX 进快照（此前只存 volume/mute——捕获 A 后
+            # 改 Master EQ 再应用 A，EQ 变化被静默保留）
+            master_strip_eq=getattr(timeline, 'master_strip_eq', None),
+            master_effect_chain=getattr(timeline, 'master_effect_chain', None),
         )
