@@ -372,36 +372,94 @@ class _LibavSession(DecoderBackend):
 
     def frame_rgb(self, index: int, size=None):
         with self._lock:
-            need_seek = self._iter is None or self._next_idx != index
-            if need_seek:
-                self._container.seek(self._pts_of(index), stream=self._stream,
-                                     backward=True)
-                self._iter = self._container.decode(video=0)
-                self._next_idx = None
-            # 跳过 seek 落点之前的帧（关键帧对齐）
-            while True:
-                frame = next(self._iter)
-                idx = self._idx_of(frame)
-                if self._next_idx is None:
-                    self._next_idx = idx
-                if idx >= index:
-                    break
-            self._next_idx = index + 1
+            frame = self._decode_frame_locked(index, size)
             if size:
                 w, h = size
-                # 偶数对齐（swscale 要求）
                 w -= w % 2
                 h -= h % 2
-                out = frame.to_ndarray(format='rgb24', width=w, height=h)
-                # 带 size 的转换可能返回非连续 buffer，QImage 拒收 —— 归一化
-                return np.ascontiguousarray(out)
+                return np.ascontiguousarray(
+                    frame.to_ndarray(format='rgb24', width=w, height=h))
             return frame.to_ndarray(format='rgb24')
+
+    def frame_yuv(self, index: int, size=None):
+        """解码第 index 帧 → ``YuvFrame``（GPU 预览路径）。
+
+        PyAV 保留源平面位深：8-bit 用 uint8，10/12/16-bit 用 uint16
+        （码值不左移）。这里按 ``size`` 让 swscale 只做缩放，不做
+        YUV→RGB，随后把三平面复制成本帧独立数组供 GUI 线程上传。
+        """
+        from .yuv_frame import YuvFrame
+
+        with self._lock:
+            frame = self._decode_frame_locked(index, size)
+            fmt = str(getattr(frame.format, 'name', '') or '')
+            depth = 16 if 'p16' in fmt else 12 if 'p12' in fmt else \
+                10 if 'p10' in fmt else 8
+            dtype = np.uint16 if depth > 8 else np.uint8
+            planes = [
+                _plane_to_ndarray(plane, dtype)
+                for plane in frame.planes[:3]
+            ]
+            if len(planes) != 3:
+                raise ValueError(f'unsupported non-planar format: {fmt}')
+            subsampling = '444' if ('444' in fmt or 'gbr' in fmt) else \
+                '422' if '422' in fmt else '420'
+            matrix = int(getattr(frame, 'colorspace', 1) or 1)
+            # PyAV color_range: 0=unspecified, 1=MPEG(limited), 2=JPEG(full)
+            full_range = 1 if int(getattr(frame, 'color_range', 0) or 0) == 2 else 0
+            siting = int(getattr(frame, 'chroma_location', 1) or 1)
+            if subsampling == '444':
+                siting = 1
+            return YuvFrame(
+                y=planes[0].copy(), u=planes[1].copy(), v=planes[2].copy(),
+                bit_depth=depth, subsampling=subsampling,
+                matrix=matrix, color_range=full_range, chroma_siting=siting,
+                pixel_format='gbr' if 'gbr' in fmt else subsampling,
+                source_width=int(frame.width), source_height=int(frame.height))
+
+    def _decode_frame_locked(self, index: int, size=None):
+        need_seek = self._iter is None or self._next_idx != index
+        if need_seek:
+            self._container.seek(self._pts_of(index), stream=self._stream,
+                                 backward=True)
+            self._iter = self._container.decode(video=0)
+            self._next_idx = None
+        # 跳过 seek 落点之前的帧（关键帧对齐）
+        while True:
+            frame = next(self._iter)
+            idx = self._idx_of(frame)
+            if self._next_idx is None:
+                self._next_idx = idx
+            if idx >= index:
+                break
+        self._next_idx = index + 1
+        if size:
+            w, h = int(size[0]), int(size[1])
+            w -= w % 2
+            h -= h % 2
+            frame = frame.reformat(width=w, height=h,
+                                   format=frame.format.name)
+        return frame
 
     def close(self):
         try:
             self._container.close()
         except Exception:
             pass
+
+
+def _plane_to_ndarray(plane, dtype) -> np.ndarray:
+    """PyAV VideoPlane → 紧凑二维数组（按 line_size 裁掉行尾对齐填充）。"""
+    itemsize = np.dtype(dtype).itemsize
+    row_values = int(plane.line_size) // itemsize
+    raw = np.frombuffer(plane, dtype=dtype)
+    height = int(plane.height)
+    width = int(plane.width)
+    if row_values != width:
+        raw = raw.reshape(height, row_values)[:, :width]
+    else:
+        raw = raw.reshape(height, width)
+    return np.ascontiguousarray(raw)
 
 
 class LibavPlayer(BasePlayer):
@@ -514,8 +572,19 @@ class LibavPlayer(BasePlayer):
             a.pause()
         _icons.set_play_icon(self.btn_play, playing=False)
 
+    def _create_canvas(self):
+        from ._canvas_factory import make_canvas
+        return make_canvas(self)
+
     def _decode_frame(self, session, target: int):
-        size = self.canvas.display_size()
+        canvas = self.canvas
+        size = canvas.display_size()
+        if getattr(canvas, 'gpu_active', False) and \
+                hasattr(session, 'frame_yuv'):
+            try:
+                return session.frame_yuv(target, size=size)
+            except Exception:
+                logger.warning('Libav GPU YUV 帧失败，回退 RGB', exc_info=True)
         rgb = session.frame_rgb(target, size=size)
         return _frame_to_qimage(rgb)
 

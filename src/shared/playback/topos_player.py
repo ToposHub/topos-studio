@@ -18,6 +18,7 @@ Topos Video Codec 原生播放器（应用级共享播放核心）。
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,8 +40,12 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit,
 
 from . import icons as _icons
 from .base_player import (BasePlayer, DecoderBackend, _fmt_time,
+                          _frame_to_qimage,
                           utils_get_tool_path)  # noqa: F401  (libav/外部沿用旧导入名)
 from .topos_media import topos_color_info  # noqa: F401  (topos_media 元数据面板沿用)
+
+if TYPE_CHECKING:
+    from .yuv_frame import YuvFrame
 
 # —— H.273 码值 → 显示名（元数据面板用；与 AVCodecContext 枚举同源） ——
 _MATRIX_NAMES = {1: 'BT.709', 5: 'BT.601', 6: 'SMPTE 170M', 9: 'BT.2020 NC'}
@@ -167,7 +172,34 @@ class ToposMovieSession(DecoderBackend):
         with self._lock:
             return self._frame_rgb_locked(index, size)
 
-    def _frame_rgb_locked(self, index: int, size=None):
+    def frame_yuv(self, index: int, size=None) -> YuvFrame:
+        """解码第 index 帧 → :class:`YuvFrame`（GPU 预览路径）。
+
+        与 ``frame_rgb`` 共用同一条 decode/auto2k 路径，但不经过
+        swscale，也不把 10/12-bit 压成 8-bit；三平面复制成本帧独立数组，
+        避免解码器缓冲被下一帧覆盖。``size`` 非空时启用 AUTO_2K。
+        """
+        from .yuv_frame import YuvFrame
+
+        with self._lock:
+            self._decode_planes_locked(index, size)
+            pixel_format = '444' if int(self.info.pixel_format) == 1 else '422'
+            return YuvFrame(
+                y=self._y.copy(),
+                u=self._u.copy(),
+                v=self._v.copy(),
+                bit_depth=int(self.info.bit_depth),
+                subsampling=pixel_format,
+                matrix=int(self.info.color_matrix),
+                color_range=int(self.info.color_range),
+                chroma_siting=int(self.info.chroma_siting),
+                pixel_format=pixel_format,
+                source_width=self.width,
+                source_height=self.height,
+            )
+
+    def _decode_planes_locked(self, index: int, size=None) -> None:
+        """解码到当前 Y/U/V 平面（调用方必须持有 ``_lock``）。"""
         buf, size_n = self._movie.packet_into(index)
         req = self._auto_request if size is not None else None
         if req is not None:
@@ -186,6 +218,9 @@ class ToposMovieSession(DecoderBackend):
         if req is None:
             self._ensure_full_planes()
             self._decoder.decode_views(buf, self._views, 3, size=size_n)
+
+    def _frame_rgb_locked(self, index: int, size=None):
+        self._decode_planes_locked(index, size)
         frame = self._av.VideoFrame(self._out_w, self._out_h, format=self.vfmt)
         frame.planes[0].update(self._y.data)
         frame.planes[1].update(self._u.data)
@@ -262,6 +297,29 @@ class ToposPlayer(BasePlayer):
         # 不回退系统播放器——QuickTime 无法解码 TPIC，静默转交只会
         # 制造"打开了但报错"的困惑。原因经 play_failed 上抛为可见 toast。
         return 'Topos 解码失败'
+
+    def _create_canvas(self):
+        # M3：Topos 的 10/12-bit YUV 直接上 GPU；GL 不可用时自动回退
+        # base_player 的 QImage 画布，播放链路不受影响。
+        from ._canvas_factory import make_canvas
+        return make_canvas(self)
+
+    def _decode_frame(self, session: DecoderBackend, target: int):
+        """解码线程：GPU 就绪时产出 YUV 平面，否则回退 RGB QImage。
+
+        BasePlayer 默认 ``frame_rgb(target)`` 不传 size，会让 Topos 的
+        AUTO_2K 请求完全失效（M2 遗留问题）。这里统一传画布显示尺寸，
+        4K 素材预览解码到 1920×1080，快照仍走 ``_native_frame`` 全尺寸。
+        """
+        canvas = self.canvas
+        if getattr(canvas, 'gpu_active', False) and \
+                hasattr(session, 'frame_yuv'):
+            try:
+                return session.frame_yuv(target, size=canvas.display_size())
+            except Exception:
+                logger.warning('Topos GPU YUV 帧失败，回退 RGB', exc_info=True)
+        rgb = session.frame_rgb(target, size=canvas.display_size())
+        return _frame_to_qimage(rgb)
 
     def _populate_header_buttons(self, hl) -> None:
         btn_clip = _icons.make_tool_button(
