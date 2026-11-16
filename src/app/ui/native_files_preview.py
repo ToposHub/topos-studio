@@ -81,7 +81,12 @@ def decode_preview(data: bytes) -> tuple[QImage, str]:
 
 
 class PreviewDecoder(QObject):
-    """管理解码任务的线程池与结果回收（同一时刻只关心最新一张）。"""
+    """管理解码任务的线程池与结果回收（同一时刻只关心最新一张）。
+
+    [FR-14] 任务身份 = 递增 generation + path，不再只用 path：同路径
+    关闭后重开时，旧任务的完成回调不得删除/顶替新任务的结果——
+    "旧 1px 任务先到、新 2px 后到必须只显示新图"。
+    """
 
     image_ready = pyqtSignal(str, object)
     decode_failed = pyqtSignal(str, str)
@@ -90,28 +95,33 @@ class PreviewDecoder(QObject):
         super().__init__(parent)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(max(1, int(max_concurrency)))
-        self._current_path: Optional[str] = None
-        self._jobs: dict[str, _PreviewDecodeJob] = {}
+        self._generation = 0
+        self._current: Optional[tuple[int, str]] = None
+        self._jobs: dict[int, _PreviewDecodeJob] = {}
 
     def start(self, path: str, data: bytes) -> None:
         self.cancel()
-        self._current_path = path
+        self._generation += 1
+        generation = self._generation
+        self._current = (generation, path)
         job = _PreviewDecodeJob(path, data)
-        job.signals.finished.connect(self._on_finished)
-        self._jobs[path] = job
+        job.signals.finished.connect(
+            lambda p, image, error, g=generation: self._on_finished(g, p, image, error))
+        self._jobs[generation] = job
         self._pool.start(job)
 
     def cancel(self) -> None:
-        self._current_path = None
+        self._current = None
         for job in list(self._jobs.values()):
             self._pool.tryTake(job)
         self._jobs.clear()
 
-    def _on_finished(self, path: str, image: QImage, error: str) -> None:
-        self._jobs.pop(path, None)
-        if path != self._current_path:
-            return
-        self._current_path = None
+    def _on_finished(self, generation: int, path: str,
+                     image: QImage, error: str) -> None:
+        self._jobs.pop(generation, None)
+        if self._current is None or self._current[0] != generation:
+            return  # 已被取消或被更新的同路径任务取代：结果作废
+        self._current = None
         if image is None or image.isNull():
             self.decode_failed.emit(path, error or "无法解码该文件")
         else:
@@ -120,6 +130,8 @@ class PreviewDecoder(QObject):
     def shutdown(self) -> None:
         self.cancel()
         self._pool.clear()
+        # [FR-17] 有界等待在途解码结束：不带着运行中的 job 析构线程池
+        self._pool.waitForDone(2000)
 
 
 class NativeFilesPreview(QWidget):

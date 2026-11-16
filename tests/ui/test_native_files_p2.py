@@ -77,14 +77,15 @@ def test_hover_non_video_clears(panel):
 def test_batch_rename_dialog_preview_and_conflict(qtbot):
     dialog = BatchRenameDialog(["/a.jpg", "/b.jpg"])
     qtbot.addWidget(dialog)
-    dialog.show_preview({"plan": [
+    session = {"session_id": dialog.session_id}  # [FR-13] 会话化载荷
+    dialog.show_preview({**session, "plan": [
         {"src_name": "a.jpg", "dst_name": "a_001.jpg", "conflict": False},
         {"src_name": "b.jpg", "dst_name": "b_001.jpg", "conflict": True},
     ], "errors": []})
     assert dialog.table.rowCount() == 2
     assert dialog.execute_button.isEnabled()
     assert "1 项冲突" in dialog.summary.text()
-    dialog.show_preview({"plan": [
+    dialog.show_preview({**session, "plan": [
         {"src_name": "a.jpg", "dst_name": "a_001.jpg", "conflict": False},
     ], "errors": []})
     assert dialog.execute_button.isEnabled()
@@ -93,7 +94,9 @@ def test_batch_rename_dialog_preview_and_conflict(qtbot):
 def test_batch_rename_dialog_result_lists_failures(qtbot):
     dialog = BatchRenameDialog(["/a.jpg"])
     qtbot.addWidget(dialog)
-    dialog.show_result({"success": True, "processed": 1, "errors": ["x.jpg: 只读"]})
+    dialog.show_result({"success": True, "processed": 1,
+                        "session_id": dialog.session_id,
+                        "errors": ["x.jpg: 只读"]})
     assert "已处理 1 项" in dialog.summary.text()
     assert "只读" in dialog.summary.text()
 
