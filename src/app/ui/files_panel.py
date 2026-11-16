@@ -439,6 +439,9 @@ class FilesPanel(QWidget):
                 self._native_panel.apply_metadata_result)
             self._native_transport.metadata_failed.connect(
                 self._native_panel.metadata_failed)
+            # [FR-11] 服务端最终 user 快照：UI 回显一律以落库状态为准
+            self._native_transport.metadata_snapshot.connect(
+                self._native_panel.apply_metadata_snapshot)
             # B01：能力清单 —— 服务不支持的能力在 UI 上直接禁用并给原因
             self._native_transport.capabilities_loaded.connect(
                 self._native_panel.apply_capabilities)

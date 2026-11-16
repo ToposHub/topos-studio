@@ -24,6 +24,8 @@ class _MetadataJob:
     patch: dict[str, Any]
     remaining: int = 0
     failures: list[str] = field(default_factory=list)
+    # [FR-11] 服务端落库后的最终 user 快照：path → {tags/rating/...}
+    snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +55,8 @@ class NativeFilesTransport(QObject):
     tree_failed = pyqtSignal(str, str)
     metadata_applied = pyqtSignal(list, dict, str)
     metadata_failed = pyqtSignal(list, dict, str)
+    # [FR-11] 服务确认后的最终 user 快照：UI 一律按此回显（不自行推算）
+    metadata_snapshot = pyqtSignal(dict)
     capabilities_loaded = pyqtSignal(list)
     preview_loaded = pyqtSignal(str, bytes)
     preview_failed = pyqtSignal(str, str)
@@ -111,10 +115,13 @@ class NativeFilesTransport(QObject):
         self._compare_reply: QNetworkReply | None = None
         self._compare_state: _PreviewRead | None = None
         self._strip_replies: dict[QNetworkReply, str] = {}
+        # [FR-09] 搜索/集合请求也纳入在途表：切目录后旧结果不得覆盖新视图
+        self._search_reply: QNetworkReply | None = None
+        self._collection_reply: QNetworkReply | None = None
+        # [FR-16] 多任务并行轮询：job_id → {attempts, reply}；单一槽位会让
+        # 第二个任务覆盖第一个的轮询，前任务失去完成/失败反馈
+        self._task_polls: dict[str, dict[str, Any]] = {}
         self._task_poll_timer: QTimer | None = None
-        self._task_poll_job: str = ""
-        self._task_poll_reply: QNetworkReply | None = None
-        self._task_poll_attempts: int = 0
         self._scan_poll_timer: QTimer | None = None
 
     def _make_request(self, endpoint: str, query: dict[str, str | int]) -> QNetworkRequest | None:
@@ -367,21 +374,28 @@ class NativeFilesTransport(QObject):
         self.loaded.emit(path, entries)
 
     # -- 元数据写入（U05） ------------------------------------------------
-    def patch_metadata(self, paths: list[str], patch: dict[str, Any]) -> None:
+    def patch_metadata(self, paths: list[str], patch: dict[str, Any],
+                       tags_op: str = "replace") -> None:
         """只提交用户改过的字段；单文件走 update_meta，多文件走 batch/meta。
 
-        响应确认后才发 metadata_applied，失败逐条汇总：不写"已保存"的假状态。
+        [FR-11] tags_op 显式语义（replace/add/remove/clear），不再让服务
+        端"追加"与 UI"替换"显示各说各话。响应确认后才发 metadata_applied，
+        失败逐条汇总：不写"已保存"的假状态；成功时随 metadata_snapshot
+        发布服务端最终 user 快照。
         """
         if self._closed or not paths or not patch:
             return
         allowed = ("rating", "tags", "color", "flag", "comments")
         batchable = {key: value for key, value in patch.items() if key in allowed}
+        tags_payload = dict(patch)
+        if "tags" in batchable or tags_op == "clear":
+            tags_payload["tags_op"] = tags_op
         requests: list[tuple[str, dict[str, Any]]] = []
         if len(paths) == 1:
-            requests.append(("/api/update_meta", {"path": paths[0], **patch}))
+            requests.append(("/api/update_meta", {"path": paths[0], **tags_payload}))
         elif batchable:
             # B06：comments 已并入 batch/meta（字段级 patch，一次请求一套语义）
-            requests.append(("/api/batch/meta", {"files": paths, **batchable}))
+            requests.append(("/api/batch/meta", {"files": paths, **tags_payload}))
         if not requests:
             return
         job = _MetadataJob(paths=list(paths), patch=dict(patch), remaining=len(requests))
@@ -418,6 +432,16 @@ class NativeFilesTransport(QObject):
             if isinstance(payload, dict):
                 message = str(payload.get("message") or payload.get("error") or "")
             job.failures.append(message or "保存失败（服务未确认）")
+        elif isinstance(payload, dict):
+            # [FR-11] 收集服务端最终快照：单文件 user 字段 / 批量 results 列表
+            user = payload.get("user")
+            if isinstance(user, dict):
+                job.snapshots[str(job.paths[0]) if len(job.paths) == 1 else ""] = \
+                    dict(user)  # 单请求路径在 job.paths 内
+            for item in payload.get("results") or []:
+                if isinstance(item, dict) and item.get("path"):
+                    snapshot = item.get("user")
+                    job.snapshots[str(item["path"])] = dict(snapshot) if isinstance(snapshot, dict) else {}
         if job.remaining <= 0:
             self._publish_metadata(job)
 
@@ -427,6 +451,8 @@ class NativeFilesTransport(QObject):
                                      "；".join(sorted(set(job.failures))))
         else:
             self.metadata_applied.emit(list(job.paths), dict(job.patch), "已保存")
+            if job.snapshots:
+                self.metadata_snapshot.emit(dict(job.snapshots))
 
     # -- 文件任务（B07） ---------------------------------------------------
     TASK_POLL_INTERVAL_MS = 400
@@ -476,8 +502,8 @@ class NativeFilesTransport(QObject):
         self._start_task_poll(job_id)
 
     def _start_task_poll(self, job_id: str) -> None:
-        self._task_poll_job = job_id
-        self._task_poll_attempts = 0
+        """[FR-16] 按 job_id 注册轮询：多个活动任务各自独立，互不覆盖。"""
+        self._task_polls[job_id] = {"attempts": 0, "reply": None}
         if self._task_poll_timer is None:
             self._task_poll_timer = QTimer(self)
             self._task_poll_timer.timeout.connect(self._poll_task_once)
@@ -485,44 +511,53 @@ class NativeFilesTransport(QObject):
         self._poll_task_once()
 
     def _poll_task_once(self) -> None:
-        if self._closed or not self._task_poll_job:
+        if self._closed or not self._task_polls:
             return
-        if self._task_poll_reply is not None:
-            return  # 上一次轮询未回：让 HTTP 自己返回，不堆叠
-        self._task_poll_attempts += 1
-        if self._task_poll_attempts > self.TASK_POLL_MAX_ATTEMPTS:
-            self._stop_task_poll()
-            self.task_failed.emit("文件任务超时，请稍后在完整 Files 中查看结果。")
-            return
-        request = self._make_request("/api/tasks/status", {"job_id": self._task_poll_job})
-        if request is None:
-            self._stop_task_poll()
-            return
-        reply = self._network.get(request)
-        self._task_poll_reply = reply
-        reply.finished.connect(lambda r=reply: self._finish_task_poll(r))
+        for job_id in list(self._task_polls):
+            state = self._task_polls.get(job_id)
+            if state is None or state["reply"] is not None:
+                continue  # 该任务上次轮询未回：让 HTTP 自己返回，不堆叠
+            state["attempts"] += 1
+            if state["attempts"] > self.TASK_POLL_MAX_ATTEMPTS:
+                self._stop_task_poll(job_id)
+                self.task_failed.emit(
+                    f"文件任务 {job_id[:8]} 超时，请稍后在完整 Files 中查看结果。")
+                continue
+            request = self._make_request("/api/tasks/status", {"job_id": job_id})
+            if request is None:
+                self._stop_task_poll(job_id)
+                continue
+            reply = self._network.get(request)
+            state["reply"] = reply
+            reply.finished.connect(lambda r=reply, j=job_id: self._finish_task_poll(r, j))
+        if not self._task_polls and self._task_poll_timer is not None:
+            self._task_poll_timer.stop()
 
-    def _finish_task_poll(self, reply: QNetworkReply) -> None:
-        self._task_poll_reply = None
+    def _finish_task_poll(self, reply: QNetworkReply, job_id: str) -> None:
+        state = self._task_polls.get(job_id)
+        if state is not None and state["reply"] is reply:
+            state["reply"] = None
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         raw = bytes(reply.readAll())
         error = reply.error()
         reply.deleteLater()
         if self._closed:
             return
+        if state is None:
+            return  # 已停止跟踪（超时/关闭）：丢弃
         try:
             payload: Any = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             return
         job = payload.get("job") if isinstance(payload, dict) else None
         if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(job, dict):
-            self._stop_task_poll()
+            self._stop_task_poll(job_id)
             self.task_failed.emit("无法读取文件任务进度。")
             return
-        if str(job.get("job_id") or "") != self._task_poll_job:
+        if str(job.get("job_id") or "") != job_id:
             return
         if job.get("status") in ("completed", "failed", "cancelled"):
-            self._stop_task_poll()
+            self._stop_task_poll(job_id)
             self.task_finished.emit(dict(job))
             return
         self.task_started.emit(dict(job))  # 复用为进度快照，UI 只读 completed/total
@@ -536,13 +571,20 @@ class NativeFilesTransport(QObject):
         reply = self._network.post(request, json.dumps({"job_id": job_id}).encode("utf-8"))
         reply.finished.connect(lambda r=reply: r.deleteLater())
 
-    def _stop_task_poll(self) -> None:
-        self._task_poll_job = ""
-        if self._task_poll_timer is not None:
+    def active_task_jobs(self) -> list[str]:
+        """[FR-16] 当前仍在轮询的任务 id（任务列表/取消入口用）。"""
+        return list(self._task_polls)
+
+    def _stop_task_poll(self, job_id: str | None = None) -> None:
+        """停止指定任务的轮询；None = 全部（关闭时）。"""
+        targets = list(self._task_polls) if job_id is None else [job_id]
+        for target in targets:
+            state = self._task_polls.pop(target, None)
+            if state is not None and state["reply"] is not None:
+                state["reply"].abort()
+                state["reply"].deleteLater()
+        if not self._task_polls and self._task_poll_timer is not None:
             self._task_poll_timer.stop()
-        if self._task_poll_reply is not None:
-            self._task_poll_reply.abort()
-            self._task_poll_reply = None
 
     # -- 常用位置 / 扫描状态（F11 / B10） ---------------------------------
     def load_libraries(self) -> None:
@@ -833,14 +875,24 @@ class NativeFilesTransport(QObject):
         """集合成员与 /api/list 同构；不构建第二套查询语义。"""
         if self._closed:
             return
+        # [FR-09] 取消上一个集合请求：连续切换集合时旧响应直接作废
+        stale, self._collection_reply = self._collection_reply, None
+        if stale is not None:
+            stale.abort()
+            stale.deleteLater()
         request = self._make_request(f"/api/collections/{int(collection_id)}/items", {})
         if request is None:
             self.collection_failed.emit("素材服务尚未就绪，无法读取集合。")
             return
         reply = self._network.get(request)
+        self._collection_reply = reply
         reply.finished.connect(lambda r=reply: self._finish_collection(r))
 
     def _finish_collection(self, reply: QNetworkReply) -> None:
+        if reply is not self._collection_reply:
+            reply.deleteLater()
+            return  # 已被更新的集合请求/导航作废：一律丢弃
+        self._collection_reply = None
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         raw = bytes(reply.readAll())
         error = reply.error()
@@ -860,18 +912,31 @@ class NativeFilesTransport(QObject):
 
     # -- 全库搜索（B05） ---------------------------------------------------
     def search_library(self, query: str, *, limit: int = 200, offset: int = 0) -> None:
-        """跨目录搜索：只读索引，不扫盘；结果显式带 total/truncated。"""
+        """跨目录搜索：只读索引，不扫盘；结果显式带 total/truncated。
+
+        [FR-09] 与目录列表同一套失效规则：新请求作废旧搜索；切目录
+        （load_directory→cancel）也一并作废，晚到的旧响应绝不覆盖新视图。
+        """
         if self._closed:
             return
+        stale, self._search_reply = self._search_reply, None
+        if stale is not None:
+            stale.abort()
+            stale.deleteLater()
         request = self._make_request("/api/search", {
             "q": str(query or ""), "limit": int(limit), "offset": int(offset)})
         if request is None:
             self.search_failed.emit("素材服务尚未就绪，无法搜索素材库。")
             return
         reply = self._network.get(request)
+        self._search_reply = reply
         reply.finished.connect(lambda r=reply: self._finish_search(r))
 
     def _finish_search(self, reply: QNetworkReply) -> None:
+        if reply is not self._search_reply:
+            reply.deleteLater()
+            return  # [FR-09] 已被更新的搜索/导航作废：一律丢弃
+        self._search_reply = None
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         raw = bytes(reply.readAll())
         error = reply.error()
@@ -984,6 +1049,13 @@ class NativeFilesTransport(QObject):
         self._thumbnail_queue.clear()
         self._thumbnail_attempted.clear()
         self._thumbnail_versions.clear()
+        # [FR-09] 目录切换同样作废在途搜索/集合请求，防晚到旧响应覆盖新目录
+        for attr in ("_search_reply", "_collection_reply"):
+            stale = getattr(self, attr, None)
+            if stale is not None:
+                stale.abort()
+                stale.deleteLater()
+                setattr(self, attr, None)
         if reply is not None:
             reply.abort()
         for thumbnail in thumbnails:
