@@ -227,8 +227,12 @@ class BasePlayer(QFrame):
     # UI 骨架（浮层：顶栏/播放条悬浮在画布上，自动隐藏时画面不跳变）
     # ------------------------------------------------------------------
 
+    def _create_canvas(self):
+        """创建当前帧画布；子类可返回 GPU 画布（Topos/Libav）。"""
+        return _VideoCanvas(self)
+
     def _build_ui(self) -> None:
-        self.canvas = _VideoCanvas(self)
+        self.canvas = self._create_canvas()
         self.canvas._on_click = self.toggle_play
         self.canvas.setCursor(Qt.CursorShape.PointingHandCursor)
 
