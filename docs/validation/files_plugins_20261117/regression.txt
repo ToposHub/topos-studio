@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 382 items
+
+tests/files/test_contracts.py ................                           [  4%]
+tests/files/test_file_safety_regressions.py ........................     [ 10%]
+tests/files/test_file_tasks.py ......                                    [ 12%]
+tests/files/test_files_api_contract.py .............                     [ 15%]
+tests/files/test_files_plugin_catalog.py .........                       [ 17%]
+tests/files/test_import_job.py ..........                                [ 20%]
+tests/files/test_query_semantics_regressions.py ......                   [ 21%]
+tests/ui/test_native_files_actions.py .............                      [ 25%]
+tests/ui/test_native_files_gallery.py ..                                 [ 25%]
+tests/ui/test_native_files_metadata.py ......                            [ 27%]
+tests/ui/test_native_files_p2.py .......                                 [ 29%]
+tests/ui/test_native_files_panel.py ......................               [ 35%]
+tests/ui/test_native_files_platform.py ....                              [ 36%]
+tests/ui/test_native_files_plugins.py .................                  [ 40%]
+tests/ui/test_native_files_prefs.py .....                                [ 41%]
+tests/ui/test_native_files_preview.py ..........                         [ 44%]
+tests/ui/test_native_files_transport.py ................................ [ 52%]
+....                                                                     [ 53%]
+tests/ui/test_files_native_host.py .                                     [ 54%]
+tests/ui/test_files_location_regressions.py ...........                  [ 57%]
+tests/ui/test_files_session_regressions.py ..................            [ 61%]
+tests/ui/test_files_gallery_layouts.py .............................     [ 69%]
+tests/ui/test_files_four_layouts.py ............                         [ 72%]
+tests/ui/test_files_image_factory_close.py ..                            [ 73%]
+tests/ui/test_playback_semantics_regressions.py ...............          [ 76%]
+tests/ui/test_native_player_host.py .                                    [ 77%]
+tests/ui/test_topos_audio.py ........                                    [ 79%]
+tests/ui/test_gpu_yuv_frame.py .........                                 [ 81%]
+tests/edit/test_external_import_compensation.py ...                      [ 82%]
+tests/architecture/test_file_explorer_integration.py ......              [ 84%]
+tests/app/test_preferences_dialog_coverage.py .......................... [ 90%]
+...................................                                      [100%]
+
+- generated xml file: /Users/heng/Documents/vscode/topos-studio/docs/validation/files_plugins_20261117/regression.xml -
+============================= 382 passed in 31.18s =============================

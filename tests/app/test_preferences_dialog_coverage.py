@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Optional
 
@@ -90,19 +91,35 @@ class _RecordingConfig:
 
 
 class _FakeFeModule:
-    """file_explorer.main 替身：内存 config + 可控 plugin_manager。"""
+    """Temporary static plugin declarations and in-memory runtime/config."""
 
-    def __init__(self, disabled: Optional[list[str]] = None,
-                 plugins: Optional[list[dict]] = None) -> None:
+    def __init__(self, root: Path, disabled: Optional[list[str]] = None,
+                 plugins: Optional[list[dict]] = None,
+                 installed: Optional[list[str]] = None) -> None:
+        root.mkdir(parents=True)
+        main_file = root / "main.py"
+        main_file.write_text("# Test host; never imported.\n", encoding="utf-8")
+        self.__file__ = str(main_file)
         self.conf: dict = {"disabled_plugins": list(disabled or [])}
         self.saved: Optional[dict] = None
-        self.plugin_manager = SimpleNamespace(plugins=list(plugins or []))
+        self.plugin_manager = SimpleNamespace(
+            plugins=list(plugins or []), failed_plugins=[])
+        plugin_ids = set(installed or []) | {
+            plugin["name"] for plugin in plugins or []}
+        (root / "plugins").mkdir()
+        for plugin_id in plugin_ids:
+            folder = root / "plugins" / plugin_id
+            folder.mkdir()
+            (folder / "__init__.py").write_text(
+                f"NAME = {plugin_id!r}\nVERSION = '1.0.0'\n",
+                encoding="utf-8")
 
     def load_config(self) -> dict:
         return dict(self.conf)
 
     def save_config(self, conf: dict) -> None:
         self.saved = dict(conf)
+        self.conf = dict(conf)
 
 
 class _FakeModulePage:
@@ -162,6 +179,19 @@ def _confirm_with(monkeypatch: pytest.MonkeyPatch,
 
 
 # ── Fixtures ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def make_fe(tmp_path: Path) -> Callable[..., _FakeFeModule]:
+    """Keep discovery and all FE config writes inside the test directory."""
+    count = 0
+
+    def _make(**kwargs: Any) -> _FakeFeModule:
+        nonlocal count
+        count += 1
+        return _FakeFeModule(tmp_path / f"file_explorer_{count}", **kwargs)
+
+    return _make
 
 
 @pytest.fixture
@@ -1075,13 +1105,13 @@ class TestModulePageDelegation:
 class TestFileExplorerPluginSync:
 
     def test_apply_without_refresh_preserves_fe_disabled_plugins(
-            self, make_dialog) -> None:
+            self, make_dialog, make_fe) -> None:
         # BUG-B3-01 / AUD-03900 已修复：对话框构造时不刷新插件列表，用户
         # 未点 Advanced > Refresh 就按 Apply/Save 时，_apply_settings 必须
         # 跳过对 file_explorer config 的 disabled_plugins 写回（列表无真实
         # 条目 = 无数据可写），FE 侧停用状态保持原值，不被清空。
         dlg, _cfg = make_dialog()
-        fe = _FakeFeModule(disabled=["fe.alpha", "fe.beta"])
+        fe = make_fe(disabled=["fe.alpha", "fe.beta"])
         dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
         assert dlg._plugin_list.count() == 0
         dlg._on_apply()
@@ -1089,9 +1119,10 @@ class TestFileExplorerPluginSync:
         assert fe.conf["disabled_plugins"] == ["fe.alpha", "fe.beta"]
         assert dlg._disabled_plugins == []
 
-    def test_apply_after_refresh_writes_unchecked_entries(self, make_dialog) -> None:
+    def test_apply_after_refresh_writes_unchecked_entries(
+            self, make_dialog, make_fe) -> None:
         dlg, _cfg = make_dialog()
-        fe = _FakeFeModule(
+        fe = make_fe(
             disabled=["fe.alpha"],
             plugins=[
                 {"name": "fe.alpha", "info": {"version": "1.0", "description": "a"}},
@@ -1117,9 +1148,10 @@ class TestFileExplorerPluginSync:
         item = dlg._plugin_list.item(0)
         assert not (item.flags() & Qt.ItemFlag.ItemIsEnabled)
 
-    def test_refresh_populates_check_states_from_fe_config(self, make_dialog) -> None:
+    def test_refresh_populates_check_states_from_fe_config(
+            self, make_dialog, make_fe) -> None:
         dlg, _ = make_dialog()
-        fe = _FakeFeModule(
+        fe = make_fe(
             disabled=["fe.alpha"],
             plugins=[{"name": "fe.alpha", "info": {"version": "2.0"}},
                      {"name": "fe.gamma", "info": {}}],
@@ -1135,6 +1167,61 @@ class TestFileExplorerPluginSync:
             "fe.alpha": Qt.CheckState.Unchecked,
             "fe.gamma": Qt.CheckState.Checked,
         }
+
+    def test_disabled_plugin_remains_visible_after_restart_and_can_be_enabled(
+            self, make_dialog, make_fe) -> None:
+        fe = make_fe(disabled=["fe.alpha"], installed=["fe.alpha"])
+        # A restarted runtime skips disabled code entirely, so its success list
+        # is empty. The installed declaration must still appear and be editable.
+        assert fe.plugin_manager.plugins == []
+        dlg, _ = make_dialog()
+        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        dlg._refresh_plugins()
+        assert dlg._plugin_list.count() == 1
+        item = dlg._plugin_list.item(0)
+        assert item.data(Qt.ItemDataRole.UserRole) == "fe.alpha"
+        assert item.checkState() == Qt.CheckState.Unchecked
+        assert item.flags() & Qt.ItemFlag.ItemIsEnabled
+        assert item.flags() & Qt.ItemFlag.ItemIsUserCheckable
+
+        item.setCheckState(Qt.CheckState.Checked)
+        dlg._on_apply()
+        assert fe.saved is not None
+        assert fe.saved["disabled_plugins"] == []
+        # Persisting next-start intent does not load Python code in this session.
+        assert fe.plugin_manager.plugins == []
+
+        restarted, _ = make_dialog()
+        restarted._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        restarted._refresh_plugins()
+        assert restarted._plugin_list.item(0).checkState() == Qt.CheckState.Checked
+
+    def test_apply_preserves_uninstalled_disabled_ids_and_other_fe_config(
+            self, make_dialog, make_fe) -> None:
+        fe = make_fe(disabled=["fe.removed", "fe.alpha"], installed=["fe.alpha"])
+        fe.conf["future_schema"] = {"preserve": [1, "value"]}
+        dlg, _ = make_dialog()
+        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        dlg._refresh_plugins()
+        assert dlg._plugin_list.count() == 1
+        dlg._plugin_list.item(0).setCheckState(Qt.CheckState.Checked)
+
+        dlg._on_apply()
+        assert fe.saved is not None
+        assert fe.saved["disabled_plugins"] == ["fe.removed"]
+        assert fe.saved["future_schema"] == {"preserve": [1, "value"]}
+
+    def test_open_plugin_directory_uses_fe_location_not_shader_setting(
+            self, make_dialog, make_fe, monkeypatch) -> None:
+        dlg, _ = make_dialog({"plugin_directory": "/wrong-shader-plugin-path"})
+        fe = make_fe(installed=["fe.alpha"])
+        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        opened: list[str] = []
+        monkeypatch.setattr(dlg, "_open_in_file_manager", opened.append)
+
+        dlg._open_plugin_directory()
+
+        assert opened == [str(Path(fe.__file__).parent / "plugins")]
 
     def test_fe_disabled_plugins_empty_without_bridge(self, make_dialog) -> None:
         dlg, _ = make_dialog()
