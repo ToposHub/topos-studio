@@ -14,6 +14,7 @@ models/ai_editing/*/*
 !models/ai_editing/*/.gitkeep
 .venv/
 .venv-win/
+.venv-oldmac-backup/
 Presets/User/
 # 用户创建的 MG 素材库（用户级 ~/…/Topos/mg_presets 与工程级 <工程目录>/mg_presets）
 # 均为用户数据，不入库；随应用分发的内置库在

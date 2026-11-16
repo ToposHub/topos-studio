@@ -1,0 +1,3 @@
+{"case": "eof_never_reached", "targets": [0, 1, 1, 1, 1, 1], "eof_calls": 0}
+{"case": "timescale_is_not_fps", "expected_fps": 24, "actual_fps": 24000.0, "expected_duration": 10, "actual_duration": 0.01}
+{"case": "decode_stretches_aspect", "source": [160, 80], "display": [400, 400], "decoded": [400, 400], "source_aspect": 2, "decoded_aspect": 1.0}

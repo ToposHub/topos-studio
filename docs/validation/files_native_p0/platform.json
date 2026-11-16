@@ -1,0 +1,71 @@
+[
+  {
+    "scale": "1",
+    "narrow": {
+      "sidebar": 164,
+      "inspector": 200,
+      "controls": {
+        "back": true,
+        "up": true,
+        "type": true,
+        "flag": true,
+        "view": true,
+        "inspector": true
+      }
+    },
+    "floating": {
+      "visible": true,
+      "size": [
+        700,
+        500
+      ],
+      "panel_visible": true
+    }
+  },
+  {
+    "scale": "1.5",
+    "narrow": {
+      "sidebar": 164,
+      "inspector": 200,
+      "controls": {
+        "back": true,
+        "up": true,
+        "type": true,
+        "flag": true,
+        "view": true,
+        "inspector": true
+      }
+    },
+    "floating": {
+      "visible": true,
+      "size": [
+        700,
+        500
+      ],
+      "panel_visible": true
+    }
+  },
+  {
+    "scale": "2",
+    "narrow": {
+      "sidebar": 164,
+      "inspector": 200,
+      "controls": {
+        "back": true,
+        "up": true,
+        "type": true,
+        "flag": true,
+        "view": true,
+        "inspector": true
+      }
+    },
+    "floating": {
+      "visible": true,
+      "size": [
+        700,
+        473
+      ],
+      "panel_visible": true
+    }
+  }
+]
