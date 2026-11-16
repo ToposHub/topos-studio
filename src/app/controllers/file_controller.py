@@ -5160,13 +5160,13 @@ class FileOpsMixin:
 
         files_panel = self.files_panel
         try:
-            # [ARCH-3] 路由决策统一到 plugins/video_pro/player_host.decide_route
+            # [ARCH-3] 路由决策统一到 src.shared.playback.player_host.decide_route
             # （与独立模式 VideoProEngine 同一实现，消除双份复制漂移）
-            from plugins.video_pro.player_host import decide_route, stop_other_players
+            from src.shared.playback.player_host import decide_route, stop_other_players
             route = decide_route(path)
 
             if route == 'topos':
-                from plugins.video_pro.topos_player import ToposPlayer
+                from src.shared.playback.topos_player import ToposPlayer
                 player = getattr(self, '_topos_video_player', None)
                 if player is None:
                     player = ToposPlayer(files_panel)
@@ -5174,7 +5174,7 @@ class FileOpsMixin:
                     player.play_failed.connect(
                         lambda msg: self.status_bar.showMessage(str(msg), 5000))
             elif route == 'libav':
-                from plugins.video_pro.libav_player import LibavPlayer
+                from src.shared.playback.libav_player import LibavPlayer
                 player = getattr(self, '_libav_video_player', None)
                 if player is None:
                     player = LibavPlayer(files_panel)
@@ -5182,7 +5182,7 @@ class FileOpsMixin:
                     player.play_failed.connect(
                         lambda msg: self.status_bar.showMessage(str(msg), 5000))
             else:
-                from plugins.video_pro.player_qt import UltimatePlayer
+                from src.shared.playback.player_qt import UltimatePlayer
                 player = getattr(self, 'video_player', None)
                 # [CRASH-5] 持久复用单一实例。旧判断 "is None or not isVisible()"
                 # 在播放器隐藏（停止/互斥/播完）时必然为真 → 每次播放都新建，

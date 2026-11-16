@@ -138,6 +138,7 @@ class NativeFilesPreview(QWidget):
         self._muted = muted
         self._path = ""
         self._image: Optional[QImage] = None
+        self._mode = "image"
         self._fit = True
         self._decode_pending = False
         self.setObjectName("nativeFilesPreview")
@@ -151,6 +152,9 @@ class NativeFilesPreview(QWidget):
 
         header = QHBoxLayout()
         header.setSpacing(8)
+        self._header_widget = QWidget(self)
+        self._header_widget.setLayout(header)
+        header.setContentsMargins(0, 0, 0, 0)
         self.title = QLabel("", self)
         self.title.setStyleSheet(f"color: {fg};")
         title_font = QFont(self.title.font())
@@ -188,7 +192,13 @@ class NativeFilesPreview(QWidget):
         self.close_button.setToolTip("关闭预览（Esc）")
         self.close_button.clicked.connect(self.request_close)
         header.addWidget(self.close_button)
-        root.addLayout(header)
+        root.addWidget(self._header_widget)
+
+        self.video_slot = QWidget(self)
+        self.video_slot.setObjectName("nativeVideoSlot")
+        self.video_slot.setStyleSheet("#nativeVideoSlot { background: #000; }")
+        self.video_slot.hide()
+        root.addWidget(self.video_slot, 1)
 
         self.body = QLabel("", self)
         self.body.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -223,11 +233,15 @@ class NativeFilesPreview(QWidget):
         """显示浮层并进入"载入中"状态（字节与解码由调用方驱动）。"""
         self._path = path
         self._image = None
+        self._mode = "image"
         self._decode_pending = True
         self._fit = True
         self._sync_fit_button()
         self.title.setText(title or path.rsplit("/", 1)[-1])
         self.meta.setText("载入中…")
+        self._header_widget.show()
+        self.video_slot.hide()
+        self.scroll.show()
         self.body.clear()
         self.body.setText("载入中…")
         self.body.setPixmap(QPixmap())
@@ -237,6 +251,33 @@ class NativeFilesPreview(QWidget):
         self.show()
         self.raise_()
         self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    @property
+    def is_video(self) -> bool:
+        return self._mode == "video"
+
+    def open_video(self, path: str, title: str = "") -> None:
+        """Open the overlay in video mode; the player is hosted in video_slot."""
+        self._path = path
+        self._image = None
+        self._decode_pending = False
+        self._mode = "video"
+        self.title.setText(title or path.rsplit("/", 1)[-1])
+        self.meta.setText("正在打开视频…")
+        self.body.clear()
+        self.body.setText("")
+        self.body.setPixmap(QPixmap())
+        self._header_widget.hide()
+        self.scroll.hide()
+        self.video_slot.show()
+        if self.parent() is not None:
+            self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self.video_slot.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def show_image(self, path: str, image: QImage) -> None:
         if path != self._path:
@@ -251,7 +292,11 @@ class NativeFilesPreview(QWidget):
             return
         self._decode_pending = False
         self._image = None
+        self._mode = "image"
         self.meta.setText(message)
+        self._header_widget.show()
+        self.video_slot.hide()
+        self.scroll.show()
         self.body.setPixmap(QPixmap())
         self.body.setText(message)
         self._resize_body_text()
@@ -272,8 +317,12 @@ class NativeFilesPreview(QWidget):
         was_open = self.is_open
         self._image = None
         self._path = ""
+        self._mode = "image"
         self._decode_pending = False
         self._jobs_cleanup()
+        self._header_widget.show()
+        self.video_slot.hide()
+        self.scroll.show()
         self.hide()
         if was_open:
             self.closed.emit()
@@ -333,6 +382,9 @@ class NativeFilesPreview(QWidget):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.close_preview()
+            return
+        if self._mode == "video":
+            super().keyPressEvent(event)
             return
         if key in (Qt.Key.Key_F, Qt.Key.Key_F11):
             self.toggle_fit()

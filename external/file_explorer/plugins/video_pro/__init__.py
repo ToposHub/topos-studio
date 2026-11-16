@@ -32,14 +32,14 @@ def setup(context):
     """
     import utils
     import thumb_engine
-    from . import topos_media
+    from src.shared.playback import topos_media
 
     utils.register_thumbnail_provider(['.topos'], topos_media.generate_topos_thumbnail)
     utils.register_metadata_provider(['.topos'], topos_media.get_topos_metadata)
     # [BUG-P3-54] thumb_engine.EXT_VIDEO 已含 '.topos'，冗余 add 已移除
 
     def on_window_ready(window):
-        from .player_host import VideoProEngine
+        from src.shared.playback.player_host import VideoProEngine
         window.attach_play_engine(VideoProEngine(window))
 
     # [ARCH-3] 该钩子仅独立模式会 fire（main.MainWindow.__init__ 末尾）；
