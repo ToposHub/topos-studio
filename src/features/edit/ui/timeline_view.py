@@ -16928,7 +16928,13 @@ class TimelineView(QGraphicsView):
         return os.path.splitext(path)[1].lower() in SUPPORTED_SUBTITLE_EXTENSIONS
 
     def _finish_external_import(self, result: Any) -> None:
-        """探测完成后的主线程提交：重新校验目标上下文，再单宏落轨。"""
+        """探测完成后的主线程提交：重新校验目标上下文，再单宏落轨。
+
+        [FR-06] 导入与落轨的原子性以**补偿**保证：素材先导入（片段构造
+        需要真实 asset），但任一后续步骤失败时，本次**新导入**的素材会
+        被移除并如实播报——不再出现"已回滚"提示下多出 asset 的伪成功。
+        复用的既有素材（is_new=False）永不因落轨失败被删。
+        """
         if result.job_id != self._external_job_id:
             logger.debug("Discarding stale external import result %s", result.job_id)
             return
@@ -16982,6 +16988,27 @@ class TimelineView(QGraphicsView):
             self._project = plan.project
             self.project_changed.emit(plan.project)
 
+        # [FR-06] 补偿清单：本次投放新导入（工程里原先没有）的路径。
+        new_paths = {candidate.path for candidate in result.usable if candidate.is_new}
+
+        def _compensate_new_imports() -> int:
+            """落轨失败时移除本次新导入的素材；复用素材不动。返回移除数。"""
+            removed = 0
+            current = self._project
+            for path in new_paths:
+                asset = current.get_asset_by_path(path) if current is not None else None
+                if asset is None:
+                    continue
+                try:
+                    current = current.remove_asset(asset.asset_id)
+                    removed += 1
+                except Exception:  # noqa: BLE001 - 补偿尽力而为，失败如实计数
+                    logger.warning("External drop: compensate failed for %s", path)
+            if removed and current is not None:
+                self._project = current
+                self.project_changed.emit(current)
+            return removed
+
         if not imported:
             detail = "；".join(f"{item.path.rsplit('/', 1)[-1]}: {item.error.message}"
                               for item in failures[:3]) if failures else "没有可导入的文件"
@@ -16989,7 +17016,9 @@ class TimelineView(QGraphicsView):
             return
 
         if not self._ensure_first_asset_timeline_settings(imported[0]):
-            self.status_message_requested.emit("无法建立时间线设置，导入未落轨")
+            removed = _compensate_new_imports()
+            self.status_message_requested.emit(
+                f"无法建立时间线设置，导入未落轨（已回退 {removed} 个新导入素材）")
             return
 
         import uuid
@@ -17005,7 +17034,9 @@ class TimelineView(QGraphicsView):
             staging_timeline = staged
             track = staging_timeline.get_track_by_id(new_track_id)
             if track is None:
-                self.status_message_requested.emit("无法创建目标轨道，导入未落轨")
+                removed = _compensate_new_imports()
+                self.status_message_requested.emit(
+                    f"无法创建目标轨道，导入未落轨（已回退 {removed} 个新导入素材）")
                 return
 
         batch_commands: list[Any] = []
@@ -17030,15 +17061,23 @@ class TimelineView(QGraphicsView):
             self._timeline = real_timeline
 
         if not batch_commands:
-            self.status_message_requested.emit("片段构造失败，导入未落轨")
+            removed = _compensate_new_imports()
+            self.status_message_requested.emit(
+                f"片段构造失败，导入未落轨（已回退 {removed} 个新导入素材）")
             return
 
         try:
             self._execute_command(MacroCommand.create(
                 f"Drop {len(imported)} external file(s)", batch_commands))
         except (RuntimeError, ValueError) as exc:
-            # MacroCommand 内部已逆序回滚，工程与历史不变
-            self.status_message_requested.emit(f"落轨失败，已回滚：{exc}")
+            # MacroCommand 内部已逆序回滚时间线；工程侧同步补偿新导入素材，
+            # 播报内容与实际状态一致（FR-06：不得宣称不存在的整批回滚）
+            removed = _compensate_new_imports()
+            if removed:
+                self.status_message_requested.emit(
+                    f"落轨失败，已回滚（时间线 + {removed} 个新导入素材）：{exc}")
+            else:
+                self.status_message_requested.emit(f"落轨失败，已回滚：{exc}")
             return
 
         message = f"已落轨 {added} 个片段"
