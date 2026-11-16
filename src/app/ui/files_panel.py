@@ -520,11 +520,11 @@ class FilesPanel(QWidget):
             return
         dialog = BatchRenameDialog(paths, self)
         dialog.preview_requested.connect(
-            lambda template: self._native_transport.preview_batch_rename(
-                paths, "template", {"template": template}))
+            lambda template, session: self._native_transport.preview_batch_rename(
+                paths, "template", {"template": template}, session_id=session))
         dialog.execute_requested.connect(
-            lambda template: self._native_transport.execute_batch_rename(
-                paths, "template", {"template": template}))
+            lambda template, session: self._native_transport.execute_batch_rename(
+                paths, "template", {"template": template}, session_id=session))
         self._native_transport.batch_rename_preview_ready.connect(dialog.show_preview)
         self._native_transport.batch_rename_preview_failed.connect(dialog.show_preview_error)
         self._native_transport.batch_rename_finished.connect(dialog.show_result)
@@ -537,9 +537,14 @@ class FilesPanel(QWidget):
         if not 2 <= len(paths) <= 4:
             return
         dialog = CompareDialog(paths, self)
-        dialog.images_requested.connect(self._native_transport.load_compare_images)
+        dialog.images_requested.connect(
+            lambda p, session: self._native_transport.load_compare_images(
+                p, session_id=session))
         self._native_transport.compare_image_loaded.connect(dialog.set_image)
         self._native_transport.compare_image_failed.connect(dialog.set_error)
+        # [FR-15/17] 关闭即取消本会话在途请求与剩余队列
+        dialog.finished.connect(
+            lambda *_: self._native_transport.cancel_compare(dialog.session_id))
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.show()
 

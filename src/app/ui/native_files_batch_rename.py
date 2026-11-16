@@ -1,6 +1,12 @@
-"""F13 批量改名：先预览冲突，再执行并展示逐项结果。"""
+"""F13 批量改名：先预览冲突，再执行并展示逐项结果。
+
+[FR-13] 会话安全：每个窗口持有唯一 session_id，请求与响应双向携带；
+广播结果不属于本会话一律忽略（多个非模态窗口互不串台）。执行绑定
+**已确认**的模板快照——预览后修改模板会使确认失效，必须重新预览。
+"""
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -13,12 +19,14 @@ from src.shared.ui.style_sheet import C
 
 
 class BatchRenameDialog(QDialog):
-    preview_requested = pyqtSignal(str)
-    execute_requested = pyqtSignal(str)
+    preview_requested = pyqtSignal(str, str)   # template, session_id
+    execute_requested = pyqtSignal(str, str)   # confirmed template, session_id
 
     def __init__(self, paths: list[str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.paths = list(paths)
+        self.session_id = uuid.uuid4().hex
+        self._confirmed_template: str | None = None  # 预览确认过的模板快照
         self.setWindowTitle("批量改名")
         self.resize(720, 480)
         root = QVBoxLayout(self)
@@ -30,6 +38,7 @@ class BatchRenameDialog(QDialog):
         row = QHBoxLayout()
         self.template_edit = QLineEdit("{name}_{seq:3}", self)
         self.template_edit.setAccessibleName("改名模板")
+        self.template_edit.textChanged.connect(self._invalidate_confirmed_template)
         row.addWidget(self.template_edit, 1)
         preview_button = QPushButton("预览", self)
         preview_button.clicked.connect(self._preview)
@@ -58,23 +67,37 @@ class BatchRenameDialog(QDialog):
         root.addLayout(actions)
         self.setStyleSheet(f"QDialog {{ background: {C.BG_PANEL}; color: {C.TEXT_PRIMARY}; }}")
 
+    def _invalidate_confirmed_template(self, *_: Any) -> None:
+        """[FR-13] 模板一旦改动，既有预览即失效：执行入口关闭。"""
+        if self._confirmed_template is None:
+            return
+        self._confirmed_template = None
+        self.execute_button.setEnabled(False)
+        self.summary.setText("模板已修改，请重新预览后再执行。")
+
     def _preview(self) -> None:
         template = self.template_edit.text().strip()
         if not template:
             self.summary.setText("模板不能为空")
             return
         self.execute_button.setEnabled(False)
+        self._confirmed_template = None
         self.summary.setText("正在生成预览…")
-        self.preview_requested.emit(template)
+        self.preview_requested.emit(template, self.session_id)
 
     def _execute(self) -> None:
-        template = self.template_edit.text().strip()
-        if template:
-            self.execute_button.setEnabled(False)
-            self.summary.setText("正在执行…")
-            self.execute_requested.emit(template)
+        template = self._confirmed_template
+        if template is None:
+            # 防线：预览失效后按钮应已禁用，这里再拦一次
+            self.summary.setText("模板已修改，请重新预览后再执行。")
+            return
+        self.execute_button.setEnabled(False)
+        self.summary.setText("正在执行…")
+        self.execute_requested.emit(template, self.session_id)
 
     def show_preview(self, payload: dict[str, Any]) -> None:
+        if str(payload.get("session_id") or "") != self.session_id:
+            return  # [FR-13] 其他窗口的预览结果：忽略
         plan = payload.get("plan") or []
         errors = payload.get("errors") or []
         self.table.setRowCount(0)
@@ -91,21 +114,31 @@ class BatchRenameDialog(QDialog):
                 cell.setForeground(Qt.GlobalColor.yellow)
             self.table.setItem(row, 2, cell)
         # 冲突由服务在目标名后加序号；预览只负责让用户看清，不代替用户决定
-        self.execute_button.setEnabled(bool(plan) and not errors)
+        if plan and not errors:
+            # [FR-13] 执行绑定当前模板的确认快照
+            self._confirmed_template = self.template_edit.text().strip()
+            self.execute_button.setEnabled(True)
+        else:
+            self._confirmed_template = None
+            self.execute_button.setEnabled(False)
         text = f"预览 {len(plan)} 项"
         if conflicts:
             text += f"，其中 {conflicts} 项冲突（执行时自动加后缀）"
         if errors:
             text += "；" + "；".join(str(e) for e in errors[:3])
-            self.execute_button.setEnabled(False)
         self.summary.setText(text)
 
-    def show_preview_error(self, message: str) -> None:
+    def show_preview_error(self, message: str, session_id: str = "") -> None:
+        if session_id and session_id != self.session_id:
+            return  # [FR-13] 其他窗口的失败提示：忽略
         self.table.setRowCount(0)
         self.execute_button.setEnabled(False)
+        self._confirmed_template = None
         self.summary.setText(str(message))
 
     def show_result(self, payload: dict[str, Any]) -> None:
+        if str(payload.get("session_id") or "") != self.session_id:
+            return  # [FR-13] 其他窗口的执行结果：忽略
         errors = payload.get("errors") or []
         processed = payload.get("processed")
         text = str(payload.get("message") or "已执行")
@@ -115,3 +148,4 @@ class BatchRenameDialog(QDialog):
             text += "；失败：" + "；".join(str(e) for e in errors[:5])
         self.summary.setText(text)
         self.execute_button.setEnabled(False)
+        self._confirmed_template = None

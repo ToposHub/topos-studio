@@ -75,11 +75,11 @@ class NativeFilesTransport(QObject):
     scan_failed = pyqtSignal(str)
     thumbnail_retry_done = pyqtSignal(str, bool)
     batch_rename_preview_ready = pyqtSignal(dict)
-    batch_rename_preview_failed = pyqtSignal(str)
+    batch_rename_preview_failed = pyqtSignal(str, str)  # [FR-13] message, session_id
     batch_rename_finished = pyqtSignal(dict)
-    compare_image_loaded = pyqtSignal(str, bytes)
-    compare_image_failed = pyqtSignal(str, str)
-    compare_set_finished = pyqtSignal()
+    compare_image_loaded = pyqtSignal(str, bytes, str)   # path, data, session
+    compare_image_failed = pyqtSignal(str, str, str)    # path, message, session
+    compare_set_finished = pyqtSignal(str)              # session
     strip_loaded = pyqtSignal(str, bytes)
     strip_failed = pyqtSignal(str)
 
@@ -111,9 +111,9 @@ class NativeFilesTransport(QObject):
         self._metadata_replies: dict[QNetworkReply, _MetadataJob] = {}
         self._preview_reply: QNetworkReply | None = None
         self._preview_state: _PreviewRead | None = None
-        self._compare_queue: deque[str] = deque()
-        self._compare_reply: QNetworkReply | None = None
-        self._compare_state: _PreviewRead | None = None
+        # [FR-15/17] 比较会话化：session_id → 剩余队列 / 在途 (reply, state)
+        self._compare_sessions: dict[str, deque[str]] = {}
+        self._compare_replies: dict[str, tuple[QNetworkReply, _PreviewRead]] = {}
         self._strip_replies: dict[QNetworkReply, str] = {}
         # [FR-09] 搜索/集合请求也纳入在途表：切目录后旧结果不得覆盖新视图
         self._search_reply: QNetworkReply | None = None
@@ -725,17 +725,23 @@ class NativeFilesTransport(QObject):
         self.thumbnail_retry_done.emit(path, status == 200 and error == QNetworkReply.NetworkError.NoError)
 
     # -- 批量重命名（F13） -------------------------------------------------
-    def preview_batch_rename(self, files: list[str], mode: str, params: dict[str, Any]) -> None:
-        """先预览再执行：预览不落盘，冲突由服务标记。"""
+    def preview_batch_rename(self, files: list[str], mode: str, params: dict[str, Any],
+                             session_id: str = "") -> None:
+        """先预览再执行：预览不落盘，冲突由服务标记。
+
+        [FR-13] session_id 贯穿请求/响应：多个非模态窗口共享广播信号，
+        没有会话身份就会收到彼此的预览/执行结果。
+        """
         request = self._make_post("/api/batch/rename/preview")
         if request is None:
-            self.batch_rename_preview_failed.emit("素材服务尚未就绪")
+            self.batch_rename_preview_failed.emit("素材服务尚未就绪", session_id)
             return
         payload = {"files": list(files), "mode": mode, "params": dict(params or {})}
         reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
-        reply.finished.connect(lambda r=reply: self._finish_batch_rename_preview(r))
+        reply.finished.connect(
+            lambda r=reply, s=session_id: self._finish_batch_rename_preview(r, s))
 
-    def _finish_batch_rename_preview(self, reply: QNetworkReply) -> None:
+    def _finish_batch_rename_preview(self, reply: QNetworkReply, session_id: str) -> None:
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         raw = bytes(reply.readAll())
         error = reply.error()
@@ -748,18 +754,40 @@ class NativeFilesTransport(QObject):
             payload = None
         if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(payload, dict):
             message = (payload or {}).get("message") if isinstance(payload, dict) else None
-            self.batch_rename_preview_failed.emit(str(message or "批量改名预览失败"))
+            self.batch_rename_preview_failed.emit(str(message or "批量改名预览失败"),
+                                                  session_id)
             return
+        payload["session_id"] = session_id
         self.batch_rename_preview_ready.emit(dict(payload))
 
-    def execute_batch_rename(self, files: list[str], mode: str, params: dict[str, Any]) -> None:
+    def execute_batch_rename(self, files: list[str], mode: str, params: dict[str, Any],
+                             session_id: str = "") -> None:
         request = self._make_post("/api/batch/rename")
         if request is None:
-            self.batch_rename_finished.emit({"success": False, "message": "素材服务尚未就绪"})
+            self.batch_rename_finished.emit({"success": False,
+                                             "message": "素材服务尚未就绪",
+                                             "session_id": session_id})
             return
         payload = {"files": list(files), "mode": mode, "params": dict(params or {})}
         reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
-        reply.finished.connect(lambda r=reply: self._finish_batch_rename(r))
+        reply.finished.connect(
+            lambda r=reply, s=session_id: self._finish_batch_rename(r, s))
+
+    def _finish_batch_rename(self, reply: QNetworkReply, session_id: str = "") -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if not isinstance(payload, dict):
+            payload = {"success": False, "message": "批量改名失败"}
+        payload["session_id"] = session_id
+        self.batch_rename_finished.emit(dict(payload))
 
     def _finish_batch_rename(self, reply: QNetworkReply) -> None:
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
@@ -776,48 +804,70 @@ class NativeFilesTransport(QObject):
             payload = {"success": False, "message": "批量改名失败"}
         self.batch_rename_finished.emit(dict(payload))
 
-    # -- 并排比较（F15） ---------------------------------------------------
-    def load_compare_images(self, paths: list[str]) -> None:
-        self._compare_queue = deque(list(paths)[:4])
-        if not self._compare_queue:
-            self.compare_set_finished.emit()
-        else:
-            self._next_compare()
+    # -- 并排比较（F15 / FR-15/17） ----------------------------------------
+    def load_compare_images(self, paths: list[str], session_id: str = "") -> None:
+        """[FR-15] 会话隔离：每个比较窗口一个独立队列与在途请求。
 
-    def _next_compare(self) -> None:
-        if self._compare_reply is not None or not self._compare_queue:
+        此前全局单队列 + 单 reply——两个窗口互相吞请求，关闭也不取消。
+        """
+        queue = deque(list(paths)[:4])
+        if not queue:
+            self.compare_set_finished.emit(session_id)
             return
-        path = self._compare_queue.popleft()
+        self._compare_sessions[session_id] = queue
+        self._pump_compare(session_id)
+
+    def cancel_compare(self, session_id: str = "") -> None:
+        """[FR-17] 关闭窗口即取消该会话在途请求，清空剩余队列。"""
+        self._compare_sessions.pop(session_id, None)
+        entry = self._compare_replies.pop(session_id, None)
+        if entry is not None:
+            reply, _state = entry
+            reply.abort()
+            reply.deleteLater()
+
+    def _pump_compare(self, session_id: str) -> None:
+        queue = self._compare_sessions.get(session_id)
+        if queue is None:
+            return  # 会话已取消/关闭
+        if session_id in self._compare_replies:
+            return  # 该会话上一张未传完
+        if not queue:
+            self._compare_sessions.pop(session_id, None)
+            self.compare_set_finished.emit(session_id)
+            return
+        path = queue.popleft()
         request = self._make_request("/api/file", {"path": path})
         if request is None:
-            self.compare_image_failed.emit(path, "素材服务尚未就绪")
-            QTimer.singleShot(0, self._next_compare)
+            self.compare_image_failed.emit(path, "素材服务尚未就绪", session_id)
+            QTimer.singleShot(0, lambda s=session_id: self._pump_compare(s))
             return
         reply = self._network.get(request)
         reply.setReadBufferSize(self.MAX_PREVIEW_BYTES + 1)
         state = _PreviewRead(path=path)
-        self._compare_reply = reply
-        self._compare_state = state
+        self._compare_replies[session_id] = (reply, state)
         reply.readyRead.connect(lambda r=reply, st=state: self._read_preview(r, st))
-        reply.finished.connect(lambda r=reply, st=state: self._finish_compare(r, st))
+        reply.finished.connect(
+            lambda r=reply, st=state, s=session_id: self._finish_compare(r, st, s))
 
-    def _finish_compare(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+    def _finish_compare(self, reply: QNetworkReply, state: _PreviewRead,
+                        session_id: str) -> None:
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         error = reply.error()
         data = bytes(state.data)
         reply.deleteLater()
-        self._compare_reply = None
-        self._compare_state = None
+        self._compare_replies.pop(session_id, None)
+        if self._closed:
+            return
+        if session_id not in self._compare_sessions:
+            return  # [FR-17] 会话已关闭：结果一律丢弃
         if state.oversized:
-            self.compare_image_failed.emit(state.path, "文件过大，无法比较")
+            self.compare_image_failed.emit(state.path, "文件过大，无法比较", session_id)
         elif status == 200 and error == QNetworkReply.NetworkError.NoError and data:
-            self.compare_image_loaded.emit(state.path, data)
+            self.compare_image_loaded.emit(state.path, data, session_id)
         else:
-            self.compare_image_failed.emit(state.path, "读取失败")
-        if self._compare_queue:
-            self._next_compare()
-        else:
-            self.compare_set_finished.emit()
+            self.compare_image_failed.emit(state.path, "读取失败", session_id)
+        self._pump_compare(session_id)
 
     # -- 悬停胶片条（F14） -------------------------------------------------
     def request_strip(self, path: str, duration: float = 0.0) -> None:
@@ -1062,19 +1112,27 @@ class NativeFilesTransport(QObject):
             thumbnail.abort()
 
     def shutdown(self) -> None:
-        self._compare_queue.clear()
-        if self._compare_reply is not None:
-            self._compare_reply.abort()
-            self._compare_reply = None
-        self._compare_state = None
+        # [FR-17] 先标记关闭，再取消全部在途请求：关闭后的完成回调
+        # 一律静默丢弃（compare/metadata 此前只清引用不 abort，请求仍
+        # 会跑完并试图发信号）
+        self._closed = True
+        for session_id in list(self._compare_sessions):
+            self.cancel_compare(session_id)
+        self._compare_sessions.clear()
+        for reply, _state in list(self._compare_replies.values()):
+            reply.abort()
+            reply.deleteLater()
+        self._compare_replies.clear()
         for reply in list(self._strip_replies):
             reply.abort()
         self._strip_replies.clear()
-        self._closed = True
         self._stop_task_poll()
         self._sync_scan_poll(False)
         self.cancel()
         self.cancel_preview()
+        for reply in list(self._metadata_replies):
+            reply.abort()
+            reply.deleteLater()
         self._metadata_replies.clear()
         trees = list(self._tree_replies)
         self._tree_queue.clear()
