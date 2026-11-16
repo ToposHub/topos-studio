@@ -1,0 +1,101 @@
+{
+  "source_baseline": "b08e60f0",
+  "direct_imports": [
+    {
+      "file": "src/app/integrations/file_explorer/adapter.py",
+      "line": 43,
+      "module": "file_explorer.main",
+      "names": [
+        "app",
+        "find_available_port",
+        "ensure_runtime"
+      ]
+    },
+    {
+      "file": "src/app/main_window.py",
+      "line": 1291,
+      "module": "src.app.integrations.file_explorer.edit_benchmark_service",
+      "names": [
+        "EditBenchmarkHostService"
+      ]
+    },
+    {
+      "file": "src/app/main_window.py",
+      "line": 1294,
+      "module": "file_explorer.main",
+      "names": [
+        "bridge"
+      ]
+    },
+    {
+      "file": "src/app/ui/files_panel.py",
+      "line": 21,
+      "module": "file_explorer.main",
+      "names": [
+        "bridge",
+        "load_config",
+        "save_config"
+      ]
+    },
+    {
+      "file": "src/app/ui/files_panel.py",
+      "line": 22,
+      "module": "file_explorer.main",
+      "names": [
+        "APP_TOKEN"
+      ]
+    },
+    {
+      "file": "src/app/ui/library_adapter.py",
+      "line": 3,
+      "module": "src.app.integrations.file_explorer.adapter",
+      "names": [
+        "FileExplorerAdapter"
+      ]
+    },
+    {
+      "file": "src/app/ui/library_adapter.py",
+      "line": 6,
+      "module": "src.app.integrations.file_explorer.adapter",
+      "names": [
+        "PROJECT_ROOT",
+        "external_path",
+        "file_explorer_path",
+        "file_explorer_app",
+        "find_available_port",
+        "make_server",
+        "read_port_config",
+        "FlaskWorker"
+      ]
+    },
+    {
+      "file": "src/app/ui/preferences_dialog.py",
+      "line": 1701,
+      "module": "file_explorer.main"
+    },
+    {
+      "file": "src/main.py",
+      "line": 156,
+      "module": "file_explorer.main",
+      "names": [
+        "shutdown_thumbnail_worker"
+      ]
+    },
+    {
+      "file": "src/shared/diagnostics/optional_dependencies.py",
+      "line": 80,
+      "module": "external.file_explorer.utils",
+      "names": [
+        "get_tool_path"
+      ]
+    },
+    {
+      "file": "src/shared/media/thumbnail_provider.py",
+      "line": 834,
+      "module": "external.file_explorer.plugins.topos_image.topos_image_media",
+      "names": [
+        "_decode_rgb"
+      ]
+    }
+  ]
+}

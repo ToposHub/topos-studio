@@ -85,10 +85,10 @@ external_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.
 sys.path.append(external_path)
 
 try:
-    # 9a8bfd99 插件化后播放器迁至 plugins/video_pro/player_qt.py（旧 player.py 已删除）；
-    # 预导入以探测 QtMultimedia 组件存在，异常时仅置 PLAYER_AVAILABLE=False。
+    # 播放核心已从 file_explorer 插件迁到 src/shared/playback，原生面板
+    # 不再依赖旧 Web UI；预导入仍用于探测 QtMultimedia 组件是否存在。
     from PyQt6.QtMultimedia import QMediaPlayer  # noqa: F401
-    from plugins.video_pro.player_qt import UltimatePlayer  # noqa: F401 — 播放器可用性探测（置 PLAYER_AVAILABLE）
+    from src.shared.playback.player_qt import UltimatePlayer  # noqa: F401 — 播放器可用性探测（置 PLAYER_AVAILABLE）
     PLAYER_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"UltimatePlayer unavailable, 视频将无法播放（不回退系统播放器）: {e}")

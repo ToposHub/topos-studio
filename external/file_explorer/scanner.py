@@ -38,6 +38,7 @@ _state = {
     'last_result': None, 'started_at': None,
 }
 _stop_event = threading.Event()
+_cancel_event = threading.Event()
 _scan_thread = None
 
 
@@ -55,6 +56,7 @@ def start(library=None):
         _state.update({'running': True, 'phase': '准备', 'scanned': 0, 'total': 0,
                        'library': library or '全部素材库', 'started_at': time.time()})
     _stop_event.clear()
+    _cancel_event.clear()
     _scan_thread = threading.Thread(target=_run, args=(library,), daemon=True,
                                     name='fe-library-scanner')
     _scan_thread.start()
@@ -63,6 +65,14 @@ def start(library=None):
 
 def stop():
     _stop_event.set()
+
+
+def cancel():
+    """B05：取消当前扫描（不关闭自动增量，只中止本轮枚举）。"""
+    _cancel_event.set()
+    with _state_lock:
+        if _state['running']:
+            _state['phase'] = '取消中'
 
 
 def _libraries():
@@ -79,6 +89,8 @@ def _iter_files(root):
         for name in filenames:
             if name.startswith('.') or name.lower().endswith('.xmp'):
                 continue  # [V2/GAP-04] XMP sidecar 不是素材，不入库不显示
+            if _cancel_event.is_set():
+                return
             n += 1
             if n > const.SCAN_ENUM_CAP:
                 logger.warning(f"[Scanner] 单库枚举达到上限 {const.SCAN_ENUM_CAP}，截断: {root}")
@@ -91,7 +103,7 @@ def _run(library=None):
     libs = [library] if library else _libraries()
     try:
         for lib in libs:
-            if _stop_event.is_set():
+            if _stop_event.is_set() or _cancel_event.is_set():
                 break
             if not lib or not os.path.isdir(lib):
                 continue
@@ -118,10 +130,12 @@ def _run(library=None):
         started = _state.get('started_at')
         if started:
             elapsed = round(time.time() - started, 1)
+        cancelled = _cancel_event.is_set()
         _state['running'] = False
-        _state['phase'] = '完成'
+        _state['phase'] = '已取消' if cancelled else '完成'
         _state['last_result'] = {'added': added, 'updated': updated,
                                  'tech_meta': tech_done, 'elapsed': elapsed,
+                                 'cancelled': cancelled,
                                  'finished_at': time.time()}
     logger.info(f"[Scanner] 扫描完成：新增 {added}，更新 {updated}，"
                 f"技术元数据 {tech_done}（{elapsed}s）")

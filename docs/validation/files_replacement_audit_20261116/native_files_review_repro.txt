@@ -1,0 +1,6 @@
+VIRTUAL {"model_paths": ["/Users/review/B/new.png"], "thumbnail_accepted": false, "entry_row_for_new": null, "lookup_old_returns": "/Users/review/B/new.png", "operation_directory": "/Users/review/A"}
+SEARCH_AND 1 0
+CAP_BEFORE False
+CAP_AFTER_INFO False
+UNPREVIEWED_RENAME ['completely_different_{seq:3}']
+SAME_PATH_DECODER_EMITTED_WIDTHS [1]
