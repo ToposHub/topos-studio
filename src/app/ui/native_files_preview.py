@@ -98,6 +98,9 @@ class PreviewDecoder(QObject):
         self._generation = 0
         self._current: Optional[tuple[int, str]] = None
         self._jobs: dict[int, _PreviewDecodeJob] = {}
+        # [FR-14] 退役任务保持强引用直到 shutdown：运行中的 QRunnable
+        # 若只剩 C++ 侧指针，Python 包装被 GC 后 run() 会退化为抽象基类
+        self._retired: list[_PreviewDecodeJob] = []
 
     def start(self, path: str, data: bytes) -> None:
         self.cancel()
@@ -114,6 +117,7 @@ class PreviewDecoder(QObject):
         self._current = None
         for job in list(self._jobs.values()):
             self._pool.tryTake(job)
+            self._retired.append(job)  # 保留引用：在途任务安全跑完即被丢弃
         self._jobs.clear()
 
     def _on_finished(self, generation: int, path: str,
@@ -132,6 +136,7 @@ class PreviewDecoder(QObject):
         self._pool.clear()
         # [FR-17] 有界等待在途解码结束：不带着运行中的 job 析构线程池
         self._pool.waitForDone(2000)
+        self._retired.clear()
 
 
 class NativeFilesPreview(QWidget):

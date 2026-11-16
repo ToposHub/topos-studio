@@ -107,11 +107,14 @@ def test_fr14_same_path_reopen_latest_result_wins(qtbot, monkeypatch):
     decoder.start("/same.png", _png_bytes(2))
     decoder.start("/same.png", _png_bytes(6))   # 同路径立刻重开（旧任务在途）
     release.set()
-    qtbot.waitUntil(lambda: len(results) + len(errors) >= 1, timeout=5000)
-    # 只显示新任务的结果；旧 2px 结果被世代作废
-    assert len(errors) == 0
-    assert len(results) == 1
-    assert results[0][1].width() == 6
+    try:
+        qtbot.waitUntil(lambda: len(results) + len(errors) >= 1, timeout=5000)
+        # 只显示新任务的结果；旧 2px 结果被世代作废
+        assert len(errors) == 0
+        assert len(results) == 1
+        assert results[0][1].width() == 6
+    finally:
+        decoder.shutdown()   # 等待在途解码退出，避免任务包装被 GC 后崩溃
 
 
 def test_fr14_cancel_discards_late_result(qtbot):
