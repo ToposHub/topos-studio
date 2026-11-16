@@ -16,10 +16,16 @@ ModernGL 接管当前 Qt 上下文，然后复用项目已有的 ``YUVGPUUploade
 
 线程边界
 --------
-所有 GL 调用都在 Qt GUI 线程的 ``initializeGL/paintGL`` 内完成；解码
-线程只产出独立的 :class:`YuvFrame` 数组，不触碰任何 GL 对象。这与
-``.clinerules`` 的“GL 只在渲染线程”一致，也和现有 ``GLContextManager``
-的线程亲和约束不冲突（本画布不注册到全局 render context）。
+GL 调用发生在 Qt GUI 线程的 ``initializeGL/paintGL`` 内（QOpenGLWidget 的
+硬性约束：widget 表面绑定 GUI 线程）；解码线程只产出独立的
+:class:`YuvFrame` 数组，不触碰任何 GL 对象与 QWidget API（显示尺寸经
+``refresh_size_cache`` 的 GUI 线程快照传递，[FR-21]）。
+
+**已知偏差（FR-21 整改项，未完成）**：项目 GPU 约束要求渲染任务走既有
+渲染线程任务队列（AsyncRenderer/GLContextManager），本画布目前仍在 GUI
+线程内直接执行 ModernGL 创建/上传/绘制，未接入该队列。完整整改需要
+共享上下文的离屏渲染 + 呈现层接帧，且必须经真 GPU 验证；在此之前不得
+宣称符合规则。
 
 失败回退
 --------
@@ -102,7 +108,18 @@ class GLVideoCanvas(QOpenGLWidget):
         return self._gpu_error
 
     def refresh_size_cache(self) -> None:
-        """与 ``_VideoCanvas`` 同名接口；本画布直接读实时尺寸。"""
+        """[FR-21] GUI 线程更新尺寸快照：解码线程只读缓存。
+
+        ``width()/devicePixelRatioF()`` 属 QWidget 主线程 API，解码线程
+        直接调用会读到撕裂值并触屏屏幕对象查询（对齐 _VideoCanvas 的
+        U10 缓存方案）。resizeGL/paintGL 都在 GUI 线程，顺手刷新。
+        """
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            self._size_cache = None
+        else:
+            dpr = float(self.devicePixelRatioF())
+            self._size_cache = (max(1, int(w * dpr)), max(1, int(h * dpr)))
 
     def closeEvent(self, event) -> None:
         self._release_gl()
@@ -114,10 +131,8 @@ class GLVideoCanvas(QOpenGLWidget):
         self.update()
 
     def display_size(self):
-        """返回设备像素下的显示区尺寸（对齐 base_player 的约定）。"""
-        dpr = float(self.devicePixelRatioF())
-        return (max(1, int(self.width() * dpr)),
-                max(1, int(self.height() * dpr)))
+        """设备像素显示区尺寸（快照）；工作线程安全。"""
+        return getattr(self, '_size_cache', None)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._on_click:
@@ -145,9 +160,11 @@ class GLVideoCanvas(QOpenGLWidget):
 
     def resizeGL(self, w: int, h: int) -> None:
         # 尺寸变化只触发重绘；纹理仍复用，避免每帧重复上传。
+        self.refresh_size_cache()
         self.update()
 
     def paintGL(self) -> None:
+        self.refresh_size_cache()  # GUI 线程内维护快照（FR-21）
         frame = self._frame
         if frame is None:
             self._paint_black()

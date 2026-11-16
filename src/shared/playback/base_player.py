@@ -666,8 +666,11 @@ class BasePlayer(QFrame):
                 self._ring.append((target, img))
                 self._ring_space.notify()
             with self._cond:
-                if self._seek_target is None and \
-                        target + 1 < session.frame_count:
+                # [FR-18] 无条件推进到 target+1：末帧（target == frame_count-1）
+                # 之后 _next_index == frame_count，下一轮进入 EOF 哨兵分支
+                # 只触发一次 _on_eof。此前 `target+1 < frame_count` 把末帧
+                # 永远留在 _next_index——2 帧会话读成 0,1,1,1…，EOF 永不触发。
+                if self._seek_target is None:
                     self._next_index = target + 1
 
     def _poll_ring(self) -> None:
