@@ -12,8 +12,25 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from PyQt6.QtCore import QObject, QUrl, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+
+
+@dataclass
+class _MetadataJob:
+    """一次元数据写入的请求身份；逐路径结果汇总后才发布成功/失败。"""
+
+    paths: list[str]
+    patch: dict[str, Any]
+    remaining: int = 0
+    failures: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _PreviewRead:
+    path: str
+    data: bytearray = field(default_factory=bytearray)
+    oversized: bool = False
 
 
 @dataclass
@@ -34,12 +51,40 @@ class NativeFilesTransport(QObject):
     thumbnail_pending = pyqtSignal(str)
     tree_loaded = pyqtSignal(str, list)
     tree_failed = pyqtSignal(str, str)
+    metadata_applied = pyqtSignal(list, dict, str)
+    metadata_failed = pyqtSignal(list, dict, str)
+    capabilities_loaded = pyqtSignal(list)
+    preview_loaded = pyqtSignal(str, bytes)
+    preview_failed = pyqtSignal(str, str)
+    preview_cancelled = pyqtSignal(str)
+    task_started = pyqtSignal(dict)
+    task_finished = pyqtSignal(dict)
+    task_failed = pyqtSignal(str)
+    search_loaded = pyqtSignal(dict)
+    search_failed = pyqtSignal(str)
+    collections_loaded = pyqtSignal(list)
+    collection_loaded = pyqtSignal(dict)
+    collection_failed = pyqtSignal(str)
+    libraries_loaded = pyqtSignal(list)
+    library_changed = pyqtSignal(bool, str)
+    scan_status_loaded = pyqtSignal(dict)
+    scan_failed = pyqtSignal(str)
+    thumbnail_retry_done = pyqtSignal(str, bool)
+    batch_rename_preview_ready = pyqtSignal(dict)
+    batch_rename_preview_failed = pyqtSignal(str)
+    batch_rename_finished = pyqtSignal(dict)
+    compare_image_loaded = pyqtSignal(str, bytes)
+    compare_image_failed = pyqtSignal(str, str)
+    compare_set_finished = pyqtSignal()
+    strip_loaded = pyqtSignal(str, bytes)
+    strip_failed = pyqtSignal(str)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
     MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
     MAX_TREE_CONCURRENCY = 4
     MAX_TREE_QUEUE = 128
+    MAX_PREVIEW_BYTES = 64 * 1024 * 1024
 
     def __init__(
         self, server_url: Callable[[], str], token: str | None,
@@ -59,6 +104,18 @@ class NativeFilesTransport(QObject):
         self._tree_queue: deque[str] = deque()
         self._tree_replies: dict[QNetworkReply, str] = {}
         self._tree_pending_paths: set[str] = set()
+        self._metadata_replies: dict[QNetworkReply, _MetadataJob] = {}
+        self._preview_reply: QNetworkReply | None = None
+        self._preview_state: _PreviewRead | None = None
+        self._compare_queue: deque[str] = deque()
+        self._compare_reply: QNetworkReply | None = None
+        self._compare_state: _PreviewRead | None = None
+        self._strip_replies: dict[QNetworkReply, str] = {}
+        self._task_poll_timer: QTimer | None = None
+        self._task_poll_job: str = ""
+        self._task_poll_reply: QNetworkReply | None = None
+        self._task_poll_attempts: int = 0
+        self._scan_poll_timer: QTimer | None = None
 
     def _make_request(self, endpoint: str, query: dict[str, str | int]) -> QNetworkRequest | None:
         base = self._server_url()
@@ -71,6 +128,25 @@ class NativeFilesTransport(QObject):
         url.setQuery(urlencode(query, quote_via=quote))
         url.setFragment("")
         request = QNetworkRequest(url)
+        request.setRawHeader(b"X-Auth-Token", self._token.encode("utf-8"))
+        request.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.ManualRedirectPolicy,
+        )
+        request.setTransferTimeout(15000)
+        return request
+
+    def _make_post(self, endpoint: str) -> QNetworkRequest | None:
+        base = self._server_url()
+        if self._closed or not base or not self._token:
+            return None
+        url = QUrl(base)
+        if url.scheme() != "http" or url.host() not in ("127.0.0.1", "localhost", "::1"):
+            return None
+        url.setPath(endpoint)
+        url.setQuery("")
+        request = QNetworkRequest(url)
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
         request.setRawHeader(b"X-Auth-Token", self._token.encode("utf-8"))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
@@ -290,6 +366,616 @@ class NativeFilesTransport(QObject):
             return
         self.loaded.emit(path, entries)
 
+    # -- 元数据写入（U05） ------------------------------------------------
+    def patch_metadata(self, paths: list[str], patch: dict[str, Any]) -> None:
+        """只提交用户改过的字段；单文件走 update_meta，多文件走 batch/meta。
+
+        响应确认后才发 metadata_applied，失败逐条汇总：不写"已保存"的假状态。
+        """
+        if self._closed or not paths or not patch:
+            return
+        allowed = ("rating", "tags", "color", "flag", "comments")
+        batchable = {key: value for key, value in patch.items() if key in allowed}
+        requests: list[tuple[str, dict[str, Any]]] = []
+        if len(paths) == 1:
+            requests.append(("/api/update_meta", {"path": paths[0], **patch}))
+        elif batchable:
+            # B06：comments 已并入 batch/meta（字段级 patch，一次请求一套语义）
+            requests.append(("/api/batch/meta", {"files": paths, **batchable}))
+        if not requests:
+            return
+        job = _MetadataJob(paths=list(paths), patch=dict(patch), remaining=len(requests))
+        for endpoint, payload in requests:
+            request = self._make_post(endpoint)
+            if request is None:
+                job.remaining -= 1
+                job.failures.append("素材服务尚未就绪，无法保存标记。")
+                continue
+            reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+            self._metadata_replies[reply] = job
+            reply.finished.connect(lambda r=reply, j=job: self._finish_metadata(r, j))
+        if job.remaining == 0:
+            self._publish_metadata(job)
+
+    def _finish_metadata(self, reply: QNetworkReply, job: _MetadataJob) -> None:
+        self._metadata_replies.pop(reply, None)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        job.remaining -= 1
+        if self._closed:
+            return
+        payload: Any = None
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        success = (status == 200 and error == QNetworkReply.NetworkError.NoError
+                   and isinstance(payload, dict) and payload.get("success") is not False)
+        if not success:
+            message = ""
+            if isinstance(payload, dict):
+                message = str(payload.get("message") or payload.get("error") or "")
+            job.failures.append(message or "保存失败（服务未确认）")
+        if job.remaining <= 0:
+            self._publish_metadata(job)
+
+    def _publish_metadata(self, job: _MetadataJob) -> None:
+        if job.failures:
+            self.metadata_failed.emit(list(job.paths), dict(job.patch),
+                                     "；".join(sorted(set(job.failures))))
+        else:
+            self.metadata_applied.emit(list(job.paths), dict(job.patch), "已保存")
+
+    # -- 文件任务（B07） ---------------------------------------------------
+    TASK_POLL_INTERVAL_MS = 400
+    TASK_POLL_MAX_ATTEMPTS = 300
+
+    def run_task(
+        self, operation: str, targets: list[str], *, policy: str = "error",
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        """提交文件任务并轮询到终态：mkdir/rename/copy/move/trash/restore/purge。
+
+        不在这里做成功判断——逐项结果由 /api/tasks/status 的 items 决定。
+        """
+        if self._closed or not targets:
+            return
+        request = self._make_post("/api/tasks/start")
+        if request is None:
+            self.task_failed.emit("素材服务尚未就绪，无法执行文件操作。")
+            return
+        payload = {"operation": operation, "targets": targets,
+                   "policy": policy, "options": dict(options or {})}
+        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda r=reply: self._finish_task_start(r))
+
+    def _finish_task_start(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError \
+                or not isinstance(payload, dict) or not payload.get("success"):
+            message = payload.get("message") if isinstance(payload, dict) else None
+            self.task_failed.emit(str(message or reply.errorString() or "文件操作未能提交"))
+            return
+        job = payload.get("job") or {}
+        job_id = str(job.get("job_id") or "")
+        if not job_id:
+            self.task_failed.emit("素材服务未返回任务编号")
+            return
+        self.task_started.emit(dict(job))
+        self._start_task_poll(job_id)
+
+    def _start_task_poll(self, job_id: str) -> None:
+        self._task_poll_job = job_id
+        self._task_poll_attempts = 0
+        if self._task_poll_timer is None:
+            self._task_poll_timer = QTimer(self)
+            self._task_poll_timer.timeout.connect(self._poll_task_once)
+        self._task_poll_timer.start(self.TASK_POLL_INTERVAL_MS)
+        self._poll_task_once()
+
+    def _poll_task_once(self) -> None:
+        if self._closed or not self._task_poll_job:
+            return
+        if self._task_poll_reply is not None:
+            return  # 上一次轮询未回：让 HTTP 自己返回，不堆叠
+        self._task_poll_attempts += 1
+        if self._task_poll_attempts > self.TASK_POLL_MAX_ATTEMPTS:
+            self._stop_task_poll()
+            self.task_failed.emit("文件任务超时，请稍后在完整 Files 中查看结果。")
+            return
+        request = self._make_request("/api/tasks/status", {"job_id": self._task_poll_job})
+        if request is None:
+            self._stop_task_poll()
+            return
+        reply = self._network.get(request)
+        self._task_poll_reply = reply
+        reply.finished.connect(lambda r=reply: self._finish_task_poll(r))
+
+    def _finish_task_poll(self, reply: QNetworkReply) -> None:
+        self._task_poll_reply = None
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return
+        job = payload.get("job") if isinstance(payload, dict) else None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(job, dict):
+            self._stop_task_poll()
+            self.task_failed.emit("无法读取文件任务进度。")
+            return
+        if str(job.get("job_id") or "") != self._task_poll_job:
+            return
+        if job.get("status") in ("completed", "failed", "cancelled"):
+            self._stop_task_poll()
+            self.task_finished.emit(dict(job))
+            return
+        self.task_started.emit(dict(job))  # 复用为进度快照，UI 只读 completed/total
+
+    def cancel_task(self, job_id: str) -> None:
+        if self._closed or not job_id:
+            return
+        request = self._make_post("/api/tasks/cancel")
+        if request is None:
+            return
+        reply = self._network.post(request, json.dumps({"job_id": job_id}).encode("utf-8"))
+        reply.finished.connect(lambda r=reply: r.deleteLater())
+
+    def _stop_task_poll(self) -> None:
+        self._task_poll_job = ""
+        if self._task_poll_timer is not None:
+            self._task_poll_timer.stop()
+        if self._task_poll_reply is not None:
+            self._task_poll_reply.abort()
+            self._task_poll_reply = None
+
+    # -- 常用位置 / 扫描状态（F11 / B10） ---------------------------------
+    def load_libraries(self) -> None:
+        if self._closed:
+            return
+        request = self._make_request("/api/library/list", {})
+        if request is None:
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_libraries(r))
+
+    def _finish_libraries(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed or status != 200 or error != QNetworkReply.NetworkError.NoError:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return
+        if isinstance(payload, dict):
+            payload = payload.get("libraries") or payload.get("items") or []
+        if isinstance(payload, list):
+            self.libraries_loaded.emit(payload)
+
+    def pin_library(self, path: str) -> None:
+        self._post_library("/api/library/add", {"path": path}, "已固定为常用位置")
+
+    def unpin_library(self, path: str) -> None:
+        self._post_library("/api/library/unpin", {"path": path}, "已取消固定")
+
+    def _post_library(self, endpoint: str, payload: dict[str, Any], ok_message: str) -> None:
+        request = self._make_post(endpoint)
+        if request is None:
+            self.library_changed.emit(False, "素材服务尚未就绪")
+            return
+        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda r=reply: self._finish_library_change(r, ok_message))
+
+    def _finish_library_change(self, reply: QNetworkReply, ok_message: str) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        ok = (status == 200 and error == QNetworkReply.NetworkError.NoError
+              and isinstance(payload, dict) and payload.get("success") is not False)
+        message = ok_message if ok else str(
+            (payload or {}).get("message") if isinstance(payload, dict) else "操作失败")
+        self.library_changed.emit(bool(ok), message)
+        if ok:
+            self.load_libraries()
+
+    def load_scan_status(self) -> None:
+        if self._closed:
+            return
+        request = self._make_request("/api/scan/status", {})
+        if request is None:
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_scan_status(r))
+
+    def _finish_scan_status(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return
+        if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(payload, dict):
+            self.scan_failed.emit("无法读取索引状态")
+            return
+        self.scan_status_loaded.emit(dict(payload))
+        self._sync_scan_poll(bool(payload.get("running")))
+
+    def _sync_scan_poll(self, running: bool) -> None:
+        if running and self._scan_poll_timer is None:
+            self._scan_poll_timer = QTimer(self)
+            self._scan_poll_timer.timeout.connect(self.load_scan_status)
+            self._scan_poll_timer.start(1000)
+        elif not running and self._scan_poll_timer is not None:
+            self._scan_poll_timer.stop()
+            self._scan_poll_timer = None
+
+    def start_scan(self) -> None:
+        request = self._make_post("/api/scan/start")
+        if request is None:
+            self.scan_failed.emit("素材服务尚未就绪")
+            return
+        reply = self._network.post(request, b"{}")
+        reply.finished.connect(lambda r=reply: self._finish_scan_action(r, "索引已开始"))
+
+    def cancel_scan(self) -> None:
+        request = self._make_post("/api/scan/cancel")
+        if request is None:
+            return
+        reply = self._network.post(request, b"{}")
+        reply.finished.connect(lambda r=reply: self._finish_scan_action(r, "已请求取消索引"))
+
+    def _finish_scan_action(self, reply: QNetworkReply, ok_message: str) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        if status not in (200, 409) or error != QNetworkReply.NetworkError.NoError:
+            self.scan_failed.emit("索引操作失败")
+            return
+        if status == 409:
+            self.scan_failed.emit("索引已在运行，或当前没有可取消的任务")
+        self.load_scan_status()
+
+    def retry_thumbnail(self, path: str, version: int = 0) -> None:
+        request = self._make_post("/api/thumb/retry")
+        if request is None:
+            self.thumbnail_retry_done.emit(path, False)
+            return
+        reply = self._network.post(request, json.dumps({"path": path}).encode("utf-8"))
+        reply.finished.connect(lambda r=reply, p=path: self._finish_thumbnail_retry(r, p))
+
+    def _finish_thumbnail_retry(self, reply: QNetworkReply, path: str) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        self.thumbnail_retry_done.emit(path, status == 200 and error == QNetworkReply.NetworkError.NoError)
+
+    # -- 批量重命名（F13） -------------------------------------------------
+    def preview_batch_rename(self, files: list[str], mode: str, params: dict[str, Any]) -> None:
+        """先预览再执行：预览不落盘，冲突由服务标记。"""
+        request = self._make_post("/api/batch/rename/preview")
+        if request is None:
+            self.batch_rename_preview_failed.emit("素材服务尚未就绪")
+            return
+        payload = {"files": list(files), "mode": mode, "params": dict(params or {})}
+        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda r=reply: self._finish_batch_rename_preview(r))
+
+    def _finish_batch_rename_preview(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(payload, dict):
+            message = (payload or {}).get("message") if isinstance(payload, dict) else None
+            self.batch_rename_preview_failed.emit(str(message or "批量改名预览失败"))
+            return
+        self.batch_rename_preview_ready.emit(dict(payload))
+
+    def execute_batch_rename(self, files: list[str], mode: str, params: dict[str, Any]) -> None:
+        request = self._make_post("/api/batch/rename")
+        if request is None:
+            self.batch_rename_finished.emit({"success": False, "message": "素材服务尚未就绪"})
+            return
+        payload = {"files": list(files), "mode": mode, "params": dict(params or {})}
+        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda r=reply: self._finish_batch_rename(r))
+
+    def _finish_batch_rename(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if not isinstance(payload, dict):
+            payload = {"success": False, "message": "批量改名失败"}
+        self.batch_rename_finished.emit(dict(payload))
+
+    # -- 并排比较（F15） ---------------------------------------------------
+    def load_compare_images(self, paths: list[str]) -> None:
+        self._compare_queue = deque(list(paths)[:4])
+        if not self._compare_queue:
+            self.compare_set_finished.emit()
+        else:
+            self._next_compare()
+
+    def _next_compare(self) -> None:
+        if self._compare_reply is not None or not self._compare_queue:
+            return
+        path = self._compare_queue.popleft()
+        request = self._make_request("/api/file", {"path": path})
+        if request is None:
+            self.compare_image_failed.emit(path, "素材服务尚未就绪")
+            QTimer.singleShot(0, self._next_compare)
+            return
+        reply = self._network.get(request)
+        reply.setReadBufferSize(self.MAX_PREVIEW_BYTES + 1)
+        state = _PreviewRead(path=path)
+        self._compare_reply = reply
+        self._compare_state = state
+        reply.readyRead.connect(lambda r=reply, st=state: self._read_preview(r, st))
+        reply.finished.connect(lambda r=reply, st=state: self._finish_compare(r, st))
+
+    def _finish_compare(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        data = bytes(state.data)
+        reply.deleteLater()
+        self._compare_reply = None
+        self._compare_state = None
+        if state.oversized:
+            self.compare_image_failed.emit(state.path, "文件过大，无法比较")
+        elif status == 200 and error == QNetworkReply.NetworkError.NoError and data:
+            self.compare_image_loaded.emit(state.path, data)
+        else:
+            self.compare_image_failed.emit(state.path, "读取失败")
+        if self._compare_queue:
+            self._next_compare()
+        else:
+            self.compare_set_finished.emit()
+
+    # -- 悬停胶片条（F14） -------------------------------------------------
+    def request_strip(self, path: str, duration: float = 0.0) -> None:
+        if self._closed:
+            return
+        request = self._make_request("/api/thumb/strip", {"path": path, "duration": max(0.0, float(duration or 0.0))})
+        if request is None:
+            self.strip_failed.emit(path)
+            return
+        reply = self._network.get(request)
+        self._strip_replies[reply] = path
+        reply.finished.connect(lambda r=reply: self._finish_strip(r))
+
+    def _finish_strip(self, reply: QNetworkReply) -> None:
+        path = self._strip_replies.pop(reply, "")
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed or not path:
+            return
+        if status == 200 and error == QNetworkReply.NetworkError.NoError and raw:
+            self.strip_loaded.emit(path, raw)
+        else:
+            self.strip_failed.emit(path)
+
+    # -- 集合浏览（B11） ---------------------------------------------------
+    def load_collections(self) -> None:
+        if self._closed:
+            return
+        request = self._make_request("/api/collections", {})
+        if request is None:
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_collections(r))
+
+    def _finish_collections(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed or status != 200 or error != QNetworkReply.NetworkError.NoError:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return
+        items = payload.get("collections") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            items = payload if isinstance(payload, list) else None
+        if isinstance(items, list):
+            self.collections_loaded.emit(items)
+
+    def load_collection(self, collection_id: int) -> None:
+        """集合成员与 /api/list 同构；不构建第二套查询语义。"""
+        if self._closed:
+            return
+        request = self._make_request(f"/api/collections/{int(collection_id)}/items", {})
+        if request is None:
+            self.collection_failed.emit("素材服务尚未就绪，无法读取集合。")
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_collection(r))
+
+    def _finish_collection(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError \
+                or not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            self.collection_failed.emit(str(message or "读取集合失败"))
+            return
+        self.collection_loaded.emit(dict(payload))
+
+    # -- 全库搜索（B05） ---------------------------------------------------
+    def search_library(self, query: str, *, limit: int = 200, offset: int = 0) -> None:
+        """跨目录搜索：只读索引，不扫盘；结果显式带 total/truncated。"""
+        if self._closed:
+            return
+        request = self._make_request("/api/search", {
+            "q": str(query or ""), "limit": int(limit), "offset": int(offset)})
+        if request is None:
+            self.search_failed.emit("素材服务尚未就绪，无法搜索素材库。")
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_search(r))
+
+    def _finish_search(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            payload = None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError or not isinstance(payload, dict):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            self.search_failed.emit(str(message or reply.errorString() or "搜索失败"))
+            return
+        files = payload.get("files")
+        if not isinstance(files, list):
+            self.search_failed.emit("素材服务返回的搜索结果格式无效。")
+            return
+        self.search_loaded.emit(dict(payload))
+
+    # -- 能力清单（B01） ---------------------------------------------------
+    def load_capabilities(self) -> None:
+        request = self._make_request("/api/capabilities", {})
+        if request is None:
+            return
+        reply = self._network.get(request)
+        reply.finished.connect(lambda r=reply: self._finish_capabilities(r))
+
+    def _finish_capabilities(self, reply: QNetworkReply) -> None:
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed or status != 200 or error != QNetworkReply.NetworkError.NoError:
+            return
+        try:
+            payload: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return
+        items = payload.get("capabilities") if isinstance(payload, dict) else None
+        if isinstance(items, list):
+            self.capabilities_loaded.emit(items)
+
+    # -- 原生预览取数（B04 / U03） ----------------------------------------
+    def load_preview(self, path: str) -> None:
+        """只取字节；解码在 UI 侧工作线程完成，主线程不做同步解码。"""
+        self.cancel_preview()
+        request = self._make_request("/api/file", {"path": path})
+        if request is None:
+            self.preview_failed.emit(path, "素材服务尚未就绪，无法预览。")
+            return
+        reply = self._network.get(request)
+        reply.setReadBufferSize(self.MAX_PREVIEW_BYTES + 1)
+        state = _PreviewRead(path=path)
+        self._preview_reply = reply
+        self._preview_state = state
+        reply.metaDataChanged.connect(lambda r=reply, st=state: self._check_preview_size(r, st))
+        reply.readyRead.connect(lambda r=reply, st=state: self._read_preview(r, st))
+        reply.finished.connect(lambda r=reply, st=state: self._finish_preview(r, st))
+
+    def _check_preview_size(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        size = reply.header(QNetworkRequest.KnownHeaders.ContentLengthHeader)
+        if isinstance(size, int) and size > self.MAX_PREVIEW_BYTES:
+            state.oversized = True
+            reply.abort()
+
+    def _read_preview(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        if state.oversized:
+            return
+        chunk = reply.read(self.MAX_PREVIEW_BYTES + 1 - len(state.data))
+        if chunk:
+            state.data.extend(bytes(chunk))
+        if len(state.data) > self.MAX_PREVIEW_BYTES:
+            state.oversized = True
+            reply.abort()
+
+    def _finish_preview(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        self._read_preview(reply, state)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        error_text = reply.errorString()
+        if reply is self._preview_reply:
+            self._preview_reply = None
+            self._preview_state = None
+        reply.deleteLater()
+        if self._closed:
+            return
+        if state.oversized:
+            self.preview_failed.emit(state.path, "文件过大，请在完整 Files 中预览。")
+        elif (status == 200 and error == QNetworkReply.NetworkError.NoError and state.data):
+            self.preview_loaded.emit(state.path, bytes(state.data))
+        elif status == 423:
+            self.preview_failed.emit(state.path, "目录已锁定，请在完整 Files 中解锁后预览。")
+        elif status == 204:
+            self.preview_failed.emit(state.path, "该文件没有可预览内容。")
+        else:
+            self.preview_failed.emit(state.path, error_text or "预览请求失败。")
+
+    def cancel_preview(self) -> None:
+        reply, self._preview_reply = self._preview_reply, None
+        self._preview_state = None
+        if reply is not None:
+            reply.abort()
+
     def cancel(self) -> None:
         self._generation += 1
         reply, self._reply = self._reply, None
@@ -304,8 +990,20 @@ class NativeFilesTransport(QObject):
             thumbnail.abort()
 
     def shutdown(self) -> None:
+        self._compare_queue.clear()
+        if self._compare_reply is not None:
+            self._compare_reply.abort()
+            self._compare_reply = None
+        self._compare_state = None
+        for reply in list(self._strip_replies):
+            reply.abort()
+        self._strip_replies.clear()
         self._closed = True
+        self._stop_task_poll()
+        self._sync_scan_poll(False)
         self.cancel()
+        self.cancel_preview()
+        self._metadata_replies.clear()
         trees = list(self._tree_replies)
         self._tree_queue.clear()
         self._tree_replies.clear()

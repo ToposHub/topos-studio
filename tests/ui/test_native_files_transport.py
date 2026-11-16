@@ -422,3 +422,176 @@ def test_releasing_inflight_thumbnail_keeps_network_deduplication(qtbot, thumbna
         release.set()
     assert len(state["calls"]) == 1
     transport.shutdown()
+
+
+@pytest.fixture
+def metadata_service():
+    """U05/B01/U03 的端到端 HTTP 替身：POST 写入 + capabilities + 原始字节预览。"""
+    png = b"\x89PNG\r\n\x1a\nfake-bytes"
+    release = threading.Event()
+    state = {"posts": [], "gets": []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            parsed = urlsplit(self.path)
+            state["posts"].append((parsed.path, payload, self.headers.get("X-Auth-Token")))
+            if parsed.path == "/api/update_meta" and payload.get("path") == "/deny":
+                body, status = {"success": False, "message": "只读挂载"}, 403
+            elif parsed.path == "/api/batch/meta" and "/deny" in payload.get("files", []):
+                body, status = {"success": False, "message": "部分文件锁住"}, 409
+            else:
+                body, status = {"success": True}, 200
+            raw = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            parsed = urlsplit(self.path)
+            query = parse_qs(parsed.query)
+            path = query.get("path", [""])[0]
+            state["gets"].append((parsed.path, path, self.headers.get("X-Auth-Token")))
+            if parsed.path == "/api/capabilities":
+                raw = json.dumps({"version": 1, "capabilities": [
+                    {"key": "metadata.patch", "available": True, "reason": ""},
+                    {"key": "preview.video", "available": False, "reason": "ffmpeg 缺失"},
+                ]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            if parsed.path == "/api/file":
+                if path == "/slow":
+                    release.wait(3)
+                if path == "/locked":
+                    body, status = b'{"locked": true}', 423
+                elif path == "/empty":
+                    body, status = b"", 204
+                elif path == "/huge":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(NativeFilesTransport.MAX_PREVIEW_BYTES + 10))
+                    self.end_headers()
+                    return
+                else:
+                    body, status = png, 200
+                self.send_response(status)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+            raw = b'{"files": []}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
+    worker.start()
+    yield f"http://127.0.0.1:{server.server_port}", state, release, png
+    release.set()
+    server.shutdown()
+    server.server_close()
+    worker.join(2)
+
+
+def test_capabilities_are_loaded_with_token(qtbot, metadata_service):
+    base, state, _, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.capabilities_loaded, timeout=3000) as received:
+        transport.load_capabilities()
+    assert state["gets"][-1] == ("/api/capabilities", "", "secret")
+    keys = {item["key"]: item for item in received.args[0]}
+    assert keys["preview.video"]["available"] is False
+    assert keys["preview.video"]["reason"]
+    transport.shutdown()
+
+
+def test_single_file_patch_uses_update_meta(qtbot, metadata_service):
+    base, state, _, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.metadata_applied, timeout=3000) as received:
+        transport.patch_metadata(["/a.mov"], {"rating": 4})
+    assert state["posts"][0][0] == "/api/update_meta"
+    assert state["posts"][0][1] == {"path": "/a.mov", "rating": 4}
+    assert received.args[0] == ["/a.mov"]
+    assert received.args[1] == {"rating": 4}
+    transport.shutdown()
+
+
+def test_multi_file_patch_is_one_batch_request_with_comments(qtbot, metadata_service):
+    base, state, _, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.metadata_applied, timeout=3000) as received:
+        transport.patch_metadata(["/a.mov", "/b.mov"], {"comments": "统一", "color": 0})
+    assert [item[0] for item in state["posts"]] == ["/api/batch/meta"]
+    assert state["posts"][0][1] == {"files": ["/a.mov", "/b.mov"], "comments": "统一", "color": 0}
+    assert received.args[0] == ["/a.mov", "/b.mov"]
+    transport.shutdown()
+
+
+def test_patch_failure_surfaces_server_message_and_publishes_nothing(qtbot, metadata_service):
+    base, state, _, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.metadata_failed, timeout=3000) as received:
+        transport.patch_metadata(["/deny", "/b.mov"], {"rating": 5})
+    assert "部分文件锁住" in received.args[2]
+    applied: list[tuple] = []
+    transport.metadata_applied.connect(lambda *args: applied.append(args))
+    transport.patch_metadata(["/deny"], {"tags": "x"})
+    qtbot.waitUntil(lambda: len(state["posts"]) == 2, timeout=3000)
+    qtbot.wait(150)  # 给失败回包一个汇合窗口，确认没有"成功"误报
+    assert applied == []
+    transport.shutdown()
+
+
+def test_preview_bytes_and_locked_and_empty_states(qtbot, metadata_service):
+    base, _, _, png = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.preview_loaded, timeout=3000) as received:
+        transport.load_preview("/a.png")
+    assert received.args == ["/a.png", png]
+    with qtbot.waitSignal(transport.preview_failed, timeout=3000) as locked:
+        transport.load_preview("/locked")
+    assert locked.args[0] == "/locked"
+    assert "锁定" in locked.args[1]
+    with qtbot.waitSignal(transport.preview_failed, timeout=3000) as empty:
+        transport.load_preview("/empty")
+    assert "没有可预览内容" in empty.args[1]
+    transport.shutdown()
+
+
+def test_preview_rejects_oversized_without_decompressing_everything(qtbot, metadata_service):
+    base, _, _, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.preview_failed, timeout=3000) as received:
+        transport.load_preview("/huge")
+    assert "过大" in received.args[1]
+    transport.shutdown()
+
+
+def test_cancelled_preview_never_publishes_stale_bytes(qtbot, metadata_service):
+    base, state, release, _ = metadata_service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    transport.load_preview("/slow")
+    qtbot.waitUntil(lambda: len(state["gets"]) == 1, timeout=3000)
+    transport.cancel_preview()
+    release.set()
+    with qtbot.assertNotEmitted(transport.preview_loaded):
+        qtbot.wait(200)
+    transport.shutdown()

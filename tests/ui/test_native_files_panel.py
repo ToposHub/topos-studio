@@ -291,7 +291,7 @@ def test_home_tree_hides_system_folders_without_hiding_named_media_folders(qtbot
     entries = [{"name": name, "path": "/Users/creator/" + name, "type": "dir"}
                for name in ("Documents", "Movies", "Library", "Applications", ".hidden", "Editor.app")]
     panel.set_entries(panel.home_path, entries)
-    assert [entry["name"] for entry in panel.model.entries] == ["Documents", "Movies"]
+    assert [entry.name for entry in panel.model.entries] == ["Documents", "Movies"]
     panel.locations.set_children(panel.home_path, entries)
     assert panel.locations.home_item.text() == "Home"
     assert panel.locations.home_item.rowCount() == 2

@@ -1008,6 +1008,12 @@ class TimelineView(QGraphicsView):
         # and publish them as one MacroCommand. This prevents one timeline
         # reload/waveform refresh per clip from monopolising the UI thread.
         self._batch_drop_commands: Optional[list[Any]] = None
+        # B08：外部投放的异步探测与目标上下文（提交前重新校验）
+        from src.features.files.import_job import ImportProbeRunner
+        self._external_import_runner = ImportProbeRunner(self)
+        self._external_import_runner.finished.connect(self._finish_external_import)
+        self._external_job_id = 0
+        self._external_target: Optional[dict[str, Any]] = None
 
         # Thumbnail provider for drag preview
         self._thumb_provider = ThumbnailProvider.instance()
@@ -1939,6 +1945,12 @@ class TimelineView(QGraphicsView):
         previous_id = getattr(self._project, "project_id", None)
         next_id = getattr(project, "project_id", None)
         if previous_id is not None and previous_id != next_id:
+            # 切工程时取消未完成的导入探测：旧结果不得插入新工程
+            runner = getattr(self, "_external_import_runner", None)
+            if runner is not None:
+                runner.cancel()
+            self._external_job_id = 0
+            self._external_target = None
             if not self._interaction.is_idle:
                 self._cancel_current_interaction()
             self._hide_trim_monitor()
@@ -16829,11 +16841,222 @@ class TimelineView(QGraphicsView):
         )
 
     def _handle_external_file_drop(self, event: QDropEvent) -> None:
-        """
-        Handle external file drop - import files and add to timeline.
+        """B08：外部文件投放改为"立即接受、后台探测、主线程单事务提交"。
 
-        This handles the text/uri-list fallback when dragging files from
-        outside the application (e.g., from Finder/Desktop).
+        为什么不在 dropEvent 里等探测：
+        * ``QDropEvent`` 只在处理函数内有效，把它的值复制出来是唯一正确做法；
+        * 旧实现同步 ``future.result()``，N 个文件时 UI 阻塞 ≈ N×probe；
+        * 旧实现逐个 AddClip，一次拖入 N 个文件要按 N 次撤销。
+
+        这里只做轻量校验（路径可读、目标轨道可落、锁轨拒绝），然后接受
+        drop；探测在 ``ImportProbeRunner`` 的线程池中完成，结果回到 GUI
+        线程后重新核对工程身份/revision/轨道锁，再用单条 MacroCommand 提交。
+        """
+        paths = self._filter_external_media_paths(list(self._drag_file_paths))
+        self._drag_file_paths = []
+        self._hide_drag_preview()
+        if not paths:
+            logger.warning("Handle external file drop: no file paths")
+            event.ignore()
+            return
+        from src.features.files.import_job import dedupe_paths
+
+        paths = dedupe_paths(paths)
+        subtitle_paths = [path for path in paths if self._is_subtitle_path(path)]
+        if subtitle_paths:
+            if len(subtitle_paths) != len(paths):
+                self.status_message_requested.emit("外部投放不能混用字幕与媒体文件")
+                event.ignore()
+                return
+            # 字幕由字幕轨道流程接管（导入 → 建字幕轨），保持既有同步语义
+            self._drag_file_paths = paths
+            self._handle_external_file_drop_legacy(event)
+            return
+
+        if self._project is None:
+            self.project_needed.emit()
+        if self._project is None:
+            self.status_message_requested.emit("无法创建工程，未导入任何文件")
+            event.ignore()
+            return
+
+        first_type = get_media_type(paths[0])
+        timeline_was_missing = self._timeline is None or self._provisional_timeline
+        drop = self._resolve_media_drop_target(event.position(), first_type, timeline_was_missing)
+        if not drop.is_valid and not drop.create_track:
+            self.status_message_requested.emit(
+                f"无法落轨：{drop.reason or '目标轨道不可用'}")
+            event.ignore()
+            return
+
+        target_track_type = (
+            "video" if first_type in ("video", "image", "comp_clip", "motion_graphic")
+            else "audio")
+        target_track = None
+        if drop.track_id and self._timeline is not None:
+            target_track = self._timeline.get_track_by_id(drop.track_id)
+        if target_track is not None and getattr(target_track, "is_locked", False):
+            self.status_message_requested.emit(
+                f"轨道 {target_track.name} 已锁定，未导入任何文件")
+            event.ignore()
+            return
+
+        from src.features.files.import_job import project_existing_paths
+
+        self._external_target = {
+            "project": self._project,
+            "project_id": getattr(self._project, "project_id", ""),
+            "track_id": target_track.track_id if target_track else None,
+            "create_track": bool(drop.create_track),
+            "track_type": target_track_type,
+            "track_name": target_track.name if target_track else "",
+            "frame": self._calculate_insert_frame(drop.frame),
+            "sequence_revision": int(getattr(self._timeline, "revision", 0))
+            if self._timeline is not None else -1,
+        }
+        self._external_job_id = self._external_import_runner.start(
+            paths, project_existing_paths(self._project))
+        self.status_message_requested.emit(f"正在导入 {len(paths)} 个文件…")
+        event.acceptProposedAction()
+        logger.info(
+            "External file drop accepted: %d files, probing in background", len(paths))
+
+    @staticmethod
+    def _is_subtitle_path(path: str) -> bool:
+        return os.path.splitext(path)[1].lower() in SUPPORTED_SUBTITLE_EXTENSIONS
+
+    def _finish_external_import(self, result: Any) -> None:
+        """探测完成后的主线程提交：重新校验目标上下文，再单宏落轨。"""
+        if result.job_id != self._external_job_id:
+            logger.debug("Discarding stale external import result %s", result.job_id)
+            return
+        target = self._external_target
+        self._external_target = None
+        if target is None:
+            return
+        if result.cancelled:
+            self.status_message_requested.emit("导入已取消，未落轨")
+            return
+
+        project = self._project
+        if project is not target["project"] or getattr(project, "project_id", "") != target["project_id"]:
+            self.status_message_requested.emit("工程已切换，导入结果作废")
+            return
+        timeline_revision = int(getattr(self._timeline, "revision", 0)) if self._timeline is not None else -1
+        if timeline_revision != target["sequence_revision"]:
+            self.status_message_requested.emit("时间线已变化，导入结果作废，请重新拖入")
+            return
+        track = None
+        if target["track_id"] and self._timeline is not None:
+            track = self._timeline.get_track_by_id(target["track_id"])
+            if track is None:
+                self.status_message_requested.emit("目标轨道已删除，导入结果作废")
+                return
+            if getattr(track, "is_locked", False):
+                self.status_message_requested.emit(
+                    f"轨道 {track.name} 已锁定，导入结果作废")
+                return
+
+        from src.features.files.import_job import prepare_import
+
+        def _fallback_metadata(path: str) -> dict[str, Any]:
+            from src.features.edit.core.project import probe_media_metadata
+            return probe_media_metadata(path)
+
+        plan = prepare_import(
+            project, list(result.usable),
+            fallback_metadata=_fallback_metadata,
+            classify=get_media_type,
+        )
+        for failure in plan.failures:
+            logger.error("External drop: failed to import %s: %s",
+                         getattr(failure, "path", "?"),
+                         getattr(getattr(failure, "error", None), "message", failure))
+        failures = list(result.failures) + [item for item in plan.failures
+                                           if item not in result.failures]
+        imported: List[MediaAsset] = list(plan.assets)
+
+        if plan.changed and plan.project is not None:
+            self._project = plan.project
+            self.project_changed.emit(plan.project)
+
+        if not imported:
+            detail = "；".join(f"{item.path.rsplit('/', 1)[-1]}: {item.error.message}"
+                              for item in failures[:3]) if failures else "没有可导入的文件"
+            self.status_message_requested.emit(f"导入失败，未落轨：{detail}")
+            return
+
+        if not self._ensure_first_asset_timeline_settings(imported[0]):
+            self.status_message_requested.emit("无法建立时间线设置，导入未落轨")
+            return
+
+        import uuid
+
+        staging_timeline = None
+        add_track_cmd = None
+        if track is None and target["create_track"]:
+            new_track_id = str(uuid.uuid4())
+            add_track_cmd = AddTrackCommand.create(target["track_type"], track_id=new_track_id)
+            staged = add_track_cmd.apply(self._timeline)
+            if isinstance(staged, tuple):
+                staged = staged[0]
+            staging_timeline = staged
+            track = staging_timeline.get_track_by_id(new_track_id)
+            if track is None:
+                self.status_message_requested.emit("无法创建目标轨道，导入未落轨")
+                return
+
+        batch_commands: list[Any] = []
+        real_timeline = self._timeline
+        if staging_timeline is not None:
+            self._timeline = staging_timeline
+        self._batch_drop_commands = batch_commands
+        added = 0
+        current_frame = int(target["frame"])
+        try:
+            if add_track_cmd is not None:
+                batch_commands.append(add_track_cmd)
+            for asset in imported:
+                success = self._add_asset_as_clip(asset, track, current_frame)
+                if success:
+                    added += 1
+                    current_frame += self._get_asset_duration_frames(asset)
+                else:
+                    logger.warning("External drop: clip construction failed for %s", asset.asset_id)
+        finally:
+            self._batch_drop_commands = None
+            self._timeline = real_timeline
+
+        if not batch_commands:
+            self.status_message_requested.emit("片段构造失败，导入未落轨")
+            return
+
+        try:
+            self._execute_command(MacroCommand.create(
+                f"Drop {len(imported)} external file(s)", batch_commands))
+        except (RuntimeError, ValueError) as exc:
+            # MacroCommand 内部已逆序回滚，工程与历史不变
+            self.status_message_requested.emit(f"落轨失败，已回滚：{exc}")
+            return
+
+        message = f"已落轨 {added} 个片段"
+        if failures:
+            first = failures[0]
+            name = str(getattr(first, "path", "")).rsplit("/", 1)[-1]
+            reason = getattr(getattr(first, "error", None), "message", "") or "未知原因"
+            message += f" · {len(failures)} 个失败（{name}：{reason}）"
+            for item in failures[:3]:
+                logger.warning("External drop failure: %s -> %s",
+                               getattr(item, "path", "?"),
+                               getattr(getattr(item, "error", None), "message", "?"))
+        self.status_message_requested.emit(message)
+        logger.info("External drop committed: %d clips, %d failures", added, len(failures))
+
+    def _handle_external_file_drop_legacy(self, event: QDropEvent) -> None:
+        """既有同步外部投放：仅字幕文件继续走这条路径（见新入口的说明）。
+
+        历史行为保留：同步探测 + 逐条 AddClip（非单次撤销）。媒体文件不再
+        走这里，改由 B08 异步探测 + 单宏提交处理。
         """
         if self._project is None:
             logger.warning("Handle external file drop: no project set")

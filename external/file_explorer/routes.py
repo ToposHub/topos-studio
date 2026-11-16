@@ -25,6 +25,7 @@ import utils
 import const
 import trash
 import webapp
+import file_tasks
 from thumb_engine import (
     engine as thumb_engine, EXT_VIDEO, EXT_IMAGE_PRO, EXT_DESIGN, EXT_RAW_PHOTO,
     EXT_IMAGE_NORMAL, EXT_IMAGE_TOPOS, EXT_AUDIO, EXT_DOCS, EXT_CODE, EXT_ARCHIVE,
@@ -317,16 +318,22 @@ def list_files():
                                 # 拍摄日期筛选/时间线切换；旧行为 NULL 前端自然降级）
                                 # [V2/GAP-07] stack_id 随列表下发（堆叠折叠）
                                 # [V3/GAP-09] dom_color 随列表下发（自动颜色筛选）
-                                c.execute(f"SELECT path, tags, comments, rating, cached_info, color, flag, duration, date_taken, stack_id, dom_color FROM file_meta WHERE path IN ({placeholders})", [_meta_key(p) for p in chunk])
+                                # [FILES-B03] width/height/codec/missing 随列表下发：
+                                # 原生 UI 的技术信息栏不再解析 cached_info 自由文本；
+                                # missing=1 表示索引后磁盘失联（可用性=offline）
+                                c.execute(f"SELECT path, tags, comments, rating, cached_info, color, flag, duration, date_taken, stack_id, dom_color, width, height, codec, missing FROM file_meta WHERE path IN ({placeholders})", [_meta_key(p) for p in chunk])
                             except sqlite3.OperationalError:
                                 legacy_schema = True
                         if legacy_schema:
                             c.execute(f"SELECT path, tags, comments, rating FROM file_meta WHERE path IN ({placeholders})", [_meta_key(p) for p in chunk])
                         for row in c.fetchall():
                             meta_map[row[0]] = ({'tags': row[1], 'comments': row[2], 'rating': row[3], 'cached_info': row[4], 'color': row[5] or 0, 'flag': row[6] or 0,
-                                                 'duration': row[7], 'date_taken_ts': row[8], 'stack_id': row[9], 'dom_color': row[10]}
+                                                 'duration': row[7], 'date_taken_ts': row[8], 'stack_id': row[9], 'dom_color': row[10],
+                                                 'width': row[11], 'height': row[12], 'codec': row[13],
+                                                 'missing': row[14] or 0}
                                                 if not legacy_schema else
-                                                {'tags': row[1], 'comments': row[2], 'rating': row[3], 'cached_info': None, 'color': 0, 'flag': 0, 'duration': None, 'date_taken_ts': None, 'stack_id': None, 'dom_color': None})
+                                                {'tags': row[1], 'comments': row[2], 'rating': row[3], 'cached_info': None, 'color': 0, 'flag': 0, 'duration': None, 'date_taken_ts': None, 'stack_id': None, 'dom_color': None,
+                                                 'width': None, 'height': None, 'codec': None, 'missing': 0})
                     # [V2/GAP-07] 堆叠封面/成员数一次取齐
                     sid_list = {m.get('stack_id') for m in meta_map.values() if m.get('stack_id')}
                     if sid_list:
@@ -341,10 +348,12 @@ def list_files():
             for f in files:
                 # [V5 复查] 统一经 _meta_key 归一化后查表：NFD 回退分支拼出的
                 # 路径与 NFC 键永不相等，此前该分支下整目录元数据显示为空
-                m = meta_map.get(_meta_key(f['path']), {'tags': '', 'comments': '', 'rating': 0, 'cached_info': None, 'color': 0, 'flag': 0, 'duration': None, 'date_taken_ts': None, 'stack_id': None, 'dom_color': None})
+                m = meta_map.get(_meta_key(f['path']), {'tags': '', 'comments': '', 'rating': 0, 'cached_info': None, 'color': 0, 'flag': 0, 'duration': None, 'date_taken_ts': None, 'stack_id': None, 'dom_color': None, 'width': None, 'height': None, 'codec': None, 'missing': 0})
                 sid = m.get('stack_id')
                 f.update({'tags': m['tags'], 'comments': m['comments'], 'rating': m['rating'], 'res': m.get('cached_info'), 'color': m.get('color', 0), 'flag': m.get('flag', 0),
                           'duration': m.get('duration'), 'date_taken_ts': m.get('date_taken_ts'),
+                          'width': m.get('width'), 'height': m.get('height'), 'codec': m.get('codec'),
+                          'missing': 1 if m.get('missing') else 0,
                           'date_taken': (datetime.fromtimestamp(m['date_taken_ts'], tz=timezone.utc).strftime('%Y-%m-%d') if m.get('date_taken_ts') else None),
                           'stack_id': sid,
                           'stack_cover': stack_covers.get(sid) if sid else None,
@@ -354,7 +363,19 @@ def list_files():
             # [BUG-P2-02] DB 锁超时等错误此前被整体吞掉——整目录 tags/rating
             # 静默消失。降级为无元数据展示，但必须留日志可查。
             logger.error(f"/api/list 元数据批量查询失败（以无元数据降级）: {e}")
-        response_data = {'files': files}
+        # [FILES-B02] 查询总量与截断显式下发：原生 UI 不必猜"空目录"还是
+        # "被护栏截断"（递归聚合有 2000 条上限）。当前无分页，total 即本次
+        # 返回条数；后续若加分页，total 表示匹配总数。
+        rid = request.args.get('rid') or ''
+        response_data = {
+            'files': files,
+            'total': len(files),
+            'truncated': bool(recursive and len(files) >= 2000),
+            'recursive': recursive,
+        }
+        if rid:
+            # 请求身份回显：晚到响应据此与当前请求比对，旧结果不得覆盖新目录
+            response_data['request_id'] = rid
         # [BUG-P2-03] 带上限淘汰的缓存写入（直写 DIR_CACHE 会无界增长）
         # [V3/GAP-11] key 含递归模式，防普通/聚合列表缓存互踩
         put_dir_cache(cache_key, response_data)
@@ -594,6 +615,59 @@ def api_health():
     })
 
 
+# [FILES-B01] 能力契约：原生 UI 只按这里返回的 available 决定启用哪些操作，
+# 未接通的能力禁用并给出 reason，而不是"点了没反应"或假装成功。
+CAPABILITY_VERSION = 1
+
+
+@app.route('/api/capabilities')
+def api_capabilities():
+    """能力清单（key / available / reason / version）。
+
+    与 /api/health 分开：health 只服务启动探测（免 token），能力清单走
+    正常鉴权，因为它会暴露插件数量、ffmpeg 缺失等运行环境信息。
+    """
+    global _FFMPEG_AVAILABLE
+    if _FFMPEG_AVAILABLE is None:
+        _FFMPEG_AVAILABLE = utils.get_tool_path('ffmpeg') is not None
+    ffmpeg_ok = bool(_FFMPEG_AVAILABLE)
+    try:
+        plugin_count = len(getattr(plugin_manager, 'plugins', {}) or {})
+    except Exception:  # pragma: no cover - 防御性：插件系统异常不得影响浏览
+        plugin_count = 0
+
+    def cap(key, available, reason=''):
+        return {'key': key, 'available': bool(available),
+                'reason': '' if available else reason,
+                'version': CAPABILITY_VERSION}
+
+    items = [
+        cap('browse.list', True),
+        cap('browse.tree', True),
+        cap('browse.drives', True),
+        cap('thumbnail', True),
+        cap('metadata.patch', True),
+        cap('metadata.batch', True),
+        cap('file.mkdir', True),
+        cap('file.rename', True),
+        cap('file.copy', True),
+        cap('file.trash', True),
+        cap('file.move', True),
+        cap('tasks', True),
+        cap('browse.search', True),
+        cap('trash.restore', True),
+        # 预览：图片走宿主解码线程；视频/音频需要 ffmpeg 与既有播放器
+        cap('preview.image', True),
+        cap('preview.video', ffmpeg_ok, 'ffmpeg 未安装，视频预览不可用'),
+        cap('preview.audio', ffmpeg_ok, 'ffmpeg 未安装，音频预览不可用'),
+        # 索引/扫描：后台线程可用，但大库耗时不作为浏览阻塞
+        cap('scan', True),
+        cap('collections', True),
+        cap('plugins', plugin_count > 0, '未发现已注册插件'),
+    ]
+    return jsonify({'version': CAPABILITY_VERSION, 'capabilities': items})
+
+
 # ============================================================================
 # [V1/GAP-01] 全库索引器 API
 # ============================================================================
@@ -607,6 +681,17 @@ def api_scan_start():
     ok = scanner.start(data.get('library'))
     if not ok:
         return jsonify({'success': False, 'message': '扫描已在进行中'}), 409
+    return jsonify({'success': True})
+
+
+@app.route('/api/scan/cancel', methods=['POST'])
+def api_scan_cancel():
+    """B05：取消当前全库扫描；自动增量周期不受影响（下轮仍会开始）。"""
+    import scanner
+    state = scanner.status()
+    if not state.get('running'):
+        return jsonify({'success': False, 'message': '当前没有正在进行的扫描'}), 409
+    scanner.cancel()
     return jsonify({'success': True})
 
 
@@ -816,6 +901,10 @@ def api_batch_meta():
     # [U5/GAP-03] 批量颜色/旗标（None=不修改）
     color = data.get('color')
     flag = data.get('flag')
+    # B06：批量备注（None=不修改；空串=清空，与单项 update_meta 语义一致）
+    comments = data.get('comments')
+    if comments is not None and not isinstance(comments, str):
+        return jsonify({'success': False, 'message': 'comments 必须是字符串'}), 400
     if color is not None:
         color = _clamp_update_value({'color': color}, 'color', COLOR_VALUES)
         if color is False:
@@ -861,7 +950,9 @@ def api_batch_meta():
                 curr_tags = row[0] or ''
 
             # 2. 准备更新
-            if rating is not None and rating > 0:
+            # B06 字段级语义：rating=0 是"取消评分"，必须落库；此前 >0 才写
+            # 会让"批量清空星级"在 UI 上显示成功但库里仍是旧值。
+            if rating is not None:
                 updates.append("rating = ?")
                 values.append(rating)
 
@@ -880,6 +971,10 @@ def api_batch_meta():
                     c.execute("""INSERT OR IGNORE INTO file_tags (file_path, tag_id)
                                  SELECT ?, id FROM tags WHERE name = ?""", (_meta_key(path), t))
 
+            if comments is not None:
+                updates.append("comments = ?")
+                values.append(comments)
+
             # [U5/GAP-03] 批量颜色/旗标
             if color is not None:
                 updates.append("color = ?")
@@ -893,9 +988,10 @@ def api_batch_meta():
                 values.append(_meta_key(path))
                 sql = f"UPDATE file_meta SET {', '.join(updates)} WHERE path = ?"
                 c.execute(sql, values)
-                sync_jobs.append((path, {'rating': rating if (rating is not None and rating > 0) else None,
+                sync_jobs.append((path, {'rating': rating,
                                          'tags': ([t.strip() for t in (final_tag_str or '').split(',') if t.strip()]
                                                   if tags else None),
+                                         'comments': comments,
                                          'color': color, 'flag': flag}))
 
         conn.commit()
@@ -1671,6 +1767,27 @@ def api_library_list():
     """获取所有已固定的库"""
     conf = load_config()
     return jsonify(conf.get("libraries", []))
+
+@app.route('/api/library/add', methods=['POST'])
+def api_library_add():
+    """F11：直接固定目录（原生面板没有 WebChannel 对话框可用）。
+
+    body: {path}；目录必须存在。固定只影响索引/常用位置，不移动文件。
+    """
+    data = request.get_json(silent=True) or {}
+    path = unicodedata.normalize('NFC', str(data.get('path') or '').strip())
+    if not path:
+        return jsonify({'success': False, 'message': '缺少 path'}), 400
+    if not os.path.isdir(path):
+        return jsonify({'success': False, 'message': '目录不存在或不可访问'}), 404
+    conf = load_config()
+    libs = conf.get('libraries', [])
+    if any(lib.get('path') == path for lib in libs):
+        return jsonify({'success': True, 'library': {'path': path}, 'duplicate': True})
+    libs.append({'path': path, 'name': os.path.basename(path.rstrip('/')) or path})
+    save_config({'libraries': libs})
+    return jsonify({'success': True, 'library': libs[-1]})
+
 
 @app.route('/api/library/unpin', methods=['POST'])
 def api_library_unpin():
@@ -2658,7 +2775,7 @@ def api_collection_files(cid):
         finally:
             if conn is not None:
                 conn.close()
-    return jsonify({'files': files})
+    return jsonify({'files': files, 'total': len(files), 'truncated': False})
 
 
 # ============================================================================
@@ -3587,6 +3704,192 @@ def _lock_guard(paths):
     return None
 
 
+# ============================================================================
+# B07 / B09：文件任务（mkdir/rename/copy/move/trash/restore/purge）+ 路径传播
+# ============================================================================
+
+
+def _move_meta_rows(old_path: str, new_path: str) -> None:
+    """B09：路径变化时同步 file_meta / file_tags（含目录后代）与缓存/缩略图。
+
+    恢复与移动都必须走这里：只改文件名而元数据留在旧键，会让搜索结果、
+    智能文件夹、集合成员和缩略图全部指向幽灵路径。
+    """
+    if not old_path or not new_path:
+        return
+    old_key = _meta_key(old_path)
+    new_key = _meta_key(new_path)
+    if old_key == new_key:
+        return
+    conn = None
+    try:
+        conn = _db()
+        pattern = _like_escape(old_key) + '/%'
+        rows = conn.execute(
+            "SELECT path FROM file_meta WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+            (old_key, pattern)).fetchall()
+        for (path,) in rows:
+            target = new_key if path == old_key else new_key + path[len(old_key):]
+            try:
+                conn.execute("UPDATE OR REPLACE file_meta SET path = ? WHERE path = ?",
+                             (target, path))
+            except sqlite3.Error as e:
+                logger.error("meta path remap failed %s -> %s: %s", path, target, e)
+        conn.execute(
+            "UPDATE OR REPLACE file_tags SET file_path = ? WHERE file_path = ?", (new_key, old_key))
+        conn.execute(
+            "UPDATE OR REPLACE file_tags SET file_path = ? || substr(file_path, ?) "
+            "WHERE file_path LIKE ? ESCAPE '\\'",
+            (new_key, len(old_key) + 1, pattern))
+        # B09：工程/组织引用一起平移，否则集合成员、堆叠封面、OCR 与标记
+        # 全部指向旧路径（恢复后"文件回来了但组织关系丢了"）
+        for table, column in (("collection_items", "file_path"),
+                              ("stacks", "cover_path"),
+                              ("ocr_text", "path"),
+                              ("markers", "path")):
+            try:
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,)).fetchone()
+                if not exists:
+                    continue
+                conn.execute(
+                    f"UPDATE OR REPLACE {table} SET {column} = ? WHERE {column} = ?",
+                    (new_key, old_key))
+                conn.execute(
+                    f"UPDATE OR REPLACE {table} SET {column} = ? || substr({column}, ?) "
+                    f"WHERE {column} LIKE ? ESCAPE '\\'",
+                    (new_key, len(old_key) + 1, pattern))
+            except sqlite3.Error as e:
+                logger.error("B09 remap %s.%s failed: %s", table, column, e)
+        conn.commit()
+    except Exception as e:
+        logger.error("B09 path propagation failed %s -> %s: %s", old_path, new_path, e)
+    finally:
+        if conn is not None:
+            conn.close()
+    try:
+        for path in (os.path.dirname(old_path), os.path.dirname(new_path)):
+            if path:
+                invalidate_cache(path)
+    except Exception:
+        pass
+    try:
+        for size in ('small', 'large', 'preview'):
+            old_thumb = thumb_engine.get_thumb_path(old_path, size_type=size)
+            if os.path.exists(old_thumb):
+                os.remove(old_thumb)
+    except Exception:
+        pass
+
+
+def _task_service():
+    return file_tasks.get_service(_move_meta_rows)
+
+
+@app.route('/api/tasks/start', methods=['POST'])
+def api_tasks_start():
+    """提交一个文件任务：立即返回 job_id，进度与逐项结果走 /api/tasks/status。"""
+    data = request.get_json(force=True) or {}
+    operation = data.get('operation')
+    targets = data.get('targets') or []
+    if not isinstance(targets, list) or not targets:
+        return jsonify({'success': False, 'message': '缺少 targets'}), 400
+    guarded = list(targets)
+    destination = (data.get('options') or {}).get('destination')
+    if destination:
+        guarded.append(destination)
+    _lg = _lock_guard(guarded)
+    if _lg:
+        return _lg
+    try:
+        task = _task_service().start(
+            operation, targets, policy=data.get('policy') or 'error',
+            options=data.get('options') or {})
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    return jsonify({'success': True, 'job': task.snapshot()})
+
+
+@app.route('/api/tasks/status')
+def api_tasks_status():
+    job_id = request.args.get('job_id') or ''
+    snapshot = _task_service().status(job_id)
+    if snapshot is None:
+        return jsonify({'success': False, 'message': '任务不存在'}), 404
+    return jsonify({'success': True, 'job': snapshot})
+
+
+@app.route('/api/tasks/cancel', methods=['POST'])
+def api_tasks_cancel():
+    data = request.get_json(force=True) or {}
+    job_id = data.get('job_id') or ''
+    cancelled = _task_service().cancel(job_id)
+    return jsonify({'success': cancelled,
+                    'message': '' if cancelled else '任务已结束或不存在'})
+
+
+@app.route('/api/tasks/list')
+def api_tasks_list():
+    return jsonify({'jobs': _task_service().list_jobs()})
+
+
+# ============================================================================
+# BX01：全库备份（数据库 + 组织关系 + 未知字段原样保留）
+# ============================================================================
+
+
+@app.route('/api/library/backup', methods=['POST'])
+def api_library_backup():
+    """把当前素材库 SQLite 做一份一致快照，并写出表行数清单。
+
+    用 sqlite3 ``backup()`` 而不是 copy 文件：运行中的 WAL 数据库直接复制
+    可能得到半写状态；备份必须能用于回滚，不能只是"看起来有文件"。
+    """
+    import db as db_module
+    data = request.get_json(silent=True) or {}
+    destination = str(data.get('destination') or '').strip()
+    if not destination:
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        destination = os.path.join(
+            os.path.expanduser('~'), '.topos', 'files_backups', f'library-{stamp}')
+    os.makedirs(destination, exist_ok=True)
+    source_path = db_module._resolve_db_file()
+    target_path = os.path.join(destination, os.path.basename(source_path) or 'metadata.db')
+    try:
+        source = sqlite3.connect(source_path, timeout=const.DB_CONNECT_TIMEOUT_S)
+        try:
+            target = sqlite3.connect(target_path)
+            try:
+                source.backup(target)
+                tables = [row[0] for row in target.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()]
+                counts = {name: target.execute(f"SELECT COUNT(*) FROM '{name}'").fetchone()[0]
+                          for name in tables}
+            finally:
+                target.close()
+        finally:
+            source.close()
+    except Exception as e:
+        logger.error("BX01 backup failed: %s", e)
+        return jsonify({'success': False, 'message': f'备份失败: {e}'}), 500
+    manifest = {
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'source': source_path,
+        'database': target_path,
+        'tables': counts,
+        'row_total': sum(counts.values()),
+        'note': '备份保留原始列与未知字段；恢复前请停写并校验 topos.db 版本。',
+    }
+    try:
+        with open(os.path.join(destination, 'manifest.json'), 'w', encoding='utf-8') as fh:
+            json.dump(manifest, fh, ensure_ascii=False, indent=2)
+    except OSError as e:
+        logger.error("BX01 manifest write failed: %s", e)
+    return jsonify({'success': True, 'backup': manifest})
+
+
 @app.route('/api/locks', methods=['POST'])
 def api_lock_set():
     """设置软锁 {path(目录), password, hint?}"""
@@ -3874,9 +4177,30 @@ def api_search():
         files = [f for f in files if (f.get('flag') or 0) != 2]
 
     total = len(files)
-    files = files[:2000]  # 上限保护：万级命中不致响应失控（在过滤后截断）
     files.sort(key=lambda x: x['name'].lower())
-    return jsonify({'files': files, 'total': total})
+    files = files[:2000]  # 上限保护：万级命中不致响应失控（在过滤后截断）
+    # B05：分页与截断必须显式——UI 不能把"前 2000 条"当成全部命中
+    rid = request.args.get('rid') or ''
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 2000), 2000))
+    except (TypeError, ValueError):
+        return jsonify({'files': [], 'total': 0, 'error': 'limit 非法',
+                        'truncated': False, 'request_id': rid}), 400
+    offset = 0
+    try:
+        offset = max(0, int(request.args.get('offset') or 0))
+    except (TypeError, ValueError):
+        return jsonify({'files': [], 'total': 0, 'error': 'offset 非法',
+                        'truncated': False, 'request_id': rid}), 400
+    page = files[offset:offset + limit]
+    return jsonify({
+        'files': page,
+        'total': total,
+        'truncated': bool(offset + len(page) < total),
+        'offset': offset,
+        'limit': limit,
+        'request_id': rid,
+    })
 
 
 # ============================================================================
