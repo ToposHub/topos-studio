@@ -1,0 +1,4 @@
+BATCH_RESPONSE {'success': True}
+DATABASE_AFTER_NEW [('/a.png', 'new,oldA'), ('/b.png', 'new,oldB')]
+CLEAR_RESPONSE {'success': True}
+DATABASE_AFTER_CLEAR [('/a.png', 'new,oldA'), ('/b.png', 'new,oldB')]

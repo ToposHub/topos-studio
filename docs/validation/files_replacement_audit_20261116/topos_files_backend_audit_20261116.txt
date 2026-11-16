@@ -1,0 +1,11 @@
+{"case": "concurrent_move_error_policy", "statuses": ["completed", "completed"], "sources_exist": [false, false], "only_output": "ORIGINAL A"}
+{"case": "self_overwrite_copy", "status": "failed", "source_exists": true, "content": "keep me", "failures": [{"source": "/tmp/topos-files-audit-zd8tabak/self-copy/source.mov", "error": "目标与源相同，拒绝覆盖自身"}]}
+{"case": "self_overwrite_move", "status": "completed", "source_exists": true, "content": "keep me", "failures": []}
+{"case": "self_overwrite_rename", "status": "failed", "source_exists": true, "content": "keep me", "failures": [{"source": "/tmp/topos-files-audit-zd8tabak/self-rename/source.mov", "error": "目标与源相同，拒绝覆盖自身"}]}
+{"case": "move_into_descendant", "status": "failed", "source_exists": true, "failures": [{"source": "/tmp/topos-files-audit-zd8tabak/descendant", "error": "Cannot move a directory '/tmp/topos-files-audit-zd8tabak/descendant' into itself '/tmp/topos-files-audit-zd8tabak/descendant/child/descendant'."}]}
+{"case": "copy_overwrite_follows_destination_symlink", "status": "completed", "target_still_symlink": true, "secret_content": "REPLACEMENT"}
+{"case": "path_migration_columns", "file_meta": [["/new.mov"]], "ocr_text": [["/old.mov"]], "markers": [["/old.mov"]]}
+{"case": "trash_restore_name_conflict", "trash_errors": [], "restore_errors": [], "restored_path": "/tmp/topos-files-audit-zd8tabak/trash-source (恢复).mov", "restored_meta": [["/tmp/topos-files-audit-zd8tabak/trash-source (恢复).mov", 5, null, null]], "collection_paths": [["/tmp/topos-files-audit-zd8tabak/trash-source.mov"]], "stack_cover": ["/tmp/topos-files-audit-zd8tabak/trash-source.mov"], "original_path_now": "different media now occupies original path"}
+{"case": "mkdir_parent_lock_bypass", "http_status": 200, "status": "completed", "created": true}
+{"case": "search_offset_2000", "http_status": 200, "total": 2001, "returned": 0, "truncated": true}
+{"case": "timeline_failed_macro_publishes_import", "assets_before": 0, "assets_after": 1, "published_projects": 1, "message": "落轨失败，已回滚：simulated command rejection"}
