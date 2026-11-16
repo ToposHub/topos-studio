@@ -343,6 +343,8 @@ class TestIOSurfaceSyncBarrier:
 
         mutex = _RecordingMutex()
         renderer = EditGpuPreviewRenderer.__new__(EditGpuPreviewRenderer)
+        renderer._previous_gpu_frames = []
+        renderer._current_present_lease = None
         renderer._drain_deferred_gpu_frame_releases = lambda block: None
         task = EditRenderTask(frame=3, generation_id=1, layers=[])
         observed = []

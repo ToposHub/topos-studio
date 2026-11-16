@@ -543,7 +543,8 @@ def test_switch_store_restore_takes_precedence_over_legacy() -> None:
     host.switch_to_page("Color")
 
     host._restore_layout_from_store.assert_called_once_with("Color")
-    host._save_current_layout_to_store.assert_called_once_with("Library")
+    host._save_current_layout_to_store.assert_called_once_with(
+        "Library", qt_state=host.page_layouts["Library"])
     assert host.restore_state_calls == []
 
 
@@ -645,6 +646,7 @@ def test_switch_schedules_edit_migration_timers(
     recorder = _SingleShotRecorder()
     monkeypatch.setattr(pc, "QTimer", recorder)
     host = _PageHost(current_page="Library")
+    host._restore_viewport_after_page_switch = MagicMock()
     migrations = {
         "_migrate_edit_properties_dock_width": MagicMock(),
         "_migrate_edit_info_dock_visibility": MagicMock(),
@@ -656,14 +658,15 @@ def test_switch_schedules_edit_migration_timers(
 
     host.switch_to_page("Edit")
 
-    scheduled = [callback for _ms, callback in recorder.calls]
-    for mock in migrations.values():
-        assert mock in scheduled
-    # The trailing viewport-restore pass is scheduled too.
-    assert host._restore_viewport_after_page_switch in scheduled
+    assert len(recorder.calls) == len(migrations) + 1
     # None of the timers fired synchronously.
     for mock in migrations.values():
         mock.assert_not_called()
+    for _ms, callback in list(recorder.calls):
+        callback()
+    for mock in migrations.values():
+        mock.assert_called_once()
+    host._restore_viewport_after_page_switch.assert_called_once()
 
 
 def test_switch_schedules_color_composite_deliver_migrations(
@@ -672,6 +675,7 @@ def test_switch_schedules_color_composite_deliver_migrations(
     recorder = _SingleShotRecorder()
     monkeypatch.setattr(pc, "QTimer", recorder)
     host = _PageHost(current_page="Library")
+    host._restore_viewport_after_page_switch = MagicMock()
     host._migrate_color_grading_dock_height = MagicMock()
     host._migrate_color_remapping_dock_layout = MagicMock()
     host._migrate_composite_scopes_dock_visibility = MagicMock()
@@ -681,11 +685,13 @@ def test_switch_schedules_color_composite_deliver_migrations(
     host.switch_to_page("Composite")
     host.switch_to_page("Deliver")
 
-    scheduled = [callback for _ms, callback in recorder.calls]
-    assert host._migrate_color_grading_dock_height in scheduled
-    assert host._migrate_color_remapping_dock_layout in scheduled
-    assert host._migrate_composite_scopes_dock_visibility in scheduled
-    assert host._migrate_deliver_layout in scheduled
+    for _ms, callback in list(recorder.calls):
+        callback()
+    host._migrate_color_grading_dock_height.assert_not_called()
+    host._migrate_color_remapping_dock_layout.assert_not_called()
+    host._migrate_composite_scopes_dock_visibility.assert_not_called()
+    host._migrate_deliver_layout.assert_called_once()
+    host._restore_viewport_after_page_switch.assert_called_once()
 
 
 def test_switch_enforces_page_dock_visibility_when_present() -> None:
@@ -696,6 +702,74 @@ def test_switch_enforces_page_dock_visibility_when_present() -> None:
     host.switch_to_page("Color")
 
     enforce.assert_called_once()
+
+
+def test_rapid_switch_discards_stale_migration_render_and_files_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = _SingleShotRecorder()
+    monkeypatch.setattr(pc, "QTimer", recorder)
+    host = _PageHost(current_page="Library")
+    host.leave_page_hook = MagicMock()
+    host.enter_page_hook = MagicMock()
+    host.dock_viewport = SimpleNamespace(isVisible=lambda: False)
+    host.canvas.viewport = lambda: SimpleNamespace(update=lambda: None)
+    render = MagicMock()
+    host.engine = SimpleNamespace(render_pipeline=render)
+    host.files_panel = SimpleNamespace(refresh_layout=MagicMock())
+    host._migrate_deliver_layout = MagicMock()
+
+    for page in ("Deliver", "Edit", "Library"):
+        host.switch_to_page(page)
+    while recorder.calls:
+        _delay, callback = recorder.calls.pop(0)
+        callback()
+
+    host._migrate_deliver_layout.assert_not_called()
+    host.files_panel.refresh_layout.assert_called_once()
+    assert render.call_count == 2  # Only the final visit's normal two passes.
+    assert host.current_page == "Library"
+
+
+def test_return_to_same_page_does_not_revive_its_old_migration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = _SingleShotRecorder()
+    monkeypatch.setattr(pc, "QTimer", recorder)
+    host = _PageHost(current_page="Library")
+    host.leave_page_hook = MagicMock()
+    host.enter_page_hook = MagicMock()
+    host._restore_viewport_after_page_switch = MagicMock()
+    host._migrate_deliver_layout = MagicMock()
+    for page in ("Deliver", "Edit", "Deliver"):
+        host.switch_to_page(page)
+    for _delay, callback in list(recorder.calls):
+        callback()
+    host._migrate_deliver_layout.assert_called_once()
+    host._restore_viewport_after_page_switch.assert_called_once()
+
+
+def test_second_restore_pass_is_discarded_after_another_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = _SingleShotRecorder()
+    monkeypatch.setattr(pc, "QTimer", recorder)
+    host = _PageHost(current_page="Library")
+    host.leave_page_hook = MagicMock()
+    host.enter_page_hook = MagicMock()
+    host.dock_viewport = SimpleNamespace(isVisible=lambda: False)
+    host.canvas.viewport = lambda: SimpleNamespace(update=lambda: None)
+    render = MagicMock()
+    host.engine = SimpleNamespace(render_pipeline=render)
+    host.switch_to_page("Edit")
+    _delay, restore = recorder.calls.pop(0)
+    restore()  # Schedules Edit's second pass before the user switches again.
+    assert render.call_count == 1
+    host.switch_to_page("Library")
+    while recorder.calls:
+        _delay, callback = recorder.calls.pop(0)
+        callback()
+    assert render.call_count == 3  # Old second pass never renders into Library.
 
 
 def test_safe_switch_to_page_reports_failure_without_raising() -> None:
@@ -1018,7 +1092,10 @@ def test_restore_viewport_normal_path_triggers_render_and_finalizes(
     host.canvas._update_lod.assert_called_once()
     scene.invalidate.assert_called_once()
     render.assert_called_once_with(render_reason="viewport_refresh")
-    assert (50, host._finalize_viewport_restore) in recorder.calls
+    assert len(recorder.calls) == 1 and recorder.calls[0][0] == 50
+    host.canvas.viewport = lambda: SimpleNamespace(update=lambda: None)
+    recorder.calls[0][1]()
+    assert render.call_count == 2
 
 
 def test_restore_viewport_swallows_exceptions() -> None:

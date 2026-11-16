@@ -22,6 +22,8 @@ from typing import Any
 import logging
 import uuid
 
+from src.shared.track_colors import next_track_color, resolve_track_color
+
 from src.features.edit.core.timeline_v2 import (
     TimelineSequence,
     EditTrack,
@@ -108,6 +110,10 @@ class InsertLinkedAssetCommand:
                     name=f"A{new_index + 1}",
                     track_type="audio",
                     index=new_index,
+                    color=next_track_color(
+                        resolve_track_color(track.track_id, track.color)
+                        for track in timeline.all_tracks
+                    ),
                     clips=(),
                     transitions=(),
                     is_enabled=True,
@@ -137,6 +143,10 @@ class InsertLinkedAssetCommand:
                         name=f"A{new_index + 1}",
                         track_type="audio",
                         index=new_index,
+                        color=next_track_color(
+                            resolve_track_color(track.track_id, track.color)
+                            for track in timeline.all_tracks
+                        ),
                         clips=(),
                         transitions=(),
                         is_enabled=True,
@@ -339,6 +349,10 @@ class InsertLinkedAssetRippleCommand:
                     name=f"A{new_index + 1}",
                     track_type="audio",
                     index=new_index,
+                    color=next_track_color(
+                        resolve_track_color(track.track_id, track.color)
+                        for track in timeline.all_tracks
+                    ),
                 ))
             if self.audio_track_id:
                 audio_track_after = timeline.get_track_by_id(
@@ -383,6 +397,10 @@ class InsertLinkedAssetRippleCommand:
                 name=f"A{new_index + 1}",
                 track_type="audio",
                 index=new_index,
+                color=next_track_color(
+                    resolve_track_color(track.track_id, track.color)
+                    for track in timeline.all_tracks
+                ),
                 clips=(),
                 transitions=(),
                 is_enabled=True,

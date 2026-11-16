@@ -47,6 +47,7 @@ from PyQt6.QtGui import QPixmap
 
 from src.features.edit.core.playback_debug import playback_trace
 from src.shared.i18n.i18n import I18N
+from src.shared.track_colors import next_track_color
 
 try:
     # E01: append 拒绝（区间重叠/无目标轨）的领域错误类型
@@ -617,11 +618,13 @@ class EditControllerMixin:
             return None
 
         v1_track = EditTrack(
+            color=next_track_color(()),
             track_id=str(uuid.uuid4()), name="V1", track_type="video", index=0,
             clips=(), transitions=(), is_enabled=True, is_locked=False,
             is_muted=False, is_solo=False,
         )
         a1_track = EditTrack(
+            color=next_track_color((v1_track.color,)),
             track_id=str(uuid.uuid4()), name="A1", track_type="audio", index=0,
             clips=(), transitions=(), is_enabled=True, is_locked=False,
             is_muted=False, is_solo=False,
@@ -1071,6 +1074,7 @@ class EditControllerMixin:
 
         # Create default V1 and A1 tracks
         v1_track = EditTrack(
+            color=next_track_color(()),
             track_id=str(uuid.uuid4()),
             name="V1",
             track_type="video",
@@ -1083,6 +1087,7 @@ class EditControllerMixin:
             is_solo=False,
         )
         a1_track = EditTrack(
+            color=next_track_color((v1_track.color,)),
             track_id=str(uuid.uuid4()),
             name="A1",
             track_type="audio",
@@ -2774,11 +2779,40 @@ class EditControllerMixin:
         except Exception as e:
             logger.debug("Failed to sync audio mixer: %s", e)
 
+    def _connect_audio_mixer_sync(self) -> None:
+        """Keep mixer initialization independent of the entry used to show it."""
+        dock = getattr(self, "dock_audio_mixer", None)
+        if dock is not None:
+            dock.visibilityChanged.connect(self._on_audio_mixer_visibility_changed)
+        edit_page = getattr(self, "edit_page", None)
+        if edit_page is not None:
+            edit_page.timeline_display_changed.connect(
+                self._on_audio_mixer_timeline_display_changed)
+        # A restored workspace can make the dock visible before these
+        # connections are installed, so reconcile its initial state too.
+        if dock is not None and dock.isVisible():
+            self._sync_audio_mixer_from_current_timeline()
+
+    def _on_audio_mixer_visibility_changed(self, visible: bool) -> None:
+        """Menu, workspace restore and toolbar opening share one initial sync."""
+        if visible:
+            self._sync_audio_mixer_from_current_timeline()
+
+    def _on_audio_mixer_timeline_display_changed(self, _timeline: Any) -> None:
+        """Initial project loads and timeline switches also refresh the mixer."""
+        # Read the canonical current timeline when the timer fires rather
+        # than capturing a sequence that may already have been switched out.
+        self._schedule_audio_mixer_sync()
+
     def _sync_audio_mixer_from_current_timeline(self) -> None:
-        """首次显示 mixer dock 时由 TimelinePanel 调用，用当前 timeline 填充。"""
+        """Fill from the current EditPage sequence without requiring an edit."""
         timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
         if timeline is not None:
             self._sync_audio_mixer_from_timeline(timeline)
+        else:
+            panel = getattr(self, "audio_mixer_panel", None)
+            if panel is not None:
+                panel.clear_all_tracks()
 
     def _get_mixer_audio_manager(self):
         """获取 EditPage 的 AudioPlaybackManager（懒加载），用于实时听感预览。"""
@@ -6984,9 +7018,7 @@ class EditControllerMixin:
 
     def _fire_audio_mixer_sync(self) -> None:
         """A6: _mixer_sync_timer 回调，用最新 timeline 同步 mixer。"""
-        timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
-        if timeline is not None:
-            self._sync_audio_mixer_from_timeline(timeline)
+        self._sync_audio_mixer_from_current_timeline()
 
     def _request_program_viewer_update(self) -> None:
         """Request program viewer to update frame display."""

@@ -2326,6 +2326,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             dock = getattr(self, 'dock_audio_mixer', None)
             if dock is not None and hasattr(self.timeline_panel, 'sync_mixer_button'):
                 dock.visibilityChanged.connect(self.timeline_panel.sync_mixer_button)
+        if self._edit_available:
+            self._connect_audio_mixer_sync()
 
         # P2: Debounced clip-strip sync — refreshes Color clip strip on edit changes
         self._setup_clip_strip_sync()

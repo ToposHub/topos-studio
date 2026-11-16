@@ -2638,7 +2638,7 @@ class FileOpsMixin:
 
             # Connect GPU renderer errors
             gpu_renderer.render_error.connect(
-                lambda frame, msg: logger.warning(f"GPU render error frame={frame}: {msg}")
+                lambda frame, msg: logger.debug("GPU render error forwarded frame=%s: %s", frame, msg)
             )
 
             # Start the GPU render thread

@@ -132,8 +132,16 @@ def _budget_constrained_scale(cap: Optional[Tuple[int, int]], scale: float,
     """
     if cap is None:
         return scale
-    budget_scale = min(int(cap[0]) / max(1, int(base_w)),
-                       int(cap[1]) / max(1, int(base_h)), 1.0)
+    if scale >= 1.0 and base_w <= cap[0] and base_h <= cap[1]:
+        return scale  # Native/full targets need no scaled-YUV alignment.
+    # Scaled YUV targets round up to even dimensions below. Reserve that
+    # alignment here: an odd 707px cap must choose 706px, not become 708px
+    # after rounding. The decoder's minimum scale/dimensions still win when
+    # the pane is genuinely too small; diagnostics must report that case.
+    aligned_w = max(0, int(cap[0]) - int(cap[0]) % 2)
+    aligned_h = max(0, int(cap[1]) - int(cap[1]) % 2)
+    budget_scale = min(aligned_w / max(1, int(base_w)),
+                       aligned_h / max(1, int(base_h)), 1.0)
     return max(0.125, min(1.0, min(scale, budget_scale)))
 
 
@@ -11791,7 +11799,9 @@ class TimelinePreviewRenderer(QObject):
             self._render_in_flight = False
             self.request_render(frame)
             return
-        logger.warning(f"GPU backend render error frame={frame}: {error_msg}")
+        # The backend owns the original error/traceback. This consumer still
+        # records every playback miss, without duplicating its warning.
+        logger.debug("GPU backend render error forwarded frame=%s: %s", frame, error_msg)
         # P1-05: 播放中 GL 渲染失败=本帧未呈现，归因上报给 engine。
         self._note_engine_playback_miss(
             f"gpu_result_drop_render_error:{error_msg}",

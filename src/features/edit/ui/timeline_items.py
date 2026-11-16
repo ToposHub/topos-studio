@@ -66,6 +66,7 @@ from PyQt6.QtGui import (
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
 from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_trim_bracket
 from src.shared.i18n.i18n import I18N
+from src.shared.track_colors import resolve_track_color
 from src.features.edit.core.audio_waveform import (
     WaveformData,
     WaveformExtractor,
@@ -2141,7 +2142,7 @@ class ClipItem(QGraphicsObject):
 
         # Fill the clip rect using the tiled brush — guarantees continuous stripes
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
         painter.setBrush(QBrush(ClipItem._disabled_pattern_tile))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(rect)
@@ -2352,7 +2353,7 @@ class ClipItem(QGraphicsObject):
         """
         inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
         painter.save()
-        painter.setClipRect(inner_rect)
+        painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         # Keep the source aspect ratio.  The scheduler cache is a single
         # frame, but it must not be stretched to the clip's arbitrary aspect.
@@ -2389,7 +2390,8 @@ class ClipItem(QGraphicsObject):
         inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
 
         painter.save()
-        painter.setClipRect(inner_rect)
+        # Preserve the outer V/A crop when this row scrolls beyond its panel.
+        painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
 
         visible_start = (
             self._source_start
@@ -2592,7 +2594,7 @@ class ClipItem(QGraphicsObject):
         inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
 
         painter.save()
-        painter.setClipRect(inner_rect)
+        painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
 
         # Semi-transparent loading background
         loading_color = QColor(60, 60, 80, 100)
@@ -2636,7 +2638,7 @@ class ClipItem(QGraphicsObject):
         inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
 
         painter.save()
-        painter.setClipRect(inner_rect)
+        painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
 
         if state == "loading":
             # Use quiet filmstrip cells instead of a large three-dot loader.
@@ -6031,6 +6033,8 @@ class ClipItem(QGraphicsObject):
 
     def update_track_index(self, track_index: int) -> None:
         """Update track vertical position."""
+        # The cached drawing includes the current V/A crop. Relayout must
+        # repaint even when the logical index survives a pane resize/scroll.
         self._track_index = track_index
         self._update_geometry()
         self.update()
@@ -7192,7 +7196,8 @@ class TrackHeaderItem(QGraphicsObject):
         is_target: bool = False,  # NEW: Target track indicator
         volume: float = 1.0,  # Volume level (0.0-2.0)
         track_role: str = "standard",
-        parent: Optional[QGraphicsItem] = None
+        parent: Optional[QGraphicsItem] = None,
+        track_color: Optional[str] = None,
     ) -> None:
         super().__init__(parent)
 
@@ -7201,6 +7206,7 @@ class TrackHeaderItem(QGraphicsObject):
         self._track_index = track_index
         self._badge_index = track_index
         self._track_type = track_type
+        self._track_color = track_color
         self._track_role = track_role
         self._track_height = track_height
         self._is_muted = is_muted
@@ -7473,10 +7479,6 @@ class TrackHeaderItem(QGraphicsObject):
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             painter.drawRect(QRectF(0, 0, 2, self._track_height))
 
-        # Target track indicator (3px orange bar on left edge)
-        if self._is_target:
-            self._draw_target_indicator(painter)
-
         # Two-row layout vs single-row layout
         if use_two_rows:
             self._paint_two_rows(painter)
@@ -7486,6 +7488,11 @@ class TrackHeaderItem(QGraphicsObject):
         # Locked overlay
         if self._is_locked:
             self._draw_locked_overlay(painter)
+
+        # Identity remains readable for every track, including target/locked tracks.
+        # Target state is still expressed by the existing badge highlight.
+        painter.fillRect(0, 0, 2, self._track_height,
+                         QColor(resolve_track_color(self._track_id, self._track_color)))
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
         """Clip pinned track headers to their own V/A area during split scrolling."""
@@ -7542,12 +7549,6 @@ class TrackHeaderItem(QGraphicsObject):
             slider_rect = self._get_volume_slider_rect()
             if slider_rect.bottom() < self._track_height - 2:
                 self._draw_volume_slider(painter)
-
-    def _draw_target_indicator(self, painter: QPainter) -> None:
-        """Draw target track indicator as a precise, low-noise edge bar."""
-        painter.setBrush(QBrush(TARGET_TRACK_INDICATOR_COLOR))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRect(QRectF(0, 0, 2, self._track_height))
 
     def _draw_track_badge(self, painter: QPainter) -> None:
         """Draw track type badge (V1/A1/S1) in DaVinci reddish-brown color."""
@@ -8180,6 +8181,12 @@ class TrackHeaderItem(QGraphicsObject):
         """
         self.target_track_changed.emit(self._track_id)
         logger.debug(f"Track {self._track_id} target requested")
+
+    def set_track_color(self, color: Optional[str]) -> None:
+        """Update the identity stripe from the immutable track snapshot."""
+        if color != self._track_color:
+            self._track_color = color
+            self.update()
 
     def set_volume(self, volume: float) -> None:
         """Set volume level (external call)."""
