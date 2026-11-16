@@ -1,0 +1,4 @@
+LATE_SEARCH /Users/review/C ['/Users/review/B/old-search.png']
+TASKS {"started": ["j1", "j2"], "finished": ["j2"], "polls": ["j1", "j2"]}
+CAP_DISABLED False
+CAP_AFTER_INFO True
