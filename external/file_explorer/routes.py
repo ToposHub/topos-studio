@@ -476,12 +476,42 @@ def api_rename():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+_TAGS_OPS = ('replace', 'add', 'remove', 'clear')
+
+
+def _apply_tags_op(current: str, incoming, op: str) -> str:
+    """[FR-11] 统一标签语义：replace/add/remove/clear，不再让端点各自为政。
+
+    返回最终逗号串（已排序去重）；UI 必须按服务返回的最终值显示，
+    不得自行推算。op 缺省 replace（与 /api/update_meta 历史行为一致；
+    /api/batch/meta 历史是 add，由该端点自己传默认）。
+    """
+    op = str(op or 'replace').lower()
+    if op not in _TAGS_OPS:
+        op = 'replace'
+    current_list = [t.strip() for t in str(current or '').split(',') if t.strip()]
+    if op == 'clear':
+        final = []
+    elif op == 'replace':
+        final = [t.strip() for t in str(incoming or '').split(',') if t.strip()]
+    elif op == 'add':
+        final = current_list + [t.strip() for t in str(incoming or '').split(',') if t.strip()]
+    else:  # remove
+        remove = {t.strip().casefold() for t in str(incoming or '').split(',') if t.strip()}
+        final = [t for t in current_list if t.casefold() not in remove]
+    return ','.join(sorted(set(final)))
+
+
 @app.route('/api/update_meta', methods=['POST'])
 def api_update_meta():
-    """更新文件元数据（备注/标签/评分/缓存信息）"""
+    """更新文件元数据（备注/标签/评分/缓存信息）
+
+    [FR-11] 支持 tags_op（replace 默认/add/remove/clear）；响应携带
+    落库后的最终 user 快照，UI 按快照回显，不再显示与 DB 不一致的状态。
+    """
     data = request.json
     path = data.get('path')
-    
+
     if not path:
         return jsonify({'success': False})
 
@@ -525,7 +555,11 @@ def api_update_meta():
                 new_rating = _rating_val
             else:
                 new_rating = current_rating
-            new_tags = data.get('tags', current_tags)
+            if 'tags' in data:
+                new_tags = _apply_tags_op(current_tags, data.get('tags'),
+                                          data.get('tags_op', 'replace'))
+            else:
+                new_tags = current_tags
             new_comments = data.get('comments', current_comments)
             new_cached = data.get('cached_info', current_cached)
             if new_color is None:
@@ -575,7 +609,10 @@ def api_update_meta():
                                      'color': new_color, 'flag': new_flag})
         except Exception:
             pass
-        return jsonify({'success': True})
+        # [FR-11] 落库后的最终 user 快照：UI 一律按此回显
+        return jsonify({'success': True, 'user': {
+            'tags': new_tags, 'comments': new_comments, 'rating': new_rating,
+            'color': new_color, 'flag': new_flag}})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
@@ -893,11 +930,17 @@ def api_batch_rename_preview():
 
 @app.route('/api/batch/meta', methods=['POST'])
 def api_batch_meta():
-    """批量元数据更新接口"""
+    """批量元数据更新接口
+
+    [FR-11] tags_op 显式语义：add（**历史默认**，旧前端依赖追加行为）/
+    replace/remove/clear。原生面板必须显式传 replace/clear 才能得到
+    "输入即最终值"的行为；响应携带逐文件最终 user 快照 results。
+    """
     data = request.json
     files = data.get('files', [])
     rating = data.get('rating')
-    tags = data.get('tags') # 逗号分隔字符串
+    tags = data.get('tags')  # 逗号分隔字符串；语义由 tags_op 决定
+    tags_op = str(data.get('tags_op') or 'add').lower()  # 历史默认 add
     # [U5/GAP-03] 批量颜色/旗标（None=不修改）
     color = data.get('color')
     flag = data.get('flag')
@@ -932,6 +975,7 @@ def api_batch_meta():
 
     conn = None
     sync_jobs = []  # [V2/GAP-04] (path, final_tags) 逐文件收集，提交后统一写回
+    batch_results = []  # [FR-11] 逐文件最终 user 快照
     try:
         conn = _db()
         c = conn.cursor()
@@ -956,13 +1000,10 @@ def api_batch_meta():
                 updates.append("rating = ?")
                 values.append(rating)
 
-            if tags:
-                # 追加标签并去重
-                new_tag_list = [t.strip() for t in tags.split(',') if t.strip()]
-                curr_tag_list = [t.strip() for t in curr_tags.split(',') if t.strip()]
-                final_tags = sorted(list(set(curr_tag_list + new_tag_list)))
-                final_tag_str = ",".join(final_tags)
-
+            if tags is not None or tags_op == 'clear':
+                # [FR-11] 显式语义：历史 add 默认，原生面板传 replace/clear
+                final_tag_str = _apply_tags_op(curr_tags, tags, tags_op)
+                final_tags = [t for t in final_tag_str.split(',') if t]
                 updates.append("tags = ?")
                 values.append(final_tag_str)
                 # [U5/GAP-01] 双写 tags/file_tags（迁移后以结构化表为准）
@@ -970,6 +1011,11 @@ def api_batch_meta():
                     c.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (t,))
                     c.execute("""INSERT OR IGNORE INTO file_tags (file_path, tag_id)
                                  SELECT ?, id FROM tags WHERE name = ?""", (_meta_key(path), t))
+                if tags_op in ('replace', 'remove', 'clear'):
+                    c.execute("""DELETE FROM file_tags WHERE file_path = ? AND tag_id NOT IN
+                                 (SELECT id FROM tags WHERE name IN ({}))""".format(
+                        ','.join('?' * len(final_tags)) or "''"),
+                        (_meta_key(path), *final_tags))
 
             if comments is not None:
                 updates.append("comments = ?")
@@ -990,9 +1036,17 @@ def api_batch_meta():
                 c.execute(sql, values)
                 sync_jobs.append((path, {'rating': rating,
                                          'tags': ([t.strip() for t in (final_tag_str or '').split(',') if t.strip()]
-                                                  if tags else None),
+                                                  if tags is not None or tags_op == 'clear' else None),
                                          'comments': comments,
                                          'color': color, 'flag': flag}))
+                # [FR-11] 逐文件最终快照：落库后真实状态（未改字段读回）
+                row2 = c.execute("SELECT tags, comments, rating, color, flag FROM file_meta WHERE path = ?",
+                                 (_meta_key(path),)).fetchone()
+                batch_results.append({
+                    'path': path,
+                    'user': {'tags': row2[0] or '', 'comments': row2[1] or '',
+                             'rating': row2[2] or 0, 'color': row2[3] or 0,
+                             'flag': row2[4] or 0}})
 
         conn.commit()
         # [V2/GAP-04] 批量元数据同样写回 XMP
@@ -1002,7 +1056,7 @@ def api_batch_meta():
                 meta_sync.enqueue(jp, {k: v for k, v in jf.items() if v is not None})
         except Exception:
             pass
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'results': batch_results})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
     finally:
@@ -4243,8 +4297,9 @@ def api_search():
 
     total = len(files)
     files.sort(key=lambda x: x['name'].lower())
-    files = files[:2000]  # 上限保护：万级命中不致响应失控（在过滤后截断）
-    # B05：分页与截断必须显式——UI 不能把"前 2000 条"当成全部命中
+    # [FR-10] 分页在**全匹配集合**上进行：此前先 [:2000] 再分页，2001 条命中
+    # 时 offset=2000 返回空页但 total=2001——末条永远取不到。响应体积由
+    # 每页 limit 上限（≤2000）控制，不再截断数据集本身。
     rid = request.args.get('rid') or ''
     try:
         limit = max(1, min(int(request.args.get('limit') or 2000), 2000))

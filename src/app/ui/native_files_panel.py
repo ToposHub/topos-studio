@@ -260,7 +260,7 @@ class NativeFilesPanel(QWidget):
     thumbnail_released = pyqtSignal(str)
     tree_requested = pyqtSignal(str)
     # paths, patch —— 只包含用户真正改过的字段（混合值不清空）
-    metadata_patch_requested = pyqtSignal(list, dict)
+    metadata_patch_requested = pyqtSignal(list, dict, str)
     file_task_requested = pyqtSignal(str, list, dict)
     library_search_requested = pyqtSignal(str, int, int)
     collections_requested = pyqtSignal()
@@ -305,6 +305,16 @@ class NativeFilesPanel(QWidget):
         self._comment_display = ""
         self._library_active = False
         self._collection_active = False
+        # [FR-08] 统一 Location：directory / library-search / collection。
+        # 虚拟位置（搜索/集合）绝不"假装"还在上一个真实目录——目录写入类
+        # 操作必须显式拒绝，而不是落到 _requested_path 指向的旧目录。
+        self._view_location: dict[str, Any] = {"kind": "directory", "path": "",
+                                               "writable": True}
+        self._last_search_query = ""
+        self._search_debounce = QTimer(self)  # [FR-09] 连续输入防抖
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(250)
+        self._search_debounce.timeout.connect(self._emit_debounced_search)
         self._collections: list[dict[str, Any]] = []
         self._pending_collection_name = ""
         self._libraries: list[dict[str, Any]] = []
@@ -1012,6 +1022,22 @@ class NativeFilesPanel(QWidget):
                 self.navigate(parent.absolutePath())
 
     def refresh(self) -> None:
+        """[FR-08/09] 按当前位置重放：目录重新列出；搜索/集合按原请求重发。
+
+        虚拟视图此前刷新会退回上一个真实目录——位置身份被偷换。
+        """
+        kind = self._view_location.get("kind")
+        if kind == "library-search":
+            query = self._view_location.get("query") or ""
+            if query:
+                self.library_search_requested.emit(query, 200, 0)
+            return
+        if kind == "collection":
+            collection_id = self._view_location.get("collection_id")
+            if collection_id is not None:
+                self.collection_requested.emit(int(collection_id),
+                                               str(self._view_location.get("name") or ""))
+            return
         path = self._requested_path or self.current_path
         if path:
             self.locations.refresh(path)
@@ -1067,6 +1093,10 @@ class NativeFilesPanel(QWidget):
         self._entry_paths = {entry.path for entry in entries}
         self._entry_rows = {entry.path: row for row, entry in enumerate(entries)}
         self._ready = True
+        # [FR-08] 目录位置：真实、可写；退出虚拟视图后恢复本地过滤语义
+        self._view_location = {"kind": "directory", "path": path, "writable": True}
+        self._library_active = False
+        self._collection_active = False
         self.model.set_entries(entries)
         self.pages.setEnabled(True)
         self.message.setText("" if entries else _tr("empty", "此文件夹为空。"))
@@ -1091,13 +1121,32 @@ class NativeFilesPanel(QWidget):
 
     def _filter_changed(self, *_: Any) -> None:
         text = self.search_edit.text()
-        self.proxy.query = text.casefold().strip()
+        # [FR-10] 本地整句 substring 过滤只用于目录视图；搜索/集合结果
+        # 的查询语义在服务端，二次过滤会丢跨字段命中
+        if self._view_location.get("kind") == "directory":
+            self.proxy.query = text.casefold().strip()
+        else:
+            self.proxy.query = ""
         self.proxy.kind = self.type_combo.currentData()
         self.proxy.flag = int(self.flag_combo.currentData())
         self.proxy.invalidateFilter()
         self._update_info()
+        # [FR-09] 连续输入防抖：每次按键立即全库查询会堆在途请求，
+        # 旧响应与新结果竞争覆盖
         if self.library_button.isChecked() and text.strip():
-            self.library_search_requested.emit(text.strip(), 200, 0)
+            self._last_search_query = text.strip()
+            self._search_debounce.start()
+
+    def _emit_debounced_search(self) -> None:
+        query = self._last_search_query.strip()
+        text = self.search_edit.text().strip()
+        if not query or not self.library_button.isChecked():
+            return
+        if text != query:
+            self._last_search_query = text  # 防抖期间输入又变了：以最新为准
+            self._search_debounce.start()
+            return
+        self.library_search_requested.emit(query, 200, 0)
 
     def _selected_entries(self) -> list[Entry]:
         return [index.data(FilesEntryModel.ENTRY_ROLE)
@@ -1190,8 +1239,17 @@ class NativeFilesPanel(QWidget):
         self._fill_metadata_controls(entries)
 
     def _enable_metadata_controls(self, enabled: bool) -> None:
+        """[FR-12] 启用条件 = 有选择 **且** 服务能力可用，二者缺一不可。
+
+        此前能力清单禁用后，选择变化/信息回填又按"有选择"重新启用，
+        提交入口也不复核——用户会看到能改的控件，保存却永远失败。
+        """
+        allowed = enabled and self._capability_available("metadata.patch")
         for widget in (self.rating_combo, self.color_combo, self.tag_edit, self.comment_edit):
-            widget.setEnabled(enabled)
+            widget.setEnabled(allowed)
+        if enabled and not allowed:
+            reason = self._capability_reason("metadata.patch")
+            self.meta_status.setText(reason or _tr("metadata_unavailable", "当前服务不支持保存标记"))
 
     def _fill_metadata_controls(self, entries: list[Entry]) -> None:
         """回填不触发写入：整体加锁，避免程序化回填再次发起元数据提交。"""
@@ -1275,10 +1333,41 @@ class NativeFilesPanel(QWidget):
         entries = self._selected_entries()
         if not entries or not patch:
             return
+        # [FR-12] 提交入口复核能力：禁用状态下的写入请求一律不发
+        if not self._capability_available("metadata.patch"):
+            self._enable_metadata_controls(True)  # 复用其中的禁用+原因提示
+            return
         paths = [entry.path for entry in entries]
         self._pending_patch = (paths, dict(patch))
         self.meta_status.setText(_tr("saving", "正在保存…"))
-        self.metadata_patch_requested.emit(paths, dict(patch))
+        # [FR-11] 标签显式 replace 语义：输入即最终值（空输入=清空），
+        # 服务返回最终快照后按快照回显
+        tags_op = "clear" if ("tags" in patch and not str(patch.get("tags") or "").strip()) \
+            else "replace"
+        self.metadata_patch_requested.emit(paths, dict(patch), tags_op)
+
+    def apply_metadata_snapshot(self, snapshots: dict[str, dict[str, Any]]) -> None:
+        """[FR-11] 服务端最终快照回显：模型与控件都按落库状态更新。
+
+        此前 UI 提交后显示自己的推算值（替换），服务实际追加——刷新后
+        标签"又变回去"。现在 UI 不推算，一律应用服务快照。
+        """
+        if not isinstance(snapshots, dict):
+            return
+        touched = False
+        for path, snapshot in snapshots.items():
+            if not isinstance(snapshot, dict):
+                continue
+            patch = {key: snapshot[key] for key in
+                     ("tags", "rating", "comments", "color", "flag") if key in snapshot}
+            if not patch:
+                continue
+            self.model.apply_patch([str(path)], patch)
+            touched = True
+        if touched:
+            selected = self._selected_entries()
+            if selected:
+                self._fill_metadata_controls(selected)
 
     def apply_metadata_result(self, paths: list[str], patch: dict[str, Any], message: str = "") -> None:
         """服务确认后才更新模型；失败不留下"已保存"的假像。"""
@@ -1485,12 +1574,9 @@ class NativeFilesPanel(QWidget):
             if key:
                 table[key] = item if isinstance(item, dict) else {"available": getattr(item, "available", True)}
         self._capabilities = table
-        metadata_available = self._capability_available("metadata.patch")
-        for widget in (self.rating_combo, self.color_combo, self.tag_edit, self.comment_edit):
-            widget.setEnabled(metadata_available)
-        if not metadata_available:
-            reason = self._capability_reason("metadata.patch")
-            self.meta_status.setText(reason or _tr("metadata_unavailable", "当前服务不支持保存标记"))
+        # [FR-12] 能力变化后立即按当前选择重算启用状态（禁用优先），
+        # 而不是等下一次选择变化才生效
+        self._enable_metadata_controls(bool(self._selected_entries()))
 
     def _capability_available(self, key: str) -> bool:
         if not self._capabilities:
@@ -1520,7 +1606,27 @@ class NativeFilesPanel(QWidget):
 
     # -- 文件任务（B07 / F10） --------------------------------------------
     def _current_directory(self) -> str:
+        """[FR-08] 目录写入类操作的真实落点：仅在目录位置返回路径。
+
+        虚拟位置（搜索/集合）返回空串并提示——此前 mkdir/粘贴会把文件
+        静默写进上一个真实目录。
+        """
+        if self._view_location.get("kind") != "directory":
+            return ""
         return self._requested_path or self.current_path or ""
+
+    def _refuse_virtual_location(self, action: str) -> bool:
+        """虚拟位置上的目录写入统一拒绝；返回 True 表示已被拒绝并提示。"""
+        if self._view_location.get("kind") == "directory":
+            return False
+        where = (_tr("library_results", "素材库搜索结果")
+                 if self._view_location.get("kind") == "library-search"
+                 else _tr("collection_title", "集合 · {name}").format(
+                     name=self._view_location.get("name") or ""))
+        self.meta_status.setText(
+            _tr("virtual_readonly", "{action}需要先进入一个真实文件夹（当前是{where}）。").format(
+                action=action, where=where))
+        return True
 
     def _task_selection(self) -> list[Entry]:
         return [entry for entry in self._selected_entries()]
@@ -1550,6 +1656,8 @@ class NativeFilesPanel(QWidget):
                                       {"policy": "error", "options": {"new_name": new_name.strip()}})
 
     def request_new_folder(self) -> None:
+        if self._refuse_virtual_location(_tr("new_folder_title", "新建文件夹")):
+            return
         directory = self._current_directory()
         if not directory:
             return
@@ -1602,34 +1710,74 @@ class NativeFilesPanel(QWidget):
             self._toggle_search(True)
         query = self.search_edit.text().strip()
         if checked and query:
+            self._last_search_query = query  # [FR-08] 刷新按当前位置重放的依据
             self.library_search_requested.emit(query, 200, 0)
         elif not checked and self._library_active:
             self._library_active = False
+            self._view_location = {"kind": "directory",
+                                   "path": self._requested_path or self.current_path,
+                                   "writable": True}
             self.refresh()
 
     def show_library_results(self, payload: Dict[str, Any]) -> None:
         raw_entries = payload.get("files") if isinstance(payload, dict) else None
         if not isinstance(raw_entries, list):
             return
-        entries: list[Entry] = []
-        for raw in raw_entries:
-            try:
-                entries.append(parse_entry(raw))
-            except Exception:
-                continue
-        self._library_active = True
-        self._ready = True
-        self.model.set_entries(entries)
-        self.proxy.invalidateFilter()
+        self._commit_virtual_view(
+            "library-search", payload,
+            title=_tr("library_results", "素材库搜索 · {n} 项"))
+        entries = self.model.entries
         total = int(payload.get("total") or len(entries))
         truncated = bool(payload.get("truncated"))
-        self.breadcrumb_button.setText(_tr("library_results", "素材库搜索 · {n} 项").format(n=total))
         self._update_info()
         self.status.setText(
             _tr("library_status", "{shown} / {total} 项{more}").format(
                 shown=len(entries), total=total, more="（结果已截断）" if truncated else ""))
         if not entries:
             self.meta_status.setText(_tr("library_empty", "没有命中素材；试试名称、标签或备注的其他关键词。"))
+
+    def _commit_virtual_view(self, kind: str, payload: Dict[str, Any], *,
+                             title: str) -> None:
+        """[FR-08] 搜索/集合统一经 Location + QueryResult 提交视图。
+
+        与目录 set_entries 同级的完整提交：重建路径索引（封面/预览身份
+        不再错位）、关闭不属于本视图的预览浮层、显式标记虚拟位置
+        （目录写入操作据此拒绝，而不是落到上一个真实目录）。
+        [FR-10] 虚拟视图只有一份查询语义：不再叠加本地整句 substring 过滤
+        （服务端已按多词 AND 命中；本地二次过滤会丢跨字段命中）。
+        """
+        raw_entries = payload.get("files") if isinstance(payload, dict) else None
+        entries: list[Entry] = []
+        for raw in raw_entries or []:
+            try:
+                entries.append(parse_entry(raw))
+            except Exception:
+                continue
+        self._clear_thumbnail_work()
+        if self._preview.is_open and (self._preview_path not in {e.path for e in entries}):
+            self.close_preview()
+        self._entry_paths = {entry.path for entry in entries}
+        self._entry_rows = {entry.path: row for row, entry in enumerate(entries)}
+        self._library_active = kind == "library-search"
+        self._collection_active = kind == "collection"
+        self._view_location = {
+            "kind": kind,
+            "query": str(payload.get("query") or self._last_search_query or ""),
+            "collection_id": getattr(self, "_pending_collection_id", None)
+                             if kind == "collection" else None,
+            "name": self._pending_collection_name if kind == "collection" else "",
+            "writable": False,  # 虚拟位置不允许隐式目录写入
+        }
+        self._ready = True
+        self.model.set_entries(entries)
+        # 退出目录的本地过滤语义：保留类型/旗标筛选，跳过 query 二次过滤
+        self.proxy.query = ""
+        self.proxy.invalidateFilter()
+        self.breadcrumb_button.setText(title.format(
+            n=int(payload.get("total") or len(entries))))
+        self.pages.setEnabled(True)
+        self.message.setVisible(not entries)
+        self.locations.reveal("")
 
     # -- 悬停胶片条（F14） -------------------------------------------------
     def hover_index(self, index: QModelIndex) -> None:
@@ -1672,6 +1820,8 @@ class NativeFilesPanel(QWidget):
     # -- 粘贴（F10） -------------------------------------------------------
     def paste_files(self) -> None:
         """Ctrl/Cmd+V：剪贴板本地文件 → 当前目录复制，默认不覆盖（rename 策略）。"""
+        if self._refuse_virtual_location(_tr("paste_title", "粘贴")):
+            return
         directory = self._current_directory()
         mime = QApplication.clipboard().mimeData()
         if not directory or mime is None or not mime.hasUrls():
@@ -1709,6 +1859,8 @@ class NativeFilesPanel(QWidget):
         self.meta_status.setText(str(message or ("已更新常用位置" if ok else "常用位置更新失败")))
 
     def pin_current_directory(self) -> None:
+        if self._refuse_virtual_location(_tr("pin_title", "固定常用位置")):
+            return
         directory = self._current_directory()
         if directory:
             self.library_pin_requested.emit(directory)
@@ -1806,6 +1958,7 @@ class NativeFilesPanel(QWidget):
 
     def _open_collection(self, collection_id: int, name: str) -> None:
         self._pending_collection_name = name
+        self._pending_collection_id = collection_id  # [FR-08] 刷新重放的身份依据
         self.meta_status.setText(_tr("collection_loading", "正在读取集合「{name}」…").format(name=name))
         self.collection_requested.emit(collection_id, name)
 
@@ -1813,22 +1966,15 @@ class NativeFilesPanel(QWidget):
         raw_entries = payload.get("files") if isinstance(payload, dict) else None
         if not isinstance(raw_entries, list):
             return
-        entries: list[Entry] = []
-        for raw in raw_entries:
-            try:
-                entries.append(parse_entry(raw))
-            except Exception:
-                continue
-        self._collection_active = True
-        self._library_active = False
-        self._ready = True
-        self.model.set_entries(entries)
-        self.proxy.invalidateFilter()
         name = self._pending_collection_name or "集合"
-        self.breadcrumb_button.setText(_tr("collection_title", "集合 · {name}").format(name=name))
+        payload = dict(payload or {})
+        payload.setdefault("total", len(raw_entries))
+        self._commit_virtual_view(
+            "collection", payload,
+            title=_tr("collection_title", f"集合 · {name} · {{n}} 项"))
         self._update_info()
         self.status.setText(_tr("collection_status", "集合 · {name} · {n} 项").format(
-            name=name, n=len(entries)))
+            name=name, n=len(self.model.entries)))
 
     def collection_failed(self, message: str) -> None:
         self.meta_status.setText(_tr("collection_failed", "读取集合失败：{message}").format(message=message))
