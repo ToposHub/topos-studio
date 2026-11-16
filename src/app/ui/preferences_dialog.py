@@ -1720,9 +1720,11 @@ class PreferencesDialog(QDialog):
         self._plugin_list.clear()
         fe_main = self._fe_plugin_bridge()
         try:
-            # 桥接模块可能只提供部分属性（测试替身/旧宿主）：缺目录时仍按
-            # manager 投影运行时清单，缺配置服务时停用态读取退化为空。
-            plugins_dir = Path(getattr(fe_main, "__file__", ".")).parent / "plugins"
+            # 桥接模块可能只提供部分属性（测试替身/旧宿主）：缺 __file__ 时
+            # 不猜目录（CWD 相对路径会扫到宿主 GLSL plugins/），按 None 走
+            # manager-only 投影。
+            module_file = getattr(fe_main, "__file__", None)
+            plugins_dir = Path(module_file).parent / "plugins" if module_file else None
             plugins = FileExplorerPluginCatalog(
                 plugins_dir, getattr(fe_main, "plugin_manager", None),
                 getattr(fe_main, "load_config", None),

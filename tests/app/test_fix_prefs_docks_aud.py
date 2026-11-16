@@ -69,7 +69,10 @@ class _FakeFeModule:
         return dict(self.conf)
 
     def save_config(self, conf: dict) -> None:
+        # 与真实 file_explorer.main 一致：保存即落盘，随后 load_config 能
+        # 读回（偏好页保存后有持久化复核，读写不一致会误报"未能保存"）。
         self.saved = dict(conf)
+        self.conf = dict(conf)
 
 
 @pytest.fixture

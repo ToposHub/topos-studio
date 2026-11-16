@@ -243,7 +243,11 @@ class FilesPluginsController(QObject):
     def _open_directory(self) -> None:
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.catalog.plugins_dir))):
+        plugins_dir = self.catalog.plugins_dir
+        if plugins_dir is None:
+            self._message(_tr("directory_failed", "无法定位插件目录。"))
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(plugins_dir))):
             self._message(_tr("directory_failed", "无法打开插件目录。"))
 
     def _open_legacy(self) -> None:
