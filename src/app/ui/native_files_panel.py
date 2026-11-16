@@ -28,6 +28,7 @@ from src.app.ui.native_files_gallery import FilesCardDelegate
 from src.app.ui.native_files_locations import HomeDirectoryTree
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.app.ui.native_files_preview import NativeFilesPreview, PreviewDecoder
+from src.shared.playback.player_host import NativePlayerHost
 from src.features.files.contracts import (
     Availability, Entry, FilesError, format_bytes, format_duration,
     normalize_path, parse_entry,
@@ -274,7 +275,7 @@ class NativeFilesPanel(QWidget):
     compare_requested = pyqtSignal(list)
     strip_requested = pyqtSignal(str, float)
     preview_requested = pyqtSignal(str)
-    # 非图片（视频/音频/模型）交给既有播放器，避免两套播放会话并存
+    # 音频/模型等尚未原生化的媒体仍交给既有查看器；图片/视频走原生浮层。
     preview_external_requested = pyqtSignal(str)
     preview_closed = pyqtSignal()
 
@@ -331,6 +332,7 @@ class NativeFilesPanel(QWidget):
             muted=C.TEXT_HINT,
         )
         self._preview_decoder = PreviewDecoder(self)
+        self._video_host: NativePlayerHost | None = None
         self._preview_decoder.image_ready.connect(self._on_preview_image)
         self._preview_decoder.decode_failed.connect(self._on_preview_decode_failed)
         self._preview.closed.connect(self._on_preview_closed)
@@ -1291,15 +1293,18 @@ class NativeFilesPanel(QWidget):
         self._fill_metadata_controls(self._selected_entries())
 
     def preview_selected(self) -> None:
-        """Space / 预览入口：图片走原生浮层，视频音频走既有播放器。"""
+        """Space / 预览入口：图片与视频走原生浮层，其余媒体暂交旧查看器。"""
         entries = self._selected_entries()
         if len(entries) == 1 and self._ready:
             entry = entries[0]
             if entry.kind == "image" and entry.availability != Availability.OFFLINE:
                 self._start_preview(entry)
                 return
+            if entry.kind == "video" and entry.availability != Availability.OFFLINE:
+                self._start_video_preview(entry)
+                return
             if entry.has_known_media:
-                # 视频/音频/模型：交给既有查看器（不在原生面板里再造播放器）
+                # 音频/模型：音频页在 M2 接入；模型仍交给既有查看器。
                 self.preview_external_requested.emit(entry.path)
                 return
             if entry.is_dir:
@@ -1309,10 +1314,101 @@ class NativeFilesPanel(QWidget):
 
     # -- U03 预览会话 --------------------------------------------------------
     def _start_preview(self, entry: Entry) -> None:
+        if self._video_host is not None:
+            self._video_host.stop()
         self._preview_path = entry.path
         self._preview.open_for(entry.path, entry.name)
         self._preview.set_steppers_enabled(len(self._previewable_paths()) > 1)
         self.preview_requested.emit(entry.path)
+
+    def open_path_native(self, path: str) -> bool:
+        """Open image/video in the native overlay; False means legacy fallback."""
+        entry = self._entry_for_path(path)
+        if entry is None:
+            for candidate in self.model.entries:
+                if candidate.path == path:
+                    entry = candidate
+                    break
+        if entry is None or entry.availability == Availability.OFFLINE:
+            return False
+        if entry.kind == "image":
+            self._start_preview(entry)
+            return True
+        if entry.kind == "video":
+            self._start_video_preview(entry)
+            return True
+        return False
+
+    def _start_video_preview(self, entry: Entry) -> None:
+        """视频预览走应用内共享播放器，不再切回旧 Files WebView。"""
+        if self._video_host is not None:
+            self._video_host.stop()
+        if self._preview.is_open:
+            self._preview.close_preview()
+        self._preview_path = entry.path
+        self._preview.open_video(entry.path, entry.name)
+        host = self._ensure_video_host()
+        host.play(entry.path)
+
+    def _ensure_video_host(self) -> NativePlayerHost:
+        if self._video_host is None:
+            host = NativePlayerHost(self._preview.video_slot, self)
+            host.closed.connect(self._on_video_player_closed)
+            host.prev_requested.connect(lambda: self._step_video_preview(-1))
+            host.next_requested.connect(lambda: self._step_video_preview(1))
+            host.failed.connect(self._on_video_player_failed)
+            host.notice.connect(lambda text: self.status.setText(str(text)))
+            self._video_host = host
+        return self._video_host
+
+    def _on_video_player_closed(self) -> None:
+        if self._preview.is_open:
+            self._preview.close_preview()
+
+    def _on_video_player_failed(self, message: str) -> None:
+        self.status.setText(str(message or "视频播放失败"))
+        if self._preview.is_open:
+            self._preview.show_message(
+                self._preview_path, str(message or "视频播放失败"),
+                open_in_legacy=False)
+
+    def _video_paths(self) -> list[str]:
+        paths: list[str] = []
+        for row in range(self.proxy.rowCount()):
+            index = self.proxy.mapToSource(self.proxy.index(row, 0))
+            if not index.isValid():
+                continue
+            entry = self.model.entries[index.row()]
+            if entry.kind == "video" and entry.availability != Availability.OFFLINE:
+                paths.append(entry.path)
+        return paths
+
+    def _step_video_preview(self, delta: int) -> None:
+        paths = self._video_paths()
+        if not paths:
+            return
+        try:
+            index = paths.index(self._preview_path)
+        except ValueError:
+            index = 0
+        target = paths[(index + delta) % len(paths)]
+        entry = self._entry_for_path(target)
+        if entry is not None:
+            self._select_path(target)
+            self._start_video_preview(entry)
+
+    def _select_path(self, path: str) -> None:
+        row = self._entry_rows.get(path)
+        if row is None:
+            return
+        index = self.proxy.mapFromSource(self.model.index(row, 0))
+        if index.isValid():
+            self.selection.select(
+                index,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                | QItemSelectionModel.SelectionFlag.Rows)
+            self.selection.setCurrentIndex(
+                index, QItemSelectionModel.SelectionFlag.NoUpdate)
 
     def show_preview_bytes(self, path: str, data: bytes) -> None:
         """transport 拿到原始字节后交给解码线程；与当前会话不匹配一律丢弃。"""
@@ -1341,6 +1437,8 @@ class NativeFilesPanel(QWidget):
         self.preview_closed.emit()
 
     def close_preview(self) -> None:
+        if self._video_host is not None:
+            self._video_host.stop()
         if self._preview.is_open:
             self._preview.close_preview()
 
@@ -1792,4 +1890,9 @@ class NativeFilesPanel(QWidget):
 
     def shutdown(self) -> None:
         self._ready = False
+        if self._video_host is not None:
+            self._video_host.shutdown()
+            self._video_host = None
+        self.close_preview()
+        self._preview_decoder.shutdown()
         self._clear_thumbnail_work()

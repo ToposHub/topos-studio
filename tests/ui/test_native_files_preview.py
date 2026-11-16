@@ -1,11 +1,11 @@
 """B04 / U03：图片预览容器与解码契约（真实解码，无磁盘 IO）。"""
 from __future__ import annotations
 
-import pytest
-from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, Qt
+from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeyEvent
 from PyQt6.QtWidgets import QWidget
 
+from src.app.ui import native_files_panel
 from src.app.ui.native_files_panel import NativeFilesPanel
 from src.app.ui.native_files_preview import NativeFilesPreview, decode_preview
 
@@ -67,6 +67,23 @@ def test_preview_overlay_fit_toggle_and_escape(qtbot):
     assert not preview.is_open
 
 
+def test_video_mode_reuses_overlay_and_resets_to_image(qtbot):
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    parent.resize(900, 600)
+    preview = NativeFilesPreview(parent)
+    preview.open_video("/m/a.mov", "a.mov")
+    assert preview.is_open
+    assert preview.is_video
+    assert preview._header_widget.isHidden()
+    assert not preview.video_slot.isHidden()
+    preview.open_for("/m/a.png", "a.png")
+    assert not preview.is_video
+    assert not preview._header_widget.isHidden()
+    with qtbot.waitSignal(preview.closed):
+        preview.close_preview()
+
+
 def test_panel_space_on_image_requests_preview_and_ignores_stale_bytes(qtbot):
     panel = NativeFilesPanel()
     qtbot.addWidget(panel)
@@ -86,17 +103,43 @@ def test_panel_space_on_image_requests_preview_and_ignores_stale_bytes(qtbot):
     assert panel._preview._image.width() == 40
 
 
-def test_panel_routes_video_to_existing_player(qtbot):
+def test_panel_routes_video_to_native_preview(qtbot, monkeypatch):
+    played = []
+
+    class FakeHost(QObject):
+        closed = pyqtSignal()
+        prev_requested = pyqtSignal()
+        next_requested = pyqtSignal()
+        failed = pyqtSignal(str)
+        notice = pyqtSignal(str)
+
+        def __init__(self, container, parent=None):
+            super().__init__(parent)
+            self.container = container
+
+        def play(self, path):
+            played.append(path)
+
+        def stop(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(native_files_panel, "NativePlayerHost", FakeHost)
     panel = NativeFilesPanel()
     qtbot.addWidget(panel)
     panel.set_entries("/media", [
         {"name": "C.mov", "path": "/media/C.mov", "type": "video", "size_bytes": 20},
     ])
     _select_path(panel, "/media/C.mov")
-    with qtbot.waitSignal(panel.preview_external_requested) as blocker:
-        panel.preview_selected()
-    assert blocker.args == ["/media/C.mov"]
-    assert not panel._preview.is_open
+    external = []
+    panel.preview_external_requested.connect(external.append)
+    panel.preview_selected()
+    assert played == ["/media/C.mov"]
+    assert external == []
+    assert panel._preview.is_open
+    assert panel._preview.is_video
 
 
 def test_preview_steps_only_between_images(qtbot):

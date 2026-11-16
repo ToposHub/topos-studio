@@ -325,16 +325,16 @@ def main():
           and "move_to_trash(final_name)" in conv)
     check("转码失败路径清理半成品", conv.count("Utils._cleanup_tmp(tmp)") >= 4)
     check("CardLoader 纳入关停协议", "tab._loader" in conv)
-    base_p = open(src_of("plugins/video_pro/base_player.py"), encoding='utf-8').read()
+    base_p = open(src_of("../../src/shared/playback/base_player.py"), encoding='utf-8').read()
     check("display_size 只读缓存", "_size_cache" in base_p
           and "refresh_size_cache" in base_p)
     check("toast 真实标题还原", "_real_title" in base_p)
-    libav = open(src_of("plugins/video_pro/libav_player.py"), encoding='utf-8').read()
+    libav = open(src_of("../../src/shared/playback/libav_player.py"), encoding='utf-8').read()
     check("音量线程内应用（GUI 侧只记账）", "applied_vol" in libav
           and "self._audio.set_volume(self.slider_vol.value() / 100.0)" in libav)
     check("截断文件停止复用 EOF 收尾", "_on_decode_stop" in libav
           and libav.index("_on_decode_stop") < libav.index("self._eof_sig.emit()", libav.index("_on_decode_stop")))
-    qt_p = open(src_of("plugins/video_pro/player_qt.py"), encoding='utf-8').read()
+    qt_p = open(src_of("../../src/shared/playback/player_qt.py"), encoding='utf-8').read()
     check("player_qt toast 代次令牌", "_toast_gen" in qt_p)
     timer_g = open(src_of("plugins/shutdown_timer/timer_gui.py"), encoding='utf-8').read()
     check("退出前取消已排定关机", "_cancel_on_app_quit" in timer_g)

@@ -1,15 +1,35 @@
 """Check native/legacy mode coordination without starting Chromium or Flask."""
 from types import SimpleNamespace
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
 from src.app.ui import files_panel
 from src.app.ui.native_files_transport import NativeFilesTransport
 
 
-def test_native_navigation_is_lazy_and_preview_reuses_legacy(qtbot, monkeypatch):
+def test_native_navigation_is_lazy_and_activation_stays_native(qtbot, monkeypatch):
     scripts = []
+
+    class FakeHost(QObject):
+        closed = pyqtSignal()
+        prev_requested = pyqtSignal()
+        next_requested = pyqtSignal()
+        failed = pyqtSignal(str)
+        notice = pyqtSignal(str)
+
+        def __init__(self, container, parent=None):
+            super().__init__(parent)
+            self.container = container
+
+        def play(self, path):
+            self.path = path
+
+        def stop(self):
+            pass
+
+        def shutdown(self):
+            pass
 
     class Browser(QWidget):
         loadFinished = pyqtSignal(bool)
@@ -30,6 +50,8 @@ def test_native_navigation_is_lazy_and_preview_reuses_legacy(qtbot, monkeypatch)
         get_server_url=lambda: "http://127.0.0.1:1",
     )
     monkeypatch.setattr(files_panel, "QWebEngineView", Browser)
+    import src.app.ui.native_files_panel as native_panel_module
+    monkeypatch.setattr(native_panel_module, "NativePlayerHost", FakeHost)
     monkeypatch.setattr(files_panel.LibraryAdapter, "instance", lambda: adapter)
     monkeypatch.setattr(files_panel, "fe_bridge", None)
     monkeypatch.setattr(files_panel.FilesPanel, "_wait_server_healthy", lambda self: None)
@@ -54,11 +76,11 @@ def test_native_navigation_is_lazy_and_preview_reuses_legacy(qtbot, monkeypatch)
     assert len(scripts) == baseline
     assert panel.content_stack.currentWidget() is panel._native_panel
     panel._native_panel.file_activated.emit(entry["path"])
-    assert panel.mode_combo.currentIndex() == 0
-    # 借道旧宿主预览不得篡改默认入口偏好
+    assert panel.mode_combo.currentIndex() == 1
+    # 原生模式激活视频必须留在原生面板，不再借道旧 WebView。
     assert panel._files_prefs.native_default is True
-    assert len(scripts) == baseline + 1
-    assert "api.openItem(index)" in scripts[-1]
-    assert "a+b%20" in scripts[-1]
-    assert panel._pending_path is None
+    assert len(scripts) == baseline
+    assert panel._native_panel._preview.is_video
+    assert panel._native_panel._preview_path == entry["path"]
+    assert panel._pending_path == path
     panel.shutdown()

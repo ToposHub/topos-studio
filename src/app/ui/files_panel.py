@@ -570,7 +570,11 @@ class FilesPanel(QWidget):
             self.directory_changed.emit(path)
 
     def _open_native_file(self, path: str) -> None:
-        """Keep all existing preview and plugin dispatch during migration."""
+        """Native mode keeps image/video in-process; other media stays legacy."""
+        native_panel = getattr(self, "_native_panel", None)
+        if self._native_active and native_panel is not None:
+            if native_panel.open_path_native(path):
+                return
         self._pending_native_open = (self._native_panel.current_path, path)
         self._mode_switch_programmatic = True
         try:
