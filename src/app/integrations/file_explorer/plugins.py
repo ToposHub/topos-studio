@@ -37,12 +37,14 @@ class FileExplorerPluginCatalog:
 
     def __init__(
         self,
-        plugins_dir: Path,
+        plugins_dir: Path | None,
         manager: Any = None,
         load_config: Callable[[], Mapping[str, Any]] | None = None,
         save_config: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self.plugins_dir = Path(plugins_dir).resolve()
+        # plugins_dir=None 表示只按 manager 投影运行时清单（桥接模块没有
+        # 可定位的插件目录时使用）；绝不按 CWD 猜目录。
+        self.plugins_dir = Path(plugins_dir).resolve() if plugins_dir is not None else None
         self._manager = manager
         self._load_config = load_config
         self._save_config = save_config
@@ -139,10 +141,12 @@ class FileExplorerPluginCatalog:
             if folder.is_dir() and (folder / "__init__.py").is_file()
             and folder.resolve().is_relative_to(self.plugins_dir)
             and (folder / "__init__.py").resolve().is_relative_to(self.plugins_dir)
-        } if self.plugins_dir.is_dir() else {}
+        } if self.plugins_dir is not None and self.plugins_dir.is_dir() else {}
         rows: list[FilesPluginInfo] = []
         for plugin_id in sorted(folders.keys() | active.keys() | failed.keys()):
-            folder = folders.get(plugin_id, self.plugins_dir / plugin_id)
+            folder = folders.get(plugin_id) or (
+                self.plugins_dir / plugin_id if self.plugins_dir is not None
+                else Path(plugin_id))
             constants, local, diagnostics = self._metadata(folder) if plugin_id in folders else ({}, {}, ["运行时插件目录已不存在"])
             manifest, manifest_notes = self._declarative(folder, plugin_id) if plugin_id in folders else (None, [])
             diagnostics.extend(manifest_notes)
