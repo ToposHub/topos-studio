@@ -5,7 +5,8 @@ import unicodedata
 import logging
 
 logger = logging.getLogger(__name__)
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFileDialog, QMenu, QDockWidget
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QFileDialog, QMenu, QDockWidget,
+                            QHBoxLayout, QLabel, QStackedWidget)
 from src.shared.i18n.i18n import I18N
 
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -13,6 +14,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import QUrl, pyqtSlot, pyqtSignal, QObject, Qt, QTimer
 from src.app.ui.library_adapter import LibraryAdapter
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # 导入 file_explorer 的全局桥接对象和配置函数 (optional: may not be installed)
 try:
@@ -80,13 +82,34 @@ class FilesPanel(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        self._files_root_path: str | None = None
+        self._native_panel = None
+        self._native_transport = None
+        self._native_active = False
+        self._pending_native_open: tuple[str, str] | None = None
+        mode_bar = QHBoxLayout()
+        mode_bar.setContentsMargins(8, 4, 8, 4)
+        mode_bar.addWidget(QLabel(I18N.tr("files.mode", "浏览方式"), self))
+        self.mode_combo = ChevronComboBox(self)
+        self.mode_combo.addItems([
+            I18N.tr("files.mode.full", "完整素材管理"),
+            I18N.tr("files.mode.native", "原生浏览（预览）"),
+        ])
+        self.mode_combo.setAccessibleName(I18N.tr("files.mode", "浏览方式"))
+        mode_bar.addWidget(self.mode_combo)
+        mode_bar.addStretch()
+        self.layout.addLayout(mode_bar)
+        self.content_stack = QStackedWidget(self)
+        self.layout.addWidget(self.content_stack, 1)
 
         # Right-click context menu for floating toggle
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
         self.browser = QWebEngineView(self)
-        self.layout.addWidget(self.browser)
+        self.content_stack.addWidget(self.browser)
+        self.mode_combo.currentIndexChanged.connect(self._set_browser_mode)
 
         # 设置深色背景，防止页面切换时白屏闪烁
         self.browser.setStyleSheet("background: #121212;")
@@ -101,7 +124,7 @@ class FilesPanel(QWidget):
         self.browser.page().setWebChannel(self.channel)
 
         # Bridge internal SyncBridge signals to public FilesPanel signals
-        self.bridge.directoryChanged.connect(self.directory_changed)
+        self.bridge.directoryChanged.connect(self._on_legacy_directory_changed)
         self.bridge.imageOpened.connect(self.image_opened)
         self.bridge.videoOpened.connect(self.video_opened)
         self.bridge.ratingChanged.connect(self.rating_changed)
@@ -210,9 +233,12 @@ class FilesPanel(QWidget):
             self._page_loaded = True
             self._load_retries = 0
             # 如果有等待设置的路径，现在设置它
-            if self._pending_path:
+            if (self._pending_path and not self.__dict__.get("_native_active", False)
+                    and self.__dict__.get("_pending_native_open") is None):
                 self._set_path_js(self._pending_path)
                 self._pending_path = None
+            if self.__dict__.get("_pending_native_open") is not None:
+                self._open_pending_native_file()
         else:
             # [CRASH-6] 重试有上限 + 指数退避；超限保留错误页不再覆盖
             self._load_retries += 1
@@ -279,9 +305,8 @@ class FilesPanel(QWidget):
         """强制刷新布局，确保 QWebEngineView 正确填充整个面板"""
         # 确保 browser 的 geometry 与 panel 一致
         if self.browser:
-            self.browser.setGeometry(self.rect())
             self.browser.updateGeometry()
-            self.browser.repaint()
+        self.layout.activate()
         self.updateGeometry()
         self.repaint()
 
@@ -296,6 +321,12 @@ class FilesPanel(QWidget):
         FilesPanel 装在 QDockWidget 里，dock 关闭/主窗口退出不会触发本控件
         的 closeEvent——真正的清理入口是 MainWindow.closeEvent。
         """
+        native_transport = getattr(self, "_native_transport", None)
+        if native_transport is not None:
+            native_transport.shutdown()
+        native_panel = getattr(self, "_native_panel", None)
+        if native_panel is not None:
+            native_panel.shutdown()
         try:
             self.adapter.stop_server()
         except Exception:
@@ -335,12 +366,100 @@ class FilesPanel(QWidget):
     def set_root_path(self, path):
         """通过 JavaScript 调用前端 loadPath() 函数同步目录"""
         if path:
+            self._files_root_path = str(path)
+            if (self._native_panel is not None
+                    and self.mode_combo.currentIndex() == 1
+                    and self._native_panel._requested_path != str(path)):
+                self._native_panel.navigate(str(path))
+            if self._native_active:
+                self._pending_path = path
+                return
             if self._page_loaded:
                 # 页面已加载，直接调用
                 self._set_path_js(path)
             else:
                 # 页面未加载，保存路径等待加载完成
                 self._pending_path = path
+
+    def _on_legacy_directory_changed(self, path: str) -> None:
+        if self._native_active:
+            return
+        self._files_root_path = path
+        self.directory_changed.emit(path)
+
+    def _set_browser_mode(self, mode: int) -> None:
+        self._native_active = mode == 1
+        if mode == 0:
+            self.content_stack.setCurrentWidget(self.browser)
+            if self._native_transport is not None:
+                self._native_transport.cancel()
+            if self._page_loaded and self._pending_path and self._pending_native_open is None:
+                self._set_path_js(self._pending_path)
+                self._pending_path = None
+            return
+        if self._native_panel is None:
+            from src.app.ui.native_files_panel import NativeFilesPanel
+            from src.app.ui.native_files_transport import NativeFilesTransport
+
+            self._native_panel = NativeFilesPanel(self)
+            self._native_transport = NativeFilesTransport(
+                self.adapter.get_server_url, _FE_APP_TOKEN, self)
+            self._native_panel.directory_requested.connect(self._native_transport.load_directory)
+            self._native_panel.thumbnail_requested.connect(self._native_transport.request_thumbnail)
+            self._native_panel.thumbnail_released.connect(self._native_transport.release_thumbnail)
+            self._native_transport.thumbnail_loaded.connect(self._native_panel.set_thumbnail)
+            self._native_transport.thumbnail_failed.connect(self._native_panel.thumbnail_failed)
+            self._native_transport.thumbnail_pending.connect(self._native_panel.thumbnail_pending)
+            self._native_panel.file_activated.connect(self._open_native_file)
+            self._native_panel.legacy_requested.connect(lambda: self.mode_combo.setCurrentIndex(0))
+            self._native_transport.loading.connect(self._native_panel.set_loading)
+            self._native_transport.failed.connect(self._native_panel.show_error)
+            self._native_transport.loaded.connect(self._on_native_directory_loaded)
+            self.content_stack.addWidget(self._native_panel)
+        self._pending_native_open = None
+        self.content_stack.setCurrentWidget(self._native_panel)
+        path = self._files_root_path
+        if not path or "://" in path:
+            path = os.path.expanduser("~")
+        self._native_panel.navigate(path)
+
+    def _on_native_directory_loaded(self, path: str, entries: list) -> None:
+        self._native_panel.set_entries(path, entries)
+        changed = self._files_root_path != path
+        self._files_root_path = path
+        # Hydrate the compatibility host only when it becomes visible. Native
+        # navigation must not also render a hidden grid and request its thumbs.
+        self._pending_path = path
+        if changed:
+            self.directory_changed.emit(path)
+
+    def _open_native_file(self, path: str) -> None:
+        """Keep all existing preview and plugin dispatch during migration."""
+        self._pending_native_open = (self._native_panel.current_path, path)
+        self.mode_combo.setCurrentIndex(0)
+        if self._page_loaded:
+            self._open_pending_native_file()
+
+    def _open_pending_native_file(self) -> None:
+        pending, self._pending_native_open = self._pending_native_open, None
+        if pending is None:
+            return
+        directory, path = pending
+        self._pending_path = None
+        self._run_js(
+            "(() => { const api = window.__FE; "
+            "if (!api || !api.STATE || typeof api.loadPath !== 'function') return null; "
+            f"const directory = {json.dumps(directory)}, path = {json.dumps(path)}; "
+            "api.STATE.pendingSelection = path; "
+            "const pending = api.loadPath(directory, false, false, true); "
+            "const sequence = window._loadSeq; pending.then(() => { "
+            "if (window._loadSeq !== sequence || api.STATE.currentPath !== directory) return; "
+            "const index = api.STATE.visibleFiles.findIndex(file => file.path === path); "
+            "if (index >= 0) api.openItem(index); "
+            "else api.showToast('文件不可见，请检查筛选条件或刷新目录', 'info'); "
+            "}); return true; })()",
+            purpose="native_file_preview",
+        )
 
     def refresh_file_rating(self, path, rating):
         """刷新指定文件的星级显示（从 Library Panel 同步）"""
