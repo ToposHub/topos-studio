@@ -16,10 +16,11 @@ def service():
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            query = parse_qs(urlsplit(self.path).query)
+            parsed = urlsplit(self.path)
+            query = parse_qs(parsed.query)
             path = query["path"][0]
             calls.append((path, self.headers.get("X-Auth-Token")))
-            if path == "/slow":
+            if path == "/slow" or path.startswith("/slow-tree/"):
                 release.wait(3)
             status = 423 if path == "/locked" else 200
             payload = {"files": [{"name": "file", "path": path + "/file", "type": "video"}]}
@@ -29,6 +30,14 @@ def service():
                 payload = {"files": [{"name": "file"}]}
             if path == "/missing":
                 payload = {"files": [], "error": "Path not found"}
+            if parsed.path == "/api/tree":
+                payload = [{"name": "folder", "path": path + "/folder"}]
+                if path == "/invalid":
+                    payload = [{"name": "missing path"}]
+                elif path == "/invalid-root":
+                    payload = {"error": "invalid tree"}
+                elif path == "/empty-tree":
+                    payload = []
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -98,6 +107,92 @@ def test_non_local_service_is_rejected_without_sending_credentials(qtbot):
     with qtbot.waitSignal(transport.failed, timeout=100):
         transport.load_directory("/media")
     assert transport._reply is None
+
+
+def test_tree_path_auth_duplicate_and_reload(qtbot, service):
+    base, calls, _ = service
+    transport = NativeFilesTransport(lambda: base, "tree-secret")
+    path = "/tmp/字面+100%20 #树"
+    with qtbot.waitSignal(transport.tree_loaded, timeout=3000) as received:
+        transport.load_tree(path)
+        transport.load_tree(path)
+    assert received.args == [path, [{"name": "folder", "path": path + "/folder"}]]
+    assert calls == [(path, "tree-secret")]
+    with qtbot.waitSignal(transport.tree_loaded, timeout=3000):
+        transport.load_tree(path)
+    assert len(calls) == 2
+    transport.shutdown()
+
+
+@pytest.mark.parametrize("path", ["/invalid", "/invalid-root", "/locked"])
+def test_tree_rejects_invalid_entries_or_http_failure(qtbot, service, path):
+    base, _, _ = service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    loaded = []
+    transport.tree_loaded.connect(lambda *args: loaded.append(args))
+    with qtbot.waitSignal(transport.tree_failed, timeout=3000) as received:
+        transport.load_tree(path)
+    assert received.args[0] == path
+    assert received.args[1]
+    assert not loaded
+    assert not transport._tree_pending_paths
+    transport.shutdown()
+
+
+def test_empty_tree_is_success(qtbot, service):
+    base, _, _ = service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    with qtbot.waitSignal(transport.tree_loaded, timeout=3000) as received:
+        transport.load_tree("/empty-tree")
+    assert received.args == ["/empty-tree", []]
+    transport.shutdown()
+
+
+def test_content_navigation_does_not_cancel_expanded_tree(qtbot, service):
+    base, calls, release = service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    transport.load_tree("/slow")
+    qtbot.waitUntil(lambda: bool(calls), timeout=3000)
+    with qtbot.waitSignal(transport.loaded, timeout=3000):
+        transport.load_directory("/new")
+    transport.cancel()
+    with qtbot.waitSignal(transport.tree_loaded, timeout=3000) as received:
+        release.set()
+    assert received.args[0] == "/slow"
+    transport.shutdown()
+
+
+def test_tree_queue_bounds_and_shutdown_suppress_late_results(qtbot, service):
+    base, calls, release = service
+    transport = NativeFilesTransport(lambda: base, "secret")
+    loaded, failed = [], []
+    transport.tree_loaded.connect(lambda *args: loaded.append(args))
+    transport.tree_failed.connect(lambda *args: failed.append(args))
+    for index in range(200):
+        transport.load_tree(f"/slow-tree/{index}")
+    assert len(transport._tree_replies) == 4
+    assert len(transport._tree_queue) == 128
+    assert len(failed) == 68
+    qtbot.waitUntil(lambda: len(calls) == 4, timeout=3000)
+    transport.shutdown()
+    assert not transport._tree_replies
+    assert not transport._tree_queue
+    assert not transport._tree_pending_paths
+    release.set()
+    qtbot.wait(100)
+    assert not loaded
+    assert len(failed) == 68
+    transport.load_tree("/after-close")
+    assert len(calls) == 4
+
+
+def test_tree_nonlocal_runtime_is_rejected(qtbot):
+    transport = NativeFilesTransport(lambda: "http://example.com", "secret")
+    with qtbot.waitSignal(transport.tree_failed, timeout=100):
+        transport.load_tree("/media")
+    assert not transport._tree_replies
+    assert not transport._tree_pending_paths
+    transport.shutdown()
 
 
 @pytest.fixture

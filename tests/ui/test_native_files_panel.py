@@ -1,8 +1,11 @@
 """Native Files interaction contracts without disk scanning or WebEngine."""
 from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, Qt
 from PyQt6.QtGui import QColor, QImage
+from PyQt6.QtWidgets import QFrame
 
 from src.app.ui.native_files_panel import NativeFilesPanel
+from src.shared.ui.panel_splitter import PanelSplitter
+from src.shared.ui.style_sheet import C
 
 
 def _entries():
@@ -240,3 +243,112 @@ def test_large_visible_gallery_cache_converges_without_reload_loop(qtbot, monkey
                 panel.set_thumbnail(entry["path"], _png_bytes())
     assert len(requests) == 129
     assert len(panel._images) == 129
+
+
+def test_search_expands_in_path_row_and_escape_restores_files(qtbot):
+    panel = _panel(qtbot)
+    panel.resize(1120, 650)
+    panel.show()
+    assert panel.search_edit.isHidden()
+    panel.search_button.click()
+    assert not panel.search_edit.isHidden()
+    assert abs(panel.search_button.geometry().center().y() - panel.path_stack.geometry().center().y()) <= 2
+    assert panel.search_edit.width() <= 200
+    qtbot.keyClicks(panel.search_edit, "INTERVIEW")
+    assert panel.proxy.rowCount() == 1
+    qtbot.keyClick(panel.search_edit, Qt.Key.Key_Escape)
+    assert panel.search_edit.isHidden()
+    assert panel.search_edit.text() == ""
+    assert panel.proxy.rowCount() == 3
+
+
+def test_compact_search_fits_and_restores_navigation(qtbot):
+    panel = _panel(qtbot)
+    panel.resize(480, 520)
+    panel.show()
+    panel.search_button.click()
+    qtbot.waitUntil(lambda: not panel.path_stack.isVisible())
+    assert panel.search_edit.isVisible()
+    assert panel.more_button.geometry().right() < panel.width()
+    qtbot.keyClick(panel.search_edit, Qt.Key.Key_Escape)
+    assert panel.path_stack.isVisible()
+    assert panel.sidebar_button.isVisible()
+
+
+def test_functional_sections_use_shared_black_rules(qtbot):
+    panel = _panel(qtbot)
+    panel.resize(1120, 650)
+    panel.show()
+    assert isinstance(panel.splitter, PanelSplitter)
+    rule = panel.findChild(QFrame, "filesRule")
+    assert rule.height() == 1
+    assert rule.grab().toImage().pixelColor(0, 0).name() == QColor(C.PANEL_DIVIDER).name()
+
+
+def test_home_tree_hides_system_folders_without_hiding_named_media_folders(qtbot):
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    entries = [{"name": name, "path": "/Users/creator/" + name, "type": "dir"}
+               for name in ("Documents", "Movies", "Library", "Applications", ".hidden", "Editor.app")]
+    panel.set_entries(panel.home_path, entries)
+    assert [entry["name"] for entry in panel.model.entries] == ["Documents", "Movies"]
+    panel.locations.set_children(panel.home_path, entries)
+    assert panel.locations.home_item.text() == "Home"
+    assert panel.locations.home_item.rowCount() == 2
+    assert panel.is_browsable_path("/Volumes/Media/Library")
+    assert panel.is_browsable_path("/Volumes/Media/System")
+    requests = []
+    panel.directory_requested.connect(requests.append)
+    for blocked in ("/", "/Users", "/Applications", "/System/Library", "/Users/creator/Library", "/Users/creator/Applications", "/Volumes/Macintosh HD"):
+        panel.navigate(blocked)
+    panel.go_up()
+    assert requests == []
+    assert not panel.up_button.isEnabled()
+
+
+def test_home_tree_expands_lazily_and_reveals_without_navigation_loop(qtbot):
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    trees, directories = [], []
+    panel.tree_requested.connect(trees.append)
+    panel.directory_requested.connect(directories.append)
+    panel.start_home_tree()
+    panel.start_home_tree()
+    assert trees == [panel.home_path]
+    panel.locations.set_children(panel.home_path, [{"name": "Movies", "path": panel.home_path + "/Movies"}])
+    panel.locations.reveal(panel.home_path + "/Movies/Footage")
+    assert trees[-1] == panel.home_path + "/Movies"
+    panel.locations.set_children(panel.home_path + "/Movies", [{"name": "Footage", "path": panel.home_path + "/Movies/Footage"}])
+    assert panel.locations.currentIndex().data(panel.locations.PATH_ROLE) == panel.home_path + "/Movies/Footage"
+    assert directories == []
+
+
+def test_home_tree_error_retries_and_reload_discards_old_nodes(qtbot):
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    requests = []
+    panel.tree_requested.connect(requests.append)
+    panel.start_home_tree()
+    panel.locations.set_error(panel.home_path, "offline")
+    panel.start_home_tree()
+    assert requests == [panel.home_path, panel.home_path]
+    panel.locations.set_children(panel.home_path, [{"name": "Old", "path": panel.home_path + "/Old"}])
+    panel.locations.set_children(panel.home_path, [{"name": "New", "path": panel.home_path + "/New"}])
+    assert panel.home_path + "/Old" not in panel.locations._nodes
+    assert panel.locations.home_item.child(0).text() == "New"
+
+
+def test_refresh_reloads_current_home_tree_node_and_file_list(qtbot):
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    panel.set_entries(panel.home_path, [])
+    panel.locations.set_children(panel.home_path, [{"name": "Old", "path": panel.home_path + "/Old"}])
+    trees, directories = [], []
+    panel.tree_requested.connect(trees.append)
+    panel.directory_requested.connect(directories.append)
+    panel.refresh()
+    assert trees == [panel.home_path]
+    assert directories == [panel.home_path]
+    panel.locations.set_children(panel.home_path, [{"name": "New", "path": panel.home_path + "/New"}])
+    assert panel.locations.home_item.child(0).text() == "New"
+    assert panel.home_path + "/Old" not in panel.locations._nodes

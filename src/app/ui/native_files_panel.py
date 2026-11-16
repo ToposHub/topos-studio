@@ -2,19 +2,20 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from collections import OrderedDict
 from typing import Any
 
 from PyQt6.QtCore import (
-    QAbstractTableModel, QBuffer, QByteArray, QDir, QIODevice,
+    QAbstractTableModel, QBuffer, QByteArray, QDir, QEvent, QIODevice, QObject,
     QItemSelectionModel, QMimeData, QModelIndex, QSignalBlocker,
     QSize, QSortFilterProxyModel, Qt, QTimer, QUrl, pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QPainter, QPixmap, QResizeEvent
+from PyQt6.QtGui import QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QPainter, QPen, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QFileDialog, QHBoxLayout,
-    QFormLayout, QHeaderView, QLabel, QLayout, QLineEdit, QListView, QListWidget, QListWidgetItem,
-    QMenu, QPushButton, QSizePolicy, QSlider, QSplitter, QStackedWidget, QStyle, QTreeView,
+    QFrame, QFormLayout, QHeaderView, QLabel, QLayout, QLineEdit, QListView,
+    QMenu, QPushButton, QSizePolicy, QSlider, QStackedWidget, QStyle, QTreeView,
     QVBoxLayout, QWidget,
 )
 
@@ -22,6 +23,8 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.app.ui.native_files_gallery import FilesCardDelegate
+from src.app.ui.native_files_locations import HomeDirectoryTree
+from src.shared.ui.panel_splitter import PanelSplitter
 
 
 def _tr(key: str, default: str) -> str:
@@ -157,9 +160,11 @@ class NativeFilesPanel(QWidget):
     legacy_requested = pyqtSignal()
     thumbnail_requested = pyqtSignal(str, int)
     thumbnail_released = pyqtSignal(str)
+    tree_requested = pyqtSignal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, home_path: str | None = None) -> None:
         super().__init__(parent)
+        self.home_path = unicodedata.normalize("NFC", QDir.cleanPath(home_path or QDir.homePath()))
         self.current_path = ""
         self._requested_path = ""
         self._history: list[str] = []
@@ -203,18 +208,17 @@ class NativeFilesPanel(QWidget):
             QLabel#filesHint {{ color: {C.TEXT_HINT}; font-size: 11px; }}
             QWidget#filesSidebar, QWidget#filesInspector {{ background: {C.BG_DARKEST}; }}
             QAbstractItemView {{ background: transparent; color: {C.TEXT_PRIMARY}; border: none; outline: none; }}
-            QListWidget::item {{ border-radius: 5px; padding: 7px 6px; }}
-            QListWidget::item:selected {{ background: {C.BG_ACTIVE}; color: {C.TEXT_BRIGHT}; }}
             QTreeView::item {{ height: 30px; border-bottom: 1px solid {C.BORDER_SUBTLE}; }}
             QTreeView::item:selected {{ background: {C.BG_ACTIVE}; color: {C.ORANGE}; }}
+            QTreeView#filesHomeTree::item {{ height: 24px; border: none; }}
             QHeaderView::section {{ background: {C.BG_DARK}; color: {C.TEXT_HINT}; border: none; padding: 8px; font-size: 11px; }}
-            QLineEdit {{ background: {C.BG_INPUT}; color: {C.TEXT_PRIMARY}; border: 1px solid {C.BORDER}; border-radius: 7px; padding: 7px 10px; }}
+            QLineEdit {{ background: {C.BG_INPUT}; color: {C.TEXT_PRIMARY}; border: 1px solid {C.BORDER}; border-radius: 4px; padding: 3px 7px; }}
             QLineEdit:focus {{ border-color: {C.ORANGE_PRESS}; }}
             QPushButton {{ background: transparent; color: {C.TEXT_SECONDARY}; border: 1px solid transparent; border-radius: 5px; padding: 5px 9px; }}
             QPushButton:hover, QPushButton:checked {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
             QPushButton:disabled {{ color: {C.TEXT_HINT}; }}
             QPushButton#filesBreadcrumb {{ text-align: left; color: {C.TEXT_SECONDARY}; }}
-            QSplitter::handle {{ background: {C.BORDER_SUBTLE}; }}
+            QFrame#filesRule {{ background: {C.PANEL_DIVIDER}; border: none; }}
             QSlider::groove:horizontal {{ height: 3px; border-radius: 1px; background: {C.BORDER}; }}
             QSlider::handle:horizontal {{ background: {C.TEXT_SECONDARY}; width: 9px; margin: -3px 0; border-radius: 4px; }}
         """)
@@ -224,26 +228,19 @@ class NativeFilesPanel(QWidget):
         root.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        header = QHBoxLayout()
-        header.setContentsMargins(16, 14, 16, 10)
-        title = QLabel(_tr("title", "素材库"), self)
-        title.setObjectName("filesTitle")
-        header.addWidget(title)
-        header.addSpacing(20)
         self.search_edit = QLineEdit(self)
         self.search_edit.setPlaceholderText(_tr("search", "搜索名称、标签或备注…"))
         self.search_edit.setAccessibleName(_tr("search_label", "搜索当前目录"))
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._filter_changed)
-        header.addWidget(self.search_edit, 1)
-        header.addSpacing(8)
-        self.open_folder_button = self._button(_tr("choose_short", "打开文件夹"), _tr("choose", "选择文件夹"), self._choose_folder)
-        header.addWidget(self.open_folder_button)
-        self.more_button = self._button("•••", _tr("more", "更多工具"), self._show_tools)
-        header.addWidget(self.more_button)
-        root.addLayout(header)
+        self.search_edit.setMinimumWidth(80)
+        self.search_edit.setMaximumWidth(200)
+        self.search_edit.setFixedHeight(26)
+        self.search_edit.installEventFilter(self)
+        self.search_edit.hide()
         navigation = QHBoxLayout()
-        navigation.setContentsMargins(12, 0, 12, 10)
+        navigation.setContentsMargins(8, 4, 8, 4)
+        navigation.setSpacing(3)
         self.sidebar_button = self._button(_tr("locations", "位置"), _tr("toggle_sidebar", "显示或隐藏位置栏"), self._toggle_sidebar)
         self.sidebar_button.setCheckable(True)
         self.sidebar_button.setChecked(True)
@@ -254,7 +251,8 @@ class NativeFilesPanel(QWidget):
         for button in (self.back_button, self.forward_button):
             button.setFixedWidth(28)
             navigation.addWidget(button)
-        navigation.addWidget(self._button("↑", _tr("up", "上一级"), self.go_up))
+        self.up_button = self._button("↑", _tr("up", "上一级"), self.go_up)
+        navigation.addWidget(self.up_button)
         self.path_stack = QStackedWidget(self)
         self.breadcrumb_button = self._button("", _tr("edit_path", "点击编辑完整路径"), self._edit_path)
         self.breadcrumb_button.setObjectName("filesBreadcrumb")
@@ -269,31 +267,41 @@ class NativeFilesPanel(QWidget):
         self.path_edit.editingFinished.connect(lambda: self.path_stack.setCurrentIndex(0))
         self.path_stack.addWidget(self.path_edit)
         navigation.addWidget(self.path_stack, 1)
+        navigation.addWidget(self.search_edit)
+        self.search_button = self._button("", _tr("search_label", "搜索当前目录"), self._toggle_search)
+        self.search_button.setCheckable(True)
+        self.search_button.setFixedSize(28, 26)
+        search_pixmap = QPixmap(20, 20)
+        search_pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(search_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(C.TEXT_SECONDARY), 1.5))
+        painter.drawEllipse(3, 3, 10, 10)
+        painter.drawLine(12, 12, 17, 17)
+        painter.end()
+        self.search_button.setIcon(QIcon(search_pixmap))
+        navigation.addWidget(self.search_button)
         navigation.addWidget(self._button("↻", _tr("refresh", "刷新"), self.refresh))
         self.inspector_button = self._button(_tr("inspector_short", "信息"), _tr("toggle_inspector", "显示或隐藏文件信息"), self._toggle_inspector)
         self.inspector_button.setCheckable(True)
         navigation.addWidget(self.inspector_button)
+        self.more_button = self._button("•••", _tr("more", "更多工具"), self._show_tools)
+        navigation.addWidget(self.more_button)
         root.addLayout(navigation)
-        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.splitter.setHandleWidth(1)
+        root.addWidget(self._rule())
+        self.splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.sidebar = QWidget(self.splitter)
         self.sidebar.setObjectName("filesSidebar")
         side_layout = QVBoxLayout(self.sidebar)
-        side_layout.setContentsMargins(12, 16, 10, 12)
+        side_layout.setContentsMargins(8, 8, 6, 6)
         side_label = QLabel(_tr("location_heading", "浏览位置"))
         side_label.setObjectName("filesSection")
         side_layout.addWidget(side_label)
-        side_hint = QLabel(_tr("location_hint", "个人目录与最近访问"))
-        side_hint.setObjectName("filesHint")
-        side_layout.addWidget(side_hint)
-        self.locations = QListWidget(self.sidebar)
-        self.locations.setSpacing(3)
+        side_layout.addWidget(self._rule())
+        self.locations = HomeDirectoryTree(self.home_path, self._is_visible_entry, self.sidebar)
         self.locations.setMinimumWidth(112)
-        home = QListWidgetItem(_tr("home", "个人文件夹"))
-        home.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon))
-        home.setData(Qt.ItemDataRole.UserRole, QDir.homePath())
-        self.locations.addItem(home)
-        self.locations.itemClicked.connect(lambda item: self.navigate(item.data(Qt.ItemDataRole.UserRole)))
+        self.locations.directory_requested.connect(self.navigate)
+        self.locations.tree_requested.connect(self.tree_requested)
         side_layout.addWidget(self.locations, 1)
         side_footer = QLabel(_tr("side_footer", "从素材库拖入媒体池或时间线"))
         side_footer.setObjectName("filesHint")
@@ -301,9 +309,10 @@ class NativeFilesPanel(QWidget):
         side_layout.addWidget(side_footer)
         content = QWidget(self.splitter)
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(14, 12, 14, 6)
-        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
         toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(10, 6, 10, 6)
         self.folder_title = QLabel(_tr("browse", "浏览素材"), content)
         self.folder_title.setObjectName("filesSection")
         self.folder_title.setTextFormat(Qt.TextFormat.PlainText)
@@ -327,6 +336,7 @@ class NativeFilesPanel(QWidget):
         self.view_combo.addItems([_tr("gallery", "卡片"), _tr("details", "列表")])
         toolbar.addWidget(self.view_combo)
         content_layout.addLayout(toolbar)
+        content_layout.addWidget(self._rule())
         self.pages = QStackedWidget(content)
         self.icon_view = FilesIconView(self.pages)
         self.icon_view.setViewMode(QListView.ViewMode.IconMode)
@@ -371,11 +381,11 @@ class NativeFilesPanel(QWidget):
         self.inspector.setObjectName("filesInspector")
         self.inspector.setMinimumWidth(200)
         info_layout = QVBoxLayout(self.inspector)
-        info_layout.setContentsMargins(16, 16, 16, 16)
+        info_layout.setContentsMargins(12, 8, 12, 10)
         info_heading = QLabel(_tr("inspector", "文件信息"))
         info_heading.setObjectName("filesSection")
         info_layout.addWidget(info_heading)
-        info_layout.addSpacing(10)
+        info_layout.addWidget(self._rule())
         self.preview_cover = QLabel(self.inspector)
         self.preview_cover.setFixedHeight(130)
         self.preview_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -410,8 +420,9 @@ class NativeFilesPanel(QWidget):
         self.splitter.setSizes([164, 680, 240])
         self.splitter.setStretchFactor(1, 1)
         root.addWidget(self.splitter, 1)
+        root.addWidget(self._rule())
         footer = QHBoxLayout()
-        footer.setContentsMargins(16, 8, 16, 10)
+        footer.setContentsMargins(10, 4, 10, 4)
         self.status = QLabel(self)
         self.status.setObjectName("filesHint")
         footer.addWidget(self.status, 1)
@@ -426,6 +437,36 @@ class NativeFilesPanel(QWidget):
         root.addLayout(footer)
         self._update_navigation()
         self._update_info()
+
+    def _rule(self) -> QFrame:
+        rule = QFrame(self)
+        rule.setObjectName("filesRule")
+        rule.setFixedHeight(1)
+        return rule
+
+    def _toggle_search(self, expanded: bool) -> None:
+        with QSignalBlocker(self.search_button):
+            self.search_button.setChecked(expanded)
+        self.search_edit.setVisible(expanded)
+        self._layout_search()
+        if expanded:
+            self.search_edit.setFocus()
+            self.search_edit.selectAll()
+        else:
+            self.search_edit.clear()
+            self.pages.currentWidget().setFocus()
+
+    def _layout_search(self) -> None:
+        compact_search = self.search_button.isChecked() and self.width() < 640
+        self.path_stack.setVisible(not compact_search)
+        self.sidebar_button.setVisible(not compact_search)
+        self.inspector_button.setVisible(not compact_search)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.search_edit and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self._toggle_search(False)
+            return True
+        return super().eventFilter(watched, event)
 
     def _show_tools(self) -> None:
         menu = QMenu(self)
@@ -446,7 +487,8 @@ class NativeFilesPanel(QWidget):
         self.path_edit.selectAll()
 
     def _update_path_label(self, path: str) -> None:
-        parts = [part for part in path.replace("\\", "/").split("/") if part]
+        display_path = "Home" + path[len(self.home_path):] if path == self.home_path or path.startswith(self.home_path + "/") else path
+        parts = [part for part in display_path.replace("\\", "/").split("/") if part]
         label = "  ›  ".join(parts[-3:]) if parts else path
         self.breadcrumb_button.setText(label)
         self.breadcrumb_button.setToolTip(path)
@@ -478,8 +520,8 @@ class NativeFilesPanel(QWidget):
             return
         show_sidebar = self._sidebar_preference if self._sidebar_preference is not None else self.width() >= 720
         self.sidebar.setVisible(show_sidebar)
-        self.open_folder_button.setVisible(self.width() >= 760)
         self.sort_combo.setVisible(self.width() >= 800)
+        self._layout_search()
         with QSignalBlocker(self.sidebar_button):
             self.sidebar_button.setChecked(show_sidebar)
         self._sync_inspector_visibility()
@@ -610,11 +652,44 @@ class NativeFilesPanel(QWidget):
         if path in self._entry_paths:
             self._thumbnail_failed.add(path)
 
+    @staticmethod
+    def _path_key(path: str) -> str:
+        return unicodedata.normalize("NFC", QDir.cleanPath(path.replace("\\", "/"))).rstrip("/").casefold()
+
+    def is_browsable_path(self, path: str) -> bool:
+        """Presentation policy, not a replacement for service permissions."""
+        key = self._path_key(path)
+        home = self._path_key(self.home_path)
+        if not key or key in ("/", ".", "/volumes") or home.startswith(key + "/"):
+            return False
+        system_roots = ("/Applications", "/System", "/Library", "/bin", "/sbin", "/usr", "/private",
+                        "/etc", "/var", "/dev", "/proc", "/sys", "/run", "/opt",
+                        "/Volumes/Macintosh HD", self.home_path + "/Library", self.home_path + "/Applications")
+        if any(key == self._path_key(root) or key.startswith(self._path_key(root) + "/") for root in system_roots):
+            return False
+        # Keep Windows system locations out of native media browsing too.
+        if len(key) >= 3 and key[1:3] == ":/":
+            suffix = key[3:]
+            if any(suffix == root or suffix.startswith(root + "/") for root in ("windows", "program files", "program files (x86)", "programdata", "$recycle.bin")):
+                return False
+        return not any(part.endswith(".app") for part in key.split("/"))
+
+    def _is_visible_entry(self, entry: dict[str, Any]) -> bool:
+        return (not entry["name"].startswith(".")
+                and self.is_browsable_path(entry["path"]))
+
+    def start_home_tree(self) -> None:
+        self.locations.start()
+
     def navigate(self, path: str) -> None:
         if not path or not path.strip():
             return
         if "://" in path:
             self.message.setText(_tr("virtual", "此位置请在完整 Files 中打开。"))
+            self.message.show()
+            return
+        if not self.is_browsable_path(path):
+            self.message.setText(_tr("system_location", "此位置不用于素材浏览，请选择 Home 或素材文件夹。"))
             self.message.show()
             return
         self._history_target = None
@@ -628,14 +703,15 @@ class NativeFilesPanel(QWidget):
 
     def go_up(self) -> None:
         path = self.current_path or self._requested_path
-        if path:
+        if path and self._path_key(path) != self._path_key(self.home_path):
             parent = QDir(path)
-            if parent.cdUp():
+            if parent.cdUp() and self.is_browsable_path(parent.absolutePath()):
                 self.navigate(parent.absolutePath())
 
     def refresh(self) -> None:
         path = self._requested_path or self.current_path
         if path:
+            self.locations.refresh(path)
             self.directory_requested.emit(path)
 
     def _choose_folder(self) -> None:
@@ -658,6 +734,10 @@ class NativeFilesPanel(QWidget):
         self._update_info()
 
     def set_entries(self, path: str, entries: list[dict[str, Any]]) -> None:
+        if not self.is_browsable_path(path):
+            self.show_error(path, _tr("system_location", "此位置不用于素材浏览，请选择 Home 或素材文件夹。"))
+            return
+        entries = [entry for entry in entries if self._is_visible_entry(entry)]
         if self._history_target is not None and self._history[self._history_target] == path:
             self._history_index = self._history_target
         elif path != self.current_path:
@@ -675,13 +755,7 @@ class NativeFilesPanel(QWidget):
         self.pages.setEnabled(True)
         self.message.setText("" if entries else _tr("empty", "此文件夹为空。"))
         self.message.setVisible(not entries)
-        if not any(self.locations.item(i).data(Qt.ItemDataRole.UserRole) == path for i in range(self.locations.count())):
-            item = QListWidgetItem(QDir(path).dirName() or path)
-            item.setToolTip(path)
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            self.locations.addItem(item)
-            if self.locations.count() > 13:
-                self.locations.takeItem(1)
+        self.locations.reveal(path)
         self._update_navigation()
         self._update_info()
 
@@ -694,6 +768,10 @@ class NativeFilesPanel(QWidget):
     def _update_navigation(self) -> None:
         self.back_button.setEnabled(self._history_index > 0)
         self.forward_button.setEnabled(0 <= self._history_index < len(self._history) - 1)
+        path = self.current_path or self._requested_path
+        parent = QDir(path or self.home_path)
+        self.up_button.setEnabled(bool(path) and self._path_key(path) != self._path_key(self.home_path)
+                                  and parent.cdUp() and self.is_browsable_path(parent.absolutePath()))
 
     def _filter_changed(self, *_: Any) -> None:
         self.proxy.query = self.search_edit.text().casefold().strip()

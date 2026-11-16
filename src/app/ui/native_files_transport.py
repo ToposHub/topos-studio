@@ -32,10 +32,14 @@ class NativeFilesTransport(QObject):
     thumbnail_loaded = pyqtSignal(str, bytes)
     thumbnail_failed = pyqtSignal(str)
     thumbnail_pending = pyqtSignal(str)
+    tree_loaded = pyqtSignal(str, list)
+    tree_failed = pyqtSignal(str, str)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
     MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
+    MAX_TREE_CONCURRENCY = 4
+    MAX_TREE_QUEUE = 128
 
     def __init__(
         self, server_url: Callable[[], str], token: str | None,
@@ -52,6 +56,9 @@ class NativeFilesTransport(QObject):
         self._thumbnail_attempted: set[tuple[str, int]] = set()
         self._thumbnail_replies: dict[QNetworkReply, _ThumbnailRead] = {}
         self._thumbnail_versions: dict[str, int] = {}
+        self._tree_queue: deque[str] = deque()
+        self._tree_replies: dict[QNetworkReply, str] = {}
+        self._tree_pending_paths: set[str] = set()
 
     def _make_request(self, endpoint: str, query: dict[str, str | int]) -> QNetworkRequest | None:
         base = self._server_url()
@@ -71,6 +78,60 @@ class NativeFilesTransport(QObject):
         )
         request.setTransferTimeout(15000)
         return request
+
+    def load_tree(self, path: str) -> None:
+        """Load one expanded node, independently of content navigation.
+
+        Concurrent requests for the same node share its final loaded/failed
+        signal. No filesystem scanning or recursive prefetch occurs here.
+        """
+        if self._closed or path in self._tree_pending_paths:
+            return
+        if len(self._tree_queue) >= self.MAX_TREE_QUEUE:
+            self.tree_failed.emit(path, "目录树读取队列已满，请稍后重试。")
+            return
+        self._tree_pending_paths.add(path)
+        self._tree_queue.append(path)
+        self._pump_tree()
+
+    def _pump_tree(self) -> None:
+        while not self._closed and self._tree_queue and len(self._tree_replies) < self.MAX_TREE_CONCURRENCY:
+            path = self._tree_queue.popleft()
+            request = self._make_request("/api/tree", {"path": path})
+            if request is None:
+                self._tree_pending_paths.discard(path)
+                self.tree_failed.emit(path, "素材服务尚未就绪或地址无效。")
+                continue
+            reply = self._network.get(request)
+            self._tree_replies[reply] = path
+            reply.finished.connect(lambda r=reply, p=path: self._finish_tree(r, p))
+
+    def _finish_tree(self, reply: QNetworkReply, path: str) -> None:
+        self._tree_replies.pop(reply, None)
+        self._tree_pending_paths.discard(path)
+        if self._closed:
+            reply.deleteLater()
+            return
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        raw = bytes(reply.readAll())
+        error = reply.error()
+        error_text = reply.errorString()
+        reply.deleteLater()
+        try:
+            entries: Any = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            entries = None
+        if status != 200 or error != QNetworkReply.NetworkError.NoError:
+            self.tree_failed.emit(path, error_text if error != QNetworkReply.NetworkError.NoError else "目录树请求失败。")
+        elif not isinstance(entries, list) or any(
+            not isinstance(entry, dict)
+            or any(not isinstance(entry.get(key), str) or not entry[key] for key in ("name", "path"))
+            for entry in entries
+        ):
+            self.tree_failed.emit(path, "素材服务返回的目录树格式无效。")
+        else:
+            self.tree_loaded.emit(path, entries)
+        self._pump_tree()
 
     def request_thumbnail(self, path: str, version: int = 0) -> None:
         """Request only painted items; one attempt per path/version/directory.
@@ -245,3 +306,9 @@ class NativeFilesTransport(QObject):
     def shutdown(self) -> None:
         self._closed = True
         self.cancel()
+        trees = list(self._tree_replies)
+        self._tree_queue.clear()
+        self._tree_replies.clear()
+        self._tree_pending_paths.clear()
+        for tree in trees:
+            tree.abort()
