@@ -1337,22 +1337,40 @@ class TestAud21410LayoutHotPath:
 
 
 class TestAud21412DropProbePool:
-    def _drop_handler_node(self) -> ast.FunctionDef:
-        return _method_node(
-            "timeline_view.py", "TimelineView", "_handle_external_file_drop"
-        )
+    """B08 之后：媒体投放接受 drop 后转后台，提交回到主线程单事务。
 
-    def test_drop_handler_probes_off_thread(self) -> None:
-        node = self._drop_handler_node()
-        unparsed = ast.unparse(node)
+    历史断言（drop 内部 ThreadPoolExecutor）仍然成立，但对象已收拢到
+    ``_handle_external_file_drop_legacy``（字幕专用）与 ``ImportProbeJob``。
+    """
 
+    def _handler(self, name: str) -> ast.FunctionDef:
+        node = _method_node("timeline_view.py", "TimelineView", name)
+        # 去掉 docstring：断言要描述行为，不能被注释文字命中
+        if (node.body and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)):
+            node.body = node.body[1:]
+        return node
+
+    def test_drop_handler_returns_immediately_and_accepts(self) -> None:
+        unparsed = ast.unparse(self._handler("_handle_external_file_drop"))
+        # 不在 dropEvent 里等探测结果
+        assert ".result()" not in unparsed
+        assert "_external_import_runner.start" in unparsed
+        assert "dedupe_paths" in unparsed
+        assert "acceptProposedAction" in unparsed
+
+    def test_commit_revalidates_project_and_uses_single_macro(self) -> None:
+        unparsed = ast.unparse(self._handler("_finish_external_import"))
+        assert "project_id" in unparsed
+        assert "revision" in unparsed
+        assert "is_locked" in unparsed
+        assert "prepare_import" in unparsed
+        assert "MacroCommand" in unparsed
+        assert "_batch_drop_commands" in unparsed
+
+    def test_legacy_subtitle_path_keeps_bounded_pool(self) -> None:
+        unparsed = ast.unparse(self._handler("_handle_external_file_drop_legacy"))
         assert "ThreadPoolExecutor" in unparsed
         assert "drop-probe" in unparsed
-        # The synchronous fallback keeps the old per-path error behaviour.
-        assert "probe_media_metadata" in unparsed
-        assert "get_asset_by_path" in unparsed
-
-    def test_pool_is_bounded(self) -> None:
-        node = self._drop_handler_node()
-        unparsed = ast.unparse(node)
         assert "max_workers=min(4, len(new_paths))" in unparsed

@@ -45,15 +45,20 @@ def test_native_navigation_is_lazy_and_preview_reuses_legacy(qtbot, monkeypatch)
     qtbot.addWidget(panel)
     panel._page_loaded = True
     panel._is_error_page = False
+    panel.mode_combo.setCurrentIndex(0)
+    baseline = len(scripts)
     panel._files_root_path = path
     panel.mode_combo.setCurrentIndex(1)
     assert panel._native_panel.current_path == path
-    assert scripts == []  # A hidden legacy grid must not render on each navigation.
+    # A hidden legacy grid must not render on each native navigation.
+    assert len(scripts) == baseline
     assert panel.content_stack.currentWidget() is panel._native_panel
     panel._native_panel.file_activated.emit(entry["path"])
     assert panel.mode_combo.currentIndex() == 0
-    assert len(scripts) == 1
-    assert "api.openItem(index)" in scripts[0]
-    assert "a+b%20" in scripts[0]
+    # 借道旧宿主预览不得篡改默认入口偏好
+    assert panel._files_prefs.native_default is True
+    assert len(scripts) == baseline + 1
+    assert "api.openItem(index)" in scripts[-1]
+    assert "a+b%20" in scripts[-1]
     assert panel._pending_path is None
     panel.shutdown()
