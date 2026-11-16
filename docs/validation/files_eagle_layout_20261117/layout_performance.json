@@ -1,0 +1,78 @@
+{
+  "scope": "offscreen Qt layout+visible paint; synthetic metadata, no thumbnails/IO/GPU",
+  "fps_claim": null,
+  "results": [
+    {
+      "items": 100,
+      "mode": "adaptive",
+      "change_layout_ms": 4.01,
+      "resize_median_ms": 6.5,
+      "resize_max_ms": 7.17,
+      "visible_items": 19
+    },
+    {
+      "items": 100,
+      "mode": "masonry",
+      "change_layout_ms": 3.65,
+      "resize_median_ms": 7.06,
+      "resize_max_ms": 7.65,
+      "visible_items": 17
+    },
+    {
+      "items": 100,
+      "mode": "grid",
+      "change_layout_ms": 3.33,
+      "resize_median_ms": 6.12,
+      "resize_max_ms": 6.58,
+      "visible_items": 15
+    },
+    {
+      "items": 1000,
+      "mode": "adaptive",
+      "change_layout_ms": 9.48,
+      "resize_median_ms": 9.55,
+      "resize_max_ms": 10.09,
+      "visible_items": 19
+    },
+    {
+      "items": 1000,
+      "mode": "masonry",
+      "change_layout_ms": 8.71,
+      "resize_median_ms": 8.64,
+      "resize_max_ms": 9.06,
+      "visible_items": 17
+    },
+    {
+      "items": 1000,
+      "mode": "grid",
+      "change_layout_ms": 6.93,
+      "resize_median_ms": 8.18,
+      "resize_max_ms": 8.31,
+      "visible_items": 15
+    },
+    {
+      "items": 10000,
+      "mode": "adaptive",
+      "change_layout_ms": 98.59,
+      "resize_median_ms": 54.51,
+      "resize_max_ms": 58.82,
+      "visible_items": 19
+    },
+    {
+      "items": 10000,
+      "mode": "masonry",
+      "change_layout_ms": 114.5,
+      "resize_median_ms": 46.43,
+      "resize_max_ms": 81.6,
+      "visible_items": 17
+    },
+    {
+      "items": 10000,
+      "mode": "grid",
+      "change_layout_ms": 67.81,
+      "resize_median_ms": 39.55,
+      "resize_max_ms": 68.52,
+      "visible_items": 15
+    }
+  ]
+}

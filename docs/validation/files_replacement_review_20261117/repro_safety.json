@@ -1,0 +1,70 @@
+{
+  "service": {
+    "directory_rename": {
+      "error": "NotADirectoryError",
+      "source_preserved": true
+    },
+    "overwrite_exdev_injection": {
+      "errno": 18,
+      "source_preserved": true
+    },
+    "no_replace_target_swap_injection": {
+      "destination": "SOURCE",
+      "source_exists": false,
+      "third_party_preserved": false
+    },
+    "directory_cancel_injection": {
+      "destination_exists": true,
+      "remaining_files": [
+        "a"
+      ]
+    }
+  },
+  "backend": {
+    "single_rename_metadata": {
+      "response": {
+        "success": true
+      },
+      "file_meta": [
+        "single-new.mov"
+      ],
+      "marker_paths": [
+        "single.mov"
+      ]
+    },
+    "batch_rename_metadata": {
+      "response": {
+        "errors": [],
+        "processed": 1,
+        "success": true
+      },
+      "file_meta": [
+        "batch-new.mov"
+      ],
+      "marker_paths": [
+        "batch.mov"
+      ]
+    },
+    "trash_restore_organization_fields": {
+      "trash_errors": [],
+      "restore_errors": [],
+      "restored_count": 1,
+      "expected_collection": [
+        17,
+        123.0
+      ],
+      "actual_collection": [
+        0,
+        null
+      ],
+      "expected_stack_created_at": 456.0,
+      "actual_stack_created_at": null
+    }
+  },
+  "import_clip_failure": {
+    "error": "clip construction injected error",
+    "assets_left": 1,
+    "published_projects": 1,
+    "messages": []
+  }
+}

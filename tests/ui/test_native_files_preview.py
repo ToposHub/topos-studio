@@ -1,6 +1,8 @@
 """B04 / U03：图片预览容器与解码契约（真实解码，无磁盘 IO）。"""
 from __future__ import annotations
 
+import pytest
+
 from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeyEvent
 from PyQt6.QtWidgets import QWidget
@@ -8,6 +10,7 @@ from PyQt6.QtWidgets import QWidget
 from src.app.ui import native_files_panel
 from src.app.ui.native_files_panel import NativeFilesPanel
 from src.app.ui.native_files_preview import NativeFilesPreview, decode_preview
+from src.features.files.contracts import Capability
 
 
 def _png_bytes(width: int = 40, height: int = 24) -> bytes:
@@ -170,15 +173,24 @@ def test_preview_closed_signal_cancels_session(qtbot):
     assert not panel._preview.is_open
 
 
-def test_capabilities_disable_metadata_controls_with_reason(qtbot):
+@pytest.mark.parametrize("capability", [
+    {"key": "metadata.patch", "available": False, "reason": "只读挂载，标记不可写"},
+    Capability(key="metadata.patch", available=False, reason="只读挂载，标记不可写"),
+])
+def test_capabilities_disable_metadata_controls_with_reason(qtbot, capability):
     panel = NativeFilesPanel()
     qtbot.addWidget(panel)
     panel.apply_capabilities([
-        {"key": "metadata.patch", "available": False, "reason": "只读挂载，标记不可写"},
+        capability,
         {"key": "preview.image", "available": True},
     ])
     assert not panel.rating_combo.isEnabled()
     assert not panel.tag_edit.isEnabled()
     assert "只读挂载" in panel.meta_status.text()
     panel.apply_capabilities([{"key": "metadata.patch", "available": True}])
+    assert not panel.rating_combo.isEnabled()  # 能力恢复后仍需有效选区
+    panel.set_entries("/media", [
+        {"name": "A.png", "path": "/media/A.png", "type": "image"},
+    ])
+    _select_path(panel, "/media/A.png")
     assert panel.rating_combo.isEnabled()

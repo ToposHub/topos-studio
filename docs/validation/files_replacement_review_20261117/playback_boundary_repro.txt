@@ -1,0 +1,2 @@
+{"case": "FR-18 producer EOF before presentation", "events": [{"event": "audio.pause"}, {"event": "eof_signal"}, {"event": "producer_eof", "playing": false, "shown_index": -1, "queued_indices": [0, 1]}]}
+{"case": "Topos poll while playing is false", "shown_indices": [0]}

@@ -26,7 +26,7 @@ def test_view_density_and_sort_roundtrip_between_panels(qtbot, tmp_path):
     prefs = _prefs(tmp_path)
     first = NativeFilesPanel(preferences=prefs)
     qtbot.addWidget(first)
-    first.view_combo.setCurrentIndex(1)
+    first.view_combo.setCurrentIndex(first.view_combo.findData("list"))
     first.density_slider.setValue(210)
     first.sort_combo.setCurrentIndex(1)
 
@@ -36,7 +36,7 @@ def test_view_density_and_sort_roundtrip_between_panels(qtbot, tmp_path):
 
     second = NativeFilesPanel(preferences=prefs)
     qtbot.addWidget(second)
-    assert second.view_combo.currentIndex() == 1
+    assert second.view_combo.currentData() == "list"
     assert second.pages.currentIndex() == 1
     assert second.density_slider.value() == 210
     assert second.sort_combo.currentIndex() == 1

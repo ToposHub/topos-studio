@@ -330,6 +330,9 @@ class FilesPanel(QWidget):
         FilesPanel 装在 QDockWidget 里，dock 关闭/主窗口退出不会触发本控件
         的 closeEvent——真正的清理入口是 MainWindow.closeEvent。
         """
+        plugins = getattr(self, "_files_plugins", None)
+        if plugins is not None:
+            plugins.shutdown()
         native_transport = getattr(self, "_native_transport", None)
         if native_transport is not None:
             native_transport.shutdown()
@@ -498,6 +501,7 @@ class FilesPanel(QWidget):
             self._native_transport.tree_failed.connect(self._native_panel.locations.set_error)
             self._native_panel.file_activated.connect(self._open_native_file)
             self._native_panel.legacy_requested.connect(lambda: self.mode_combo.setCurrentIndex(0))
+            self._connect_native_plugins()
             self._native_transport.loading.connect(self._native_panel.set_loading)
             self._native_transport.failed.connect(self._native_panel.show_error)
             self._native_transport.loaded.connect(self._on_native_directory_loaded)
@@ -513,6 +517,26 @@ class FilesPanel(QWidget):
         if not path or "://" in path or not self._native_panel.is_browsable_path(path):
             path = os.path.expanduser("~")
         self._native_panel.navigate(path)
+
+    def _connect_native_plugins(self) -> None:
+        from pathlib import Path
+        from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
+        from src.app.ui.files_plugins_controller import FilesPluginsController
+        try:
+            import file_explorer.main as fe_main
+        except ImportError:
+            self._native_panel.plugins_button.setEnabled(False)
+            self._native_panel.plugins_button.setToolTip("素材插件宿主不可用。")
+            return
+        catalog = FileExplorerPluginCatalog(
+            Path(fe_main.__file__).parent / "plugins", fe_main.plugin_manager,
+            fe_main.load_config, fe_main.save_config)
+        self._files_plugins = FilesPluginsController(
+            catalog, self._native_transport, self._files_prefs, self._native_panel,
+            lambda: [entry.path for entry in self._native_panel._selected_entries() if not entry.is_dir],
+            lambda: self.mode_combo.setCurrentIndex(0), self)
+        self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
+        self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
 
     def _open_batch_rename(self, paths: list[str]) -> None:
         from src.app.ui.native_files_batch_rename import BatchRenameDialog

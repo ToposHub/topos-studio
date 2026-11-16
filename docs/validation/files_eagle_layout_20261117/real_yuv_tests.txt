@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 9 items
+
+tests/ui/test_gpu_yuv_frame.py .........                                 [100%]
+
+- generated xml file: /Users/heng/Documents/vscode/topos-studio/docs/validation/files_eagle_layout_20261117/real_yuv_tests.xml -
+============================== 9 passed in 2.14s ===============================

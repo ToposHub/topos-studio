@@ -1,0 +1,9 @@
+START open
+OPENED 0.5458516599974246 prores_raw 8192 4320 24.0 27.291666666666668 655
+START RGB index0
+
+TIMEOUT after 35s
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7fe7e881f540] stream 0, timescale not set
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7fe7e881f540] Could not find codec parameters for stream 0 (Video: prores_raw (RAW HQ) (aprh / 0x68727061), none(progressive), 8192x4320, 3407179 kb/s): unspecified pixel format
+Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+

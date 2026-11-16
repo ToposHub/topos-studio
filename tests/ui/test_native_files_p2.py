@@ -77,7 +77,8 @@ def test_hover_non_video_clears(panel):
 def test_batch_rename_dialog_preview_and_conflict(qtbot):
     dialog = BatchRenameDialog(["/a.jpg", "/b.jpg"])
     qtbot.addWidget(dialog)
-    session = {"session_id": dialog.session_id}  # [FR-13] 会话化载荷
+    dialog._preview()
+    session = {"session_id": dialog._preview_request_id}
     dialog.show_preview({**session, "plan": [
         {"src_name": "a.jpg", "dst_name": "a_001.jpg", "conflict": False},
         {"src_name": "b.jpg", "dst_name": "b_001.jpg", "conflict": True},
@@ -85,6 +86,8 @@ def test_batch_rename_dialog_preview_and_conflict(qtbot):
     assert dialog.table.rowCount() == 2
     assert dialog.execute_button.isEnabled()
     assert "1 项冲突" in dialog.summary.text()
+    dialog._preview()
+    session = {"session_id": dialog._preview_request_id}
     dialog.show_preview({**session, "plan": [
         {"src_name": "a.jpg", "dst_name": "a_001.jpg", "conflict": False},
     ], "errors": []})

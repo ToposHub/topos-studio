@@ -2,7 +2,11 @@
 
 日期：2026-11-16。审查基线：`dev @ b08e60f0`（包含 `abd41b9a` 原生功能扩展、`9db4aaac` 播放核心迁移、`b08e60f0` GPU预览）。本计划记录**复查发现及下一步工作**，不是已修复清单。
 
-## 实施状态（2026-11-16 整改批次，fix-ui 分支）
+## 历史实施记录（2026-11-16 整改批次，fix-ui 分支）
+
+> **2026-11-17 复核更新**：下表保留为历史交付记录，不代表整批退出门槛已满足。本轮发现 NR-00～05 仍为部分完成（含 FR-01 P0 未关闭、真实改名入口未贯通、UI 分页未实现等），NR-06～10 未实施；已直接修复局部问题。当前状态、后续任务和验证证据以[新复核与后续计划](2026-11-17-files-replacement-followup-plan.md)为准。
+
+以下§1～8保留最初审查内容与阶段设计，其中“本轮”指2026-11-16审查，不指2026-11-17复核。
 
 按 §8 拆分的证据层级（实现存在 / 自动化链路通过 / 实机验收通过 / 无旧扩展通过）如实记录：
 
@@ -34,9 +38,9 @@
 | 未完成实机项 | 全格式真实播放/HDR显示/音频设备/真实鼠标拖拽/长期压力/Windows与Linux原生设备/无源码发布包测试，均不因单元测试通过而标完成 |
 | 当前提交保护 | 开始审查时dev已有3个本地提交；本轮保留其内容，只新增计划与审查证据 |
 
-证据类型：**R=隔离复现已确认；C=调用链/源码已确认；V=待补实机验证。** 运行记录、复现脚本与基线报告位于[验证目录](/Users/hengshi/Documents/vscode/topos-studio/docs/validation/files_replacement_audit_20261116/README.md)。R证明具体触发路径，不代表所有环境都会同样表现。
+证据类型：**R=隔离复现已确认；C=调用链/源码已确认；V=待补实机验证。** 运行记录、复现脚本与基线报告位于[验证目录](../../docs/validation/files_replacement_audit_20261116/README.md)。R证明具体触发路径，不代表所有环境都会同样表现。
 
-优先级：P0=可造成不可恢复数据丢失；P1=核心行为错误、数据/事务失真、项目架构硬约束违例或退役阻塞；P2=局部交互、一致性、资源或证据缺口。以下问题**全部待整改**，没有把本轮发现写成已经修复。
+优先级：P0=可造成不可恢复数据丢失；P1=核心行为错误、数据/事务失真、项目架构硬约束违例或退役阻塞；P2=局部交互、一致性、资源或证据缺口。以下保留2026-11-16审查基线的问题描述；后续整改并非全部未做，当前完成边界以顶部链接的新复核计划为准。
 
 ## 2. 问题总表与整改验收
 
@@ -54,11 +58,11 @@
 
 定位依据：
 
-- FR-01/02/07：[file_tasks.py:120](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/file_tasks.py:120)、[目标冲突处理:224](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/file_tasks.py:224)、[复制/移动:262](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/file_tasks.py:262)、[历史淘汰:149](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/file_tasks.py:149)。
-- FR-03：[路径传播:3712](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/routes.py:3712)，尤其3746–3767的列映射与吞异常；schema在`db.py`的ocr_text/markers表定义。
-- FR-04：[回收站快照:103](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/trash.py:103)、[恢复:251](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/trash.py:251)。
-- FR-05：[任务入口:3791](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/routes.py:3791)。
-- FR-06：[落轨提交:16928](/Users/hengshi/Documents/vscode/topos-studio/src/features/edit/ui/timeline_view.py:16928)，16979先发布，17035后执行宏，17039提示全回滚。
+- FR-01/02/07：[file_tasks.py:120](../../external/file_explorer/file_tasks.py:120)、[目标冲突处理:224](../../external/file_explorer/file_tasks.py:224)、[复制/移动:262](../../external/file_explorer/file_tasks.py:262)、[历史淘汰:149](../../external/file_explorer/file_tasks.py:149)。
+- FR-03：[路径传播:3712](../../external/file_explorer/routes.py:3712)，尤其3746–3767的列映射与吞异常；schema在`db.py`的ocr_text/markers表定义。
+- FR-04：[回收站快照:103](../../external/file_explorer/trash.py:103)、[恢复:251](../../external/file_explorer/trash.py:251)。
+- FR-05：[任务入口:3791](../../external/file_explorer/routes.py:3791)。
+- FR-06：[落轨提交:16928](../../src/features/edit/ui/timeline_view.py:16928)，16979先发布，17035后执行宏，17039提示全回滚。
 
 已排除的猜测：同源overwrite copy/rename会拒绝、原地move为no-op、move目录到自身后代会报错且源保留；这些隔离用例没有复现直接删源，不把它们列为已发现缺陷。
 
@@ -74,10 +78,10 @@
 
 定位依据：
 
-- FR-08：[搜索结果提交:1610](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1610)、[集合提交:1812](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1812)、[lookup:1470](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1470)、[操作目录:1522](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1522)。
-- FR-09/10：[搜索请求:862](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:862)、[取消:979](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:979)、[查询截断:4179](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/routes.py:4179)。
-- FR-11：[标签提交:1251](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1251)、[API追加:959](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/routes.py:959)。
-- FR-12：[能力应用:1477](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1477)、[回填重启用:1196](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_panel.py:1196)。
+- FR-08：[搜索结果提交:1610](../../src/app/ui/native_files_panel.py:1610)、[集合提交:1812](../../src/app/ui/native_files_panel.py:1812)、[lookup:1470](../../src/app/ui/native_files_panel.py:1470)、[操作目录:1522](../../src/app/ui/native_files_panel.py:1522)。
+- FR-09/10：[搜索请求:862](../../src/app/ui/native_files_transport.py:862)、[取消:979](../../src/app/ui/native_files_transport.py:979)、[查询截断:4179](../../external/file_explorer/routes.py:4179)。
+- FR-11：[标签提交:1251](../../src/app/ui/native_files_panel.py:1251)、[API追加:959](../../external/file_explorer/routes.py:959)。
+- FR-12：[能力应用:1477](../../src/app/ui/native_files_panel.py:1477)、[回填重启用:1196](../../src/app/ui/native_files_panel.py:1196)。
 
 ### 2.3 对话框、预览与任务生命周期
 
@@ -91,11 +95,11 @@
 
 定位依据：
 
-- FR-13：[批改名执行:70](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_batch_rename.py:70)、[宿主接线:514](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/files_panel.py:514)。
-- FR-14：[PreviewDecoder:96](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_preview.py:96)。
-- FR-15：[比较解码:108](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_compare.py:108)、[缩放:95](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_compare.py:95)、[共享请求队列:738](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:738)。4张7K级RGBA图本体可达约784MB，放大4倍的像素面积增16倍；这是容量估算，**本轮没有故意分配巨量内存来压垮应用**。
-- FR-16：[单任务轮询:478](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:478)。
-- FR-17：[transport关闭:992](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:992)、[比较完成:762](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_transport.py:762)、[解码取消/关闭:104](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/native_files_preview.py:104)。这里是明确的清理不完整，不宣称已在实机复现崩溃；由失败注入测试进一步验证。
+- FR-13：[批改名执行:70](../../src/app/ui/native_files_batch_rename.py:70)、[宿主接线:514](../../src/app/ui/files_panel.py:514)。
+- FR-14：[PreviewDecoder:96](../../src/app/ui/native_files_preview.py:96)。
+- FR-15：[比较解码:108](../../src/app/ui/native_files_compare.py:108)、[缩放:95](../../src/app/ui/native_files_compare.py:95)、[共享请求队列:738](../../src/app/ui/native_files_transport.py:738)。4张7K级RGBA图本体可达约784MB，放大4倍的像素面积增16倍；这是容量估算，**本轮没有故意分配巨量内存来压垮应用**。
+- FR-16：[单任务轮询:478](../../src/app/ui/native_files_transport.py:478)。
+- FR-17：[transport关闭:992](../../src/app/ui/native_files_transport.py:992)、[比较完成:762](../../src/app/ui/native_files_transport.py:762)、[解码取消/关闭:104](../../src/app/ui/native_files_preview.py:104)。这里是明确的清理不完整，不宣称已在实机复现崩溃；由失败注入测试进一步验证。
 
 ### 2.4 播放语义与GPU边界
 
@@ -108,10 +112,10 @@
 
 定位依据：
 
-- FR-18：[BasePlayer:646](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/base_player.py:646)、[尾帧索引:669](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/base_player.py:669)。
-- FR-19：[Topos fps:87](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/topos_player.py:87)；可复用[ToposSource时基:1882](/Users/hengshi/Documents/vscode/topos-studio/src/shared/media/topos_source.py:1882)。
-- FR-20：[Libav缩放:436](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/libav_player.py:436)。
-- FR-21：[GL创建:129](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/gl_video_canvas.py:129)、[GL呈现:150](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/gl_video_canvas.py:150)、[错误约束说明:19](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/gl_video_canvas.py:19)、[worker读尺寸:579](/Users/hengshi/Documents/vscode/topos-studio/src/shared/playback/libav_player.py:579)。Qt容许某些QOpenGLWidget用法，不等于项目授权绕过本项目GPU线程约束。
+- FR-18：[BasePlayer:646](../../src/shared/playback/base_player.py:646)、[尾帧索引:669](../../src/shared/playback/base_player.py:669)。
+- FR-19：[Topos fps:87](../../src/shared/playback/topos_player.py:87)；可复用[ToposSource时基:1882](../../src/shared/media/topos_source.py:1882)。
+- FR-20：[Libav缩放:436](../../src/shared/playback/libav_player.py:436)。
+- FR-21：[GL创建:129](../../src/shared/playback/gl_video_canvas.py:129)、[GL呈现:150](../../src/shared/playback/gl_video_canvas.py:150)、[错误约束说明:19](../../src/shared/playback/gl_video_canvas.py:19)、[worker读尺寸:579](../../src/shared/playback/libav_player.py:579)。Qt容许某些QOpenGLWidget用法，不等于项目授权绕过本项目GPU线程约束。
 
 ## 3. 完全替代的现存阻塞
 
@@ -126,7 +130,7 @@
 | FD-05 | 原生恢复闭环缺失：已有Delete，回收站列表/恢复/冲突说明无原生入口；独立音频仍经旧分派，文本/专业图片解码并未全部原生覆盖；解锁提示要求去旧Files | 原生回收站/恢复、可达任务取消、音频预览、必要解锁/格式诊断；必要专业格式走现有provider而非只依赖Qt原始字节解码 |
 | FD-06 | BX01只有备份端点，尚无完整恢复演练；DB快照不包含独立config、XMP、回收站实体与插件资源。发布spec也未提供“无旧扩展”验收 | 一致备份清单/恢复工具/校验和、实体引用检查；无扩展目录源码启动+冻结包运行、断网/可选依赖缺失矩阵；确认其他功能的WebEngine使用不受影响 |
 
-关键证据：[adapter:18](/Users/hengshi/Documents/vscode/topos-studio/src/app/integrations/file_explorer/adapter.py:18)、[Files启动:147](/Users/hengshi/Documents/vscode/topos-studio/src/app/ui/files_panel.py:147)、[共享工具反向依赖:80](/Users/hengshi/Documents/vscode/topos-studio/src/shared/diagnostics/optional_dependencies.py:80)、[.toos反向依赖:834](/Users/hengshi/Documents/vscode/topos-studio/src/shared/media/thumbnail_provider.py:834)、[main_window注入:79](/Users/hengshi/Documents/vscode/topos-studio/src/app/main_window.py:79)、[shared库默认CWD:40](/Users/hengshi/Documents/vscode/topos-studio/src/shared/db/database.py:40)、[备份端点:3843](/Users/hengshi/Documents/vscode/topos-studio/external/file_explorer/routes.py:3843)。
+关键证据：[adapter:18](../../src/app/integrations/file_explorer/adapter.py:18)、[Files启动:147](../../src/app/ui/files_panel.py:147)、[共享工具反向依赖:80](../../src/shared/diagnostics/optional_dependencies.py:80)、[.toos反向依赖:834](../../src/shared/media/thumbnail_provider.py:834)、[main_window注入:79](../../src/app/main_window.py:79)、[shared库默认CWD:40](../../src/shared/db/database.py:40)、[备份端点:3843](../../external/file_explorer/routes.py:3843)。
 
 “完全替代”不要求全项目卸掉QtWebEngine或Flask：教学动画HTML预览、其他独立产品可能合法使用。门槛是**Files及其跨域消费者不再依赖旧file_explorer的代码、端点、数据路径或插件注册**，不能为清理Files而删掉其他页面需要的依赖。
 
@@ -198,7 +202,7 @@ Files facade（异步query/command/capability/job事件）
 
 ## 6. 下一步执行表
 
-以下状态统一为**待实施**。阶段完成必须附新测试和真实证据；不要把“旧代码挪位置”“新增DTO”“某组单测绿”单独当退役完成。
+下表保留最初的阶段设计与退出门槛，当前状态见顶部复核更新。阶段完成必须附新测试和真实证据；不要把“旧代码挪位置”“新增DTO”“某组单测绿”单独当退役完成。
 
 | 阶段 | 任务 | 对应问题 | 依赖 | 负责人 | 退出门槛 |
 | --- | --- | --- | --- | --- | --- |

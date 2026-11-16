@@ -1,0 +1,35 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 250 items
+
+tests/files/test_contracts.py ................                           [  6%]
+tests/files/test_file_safety_regressions.py ........................     [ 16%]
+tests/files/test_file_tasks.py ......                                    [ 18%]
+tests/files/test_files_api_contract.py .............                     [ 23%]
+tests/files/test_import_job.py ..........                                [ 27%]
+tests/files/test_query_semantics_regressions.py ......                   [ 30%]
+tests/ui/test_native_files_actions.py .............                      [ 35%]
+tests/ui/test_native_files_metadata.py ......                            [ 37%]
+tests/ui/test_native_files_p2.py .......                                 [ 40%]
+tests/ui/test_native_files_panel.py ......................               [ 49%]
+tests/ui/test_native_files_platform.py ....                              [ 50%]
+tests/ui/test_native_files_prefs.py .....                                [ 52%]
+tests/ui/test_native_files_preview.py ..........                         [ 56%]
+tests/ui/test_native_files_transport.py ................................ [ 69%]
+....                                                                     [ 71%]
+tests/ui/test_files_native_host.py .                                     [ 71%]
+tests/ui/test_files_location_regressions.py ...........                  [ 76%]
+tests/ui/test_files_session_regressions.py ..................            [ 83%]
+tests/ui/test_playback_semantics_regressions.py ...............          [ 89%]
+tests/ui/test_native_player_host.py .                                    [ 89%]
+tests/ui/test_topos_audio.py ........                                    [ 92%]
+tests/ui/test_gpu_yuv_frame.py ......sss                                 [ 96%]
+tests/edit/test_external_import_compensation.py ...                      [ 97%]
+tests/architecture/test_file_explorer_integration.py ......              [100%]
+
+- generated xml file: /Users/heng/Documents/vscode/topos-studio/docs/validation/files_replacement_review_20261117/regression.xml -
+======================= 247 passed, 3 skipped in 14.08s ========================

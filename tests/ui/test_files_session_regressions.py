@@ -34,7 +34,7 @@ def test_fr13_execute_binds_confirmed_template_not_live_text(qtbot):
 
     dialog.template_edit.setText("{name}_x")
     dialog._preview()
-    dialog.show_preview({"session_id": dialog.session_id,
+    dialog.show_preview({"session_id": dialog._preview_request_id,
                          "plan": [{"src": "a", "dst": "a_x"}], "errors": []})
     assert dialog.execute_button.isEnabled()
 
@@ -44,10 +44,32 @@ def test_fr13_execute_binds_confirmed_template_not_live_text(qtbot):
     assert ("execute", "{name}_Y") not in emitted  # 未重新预览绝不能执行新模板
 
     dialog._preview()                              # 重新预览后按快照执行
-    dialog.show_preview({"session_id": dialog.session_id,
+    dialog.show_preview({"session_id": dialog._preview_request_id,
                          "plan": [{"src": "a", "dst": "a_Y"}], "errors": []})
     dialog._execute()
     assert ("execute", "{name}_Y") in emitted
+
+
+def test_fr13_preview_reply_cannot_confirm_edited_or_newer_request(qtbot) -> None:
+    dialog = _rename_dialog(qtbot)
+    dialog.template_edit.setText("{name}_OLD")
+    dialog._preview()
+    old_request = dialog._preview_request_id
+    dialog.template_edit.setText("{name}_NEW")
+    dialog.show_preview({"session_id": old_request, "plan": [{"src": "a", "dst": "old"}]})
+    assert not dialog.execute_button.isEnabled()
+    assert dialog._confirmed_template is None
+
+    dialog._preview()
+    first_request = dialog._preview_request_id
+    dialog._preview()  # 相同模板重复请求，仍需区分代次
+    latest_request = dialog._preview_request_id
+    dialog.show_preview({"session_id": latest_request, "plan": [{"src": "a", "dst": "new"}]})
+    dialog.show_preview_error("旧请求失败", first_request)
+    dialog.show_preview({"session_id": first_request, "plan": [], "errors": ["旧错误"]})
+    assert dialog.execute_button.isEnabled()
+    assert dialog._confirmed_template == "{name}_NEW"
+    assert "旧" not in dialog.summary.text()
 
 
 def test_fr13_foreign_session_results_are_ignored(qtbot):
@@ -134,22 +156,28 @@ def test_fr14_cancel_discards_late_result(qtbot):
 class _FakeReply(QObject):
     finished = pyqtSignal()
     readyRead = pyqtSignal()
+    metaDataChanged = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self._payload = {}
         self._chunk = b"x"
+        self._status = 200
+        self._error = None
         self.aborted = False
 
     def attribute(self, *_):
-        return 200
+        return self._status
+
+    def header(self, *_):
+        return len(self._chunk)
 
     def readAll(self):
         return json.dumps(self._payload).encode("utf-8")
 
     def error(self):
         from PyQt6.QtNetwork import QNetworkReply
-        return QNetworkReply.NetworkError.NoError
+        return self._error or QNetworkReply.NetworkError.NoError
 
     def errorString(self):
         return ""
@@ -164,7 +192,8 @@ class _FakeReply(QObject):
         pass
 
     def read(self, limit):
-        return self._chunk[:limit]
+        chunk, self._chunk = self._chunk[:limit], self._chunk[limit:]
+        return chunk
 
 
 class _FakeNetwork:
@@ -176,11 +205,73 @@ class _FakeNetwork:
         self.pending.append(reply)
         return reply
 
+    def post(self, request, payload):
+        return self.get(request)
+
 
 def _transport():
     transport = NativeFilesTransport(lambda: "http://127.0.0.1:8765", "token")
     transport._network = _FakeNetwork()
     return transport
+
+
+@pytest.mark.parametrize("failure", [None, "http", "network", "payload", "unconfirmed", "domain"])
+def test_fr13_execute_reply_keeps_session_and_reports_transport_failure(qtbot, failure) -> None:
+    from PyQt6.QtNetwork import QNetworkReply
+
+    transport = _transport()
+    results = []
+    transport.batch_rename_finished.connect(results.append)
+    try:
+        transport.execute_batch_rename(["/a.png"], "template", {"template": "{name}_x"}, "window-a")
+        reply = transport._network.pending[-1]
+        reply._payload = {"success": True, "processed": 1}
+        if failure == "http":
+            reply._status = 500
+        elif failure == "network":
+            reply._error = QNetworkReply.NetworkError.ConnectionRefusedError
+        elif failure == "payload":
+            reply._payload = []
+        elif failure == "unconfirmed":
+            reply._payload = {}
+        elif failure == "domain":
+            reply._payload = {"success": False, "message": "目录只读"}
+        reply.finished.emit()
+        assert len(results) == 1
+        assert results[0]["session_id"] == "window-a"
+        assert results[0]["success"] is (failure is None)
+        if failure:
+            assert results[0]["message"]
+        if failure == "domain":
+            assert results[0]["message"] == "目录只读"
+    finally:
+        transport.shutdown()
+
+
+@pytest.mark.parametrize("old_finishes_first", [True, False])
+def test_fr14_same_path_fetch_discards_stale_reply(qtbot, old_finishes_first) -> None:
+    transport = _transport()
+    results, failures = [], []
+    transport.preview_loaded.connect(lambda p, data: results.append((p, data)))
+    transport.preview_failed.connect(lambda p, message: failures.append((p, message)))
+    try:
+        transport.load_preview("/same.png")
+        old = transport._network.pending[-1]
+        old._chunk = b"OLD"
+        old_state = transport._preview_state
+        transport.load_preview("/same.png")
+        new = transport._network.pending[-1]
+        new._chunk = b"NEW"
+        assert old.aborted
+        old.metaDataChanged.emit()
+        old.readyRead.emit()
+        assert not old_state.data
+        for reply in ((old, new) if old_finishes_first else (new, old)):
+            reply.finished.emit()
+        assert results == [("/same.png", b"NEW")]
+        assert failures == []
+    finally:
+        transport.shutdown()
 
 
 def test_fr15_two_compare_sessions_do_not_interleave(qtbot):
