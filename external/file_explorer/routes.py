@@ -3709,11 +3709,26 @@ def _lock_guard(paths):
 # ============================================================================
 
 
+# B09 / FR-03：组织关系表 → 实际路径列名（此前 ocr_text/markers 误写
+# "path"，实际 schema 列是 file_path——UPDATE 抛错又被逐表吞掉，任务
+# 仍报成功，元数据留旧键成幽灵记录）
+_REMAP_RELATION_TABLES = (
+    ("collection_items", "file_path"),
+    ("stacks", "cover_path"),
+    ("ocr_text", "file_path"),
+    ("markers", "file_path"),
+)
+
+
 def _move_meta_rows(old_path: str, new_path: str) -> None:
     """B09：路径变化时同步 file_meta / file_tags（含目录后代）与缓存/缩略图。
 
-    恢复与移动都必须走这里：只改文件名而元数据留在旧键，会让搜索结果、
+    恢复与移动都必须走这里：只改文件名而元数据留旧键，会让搜索结果、
     智能文件夹、集合成员和缩略图全部指向幽灵路径。
+
+    [FR-03] 所有重映射纳入**单事务**：任一表失败 → rollback 并抛出，
+    由文件任务把该项记为失败——文件已移动时错误信息明确指出"元数据
+    未同步"，不允许吞异常后仍 commit 伪成功。
     """
     if not old_path or not new_path:
         return
@@ -3730,11 +3745,8 @@ def _move_meta_rows(old_path: str, new_path: str) -> None:
             (old_key, pattern)).fetchall()
         for (path,) in rows:
             target = new_key if path == old_key else new_key + path[len(old_key):]
-            try:
-                conn.execute("UPDATE OR REPLACE file_meta SET path = ? WHERE path = ?",
-                             (target, path))
-            except sqlite3.Error as e:
-                logger.error("meta path remap failed %s -> %s: %s", path, target, e)
+            conn.execute("UPDATE OR REPLACE file_meta SET path = ? WHERE path = ?",
+                         (target, path))
         conn.execute(
             "UPDATE OR REPLACE file_tags SET file_path = ? WHERE file_path = ?", (new_key, old_key))
         conn.execute(
@@ -3743,28 +3755,28 @@ def _move_meta_rows(old_path: str, new_path: str) -> None:
             (new_key, len(old_key) + 1, pattern))
         # B09：工程/组织引用一起平移，否则集合成员、堆叠封面、OCR 与标记
         # 全部指向旧路径（恢复后"文件回来了但组织关系丢了"）
-        for table, column in (("collection_items", "file_path"),
-                              ("stacks", "cover_path"),
-                              ("ocr_text", "path"),
-                              ("markers", "path")):
-            try:
-                exists = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (table,)).fetchone()
-                if not exists:
-                    continue
-                conn.execute(
-                    f"UPDATE OR REPLACE {table} SET {column} = ? WHERE {column} = ?",
-                    (new_key, old_key))
-                conn.execute(
-                    f"UPDATE OR REPLACE {table} SET {column} = ? || substr({column}, ?) "
-                    f"WHERE {column} LIKE ? ESCAPE '\\'",
-                    (new_key, len(old_key) + 1, pattern))
-            except sqlite3.Error as e:
-                logger.error("B09 remap %s.%s failed: %s", table, column, e)
+        for table, column in _REMAP_RELATION_TABLES:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,)).fetchone()
+            if not exists:
+                continue
+            conn.execute(
+                f"UPDATE OR REPLACE {table} SET {column} = ? WHERE {column} = ?",
+                (new_key, old_key))
+            conn.execute(
+                f"UPDATE OR REPLACE {table} SET {column} = ? || substr({column}, ?) "
+                f"WHERE {column} LIKE ? ESCAPE '\\'",
+                (new_key, len(old_key) + 1, pattern))
         conn.commit()
     except Exception as e:
-        logger.error("B09 path propagation failed %s -> %s: %s", old_path, new_path, e)
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"元数据路径平移失败（已回滚）{old_path} -> {new_path}: {e}") from e
     finally:
         if conn is not None:
             conn.close()
@@ -3787,6 +3799,63 @@ def _task_service():
     return file_tasks.get_service(_move_meta_rows)
 
 
+def _task_write_targets(operation, targets, options) -> list[str]:
+    """[FR-05] 任务**实际落盘**的路径集合：锁校验必须覆盖真实写目标。
+
+    此前只检查 targets 与 options.destination——mkdir 实际写的是
+    ``options.parent/name``，可用无锁 targets 向锁定目录建文件夹绕过；
+    rename 的新路径、restore 的原路径同理纳入。
+    """
+    guarded = [str(t) for t in targets if t]
+    options = options or {}
+    destination = options.get('destination')
+    if destination:
+        guarded.append(str(destination))
+    op = str(operation or '').strip().lower()
+    if op == 'mkdir':
+        parent = options.get('parent')
+        if parent:
+            guarded.append(str(parent))
+            name = str(options.get('name') or '').strip()
+            if name:
+                guarded.append(os.path.join(str(parent), name))
+    elif op == 'rename':
+        new_name = str(options.get('new_name') or '').strip()
+        if new_name:
+            for t in targets:
+                if t:
+                    guarded.append(os.path.join(os.path.dirname(str(t)), new_name))
+    elif op == 'restore':
+        guarded.extend(_restore_write_targets(targets))
+    return guarded
+
+
+def _restore_write_targets(targets) -> list[str]:
+    """restore 的真实写目标是回收站记录的 original_path（targets 可能是 id）。"""
+    hints, conn = [], None
+    try:
+        conn = _db()
+        for t in targets:
+            key = str(t or '').strip()
+            if not key:
+                continue
+            if key.isdigit():
+                row = conn.execute(
+                    "SELECT original_path FROM trash WHERE id = ?", (int(key),)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT original_path FROM trash WHERE original_path = ?",
+                    (_meta_key(key),)).fetchone()
+            if row and row[0]:
+                hints.append(row[0])
+    except Exception:
+        pass  # 旧库无 trash 表等：targets 本身仍在守卫集合内
+    finally:
+        if conn is not None:
+            conn.close()
+    return hints
+
+
 @app.route('/api/tasks/start', methods=['POST'])
 def api_tasks_start():
     """提交一个文件任务：立即返回 job_id，进度与逐项结果走 /api/tasks/status。"""
@@ -3795,11 +3864,7 @@ def api_tasks_start():
     targets = data.get('targets') or []
     if not isinstance(targets, list) or not targets:
         return jsonify({'success': False, 'message': '缺少 targets'}), 400
-    guarded = list(targets)
-    destination = (data.get('options') or {}).get('destination')
-    if destination:
-        guarded.append(destination)
-    _lg = _lock_guard(guarded)
+    _lg = _lock_guard(_task_write_targets(operation, targets, data.get('options')))
     if _lg:
         return _lg
     try:

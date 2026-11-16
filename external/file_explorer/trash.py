@@ -101,32 +101,103 @@ def _like_escape(s: str) -> str:
 
 
 def _snapshot_meta(path: str):
-    """取该路径（含目录的全部后代）的 file_meta 行快照。"""
+    """[FR-04] 取该路径（含目录全部后代）的**完整**元数据与组织关系快照。
+
+    v2 清单：file_meta 全列（技术字段/stack_id 等不再丢失）+ file_tags +
+    集合成员 + 堆叠封面 + OCR + 标记。恢复时按最终身份整体重映射，
+    原文件与新占位文件不串组织关系。单表失败记 warning 继续快照其余
+    表（恢复尽最大努力），但不再静默返回空清单。
+    """
+    import sqlite3 as _sqlite3
+    key = _meta_key(path)
+    pattern = _like_escape(key) + "/%"
     conn = None
+    snapshot = {"version": 2, "meta": [], "file_tags": [],
+                "collections": [], "stacks": [], "ocr": [], "markers": []}
     try:
         conn = _db()
-        rows = conn.execute(
-            """SELECT path, tags, comments, rating, cached_info, color, flag
-               FROM file_meta WHERE path = ? OR path LIKE ? ESCAPE '\\'""",
-            (_meta_key(path), _like_escape(_meta_key(path)) + "/%")).fetchall()
-        return [dict(zip(_META_FIELDS, r)) for r in rows]
+        cursor = conn.execute(
+            "SELECT * FROM file_meta WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+            (key, pattern))
+        columns = [d[0] for d in cursor.description]
+        snapshot["meta"] = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        def _table_exists(name: str) -> bool:
+            return conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (name,)).fetchone() is not None
+
+        def _collect(section: str, sql: str, params: tuple) -> None:
+            try:
+                cur = conn.execute(sql, params)
+                cols = [d[0] for d in cur.description]
+                snapshot[section] = [dict(zip(cols, row)) for row in cur.fetchall()]
+            except _sqlite3.Error as e:
+                logger.warning(f"[FR-04] 快照 {section} 失败 {path}: {e}")
+
+        if _table_exists("file_tags"):
+            _collect("file_tags",
+                     """SELECT ft.file_path AS file_path, t.name AS name
+                        FROM file_tags ft JOIN tags t ON t.id = ft.tag_id
+                        WHERE ft.file_path = ? OR ft.file_path LIKE ? ESCAPE '\\'""",
+                     (key, pattern))
+        if _table_exists("collection_items"):
+            _collect("collections",
+                     """SELECT collection_id, file_path FROM collection_items
+                        WHERE file_path = ? OR file_path LIKE ? ESCAPE '\\'""",
+                     (key, pattern))
+        if _table_exists("stacks"):
+            _collect("stacks",
+                     """SELECT id, cover_path FROM stacks
+                        WHERE cover_path = ? OR cover_path LIKE ? ESCAPE '\\'""",
+                     (key, pattern))
+        if _table_exists("ocr_text"):
+            _collect("ocr",
+                     """SELECT file_path, text, ocr_at FROM ocr_text
+                        WHERE file_path = ? OR file_path LIKE ? ESCAPE '\\'""",
+                     (key, pattern))
+        if _table_exists("markers"):
+            _collect("markers",
+                     """SELECT file_path, t_in, t_out, label, created_at FROM markers
+                        WHERE file_path = ? OR file_path LIKE ? ESCAPE '\\'""",
+                     (key, pattern))
+        return snapshot
     except Exception as e:
         logger.warning(f"[U6] meta 快照失败 {path}: {e}")
-        return []
+        return snapshot
     finally:
         if conn is not None:
             conn.close()
 
 
 def _delete_meta_rows(conn, path: str) -> None:
-    """删除该路径及全部后代的 file_meta/file_tags 行（FTS 由 AD 触发器同步）。"""
+    """删除该路径及全部后代的元数据与**组织关系**行（FTS 由触发器同步）。
+
+    [FR-04] 此前集合成员/堆叠封面/OCR/标记留在原路径：目录里删掉的文件
+    其幽灵关系继续出现在集合中，恢复成副本后又指向另一份素材。现在与
+    file_meta 一起删除、进快照，恢复时按最终身份重建。
+    """
+    import sqlite3 as _sqlite3
     key = _meta_key(path)
+    pattern = _like_escape(key) + "/%"
     conn.execute("DELETE FROM file_meta WHERE path = ?", (key,))
-    conn.execute("DELETE FROM file_meta WHERE path LIKE ? ESCAPE '\\'",
-                 (_like_escape(key) + "/%",))
+    conn.execute("DELETE FROM file_meta WHERE path LIKE ? ESCAPE '\\'", (pattern,))
     conn.execute("""DELETE FROM file_tags WHERE file_path = ?
-                    OR file_path LIKE ? ESCAPE '\\'""",
-                 (key, _like_escape(key) + "/%"))
+                    OR file_path LIKE ? ESCAPE '\\'""", (key, pattern))
+    for table, column in (("collection_items", "file_path"),
+                          ("stacks", "cover_path"),
+                          ("ocr_text", "file_path"),
+                          ("markers", "file_path")):
+        try:
+            if not conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,)).fetchone():
+                continue
+            conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (key,))
+            conn.execute(
+                f"DELETE FROM {table} WHERE {column} LIKE ? ESCAPE '\\'", (pattern,))
+        except _sqlite3.Error as e:
+            logger.warning(f"[FR-04] 清理 {table} 关系失败 {key}: {e}")
 
 
 def trash_items(paths):
@@ -214,7 +285,9 @@ def list_items():
         items = []
         for rid, opath, name, is_dir, deleted_at, meta_json in rows:
             try:
-                meta_rows = len(json.loads(meta_json or '[]'))
+                parsed = json.loads(meta_json or '[]')
+                # v2 是完整清单字典，v1 是行列表——统一取行数
+                meta_rows = len(parsed.get('meta', []) if isinstance(parsed, dict) else parsed)
             except Exception:
                 meta_rows = 0
             items.append({'id': rid, 'original_path': opath, 'name': name,
@@ -246,6 +319,70 @@ def _remap_meta_path(old_path, root_old, root_new):
     if old_path.startswith(prefix):
         return root_new.rstrip('/') + '/' + old_path[len(prefix):]
     return old_path
+
+
+def _parse_snapshot(meta_json):
+    """兼容 v1（7 字段行列表）与 v2（完整清单）两种 trash.meta_json。"""
+    try:
+        data = json.loads(meta_json or '[]')
+    except Exception:
+        data = []
+    if isinstance(data, dict) and data.get('version') == 2:
+        return data
+    return {"version": 1, "meta": [row for row in data if isinstance(row, dict)],
+            "file_tags": [], "collections": [], "stacks": [], "ocr": [], "markers": []}
+
+
+def _restore_snapshot_rows(cursor, meta_json, opath, dest) -> None:
+    """[FR-04] 按最终恢复身份重建全部元数据与组织关系（单事务内调用）。"""
+    snapshot = _parse_snapshot(meta_json)
+
+    def remap(old: str) -> str:
+        return _meta_key(_remap_meta_path(old, opath, dest))
+
+    file_meta_cols = {row[1] for row in cursor.execute(
+        "PRAGMA table_info(file_meta)").fetchall()}
+    for m in snapshot.get("meta") or []:
+        nk = remap(m.get('path'))
+        if cursor.execute("SELECT 1 FROM file_meta WHERE path = ?", (nk,)).fetchone():
+            continue  # 已存在同路径行：不覆盖用户新数据
+        cols = {k: v for k, v in m.items()
+                if k != 'path' and k in file_meta_cols}
+        if not cols:  # 极老快照只剩 7 字段之外的新库：退化为默认行
+            cols = {'tags': '', 'rating': 0}
+        placeholders = ', '.join('?' for _ in cols)
+        cursor.execute(
+            f"INSERT INTO file_meta (path, {', '.join(cols)}) VALUES (?, {placeholders})",
+            (nk, *cols.values()))
+        # file_tags：优先 v2 精确标签关系；v1 退回 tags 逗号串
+        tag_names = [row.get('name') for row in (snapshot.get("file_tags") or [])
+                     if row.get('file_path') == m.get('path') and row.get('name')]
+        if not snapshot.get("file_tags"):
+            tag_names = [x.strip() for x in (m.get('tags') or '').split(',') if x.strip()]
+        for tag in tag_names:
+            cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+            cursor.execute("""INSERT OR IGNORE INTO file_tags (file_path, tag_id)
+                              SELECT ?, id FROM tags WHERE name = ?""", (nk, tag))
+
+    for row in snapshot.get("collections") or []:
+        cursor.execute(
+            """INSERT OR REPLACE INTO collection_items (collection_id, file_path)
+               VALUES (?, ?)""",
+            (row.get('collection_id'), remap(row.get('file_path'))))
+    for row in snapshot.get("stacks") or []:
+        cursor.execute("INSERT OR REPLACE INTO stacks (id, cover_path) VALUES (?, ?)",
+                       (row.get('id'), remap(row.get('cover_path'))))
+    for row in snapshot.get("ocr") or []:
+        cursor.execute(
+            """INSERT OR REPLACE INTO ocr_text (file_path, text, ocr_at)
+               VALUES (?, ?, ?)""",
+            (remap(row.get('file_path')), row.get('text') or '', row.get('ocr_at')))
+    for row in snapshot.get("markers") or []:
+        cursor.execute(
+            """INSERT INTO markers (file_path, t_in, t_out, label, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (remap(row.get('file_path')), row.get('t_in'), row.get('t_out'),
+             row.get('label'), row.get('created_at')))
 
 
 def restore_items(ids):
@@ -293,24 +430,12 @@ def restore_items(ids):
             # [U9] 回写失败时回滚 + 把文件放回回收站：此前只记日志继续，
             # 留下"文件已恢复但 trash 行还在"的僵尸记录（后续 purge 还会
             # 误删刚恢复文件的缩略图）。
+            # [FR-04] v2 快照：file_meta 全列 + 组织关系按**最终身份**重映射
+            # ——同名恢复成副本时，集合/堆叠/OCR/标记跟到新路径，不指向
+            # 原位置的新占位文件。
             try:
                 c = conn.cursor()
-                for m in (json.loads(meta_json or '[]') if meta_json else []):
-                    nk = _meta_key(_remap_meta_path(m.get('path'), opath, dest))
-                    if c.execute("SELECT 1 FROM file_meta WHERE path = ?", (nk,)).fetchone():
-                        continue
-                    c.execute(
-                        """INSERT INTO file_meta (path, tags, comments, rating,
-                                                  cached_info, color, flag)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (nk, m.get('tags') or '', m.get('comments') or '',
-                         m.get('rating') or 0, m.get('cached_info'),
-                         m.get('color') or 0, m.get('flag') or 0))
-                    for t in [x.strip() for x in (m.get('tags') or '').split(',')
-                              if x.strip()]:
-                        c.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (t,))
-                        c.execute("""INSERT OR IGNORE INTO file_tags (file_path, tag_id)
-                                     SELECT ?, id FROM tags WHERE name = ?""", (nk, t))
+                _restore_snapshot_rows(c, meta_json, opath, dest)
                 c.execute("DELETE FROM trash WHERE id = ?", (rid,))
                 conn.commit()
             except Exception as e:
