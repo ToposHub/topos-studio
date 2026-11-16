@@ -33,7 +33,7 @@ def _select_all(panel):
 def test_views_share_selection_and_drag_all_files(qtbot):
     panel = _panel(qtbot)
     _select_all(panel)
-    panel.view_combo.setCurrentIndex(1)
+    panel.view_combo.setCurrentIndex(panel.view_combo.findData("list"))
     assert panel.icon_view.selectionModel() is panel.detail_view.selectionModel()
     assert len(panel.selection.selectedRows()) == 3
     mime = panel.mime_data_for_selection()

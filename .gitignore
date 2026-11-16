@@ -160,3 +160,11 @@ external/blackmagic/
 
 # [侵权排查 2026-11-01] 来源不明素材不入仓(本地保留)
 hdri/*.jpg
+
+# [隐私保护 2026-11-17] Files 验证截图与真实媒体清单不入仓：截图含用户私人照片，
+# JSON 记录真实文件名；本地保留用于核验，仅从版本库排除
+docs/validation/files_eagle_layout_20261117/**/*.png
+docs/validation/files_eagle_layout_20261117/mixed_samples.json
+docs/validation/files_eagle_layout_20261117/real_media_results.json
+docs/validation/files_eagle_layout_20261117/__pycache__/
+docs/validation/files_plugins_20261117/**/*.png

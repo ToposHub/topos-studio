@@ -1,0 +1,2 @@
+{"case": "FR-13 old preview after template edit", "confirmed_template": null, "execute_enabled": false}
+{"case": "FR-09 search after newer collection", "loaded_events": ["collection", "search"], "old_search_aborted": false}

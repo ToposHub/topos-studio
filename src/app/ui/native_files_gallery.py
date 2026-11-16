@@ -4,12 +4,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QCursor, QFont, QImage, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QTextOption
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from src.features.files.contracts import Entry, format_duration
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
+from src.app.ui.native_files_gallery_view import GALLERY_CAPTION_HEIGHT, GALLERY_ITEM_INSET
 
 
 class FilesCardDelegate(QStyledItemDelegate):
@@ -22,9 +23,12 @@ class FilesCardDelegate(QStyledItemDelegate):
         self.image_for_entry = image_for_entry
         self.strip_for_entry = strip_for_entry
         self.card_width = 180
+        self.layout_mode = "grid"
+        self.grid_fill = False
 
     def sizeHint(self, option: QStyleOptionViewItem | None, index: QModelIndex) -> QSize:
-        return QSize(self.card_width + 16, int(self.card_width * 0.625) + 72)
+        return QSize(self.card_width + 2 * GALLERY_ITEM_INSET,
+                     self.card_width + GALLERY_CAPTION_HEIGHT + 2 * GALLERY_ITEM_INSET)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         entry: Entry | None = index.data(self.entry_role)
@@ -32,30 +36,34 @@ class FilesCardDelegate(QStyledItemDelegate):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(option.rect).adjusted(5, 5, -5, -5)
-        cover = QRectF(rect.left() + 1, rect.top() + 1, rect.width() - 2, rect.width() * 0.625)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setClipRect(option.rect)
+        rect = QRectF(option.rect).adjusted(3, 3, -3, -3)
+        cover = QRectF(option.rect).adjusted(GALLERY_ITEM_INSET, GALLERY_ITEM_INSET,
+                                            -GALLERY_ITEM_INSET,
+                                            -GALLERY_ITEM_INSET - GALLERY_CAPTION_HEIGHT)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         offline = entry.availability == "offline"
-        body = QColor(C.BG_PANEL)
-        if selected:
-            body = QColor(C.ORANGE)
-            body.setAlpha(22)
-        painter.setBrush(body)
-        painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER if hovered else C.BORDER_SUBTLE),
-                            1.2 if selected else 0.7))
-        painter.drawRoundedRect(rect, 8, 8)
+        if selected or hovered:
+            body = QColor(C.ORANGE if selected else C.BG_ACTIVE)
+            if selected:
+                body.setAlpha(22)
+            painter.setBrush(body)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, 5, 5)
         clip = QPainterPath()
-        clip.addRoundedRect(cover, 7, 7)
+        clip.addRoundedRect(cover, 4, 4)
         painter.save()
         painter.setClipPath(clip)
-        painter.fillRect(cover, QColor(C.BG_INPUT_DARK))
         image = self.image_for_entry(entry)
         if image is not None and not image.isNull():
-            scale = max(cover.width() / image.width(), cover.height() / image.height())
+            fit = max if self.layout_mode == "grid" and self.grid_fill else min
+            scale = fit(cover.width() / image.width(), cover.height() / image.height())
             width, height = image.width() * scale, image.height() * scale
             painter.drawImage(QRectF(cover.center().x() - width / 2, cover.center().y() - height / 2, width, height), image)
         else:
+            painter.fillRect(cover, QColor(C.BG_INPUT_DARK))
             icon = index.data(Qt.ItemDataRole.DecorationRole)
             if icon is not None:
                 icon.paint(painter, int(cover.center().x() - 19), int(cover.center().y() - 19), 38, 38)
@@ -78,6 +86,11 @@ class FilesCardDelegate(QStyledItemDelegate):
                     painter.drawLine(int(x), int(strip_rect.top()), int(x), int(strip_rect.bottom()))
                 painter.restore()
 
+        if selected or hovered:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER), 1.2))
+            painter.drawRoundedRect(cover, 4, 4)
+
         kind = entry.kind
         if entry.is_dir:
             badge = I18N.tr("files.native.kind.dir", "文件夹")
@@ -97,7 +110,8 @@ class FilesCardDelegate(QStyledItemDelegate):
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge)
 
         if entry.user.rating:
-            rating_rect = QRectF(cover.right() - 46, cover.top() + 8, 38, 18)
+            rating_width = metrics.horizontalAdvance("★" * entry.user.rating) + 12
+            rating_rect = QRectF(cover.right() - rating_width - 8, cover.top() + 8, rating_width, 18)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(18, 18, 18, 190))
             painter.drawRoundedRect(rating_rect, 4, 4)
@@ -105,34 +119,79 @@ class FilesCardDelegate(QStyledItemDelegate):
             painter.drawText(rating_rect, Qt.AlignmentFlag.AlignCenter, "★" * entry.user.rating)
 
         title_font = QFont(option.font)
-        title_font.setPointSizeF(11)
-        title_font.setWeight(title_font.Weight.Medium)
+        title_font.setPointSizeF(10)
         painter.setFont(title_font)
-        title_rect = QRectF(rect.left() + 10, cover.bottom() + 6, rect.width() - 20, 22)
+        title_rect = QRectF(rect.left() + 4, cover.bottom() + 4, rect.width() - 8, 34)
         painter.setPen(QColor(C.TEXT_HINT if offline else C.TEXT_PRIMARY))
-        title = painter.fontMetrics().elidedText(entry.name, Qt.TextElideMode.ElideMiddle, int(title_rect.width()))
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
-
-        # 辅助信息只用真实已知值：时长来自技术元数据，大小来自 stat。
-        details: list[str] = []
+        text_option = QTextOption(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        text_option.setWrapMode(QTextOption.WrapMode.WrapAnywhere)
+        painter.drawText(title_rect, entry.name, text_option)
+        # 时间和离线状态覆在封面上，名称区域留给两行文件名。
         duration = entry.technical.duration_seconds
-        if duration and 0 < duration < 360000:
-            details.append(format_duration(duration))
-        if not entry.is_dir and entry.size_label != "—":
-            details.append(entry.size_label)
-        if entry.subdir:
-            details.append(entry.subdir.rsplit("/", 1)[-1])
-        if offline:
-            details.append(I18N.tr("files.native.offline", "离线"))
-        subtitle = " · ".join(details)
-        if entry.is_dir:
-            subtitle = I18N.tr("files.native.open_folder", "双击浏览文件夹")
-        painter.setFont(badge_font)
-        painter.setPen(QColor(C.TEXT_HINT))
-        painter.drawText(QRectF(title_rect.left(), title_rect.bottom(), title_rect.width(), 17),
-                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, subtitle)
+        label = (I18N.tr("files.native.offline", "离线") if offline
+                 else format_duration(duration) if entry.kind in ("video", "audio")
+                 and duration and 0 < duration < 360000 else "")
+        if label:
+            painter.setFont(badge_font)
+            width = painter.fontMetrics().horizontalAdvance(label) + 12
+            badge_rect = QRectF(cover.right() - width - 6, cover.bottom() - 24, width, 18)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(18, 18, 18, 190))
+            painter.drawRoundedRect(badge_rect, 4, 4)
+            painter.setPen(QColor(C.TEXT_PRIMARY))
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
         if option.state & QStyle.StateFlag.State_HasFocus:
             painter.setPen(QPen(QColor(C.ORANGE), 1, Qt.PenStyle.DotLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect.adjusted(3, 3, -3, -3), 6, 6)
+        painter.restore()
+
+
+class FilesListDelegate(QStyledItemDelegate):
+    """真实缩略图与属性列共用当前selection/model，不创建逐行控件。"""
+
+    def __init__(self, entry_role: int, image_for_entry: Callable[[Entry], QImage | None],
+                 parent: QWidget) -> None:
+        super().__init__(parent)
+        self.entry_role = entry_role
+        self.image_for_entry = image_for_entry
+        self.row_height = 46
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        size = super().sizeHint(option, index)
+        size.setHeight(self.row_height)
+        return size
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        entry = index.data(self.entry_role)
+        if index.column() != 0 or not isinstance(entry, Entry):
+            super().paint(painter, option, index)
+            return
+        background = QStyleOptionViewItem(option)
+        self.initStyleOption(background, index)
+        background.text = ""
+        background.icon = QIcon()
+        widget = option.widget
+        if widget is not None:
+            widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, background, painter, widget)
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        cover = QRectF(option.rect.left() + 6, option.rect.top() + 4, 54, option.rect.height() - 8)
+        image = self.image_for_entry(entry)
+        if image is not None and not image.isNull():
+            scale = min(cover.width() / image.width(), cover.height() / image.height())
+            width, height = image.width() * scale, image.height() * scale
+            painter.drawImage(QRectF(cover.center().x() - width / 2,
+                                     cover.center().y() - height / 2, width, height), image)
+        else:
+            icon = index.data(Qt.ItemDataRole.DecorationRole)
+            if icon is not None:
+                icon.paint(painter, int(cover.center().x() - 12), int(cover.center().y() - 12), 24, 24)
+        title_rect = QRectF(option.rect).adjusted(70, 0, -6, 0)
+        painter.setFont(option.font)
+        painter.setPen(QColor(C.TEXT_HINT if entry.availability == "offline" else C.TEXT_PRIMARY))
+        title = painter.fontMetrics().elidedText(entry.name, Qt.TextElideMode.ElideMiddle,
+                                                max(1, int(title_rect.width())))
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
         painter.restore()

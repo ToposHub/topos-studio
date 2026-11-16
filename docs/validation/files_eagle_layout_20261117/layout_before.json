@@ -1,0 +1,22 @@
+{
+  "variant": "before",
+  "photos": 123,
+  "geometry": {
+    "size": [
+      1360,
+      820
+    ],
+    "sidebar": 164,
+    "inspector": 240,
+    "gallery_viewport": [
+      944,
+      714
+    ],
+    "grid": [
+      176,
+      172
+    ]
+  },
+  "source_write_operations": 0,
+  "preferences": "temporary INI"
+}

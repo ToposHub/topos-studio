@@ -1,0 +1,42 @@
+{
+  "scope": "21 real items, prepared thumbnails, virtual read-only location",
+  "layouts": {
+    "adaptive": {
+      "page": 0,
+      "selected_path": "/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "viewport": [
+        904,
+        714
+      ],
+      "scroll_max": 367
+    },
+    "masonry": {
+      "page": 0,
+      "selected_path": "/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "viewport": [
+        904,
+        714
+      ],
+      "scroll_max": 370
+    },
+    "grid": {
+      "page": 0,
+      "selected_path": "/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "viewport": [
+        904,
+        714
+      ],
+      "scroll_max": 409
+    },
+    "list": {
+      "page": 1,
+      "selected_path": "/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/2K_h264.mp4",
+      "viewport": [
+        904,
+        675
+      ],
+      "scroll_max": 5
+    }
+  },
+  "source_write_operations": 0
+}

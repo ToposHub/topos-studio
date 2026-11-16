@@ -1,0 +1,52 @@
+[ThumbEngine] ffmpeg 无 libwebp 编码器，视频缩略图走 PNG+Pillow 直转
+Images: {'passed': 137}
+2K_DNxHR 444 10bit.mov: passed
+2K_DNxHR 444 12bit.mov: passed
+2K_DNxHR HQX 10bit.mov: passed
+2K_DNxHR HQX 12bit.mov: passed
+2K_H265.mov: passed
+2K_Prores4444_Alpha.mov: passed
+2K_h264.mp4: passed
+2K_prores422.mov: passed
+2K_prores422HQ.mov: passed
+2K_prores422LT.mov: passed
+2K_prores422Proxy.mov: passed
+2K_prores4444.mov: passed
+2K_prores4444XQ.mov: passed
+2K_topos_422.mov: aspect_mismatch
+2K_topos_422_HQ.mov: aspect_mismatch
+2K_topos_422_LT (H.264).mp4: passed
+2K_topos_422_LT.mov: aspect_mismatch
+2K_topos_422_Proxy.mov: aspect_mismatch
+2K_topos_4444.mov: aspect_mismatch
+2K_topos_4444_XQ.mov: aspect_mismatch
+4K_DNxHR 444 10bit.mov: passed
+4K_DNxHR 444 12bit.mov: passed
+4K_DNxHR HQX 10bit.mov: passed
+4K_DNxHR HQX 12bit.mov: passed
+4K_H264.mov: passed
+4K_H265.mov: passed
+4K_prores422.mov: passed
+4K_prores422HQ.mov: passed
+4K_prores422LT.mov: passed
+4K_prores422Proxy.mov: passed
+4K_prores4444.mov: passed
+4K_prores4444XQ.mov: passed
+4K_topos_422.mov: aspect_mismatch
+4K_topos_422_HQ.mov: aspect_mismatch
+4K_topos_422_LT.mov: aspect_mismatch
+4K_topos_422_Proxy.mov: aspect_mismatch
+4K_topos_4444.mov: aspect_mismatch
+4K_topos_4444_XQ.mov: aspect_mismatch
+A002_01012049_C013.braw: not_supported_by_files_player
+A010_A037_0715UN_001.R3D: not_supported_by_files_player
+H034C0035_240410_P05R39.MOV: timeout
+4K_prores_422_HQ_from_4444.mov: passed
+4K_prores_422_from_4444.mov: passed
+motion_blur.mp4: passed
+occlusion.mp4: passed
+perspective.mp4: passed
+scene_cut.mp4: passed
+translation.mp4: passed
+trs.mp4: passed
+{"images": {"passed": 137}, "videos": {"passed": 34, "aspect_mismatch": 12, "not_supported_by_files_player": 2, "timeout": 1}, "elapsed_seconds": 131.186}

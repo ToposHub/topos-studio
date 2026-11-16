@@ -3,6 +3,10 @@
 The broker only returns an authorization decision.  It never opens files or
 creates sockets, so the host can keep actual I/O in a separately audited
 adapter.  A plugin's declarative policy is an additional gate, not a sandbox.
+
+Contract types (BrokerDecision / HostIOResult / PluginResourceBroker /
+PathGrant / NetworkGrant) live in ``src/shared/plugins/broker.py`` so every
+plugin host shares them; they are re-exported here for compatibility.
 """
 
 from __future__ import annotations
@@ -17,6 +21,20 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+from src.shared.plugins.broker import (
+    BrokerDecision,
+    HostIOResult,
+    NetworkGrant,
+    PathGrant,
+    PluginResourceBroker,
+)
+
+__all__ = [
+    "BrokerDecision", "HostIOResult", "PluginResourceBroker", "PluginHostIO",
+    "DefaultDenyResourceBroker", "PolicyBoundResourceBroker", "PathGrant",
+    "NetworkGrant", "AllowlistResourceBroker",
+]
+
 
 def _force_binary_fd(fd: int) -> None:
     """Windows：os.open 默认继承 CRT 文本模式，os.read/write 会做 CRLF
@@ -25,69 +43,6 @@ def _force_binary_fd(fd: int) -> None:
         import msvcrt
 
         msvcrt.setmode(fd, os.O_BINARY)
-
-
-@dataclass(frozen=True)
-class BrokerDecision:
-    allowed: bool
-    code: str
-    message: str
-    target: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "allowed": self.allowed,
-            "code": self.code,
-            "message": self.message[:500],
-            "target": self.target,
-        }
-
-
-@dataclass(frozen=True)
-class HostIOResult:
-    """Bounded result returned by a host-owned plugin I/O capability."""
-
-    ok: bool
-    code: str
-    message: str = ""
-    data: bytes = b""
-    bytes_count: int = 0
-    status_code: int = 0
-    content_type: str = ""
-
-    def to_dict(self, *, include_data: bool = False) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "ok": self.ok,
-            "code": self.code,
-            "message": self.message[:500],
-            "bytes_count": self.bytes_count,
-            "status_code": self.status_code,
-            "content_type": self.content_type[:200],
-        }
-        if include_data:
-            payload["data"] = self.data
-        return payload
-
-
-class PluginResourceBroker(Protocol):
-    def check_path(
-        self,
-        plugin_id: str,
-        path: str,
-        *,
-        mode: str = "read",
-        policy: Any = None,
-    ) -> BrokerDecision:
-        ...
-
-    def check_network(
-        self,
-        plugin_id: str,
-        url: str,
-        *,
-        policy: Any = None,
-    ) -> BrokerDecision:
-        ...
 
 
 class PluginHostIO:
@@ -376,36 +331,6 @@ class PolicyBoundResourceBroker:
         return self._delegate.check_network(
             self._plugin_id, url, policy=self._policy,
         )
-
-
-@dataclass(frozen=True)
-class PathGrant:
-    root: str
-    allow_read: bool = True
-    allow_write: bool = False
-
-    @property
-    def resolved_root(self) -> str:
-        return str(Path(self.root).expanduser().resolve(strict=False))
-
-
-@dataclass(frozen=True)
-class NetworkGrant:
-    domain: str
-    schemes: tuple[str, ...] = ("https",)
-    allow_subdomains: bool = False
-
-    def __post_init__(self) -> None:
-        domain = str(self.domain or "").strip().lower().rstrip(".")
-        if not domain or "/" in domain or ":" in domain:
-            raise ValueError("network grant domain must be a hostname")
-        schemes = tuple(dict.fromkeys(
-            str(item).strip().lower() for item in self.schemes if str(item).strip()
-        ))
-        if not schemes:
-            raise ValueError("network grant requires at least one scheme")
-        object.__setattr__(self, "domain", domain)
-        object.__setattr__(self, "schemes", schemes)
 
 
 class AllowlistResourceBroker:

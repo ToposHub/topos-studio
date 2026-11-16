@@ -163,7 +163,9 @@ def test_fr01_concurrent_same_destination_error_policy_no_data_loss(tmp_path, se
         survivors = [p for p in (a, b) if p.exists()]
         assert len(survivors) == len([s for s in snaps if s["status"] == "failed"])
     else:
-        assert not a.exists() or not b.exists()  # 至多允许全部失败，不允许双成功丢数据
+        assert all(s["status"] == "failed" for s in snaps)
+        assert a.read_bytes() == b"ORIGINAL A"
+        assert b.read_bytes() == b"ORIGINAL B"
     # 未授权覆盖为零：目标内容必须是其中一份的原始字节
     assert not out.exists() or out.read_bytes() in (b"ORIGINAL A", b"ORIGINAL B")
 
@@ -193,16 +195,23 @@ def test_fr01_concurrent_matrix_no_unauthorized_overwrite(tmp_path, service, ope
         assert len(outputs) == 2
         assert set(outputs.values()) == {b"ORIGINAL A", b"ORIGINAL B"}
         assert all(s["status"] == "completed" for s in snaps)
+    elif policy == "error":
+        assert sum(s["status"] == "completed" for s in snaps) == 1
+        assert len(outputs) == 1
+        winner = next(i for i, s in enumerate(snaps) if s["status"] == "completed")
+        assert list(outputs.values()) == [(b"ORIGINAL A", b"ORIGINAL B")[winner]]
     else:
+        assert any(s["status"] == "completed" for s in snaps)
+        assert len(outputs) == 1
         for content in outputs.values():
-            assert content in (b"ORIGINAL A", b"ORIGINAL B")  # 未授权覆盖为零
-        succeeded = sum(1 for s in snaps if s["status"] == "completed")
-        assert len(outputs) == max(succeeded, 0) + (0 if policy == "error" else 0) or outputs
+            assert content in (b"ORIGINAL A", b"ORIGINAL B")  # 显式授权覆盖
     # move 语义：成功的源消失、失败的源必须保留
     for path, snap in zip((a, b), snaps):
         if snap["status"] == "completed":
             if operation == "move":
                 assert not path.exists()
+            else:
+                assert path.read_bytes() in (b"ORIGINAL A", b"ORIGINAL B")
         else:
             assert path.exists()
     assert not list((tmp_path / "out").glob("*.topos-tmp"))
