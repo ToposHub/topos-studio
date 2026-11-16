@@ -26,6 +26,7 @@ import sys
 import subprocess
 import threading
 import time
+from fractions import Fraction
 from pathlib import Path
 
 # ``src/shared/playback`` is inside the repository package tree; when this file
@@ -84,7 +85,22 @@ class ToposMovieSession(DecoderBackend):
         self.width = info.width
         self.height = info.height
         self.frame_count = info.sample_count
-        self.fps = float(info.timescale) if info.timescale else 24.0
+        # [FR-19] timescale 不是 fps：MOV media timescale 是"每秒 tick 数"，
+        # 与帧率无关（timescale=24000、每帧 1000 ticks 的 24fps 片会算出
+        # 24000fps/0.01s）。复用 ToposSource 的精确时基公式：
+        # duration_ticks = 末帧 pts + 末帧时长；fps = timescale × 帧数 ÷
+        # duration_ticks（含 NTSC 等 Non-整数帧率的精确换算）。
+        duration_ticks = 0
+        try:
+            last_pts, last_dur = self._movie.pts(max(0, int(info.sample_count) - 1))
+            duration_ticks = int(last_pts) + int(last_dur)
+        except Exception:
+            duration_ticks = 0
+        if duration_ticks > 0 and info.sample_count > 0 and info.timescale:
+            self.fps = float(Fraction(int(info.timescale) * int(info.sample_count),
+                                      duration_ticks))
+        else:
+            self.fps = 24.0
         try:
             self.vfmt = _PIX_FMT_BY_GEOMETRY[(info.pixel_format, info.bit_depth)]
         except KeyError:
