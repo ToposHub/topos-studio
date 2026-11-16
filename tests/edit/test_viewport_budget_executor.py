@@ -25,6 +25,7 @@ R03（2026-11-09 复查）新增验收：
 from __future__ import annotations
 
 import json
+import logging
 from types import SimpleNamespace
 from typing import Any, Optional, Tuple
 
@@ -266,6 +267,39 @@ def _worker_shell():
 
 class TestBudgetScaleDomain:
     @pytest.mark.parametrize("seq,cap", [
+        ((1920, 1080), (707, 585)),
+        ((3840, 2160), (621, 585)),
+        ((3840, 2160), (657, 585)),
+        ((3840, 2160), (739, 585)),
+        ((2160, 3840), (585, 707)),
+        ((2048, 858), (1001, 501)),
+    ])
+    def test_odd_caps_constrain_real_auto_full_scrub_and_worker_targets(
+        self, seq: Tuple[int, int], cap: Tuple[int, int],
+    ) -> None:
+        renderer = _renderer_shell(seq)
+        renderer.set_budget_size_cap(cap)
+        worker = _worker_shell()
+        worker._timeline_sequence = SimpleNamespace(width=seq[0], height=seq[1])
+        worker._viewport_size = (1920, 1080)
+        worker._active_decode_target_size = None
+        worker.set_budget_size_cap(cap)
+        targets = [renderer.preview_decode_target_size(), worker._decode_target_size,
+                   renderer._scrub_decode_target_size]
+        renderer._decode_quality_stage = "full"
+        targets.append(renderer.preview_decode_target_size())
+        for width, height in targets:
+            assert width <= cap[0] and height <= cap[1]
+            assert width % 2 == 0 and height % 2 == 0
+        assert renderer.budget_size_cap_status()["satisfied"] is True
+
+    def test_native_odd_dimensions_that_fit_cap_stay_exact(self) -> None:
+        renderer = _renderer_shell((1919, 1079), user_quality=1.0)
+        renderer.set_budget_size_cap((1919, 1079))
+        assert renderer.preview_decode_target_size() == (1919, 1079)
+        assert renderer.budget_size_cap_status()["satisfied"] is True
+
+    @pytest.mark.parametrize("seq,cap", [
         ((1920, 1080), (1280, 720)),   # 1080p 序列
         ((3840, 2160), (960, 540)),    # 4K
         ((7680, 4320), (1920, 1080)),  # 8K（auto/smooth 也被压到 cap）
@@ -324,6 +358,52 @@ class TestBudgetScaleDomain:
 # ── R03：执行器生命周期与更新时机 ────────────────────────────────────
 
 class TestExecutorLifecycleR03:
+    def test_unsatisfied_resize_warns_once_until_recovery_and_keeps_live_diagnostics(
+        self, qtbot: Any, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        viewport = _Viewport()
+        viewport.program_pane.resize(200, 112)
+        renderer = _renderer_shell((3840, 2160))
+        with caplog.at_level(logging.WARNING):
+            executor, _ = _executor(qtbot, viewport=viewport, renderer=renderer)
+            for size in ((201, 113), (203, 115), (205, 117)):
+                viewport.program_pane.resize(*size)
+                executor.refresh()
+            warnings = [r for r in caplog.records if "cannot be satisfied" in r.message]
+            assert len(warnings) == 1
+            assert "enlarge the monitor pane" in warnings[0].message
+            status = executor.diagnostics()["applied"]["timeline"]["size_cap"]
+            assert status["cap"] == [205, 117]
+            assert status["actual"] == [480, 270]
+            assert status["satisfied"] is False
+
+            viewport.program_pane.resize(707, 585)
+            executor.refresh()
+            assert executor.diagnostics()["applied"]["timeline"]["size_cap"]["satisfied"] is True
+            viewport.program_pane.resize(200, 112)
+            executor.refresh()
+            assert len([r for r in caplog.records if "cannot be satisfied" in r.message]) == 2
+            executor.mark_page_left()
+            executor.refresh()
+            assert len([r for r in caplog.records if "cannot be satisfied" in r.message]) == 3
+
+    def test_unsatisfied_renderer_replacement_warns_for_new_renderer(
+        self, qtbot: Any, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        viewport = _Viewport()
+        viewport.program_pane.resize(200, 112)
+        current = {"renderer": _renderer_shell((3840, 2160))}
+        with caplog.at_level(logging.WARNING):
+            executor = ViewportBudgetExecutor(
+                viewport=viewport, source_widget=_Source(), timeline_panel=_Panel(),
+                renderer_provider=lambda: current["renderer"])
+            executor.refresh()
+            current["renderer"] = _renderer_shell((7680, 4320))
+            executor.refresh()
+        warnings = [r for r in caplog.records if "cannot be satisfied" in r.message]
+        assert len(warnings) == 2
+        assert executor.diagnostics()["applied"]["timeline"]["size_cap"]["actual"] == [960, 540]
+
     def test_pane_resize_updates_diagnostics_promptly(self, qtbot, qapp):
         viewport = _Viewport()
         qtbot.addWidget(viewport)

@@ -24,6 +24,8 @@ import copy as _copy
 import logging
 import uuid
 
+from src.shared.track_colors import next_track_color, resolve_track_color
+
 from src.features.edit.core.timeline_v2 import (
     TimelineSequence,
     EditTrack,
@@ -729,6 +731,10 @@ class MoveClipToTrackCommand:
                 name=track_name,
                 track_type=self.target_track_type,
                 index=insert_pos,
+                color=next_track_color(
+                    resolve_track_color(track.track_id, track.color)
+                    for track in timeline.all_tracks
+                ),
                 clips=(),
                 transitions=(),
                 is_enabled=True,
@@ -1148,6 +1154,10 @@ class CopyClipsToNewTrackCommand:
             name=track_name,
             track_type=self.track_type,
             index=insert_pos,
+            color=next_track_color(
+                resolve_track_color(track.track_id, track.color)
+                for track in timeline.all_tracks
+            ),
             clips=(),
             subtitle_clips=(),
             transitions=(),

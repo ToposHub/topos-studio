@@ -256,6 +256,8 @@ from src.features.edit.ui.timeline_layout import (
     MAX_SUBTITLE_TRACK_HEIGHT,
 )
 from src.shared.i18n.i18n import I18N
+from src.shared.track_colors import next_track_color
+from src.shared.ui.style_sheet import COMPACT_HORIZONTAL_SCROLLBAR_STYLE
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.format_registry import is_media
 from src.features.edit.core.captions.importer import (
@@ -1073,17 +1075,7 @@ class TimelineView(QGraphicsView):
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.horizontalScrollBar().setStyleSheet(f"""
-            QScrollBar:horizontal {{ height: 8px; margin: 0; border: none;
-                background: {get_color('bg_app')}; }}
-            QScrollBar::handle:horizontal {{ min-width: 40px; margin: 1px;
-                border: none; border-radius: 3px; background: {get_color('border')}; }}
-            QScrollBar::handle:horizontal:hover {{ background: {get_color('accent')}; }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-                width: 0; border: none; background: transparent; }}
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
-                border: none; background: transparent; }}
-        """)
+        self.horizontalScrollBar().setStyleSheet(COMPACT_HORIZONTAL_SCROLLBAR_STYLE)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)  # We handle drag manually
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1515,8 +1507,8 @@ class TimelineView(QGraphicsView):
             total += self._track_height_for(track) + TRACK_GAP
         return total
 
-    def _layout_track_items(self) -> None:
-        """Position track-bound items using the layout engine."""
+    def _layout_track_items(self, *, geometry_only: bool = False) -> None:
+        """Position items; resizing retains existing cut and tool metadata."""
         if self._timeline is None:
             return
 
@@ -1594,7 +1586,7 @@ class TimelineView(QGraphicsView):
             # than a cut between different media.  Resolve expresses this as
             # a dashed seam; the model's asset_id is the reliable source
             # identity, while timeline adjacency prevents dashes across gaps.
-            ordered_clips: list[ClipInstance] = sorted(
+            ordered_clips: list[ClipInstance] = [] if geometry_only else sorted(
                 track.clips,
                 key=lambda candidate: (candidate.timeline_start, candidate.clip_id),
             )
@@ -1615,13 +1607,14 @@ class TimelineView(QGraphicsView):
                 )
                 clip_item.set_right_seam_is_same_source(is_same_source_cut)
 
-            self._sync_roll_handles_for_track(
-                track=track,
-                track_top=track_top,
-                track_height=track_h,
-                track_index=track_index,
-                active_keys=active_roll_keys,
-            )
+            if not geometry_only:
+                self._sync_roll_handles_for_track(
+                    track=track,
+                    track_top=track_top,
+                    track_height=track_h,
+                    track_index=track_index,
+                    active_keys=active_roll_keys,
+                )
 
             # Position transitions
             for trans in track.transitions:
@@ -1655,7 +1648,7 @@ class TimelineView(QGraphicsView):
                     roll_item.setPos(x, track_top)
 
         # Remove seam handles that no longer correspond to adjacent clips.
-        for key, handle in list(self._roll_handles.items()):
+        for key, handle in (() if geometry_only else list(self._roll_handles.items())):
             if key in active_roll_keys:
                 continue
             self._scene.removeItem(handle)
@@ -2086,6 +2079,7 @@ class TimelineView(QGraphicsView):
                     track.name,
                     i,
                     track.track_type,
+                    track_color=track.color,
                     track_height=self._default_track_height(track),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
@@ -2118,6 +2112,7 @@ class TimelineView(QGraphicsView):
                     track.name,
                     i + len(timeline.video_tracks),
                     track.track_type,
+                    track_color=track.color,
                     track_height=self._default_track_height(track),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
@@ -2152,6 +2147,7 @@ class TimelineView(QGraphicsView):
                     track.name,
                     i + len(timeline.video_tracks) + len(timeline.audio_tracks),
                     track.track_type,
+                    track_color=track.color,
                     track_height=self._default_track_height(track),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
@@ -2595,6 +2591,7 @@ class TimelineView(QGraphicsView):
             track.name,
             track_index,
             track.track_type,
+            track_color=track.color,
             track_height=self._default_track_height(track),
             is_muted=track.is_muted,
             is_solo=track.is_solo,
@@ -2654,6 +2651,7 @@ class TimelineView(QGraphicsView):
                 continue
             header._track_name = track.name
             header._track_type = track.track_type
+            header.set_track_color(track.color)
             header.set_muted(track.is_muted)
             header.set_solo(track.is_solo)
             header.set_locked(track.is_locked)
@@ -3120,7 +3118,7 @@ class TimelineView(QGraphicsView):
         if vp:
             self._layout_engine.set_viewport_size(float(vp.width()), float(vp.height()))
         self._update_ruler_viewport()
-        self._layout_track_items()
+        self._layout_track_items(geometry_only=True)
         self._sync_split_vertical_scrollbars()
         if self._ruler_item:
             self._ruler_item.update()
@@ -7094,6 +7092,8 @@ class TimelineView(QGraphicsView):
                 old_track = old_tracks[track_id]
                 changes = {}
 
+                if old_track.color != new_track.color:
+                    changes["color"] = new_track.color
                 if old_track.is_muted != new_track.is_muted:
                     changes['is_muted'] = new_track.is_muted
                 if old_track.is_solo != new_track.is_solo:
@@ -7646,6 +7646,8 @@ class TimelineView(QGraphicsView):
                             item.set_track_locked(lock_state)
                 if track_id in self._track_headers:
                     header = self._track_headers[track_id]
+                    if "color" in track_changes:
+                        header.set_track_color(track_changes["color"])
                     if 'is_muted' in track_changes:
                         header.set_muted(track_changes['is_muted'])
                     if 'is_solo' in track_changes:
@@ -17721,6 +17723,7 @@ class TimelineView(QGraphicsView):
 
         # Create default video track
         v1_track = EditTrack(
+            color=next_track_color(()),
             track_id=str(uuid.uuid4()),
             name="V1",
             track_type="video",
@@ -17735,6 +17738,7 @@ class TimelineView(QGraphicsView):
 
         # Create default audio track
         a1_track = EditTrack(
+            color=next_track_color((v1_track.color,)),
             track_id=str(uuid.uuid4()),
             name="A1",
             track_type="audio",

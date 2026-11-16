@@ -112,10 +112,27 @@ class C:
     MIXER_MONITOR_CHECKED = "#1565c0"
     MIXER_MONITOR_BORDER  = "#1e88e5"
 
+    # --- 时间线 / Mixer 共用的紧凑滚动条 ---
+    SCROLLBAR_BG         = "#1B1C21"
+    SCROLLBAR_HANDLE     = "#34363E"
+    SCROLLBAR_HOVER      = "#E29227"
+
 
 # ============================================================================
 # 可复用 QSS 模板 — 供各控件直接引用，避免硬编码
 # ============================================================================
+
+COMPACT_HORIZONTAL_SCROLLBAR_STYLE = f"""
+    QScrollBar:horizontal {{ height: 8px; margin: 0; border: none;
+        background: {C.SCROLLBAR_BG}; }}
+    QScrollBar::handle:horizontal {{ min-width: 40px; margin: 1px;
+        border: none; border-radius: 3px; background: {C.SCROLLBAR_HANDLE}; }}
+    QScrollBar::handle:horizontal:hover {{ background: {C.SCROLLBAR_HOVER}; }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0; border: none; background: transparent; }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        border: none; background: transparent; }}
+"""
 
 # --- 参数标签（DragValue 左侧的灰色文字） ---
 DRAG_VALUE_LABEL_STYLE = f"""

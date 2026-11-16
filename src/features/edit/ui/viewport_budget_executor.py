@@ -62,6 +62,7 @@ class ViewportBudgetExecutor(QObject):
         self._counters: dict[str, dict[str, int]] = {"source": {}, "timeline": {}}
         self._last_applied_cap: Optional[Tuple[int, int]] = ...
         self._last_budget_renderer: Any = None  # weakref→渲染器（替换后强制重应用）
+        self._budget_unsatisfied = False
         self._shutdown = False
         self._watched_panes: list[Any] = []
         self._refresh_timer = QTimer(self)
@@ -254,6 +255,8 @@ class ViewportBudgetExecutor(QObject):
         # （同值 no-op，避免反复废缓存）。
         prev_renderer = (self._last_budget_renderer()
                          if callable(self._last_budget_renderer) else None)
+        if prev_renderer is not renderer:
+            self._budget_unsatisfied = False
         if cap_tuple != self._last_applied_cap or prev_renderer is not renderer:
             try:
                 budget_setter(cap_tuple)
@@ -278,11 +281,18 @@ class ViewportBudgetExecutor(QObject):
             "note": ("budget constrains only; user preview-quality "
                      "preference is never overwritten"),
         }
-        if status.get("satisfied") is False:
+        unsatisfied = status.get("satisfied") is False
+        if unsatisfied and not self._budget_unsatisfied:
             logger.warning(
                 "budget executor: size cap %s cannot be satisfied "
-                "(actual %s; 0.125 tier floor)",
+                "(actual %s; minimum preview scale 0.125 / 64px dimensions); "
+                "enlarge the monitor pane to accommodate the minimum target. "
+                "Further size changes remain available in diagnostics",
                 status.get("cap"), status.get("actual"))
+        # A resize gesture can produce many different undersized caps. Warn
+        # once per continuous failure, while retaining every current cap and
+        # actual target in diagnostics. Recovery/release permits a new warning.
+        self._budget_unsatisfied = unsatisfied
         return record
 
     def _apply_source(self, decision: Any) -> dict[str, Any]:
@@ -328,6 +338,7 @@ class ViewportBudgetExecutor(QObject):
                                reason, exc_info=True)
         self._last_applied_cap = None
         self._last_budget_renderer = None
+        self._budget_unsatisfied = False
 
     @staticmethod
     def _quality_scale_for(cap) -> Optional[float]:

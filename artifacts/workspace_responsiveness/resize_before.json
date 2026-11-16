@@ -1,0 +1,20 @@
+{
+  "platform": "offscreen",
+  "iterations": 40,
+  "scope": "Qt resize/layout/paint; no decoding, GL or OS composition",
+  "timeline_200_clips": {
+    "median_ms": 36.456,
+    "p95_ms": 44.133,
+    "max_ms": 45.566
+  },
+  "timeline_2000_clips": {
+    "median_ms": 108.867,
+    "p95_ms": 176.963,
+    "max_ms": 184.402
+  },
+  "mixer_8_tracks": {
+    "median_ms": 15.271,
+    "p95_ms": 40.097,
+    "max_ms": 40.472
+  }
+}

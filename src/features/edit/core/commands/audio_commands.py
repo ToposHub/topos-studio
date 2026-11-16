@@ -15,6 +15,7 @@ import logging
 import uuid
 
 from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+from src.shared.track_colors import next_track_color, resolve_track_color
 
 logger = logging.getLogger(__name__)
 
@@ -1672,6 +1673,10 @@ class AddBusCommand:
         bus_track = EditTrack(
             track_id=bus_id, name=self.bus_name, track_type="audio",
             index=index, is_bus=True,
+            color=next_track_color(
+                resolve_track_color(track.track_id, track.color)
+                for track in timeline.all_tracks
+            ),
         )
         new_timeline = timeline.with_track_added(bus_track)
         updated_cmd = AddBusCommand(

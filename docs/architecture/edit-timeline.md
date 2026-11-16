@@ -314,6 +314,11 @@ assert_sequences_consistent（ref 层 key == sequence 层 key，把保存期校�
 轨高、分区滚动和编辑命令沿用原实现。保持 `MinimalViewportUpdate` 与独立
 时间码控件，播放时继续只更新播放头的新旧窄条。
 
+`ClipItem` 的局部裁切必须与外层 V/A 区域求交集：缓存胶片、单帧缩略图、
+加载占位和禁用纹理均使用 `Qt.ClipOperation.IntersectClip`。不得用默认
+`ReplaceClip` 覆盖 `_apply_track_area_clip()`，否则视频轨溢出时缩略图会绘制到
+音频区域。轨高、分区比例、缩放与独立滚动后的组合像素由回归测试覆盖。
+
 视频/音频/字幕的溢出滑条是 `TimelineView` 的直接子控件，与 viewport 同级，
 通过 `viewport.mapTo(view, ...)` 定位到面板右缘并裁剪到标尺以下的所属区域。
 不能将固定滑条放在 viewport 内：Qt 的 raster bitblt 滚动会同时平移其子控件。
@@ -322,6 +327,71 @@ assert_sequences_consistent（ref 层 key == sequence 层 key，把保存期校�
 `tools/preview_resolve_timeline.py --screenshot <path> --size 1420x660` 可使用
 仓库真实素材生成独立审阅图，配置文件使用临时目录；不修改用户工程或队列。
 加 `--extra-tracks 4` 可预览视频/音频轨道溢出。
+
+### 8.1 Audio Mixer 功能区与菜单
+
+Mixer 默认轨宽 88px，Compact 为 70px；Master 与普通轨使用相同的区块高度，
+机架滚动不改变推子行程。轨道标识、FX、M/S/R、Pan、表计/推子与增益读数之间
+使用全宽 1px `C.PANEL_DIVIDER`，与轨道纵向边界连接。背景与普通控件引用全局
+`C.BG_PANEL`、`C.BG_DARK`、`C.BG_INPUT` 等中性色，效果启用与静音/独奏保留状态色。
+每轨持有右侧 1px 边线，末轨后方留白时也保持闭合；Master 边线覆盖滚动区域的
+最后一列，因此滚到最右时两条线共用同一列像素，不叠成 2px。dB 单位标签背景透明。
+底部横滑条与 Timeline 共用 `COMPACT_HORIZONTAL_SCROLLBAR_STYLE`：8px 轨道、
+1px 内缩圆角滑块和橙色悬停反馈，Master 下方保留同高空隙以保持推子对齐。
+
+顶部工具栏已移除；机架显示、Compact、批量操作和恢复隐藏轨道由右键菜单提供。
+面板空白处直接显示菜单，轨道标签、Master 标签和效果列表通过
+`mixer_menu_requested` 请求宿主追加同一组选项。每条机架只保留底部永久加号，
+不再显示 Inserts 标题行或空列表占位加号。已有编辑、旁路、删除与提交信号保持原路径。
+
+首次填充由 controller 统一监听 Dock 可见性，菜单、工具栏与恢复布局均立即从
+`EditPage._current_timeline` 同步。`timeline_display_changed` 补充项目加载和序列切换，
+沿用 100ms 防抖并在执行时读取最新快照；没有当前序列时清除旧轨道并保留 Master。
+Mixer 初始化不再依赖用户先移动素材或执行编辑命令。
+
+### 8.2 轨道身份色
+
+`src/shared/track_colors.py` 是不依赖 Qt 的共享调色板。新建普通轨道、Bus、
+移动/复制到新轨及媒体插入补轨时，从整个时间线尚未占用的颜色中分配，写入现有
+`EditTrack.color` 字段；初始 V1/A1 也使用该调色板。不修改序列化 schema、加载或
+撤销恢复路径。已有自定义颜色保留；历史 `color=None` 通过轨道 ID 获得稳定的显示回退。
+
+Timeline 左侧 2px 色条与 Mixer 顶部 2px 色条调用同一解析函数。
+轨道颜色变化参与 Timeline 增量检测与 header setter；Mixer 通过现有 controller
+快照同步读取颜色，首次显示的兜底同步也传递该字段。目标轨道状态继续由 badge
+高亮表达，不覆盖身份色条。设色、清除颜色、撤销重做和重排均无需重建整个时间线。
+
+### 8.3 窗口缩放与快速切页
+
+`TimelineView.resizeEvent()` 使用 `_layout_track_items(geometry_only=True)`：保留
+已有接缝与剪切工具元数据，只更新轨道、片段、转场、接缝的位置和高度，以及
+范围、标尺、分区滚动条。编辑、缩放和结构变化继续走完整同步路径。片段缓存
+包含当前 V/A 裁切，布局时仍需刷新，不能仅因轨道索引相同而跳过重绘。
+
+页面切换为每次访问分配 generation。延迟布局迁移、文件区刷新和两阶段视口
+恢复均核对页面与 generation，快速离开再返回同一页也不会执行上次访问的旧任务。
+正常访问保留两阶段重绘；离开页面时的 Qt 布局快照复用于 LayoutStore，避免
+重复 `saveState()`，持久化时机保持不变。
+
+`tools/benchmark_workspace_responsiveness.py` 测量真实 Qt 离屏缩放/布局/绘制，
+覆盖 200/2,000 片段与 8 条 Mixer 轨道；不包含解码、GL 呈现或系统窗口合成。
+前后对照记录位于 `artifacts/workspace_responsiveness/`，不能当作实机播放帧率。
+
+### 8.4 预算与 GPU 异常诊断
+
+预览预算先将缩放目标的尺寸上限向下对齐到偶数，避免后续 YUV 对齐把 707px
+变成 708px。能容纳的原始全尺寸保持精确尺寸；0.125 缩放与 64px 最小边长
+仍是解码约束。真正低于下限时，连续缩放只警告一次，实时诊断仍记录最新值；
+恢复满足、解除预算或替换渲染器后重新允许告警。
+
+VT/CUDA 导入帧在首次采样前即登记到任务与源资源清单。GPU pass 抛错时，在
+共享 GPU lane 内取消尚未发布的 WRITING 槽位，并通过 source-read fence 延迟
+归还已采样的输入；未启动的输入即时归还，同一 wrapper 不重复回收。
+`TextureLease.abort_writing()` 只接受 WRITING 状态，保留异常强制释放的原有告警。
+
+原始 GPU 错误由 worker 保留完整 traceback，同一类型/消息在连续失败时每 5 秒
+汇总一次，恢复后新错误立即记录。上层纯转发日志为 DEBUG，错误信号与播放 miss
+归因保留。异常注入测试不等同于重现特定设备的 `glUseProgram` 原始故障。
 
 ---
 

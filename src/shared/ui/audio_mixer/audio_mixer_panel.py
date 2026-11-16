@@ -14,23 +14,22 @@ import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QApplication, QVBoxLayout, QToolButton, QLabel
+    QFrame, QApplication, QVBoxLayout, QMenu
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QObject, QEvent
 
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget, MASTER_TRACK_ID
 from src.shared.ui.audio_mixer.mixer_separator import MixerSeparator
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import C
+from src.shared.ui.style_sheet import C, COMPACT_HORIZONTAL_SCROLLBAR_STYLE
 
 
 logger = logging.getLogger(__name__)
 
 
 # 边距常量
-# Strip 外沿只保留一条很细的呼吸空间；轨道之间由深色分隔线承担层次，
-# 避免多轨时出现一片过宽的灰色空隙。
-MARGIN_AROUND_MIXER = 2
+# Functional rules extend to each strip edge and meet the vertical separators.
+MARGIN_AROUND_MIXER = 0
 
 
 class AudioMixerPanel(QWidget):
@@ -105,39 +104,6 @@ class AudioMixerPanel(QWidget):
         panel_layout = QVBoxLayout(self)
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(0)
-        toolbar = QWidget(self)
-        toolbar.setObjectName("mixer_toolbar")
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(6, 3, 4, 3)
-        toolbar_layout.setSpacing(4)
-        self._track_count_label = QLabel()
-        self._track_count_label.setStyleSheet("color: #919ba9; font-size: 10px;")
-        toolbar_layout.addWidget(self._track_count_label)
-        toolbar_layout.addStretch()
-        self._inserts_btn = QToolButton()
-        self._inserts_btn.setText(I18N.tr("audio.mixer.inserts", "Inserts"))
-        self._inserts_btn.setCheckable(True)
-        self._inserts_btn.setChecked(True)
-        self._inserts_btn.setToolTip(I18N.tr("audio.mixer.inserts_visibility", "Show / hide insert racks"))
-        self._inserts_btn.toggled.connect(self.set_inserts_visible)
-        toolbar_layout.addWidget(self._inserts_btn)
-        self._compact_btn = QToolButton()
-        self._compact_btn.setText(I18N.tr("audio.mixer.compact", "Compact"))
-        self._compact_btn.setCheckable(True)
-        self._compact_btn.setToolTip(I18N.tr("audio.mixer.compact_tip", "Compact strips · keep more tracks in view"))
-        self._compact_btn.toggled.connect(self.set_narrow_layout)
-        toolbar_layout.addWidget(self._compact_btn)
-        self._options_btn = QToolButton()
-        self._options_btn.setText("⋯")
-        self._options_btn.setAccessibleName(I18N.tr("audio.mixer.options", "Mixer options"))
-        self._options_btn.setToolTip(I18N.tr("audio.mixer.options", "Mixer options"))
-        self._options_btn.clicked.connect(lambda: self._show_batch_menu(
-            self._options_btn.mapTo(self, self._options_btn.rect().bottomLeft())))
-        toolbar_layout.addWidget(self._options_btn)
-        for button in (self._inserts_btn, self._compact_btn, self._options_btn):
-            button.setFixedHeight(22)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-        panel_layout.addWidget(toolbar)
         main_layout = QHBoxLayout()
         panel_layout.addLayout(main_layout, 1)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -162,11 +128,16 @@ class AudioMixerPanel(QWidget):
         self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self._scroll_area.setWidget(scroll_container)
+        self._scroll_area.viewport().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._scroll_area.viewport().customContextMenuRequested.connect(
+            lambda pos: self._show_batch_menu(self._scroll_area.viewport().mapTo(self, pos)))
         main_layout.addWidget(self._scroll_area, 1)
 
-        # 主混音器分隔线
+        # Pin the Master boundary over the scroll area's final pixel. At the
+        # right scroll limit it shares the last strip's rule instead of adding
+        # a second column of black pixels beside it.
         self._master_separator = MixerSeparator(self)
-        main_layout.addWidget(self._master_separator)
+        self._master_separator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # 主混音器
         # AUD-37626: 保留 master_container 引用 —— QLayout.setAlignment(QWidget*)
@@ -182,6 +153,7 @@ class AudioMixerPanel(QWidget):
             parent=self,
             is_master=True
         )
+        self._master_mixer.installEventFilter(self)
         self._master_mixer.setContentsMargins(MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER)
         self._master_mixer._update_size_constraints()
         # 记住统一宽度（用 maximumWidth，width() 布局前为 0）
@@ -197,10 +169,26 @@ class AudioMixerPanel(QWidget):
         main_layout.addLayout(master_column)
 
         self._apply_styles()
+        self._scroll_area.horizontalScrollBar().setStyleSheet(COMPACT_HORIZONTAL_SCROLLBAR_STYLE)
         self._scroll_area.ensurePolished()
         self._master_scroll_gutter.setFixedHeight(
             self._scroll_area.horizontalScrollBar().sizeHint().height())
         self._update_minimum_width()
+        self._sync_master_separator()
+
+    def _sync_master_separator(self) -> None:
+        if self._master_mixer is None or self._master_separator is None:
+            return
+        x = self._master_mixer.mapTo(self, QPoint()).x() - 1
+        self._master_separator.setGeometry(max(0, x), 0, 1, self.height())
+        self._master_separator.raise_()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self._master_mixer and event.type() in (
+            QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show,
+        ):
+            self._sync_master_separator()
+        return super().eventFilter(watched, event)
 
     def _setup_master_connections(self) -> None:
         """设置主混音器信号连接。
@@ -210,6 +198,7 @@ class AudioMixerPanel(QWidget):
         LUFS 门控把 Master 纳入遍历。
         """
         if self._master_mixer:
+            self._master_mixer.mixer_menu_requested.connect(self._append_mixer_options)
             self._master_mixer.mute_toggled.connect(lambda tid, muted: self.master_mute_toggled.emit(muted))
             self._master_mixer.volume_changed.connect(lambda tid, db: self.master_volume_changed.emit(db))
             self._master_mixer.show_effects.connect(lambda tid: self.show_effects_for_track.emit(tid))
@@ -244,20 +233,7 @@ class AudioMixerPanel(QWidget):
             QWidget#mixer_tracks {{
                 background-color: {C.BG_PANEL};
             }}
-            QWidget#mixer_alternate {{
-                background-color: #20242b;
-            }}
-            QWidget#mixer_base {{ background-color: #1c2027; }}
-            QWidget#mixer_toolbar {{ background-color: #1d232b; border-bottom: 1px solid #303944; }}
-            QWidget#mixer_toolbar QToolButton {{ color: #aab5c2; background: #272f39;
-                border: 1px solid #37424e; border-radius: 4px; padding: 0 5px; font-size: 10px; }}
-            QWidget#mixer_toolbar QToolButton:checked {{ background: #203d45; color: #9ce3e4;
-                border-color: #3a626b; }}
-            QWidget#mixer_toolbar QToolButton:hover, QWidget#mixer_toolbar QToolButton:focus {{
-                border-color: #66848e; color: #ffffff; }}
-            QScrollBar:horizontal {{ height: 7px; background: #1a1f25; margin: 0; }}
-            QScrollBar::handle:horizontal {{ background: #4a5663; border-radius: 3px; min-width: 20px; }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+            QWidget#mixer_alternate, QWidget#mixer_base {{ background-color: {C.BG_PANEL}; }}
         """)
 
     # ========== 公共接口 ==========
@@ -296,14 +272,13 @@ class AudioMixerPanel(QWidget):
         color_role = "base" if len(self._track_mixers) % 2 == 0 else "alternate"
         mixer.setObjectName(f"mixer_{color_role}")
 
-        # 添加分隔线（在已有轨道和新轨道之间）
-        if self._track_mixers:
-            separator = MixerSeparator(self)
-            self._tracks_layout.addWidget(separator)
-            self._track_separators[track_id] = separator
-
         # 添加到布局末尾（tracks 从左到右排列，新轨道在最右、靠近 Master）
         self._tracks_layout.addWidget(mixer)
+        # Each strip owns its trailing rule, including the last visible track
+        # when the scrollable area leaves empty space before the pinned Master.
+        separator = MixerSeparator(self)
+        self._tracks_layout.addWidget(separator)
+        self._track_separators[track_id] = separator
         self._track_mixers[track_id] = mixer
         # Undo can re-register a previously hidden track with the same identity.
         # Preserve that view preference and keep the count consistent with the widgets.
@@ -332,12 +307,14 @@ class AudioMixerPanel(QWidget):
         except (AttributeError, RuntimeError):
             pass
         self._tracks_layout.removeWidget(mixer)
+        mixer.hide()
         mixer.deleteLater()
 
         # 移除分隔线
         if track_id in self._track_separators:
             separator = self._track_separators[track_id]
             self._tracks_layout.removeWidget(separator)
+            separator.hide()
             separator.deleteLater()
             del self._track_separators[track_id]
 
@@ -410,31 +387,42 @@ class AudioMixerPanel(QWidget):
         if affected:
             self.batch_mute_changed.emit(affected)
 
-    def _show_batch_menu(self, pos) -> None:
-        """C4: panel 右键菜单 —— 批量 solo/mute 操作。"""
-        from PyQt6.QtWidgets import QMenu
-        menu = QMenu(self)
-        act_clear_solo = menu.addAction(self.tr("Clear All Solo"))
-        act_mute_all = menu.addAction(self.tr("Mute All"))
-        act_unmute_all = menu.addAction(self.tr("Unmute All"))
-        # 无轨道时禁用
-        has_tracks = bool(self._track_mixers)
-        act_clear_solo.setEnabled(has_tracks and bool(self._solo_tracks))
-        act_mute_all.setEnabled(has_tracks)
-        act_unmute_all.setEnabled(has_tracks)
+    def _populate_mixer_menu(self, menu: QMenu) -> None:
+        """Keep mixer view preferences and batch actions available from context menus."""
+        inserts = menu.addAction(I18N.tr("audio.mixer.inserts", "Inserts"))
+        inserts.setObjectName("mixer_show_inserts")
+        inserts.setCheckable(True)
+        inserts.setChecked(self._inserts_visible)
+        inserts.toggled.connect(self.set_inserts_visible)
+        compact = menu.addAction(I18N.tr("audio.mixer.compact", "Compact"))
+        compact.setObjectName("mixer_compact")
+        compact.setCheckable(True)
+        compact.setChecked(self._narrow_layout)
+        compact.toggled.connect(self.set_narrow_layout)
         menu.addSeparator()
-        act_show_all = menu.addAction(I18N.tr("audio.mixer.show_all_tracks", "Show all tracks"))
-        act_show_all.setEnabled(bool(self._hidden_track_ids))
+        act_clear_solo = menu.addAction(self.tr("Clear All Solo"))
+        act_clear_solo.setEnabled(bool(self._track_mixers) and bool(self._solo_tracks))
+        act_clear_solo.triggered.connect(self.clear_all_solo)
+        for label, callback in (("Mute All", self.mute_all), ("Unmute All", self.unmute_all)):
+            action = menu.addAction(self.tr(label))
+            action.setEnabled(bool(self._track_mixers))
+            action.triggered.connect(callback)
+        menu.addSeparator()
+        show_all = menu.addAction(I18N.tr("audio.mixer.show_all_tracks", "Show all tracks"))
+        show_all.setEnabled(bool(self._hidden_track_ids))
+        show_all.triggered.connect(self.show_all_tracks)
 
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act_clear_solo:
-            self.clear_all_solo()
-        elif chosen is act_mute_all:
-            self.mute_all()
-        elif chosen is act_unmute_all:
-            self.unmute_all()
-        elif chosen is act_show_all:
-            self.show_all_tracks()
+    def _append_mixer_options(self, menu: QMenu) -> None:
+        """Add the same options to track-label and effect-rack context menus."""
+        if menu.actions():
+            menu.addSeparator()
+        options = menu.addMenu(I18N.tr("audio.mixer.options", "Mixer options"))
+        self._populate_mixer_menu(options)
+
+    def _show_batch_menu(self, pos: QPoint) -> None:
+        menu = QMenu(self)
+        self._populate_mixer_menu(menu)
+        menu.exec(self.mapToGlobal(pos))
 
     def set_track_name(self, track_id: str, name: str) -> None:
         """设置轨道名称"""
@@ -747,12 +735,9 @@ class AudioMixerPanel(QWidget):
         """切换窄/宽 strip 布局（W15）。
 
         窄布局：70px，隐藏轨名/Pan，显示两行 inserts；
-        标准布局：112px，显示完整控制区与三行 inserts。
+        标准布局：88px，显示完整控制区与三行 inserts。
         """
         self._narrow_layout = narrow
-        self._compact_btn.blockSignals(True)
-        self._compact_btn.setChecked(narrow)
-        self._compact_btn.blockSignals(False)
         # 遍历所有 strip 应用窄/宽
         for mixer in self._track_mixers.values():
             self._apply_layout_mode(mixer, narrow)
@@ -763,9 +748,6 @@ class AudioMixerPanel(QWidget):
     def set_inserts_visible(self, visible: bool) -> None:
         """Change rack visibility without bypassing or changing any effect."""
         self._inserts_visible = visible
-        self._inserts_btn.blockSignals(True)
-        self._inserts_btn.setChecked(visible)
-        self._inserts_btn.blockSignals(False)
         for mixer in self._track_mixers.values():
             mixer.set_inserts_visible(visible)
         if self._master_mixer is not None:
@@ -902,6 +884,7 @@ class AudioMixerPanel(QWidget):
 
     def _setup_track_connections(self, track_id: str, mixer: TrackMixerWidget) -> None:
         """设置轨道信号连接"""
+        mixer.mixer_menu_requested.connect(self._append_mixer_options)
         mixer.mute_toggled.connect(lambda tid, muted: self.track_mute_toggled.emit(tid, muted))
         mixer.solo_toggled.connect(lambda tid, solo: self._on_solo_toggled(tid, solo))
         mixer.volume_changed.connect(lambda tid, db: self.track_volume_changed.emit(tid, db))
@@ -1031,9 +1014,6 @@ class AudioMixerPanel(QWidget):
         """更新最小宽度"""
         visible = [mixer for tid, mixer in self._track_mixers.items()
                    if tid not in self._hidden_track_ids]
-        count = len(visible)
-        self._track_count_label.setText(str(count))
-        self._track_count_label.setToolTip(I18N.tr("audio.mixer.visible_tracks", "Visible audio tracks"))
         # One scrollable strip is enough; Master always stays pinned outside.
         self._scroll_area.setMinimumWidth(visible[0].minimumWidth() + 2 if visible else 30)
 

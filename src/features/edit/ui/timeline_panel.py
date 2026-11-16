@@ -2584,6 +2584,7 @@ class TimelinePanel(QWidget):
                 "pan": float(getattr(track, 'pan', 0.0)),
                 "is_muted": bool(getattr(track, 'is_muted', False)),
                 "is_solo": bool(getattr(track, 'is_solo', False)),
+                "color": getattr(track, "color", None),
                 # CW-A1: 空间声像器（空 dict=未使用）
                 "panner": getattr(track, 'panner', None),
             })

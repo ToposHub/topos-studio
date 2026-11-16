@@ -1790,7 +1790,9 @@ class DockLayoutMixin:
                     filtered.qt_state_hex.encode()
                 )
 
-    def _save_current_layout_to_store(self, page_id: str) -> None:
+    def _save_current_layout_to_store(
+        self, page_id: str, *, qt_state: QByteArray | None = None,
+    ) -> None:
         """Save the current dock layout to LayoutStore.
 
         Called alongside the legacy page_layouts save so both
@@ -1798,7 +1800,8 @@ class DockLayoutMixin:
         """
         try:
             product_mode = self._current_product_mode()
-            qt_state = self.saveState()
+            if qt_state is None:
+                qt_state = self.saveState()
             qt_state_hex = qt_state.toHex().data().decode()
 
             # Collect visible panel IDs from registered panels

@@ -1254,10 +1254,53 @@ class EditGpuPreviewRenderer(QThread):
         gpu_mutex = GLContextManager.instance().mutex
         gpu_mutex.lock()
         try:
+            self._task_had_render_error = False
             self._process_task(task)
             self._drain_deferred_gpu_frame_releases(block=False)
+            if not self._task_had_render_error:
+                self._task_error_fingerprint = None
+                self._task_error_suppressed = 0
+        except Exception:
+            # A failed pass may already have submitted reads of earlier
+            # layers. Keep their leases until the source-read fence signals,
+            # including locally imported VT/CUDA frames. Cleanup belongs to
+            # this current context and command lane, before another producer
+            # can recycle shared resources.
+            sampled = tuple(getattr(self, "_previous_gpu_frames", ()))
+            self._abandon_current_present_lease()
+            self._release_previous_frames()
+            self._release_task_sources(task, exclude_resources=sampled)
+            raise
         finally:
             gpu_mutex.unlock()
+
+    def _log_task_error(self, task: EditRenderTask, error: Exception) -> None:
+        """Keep the original traceback without flooding every failed frame."""
+        fingerprint = (type(error), str(error))
+        now = time.monotonic()
+        previous = getattr(self, '_task_error_fingerprint', None)
+        last_log = getattr(self, '_task_error_logged_at', 0.0)
+        if fingerprint == previous and now - last_log < 5.0:
+            self._task_error_suppressed = getattr(self, '_task_error_suppressed', 0) + 1
+            return
+        repeated = getattr(self, '_task_error_suppressed', 0) if fingerprint == previous else 0
+        self._task_error_fingerprint = fingerprint
+        self._task_error_logged_at = now
+        self._task_error_suppressed = 0
+        logger.error(
+            "EditGpuPreviewRenderer: task error frame=%s: %s (repeated=%s)",
+            task.frame, error, repeated,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+    def _emit_task_render_error(self, task: EditRenderTask, message: str) -> None:
+        """Diagnose failed frames once even when a pass returns no exception."""
+        self._task_had_render_error = True
+        # Cache eviction retries and a busy present pool are normal control
+        # flow. Keep their signals without turning them into render faults.
+        if message not in ('composite_cache_miss', 'present_slot_unavailable'):
+            self._log_task_error(task, RuntimeError(message))
+        self.render_error.emit(task.frame, message)
 
     # ==================== Thread Main Loop ====================
 
@@ -1377,13 +1420,10 @@ class EditGpuPreviewRenderer(QThread):
                 )
                 self._process_task_with_gpu_lane(task)
             except Exception as e:
-                logger.error(f"EditGpuPreviewRenderer: task error frame={task.frame}: {e}")
+                self._log_task_error(task, e)
                 playback_trace("gpu_renderer.process_error", frame=task.frame, generation=task.generation_id, error=e)
-                # AUD-16601：异常路径回收未 finalize 的 WRITING 槽位
-                #（_finalize_present_frame 成功后 lease 已置 None，此处
-                # abandon 对已上屏帧是 no-op）。
-                self._abandon_current_present_lease()
-                self._release_task_sources(task)
+                # Source/slot cleanup has already run under the GPU lane in
+                # _process_task_with_gpu_lane; do not release them twice here.
                 self.render_error.emit(task.frame, str(e))
             finally:
                 self._mutex.unlock()
@@ -2105,7 +2145,7 @@ class EditGpuPreviewRenderer(QThread):
             self._release_task_sources(task)
             # AUD-16601：cached 分支 blit 失败——acquire 的槽位回收。
             self._abandon_current_present_lease()
-            self.render_error.emit(task.frame, "composite_cache_miss")
+            self._emit_task_render_error(task, "composite_cache_miss")
             return
 
         # Ensure output FBO exists and acquire an ack-safe present slot.
@@ -2119,7 +2159,7 @@ class EditGpuPreviewRenderer(QThread):
         elif not self._ensure_composite_fbo(
             w, h, generation_id=task.generation_id, frame_index=task.frame
         ):
-            self.render_error.emit(task.frame, "present_slot_unavailable")
+            self._emit_task_render_error(task, "present_slot_unavailable")
             self._release_task_sources(task)
             return
 
@@ -2176,6 +2216,8 @@ class EditGpuPreviewRenderer(QThread):
                     )
                     continue
 
+                self._previous_gpu_frames.append(comp_gpu_handle)
+                self._task_used_io_surface_source = True
                 opacity = track_info.get('opacity', 1.0)
                 track_tex = self._apply_clip_transform(
                     comp_tex, len(track_textures), w, h,
@@ -2210,8 +2252,6 @@ class EditGpuPreviewRenderer(QThread):
                 # A CompositeGpuFrameHandle is not a GpuDecodedFrame, so it
                 # must be retained here and released by the generalized
                 # source-release path below.
-                self._previous_gpu_frames.append(comp_gpu_handle)
-                self._task_used_io_surface_source = True
                 playback_trace(
                     "gpu_renderer.comp_gpu_handle_consumed",
                     frame=task.frame,
@@ -2239,6 +2279,9 @@ class EditGpuPreviewRenderer(QThread):
                         track_index=len(track_textures) + failed_tracks,
                     )
                     continue
+                # Transfer the imported lease into the accepted task before
+                # any GL pass can raise. Its release owns the source frame.
+                layer_data['gpu_frame'] = gpu_frame
                 frame_type = 'gpu'
 
             if vt_pixel_buffer is not None and frame_type == 'vt_pixel_buffer':
@@ -2251,6 +2294,7 @@ class EditGpuPreviewRenderer(QThread):
                         track_index=len(track_textures) + failed_tracks,
                     )
                     continue
+                layer_data['gpu_frame'] = gpu_frame
                 frame_type = 'gpu'
 
             if gpu_frame is not None and frame_type == 'gpu':
@@ -2278,6 +2322,13 @@ class EditGpuPreviewRenderer(QThread):
                     )
                     continue
 
+                # Register before the first sampling pass, not after all
+                # crop/grade/effects passes succeed. An exception in any of
+                # those passes must retain and fence the imported textures.
+                self._previous_gpu_frames.append(gpu_frame)
+                decode_path = getattr(gpu_frame, 'decode_path', '') or ''
+                if getattr(gpu_frame, 'zero_copy', False) or 'iosurface' in decode_path or 'vt' in decode_path:
+                    self._task_used_io_surface_source = True
                 track_fbo, track_tex = self._ensure_track_fbo(
                     len(track_textures), w, h)
                 # clip TransformParams (7-tuple) from track_info → deforms the
@@ -2285,13 +2336,6 @@ class EditGpuPreviewRenderer(QThread):
                 track_transform = track_info.get('transform')
                 self._render_yuv_to_track_fbo(
                     wrapped, gpu_frame, track_fbo, track_tex, track_transform)
-
-                # Mark that this task sampled IOSurface-backed textures so
-                # the release path knows to insert a GL sync barrier before
-                # freeing the CVPixelBuffer backing.
-                decode_path = getattr(gpu_frame, 'decode_path', '') or ''
-                if getattr(gpu_frame, 'zero_copy', False) or 'iosurface' in decode_path or 'vt' in decode_path:
-                    self._task_used_io_surface_source = True
 
                 # FX-M06: apply the clip's crop matte after the source is on
                 # the track FBO, before grading/effects. Identity crops skip.
@@ -2322,8 +2366,6 @@ class EditGpuPreviewRenderer(QThread):
                 track_textures.append((final_track_tex, opacity, _blend_code_of(track_info)))
                 track_texture_indices.append(track_info.get('track_index', len(track_textures) - 1))
                 track_clip_ids.append(track_info.get('clip_id', ''))
-                self._previous_gpu_frames.append(gpu_frame)
-
                 playback_trace(
                     "gpu_renderer.track_ok",
                     frame=task.frame,
@@ -2458,12 +2500,12 @@ class EditGpuPreviewRenderer(QThread):
             if task.background:
                 self._release_previous_frames()
                 return
-            self.render_error.emit(task.frame, "No GPU frames rendered")
+            self._emit_task_render_error(task, "No GPU frames rendered")
             self._release_previous_frames()
             return
 
         if failed_tracks > 0:
-            logger.warning(
+            logger.debug(
                 f"GPU render incomplete: {len(track_textures)}/{len(task.layers)} "
                 f"tracks for frame {task.frame} ({failed_tracks} failed)"
             )
@@ -2472,7 +2514,7 @@ class EditGpuPreviewRenderer(QThread):
             self._release_previous_frames()
             if task.background:
                 return
-            self.render_error.emit(task.frame, "gpu_track_render_incomplete")
+            self._emit_task_render_error(task, "gpu_track_render_incomplete")
             return
 
         # P0-PREV-GPU-T：所有双源转场在 GPU 纹理域预混合；任务只携带
@@ -2486,7 +2528,7 @@ class EditGpuPreviewRenderer(QThread):
             self._release_previous_frames()
             if task.background:
                 return
-            self.render_error.emit(task.frame, transition_error)
+            self._emit_task_render_error(task, transition_error)
             return
         # dip_to_color 任务（spec=None）在合成域内/后处理；双源任务已被
         # 预混合消费。
@@ -3913,7 +3955,9 @@ class EditGpuPreviewRenderer(QThread):
 
     # ==================== Resource Management ====================
 
-    def _release_task_sources(self, task: EditRenderTask | None) -> None:
+    def _release_task_sources(
+        self, task: EditRenderTask | None, *, exclude_resources: tuple = (),
+    ) -> None:
         """Release decoded resources owned by a queued task that will not render."""
         if task is None:
             return
@@ -3926,11 +3970,12 @@ class EditGpuPreviewRenderer(QThread):
 
         from src.shared.media.gpu_frame import safe_release_gpu_frame
 
+        excluded_ids = {id(resource) for resource in exclude_resources}
         for layer_data in layers:
             if not isinstance(layer_data, dict):
                 continue
             handle = layer_data.get("gpu_handle")
-            if handle is not None:
+            if handle is not None and id(handle) not in excluded_ids:
                 release = getattr(handle, "release", None)
                 if callable(release):
                     try:
@@ -3943,7 +3988,7 @@ class EditGpuPreviewRenderer(QThread):
                 or layer_data.get("cuda_resident")
                 or layer_data.get("decoded_frame")
             )
-            if resource is None:
+            if resource is None or id(resource) in excluded_ids:
                 continue
             release = getattr(resource, "release", None)
             if callable(release):
@@ -4036,17 +4081,17 @@ class EditGpuPreviewRenderer(QThread):
         正常路径由 :meth:`_finalize_present_frame` 走 ``mark_ready``
         （READY 等 Viewer ack）。本方法用于 acquire 之后未能走到 finalize
         的路径（空 layers / 无可用轨 / 部分轨失败 / 转场失败 / 合成失败 /
-        渲染异常）：lease 直接 release 回 FREE（``TextureLease.release``
-        对 WRITING 有 force 语义并清理未消费 fence）。此前这些路径让
+        渲染异常）：owner 通过 ``TextureLease.abort_writing`` 回到 FREE。
+        这是尚未发布的写入取消，不是强制回收 Viewer 仍持有的租约。此前这些路径让
         WRITING 槽位永久退出轮换，累计 24 次后 present_pool 常驻满载、
         GPU 预览链路整体死亡。
         """
-        lease = self._current_present_lease
+        lease = getattr(self, '_current_present_lease', None)
         if lease is None:
             return
         self._current_present_lease = None
         try:
-            lease.release()
+            lease.abort_writing()
         except Exception as e:
             logger.debug(
                 f"EditGpuPreviewRenderer: abandon present lease failed: {e}"
@@ -5486,8 +5531,8 @@ void main() {
         every frame, attach a fence to the source release and drain completed
         fences on later iterations.
         """
-        frames = list(self._previous_gpu_frames)
-        self._previous_gpu_frames.clear()
+        frames = list(getattr(self, '_previous_gpu_frames', ()))
+        self._previous_gpu_frames = []
         if not frames:
             self._task_used_io_surface_source = False
             self._drain_deferred_gpu_frame_releases(block=False)

@@ -249,6 +249,21 @@ class TextureLease:
             except Exception as e:
                 logger.debug(f"TextureLease fence cleanup failed: {e}")
 
+    def abort_writing(self) -> None:
+        """Cancel an unpublished write from its owning render thread.
+
+        No viewer can own a WRITING slot and no present fence exists yet.
+        Source-read synchronization remains the renderer's responsibility.
+        Keep this distinct from force-releasing an arbitrary live lease.
+        """
+        with self._lock:
+            if self.state is not SlotState.WRITING:
+                raise RuntimeError(
+                    f"TextureLease {self.slot_id}: cannot abort_writing in state {self.state.name}"
+                )
+            self.state = SlotState.FREE
+            self.acked = False
+
     def release(self) -> None:
         """RELEASABLE -> FREE。回收（pool 内部调用）。"""
         with self._lock:

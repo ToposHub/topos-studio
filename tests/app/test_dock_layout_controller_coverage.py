@@ -1015,6 +1015,22 @@ def test_save_current_layout_to_store_records_visible_panels(
     assert profile.qt_state_hex == _hex_of(host.saveState())
 
 
+def test_save_current_layout_reuses_supplied_qt_state_without_recapture(
+    host: _DockHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_product_mode(host, "studio", monkeypatch)
+    state = host.saveState()
+
+    def unexpected_save_state() -> QByteArray:
+        raise AssertionError("LayoutStore must reuse the outgoing page snapshot")
+
+    monkeypatch.setattr(host, "saveState", unexpected_save_state)
+    host._save_current_layout_to_store("Color", qt_state=state)
+    profile = host.layout_store.get_profile("studio", "Color")
+    assert profile is not None
+    assert profile.qt_state_hex == _hex_of(state)
+
+
 def test_restore_layout_from_store_true_and_false_paths(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_product_mode(host, "studio", monkeypatch)

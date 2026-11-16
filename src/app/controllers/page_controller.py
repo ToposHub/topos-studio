@@ -38,7 +38,7 @@ import logging
 import os
 import threading
 import time
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
@@ -379,6 +379,15 @@ class PageManagementMixin:
         ):
             return
 
+        # Delayed layout repairs and redraws belong to this particular visit.
+        # A later switch, even back to the same page, makes them obsolete.
+        generation = getattr(self, "_page_switch_generation", 0) + 1
+        self._page_switch_generation = generation
+
+        def schedule(delay_ms: int, callback: Callable[[], None]) -> None:
+            self._schedule_page_switch_callback(
+                delay_ms, callback, page_name=page_name, generation=generation)
+
         # Task 3: 安全重置所有工具状态（防止切换页面后残留绘制状态）
         self.canvas.cancel_active_tools()
 
@@ -400,9 +409,10 @@ class PageManagementMixin:
         self.leave_page_hook(self.current_page)
 
         # Save current state (both legacy and LayoutStore)
-        self.page_layouts[self.current_page] = self.saveState()
+        outgoing_state = self.saveState()
+        self.page_layouts[self.current_page] = outgoing_state
         if hasattr(self, '_save_current_layout_to_store'):
-            self._save_current_layout_to_store(self.current_page)
+            self._save_current_layout_to_store(self.current_page, qt_state=outgoing_state)
 
         # Deliver reuses the real Edit Program Viewer and TimelinePanel. Move
         # them back before restoring another page's dock state, otherwise the
@@ -459,30 +469,30 @@ class PageManagementMixin:
         # restored.  The migration is versioned and never constrains later
         # user-driven splitter resizing.
         if page_name == "Edit" and hasattr(self, "_migrate_edit_properties_dock_width"):
-            QTimer.singleShot(0, self._migrate_edit_properties_dock_width)
+            schedule(0, self._migrate_edit_properties_dock_width)
         if page_name == "Edit" and hasattr(self, "_migrate_edit_info_dock_visibility"):
-            QTimer.singleShot(0, self._migrate_edit_info_dock_visibility)
+            schedule(0, self._migrate_edit_info_dock_visibility)
         if page_name == "Edit" and hasattr(self, "_migrate_ai_assistant_dock_layout"):
-            QTimer.singleShot(0, self._migrate_ai_assistant_dock_layout)
+            schedule(0, self._migrate_ai_assistant_dock_layout)
         if page_name == "Edit" and hasattr(self, "_migrate_edit_timeline_dock_height"):
             # Layout restoration completes after the current event turn.  A
             # small delay lets Timeline report its actual restored height.
-            QTimer.singleShot(50, self._migrate_edit_timeline_dock_height)
+            schedule(50, self._migrate_edit_timeline_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_grading_dock_height"):
             # The Color Wheel dock needs the restored splitter geometry to
             # settle before the legacy height can be repaired.
-            QTimer.singleShot(50, self._migrate_color_grading_dock_height)
+            schedule(50, self._migrate_color_grading_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_remapping_dock_layout"):
-            QTimer.singleShot(0, self._migrate_color_remapping_dock_layout)
+            schedule(0, self._migrate_color_remapping_dock_layout)
         if page_name == "Composite" and hasattr(self, "_migrate_composite_scopes_dock_visibility"):
             # Scopes was available before it entered the panel registry. Add
             # it to existing Composite layouts once, after restoreState().
-            QTimer.singleShot(0, self._migrate_composite_scopes_dock_visibility)
+            schedule(0, self._migrate_composite_scopes_dock_visibility)
         if page_name == "Deliver" and hasattr(self, "_migrate_deliver_layout"):
             # Old Deliver layouts had a separate queue dock and could restore
             # the settings dock at a collapsed width.  The queue now lives
             # beside the settings inside DeliverWorkspace.
-            QTimer.singleShot(50, self._migrate_deliver_layout)
+            schedule(50, self._migrate_deliver_layout)
 
         # Note: We do NOT call _restore_docked_sizes here because restoreState()
         # already restores the page-specific dock proportions correctly.
@@ -512,19 +522,33 @@ class PageManagementMixin:
 
         # Fix for FilesPanel gray block issue: refresh FilesPanel layout after page switch
         if hasattr(self, 'files_panel') and self.files_panel:
-            QTimer.singleShot(150, self.files_panel.refresh_layout)
+            schedule(150, self.files_panel.refresh_layout)
 
         # Fix black screen on cross-page switch: ensure viewport is visible and trigger render
         # When switching between pages with different dock configurations, the GL context
         # may become invalid. We need to ensure viewport is shown and trigger a render.
-        QTimer.singleShot(50, self._restore_viewport_after_page_switch)
+        schedule(50, self._restore_viewport_after_page_switch)
 
     # ------------------------------------------------------------------
     # Viewport restore helpers
     # ------------------------------------------------------------------
 
+    def _schedule_page_switch_callback(
+        self, delay_ms: int, callback: Callable[[], None], *,
+        page_name: str, generation: int,
+    ) -> None:
+        """Ignore layout/redraw work superseded by another page visit."""
+        def run_if_current() -> None:
+            if (self.current_page == page_name
+                    and getattr(self, "_page_switch_generation", 0) == generation):
+                callback()
+
+        QTimer.singleShot(delay_ms, run_if_current)
+
     def _restore_viewport_after_page_switch(self) -> None:
         """Restore viewport visibility and trigger render after page switch."""
+        page_name = self.current_page
+        generation = getattr(self, "_page_switch_generation", 0)
         # For Composite page, update the CompositeViewer
         if self.current_page == "Composite":
             if self.composite_viewer:
@@ -559,7 +583,9 @@ class PageManagementMixin:
                 self.engine.render_pipeline(render_reason='viewport_refresh')
 
             # Schedule final update
-            QTimer.singleShot(50, self._finalize_viewport_restore)
+            self._schedule_page_switch_callback(
+                50, self._finalize_viewport_restore, page_name=page_name,
+                generation=generation)
         except Exception as e:
             logger.error(f"restoring viewport after page switch: {e}")
 

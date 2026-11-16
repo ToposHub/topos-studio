@@ -1,0 +1,10 @@
+{
+  "hardware_probe": "complete",
+  "gpu": "AMD Radeon RX 6900 XT OpenGL Engine",
+  "version": "4.1 ATI-6.1.13",
+  "source": "tests/test_videos/2K_h264.mp4",
+  "output_size": [640, 360],
+  "presented": [0, 40, 88, 89, 88],
+  "errors": [],
+  "scope": "Independent Qt cocoa offscreen surface with real GPU render thread and VT source; original user context/effects not reproduced"
+}
