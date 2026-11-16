@@ -1,0 +1,26 @@
+[
+  {
+    "id": "format_factory",
+    "window": "MainWindow",
+    "visible": true,
+    "http_ack": true
+  },
+  {
+    "id": "image_factory",
+    "window": "MainWindow",
+    "visible": true,
+    "http_ack": true
+  },
+  {
+    "id": "shutdown_timer",
+    "window": "ShutdownTimerApp",
+    "visible": true,
+    "http_ack": true
+  },
+  {
+    "id": "decode_benchmark",
+    "window": "DecodeBenchmarkWindow",
+    "visible": true,
+    "http_ack": true
+  }
+]

@@ -109,6 +109,34 @@ class NativeFilesPreferences:
         existing = [item for item in self.history if item != text]
         self.history = [text] + existing
 
+    @property
+    def plugin_pins(self) -> list[str]:
+        return self._read_list("plugin_pins", 24)
+
+    @plugin_pins.setter
+    def plugin_pins(self, values: list[str]) -> None:
+        self._write("plugin_pins", list(dict.fromkeys(values))[:24])
+
+    @property
+    def plugin_recent(self) -> list[str]:
+        return self._read_list("plugin_recent", 12)
+
+    @plugin_recent.setter
+    def plugin_recent(self, values: list[str]) -> None:
+        self._write("plugin_recent", list(dict.fromkeys(values))[:12])
+
+    @property
+    def plugin_shortcuts(self) -> dict[str, str]:
+        raw = self._read("plugin_shortcuts", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {key: value for key, value in raw.items()
+                if isinstance(key, str) and isinstance(value, str) and key and value}
+
+    @plugin_shortcuts.setter
+    def plugin_shortcuts(self, values: dict[str, str]) -> None:
+        self._write("plugin_shortcuts", dict(values))
+
     def remember_search(self, term: str) -> None:
         text = str(term or "").strip()
         if not text:
@@ -117,6 +145,33 @@ class NativeFilesPreferences:
         self.search_history = [text] + existing
 
     # -- 视图状态 ------------------------------------------------------------
+    LAYOUT_MODES = ("adaptive", "masonry", "grid", "list")
+
+    @property
+    def layout_mode(self) -> str:
+        """布局用稳定名称持久化，兼容旧版0=卡片、1=列表的配置。"""
+        stored = self._settings.value(self._key("layout_mode"), None)
+        if stored in self.LAYOUT_MODES:
+            return str(stored)
+        if self._settings.contains(self._key("view_index")):
+            return "list" if self.view_index == 1 else "grid"
+        return "adaptive"
+
+    @layout_mode.setter
+    def layout_mode(self, value: str) -> None:
+        if value not in self.LAYOUT_MODES:
+            raise ValueError(f"Unknown Files layout: {value}")
+        self._write("layout_mode", value)
+        self.view_index = 1 if value == "list" else 0
+
+    @property
+    def grid_fill(self) -> bool:
+        return bool(self._read("grid_fill", False))
+
+    @grid_fill.setter
+    def grid_fill(self, value: bool) -> None:
+        self._write("grid_fill", bool(value))
+
     @property
     def view_index(self) -> int:
         return int(self._read("view_index", 0))

@@ -1407,7 +1407,7 @@ class PreferencesDialog(QDialog):
         layout.addWidget(dev_group)
 
         # Plugin Settings group
-        plugin_group = self._create_group("preferences.plugin_management.section_settings_title", "Plugin Settings")
+        plugin_group = self._create_group("preferences.plugin_management.effect_settings_title", "效果插件设置（GLSL / AI）")
         plugin_form = make_pref_form(plugin_group)
 
         # Plugin directory
@@ -1426,7 +1426,7 @@ class PreferencesDialog(QDialog):
         layout.addWidget(plugin_group)
 
         # Installed Plugins group
-        installed_group = self._create_group("preferences.plugin_management.section_list_title", "Installed Plugins")
+        installed_group = self._create_group("preferences.plugin_management.files_list_title", "素材插件（启停需重启）")
         installed_layout = QVBoxLayout(installed_group)
         installed_layout.setContentsMargins(16, 20, 16, 16)
         installed_layout.setSpacing(12)
@@ -1713,18 +1713,25 @@ class PreferencesDialog(QDialog):
             return []
 
     def _refresh_plugins(self) -> None:
-        """Refresh plugin list.
-
-        [R1-15] file_explorer 插件（FE/plugins/，plugin.json 注册制）与宿主
-        仓库根 plugins/（.tglsl/.tai）是两套体系。此前这里扫仓库根 plugins/
-        且 disabled_plugins 读写宿主 config——与 FE 插件系统毫无交集，UI
-        实际停用不了任何 FE 插件。现在列表直接读 plugin_manager.plugins，
-        停用状态写回 FE 自己的 config.json（见 _apply_settings）。"""
+        """Include disabled and failed extensions without importing their code."""
+        from pathlib import Path
+        from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
+        from src.app.ui.native_files_plugins import plugin_status
         self._plugin_list.clear()
-
         fe_main = self._fe_plugin_bridge()
-        plugins = list(getattr(fe_main.plugin_manager, "plugins", [])) if fe_main else []
-        disabled = set(self._fe_disabled_plugins(fe_main))
+        try:
+            # 桥接模块可能只提供部分属性（测试替身/旧宿主）：缺目录时仍按
+            # manager 投影运行时清单，缺配置服务时停用态读取退化为空。
+            plugins_dir = Path(getattr(fe_main, "__file__", ".")).parent / "plugins"
+            plugins = FileExplorerPluginCatalog(
+                plugins_dir, getattr(fe_main, "plugin_manager", None),
+                getattr(fe_main, "load_config", None),
+                getattr(fe_main, "save_config", None)).snapshot() if fe_main else ()
+        except (OSError, ValueError) as exc:
+            item = QListWidgetItem(str(exc))
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self._plugin_list.addItem(item)
+            return
 
         if not plugins:
             item = QListWidgetItem(
@@ -1735,28 +1742,23 @@ class PreferencesDialog(QDialog):
             return
 
         for plugin in plugins:
-            name = plugin.get("name", "?")
-            info = plugin.get("info") or {}
-            version = info.get("version", "?")
-            desc = info.get("description") or ""
-            label = f"{name} v{version}"
-            if desc:
-                label += f" — {desc}"
+            label = f"{plugin.name} v{plugin.version} — {plugin_status(plugin)}"
             item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setToolTip(plugin.description or plugin.launch_unavailable_reason)
+            item.setData(Qt.ItemDataRole.UserRole, plugin.plugin_id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
-                Qt.CheckState.Unchecked if name in disabled else Qt.CheckState.Checked)
+                Qt.CheckState.Checked if plugin.desired_enabled else Qt.CheckState.Unchecked)
+            if plugin.self_disabled:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self._plugin_list.addItem(item)
 
     def _open_plugin_directory(self) -> None:
-        """Open plugin directory in file explorer."""
-        from src.shared.io.file_io import FileIO
-        plugin_dir = self._config_manager.get("plugin_directory") or "plugins"
-        if not os.path.isabs(plugin_dir):
-            plugin_dir = os.path.join(FileIO.PROJECT_ROOT, plugin_dir)
-        os.makedirs(plugin_dir, exist_ok=True)
-        self._open_in_file_manager(plugin_dir)
+        """Open the directory belonging to this list, not the GLSL directory."""
+        fe_main = self._fe_plugin_bridge()
+        module_file = getattr(fe_main, "__file__", None)
+        if fe_main is not None and module_file:
+            self._open_in_file_manager(os.path.join(os.path.dirname(module_file), "plugins"))
 
     # ── Utility Methods ──────────────────────────────────────────────
 
@@ -2193,6 +2195,7 @@ class PreferencesDialog(QDialog):
         # writing it back would wipe file_explorer's disabled_plugins and
         # silently re-enable every plugin the user disabled there.
         disabled_plugins: list = []
+        listed_plugins: set[str] = set()
         has_plugin_entries = False
         for i in range(self._plugin_list.count()):
             item = self._plugin_list.item(i)
@@ -2200,6 +2203,7 @@ class PreferencesDialog(QDialog):
             if not entry:
                 continue  # placeholder rows ("No plugins found") hold no data
             has_plugin_entries = True
+            listed_plugins.add(entry)
             if item.checkState() == Qt.CheckState.Unchecked:
                 disabled_plugins.append(entry)
         # [R1-15] 停用列表写回 file_explorer 自己的 config.json（FE 插件
@@ -2207,6 +2211,7 @@ class PreferencesDialog(QDialog):
         # [AUD-03900] 仅在列表含真实插件条目（已 Refresh 且 FE 返回了插件）
         # 时才写回；否则跳过，保留 FE 侧现有的停用状态。
         fe_main = self._fe_plugin_bridge()
+        plugin_apply_error = ""
         if fe_main is not None and has_plugin_entries:
             try:
                 fe_conf = fe_main.load_config() or {}
@@ -2215,14 +2220,23 @@ class PreferencesDialog(QDialog):
                     # 供 Cancel 时撤销这次直写（fe_main.save_config 直接
                     # 写 FE 自己的 config.json，绕过宿主 config 快照）。
                     self._fe_config_snapshot = dict(fe_conf)
-                fe_conf["disabled_plugins"] = disabled_plugins
+                previous_disabled = fe_conf.get("disabled_plugins", [])
+                if not isinstance(previous_disabled, list):
+                    raise ValueError("Files disabled_plugins 配置格式无效")
+                fe_conf["disabled_plugins"] = sorted(
+                    (set(previous_disabled) - listed_plugins) | set(disabled_plugins))
                 fe_main.save_config(fe_conf)
-            except Exception:
+                persisted = fe_main.load_config() or {}
+                if set(persisted.get("disabled_plugins", [])) != set(fe_conf["disabled_plugins"]):
+                    raise OSError("素材插件启停设置未能保存")
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
                 logger.exception("Failed to write file_explorer disabled_plugins")
-            self._disabled_plugins = list(disabled_plugins)
+                plugin_apply_error = str(exc)
+            else:
+                self._disabled_plugins = list(fe_conf["disabled_plugins"])
 
         # Delegate apply to module preference pages
-        module_apply_failures: list[str] = []
+        module_apply_failures: list[str] = [f"Files: {plugin_apply_error}"] if plugin_apply_error else []
         for page_id, page_obj in self._module_pages.items():
             try:
                 page_obj.apply(cfg)

@@ -1,0 +1,29 @@
+{
+  "plugin_id": "files.ai_library_browser",
+  "display_name": "AI 素材库",
+  "version": "0.1.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [
+    "ai_library_browser"
+  ],
+  "author": "Topos Color",
+  "description": "在 vault 中语义搜索视频/音乐/图片素材（旧侧栏，经兼容入口打开）",
+  "category": "搜索与整理",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "semantic_search",
+      "kind": "menu",
+      "title": "语义搜索（旧界面）",
+      "selection_mode": "none"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "compatibility": "原生搜索按钮待 PL-03/07 服务接线后提供"
+  }
+}

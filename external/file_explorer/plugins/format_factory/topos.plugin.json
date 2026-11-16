@@ -1,0 +1,48 @@
+{
+  "plugin_id": "files.format_factory",
+  "display_name": "格式工厂",
+  "version": "0.0.1",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [
+    "format_factory"
+  ],
+  "author": "Topos Color",
+  "description": "视频转码与封装转换工具；现有 HTTP 启动路由一次接收一个文件",
+  "category": "转档与压缩",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "launch",
+      "kind": "command",
+      "title": "打开格式工厂",
+      "selection_mode": "single",
+      "applies_to_kinds": [],
+      "write_semantics": "read",
+      "cancellable": true,
+      "retriable": false,
+      "run_location": "host"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "version_note": "旧插件未声明 VERSION，沿用旧加载器 0.0.1 回退"
+  },
+  "windows": [
+    {
+      "window_id": "format_factory.main",
+      "command_id": "launch",
+      "min_size": [
+        420,
+        300
+      ],
+      "default_size": [
+        980,
+        640
+      ]
+    }
+  ]
+}

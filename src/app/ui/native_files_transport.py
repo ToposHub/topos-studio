@@ -82,6 +82,7 @@ class NativeFilesTransport(QObject):
     compare_set_finished = pyqtSignal(str)              # session
     strip_loaded = pyqtSignal(str, bytes)
     strip_failed = pyqtSignal(str)
+    plugin_launch_finished = pyqtSignal(str, bool, str)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
@@ -123,6 +124,39 @@ class NativeFilesTransport(QObject):
         self._task_polls: dict[str, dict[str, Any]] = {}
         self._task_poll_timer: QTimer | None = None
         self._scan_poll_timer: QTimer | None = None
+        self._plugin_replies: dict[QNetworkReply, str] = {}
+
+    def launch_plugin(self, plugin_id: str, endpoint: str, payload: dict[str, Any]) -> None:
+        """Open an existing tool; HTTP acknowledgement is not window-ready proof."""
+        if self._closed:
+            return
+        if plugin_id not in ("format_factory", "image_factory", "shutdown_timer", "decode_benchmark") or endpoint != f"/api/plugin/{plugin_id}/launch":
+            self.plugin_launch_finished.emit(plugin_id, False, "此插件没有受支持的原生启动接口。")
+            return
+        if plugin_id in self._plugin_replies.values():
+            return
+        request = self._make_post(endpoint)
+        if request is None:
+            self.plugin_launch_finished.emit(plugin_id, False, "素材服务尚未就绪，无法打开插件。")
+            return
+        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
+        self._plugin_replies[reply] = plugin_id
+        reply.finished.connect(lambda r=reply: self._finish_plugin_launch(r))
+
+    def _finish_plugin_launch(self, reply: QNetworkReply) -> None:
+        plugin_id = self._plugin_replies.pop(reply, None)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        try:
+            data = json.loads(bytes(reply.readAll()))
+        except (ValueError, UnicodeError):
+            data = None
+        reply.deleteLater()
+        if self._closed or plugin_id is None:
+            return
+        success = status == 200 and error == QNetworkReply.NetworkError.NoError and isinstance(data, dict) and data.get("status") == "ok"
+        message = "已提交打开请求；工具窗口由插件创建。" if success else "插件未接受打开请求，请检查插件状态或重试。"
+        self.plugin_launch_finished.emit(plugin_id, success, message)
 
     def _make_request(self, endpoint: str, query: dict[str, str | int]) -> QNetworkRequest | None:
         base = self._server_url()
@@ -786,22 +820,11 @@ class NativeFilesTransport(QObject):
             payload = None
         if not isinstance(payload, dict):
             payload = {"success": False, "message": "批量改名失败"}
+        if (status != 200 or error != QNetworkReply.NetworkError.NoError
+                or payload.get("success") is not True):
+            payload = {"success": False,
+                       "message": str(payload.get("message") or "批量改名失败")}
         payload["session_id"] = session_id
-        self.batch_rename_finished.emit(dict(payload))
-
-    def _finish_batch_rename(self, reply: QNetworkReply) -> None:
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        raw = bytes(reply.readAll())
-        error = reply.error()
-        reply.deleteLater()
-        if self._closed:
-            return
-        try:
-            payload: Any = json.loads(raw)
-        except (ValueError, UnicodeDecodeError):
-            payload = None
-        if not isinstance(payload, dict):
-            payload = {"success": False, "message": "批量改名失败"}
         self.batch_rename_finished.emit(dict(payload))
 
     # -- 并排比较（F15 / FR-15/17） ----------------------------------------
@@ -1044,14 +1067,20 @@ class NativeFilesTransport(QObject):
         self._preview_reply = reply
         self._preview_state = state
         reply.metaDataChanged.connect(lambda r=reply, st=state: self._check_preview_size(r, st))
-        reply.readyRead.connect(lambda r=reply, st=state: self._read_preview(r, st))
+        reply.readyRead.connect(lambda r=reply, st=state: self._read_current_preview(r, st))
         reply.finished.connect(lambda r=reply, st=state: self._finish_preview(r, st))
 
     def _check_preview_size(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        if self._closed or reply is not self._preview_reply or state is not self._preview_state:
+            return
         size = reply.header(QNetworkRequest.KnownHeaders.ContentLengthHeader)
         if isinstance(size, int) and size > self.MAX_PREVIEW_BYTES:
             state.oversized = True
             reply.abort()
+
+    def _read_current_preview(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        if not self._closed and reply is self._preview_reply and state is self._preview_state:
+            self._read_preview(reply, state)
 
     def _read_preview(self, reply: QNetworkReply, state: _PreviewRead) -> None:
         if state.oversized:
@@ -1064,6 +1093,10 @@ class NativeFilesTransport(QObject):
             reply.abort()
 
     def _finish_preview(self, reply: QNetworkReply, state: _PreviewRead) -> None:
+        # 同路径重开也必须按请求身份丢弃旧 fetch，不能让旧字节成为新解码任务。
+        if self._closed or reply is not self._preview_reply or state is not self._preview_state:
+            reply.deleteLater()
+            return
         self._read_preview(reply, state)
         status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         error = reply.error()
@@ -1116,6 +1149,10 @@ class NativeFilesTransport(QObject):
         # 一律静默丢弃（compare/metadata 此前只清引用不 abort，请求仍
         # 会跑完并试图发信号）
         self._closed = True
+        for reply in list(self._plugin_replies):
+            reply.abort()
+            reply.deleteLater()
+        self._plugin_replies.clear()
         for session_id in list(self._compare_sessions):
             self.cancel_compare(session_id)
         self._compare_sessions.clear()

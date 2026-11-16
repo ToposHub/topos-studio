@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFrame, QSizePolicy, QTabWidget, QListWidget,
                              QAbstractItemView)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QColor, QIcon, QAction
+from PyQt6.QtGui import QCloseEvent, QFont, QColor, QIcon, QAction
 
 # 导入 PIL 图像处理库
 from PIL import Image
@@ -610,8 +610,9 @@ class FileConvertWidget(QWidget):
 # 主窗口
 # ============================================================================
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
+        self._processor_thread: ProcessorThread | None = None
         self.setWindowTitle("ImageConvertPro 2026")
         self.setMinimumSize(520, 800)
         self.setStyleSheet(MAC_STYLE)
@@ -665,12 +666,12 @@ class MainWindow(QMainWindow):
         
         self.log_box.clear()
         
-        self.thread = ProcessorThread(config)
-        self.thread.progress_update.connect(self.progress.setValue)
-        self.thread.log_update.connect(self.log_box.append)
+        self._processor_thread = ProcessorThread(config)
+        self._processor_thread.progress_update.connect(self.progress.setValue)
+        self._processor_thread.log_update.connect(self.log_box.append)
         
-        self.thread.finished_signal.connect(lambda n: self.on_finished(n, source_btn))
-        self.thread.start()
+        self._processor_thread.finished_signal.connect(lambda n: self.on_finished(n, source_btn))
+        self._processor_thread.start()
 
     def on_finished(self, count, source_btn):
         self.batch_tab.setEnabled(True)
@@ -684,10 +685,10 @@ class MainWindow(QMainWindow):
 
         self.log_box.append(f"\n✨ 全部完成，共处理 {count} 个文件")
 
-    def closeEvent(self, event):  # noqa: N802 - Qt override
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         # [R1-12] 处理中关窗：置取消标志并等待线程退出，避免
         # "QThread: Destroyed while running" 崩溃
-        thread = getattr(self, "thread", None)
+        thread = self._processor_thread
         if thread is not None and thread.isRunning():
             thread.cancel()
             if not thread.wait(8000):

@@ -1,0 +1,48 @@
+{
+  "plugin_id": "files.image_factory",
+  "display_name": "图片工厂",
+  "version": "0.0.1",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [
+    "image_factory"
+  ],
+  "author": "Topos Color",
+  "description": "图片批处理（格式转换/压缩等）；打开窗口后手动添加素材",
+  "category": "图片",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "launch",
+      "kind": "command",
+      "title": "打开图片工厂",
+      "selection_mode": "none",
+      "applies_to_kinds": [],
+      "write_semantics": "read",
+      "cancellable": true,
+      "retriable": false,
+      "run_location": "host"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "version_note": "旧插件未声明 VERSION，沿用旧加载器 0.0.1 回退"
+  },
+  "windows": [
+    {
+      "window_id": "image_factory.main",
+      "command_id": "launch",
+      "min_size": [
+        420,
+        320
+      ],
+      "default_size": [
+        1000,
+        660
+      ]
+    }
+  ]
+}
