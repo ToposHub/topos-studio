@@ -89,6 +89,25 @@ if sys.platform == 'win32':
     )
     logger.info("Windows: Configured Chromium for software rendering")
 
+# ⚠️ CRITICAL macOS DYLD_LIBRARY_PATH 消毒（须在 QtWebEngine 导入/spawn 之前）
+# 用户 shell（.zshrc）常见 `export DYLD_LIBRARY_PATH=/opt/homebrew/lib`，
+# run_topos.command 会将其注入本进程。QtWebEngineProcess 子进程继承该
+# 变量后，系统 ImageIO 的 PNG 插件初始化会被 Homebrew 的 libpng 等同名
+# 动态库干扰：渲染进程绘制彩色 emoji 时 SIGBUS（CrashedTerminationStatus
+# exit=10，栈顶 PNGReadPlugin::InitializePluginData），FilesPanel 无限重载
+# 直至白屏。macOS 上本应用不依赖 DYLD_LIBRARY_PATH（cv2/av 均走自身
+# .dylibs 的 @loader_path），故在 Chromium 子进程生成前整体移除。
+# （Python 的 os.environ.pop 会同步 unset C 层 environ，posix_spawn 的
+# 子进程即不再继承；对主进程已加载的库无影响。）
+if sys.platform == 'darwin':
+    _dyld_poisoned = os.environ.pop("DYLD_LIBRARY_PATH", None)
+    if _dyld_poisoned:
+        logger.warning(
+            "macOS: removed DYLD_LIBRARY_PATH=%r from child process "
+            "environment (conflicts with QtWebEngine's ImageIO/PNG stack)",
+            _dyld_poisoned,
+        )
+
 # ⚠️ CRITICAL: QtWebEngineWidgets MUST be imported BEFORE creating QApplication
 # This must happen before any QCoreApplication instance is created.
 # [R0-6] 此前 Windows 走"临时禁用导入"的诊断分支并被固化，真实导入推迟到
