@@ -15,7 +15,12 @@ from src.shared.ui.style_sheet import DARK_THEME
 def main() -> None:
     app = QApplication([])
     app.setStyleSheet(DARK_THEME)
-    panel = NativeFilesPanel()
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    panel.locations.set_children(panel.home_path, [
+        {"name": name, "path": panel.home_path + "/" + name}
+        for name in ("Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures")
+    ])
+    panel.start_home_tree()
     entries = [
         {"name": "Interview", "type": "dir"},
         {"name": "Music", "type": "dir"},
@@ -39,6 +44,10 @@ def main() -> None:
     output = Path(__file__).parent
     app.processEvents()
     panel.grab().save(str(output / "native_files_grid.png"))
+    panel.search_button.click()
+    app.processEvents()
+    panel.grab().save(str(output / "native_files_search.png"))
+    panel.search_button.click()
     panel.view_combo.setCurrentIndex(1)
     app.processEvents()
     panel.grab().save(str(output / "native_files_list.png"))

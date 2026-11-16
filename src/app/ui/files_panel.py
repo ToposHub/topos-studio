@@ -410,6 +410,9 @@ class FilesPanel(QWidget):
             self._native_transport.thumbnail_loaded.connect(self._native_panel.set_thumbnail)
             self._native_transport.thumbnail_failed.connect(self._native_panel.thumbnail_failed)
             self._native_transport.thumbnail_pending.connect(self._native_panel.thumbnail_pending)
+            self._native_panel.tree_requested.connect(self._native_transport.load_tree)
+            self._native_transport.tree_loaded.connect(self._native_panel.locations.set_children)
+            self._native_transport.tree_failed.connect(self._native_panel.locations.set_error)
             self._native_panel.file_activated.connect(self._open_native_file)
             self._native_panel.legacy_requested.connect(lambda: self.mode_combo.setCurrentIndex(0))
             self._native_transport.loading.connect(self._native_panel.set_loading)
@@ -418,8 +421,9 @@ class FilesPanel(QWidget):
             self.content_stack.addWidget(self._native_panel)
         self._pending_native_open = None
         self.content_stack.setCurrentWidget(self._native_panel)
+        self._native_panel.start_home_tree()
         path = self._files_root_path
-        if not path or "://" in path:
+        if not path or "://" in path or not self._native_panel.is_browsable_path(path):
             path = os.path.expanduser("~")
         self._native_panel.navigate(path)
 
