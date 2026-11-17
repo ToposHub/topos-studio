@@ -1,0 +1,1750 @@
+{
+  "eq": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "voicing": {
+        "type": "string"
+      },
+      "master_gain": {
+        "type": "number"
+      },
+      "bands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "filter_type": {
+              "type": "string"
+            },
+            "range_key": {
+              "type": "string"
+            },
+            "freq": {
+              "type": "number"
+            },
+            "gain": {
+              "type": "number"
+            },
+            "q": {
+              "type": "number"
+            },
+            "slope": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "dynamic_eq": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "phase_mode": {
+        "type": "string"
+      },
+      "ext_sc_enabled": {
+        "type": "boolean"
+      },
+      "ext_sc_source": {
+        "type": "string"
+      },
+      "sc_audition": {
+        "type": "boolean"
+      },
+      "master_gain": {
+        "type": "number"
+      },
+      "bands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "filter_type": {
+              "type": "string"
+            },
+            "range_key": {
+              "type": "string"
+            },
+            "freq": {
+              "type": "number"
+            },
+            "gain": {
+              "type": "number"
+            },
+            "q": {
+              "type": "number"
+            },
+            "slope": {
+              "type": "integer"
+            },
+            "dyn_enabled": {
+              "type": "boolean"
+            },
+            "dyn_range": {
+              "type": "number"
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "attack": {
+              "type": "number"
+            },
+            "release": {
+              "type": "number"
+            },
+            "auto_timing": {
+              "type": "boolean"
+            },
+            "trigger_mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "dynamics": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "makeup": {
+        "type": "number"
+      },
+      "eg": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "range": {
+            "type": "number"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "hold": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "comp": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "knee": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "hold": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          },
+          "sc_on": {
+            "type": "boolean"
+          },
+          "sc_listen": {
+            "type": "boolean"
+          },
+          "sc_source": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "lim": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "hold": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "multiband_compressor": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "band_count": {
+        "type": "integer"
+      },
+      "crossovers": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "phase_mode": {
+        "type": "string"
+      },
+      "slope": {
+        "type": "string"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "bands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "ratio": {
+              "type": "number"
+            },
+            "knee": {
+              "type": "number"
+            },
+            "attack": {
+              "type": "number"
+            },
+            "release": {
+              "type": "number"
+            },
+            "makeup": {
+              "type": "number"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "mute": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "bus_compressor": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "topology": {
+        "type": "string"
+      },
+      "threshold": {
+        "type": "number"
+      },
+      "ratio": {
+        "type": "number"
+      },
+      "attack": {
+        "type": "number"
+      },
+      "release": {
+        "type": "number"
+      },
+      "makeup": {
+        "type": "number"
+      },
+      "mix": {
+        "type": "number"
+      },
+      "sc_hpf": {
+        "type": "integer"
+      },
+      "sc_listen": {
+        "type": "boolean"
+      },
+      "ext_sc": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "deesser": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "mode": {
+        "type": "string"
+      },
+      "filter_shape": {
+        "type": "string"
+      },
+      "listen": {
+        "type": "boolean"
+      },
+      "lookahead": {
+        "type": "number"
+      },
+      "freq": {
+        "type": "number"
+      },
+      "q": {
+        "type": "number"
+      },
+      "threshold": {
+        "type": "number"
+      },
+      "range": {
+        "type": "number"
+      },
+      "attack": {
+        "type": "number"
+      },
+      "release": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "declick_dehum": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "output_diff": {
+        "type": "boolean"
+      },
+      "view_focus": {
+        "type": "string"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "click_enabled": {
+        "type": "boolean"
+      },
+      "click_algo": {
+        "type": "string"
+      },
+      "click_sensitivity": {
+        "type": "number"
+      },
+      "click_widening": {
+        "type": "number"
+      },
+      "click_skew": {
+        "type": "number"
+      },
+      "hum_enabled": {
+        "type": "boolean"
+      },
+      "hum_base_freq": {
+        "type": "number"
+      },
+      "hum_harmonics": {
+        "type": "integer"
+      },
+      "hum_gain": {
+        "type": "number"
+      },
+      "hum_q": {
+        "type": "number"
+      },
+      "hum_slope": {
+        "type": "string"
+      },
+      "hum_adaptive": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "pitch_correction": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "mode": {
+        "type": "string"
+      },
+      "voice_type": {
+        "type": "string"
+      },
+      "ref_a4": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "correction": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "retune_speed": {
+            "type": "number"
+          },
+          "flex_tune": {
+            "type": "number"
+          },
+          "humanize": {
+            "type": "number"
+          },
+          "natural_vibrato": {
+            "type": "number"
+          },
+          "correction_amt": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "scale": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "root": {
+            "type": "string"
+          },
+          "scale_type": {
+            "type": "string"
+          },
+          "active_notes": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            }
+          },
+          "bypass_notes": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            }
+          },
+          "detune_cents": {
+            "type": "number"
+          },
+          "transpose": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "formant": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "preserve": {
+            "type": "number"
+          },
+          "throat_shift": {
+            "type": "number"
+          },
+          "breath_pass": {
+            "type": "number"
+          },
+          "sibilance_guard": {
+            "type": "number"
+          },
+          "tilt": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "graph_anchors": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "beat": {
+              "type": "number"
+            },
+            "duration": {
+              "type": "number"
+            },
+            "midi": {
+              "type": "number"
+            },
+            "offset_cents": {
+              "type": "number"
+            },
+            "drift": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "delay": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "link_lr": {
+        "type": "boolean"
+      },
+      "input_format": {
+        "type": "string"
+      },
+      "high_cut": {
+        "type": "number"
+      },
+      "low_cut": {
+        "type": "number"
+      },
+      "left_delay": {
+        "type": "number"
+      },
+      "left_feedback": {
+        "type": "number"
+      },
+      "right_delay": {
+        "type": "number"
+      },
+      "right_feedback": {
+        "type": "number"
+      },
+      "high_ratio": {
+        "type": "number"
+      },
+      "stereo_blend": {
+        "type": "number"
+      },
+      "dry_wet": {
+        "type": "number"
+      },
+      "level": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "reverb": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "height": {
+        "type": "number"
+      },
+      "length": {
+        "type": "number"
+      },
+      "width": {
+        "type": "number"
+      },
+      "pre_delay": {
+        "type": "number"
+      },
+      "reverb_time": {
+        "type": "number"
+      },
+      "distance": {
+        "type": "number"
+      },
+      "brightness": {
+        "type": "number"
+      },
+      "modulation": {
+        "type": "number"
+      },
+      "er_lo_freq": {
+        "type": "number"
+      },
+      "er_hi_freq": {
+        "type": "number"
+      },
+      "er_lo_gain": {
+        "type": "number"
+      },
+      "er_hi_gain": {
+        "type": "number"
+      },
+      "rev_lo_freq": {
+        "type": "number"
+      },
+      "rev_hi_freq": {
+        "type": "number"
+      },
+      "rev_lo_gain": {
+        "type": "number"
+      },
+      "rev_hi_gain": {
+        "type": "number"
+      },
+      "dry_wet": {
+        "type": "number"
+      },
+      "direct_db": {
+        "type": "number"
+      },
+      "er_db": {
+        "type": "number"
+      },
+      "reverb_db": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "convolution_reverb": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string"
+      },
+      "file_path": {
+        "type": "string"
+      },
+      "sample_rate": {
+        "type": "integer"
+      },
+      "native_ms": {
+        "type": "number"
+      },
+      "seed": {
+        "type": "integer"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "reverse": {
+        "type": "boolean"
+      },
+      "wet_lock": {
+        "type": "boolean"
+      },
+      "pre_delay": {
+        "type": "number"
+      },
+      "ir_length": {
+        "type": "number"
+      },
+      "fade_in": {
+        "type": "number"
+      },
+      "fade_out": {
+        "type": "number"
+      },
+      "trim_start": {
+        "type": "number"
+      },
+      "trim_end": {
+        "type": "number"
+      },
+      "er_split_ms": {
+        "type": "number"
+      },
+      "er_gain": {
+        "type": "number"
+      },
+      "tail_gain": {
+        "type": "number"
+      },
+      "stereo_width": {
+        "type": "number"
+      },
+      "lo_freq": {
+        "type": "number"
+      },
+      "hi_freq": {
+        "type": "number"
+      },
+      "lo_gain": {
+        "type": "number"
+      },
+      "hi_gain": {
+        "type": "number"
+      },
+      "dry_wet": {
+        "type": "number"
+      },
+      "direct_db": {
+        "type": "number"
+      },
+      "er_db": {
+        "type": "number"
+      },
+      "tail_db": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "panner": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "space_mode": {
+        "type": "string"
+      },
+      "format": {
+        "type": "string"
+      },
+      "lr": {
+        "type": "number"
+      },
+      "fb": {
+        "type": "number"
+      },
+      "elevation": {
+        "type": "number"
+      },
+      "rotate": {
+        "type": "number"
+      },
+      "spread": {
+        "type": "number"
+      },
+      "spread_auto": {
+        "type": "boolean"
+      },
+      "divergence": {
+        "type": "number"
+      },
+      "div_mode": {
+        "type": "string"
+      },
+      "boom_on": {
+        "type": "boolean"
+      },
+      "boom_route": {
+        "type": "string"
+      },
+      "boom_gain": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "stereo_imager": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "width": {
+        "type": "number"
+      },
+      "mid_gain": {
+        "type": "number"
+      },
+      "side_gain": {
+        "type": "number"
+      },
+      "mono_maker_on": {
+        "type": "boolean"
+      },
+      "mono_maker_freq": {
+        "type": "number"
+      },
+      "mono_maker_slope": {
+        "type": "string"
+      },
+      "solo_mode": {
+        "type": "string"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "scope_mode": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "saturation": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "global_drive": {
+        "type": "number"
+      },
+      "mix": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "auto_gain": {
+        "type": "boolean"
+      },
+      "oversampling": {
+        "type": "string"
+      },
+      "xover_low": {
+        "type": "number"
+      },
+      "xover_high": {
+        "type": "number"
+      },
+      "flutter_depth": {
+        "type": "number"
+      },
+      "flutter_rate": {
+        "type": "number"
+      },
+      "stop_time_ms": {
+        "type": "number"
+      },
+      "bands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "string"
+            },
+            "drive": {
+              "type": "number"
+            },
+            "tone": {
+              "type": "number"
+            },
+            "bias": {
+              "type": "number"
+            },
+            "level": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "exciter": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "ui_mode": {
+        "type": "string"
+      },
+      "band_count": {
+        "type": "integer"
+      },
+      "crossovers": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "oversampling": {
+        "type": "string"
+      },
+      "global_mix": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "auto_gain": {
+        "type": "boolean"
+      },
+      "bands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "number"
+            },
+            "harmonics": {
+              "type": "number"
+            },
+            "bias": {
+              "type": "number"
+            },
+            "mix": {
+              "type": "number"
+            },
+            "output": {
+              "type": "number"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "mute": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "subharmonic": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "sub_solo": {
+        "type": "boolean"
+      },
+      "source": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "octave_mode": {
+            "type": "string"
+          },
+          "freq": {
+            "type": "number"
+          },
+          "bandwidth": {
+            "type": "number"
+          },
+          "sub_lpf": {
+            "type": "number"
+          },
+          "oct1_level": {
+            "type": "number"
+          },
+          "oct2_level": {
+            "type": "number"
+          },
+          "harmonics": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "drive": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "engine_mode": {
+            "type": "string"
+          },
+          "drive_db": {
+            "type": "number"
+          },
+          "saturation": {
+            "type": "number"
+          },
+          "punch": {
+            "type": "number"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          },
+          "phase": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "direct_level": {
+            "type": "number"
+          },
+          "sub_level": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          },
+          "low_cut": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "trim_db": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "transient_designer": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "auto_gain": {
+        "type": "boolean"
+      },
+      "transient": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "sustain": {
+            "type": "number"
+          },
+          "sensitivity": {
+            "type": "number"
+          },
+          "punch": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "sidechain": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "listen": {
+            "type": "boolean"
+          },
+          "hpf_freq": {
+            "type": "number"
+          },
+          "lpf_freq": {
+            "type": "number"
+          },
+          "slope": {
+            "type": "integer"
+          },
+          "focus_q": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "output_stage": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "clip_mode": {
+            "type": "string"
+          },
+          "ceiling": {
+            "type": "number"
+          },
+          "drive": {
+            "type": "number"
+          },
+          "stereo_link": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "modulation": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "routing": {
+        "type": "string"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "chorus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "voicing": {
+            "type": "string"
+          },
+          "rate": {
+            "type": "number"
+          },
+          "depth": {
+            "type": "number"
+          },
+          "delay_ms": {
+            "type": "number"
+          },
+          "spread": {
+            "type": "number"
+          },
+          "tone": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "flanger": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "rate": {
+            "type": "number"
+          },
+          "depth": {
+            "type": "number"
+          },
+          "feedback": {
+            "type": "number"
+          },
+          "manual_ms": {
+            "type": "number"
+          },
+          "spread": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "phaser": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "stages": {
+            "type": "integer"
+          },
+          "rate": {
+            "type": "number"
+          },
+          "depth": {
+            "type": "number"
+          },
+          "feedback": {
+            "type": "number"
+          },
+          "center_hz": {
+            "type": "number"
+          },
+          "spread": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "tremolo_autopan": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "mode": {
+        "type": "string"
+      },
+      "sync": {
+        "type": "boolean"
+      },
+      "bpm": {
+        "type": "number"
+      },
+      "rate_hz": {
+        "type": "number"
+      },
+      "sync_div": {
+        "type": "string"
+      },
+      "waveform": {
+        "type": "string"
+      },
+      "shape": {
+        "type": "number"
+      },
+      "smooth": {
+        "type": "number"
+      },
+      "depth": {
+        "type": "number"
+      },
+      "phase_offset": {
+        "type": "number"
+      },
+      "pan_center": {
+        "type": "number"
+      },
+      "pan_width": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "retrigger": {
+        "type": "boolean"
+      },
+      "effective_hz": {
+        "type": "number"
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "doubler": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "voice_count": {
+        "type": "integer"
+      },
+      "key_scale": {
+        "type": "string"
+      },
+      "formant_preserve": {
+        "type": "boolean"
+      },
+      "humanize": {
+        "type": "number"
+      },
+      "stereo_width": {
+        "type": "number"
+      },
+      "dry_gain": {
+        "type": "number"
+      },
+      "wet_mix": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "voices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "type": "string"
+            },
+            "detune": {
+              "type": "number"
+            },
+            "delay": {
+              "type": "number"
+            },
+            "pan": {
+              "type": "number"
+            },
+            "gain": {
+              "type": "number"
+            },
+            "solo": {
+              "type": "boolean"
+            },
+            "mute": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "voice_changer": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "formant": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "shift": {
+            "type": "number"
+          },
+          "throat": {
+            "type": "number"
+          },
+          "gender": {
+            "type": "number"
+          },
+          "preserve": {
+            "type": "number"
+          },
+          "timbre": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "pitch": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "tracking": {
+            "type": "string"
+          },
+          "semitones": {
+            "type": "number"
+          },
+          "fine": {
+            "type": "number"
+          },
+          "formant_link": {
+            "type": "number"
+          },
+          "glide": {
+            "type": "number"
+          },
+          "jitter": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "vocoder": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "carrier": {
+            "type": "string"
+          },
+          "bands": {
+            "type": "integer"
+          },
+          "carrier_hz": {
+            "type": "number"
+          },
+          "formant": {
+            "type": "number"
+          },
+          "unvoiced": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "spectral_mangler": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "routing": {
+        "type": "string"
+      },
+      "global_mix": {
+        "type": "number"
+      },
+      "output_gain": {
+        "type": "number"
+      },
+      "ring": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "carrier": {
+            "type": "number"
+          },
+          "lfo_rate": {
+            "type": "number"
+          },
+          "lfo_depth": {
+            "type": "number"
+          },
+          "warp": {
+            "type": "number"
+          },
+          "spread": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "grain": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "freeze": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "density": {
+            "type": "number"
+          },
+          "pitch": {
+            "type": "number"
+          },
+          "pitch_jitter": {
+            "type": "number"
+          },
+          "position": {
+            "type": "number"
+          },
+          "spray": {
+            "type": "number"
+          },
+          "feedback": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      },
+      "dist": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "curve": {
+            "type": "string"
+          },
+          "drive": {
+            "type": "number"
+          },
+          "fold": {
+            "type": "number"
+          },
+          "bias": {
+            "type": "number"
+          },
+          "tone": {
+            "type": "number"
+          },
+          "resonance": {
+            "type": "number"
+          },
+          "mix": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "true_peak_limiter": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "standard": {
+        "type": "string"
+      },
+      "gain": {
+        "type": "number"
+      },
+      "ceiling": {
+        "type": "number"
+      },
+      "target_lufs": {
+        "type": "number"
+      },
+      "trim": {
+        "type": "number"
+      },
+      "lufs_auto_link": {
+        "type": "boolean"
+      },
+      "ceil_link": {
+        "type": "boolean"
+      },
+      "audition_mode": {
+        "type": "string"
+      },
+      "dc_filter": {
+        "type": "boolean"
+      },
+      "engine": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "style": {
+            "type": "string"
+          },
+          "lookahead": {
+            "type": "number"
+          },
+          "attack": {
+            "type": "number"
+          },
+          "release": {
+            "type": "number"
+          },
+          "knee": {
+            "type": "number"
+          },
+          "link_trans": {
+            "type": "number"
+          },
+          "link_rel": {
+            "type": "number"
+          },
+          "oversampling": {
+            "type": "integer"
+          },
+          "true_peak": {
+            "type": "boolean"
+          },
+          "auto_release": {
+            "type": "boolean"
+          },
+          "anti_clip": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "dither": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "bit_depth": {
+            "type": "string"
+          },
+          "shaping": {
+            "type": "string"
+          },
+          "auto_blank": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  },
+  "clip_editor": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": true,
+    "description": "Local UI state only; audio preview/export are not implemented"
+  }
+}

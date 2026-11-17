@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 FEATURE_LIBRARY = "library"
 FEATURE_COLOR = "color"
 FEATURE_EDIT = "edit"
+FEATURE_MIXER = "mixer"
 FEATURE_COMPOSITE = "composite"
 FEATURE_DELIVER = "deliver"
 FEATURE_TEACHING_ANIMATION = "teaching_animation"
 
 ALL_FEATURES = frozenset({
-    FEATURE_LIBRARY, FEATURE_COLOR, FEATURE_EDIT, FEATURE_COMPOSITE,
+    FEATURE_LIBRARY, FEATURE_COLOR, FEATURE_EDIT, FEATURE_MIXER, FEATURE_COMPOSITE,
     FEATURE_DELIVER, FEATURE_TEACHING_ANIMATION,
 })
 
@@ -81,14 +82,14 @@ PRODUCT_PRESETS: dict[str, ProductPreset] = {
         name="topos-color",
         display_name="Topos Color",
         enabled_features=frozenset({FEATURE_LIBRARY, FEATURE_COLOR, FEATURE_DELIVER}),
-        disabled_features=frozenset({FEATURE_EDIT, FEATURE_COMPOSITE, FEATURE_TEACHING_ANIMATION}),
+        disabled_features=frozenset({FEATURE_EDIT, FEATURE_MIXER, FEATURE_COMPOSITE, FEATURE_TEACHING_ANIMATION}),
         description="Color grading focused: color tools plus lightweight still/image export.",
     ),
     "topos-edit": ProductPreset(
         name="topos-edit",
         display_name="Topos Edit",
         enabled_features=frozenset({FEATURE_LIBRARY, FEATURE_COLOR, FEATURE_EDIT, FEATURE_DELIVER}),
-        disabled_features=frozenset({FEATURE_COMPOSITE, FEATURE_TEACHING_ANIMATION}),
+        disabled_features=frozenset({FEATURE_MIXER, FEATURE_COMPOSITE, FEATURE_TEACHING_ANIMATION}),
         description="Editing focused: timeline editing, delivery, and minimal color viewer/transform.",
     ),
     "topos-composite": ProductPreset(
@@ -98,7 +99,7 @@ PRODUCT_PRESETS: dict[str, ProductPreset] = {
             FEATURE_LIBRARY, FEATURE_COLOR, FEATURE_COMPOSITE, FEATURE_DELIVER,
             FEATURE_TEACHING_ANIMATION,
         }),
-        disabled_features=frozenset({FEATURE_EDIT}),
+        disabled_features=frozenset({FEATURE_EDIT, FEATURE_MIXER}),
         description="Compositing focused: node-based compositing, delivery, and minimal color viewer/transform.",
     ),
 }

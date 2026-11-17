@@ -1,0 +1,11 @@
+{
+  "page": {
+    "mixer": "Mixer"
+  },
+  "panel": {
+    "audio_console": "Audio Console",
+    "audio_viewer": "Video Monitor",
+    "audio_timeline": "Audio Timeline",
+    "audio_clip_editor": "Clip Editor"
+  }
+}

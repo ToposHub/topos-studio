@@ -1,0 +1,140 @@
+"""UI catalog, parameter-window ownership, and rack interaction regressions."""
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from PyQt6.QtCore import QCoreApplication, QEvent, QTimer
+from PyQt6.QtWidgets import QApplication, QWidget
+
+from src.features.mixer.effects import (
+    EFFECT_CATALOG, EffectBrowserWidget, EffectInstance, EffectRackWidget,
+    EffectWindowManager, create_panel, get_effect, stop_panel_timers,
+)
+
+
+@pytest.mark.parametrize("descriptor", EFFECT_CATALOG, ids=lambda entry: entry.effect_id)
+def test_every_registered_panel_constructs_without_backend(qapp: QApplication, descriptor: Any) -> None:
+    assert descriptor.backend_status == "not_connected"
+    assert descriptor.supports_preview is False
+    assert descriptor.supports_export is False
+    assert descriptor.parameter_schema["type"] == "object"
+    panel = create_panel(descriptor.effect_id, "测试轨道")
+    assert isinstance(panel, QWidget)
+    stop_panel_timers(panel)
+    assert all(not timer.isActive() for timer in panel.findChildren(QTimer))
+    panel.close()
+    panel.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_catalog_has_unique_stable_ids_and_clip_tool_scope() -> None:
+    assert len(EFFECT_CATALOG) == 24
+    assert len({entry.effect_id for entry in EFFECT_CATALOG}) == len(EFFECT_CATALOG)
+    assert get_effect("clip_editor").scope == ("clip",)
+    with pytest.raises(KeyError):
+        create_panel("../unsafe_module")
+
+
+def test_window_close_and_reopen_preserve_parameters_and_pause_timers(qapp: QApplication) -> None:
+    parent = QWidget()
+    manager = EffectWindowManager(parent)
+    instance = EffectInstance.create("eq", "dx-1")
+    window = manager.open(instance, "对白")
+    state = window.panel.get_state()
+    state["master_gain"] = -7.25
+    window.panel.set_state(state)
+    window.close()
+    assert instance.parameters["master_gain"] == -7.25
+    assert all(not timer.isActive() for timer in window.panel.findChildren(QTimer))
+    reopened = manager.open(instance, "对白")
+    assert reopened is window
+    assert reopened.panel.get_state()["master_gain"] == -7.25
+    manager.pause_all()
+    assert not window.isVisible()
+    manager.dispose_all()
+    assert manager.window_for(instance) is None
+    parent.deleteLater()
+
+
+def test_same_effect_and_instance_name_are_isolated_by_owner(qapp: QApplication) -> None:
+    parent = QWidget()
+    manager = EffectWindowManager(parent)
+    first = EffectInstance("same-local-id", "eq", "dx-1")
+    second = EffectInstance("same-local-id", "eq", "mx-1")
+    first_window = manager.open(first, "对白")
+    second_window = manager.open(second, "音乐")
+    assert first_window is not second_window
+    state = first_window.panel.get_state()
+    state["master_gain"] = -9.0
+    first_window.panel.set_state(state)
+    assert second_window.panel.get_state()["master_gain"] != -9.0
+    manager.close_instance(first.instance_id, first.owner_id)
+    assert manager.window_for(first) is None
+    assert manager.window_for(second) is second_window
+    manager.dispose_all()
+    parent.deleteLater()
+
+
+def test_rack_insert_bypass_reorder_remove_and_owner_switch(qapp: QApplication) -> None:
+    parent = QWidget()
+    manager = EffectWindowManager(parent)
+    rack = EffectRackWidget(manager, parent)
+    notifications: list[tuple[str, list[EffectInstance]]] = []
+    rack.changed.connect(lambda owner, instances: notifications.append((owner, instances)))
+    rack.set_owner("dx-1", "对白", [])
+    first = rack.insert_effect("eq")
+    second = rack.insert_effect("deesser")
+    rack.toggle_selected()
+    assert not second.enabled
+    rack.move_selected(-1)
+    assert [item.instance_id for item in rack.instances()] == [second.instance_id, first.instance_id]
+    rack.open_selected()
+    assert manager.window_for(second) is not None
+    rack.remove_selected()
+    assert manager.window_for(second) is None
+    assert rack.instances() == [first]
+    assert notifications[-1][0] == "dx-1"
+    rack.set_owner("mx-1", "音乐", [])
+    assert not rack.instances()
+    assert first.owner_id == "dx-1"
+    with pytest.raises(ValueError):
+        rack.insert_effect("clip_editor")
+    manager.dispose_all()
+    parent.deleteLater()
+
+
+def test_browser_filters_and_emits_catalog_identity(qapp: QApplication) -> None:
+    browser = EffectBrowserWidget()
+    browser.set_scope("track")
+    assert browser.list_widget.count() == 23
+    browser.search.setText("de-esser")
+    assert browser.list_widget.count() == 1
+    selected: list[str] = []
+    browser.effectChosen.connect(selected.append)
+    browser.add_button.click()
+    assert selected == ["deesser"]
+    browser.search.clear()
+    browser.set_scope("clip")
+    assert browser.list_widget.count() == 24
+    browser.deleteLater()
+
+
+def test_rack_bypass_and_panel_power_remain_consistent(qapp: QApplication) -> None:
+    parent = QWidget()
+    manager = EffectWindowManager(parent)
+    rack = EffectRackWidget(manager, parent)
+    rack.set_owner("dx-1", "对白", [])
+    instance = rack.insert_effect("eq")
+    rack.toggle_selected()
+    window = manager.open(instance, "对白")
+    assert window.panel.get_state()["enabled"] is False
+    rack.toggle_selected()
+    assert window.panel.get_state()["enabled"] is True
+    state = window.panel.get_state()
+    state["enabled"] = False
+    window.panel.stateChanged.emit(state)
+    assert instance.enabled is False
+    assert rack.list_widget.currentItem().text().startswith("○")
+    manager.dispose_all()
+    parent.deleteLater()

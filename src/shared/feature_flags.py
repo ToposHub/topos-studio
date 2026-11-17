@@ -11,6 +11,7 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "library": True,
     "color": True,
     "edit": True,
+    "mixer": True,
     "composite": True,
     "deliver": True,
     # Teaching Animation ships with the default Studio runtime so its
@@ -79,6 +80,7 @@ def _ai_capability_defaults() -> dict[str, bool]:
 # Product mode presets: mode -> {feature: enabled}
 PRODUCT_MODE_PRESETS: dict[str, dict[str, bool]] = {
     "color": {
+        "mixer": False,
         "library": True,
         "color": True,
         "edit": False,
@@ -88,6 +90,7 @@ PRODUCT_MODE_PRESETS: dict[str, dict[str, bool]] = {
         **_ai_capability_defaults(),
     },
     "studio": {
+        "mixer": True,
         "library": True,
         "color": True,
         "edit": True,
@@ -97,6 +100,7 @@ PRODUCT_MODE_PRESETS: dict[str, dict[str, bool]] = {
         **_ai_capability_defaults(),
     },
     "edit": {
+        "mixer": False,
         "library": True,
         "color": True,
         "edit": True,
@@ -108,6 +112,7 @@ PRODUCT_MODE_PRESETS: dict[str, dict[str, bool]] = {
         **_ai_capability_defaults(),
     },
     "composite": {
+        "mixer": False,
         "library": True,
         "color": True,
         "edit": False,
@@ -140,6 +145,7 @@ DEFAULT_WORK_MODE = "video"
 WORK_MODE_FEATURE_OVERRIDES: dict[str, dict[str, bool]] = {
     "image": {
         "edit": False,
+        "mixer": False,
     },
     "video": {},
 }
@@ -183,6 +189,8 @@ class FeatureFlags:
     # AI Workflow node canvas: advanced surface, ships on but dock stays hidden
     # (default_visible=False) — users opt-in via Window > Panels.
     ai_workflow: bool = True
+    # Appended to preserve the positional constructor of existing flags.
+    mixer: bool = True
 
     def is_enabled(self, feature_id: str) -> bool:
         if feature_id == "color":
@@ -341,10 +349,15 @@ def load_feature_flags(config: Any = None) -> FeatureFlags:
         if os.environ.get(env_var) is None and feature in flags:
             flags[feature] = enabled
 
+    # The UI prototype ships only in the Studio video workspace.
+    if get_product_mode() != "studio" or work_mode != "video":
+        flags["mixer"] = False
+
     return FeatureFlags(
         library=flags["library"],
         color=flags["color"],
         edit=flags["edit"],
+        mixer=flags["mixer"],
         composite=flags["composite"],
         deliver=flags["deliver"],
         teaching_animation=flags["teaching_animation"],

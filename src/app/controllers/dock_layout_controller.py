@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction
@@ -1220,6 +1220,8 @@ class DockLayoutMixin:
             if callable(attach_batch_host):
                 attach_batch_host(self)
 
+        self._create_audio_workspace_docks(create_custom_dock)
+
         self.all_docks = [
             self.dock_viewport, self.dock_library, self.dock_files, self.dock_info,
             self.dock_layers, self.dock_denoise, self.dock_deblur,
@@ -1287,11 +1289,78 @@ class DockLayoutMixin:
         # Add Deliver dock if available (Phase 9)
         if self.dock_deliver:
             self.all_docks.append(self.dock_deliver)
+        self.all_docks.extend(self._audio_workspace_docks())
         # Initial splitting and proportions
         self.apply_default_layout()
 
         # Update initial titlebar states immediately
         self._perform_update_all_titlebars()
+
+    def _create_audio_workspace_docks(
+        self, factory: Callable[[str, QWidget, str], QDockWidget],
+    ) -> None:
+        """Parent the local Mixer session's panels into independent native docks."""
+        for dock_attr in ("dock_audio_console", "dock_audio_viewer",
+                          "dock_audio_timeline", "dock_audio_clip_editor"):
+            setattr(self, dock_attr, None)
+        page = getattr(self, "mixer_page", None)
+        if not getattr(self, "_mixer_available", False) or page is None:
+            return
+        # The feature directory can be physically absent from other products.
+        from src.features.mixer.module import MIXER_PANEL_SPECS
+        object_names = {
+            "console": "dockAudioConsole", "viewer": "dockAudioViewer",
+            "timeline": "dockAudioTimeline", "clip_editor": "dockAudioClipEditor",
+        }
+        for key, dock_attr, panel_attr, title in MIXER_PANEL_SPECS:
+            dock = factory(I18N.tr(f"panel.audio_{key}", title),
+                           getattr(page, panel_attr), object_names[key])
+            dock.setProperty("mixer_workspace_panel", True)
+            # A visible native drag handle matters for independent panels;
+            # unlike tabbed legacy docks these must not have a 1px titlebar.
+            dock.setTitleBarWidget(FloatingDockTitleBar(dock))
+            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea
+                               if key in ("console", "viewer") else
+                               Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+            dock.hide()
+            setattr(self, dock_attr, dock)
+
+    def _audio_workspace_docks(self) -> tuple[QDockWidget, ...]:
+        """Include the optional Clip Editor for visibility and layout persistence."""
+        return tuple(dock for attr in (
+            "dock_audio_console", "dock_audio_viewer", "dock_audio_timeline",
+            "dock_audio_clip_editor",
+        ) if isinstance((dock := getattr(self, attr, None)), QDockWidget))
+
+    def _seed_audio_workspace_layout(self) -> bool:
+        """Capture the three-panel factory layout without disturbing the active page."""
+        docks = self._audio_workspace_docks()
+        if len(docks) < 3:
+            return False
+        if getattr(self, "_mixer_default_layout", None) is not None:
+            self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
+            return True
+        previous = self.saveState()
+        try:
+            for dock in getattr(self, "all_docks", ()):
+                dock.hide()
+            for dock in docks:
+                dock.setFloating(False)
+            console, viewer, timeline = docks[:3]
+            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, console)
+            self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
+            for dock in (console, viewer, timeline):
+                dock.show()
+            for dock in docks[3:]:
+                dock.hide()
+            self.resizeDocks([console, viewer], [760, 420], Qt.Orientation.Horizontal)
+            self.resizeDocks([console, timeline], [370, 330], Qt.Orientation.Vertical)
+            self._mixer_default_layout = self.saveState()
+            self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
+        finally:
+            self.restoreState(previous)
+        return True
 
     def _sync_color_timeline_selector(self, *_args: object) -> None:
         """Refresh the Color viewport's active-timeline selector."""
@@ -1337,6 +1406,9 @@ class DockLayoutMixin:
     # ------------------------------------------------------------------
     def initialize_page_layouts(self) -> None:
         """Pre-define the look of each page or restore from config."""
+        # Older factory/user profiles predate Mixer. Seed its own layout
+        # before loading them, so first entry never inherits a Color layout.
+        self._seed_audio_workspace_layout()
         # Phase A: Create LayoutStore and migrate legacy page_layouts
         self.layout_store = LayoutStore(self.config_manager)
         try:
@@ -2544,7 +2616,7 @@ class DockLayoutMixin:
                 # Detect floating state
                 is_floating = dock.isFloating()
 
-                if is_floating:
+                if is_floating or bool(dock.property("mixer_workspace_panel")):
                     # Floating dock: 必须用一个有真实高度的自定义标题栏，而不能
                     # 调用 setTitleBarWidget(None) 依赖原生标题栏。原因：项目全局
                     # QSS 把 QDockWidget::title 的 max-height 钉死成 0px，Qt 在有
@@ -3101,6 +3173,16 @@ class DockLayoutMixin:
         user-overwritable, which is exactly how the "default" could end up
         permanently messed up with no way back.
         """
+        if self.current_page == "Mixer" and self._audio_workspace_docks():
+            self._seed_audio_workspace_layout()
+            self.page_layouts["Mixer"] = self._mixer_default_layout
+            self.restoreState(self._mixer_default_layout)
+            self._enforce_page_dock_visibility()
+            self._sync_floating_docks()
+            self._perform_update_all_titlebars()
+            self._save_current_layout_to_store("Mixer")
+            self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
+            return
         factory_geom, factory_state, panel_states = self._load_factory_layout()
         restored = False
         if factory_geom and factory_state:
@@ -3296,6 +3378,20 @@ class DockLayoutMixin:
         mode they stay usable. Media Pool is already unavailable in image mode
         (Edit feature disabled at startup).
         """
+        mixer_docks = self._audio_workspace_docks()
+        mixer_active = self.current_page == "Mixer"
+        for dock in mixer_docks:
+            dock.toggleViewAction().setEnabled(mixer_active)
+            if not mixer_active:
+                dock.hide()
+        if mixer_active:
+            # This UI-only workspace owns its three panels, never the Color
+            # canvas, Edit viewer, or the production AudioMixerPanel.
+            for dock in getattr(self, "all_docks", ()):
+                if dock not in mixer_docks:
+                    dock.hide()
+            return
+
         # Work-mode scoped docks. Video mode is timeline-centric: the image
         # Library, the image Batch Export (dock_export) and the image-only
         # tool panels (Deblur / Crop & Transform / Info) are hidden. Image
@@ -3659,6 +3755,9 @@ class DockLayoutMixin:
             if dock.isFloating():
                 self._floating_docks.add(dock)
                 # 浮动 dock 用有真实高度的 FloatingDockTitleBar（可拖拽移动/停靠）
+                if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
+                    dock.setTitleBarWidget(FloatingDockTitleBar(dock))
+            elif bool(dock.property("mixer_workspace_panel")):
                 if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
                     dock.setTitleBarWidget(FloatingDockTitleBar(dock))
             else:

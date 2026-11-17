@@ -337,7 +337,7 @@ class TestDisabledModulesDoNotRegisterPages:
         mock_registry._context = MagicMock()
         
         disabled_flags = FeatureFlags(
-            edit=False, composite=False, deliver=False, ai_workflow=False,
+            edit=False, mixer=False, composite=False, deliver=False, ai_workflow=False,
         )
         mock_registry._context.feature_flags = disabled_flags
         

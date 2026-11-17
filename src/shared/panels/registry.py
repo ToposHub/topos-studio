@@ -32,6 +32,7 @@ CATEGORY_ORDER: list[str] = [
     "Workspace",
     "Color",
     "Edit",
+    "Mixer",
     "Composite",
     "Deliver",
     "Advanced",

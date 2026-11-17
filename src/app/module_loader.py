@@ -39,6 +39,7 @@ _FEATURE_MODULES: tuple[FeatureModuleSpec, ...] = (
         post_register_hook="discover_and_register_plugins",
     ),
     FeatureModuleSpec("edit", "src.features.edit.module", "EditModule"),
+    FeatureModuleSpec("mixer", "src.features.mixer.module", "MixerModule"),
     FeatureModuleSpec("deliver", "src.features.deliver.module", "DeliverModule"),
     FeatureModuleSpec(
         "teaching_animation",

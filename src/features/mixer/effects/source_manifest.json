@@ -1,0 +1,383 @@
+[
+  {
+    "effect_id": "eq",
+    "source_filename": "EQ-UI.py",
+    "sha256": "1b37db07289d0e832f18d910e4672bc87ddf30c5c6b73f6a1920e7dfebb7465a",
+    "panel_module": "src.features.mixer.effects.panels.eq",
+    "panel_class": "StudioParametricEQWidget",
+    "name_zh": "参数均衡器",
+    "name_en": "Parametric EQ",
+    "group": "均衡与动态",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "dynamic_eq",
+    "source_filename": "dynamic_eq_ui.py",
+    "sha256": "8c581ecc5cc2dd8eb0ecf8f62521ed66f11749f8203a4a75e21677b1c5decbd7",
+    "panel_module": "src.features.mixer.effects.panels.dynamic_eq",
+    "panel_class": "StudioDynamicEQWidget",
+    "name_zh": "动态均衡器",
+    "name_en": "Dynamic EQ",
+    "group": "均衡与动态",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "dynamics",
+    "source_filename": "Dyamics-UI.py",
+    "sha256": "2d4f2f38979a268ed99cc6e81f2dc8a28f03d12585697d76eaca651a5c8e129e",
+    "panel_module": "src.features.mixer.effects.panels.dynamics",
+    "panel_class": "StudioDynamicsWidget",
+    "name_zh": "动态处理",
+    "name_en": "Dynamics",
+    "group": "均衡与动态",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "multiband_compressor",
+    "source_filename": "multiband_comp_ui.py",
+    "sha256": "c7b67ef39053783aba45759f3bc42e3fc386a75753083b98c5fcd75e114afa69",
+    "panel_module": "src.features.mixer.effects.panels.multiband_compressor",
+    "panel_class": "StudioMultibandCompWidget",
+    "name_zh": "多段压缩器",
+    "name_en": "Multiband Compressor",
+    "group": "均衡与动态",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "bus_compressor",
+    "source_filename": "bus_comp_ui.py",
+    "sha256": "d5b12599a09eece5f14e99904f555d0b72156d41c85c03da2542abc063384e29",
+    "panel_module": "src.features.mixer.effects.panels.bus_compressor",
+    "panel_class": "StudioBusCompWidget",
+    "name_zh": "总线压缩器",
+    "name_en": "Bus Compressor",
+    "group": "均衡与动态",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "deesser",
+    "source_filename": "DeEsser_UI.py",
+    "sha256": "11a83c764dca95571bcc67b21af36613bc2d24a4856b2730beb9d37c6e424365",
+    "panel_module": "src.features.mixer.effects.panels.deesser",
+    "panel_class": "StudioDeEsserWidget",
+    "name_zh": "齿音消除",
+    "name_en": "De-Esser",
+    "group": "对白与修复",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "declick_dehum",
+    "source_filename": "DeClick_DeHum_UI.py",
+    "sha256": "b4ec1758ce6781b247db0acf2c01eb1f85f3b30606925f32954148e2bc81be4d",
+    "panel_module": "src.features.mixer.effects.panels.declick_dehum",
+    "panel_class": "StudioDeClickDeHumWidget",
+    "name_zh": "去爆音与电流声",
+    "name_en": "De-Click / De-Hum",
+    "group": "对白与修复",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "pitch_correction",
+    "source_filename": "Pitch_Correction_UI.py",
+    "sha256": "07229bba9cdd576bb76ca83a4fdf7a9cee5a603009e41f929de3f1887ee1a163",
+    "panel_module": "src.features.mixer.effects.panels.pitch_correction",
+    "panel_class": "StudioPitchCorrectionWidget",
+    "name_zh": "音高校正",
+    "name_en": "Pitch Correction",
+    "group": "对白与修复",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "delay",
+    "source_filename": "Delay-UI.py",
+    "sha256": "26877dd3ecf6ac2f85c4d9cf55f2117bc760f79e614530aa2fdd264834a6630c",
+    "panel_module": "src.features.mixer.effects.panels.delay",
+    "panel_class": "StudioDelayWidget",
+    "name_zh": "延迟",
+    "name_en": "Delay",
+    "group": "空间与延迟",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "reverb",
+    "source_filename": "Reverb-UI.py",
+    "sha256": "17d7b1109d35ebdfd307b0bdb015c8be01fbcde0b1fc99405081ee6bc20cc803",
+    "panel_module": "src.features.mixer.effects.panels.reverb",
+    "panel_class": "StudioAcousticReverbWidget",
+    "name_zh": "算法混响",
+    "name_en": "Acoustic Reverb",
+    "group": "空间与延迟",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "convolution_reverb",
+    "source_filename": "convolution_reverb_ui.py",
+    "sha256": "9364eb6dca6d0b49fdd8970672e1f4b9fb74d597687531c0e050ae0a3484320b",
+    "panel_module": "src.features.mixer.effects.panels.convolution_reverb",
+    "panel_class": "StudioConvolutionReverbWidget",
+    "name_zh": "卷积混响",
+    "name_en": "Convolution Reverb",
+    "group": "空间与延迟",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "panner",
+    "source_filename": "Panner-UI.py",
+    "sha256": "7de999ff1a144c2dc8ed4508c2865f8614f53be36d3a4ed0849f1e67b38d1c46",
+    "panel_module": "src.features.mixer.effects.panels.panner",
+    "panel_class": "StudioSpatialPannerWidget",
+    "name_zh": "空间声像",
+    "name_en": "Spatial Panner",
+    "group": "声像与立体声",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "stereo_imager",
+    "source_filename": "Stereo_Imager(M:S)_UI.py",
+    "sha256": "0c60aa842e0bd48e8547aa9312bac29b90d11e12377d60151e4dd5a21ce396bd",
+    "panel_module": "src.features.mixer.effects.panels.stereo_imager",
+    "panel_class": "StudioStereoImagerWidget",
+    "name_zh": "立体声成像",
+    "name_en": "Stereo Imager",
+    "group": "声像与立体声",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "saturation",
+    "source_filename": "Saturation_UI.py",
+    "sha256": "9edbb91eb28ce0227dacaa764eb0e598b32016914d40f25c5458cd334636d9b0",
+    "panel_module": "src.features.mixer.effects.panels.saturation",
+    "panel_class": "StudioSaturationWidget",
+    "name_zh": "饱和失真",
+    "name_en": "Saturation",
+    "group": "谐波与质感",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "exciter",
+    "source_filename": "exciter_ui.py",
+    "sha256": "7274e89b627199742bafb306c08ee076def1444a0ab02731119b240b4933ef0e",
+    "panel_module": "src.features.mixer.effects.panels.exciter",
+    "panel_class": "StudioExciterWidget",
+    "name_zh": "谐波激励",
+    "name_en": "Exciter",
+    "group": "谐波与质感",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "subharmonic",
+    "source_filename": "subharmonic_ui.py",
+    "sha256": "cf1de35eaf0476d6790bcf1e19e3cd17e9c2850a2b8f0cae1accf32babbe9276",
+    "panel_module": "src.features.mixer.effects.panels.subharmonic",
+    "panel_class": "StudioSubharmonicWidget",
+    "name_zh": "低频谐波",
+    "name_en": "Subharmonic",
+    "group": "谐波与质感",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "transient_designer",
+    "source_filename": "transient_designer_ui.py.py",
+    "sha256": "6c05655badc0a8b79db1fbf4a4bc03a365962d980b1edc93580c671c04267adf",
+    "panel_module": "src.features.mixer.effects.panels.transient_designer",
+    "panel_class": "StudioTransientDesignerWidget",
+    "name_zh": "瞬态塑形",
+    "name_en": "Transient Designer",
+    "group": "谐波与质感",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "modulation",
+    "source_filename": "Chorus:Flanger:Phaser_UI.py",
+    "sha256": "d83bdeaa76056597a10efe4e27108eee2d41c41215c9e08a0d0a8b7599fb0b87",
+    "panel_module": "src.features.mixer.effects.panels.modulation",
+    "panel_class": "StudioModulationTrioWidget",
+    "name_zh": "合唱／镶边／移相",
+    "name_en": "Chorus / Flanger / Phaser",
+    "group": "调制与创意",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "tremolo_autopan",
+    "source_filename": "TremoloAutoPan-UI.py",
+    "sha256": "544d2b10edad67162434088662a67707be0eb81bae849fdde1c6061982771d3a",
+    "panel_module": "src.features.mixer.effects.panels.tremolo_autopan",
+    "panel_class": "StudioTremoloAutoPanWidget",
+    "name_zh": "颤音与自动声像",
+    "name_en": "Tremolo / Auto Pan",
+    "group": "调制与创意",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "doubler",
+    "source_filename": "doubler_harmonizer_ui.py",
+    "sha256": "167b18381f38dd3f6646ba5282e57f180368ca27b4c2a0dae5932322cf16c0cf",
+    "panel_module": "src.features.mixer.effects.panels.doubler",
+    "panel_class": "StudioDoublerWidget",
+    "name_zh": "叠唱与和声",
+    "name_en": "Doubler / Harmonizer",
+    "group": "调制与创意",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "voice_changer",
+    "source_filename": "VoiceChanger-UI.py",
+    "sha256": "905b318efe56ea94786b2a198a474a71355bd2c092ecf7aa63244623592a4d95",
+    "panel_module": "src.features.mixer.effects.panels.voice_changer",
+    "panel_class": "StudioVoiceChangerWidget",
+    "name_zh": "变声器",
+    "name_en": "Voice Changer",
+    "group": "调制与创意",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "spectral_mangler",
+    "source_filename": "SpectralMangler-UI.py",
+    "sha256": "f17889009ac88f4944177be7f52fc5a7861bca18fbec8d180fafcd0a85704bd7",
+    "panel_module": "src.features.mixer.effects.panels.spectral_mangler",
+    "panel_class": "StudioSpectralManglerWidget",
+    "name_zh": "频谱创意处理",
+    "name_en": "Spectral Mangler",
+    "group": "调制与创意",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "true_peak_limiter",
+    "source_filename": "true_peak_limiter_ui.py",
+    "sha256": "bfec7cd8896aef42980f7334487e287654e611d66e1e12cc93d5b06c69a41a7b",
+    "panel_module": "src.features.mixer.effects.panels.true_peak_limiter",
+    "panel_class": "StudioTruePeakLimiterWidget",
+    "name_zh": "真峰值限制器",
+    "name_en": "True Peak Limiter",
+    "group": "母带与输出",
+    "scope": [
+      "clip",
+      "track",
+      "bus",
+      "master"
+    ]
+  },
+  {
+    "effect_id": "clip_editor",
+    "source_filename": "AudioClipEditor-UI.py",
+    "sha256": "361341bdef37e7bfa220fe71b5f27a34899190e92c32cd7c515791a874dba795",
+    "panel_module": "src.features.mixer.effects.panels.clip_editor",
+    "panel_class": "StudioAudioClipEditor",
+    "name_zh": "音频片段编辑器",
+    "name_en": "Audio Clip Editor",
+    "group": "片段工具",
+    "scope": [
+      "clip"
+    ]
+  }
+]

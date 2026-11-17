@@ -315,6 +315,8 @@ class PageManagementMixin:
             return self._edit_available
         if page == "composite":
             return self._composite_available
+        if page == "mixer":
+            return getattr(self, "_mixer_available", False)
         if page == "deliver":
             return self._deliver_available
         return page in ("library", "color")
@@ -549,6 +551,8 @@ class PageManagementMixin:
         """Restore viewport visibility and trigger render after page switch."""
         page_name = self.current_page
         generation = getattr(self, "_page_switch_generation", 0)
+        if page_name == "Mixer":
+            return
         # For Composite page, update the CompositeViewer
         if self.current_page == "Composite":
             if self.composite_viewer:
@@ -592,7 +596,7 @@ class PageManagementMixin:
     def _finalize_viewport_restore(self) -> None:
         """Finalize viewport restore with a second render pass."""
         try:
-            if self.current_page == "Composite":
+            if self.current_page in ("Composite", "Mixer"):
                 return
             self.canvas.viewport().update()
             if self.engine and hasattr(self.engine, 'render_pipeline'):

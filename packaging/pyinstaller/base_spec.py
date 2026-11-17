@@ -194,6 +194,18 @@ def generate_analysis(
             "src/shared/i18n/locales",
         ),
     ]
+    if "mixer" not in exclude_feature_dirs and product_name == "topos-studio":
+        mixer = Path(PROJECT_ROOT) / "src" / "features" / "mixer"
+        hidden_imports.append("src.features.mixer.module")
+        hidden_imports.extend(
+            f"src.features.mixer.effects.panels.{path.stem}"
+            for path in sorted((mixer / "effects" / "panels").glob("*.py"))
+            if path.stem != "__init__"
+        )
+        for path in (*sorted((mixer / "effects").glob("*.json")),
+                     mixer / "assets", mixer / "locales"):
+            target = path if path.is_dir() else path.parent
+            datas.append((str(path), target.relative_to(PROJECT_ROOT).as_posix()))
     # Feature modules load their translations from <module>/locales at
     # runtime (register_i18n → I18N.load_module_translations); without these
     # entries every non-English feature string falls back to English in

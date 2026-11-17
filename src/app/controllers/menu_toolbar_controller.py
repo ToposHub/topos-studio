@@ -1581,7 +1581,9 @@ class MenuToolbarMixin:
         switcher_layout.setSpacing(0)
 
         self.page_buttons = {}
-        pages = ["Library", "Edit", "Color", "Composite", "Deliver"]
+        pages = ["Library", "Edit", "Color", "Composite", "Mixer", "Deliver"]
+        if not getattr(self, "_mixer_available", False):
+            pages = [p for p in pages if p != "Mixer"]
         # Filter out disabled modules
         if not self._composite_available:
             pages = [p for p in pages if p != "Composite"]
