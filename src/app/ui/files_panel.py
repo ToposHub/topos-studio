@@ -558,8 +558,14 @@ class FilesPanel(QWidget):
 
     def _connect_native_plugins(self) -> None:
         from pathlib import Path
-        from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
+        from src.app.integrations.file_explorer.plugins import (
+            LEGACY_BUILTIN_IDS, FileExplorerPluginCatalog,
+        )
         from src.app.ui.files_plugins_controller import FilesPluginsController
+        from src.features.files.repository import FilesDataLocator
+        from src.shared.plugins.discovery import (
+            DevSourceRegistry, PluginSourceConfig,
+        )
         try:
             import file_explorer.main as fe_main
         except ImportError:
@@ -569,10 +575,23 @@ class FilesPanel(QWidget):
         catalog = FileExplorerPluginCatalog(
             Path(fe_main.__file__).parent / "plugins", fe_main.plugin_manager,
             fe_main.load_config, fe_main.save_config)
+        # [F1] 单一 Inventory 生产接线：受管安装根与开发源注册表放在
+        # files-data 配置根下（与 DB/库注册同一定位器），builtin 名单为
+        # 宿主政策；legacy 目录继续作为发现根（builtin/未识别两分）
+        locator = FilesDataLocator.default()
+        dev_registry = DevSourceRegistry(locator.root / "plugin_dev_sources.json")
+
+        def sources() -> PluginSourceConfig:
+            return PluginSourceConfig.for_host(
+                builtin_ids=LEGACY_BUILTIN_IDS,
+                install_root=locator.root / "plugins",
+                dev_roots=dev_registry.list())
+
         self._files_plugins = FilesPluginsController(
             catalog, self._native_transport, self._files_prefs, self._native_panel,
             lambda: [entry.path for entry in self._native_panel._selected_entries() if not entry.is_dir],
-            lambda: self.mode_combo.setCurrentIndex(0), self)
+            lambda: self.mode_combo.setCurrentIndex(0), self,
+            sources_factory=sources)
         self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
         self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
 

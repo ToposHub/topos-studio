@@ -169,8 +169,10 @@ class PluginCenterDialog(QDialog):
         self.author = _label("")
         self.features = _label("")
         self.runtime = _label("")
+        self.origin = _label("")
         for key, text, widget in (("version", "版本", self.version), ("author", "作者", self.author),
-                                  ("features", "功能", self.features), ("runtime", "当前会话", self.runtime)):
+                                  ("features", "功能", self.features), ("runtime", "当前会话", self.runtime),
+                                  ("origin", "来源", self.origin)):
             form.addRow(_tr(key, text), widget)
         self.shortcut = QKeySequenceEdit()
         self.shortcut.setMaximumSequenceLength(1)
@@ -283,10 +285,27 @@ class PluginCenterDialog(QDialog):
         self.reason.setText(info.launch_unavailable_reason if not info.can_launch else "")
         self.reason.setVisible(bool(self.reason.text()))
         self.legacy.setVisible(not info.launch_path)
-        self.version.setText(f"{info.version} · API {info.api_version}")
+        # [F1] 声明/运行版本分槽：宿主上报的运行版本与声明不一致时并列展示
+        version_text = f"{info.version} · API {info.api_version}"
+        runtime_version = getattr(info, "runtime_version", "")
+        if runtime_version and runtime_version != info.version:
+            version_text += f"{_tr('runtime_version', ' · 运行 {version}').format(version=runtime_version)}"
+        self.version.setText(version_text)
         self.author.setText(info.author)
         self.features.setText(" · ".join(info.capabilities) or info.category)
         self.runtime.setText(_tr("session_loaded", "已加载；停用需要重启") if info.runtime_loaded else _tr("session_unloaded", "未加载"))
+        # [F1] 来源政策 + 安装事实直达 UI（未验证开发源显式标注）
+        source = getattr(info, "source", "builtin")
+        install_state = getattr(info, "install_state", "installed")
+        state_labels = {"installed": _tr("state_installed", "已安装"),
+                        "discovered": _tr("state_discovered", "已发现"),
+                        "missing": _tr("state_missing", "已缺失")}
+        from src.shared.plugins.discovery import source_label
+        origin_text = source_label(source)
+        origin_text += f" · {state_labels.get(install_state, install_state)}"
+        if source == "local_dev":
+            origin_text += _tr("unverified", " · 未验证")
+        self.origin.setText(origin_text)
         with QSignalBlocker(self.enabled):
             self.enabled.setChecked(info.desired_enabled)
         self.enabled.setEnabled(not info.self_disabled)

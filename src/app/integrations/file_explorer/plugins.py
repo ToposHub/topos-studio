@@ -277,4 +277,7 @@ class FileExplorerPluginCatalog:
         return next(item for item in self.snapshot() if item.plugin_id == plugin_id)
 
 
-__all__ = ["FileExplorerPluginCatalog", "FilesPluginInfo"]
+# [F1] 宿主 builtin 政策名单（来源分类/默认启用政策的唯一依据）
+LEGACY_BUILTIN_IDS = frozenset(_BUILTINS)
+
+__all__ = ["FileExplorerPluginCatalog", "FilesPluginInfo", "LEGACY_BUILTIN_IDS"]
