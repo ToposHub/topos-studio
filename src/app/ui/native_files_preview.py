@@ -3,7 +3,8 @@
 职责边界
 --------
 * **取字节** 在 ``NativeFilesTransport.load_preview``（网络线程友好，64MB 上限）；
-* **解码** 在本模块的 ``PreviewDecoder``（QThreadPool，绝不在 GUI 线程解码大图）；
+* **解码** 在共享的 ``ImageDecodeRuntime``（E1/E2，FUP-06）：预览/比较
+  窗口共用同一线程池与总字节/像素预算，本模块只持有租约；
 * **呈现** 在本模块的 ``NativeFilesPreview``（浮层，只做像素与交互）。
 
 非图片（视频/音频/模型）不在这里硬塞一个播放器：浮层提供"在完整 Files 中
@@ -14,8 +15,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QRunnable, QSize, Qt, QThreadPool, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QImageReader, QKeyEvent, QPainter, QPixmap, QResizeEvent
+from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QImage, QKeyEvent, QPainter, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -27,102 +28,65 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# 与缩略图解码共用同一个上限：超过就不再尝试，避免解码期内存爆掉
+from src.app.ui.image_decode_runtime import (
+    ImageDecodeRuntime,
+    decode_image_scaled,
+    shared_runtime,
+)
+
+# 兼容旧引用：解码上限现由共享 runtime 统一（8192 边长）
 MAX_DECODE_PIXELS = 8192
-
-
-class _DecodeSignals(QObject):
-    finished = pyqtSignal(str, object, str)
-
-
-class _PreviewDecodeJob(QRunnable):
-    """后台解码一张预览图：失败时返回可读原因，不抛异常到线程池。"""
-
-    def __init__(self, path: str, data: bytes) -> None:
-        super().__init__()
-        self.path = path
-        self.data = data
-        self.signals = _DecodeSignals()
-        self.setAutoDelete(False)
-
-    def run(self) -> None:
-        image, error = decode_preview(self.data)
-        self.signals.finished.emit(self.path, image, error)
 
 
 def decode_preview(data: bytes) -> tuple[QImage, str]:
     """把字节解成 QImage；返回 ``(image, error)``，二选一为空。
 
-    使用 ``QImageReader`` 而不是 ``QImage.fromData``：
-    * 能先读尺寸，超大图在解码前就拒绝；
-    * ``setAutoTransform(True)`` 让 JPEG 的 EXIF 方向生效（手机照片不倒置）。
+    实现已并入共享 runtime 的 ``decode_image_scaled``（预览/比较同一份
+    解码逻辑）；保留本入口供既有调用与测试 monkeypatch 使用。
     """
-    if not data:
-        return QImage(), "文件没有可预览内容"
-    buffer = QBuffer()
-    buffer.setData(QByteArray(data))
-    if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
-        return QImage(), "无法读取预览数据"
-    try:
-        reader = QImageReader(buffer)
-        reader.setAutoTransform(True)
-        size = reader.size()
-        if size.isValid() and (size.width() > MAX_DECODE_PIXELS or size.height() > MAX_DECODE_PIXELS):
-            reader.setScaledSize(size.scaled(
-                QSize(MAX_DECODE_PIXELS, MAX_DECODE_PIXELS),
-                Qt.AspectRatioMode.KeepAspectRatio))
-        image = reader.read()
-        if image.isNull():
-            reason = reader.errorString() or "该格式无内置解码器"
-            return QImage(), reason
-        return image, ""
-    finally:
-        buffer.close()
+    return decode_image_scaled(data)
 
 
 class PreviewDecoder(QObject):
-    """管理解码任务的线程池与结果回收（同一时刻只关心最新一张）。
+    """预览解码的租约持有者（同一时刻只关心最新一张）。
 
     [FR-14] 任务身份 = 递增 generation + path，不再只用 path：同路径
     关闭后重开时，旧任务的完成回调不得删除/顶替新任务的结果——
     "旧 1px 任务先到、新 2px 后到必须只显示新图"。
+
+    [E1/E2] 线程池/预算/取消分层归共享 ``ImageDecodeRuntime``：本类不再
+    自建线程池（窗口销毁不牵连池），也不再本地持有 job 引用——运行中
+    任务的引用保全与完成回收由 runtime 负责。
     """
 
     image_ready = pyqtSignal(str, object)
     decode_failed = pyqtSignal(str, str)
 
-    def __init__(self, parent: QObject | None = None, max_concurrency: int = 2) -> None:
+    def __init__(self, parent: QObject | None = None,
+                 runtime: ImageDecodeRuntime | None = None) -> None:
         super().__init__(parent)
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(max(1, int(max_concurrency)))
+        self._runtime = runtime if runtime is not None else shared_runtime()
+        self._lease = self._runtime.acquire("preview")
         self._generation = 0
         self._current: Optional[tuple[int, str]] = None
-        self._jobs: dict[int, _PreviewDecodeJob] = {}
-        # [FR-14] 退役任务保持强引用直到 shutdown：运行中的 QRunnable
-        # 若只剩 C++ 侧指针，Python 包装被 GC 后 run() 会退化为抽象基类
-        self._retired: list[_PreviewDecodeJob] = []
 
     def start(self, path: str, data: bytes) -> None:
         self.cancel()
         self._generation += 1
         generation = self._generation
         self._current = (generation, path)
-        job = _PreviewDecodeJob(path, data)
-        job.signals.finished.connect(
-            lambda p, image, error, g=generation: self._on_finished(g, p, image, error))
-        self._jobs[generation] = job
-        self._pool.start(job)
+        self._lease.submit(
+            path, data,
+            decode=lambda payload: decode_preview(payload),
+            on_done=lambda p, image, error, g=generation: self._on_finished(g, p, image, error))
 
     def cancel(self) -> None:
         self._current = None
-        for job in list(self._jobs.values()):
-            self._pool.tryTake(job)
-            self._retired.append(job)  # 保留引用：在途任务安全跑完即被丢弃
-        self._jobs.clear()
+        # 排队任务即丢；在途任务由 runtime 作废回包并保留引用到真实完成
+        self._lease.cancel_all()
 
     def _on_finished(self, generation: int, path: str,
                      image: QImage, error: str) -> None:
-        self._jobs.pop(generation, None)
         if self._current is None or self._current[0] != generation:
             return  # 已被取消或被更新的同路径任务取代：结果作废
         self._current = None
@@ -132,11 +96,11 @@ class PreviewDecoder(QObject):
             self.image_ready.emit(path, image)
 
     def shutdown(self) -> None:
-        self.cancel()
-        self._pool.clear()
-        # [FR-17] 有界等待在途解码结束：不带着运行中的 job 析构线程池
-        self._pool.waitForDone(2000)
-        self._retired.clear()
+        """[FR-17/E1] 关闭：先作废回包，运行中的任务由 runtime 等真实
+        完成后回收——不再同步等待两秒后清引用假装线程结束。
+        """
+        self._current = None
+        self._lease.close()
 
 
 class NativeFilesPreview(QWidget):

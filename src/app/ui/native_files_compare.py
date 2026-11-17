@@ -3,77 +3,52 @@
 [FR-15] 会话与资源安全：
 * 每个窗口持有唯一 session_id，与 transport 的会话化队列配对——
   多窗口互不串台，关闭即取消该会话在途请求；
-* 解码在独立 QThreadPool（每窗口一个），GUI 线程只贴图；
-* 像素预算：单图解码上限 ``MAX_DECODE_PIXELS``，显示用 QPixmap 上限
-  ``MAX_PIXMAP_PIXELS``——不再按 4× 放大预生成巨图（4 张 7K RGBA ×16
-  像素面积 ≈ 784MB 的路径已封死）；
+* [E1/E2] 解码走共享 ``ImageDecodeRuntime``（预览/比较窗口统一并发
+  与总字节/像素预算）；窗口只持有租约，销毁不牵连线程池，也不本地
+  持有 job 引用（在途引用保全/完成回收由 runtime 负责）；
+* 像素预算：单图解码上限 ``MAX_DECODE_PIXELS``（runtime 统一），显示
+  用 QPixmap 上限 ``MAX_PIXMAP_PIXELS``——不再按 4× 放大预生成巨图
+  （4 张 7K RGBA ×16 像素面积 ≈ 784MB 的路径已封死）；
 * 「适应」同时考虑**所有**图片的宽与高，且不受 25% 手动缩放下限约束
   （大图也能真正 fit）。
 """
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any
 
-from PyQt6.QtCore import (
-    QBuffer, QByteArray, QIODevice, QObject, QRunnable, QSize, Qt,
-    QThreadPool, pyqtSignal,
-)
-from PyQt6.QtGui import QImage, QImageReader, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
+from src.app.ui.image_decode_runtime import (
+    ImageDecodeRuntime,
+    decode_image_scaled,
+    shared_runtime,
+)
 from src.shared.ui.style_sheet import C
 
 MAX_DECODE_PIXELS = 8192          # 与预览/缩略图解码同源的边长上限
 MAX_PIXMAP_PIXELS = 16 * 1024 * 1024  # 单格显示位图预算（约 4K×4K）
 
 
-class _DecodeSignals(QObject):
-    finished = pyqtSignal(str, object, str)
-
-
-class _CompareDecodeJob(QRunnable):
-    """后台解码一张比较图；超预算先按等比缩小再解码。"""
-
-    def __init__(self, path: str, data: bytes) -> None:
-        super().__init__()
-        self.path = path
-        self.data = data
-        self.signals = _DecodeSignals()
-        self.setAutoDelete(False)
-
-    def run(self) -> None:
-        buffer = QBuffer()
-        buffer.setData(QByteArray(self.data))
-        if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
-            self.signals.finished.emit(self.path, QImage(), "无法读取数据")
-            return
-        try:
-            reader = QImageReader(buffer)
-            reader.setAutoTransform(True)
-            size = reader.size()
-            if size.isValid() and (size.width() > MAX_DECODE_PIXELS
-                                   or size.height() > MAX_DECODE_PIXELS):
-                reader.setScaledSize(size.scaled(
-                    QSize(MAX_DECODE_PIXELS, MAX_DECODE_PIXELS),
-                    Qt.AspectRatioMode.KeepAspectRatio))
-            image = reader.read()
-            if image.isNull():
-                self.signals.finished.emit(
-                    self.path, QImage(), reader.errorString() or "不支持的图片格式")
-            else:
-                self.signals.finished.emit(self.path, image, "")
-        finally:
-            buffer.close()
+def decode_compare(data: bytes) -> tuple[QImage, str]:
+    """比较图解码（与预览共用 ``decode_image_scaled``；保留独立入口供
+    测试与差异化的错误文案）。"""
+    image, error = decode_image_scaled(data)
+    if image.isNull() and not error:
+        error = "不支持的图片格式"
+    return image, error
 
 
 class CompareDialog(QDialog):
     images_requested = pyqtSignal(list, str)   # paths, session_id
 
-    def __init__(self, paths: list[str], parent: QWidget | None = None) -> None:
+    def __init__(self, paths: list[str], parent: QWidget | None = None,
+                 *, runtime: ImageDecodeRuntime | None = None) -> None:
         super().__init__(parent)
         self.paths = list(paths)[:4]
         self.session_id = uuid.uuid4().hex
@@ -81,11 +56,10 @@ class CompareDialog(QDialog):
         self._labels: dict[str, QLabel] = {}
         self._zoom = 1.0
         self._closed = False
-        self._decode_pool = QThreadPool(self)
-        self._decode_pool.setMaxThreadCount(2)
+        self._runtime = runtime if runtime is not None else shared_runtime()
+        self._decode_lease = self._runtime.acquire(f"compare:{self.session_id[:8]}")
         self._decode_generation = 0
         self._teardown_generation = 2 ** 31  # teardown 后压到当前值以下即作废
-        self._decode_jobs: dict[int, _CompareDecodeJob] = {}
         self.setWindowTitle("并排比较")
         self.resize(1100, 720)
         root = QVBoxLayout(self)
@@ -145,15 +119,16 @@ class CompareDialog(QDialog):
         super().closeEvent(event)
 
     def _teardown(self) -> None:
-        """[FR-15/17] 关闭：作废解码结果、取消剩余任务；transport 侧由宿主取消。"""
+        """[FR-15/17] 关闭：作废解码结果、取消剩余任务；transport 侧由宿主取消。
+
+        [E1/FUP-06] 不再 tryTake 后清引用：排队任务由 runtime 立即回收，
+        在途任务作废回包、引用保留到真实完成——窗口销毁不动共享线程池。
+        """
         if self._closed:
             return
         self._closed = True
         self._teardown_generation = self._decode_generation
-        for job in list(self._decode_jobs.values()):
-            self._decode_pool.tryTake(job)
-        self._decode_jobs.clear()
-        self._decode_pool.clear()
+        self._decode_lease.close()
 
     def showEvent(self, event: Any) -> None:
         super().showEvent(event)
@@ -214,15 +189,13 @@ class CompareDialog(QDialog):
             return
         self._decode_generation += 1  # 每张图独立世代；teardown 时批量作废
         generation = self._decode_generation
-        job = _CompareDecodeJob(path, data)
-        job.signals.finished.connect(
-            lambda p, image, error, g=generation: self._on_decoded(g, p, image, error))
-        self._decode_jobs[generation] = job
-        self._decode_pool.start(job)
+        self._decode_lease.submit(
+            path, data,
+            decode=lambda payload: decode_compare(payload),
+            on_done=lambda p, image, error, g=generation: self._on_decoded(g, p, image, error))
 
     def _on_decoded(self, generation: int, path: str,
                     image: QImage, error: str) -> None:
-        self._decode_jobs.pop(generation, None)
         if self._closed or generation > self._teardown_generation:
             return  # teardown 之后的迟到结果：丢弃
         if image.isNull():
