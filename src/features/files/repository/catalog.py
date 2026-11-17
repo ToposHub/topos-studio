@@ -199,7 +199,14 @@ class FilesCatalog:
         self.locator = locator
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
+        self._revision = 0
         self.open()
+
+    @property
+    def revision(self) -> int:
+        """库修订号：每次成功写事务 +1（查询结果身份/迟到丢弃依据）。"""
+        with self._lock:
+            return self._revision
 
     # ------------------------------------------------------------ 打开/初始化
 
@@ -266,6 +273,7 @@ class FilesCatalog:
                 yield cursor
                 cursor.close()
                 conn.execute("COMMIT")
+                self._revision += 1
             except BaseException:
                 cursor.close()
                 try:

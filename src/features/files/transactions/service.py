@@ -125,6 +125,12 @@ class FileOperationService:
 
     # ------------------------------------------------------------ 回收站
 
+    def mkdir(self, target: str | Path) -> ItemOutcome:
+        """新建目录（无身份迁移）；冲突/类型错误走统一词表。"""
+        result = self._ops.mkdir(target)
+        return ItemOutcome(result.source, result.destination, result.status,
+                           result.code, result.message)
+
     def trash(self, library_id: str, paths: list[str | Path]) -> list[TrashOutcome]:
         return self.trash_service.trash(paths, library_id)
 
