@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,6 +70,11 @@ def validate_package_folder(folder: Path, *, host_facts: dict[str, Any]) -> Vali
             label = str(path.relative_to(folder)) if path != folder else "."
             note("PACKAGE_SYMLINK_MEMBER", "error", f"包内含符号链接：{label}")
         return ValidationReport(False, "", "", tuple(diagnostics))
+    special = [path for path in folder.rglob("*") if not (path.is_dir() or path.is_file())]
+    if special:
+        for path in special:
+            note("PACKAGE_SPECIAL_MEMBER", "error", f"包内含非常规文件：{path.relative_to(folder)}")
+        return ValidationReport(False, "", "", tuple(diagnostics))
     manifest, parse_diagnostics = parse_manifest_file(folder / MANIFEST_NAME)
     diagnostics.extend(parse_diagnostics)
     if manifest is None:
@@ -80,7 +87,7 @@ def validate_package_folder(folder: Path, *, host_facts: dict[str, Any]) -> Vali
     for entry in entries:
         if "__pycache__" in entry or entry.endswith((".pyc", ".DS_Store")):
             note("JUNK_ENTRY", "warning", f"打包内容包含派生文件：{entry}")
-        if entry.startswith("/") or ".." in entry:
+        if entry.startswith("/") or ".." in Path(entry).parts or "\\" in entry or ":" in entry:
             note("ENTRY_PATH_INVALID", "error", f"非法路径条目：{entry}")
     if not entries:
         note("PACKAGE_EMPTY", "error", "包内没有任何文件")
@@ -95,29 +102,49 @@ def build_package(folder: Path, output: Path, *,
     """Deterministically zip ``folder``; fails instead of shipping an invalid
     package when ``strict`` (errors) — warnings still ship."""
     folder, output = Path(folder), Path(output)
+    if output.resolve().is_relative_to(folder.resolve()):
+        raise ValueError("构建输出必须放在源目录之外，避免把构建产物重新打包")
+    if output.is_symlink() or output.with_name(output.name + ".sha256").is_symlink():
+        raise ValueError("构建输出不能是符号链接")
     report = validate_package_folder(folder, host_facts=host_facts)
-    if any(item.code == "PACKAGE_SYMLINK_MEMBER" for item in report.diagnostics):
-        raise ValueError("包内含符号链接，拒绝构建")
+    if any(item.code in {"PACKAGE_SYMLINK_MEMBER", "PACKAGE_SPECIAL_MEMBER", "ENTRY_PATH_INVALID"}
+           for item in report.diagnostics):
+        raise ValueError("包内含符号链接、非常规文件或非法路径，拒绝构建")
     if strict and not report.ok:
         raise ValueError(f"包校验未通过，拒绝构建：{report.plugin_id or folder}；"
                          f"{';'.join(item.message for item in report.diagnostics if item.severity == 'error')}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in sorted(report.entry_files):
-            path = folder / name
-            # Source mtimes and platform-specific permission bits must not
-            # change package identity. Preserve only executable intent.
-            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.create_system = 3
-            mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
-            info.external_attr = (stat.S_IFREG | mode) << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
-            with path.open("rb") as source, archive.open(info, "w") as sink:
-                shutil.copyfileobj(source, sink, length=1024 * 1024)
-    digest = package_digest(output)
     sidecar = output.with_name(output.name + ".sha256")
-    sidecar.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
-    return output, ValidationReport(True, report.plugin_id, report.version,
+    # Write new inodes and replace names; an existing hardlink at output must
+    # never truncate a source file (or another unrelated file).
+    with tempfile.NamedTemporaryFile(dir=output.parent, prefix=".topos-package-", delete=False) as temp:
+        temporary = Path(temp.name)
+    temporary_sidecar: Path | None = None
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name in sorted(report.entry_files):
+                path = folder / name
+                # Source mtimes and platform-specific permission bits must not
+                # change package identity. Preserve only executable intent.
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+                info.external_attr = (stat.S_IFREG | mode) << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with path.open("rb") as source, archive.open(info, "w") as sink:
+                    shutil.copyfileobj(source, sink, length=1024 * 1024)
+        digest = package_digest(temporary)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent,
+                                         prefix=".topos-digest-", delete=False) as temp_digest:
+            temporary_sidecar = Path(temp_digest.name)
+            temp_digest.write(f"{digest}  {output.name}\n")
+        os.replace(temporary, output)
+        os.replace(temporary_sidecar, sidecar)
+    finally:
+        temporary.unlink(missing_ok=True)
+        if temporary_sidecar is not None:
+            temporary_sidecar.unlink(missing_ok=True)
+    return output, ValidationReport(report.ok, report.plugin_id, report.version,
                                     report.diagnostics, report.entry_files,
                                     output.stat().st_size, digest)
 

@@ -240,6 +240,26 @@ def test_fr20_fit_size_pure_function_matrix():
     assert _fit_aspect_size(frame, 0, 0, None)[0] >= 2               # 退化保护
 
 
+@pytest.mark.parametrize("box,expected", [
+    ((320, 240), (320, 160)), ((240, 320), (240, 120)),
+    ((400, 400), (400, 200)), (None, (160, 80)),
+])
+def test_topos_rgb_fallback_keeps_source_aspect(box, expected):
+    import numpy as np
+    session = ToposMovieSession.__new__(ToposMovieSession)
+    session._av = av
+    session.width, session.height = 320, 160
+    session._out_w, session._out_h = 160, 80  # auto decode may use fewer pixels
+    session.vfmt = "yuv444p10le"
+    session.info = SimpleNamespace(color_matrix=1, color_range=0)
+    session._y = np.zeros((80, 160), dtype="<u2")
+    session._u = np.full((80, 160), 512, dtype="<u2")
+    session._v = np.full((80, 160), 512, dtype="<u2")
+    session._decode_planes_locked = lambda index, size: None
+    rgb = session._frame_rgb_locked(0, box)
+    assert (rgb.shape[1], rgb.shape[0]) == expected
+
+
 # ---------------------------------------------------------------------------
 # FR-21：画布尺寸快照（工作线程不触碰 QWidget API）
 # ---------------------------------------------------------------------------

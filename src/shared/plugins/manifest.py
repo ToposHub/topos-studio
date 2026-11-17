@@ -53,7 +53,11 @@ WINDOW_OWNERSHIPS = ("plugin", "host")
 
 _PLUGIN_ID_RE = re.compile(r"[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9._-]*")
 _LEGACY_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
-_SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?")
+_SEMVER_RE = re.compile(
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
 _DOTTED_VERSION_RE = re.compile(r"\d+(?:\.\d+)*")
 # Keys that must never appear in a manifest (leaked credentials / private paths).
 _FORBIDDEN_METADATA_KEYS = re.compile(
@@ -88,7 +92,7 @@ def _frozen_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
         return MappingProxyType({})
     if not isinstance(value, Mapping):
         raise ValueError("必须是键值对象")
-    return deep_freeze(value)
+    return deep_freeze(value, strict_keys=True)
 
 
 def _string_list(value: Any) -> tuple[str, ...] | None:
@@ -296,7 +300,7 @@ def _capability_from_mapping(raw: Mapping[str, Any], index: int) -> tuple[Plugin
     for name, allowed in (("selection_mode", SELECTION_MODES), ("run_location", RUN_LOCATIONS),
                           ("write_semantics", WRITE_SEMANTICS)):
         value = raw.get(name)
-        if value is not None and value not in allowed:
+        if name in raw and value not in allowed:
             diagnostics.append(_diagnostic(f"CAPABILITY_{name.upper()}_INVALID", "error",
                                            f"{capability_id}: {name} 必须是 {allowed}",
                                            f"{path}.{name}"))
@@ -304,12 +308,12 @@ def _capability_from_mapping(raw: Mapping[str, Any], index: int) -> tuple[Plugin
     title = raw.get("title", "")
     description = raw.get("description", "")
     for name, value, limit in (("title", title, 200), ("description", description, _MAX_TEXT_FIELD)):
-        if value is not None and not isinstance(value, str):
+        if not isinstance(value, str):
             diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
                                            f"{capability_id}: {name} 必须是字符串", f"{path}.{name}"))
             return None, diagnostics
     applies_raw = raw.get("applies_to_kinds", ())
-    applies = _string_list(applies_raw) if applies_raw is not None else ()
+    applies = _string_list(applies_raw)
     if applies is None:
         diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
                                        f"{capability_id}: applies_to_kinds 必须是字符串列表",
@@ -317,17 +321,15 @@ def _capability_from_mapping(raw: Mapping[str, Any], index: int) -> tuple[Plugin
         return None, diagnostics
     schema_fields: dict[str, Mapping[str, Any]] = {}
     for name in ("input_schema", "output_schema", "params_schema", "resource_policy"):
-        value = raw.get(name)
-        if value is None:
-            schema_fields[name] = {}
-        elif isinstance(value, Mapping):
+        value = raw.get(name, {})
+        if isinstance(value, Mapping):
             schema_fields[name] = value
         else:
             diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
                                            f"{capability_id}: {name} 必须是键值对象", f"{path}.{name}"))
             return None, diagnostics
     flags: dict[str, bool] = {}
-    for name, default in (("cancellable", True), ("retriable", False)):
+    for name, default in (("available", True), ("cancellable", True), ("retriable", False)):
         value = raw.get(name, default)
         if not isinstance(value, bool):
             diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
@@ -340,7 +342,7 @@ def _capability_from_mapping(raw: Mapping[str, Any], index: int) -> tuple[Plugin
         capability_id=capability_id, kind=kind,
         title=(title or "")[:200],
         description=(description or "")[:_MAX_TEXT_FIELD],
-        available=known,
+        available=known and flags["available"],
         input_schema=schema_fields["input_schema"],
         output_schema=schema_fields["output_schema"],
         params_schema=schema_fields["params_schema"],
@@ -509,6 +511,17 @@ def _parse_services(raw: Mapping[str, Any],
 
 
 def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | None, tuple[ManifestDiagnostic, ...]]:
+    """Contain malformed JSON-like inputs for both file and in-memory callers."""
+    if not isinstance(data, Mapping):
+        return None, (_diagnostic("MANIFEST_NOT_OBJECT", "error", "manifest 必须是 JSON 对象"),)
+    try:
+        frozen = deep_freeze(data, strict_keys=True)
+        return _parse_manifest_mapping(frozen)
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        return None, (_diagnostic("MANIFEST_INVALID", "error", f"manifest 字段无效：{exc}"),)
+
+
+def _parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | None, tuple[ManifestDiagnostic, ...]]:
     """Build a manifest from a JSON-like mapping. Never executes plugin code.
 
     字段类型错误一律返回结构化诊断（含字段路径），绝不以 str()/int()/bool()
@@ -536,7 +549,7 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
                                        f"version 不是语义化版本：{version}", "version"))
         return None, tuple(diagnostics)
 
-    legacy_raw = data.get("legacy_ids", ()) or ()
+    legacy_raw = data.get("legacy_ids", ())
     if not isinstance(legacy_raw, (list, tuple)) or any(
             not isinstance(item, str) or _LEGACY_ID_RE.fullmatch(item) is None for item in legacy_raw):
         diagnostics.append(_diagnostic("LEGACY_ID_INVALID", "error",
@@ -565,14 +578,14 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
         diagnostics.append(_diagnostic("HOST_API_RANGE_INVALID", "error", "host_api 区间 min 大于 max", "host_api"))
         return None, tuple(diagnostics)
 
-    topos_min = data.get("topos_min_version", "") or ""
+    topos_min = data.get("topos_min_version", "")
     if not isinstance(topos_min, str) or (topos_min and _DOTTED_VERSION_RE.fullmatch(topos_min) is None):
         diagnostics.append(_diagnostic("TOPOS_MIN_VERSION_INVALID", "error",
                                        f"topos_min_version 必须是点分数字：{topos_min}", "topos_min_version"))
         return None, tuple(diagnostics)
 
     def string_tuple(name: str) -> tuple[str, ...]:
-        value = data.get(name, ()) or ()
+        value = data.get(name, ())
         if not isinstance(value, (list, tuple)) or any(not isinstance(item, str) for item in value):
             raise ValueError(name)
         return tuple(value)
@@ -612,7 +625,7 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
                                            f"{text_field} 含用户绝对路径，不允许", text_field))
 
     capabilities: list[PluginCapability] = []
-    raw_capabilities = data.get("capabilities", ()) or ()
+    raw_capabilities = data.get("capabilities", ())
     if not isinstance(raw_capabilities, (list, tuple)):
         diagnostics.append(_diagnostic("CAPABILITIES_NOT_LIST", "error", "capabilities 必须是列表", "capabilities"))
         return None, tuple(diagnostics)
@@ -635,12 +648,12 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
     if any(item.code in fatal_section for item in diagnostics):
         return None, tuple(diagnostics)
 
-    platform_raw = data.get("platform", {}) or {}
+    platform_raw = data.get("platform", {})
     if not isinstance(platform_raw, Mapping):
         diagnostics.append(_diagnostic("PLATFORM_NOT_OBJECT", "error", "platform 必须是键值对象", "platform"))
         return None, tuple(diagnostics)
-    platforms = _string_list(platform_raw.get("platforms", ()) or ())
-    arches = _string_list(platform_raw.get("arches", ()) or ())
+    platforms = _string_list(platform_raw.get("platforms", ()))
+    arches = _string_list(platform_raw.get("arches", ()))
     if platforms is None or arches is None:
         # 平台声明损坏时不能默认"无限制"——那比拒绝更宽松（PR-04）
         diagnostics.append(_diagnostic("PLATFORM_FIELD_INVALID", "error",
@@ -792,6 +805,10 @@ def validate_manifest_set(
     host_key = _version_key(topos_version) if topos_version else ()
     for manifest in manifests:
         findings = result[manifest.plugin_id]
+        if manifest.schema_version not in KNOWN_SCHEMA_VERSIONS:
+            findings.append(_diagnostic(
+                "SCHEMA_VERSION_UNSUPPORTED", "error",
+                f"manifest schema {manifest.schema_version} 不被宿主支持", "schema_version"))
         low, high = manifest.host_api
         if not (low <= host_api <= high):
             findings.append(_diagnostic(
@@ -814,7 +831,8 @@ def validate_manifest_set(
             seen_ids.add(capability.capability_id)
         for window in manifest.windows:
             if not any(capability.capability_id == window.command_id
-                       and capability.kind == "command" for capability in manifest.capabilities):
+                       and capability.kind == "command" and capability.available
+                       for capability in manifest.capabilities):
                 findings.append(_diagnostic(
                     "WINDOW_COMMAND_MISSING", "error",
                     f"窗口 {window.window_id} 引用的 command 不存在：{window.command_id}", "windows"))
@@ -837,23 +855,63 @@ def validate_manifest_set(
                     "OPTIONAL_DEPENDENCY_MISSING", "warning",
                     f"可选依赖不存在（功能可能受限）：{dependency}", "optional_dependencies"))
 
-    def resolve(plugin_id: str, visiting: tuple[str, ...]) -> list[ManifestDiagnostic]:
-        findings: list[ManifestDiagnostic] = []
-        if plugin_id in visiting:
-            chain = " -> ".join((*visiting, plugin_id))
-            findings.append(_diagnostic("DEPENDENCY_CYCLE", "error", f"依赖循环：{chain}", "dependencies"))
-            return findings
-        manifest = by_id.get(plugin_id)
-        if manifest is None:
-            return findings
-        for dependency in manifest.dependencies:
-            target = by_id.get(dependency) or by_id.get(legacy_owner.get(dependency, ""))
-            if target is not None:
-                findings.extend(resolve(target.plugin_id, (*visiting, plugin_id)))
-        return findings
-
-    for manifest in manifests:
-        result[manifest.plugin_id].extend(resolve(manifest.plugin_id, ()))
+    # Iterative strongly-connected components: deep chains must not overflow
+    # a discovery worker; shared DAG branches must not be expanded exponentially.
+    graph = {
+        plugin_id: tuple(dict.fromkeys(
+            dependency if dependency in by_id else legacy_owner[dependency]
+            for dependency in manifest.dependencies
+            if dependency in by_id or dependency in legacy_owner))
+        for plugin_id, manifest in by_id.items()
+    }
+    reverse: dict[str, list[str]] = {plugin_id: [] for plugin_id in graph}
+    for plugin_id, dependencies in graph.items():
+        for dependency in dependencies:
+            reverse[dependency].append(plugin_id)
+    visited: set[str] = set()
+    finish_order: list[str] = []
+    for root in graph:
+        if root in visited:
+            continue
+        visited.add(root)
+        stack = [(root, iter(graph[root]))]
+        while stack:
+            node, children = stack[-1]
+            child = next(children, None)
+            if child is None:
+                finish_order.append(node)
+                stack.pop()
+            elif child not in visited:
+                visited.add(child)
+                stack.append((child, iter(graph[child])))
+    assigned: set[str] = set()
+    affected: dict[str, str] = {}
+    for root in reversed(finish_order):
+        if root in assigned:
+            continue
+        component: list[str] = []
+        pending = [root]
+        assigned.add(root)
+        while pending:
+            node = pending.pop()
+            component.append(node)
+            for parent in reverse[node]:
+                if parent not in assigned:
+                    assigned.add(parent)
+                    pending.append(parent)
+        if len(component) > 1 or root in graph[root]:
+            names = ", ".join(sorted(component)[:10])
+            message = f"依赖循环涉及：{names}" + ("…" if len(component) > 10 else "")
+            affected.update((node, message) for node in component)
+    pending = list(affected)
+    while pending:
+        node = pending.pop()
+        for parent in reverse[node]:
+            if parent not in affected:
+                affected[parent] = affected[node]
+                pending.append(parent)
+    for plugin_id, message in affected.items():
+        result[plugin_id].append(_diagnostic("DEPENDENCY_CYCLE", "error", message, "dependencies"))
 
     return {plugin_id: tuple(findings) for plugin_id, findings in result.items()}
 

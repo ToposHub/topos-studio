@@ -95,7 +95,7 @@ def test_dispatch_submits_frozen_request_and_reports_accepted_only():
     prepared = service.prepare("shutdown_timer", [])
     result = service.dispatch(prepared)
     assert transport.calls == [("shutdown_timer", "/api/plugin/shutdown_timer/launch", {})]
-    assert result.accepted and result.stage == "dispatched"
+    assert result.accepted and result.stage == "queued"
     assert "工具窗口由插件创建" in result.message                 # 受理≠窗口已开
     assert result.invocation_id == prepared.context.invocation_id
 
@@ -104,9 +104,10 @@ def test_finish_translates_transport_acknowledgement():
     service, _ = _service()
     prepared = service.prepare("image_factory", [])
     ok = service.finish(prepared, True, "已提交打开请求；工具窗口由插件创建。")
-    assert ok.ok and ok.stage == "completed"
+    assert ok.ok and ok.stage == "dispatched"
     failed = service.finish(prepared, False, "插件未接受打开请求，请检查插件状态或重试。")
     assert failed.ok is False and failed.error_code == "LAUNCH_NOT_ACCEPTED"
+    assert failed.invocation_id == prepared.context.invocation_id
 
 
 def test_prepared_payload_is_immutable():
@@ -219,7 +220,7 @@ def test_revalidated_dispatch_submits_without_rescanning():
     prepared = service.revalidate(service.prepare("shutdown_timer", []))
     assert catalog.launch_requests == 2                     # prepare + revalidate 各一次
     result = service.dispatch(prepared)
-    assert result.accepted and result.stage == "dispatched"
+    assert result.accepted and result.stage == "queued"
     assert catalog.launch_requests == 2                     # dispatch 没有补扫描
     assert len(transport.calls) == 1
 
@@ -248,6 +249,28 @@ def test_stage_vocabulary_separates_queued_dispatched_and_completed():
     assert "queued" in STAGES and "dispatched" in STAGES and "completed" in STAGES
     service, _ = _service()
     prepared = service.prepare("image_factory", [])
-    assert service.dispatch(prepared).stage == "dispatched"  # HTTP 已受理 ≠ 窗口已开
-    assert service.finish(prepared, True, "ok").stage == "completed"
+    assert service.dispatch(prepared).stage == "queued"       # 仅发出请求，尚无 HTTP ACK
+    assert service.finish(prepared, True, "ok").stage == "dispatched"  # ACK ≠ 作业完成
     assert service.finish(prepared, False, "no").error_code == "LAUNCH_NOT_ACCEPTED"
+
+
+@pytest.mark.parametrize("copy_check", [False, True])
+def test_caller_cannot_forge_a_service_revalidation(copy_check):
+    from dataclasses import replace
+    service, transport = _service()
+    prepared = service.prepare("image_factory", [])
+    prepared = service.revalidate(prepared) if copy_check else prepared
+    forged = replace(prepared, revalidated=True)
+    service.catalog._infos = (_Info("image_factory", can_launch=False),)
+    result = service.dispatch(forged)
+    assert not result.accepted and result.error_code == "COMMAND_NOT_APPLICABLE"
+    assert result.invocation_id == forged.context.invocation_id
+    assert transport.calls == []
+
+
+def test_revalidation_is_bound_to_the_authoritative_service():
+    first, _ = _service()
+    checked = first.revalidate(first.prepare("image_factory", []))
+    second, transport = _service([_Info("image_factory", can_launch=False)])
+    result = second.dispatch(checked)
+    assert not result.accepted and transport.calls == []

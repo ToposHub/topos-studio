@@ -6,7 +6,7 @@ ModelPack 未安装 WARNING），且「Qt multimedia 自带 FFmpeg 可用」与
 
 - ``qt_multimedia``：Qt 运行时多媒体后端（qEnvironmentVariable / 运行期
   曾成功初始化的标志——探测只读进程内状态，不重复加载）；
-- ``external_ffmpeg``：外部工具路径（``utils.get_tool_path``，供
+- ``external_ffmpeg``：外部工具路径（``shared.ffmpeg_locator``，供
   ThumbEngine/CLI 类用途；缺失不影响 Qt 播放/解码）；
 - ``ai_model_packs``：ModelPack 注册表逐项 installed+verified。
 
@@ -77,11 +77,11 @@ def optional_dependency_status(
         qt_probe: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """聚合可选依赖状态（单一探测源；全部可注入）。"""
-    from external.file_explorer.utils import get_tool_path
+    from src.shared.ffmpeg_locator import find_binary
     return {
         "qt_multimedia": (qt_probe or _probe_qt_multimedia)(),
         "external_ffmpeg": _probe_external_ffmpeg(
-            tool_path or get_tool_path),
+            tool_path or find_binary),
         "ai_model_packs": (ai_probe or _probe_ai_model_packs)(),
     }
 

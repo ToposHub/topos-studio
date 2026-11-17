@@ -130,3 +130,56 @@ def test_malformed_sidecar_is_a_verification_failure(tmp_path, contents):
     package, _ = build_package(folder, tmp_path / "package.zip", host_facts=HOST)
     package.with_name(package.name + ".sha256").write_bytes(contents)
     assert verify_package(package) is False
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_build_output_inside_source_is_refused_without_touching_source(tmp_path, exists):
+    folder = _folder(tmp_path)
+    output = folder / "out.zip"
+    if exists:
+        output.write_bytes(b"previous build")
+    with pytest.raises(ValueError, match="源目录之外"):
+        build_package(folder, output, host_facts=HOST)
+    assert output.read_bytes() == b"previous build" if exists else not output.exists()
+
+
+@pytest.mark.parametrize("target_kind", ["archive", "sidecar"])
+def test_build_output_symlink_does_not_overwrite_outside_file(tmp_path, target_kind):
+    folder = _folder(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched", encoding="utf-8")
+    output = tmp_path / "out.zip"
+    target = output if target_kind == "archive" else output.with_name(output.name + ".sha256")
+    target.symlink_to(outside)
+    with pytest.raises(ValueError, match="符号链接"):
+        build_package(folder, output, host_facts=HOST)
+    assert outside.read_text(encoding="utf-8") == "untouched"
+
+
+def test_special_source_file_is_refused_without_opening_it(tmp_path):
+    folder = _folder(tmp_path)
+    os.mkfifo(folder / "pipe")
+    report = validate_package_folder(folder, host_facts=HOST)
+    assert any(item.code == "PACKAGE_SPECIAL_MEMBER" for item in report.diagnostics)
+    with pytest.raises(ValueError, match="非常规文件"):
+        build_package(folder, tmp_path / "out.zip", host_facts=HOST, strict=False)
+
+
+@pytest.mark.parametrize("target_kind", ["archive", "sidecar"])
+def test_build_replaces_hardlinked_output_without_truncating_source(tmp_path, target_kind):
+    folder = _folder(tmp_path)
+    source = folder / "main.py"
+    previous = source.read_bytes()
+    output = tmp_path / "out.zip"
+    target = output if target_kind == "archive" else output.with_name(output.name + ".sha256")
+    os.link(source, target)
+    build_package(folder, output, host_facts=HOST)
+    assert source.read_bytes() == previous
+    assert verify_package(output)
+
+
+def test_non_strict_build_retains_invalid_report_status(tmp_path):
+    folder = _folder(tmp_path, plugin_id="BAD ID")
+    _, report = build_package(folder, tmp_path / "out.zip", host_facts=HOST, strict=False)
+    assert report.ok is False
+    assert any(item.severity == "error" for item in report.diagnostics)

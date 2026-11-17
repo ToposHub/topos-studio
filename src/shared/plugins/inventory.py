@@ -108,6 +108,10 @@ class PluginInventory:
         self._lock = threading.RLock()
         self._records: dict[str, PluginRecord] = {}
         self._revision = 0
+        # Discovery snapshots may have been prepared before a user/runtime update.
+        # These fields belong to this authority, never to a stale filesystem scan.
+        self._desired_overrides: dict[str, bool] = {}
+        self._runtime_overrides: dict[str, dict[str, str]] = {}
 
     @property
     def revision(self) -> int:
@@ -130,6 +134,10 @@ class PluginInventory:
             diagnostics_by_id: dict[str, list[ManifestDiagnostic]] = {}
             legacy_owner: dict[str, str] = {}
             for record in records:
+                if record.plugin_id in self._desired_overrides:
+                    record = replace(record, desired_enabled=self._desired_overrides[record.plugin_id])
+                if record.plugin_id in self._runtime_overrides:
+                    record = replace(record, **self._runtime_overrides[record.plugin_id])
                 diagnostics: list[ManifestDiagnostic] = list(record.diagnostics)
                 if record.manifest is not None and record.manifest.plugin_id != record.plugin_id:
                     # Identity integrity: a record may never speak for another id.
@@ -169,7 +177,8 @@ class PluginInventory:
                 blocking = any(item.severity == "error" for item in findings)
                 updated = replace(
                     record,
-                    diagnostics=tuple(findings[:_MAX_RECORD_DIAGNOSTICS]),
+                    diagnostics=tuple(sorted(findings, key=lambda item: item.severity != "error")
+                                      [:_MAX_RECORD_DIAGNOSTICS]),
                     runtime_state="rejected" if blocking and record.runtime_state == "not_loaded"
                     else record.runtime_state,
                     failure_phase="validate" if blocking and record.runtime_state == "not_loaded"
@@ -189,12 +198,13 @@ class PluginInventory:
             updated = replace(record, desired_enabled=bool(enabled))
             updated = replace(updated, pending_restart=self._needs_restart(updated))
             self._records[plugin_id] = updated
+            self._desired_overrides[plugin_id] = updated.desired_enabled
             self._revision += 1
             return updated
 
     def mark_runtime(self, plugin_id: str, runtime_state: str, *,
                      failure_phase: str = "", error_code: str = "",
-                     error_message: str = "") -> PluginRecord:
+                     error_message: str = "", runtime_version: str | None = None) -> PluginRecord:
         with self._lock:
             record = self._records.get(plugin_id)
             if record is None:
@@ -206,9 +216,15 @@ class PluginInventory:
             updated = replace(record, runtime_state=runtime_state,
                               failure_phase=failure_phase if runtime_state in ("failed", "rejected") else "",
                               error_code=error_code if runtime_state in ("failed", "rejected") else "",
-                              error_message=error_message if runtime_state in ("failed", "rejected") else "")
+                              error_message=error_message if runtime_state in ("failed", "rejected") else "",
+                              runtime_version=(runtime_version if runtime_version is not None
+                                               else record.runtime_version)
+                              if runtime_state != "not_loaded" else "")
             updated = replace(updated, pending_restart=self._needs_restart(updated))
             self._records[plugin_id] = updated
+            self._runtime_overrides[plugin_id] = {
+                field: getattr(updated, field) for field in
+                ("runtime_state", "failure_phase", "error_code", "error_message", "runtime_version")}
             self._revision += 1
             return updated
 

@@ -265,6 +265,66 @@ def test_contribution_kinds_are_the_planned_set():
                                        "format_provider", "inspector", "menu"}
 
 
+@pytest.mark.parametrize("fields", [
+    {"legacy_ids": False}, {"dependencies": ""}, {"keywords": 0},
+    {"platform": False}, {"platform": {"platforms": False}},
+    {"platform": {"arches": ""}}, {"capabilities": {}},
+    {"topos_min_version": 0},
+])
+def test_false_values_cannot_erase_declared_constraints(fields):
+    manifest, diagnostics = parse_manifest_mapping(_base(**fields))
+    assert manifest is None and any(d.severity == "error" for d in diagnostics)
+
+
+@pytest.mark.parametrize("version", ["01.0.0", "1.0.0-01", "1.0.0-alpha..1", "1.0.0+build..2"])
+def test_semver_rejects_ambiguous_identity(version):
+    manifest, diagnostics = parse_manifest_mapping(_base(version=version))
+    assert manifest is None and diagnostics[0].code == "VERSION_INVALID"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), object(), {1: "wrong key"}])
+def test_in_memory_manifest_invalid_json_is_a_diagnostic(value):
+    manifest, diagnostics = parse_manifest_mapping(_base(metadata={"value": value}))
+    assert manifest is None and diagnostics[0].code == "MANIFEST_INVALID"
+
+
+def test_disabled_command_stays_disabled_across_serialization():
+    manifest, diagnostics = parse_manifest_mapping(_base(capabilities=[
+        {"capability_id": "launch", "kind": "command", "available": False}]))
+    assert diagnostics == () and not manifest.capabilities[0].available
+    again, _ = parse_manifest_mapping(manifest.to_dict())
+    assert not again.capabilities[0].available
+    findings = validate_manifest_set((again,), **HOST)
+    assert any(d.code == "WINDOW_COMMAND_MISSING" for d in findings[again.plugin_id])
+
+
+def test_future_schema_is_blocked_even_when_constructed_without_parser():
+    manifest = PluginManifest(plugin_id="files.future", display_name="Future", schema_version="999")
+    findings = validate_manifest_set((manifest,), **HOST)
+    assert any(d.code == "SCHEMA_VERSION_UNSUPPORTED" for d in findings[manifest.plugin_id])
+
+
+def test_large_dependency_chain_and_cycle_are_bounded_and_diagnosed():
+    count = 1200
+    manifests = tuple(PluginManifest(
+        plugin_id=f"files.p{i}", display_name=str(i),
+        dependencies=(f"files.p{i + 1}",) if i + 1 < count else (),
+    ) for i in range(count))
+    assert all(not ds for ds in validate_manifest_set(manifests, **HOST).values())
+    from dataclasses import replace
+    manifests = (*manifests[:-1], replace(manifests[-1], dependencies=("files.p1198",)))
+    findings = validate_manifest_set(manifests, **HOST)
+    assert all(any(d.code == "DEPENDENCY_CYCLE" for d in ds) for ds in findings.values())
+
+
+def test_shared_dependency_branches_do_not_expand_paths_exponentially():
+    manifests = tuple(PluginManifest(
+        plugin_id=f"files.p{i}", display_name=str(i),
+        dependencies=tuple(f"files.p{j}" for j in (i + 1, i + 2) if j < 40),
+    ) for i in range(40))
+    assert all(not ds for ds in validate_manifest_set(manifests, **HOST).values())
+
+
 @pytest.mark.parametrize("fields,code", [
     ({"windows": 1}, "WINDOWS_NOT_LIST"),
     ({"format_providers": "nope"}, "FORMAT_PROVIDERS_NOT_LIST"),
