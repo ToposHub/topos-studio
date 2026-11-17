@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from src.features.files.contracts import (
@@ -97,6 +98,26 @@ class FilesQueryService:
             size = mtime = None
             availability = Availability.OFFLINE
         is_dir = dir_entry.is_dir(follow_symlinks=False)
+        return self._assemble(path, dir_entry.name, is_dir, size, mtime,
+                              availability, library_id)
+
+    def _path_entry(self, raw: str, library_id: str) -> Entry:
+        """任意路径水合：集合成员/搜索回填等没有 DirEntry 的场合。"""
+        path = nfc(raw)
+        try:
+            stat = os.lstat(path)
+            size, mtime = stat.st_size, stat.st_mtime
+            availability = Availability.ONLINE
+        except OSError:
+            size = mtime = None
+            availability = Availability.OFFLINE
+        name = path.rsplit("/", 1)[-1] or path
+        return self._assemble(path, name, os.path.isdir(path), size, mtime,
+                              availability, library_id)
+
+    def _assemble(self, path: str, name: str, is_dir: bool,
+                  size: int | None, mtime: float | None,
+                  availability: str, library_id: str) -> Entry:
         row = self._catalog.asset(library_id, path) if library_id else None
         user = UserMetadata() if not library_id else UserMetadata(
             rating=(row or {}).get("rating") or 0,
@@ -112,12 +133,25 @@ class FilesQueryService:
             codec=(row or {}).get("codec"),
         )
         return Entry(
-            path=path, name=dir_entry.name,
-            kind="dir" if is_dir else classify(dir_entry.name),
+            path=path, name=name,
+            kind="dir" if is_dir else classify(name),
             is_dir=is_dir, size_bytes=size, mtime_ts=mtime,
             mtime_label=time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
             if mtime else "",
             availability=availability, technical=technical, user=user,
+        )
+
+    def entries_for_paths(self, paths: Iterable[str], *, request_id: str = "",
+                          path_label: str = "", library_id: str = "") -> QueryResult:
+        """集合成员/外部路径列表 → 目录条目（磁盘真值 + catalog 叠加）。
+
+        成员已从磁盘消失时保留为 OFFLINE（集合身份仍可解释），不静默丢行。
+        """
+        entries = tuple(self._path_entry(path, library_id) for path in paths)
+        return QueryResult(
+            request_id=request_id, path=path_label,
+            entries=entries, total=len(entries), truncated=False,
+            revision=self._catalog.revision,
         )
 
     # ------------------------------------------------------------ tree / search
