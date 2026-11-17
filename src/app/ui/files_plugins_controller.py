@@ -23,6 +23,11 @@ from src.shared.plugins.host_session import PluginHostSession
 from src.shared.plugins.inventory import InventorySnapshot, PluginInventory
 
 
+# [F10] 当前插件启动管线（经旧服务 HTTP）的**实际**隔离级别——平台有
+# sandbox-exec 不等于本管线用了它；G 阶段受限执行接入后升级此常量。
+LAUNCH_PIPELINE_ISOLATION = "none"
+
+
 class _TaskSignals(QObject):
     finished = pyqtSignal(int, str, object, str)
 
@@ -323,6 +328,19 @@ class FilesPluginsController(QObject):
         if info is not None and not info.can_launch:
             self._message(info.launch_unavailable_reason or "该插件没有可用命令入口。")
             return
+        # [F10] 未保护第三方执行入口禁用：非 builtin 源的执行必须经
+        # seatbelt 级隔离。判定用**当前启动管线实际具备的隔离**（不是
+        # 平台能力）：受限执行路径 G 阶段接入前为 "none"——第三方一律
+        # 拒绝并如实说明；接入后此处升为 seatbelt 并走受限执行。
+        if info is not None and getattr(info, "source", "builtin") != "builtin":
+            from src.shared.plugins.sandbox import ExecutionGate
+            gate = ExecutionGate()
+            allowed, reason = gate.can_execute(
+                trusted=False,
+                isolated_level=LAUNCH_PIPELINE_ISOLATION)
+            if not allowed:
+                self._message(reason)
+                return
         # [F2] 命令键：新 id（偏好/中心建档）→ legacy 短 id（命令层寻址），
         # 从同一合并快照解析；旧接线（无 factory）id 即命令键
         command_key = info.command_key if info is not None and info.command_key else plugin_id
