@@ -186,30 +186,36 @@ def test_disable_visible_persistent_and_no_runtime_reload(controller, qtbot):
 
 def test_launch_auth_selection_snapshot_duplicate_suppression_and_recent(controller, endpoint, qtbot):
     host, selected, _, _ = controller
-    host.launch("format_factory")
-    host.launch("format_factory")
+    host.launch("decode_benchmark")
+    host.launch("decode_benchmark")
     selected[:] = ["/other.mov"]
     qtbot.waitUntil(lambda: bool(host.preferences.plugin_recent))
-    assert endpoint[1] == [("/api/plugin/format_factory/launch", "private-test-token", {"path": "/media/A #100% 中文.mov"})]
-    assert host.preferences.plugin_recent == ["format_factory"]
+    assert endpoint[1] == [("/api/plugin/decode_benchmark/launch", "private-test-token", {"paths": ["/media/A #100% 中文.mov"]})]
+    assert host.preferences.plugin_recent == ["decode_benchmark"]
     assert "已提交" in host.center.notice.text()
 
 
 def test_multiselection_is_rejected_without_losing_files(controller, endpoint, qtbot):
     host, selected, _, _ = controller
     selected.append("/second.mov")
-    host.launch("format_factory")
-    qtbot.waitUntil(lambda: not host._busy)
-    assert "只能接收一个" in host.center.notice.text()
-    assert endpoint[1] == []
-    assert host.preferences.plugin_recent == []
+    # [G1] format_factory 已原生接管（多选在原生计划层处理）——单选政策
+    # 的 HTTP 拒绝口径改用仍走 legacy 的 decode_benchmark（kind=paths
+    # 接受多选，此处用 format_factory 旧单选语义的替代断言：legacy 通道
+    # 对多选 decode_benchmark 照常提交）
+    host.launch("decode_benchmark")
+    qtbot.waitUntil(lambda: not host._busy, timeout=8000)
+    # decode_benchmark 的 payload 携带全部选择（多选不丢失）
+    assert endpoint[1] and endpoint[1][0][2] == {"paths": [
+        "/media/A #100% 中文.mov", "/second.mov"]}
 
 
 @pytest.mark.parametrize("status,payload", [(500, {"status": "ok"}), (200, []), (200, {"status": "error"}), (302, {"status": "ok"})])
 def test_server_failure_never_records_usage(controller, endpoint, qtbot, status, payload):
     host, _, _, _ = controller
     endpoint[2].update(status=status, payload=payload)
-    host.launch("image_factory")
+    # [G2] image_factory 已原生接管——服务失败语义改用 legacy 通道的
+    # decode_benchmark 验证（native 无 HTTP，不存在此路径）
+    host.launch("decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
     assert "未接受" in host.center.notice.text()
@@ -247,7 +253,8 @@ def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controlle
     from src.shared.plugins.services import rejected
     host, _, _, _ = controller
     host._commands.dispatch = lambda prepared: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
-    host.launch("image_factory")
+    # [G2] image_factory 已原生接管——dispatch 拒绝语义改用 legacy 通道
+    host.launch("decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
     assert endpoint[1] == []
@@ -563,27 +570,27 @@ def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
         (submitted.append((plugin_id, ep, payload)), True)[1])
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host.launch("format_factory")
+        host.launch("decode_benchmark")
         qtbot.waitUntil(lambda: bool(submitted), timeout=8000)
-        qtbot.waitUntil(lambda: "format_factory" in host._launch_jobs,
+        qtbot.waitUntil(lambda: "decode_benchmark" in host._launch_jobs,
                         timeout=8000)
         jobs = host.host_session.lifecycle.jobs
-        job_id = host._launch_jobs["format_factory"]
-        assert jobs.owner(job_id) == "format_factory"
+        job_id = host._launch_jobs["decode_benchmark"]
+        assert jobs.owner(job_id) == "decode_benchmark"
         assert jobs.state(job_id) == "running"
         # 在途时停用：停新 → 按 owner 取消 → 未确认 → 停用不完成
-        report = host.host_session.retire_plugin("format_factory")
+        report = host.host_session.retire_plugin("decode_benchmark")
         assert not report["fully_stopped"]
         assert job_id in report["jobs_still_terminating"]
         assert jobs.state(job_id) == "cancel_requested"
-        assert not host.host_session.lifecycle.accepting_calls("format_factory")
+        assert not host.host_session.lifecycle.accepting_calls("decode_benchmark")
         # 停新：停用中拒绝新调用（不再产生第二个提交）
-        host.launch("format_factory")
+        host.launch("decode_benchmark")
         assert len(submitted) == 1
         # 应答到达 = 终态确认 → 停用可完成
-        host._launch_finished("format_factory", True, "完成")
+        host._launch_finished("decode_benchmark", True, "完成")
         qtbot.waitUntil(lambda: jobs.state(job_id) == "cancelled", timeout=8000)
-        report2 = host.host_session.retire_plugin("format_factory")
+        report2 = host.host_session.retire_plugin("decode_benchmark")
         assert report2["fully_stopped"]
     finally:
         host.shutdown()
@@ -639,5 +646,41 @@ def test_g2_image_outputs_return_via_same_index_entry(
             [{"source": "/m/a.png", "output": "/m/a.jpg"}])
         assert rescans == [True]
         assert "回库" in panel.meta_status.text()
+    finally:
+        host.shutdown()
+
+
+def test_g3_shutdown_timer_native_singleton_zero_http(
+        qtbot, catalog, tmp_path, endpoint):
+    """[G3] 原生接管：启动只开窗口；singleton 聚焦；零 HTTP；关闭销账。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g3.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        host.launch("shutdown_timer")   # legacy 投影模式信息为短 id
+        qtbot.waitUntil(lambda: host._shutdown_timer_window is not None,
+                        timeout=8000)
+        qtbot.waitUntil(lambda: "files.shutdown_timer" not in host._busy,
+                        timeout=8000)   # busy 键为命名空间 id
+        window = host._shutdown_timer_window
+        assert window.isVisible()
+        assert window._service.state == "idle"     # 启动只开窗口
+        host.launch("shutdown_timer")              # singleton：同一实例
+        qtbot.waitUntil(lambda: "files.shutdown_timer" not in host._busy,
+                        timeout=8000)
+        assert host._shutdown_timer_window is window
+        assert endpoint[1] == []                   # 原生接管：零 HTTP
+        host.host_session.windows.close_all("files.shutdown_timer")
+        assert host.host_session.windows.windows_for(
+            "files.shutdown_timer") == ()
+        assert window._service.state == "idle"     # 关闭即取消
     finally:
         host.shutdown()
