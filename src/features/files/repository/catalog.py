@@ -578,6 +578,29 @@ class FilesCatalog:
             ).fetchall()
         return [row[0] for row in rows]
 
+    def rename_collection(self, collection_id: int, name: str) -> bool:
+        """改名（同库内重名由 UNIQUE 约束拒绝）；未知集合返回 False。"""
+        with self._write() as cursor:
+            cursor.execute(
+                "UPDATE collections SET name = ? WHERE id = ?",
+                (name, int(collection_id)))
+            return cursor.rowcount > 0
+
+    def remove_from_collection(self, collection_id: int,
+                               path: str | Path) -> bool:
+        with self._write() as cursor:
+            cursor.execute(
+                "DELETE FROM collection_items WHERE collection_id = ? AND path = ?",
+                (int(collection_id), nfc(path)))
+            return cursor.rowcount > 0
+
+    def delete_collection(self, collection_id: int) -> bool:
+        """删除集合（成员关系随 FK 级联清除，不触及资产本体）。"""
+        with self._write() as cursor:
+            cursor.execute(
+                "DELETE FROM collections WHERE id = ?", (int(collection_id),))
+            return cursor.rowcount > 0
+
     # ------------------------------------------------------------ 关系快照/恢复（B4/B5）
 
     def snapshot_relations(self, library_id: str, path: str | Path) -> dict[str, Any]:

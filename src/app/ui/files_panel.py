@@ -470,6 +470,20 @@ class FilesPanel(QWidget):
                 self._native_panel.show_collection_results)
             self._native_transport.collection_failed.connect(
                 self._native_panel.collection_failed)
+            # D2：集合写入与回收站入口（写入全部经 B/C 服务）
+            self._native_panel.collection_create_requested.connect(
+                self._native_transport.create_collection)
+            self._native_panel.collection_rename_requested.connect(
+                self._native_transport.rename_collection)
+            self._native_panel.collection_add_members_requested.connect(
+                self._native_transport.add_collection_members)
+            self._native_panel.collection_remove_members_requested.connect(
+                self._native_transport.remove_collection_members)
+            self._native_panel.collection_delete_requested.connect(
+                self._native_transport.delete_collection)
+            self._native_transport.collection_changed.connect(
+                self._on_collection_changed)
+            self._native_panel.trash_requested.connect(self._open_trash)
             # F11 / B10：常用位置、索引状态、缩略图重试
             self._native_panel.libraries_requested.connect(
                 self._native_transport.load_libraries)
@@ -537,6 +551,39 @@ class FilesPanel(QWidget):
             lambda: self.mode_combo.setCurrentIndex(0), self)
         self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
         self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
+
+    def _on_collection_changed(self, ok: bool, message: str) -> None:
+        """集合写反馈：面板提示；成功后刷新集合清单与当前视图。"""
+        panel = self._native_panel
+        if panel is None:
+            return
+        panel.show_collection_change(ok, message)
+        if ok:
+            panel.refresh()
+
+    def _open_trash(self) -> None:
+        """D2 回收站：非模态清单；恢复/彻底删除走文件任务并回刷。"""
+        if self._native_transport is None:
+            return
+        from src.app.ui.native_files_trash import TrashDialog
+        dialog = TrashDialog(self)
+        transport = self._native_transport
+        dialog.refresh_requested.connect(transport.load_trash)
+        dialog.restore_requested.connect(
+            lambda record_id, policy: transport.run_task(
+                "restore", [str(record_id)], policy=policy))
+        dialog.purge_requested.connect(
+            lambda record_id: transport.run_task("purge", [str(record_id)]))
+        transport.trash_loaded.connect(dialog.show_items)
+        transport.trash_failed.connect(dialog.show_error)
+        transport.task_finished.connect(
+            lambda job: (dialog.show_task_result(job),
+                         transport.load_trash()) if job.get("operation") in
+            ("restore", "purge") else None)
+        dialog.finished.connect(lambda *_: self._native_panel and self._native_panel.refresh())
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
+        transport.load_trash()
 
     def _open_batch_rename(self, paths: list[str]) -> None:
         from src.app.ui.native_files_batch_rename import BatchRenameDialog

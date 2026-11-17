@@ -190,6 +190,40 @@ class FilesCollectionsService:
         """成员路径按入集顺序返回；水合（磁盘真值+叠加）归查询服务。"""
         return list(self._catalog.collection_member_paths(collection_id))
 
+    def rename_collection(self, collection_id: int, name: str) -> ServiceResult:
+        clean = str(name or "").strip()
+        if not clean:
+            return rejected("files.collections.rename", error_code="INVALID_NAME",
+                            message="集合名不能为空")
+        try:
+            changed = self._catalog.rename_collection(collection_id, clean)
+        except Exception as exc:  # 同库重名（UNIQUE）等
+            return rejected("files.collections.rename", error_code="CONFLICT",
+                            message=str(exc))
+        if not changed:
+            return rejected("files.collections.rename", error_code="NOT_FOUND",
+                            message="集合不存在")
+        return accepted("files.collections.rename", stage="completed",
+                        revision=self._catalog.revision)
+
+    def remove_members(self, collection_id: int,
+                       paths: Iterable[str]) -> ServiceResult:
+        items = []
+        for raw in paths:
+            removed = self._catalog.remove_from_collection(collection_id, raw)
+            items.append(ItemResult(nfc(raw), ok=removed,
+                                    error_code="" if removed else "NOT_FOUND"))
+        return ServiceResult(command_id="files.collections.remove", ok=True,
+                             accepted=True, stage="completed", items=tuple(items),
+                             revision=self._catalog.revision)
+
+    def delete_collection(self, collection_id: int) -> ServiceResult:
+        if not self._catalog.delete_collection(collection_id):
+            return rejected("files.collections.delete", error_code="NOT_FOUND",
+                            message="集合不存在")
+        return accepted("files.collections.delete", stage="completed",
+                        revision=self._catalog.revision)
+
 
 class FilesScanService:
     """库扫描：登记资产技术列 + 标 missing；有界、可取消、带进度回调。"""
@@ -372,3 +406,7 @@ class FilesTaskService:
                             message="任务不在运行中（同步任务通常已完成）")
         record.cancel.request()
         return accepted("files.task.cancel", stage="accepted")
+
+    def list_trash(self, library_id: str = "") -> list:
+        """回收站清单（B4 manifest 一等公民；UI 列表入口用）。"""
+        return self._operations.trash_service.list_items(library_id)

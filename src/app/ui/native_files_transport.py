@@ -95,6 +95,9 @@ class NativeFilesTransport(QObject):
     collections_loaded = pyqtSignal(list)
     collection_loaded = pyqtSignal(dict)
     collection_failed = pyqtSignal(str)
+    collection_changed = pyqtSignal(bool, str)  # D2 集合写操作反馈
+    trash_loaded = pyqtSignal(list)             # D2 回收站清单
+    trash_failed = pyqtSignal(str)
     libraries_loaded = pyqtSignal(list)
     library_changed = pyqtSignal(bool, str)
     scan_status_loaded = pyqtSignal(dict)
@@ -879,6 +882,115 @@ class NativeFilesTransport(QObject):
 
         facade.collection_members(int(collection_id),
                                   request_id=uuid.uuid4().hex, listener=_deliver)
+
+    # ------------------------------------------------------------ 集合写入（D2）
+    def create_collection(self, name: str, paths: list[str]) -> None:
+        """从所选新建集合并加入成员；归属库按首个成员路径解析。"""
+        facade = self._runtime()
+        if facade is None or not str(name or "").strip():
+            self.collection_changed.emit(False, self._runtime_error_message()
+                                         if facade is None else "集合名不能为空")
+            return
+        clean = str(name).strip()
+        members = [nfc(path) for path in paths]
+
+        def _work(facade: FilesFacade):
+            record = facade.libraries.library_for_path(members[0]) \
+                if members else None
+            library_id = record.library_id if record else ""
+            created = facade.collections.create_collection(library_id, clean)
+            if not created.ok:
+                return created
+            return facade.collections.add_members(
+                int(created.message), members) if members else created
+
+        self._collection_write(_work, f"已创建集合「{clean}」")
+
+    def rename_collection(self, collection_id: int, name: str) -> None:
+        self._collection_write(
+            lambda facade: facade.collections.rename_collection(
+                int(collection_id), str(name or "")),
+            "集合已改名")
+
+    def add_collection_members(self, collection_id: int,
+                               paths: list[str]) -> None:
+        members = [nfc(path) for path in paths]
+        if not members:
+            self.collection_changed.emit(False, "先选择要加入集合的素材")
+            return
+        self._collection_write(
+            lambda facade: facade.collections.add_members(
+                int(collection_id), members),
+            f"已加入 {len(members)} 项")
+
+    def remove_collection_members(self, collection_id: int,
+                                  paths: list[str]) -> None:
+        members = [nfc(path) for path in paths]
+        if not members:
+            self.collection_changed.emit(False, "先选择要移除的成员")
+            return
+        self._collection_write(
+            lambda facade: facade.collections.remove_members(
+                int(collection_id), members),
+            f"已移除 {len(members)} 项")
+
+    def delete_collection(self, collection_id: int) -> None:
+        self._collection_write(
+            lambda facade: facade.collections.delete_collection(
+                int(collection_id)),
+            "集合已删除")
+
+    def _collection_write(self, work: Callable[[FilesFacade], Any],
+                          ok_message: str) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.collection_changed.emit(False, self._runtime_error_message())
+            return
+        request_id = uuid.uuid4().hex
+
+        def _deliver(outcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.collection_changed.emit(
+                    False, str(outcome.error.message or "集合操作失败"))
+                return
+            result = outcome.result
+            if not result.ok:
+                self.collection_changed.emit(
+                    False, str(result.message or result.error_code or "集合操作失败"))
+                return
+            self.collection_changed.emit(True, ok_message)
+            self.load_collections()
+
+        facade.run(key=f"collection-write:{request_id}", request_id=request_id,
+                   work=lambda: work(facade), listener=_deliver)
+
+    # ------------------------------------------------------------ 回收站（D2）
+    def load_trash(self) -> None:
+        """回收站清单（全库）；恢复/彻底删除走 run_task 的逐项结果。"""
+        if self._closed:
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.trash_failed.emit(self._runtime_error_message())
+            return
+
+        def _deliver(outcome) -> None:
+            if self._closed or outcome.error is not None:
+                if outcome.error is not None:
+                    self.trash_failed.emit(
+                        str(outcome.error.message or "回收站读取失败"))
+                return
+            self.trash_loaded.emit([
+                {"id": record.id, "library_id": record.library_id,
+                 "original_path": record.original_path,
+                 "item_name": record.item_name, "is_dir": record.is_dir,
+                 "deleted_at": record.deleted_at, "expire_at": record.expire_at}
+                for record in outcome.result])
+
+        facade.run(key="trash", request_id=uuid.uuid4().hex,
+                   work=lambda: facade.tasks.list_trash(), listener=_deliver)
 
     # ------------------------------------------------------------ 全库搜索（facade）
     def search_library(self, query: str, *, limit: int = 200, offset: int = 0) -> None:

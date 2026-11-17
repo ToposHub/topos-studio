@@ -280,6 +280,13 @@ class NativeFilesPanel(QWidget):
     library_search_requested = pyqtSignal(str, int, int)
     collections_requested = pyqtSignal()
     collection_requested = pyqtSignal(int, str)
+    # D2：集合写入 + 回收站（意图经 transport，写入全部走 B/C 服务）
+    collection_create_requested = pyqtSignal(str, list)
+    collection_rename_requested = pyqtSignal(int, str)
+    collection_add_members_requested = pyqtSignal(int, list)
+    collection_remove_members_requested = pyqtSignal(int, list)
+    collection_delete_requested = pyqtSignal(int)
+    trash_requested = pyqtSignal()
     libraries_requested = pyqtSignal()
     library_pin_requested = pyqtSignal(str)
     library_unpin_requested = pyqtSignal(str)
@@ -501,6 +508,11 @@ class NativeFilesPanel(QWidget):
             self.request_collections)
         self.collections_button.setFixedHeight(26)
         navigation.addWidget(self.collections_button)
+        self.trash_button = self._button(
+            _tr("trash_bin", "回收站"), _tr("trash_bin_tip", "查看/恢复已删除的素材"),
+            self.trash_requested.emit)
+        self.trash_button.setFixedHeight(26)
+        navigation.addWidget(self.trash_button)
         self.plugins_button = self._button(_tr("plugins", "插件"), _tr("plugins_tip", "打开插件启动器（Ctrl+Alt+P）"), self.plugins_requested.emit)
         navigation.addWidget(self.plugins_button)
         navigation.addWidget(self._button("↻", _tr("refresh", "刷新"), self.refresh))
@@ -2068,12 +2080,66 @@ class NativeFilesPanel(QWidget):
     def show_collections(self, items: list[Any]) -> None:
         self._collections = [item for item in items if isinstance(item, dict)]
         if not self._collections:
-            self.meta_status.setText(_tr("collections_empty", "还没有集合；可在完整 Files 中创建。"))
+            self._create_collection_from_selection(prompt_hint=True)
             return
         self._show_collections_menu()
 
+    def show_collection_change(self, ok: bool, message: str) -> None:
+        self.meta_status.setText(str(message or ("集合已更新" if ok else "集合操作失败")))
+
+    def _create_collection_from_selection(self, *, prompt_hint: bool = False) -> None:
+        """从所选新建集合：名字必填；没选素材也允许先建空集合。"""
+        selection = [entry.path for entry in self._task_selection() if not entry.is_dir]
+        hint = (f"（将加入所选 {len(selection)} 项）" if selection
+                else "（先建空集合，稍后可加入素材）")
+        if prompt_hint and not selection:
+            self.meta_status.setText(
+                _tr("collections_create_hint",
+                    "还没有集合；选择素材后点「集合」即可从所选新建。"))
+            return
+        name, accepted = QInputDialog.getText(
+            self, _tr("collection_new", "新建集合"),
+            _tr("collection_new_prompt", "集合名称：{hint}").format(hint=hint))
+        if not accepted or not name.strip():
+            return
+        self.collection_create_requested.emit(name.strip(), selection)
+
+    def _rename_collection(self, collection_id: int, current: str) -> None:
+        name, accepted = QInputDialog.getText(
+            self, _tr("collection_rename", "集合改名"),
+            _tr("collection_rename_prompt", "新的集合名称："), text=current)
+        if accepted and name.strip() and name.strip() != current:
+            self.collection_rename_requested.emit(collection_id, name.strip())
+
+    def _add_selection_to_collection(self, collection_id: int, name: str) -> None:
+        selection = [entry.path for entry in self._task_selection() if not entry.is_dir]
+        if not selection:
+            self.meta_status.setText(_tr("collection_add_pick", "先选择要加入「{name}」的素材").format(name=name))
+            return
+        self.meta_status.setText(_tr("collection_adding", "正在加入「{name}」…").format(name=name))
+        self.collection_add_members_requested.emit(collection_id, selection)
+
+    def _remove_selection_from_collection(self) -> None:
+        """集合视图内：把所选移出当前集合（不删文件本体）。"""
+        if not self._collection_active:
+            return
+        collection_id = self._view_location.get("collection_id")
+        if collection_id is None:
+            return
+        selection = [entry.path for entry in self._task_selection()]
+        if not selection:
+            self.meta_status.setText(_tr("collection_remove_pick", "先选择要移除的成员"))
+            return
+        self.collection_remove_members_requested.emit(int(collection_id), selection)
+
     def _show_collections_menu(self) -> None:
         menu = QMenu(self)
+        selection = [e for e in self._task_selection() if not e.is_dir]
+        new_label = (_tr("collection_new_with", "从所选新建集合（{n} 项）").format(n=len(selection))
+                     if selection else _tr("collection_new_empty", "新建空集合…"))
+        menu.addAction(new_label, lambda: self._create_collection_from_selection())
+        if self._collections:
+            menu.addSeparator()
         for item in self._collections:
             name = str(item.get("name") or "未命名集合")
             count = item.get("item_count")
@@ -2082,9 +2148,27 @@ class NativeFilesPanel(QWidget):
                 collection_id = int(item.get("id"))
             except (TypeError, ValueError):
                 continue
-            menu.addAction(label, lambda cid=collection_id, n=name:
-                           self._open_collection(cid, n))
+            submenu = menu.addMenu(label)
+            submenu.addAction(_tr("open", "打开"), lambda cid=collection_id, n=name:
+                              self._open_collection(cid, n))
+            if selection:
+                submenu.addAction(
+                    _tr("collection_add_selected", "加入所选 {n} 项").format(n=len(selection)),
+                    lambda cid=collection_id: self._add_selection_to_collection(cid, name))
+            submenu.addAction(_tr("rename", "改名…"),
+                              lambda cid=collection_id, n=name: self._rename_collection(cid, n))
+            submenu.addAction(_tr("collection_delete", "删除集合…"),
+                              lambda cid=collection_id: self._confirm_delete_collection(cid, name))
         menu.exec(self.collections_button.mapToGlobal(self.collections_button.rect().bottomLeft()))
+
+    def _confirm_delete_collection(self, collection_id: int, name: str) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+        confirm = QMessageBox.question(
+            self, _tr("collection_delete", "删除集合"),
+            _tr("collection_delete_confirm",
+                "删除集合「{name}」不会删除素材文件本身。继续？").format(name=name))
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.collection_delete_requested.emit(collection_id)
 
     def _open_collection(self, collection_id: int, name: str) -> None:
         self._pending_collection_name = name
@@ -2150,6 +2234,9 @@ class NativeFilesPanel(QWidget):
                 menu.addAction(_tr("compare", "并排比较…"),
                                lambda: self.compare_requested.emit([e.path for e in images]))
             menu.addAction(_tr("trash", "移入回收站"), self.request_trash_selection)
+            if self._collection_active:
+                menu.addAction(_tr("collection_remove_selected", "从集合移除"),
+                               self._remove_selection_from_collection)
             menu.addAction(_tr("copy_path", "复制路径"), lambda: QApplication.clipboard().setText("\n".join(e.path for e in self._selected_entries())))
             menu.addSeparator()
         if self._task_selection():
