@@ -1,0 +1,12 @@
+{
+  "source_filename": "mixer_console.py",
+  "sha256": "cb09266b1f6dff2e4bf82a39f2709218520881888fb1084d7243ebfeeba62dcf",
+  "copied_controls": [
+    "EditableValuePill",
+    "RotaryKnob",
+    "LevelMeter",
+    "StudioFader",
+    "MiniEQCurve"
+  ],
+  "source_bytes": 77662
+}

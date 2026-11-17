@@ -524,6 +524,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if not self._edit_available:
             logger.warning("Edit module disabled or unavailable")
 
+        self._mixer_available = self.feature_flags.is_enabled("mixer")
+
         self._deliver_available = self.feature_flags.is_enabled("deliver")
         if not self._deliver_available:
             logger.warning("Deliver module disabled or unavailable")
@@ -547,6 +549,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             self.current_page = "Color"
         elif page_lower == "composite" and not self._composite_available:
             logger.warning(f"Saved page '{self.current_page}' is disabled, falling back to Color")
+            self.current_page = "Color"
+        elif page_lower == "mixer" and not self._mixer_available:
             self.current_page = "Color"
         elif page_lower == "deliver" and not self._deliver_available:
             logger.warning(f"Saved page '{self.current_page}' is disabled, falling back to Color")
@@ -1238,6 +1242,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         for page_id, page_widget in created_pages.items():
             if page_id == "edit":
                 self.edit_page = page_widget
+            elif page_id == "mixer":
+                self.mixer_page = page_widget
+                # Keep the lightweight session alive while its three panels
+                # are independently parented into native docks.
+                page_widget.setParent(self)
+                page_widget.hide()
             elif page_id == "deliver":
                 self.deliver_page = page_widget
             elif page_id == "composite":
@@ -1425,6 +1435,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         # Edit Page panels (P1 phase) - Phase 8: Conditional creation
         self.edit_page = None
+        self.mixer_page = None
         self.deliver_page = None
         self.media_pool_panel = None
         self.program_viewer_widget = None
@@ -1439,6 +1450,18 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         # Try creating pages from registry first
         self._create_pages_from_registry()
+        if self._mixer_available and self.mixer_page is None:
+            try:
+                from src.features.mixer.ui.mixer_page import MixerPage
+                descriptor = (self.feature_registry.get_page("mixer")
+                              if self.feature_registry is not None else None)
+                self.mixer_page = (descriptor.create_page(None)
+                                   if descriptor is not None else MixerPage(self))
+                self.mixer_page.setParent(self)
+                self.mixer_page.hide()
+            except ImportError as exc:
+                logger.warning("Mixer UI unavailable: %s", exc)
+                self._mixer_available = False
 
         # Fallback: create Edit panels directly if not created via registry
         # Deferred edit UI imports (heavy, only needed if edit module is available)
@@ -2561,6 +2584,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 # 确认直接放行；"丢弃"后脏标记仍在，否则会被问两次。
                 self._confirm_save_before_close = lambda: True
                 confirm_bypassed = True
+
+            mixer_page = getattr(self, "mixer_page", None)
+            if mixer_page is not None:
+                mixer_page.dispose_ui()
 
             try:
                 tangent_bridge = getattr(self, "tangent_color_bridge", None)

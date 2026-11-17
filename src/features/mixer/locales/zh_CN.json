@@ -1,0 +1,11 @@
+{
+  "page": {
+    "mixer": "混音"
+  },
+  "panel": {
+    "audio_console": "混音台",
+    "audio_viewer": "视频监看",
+    "audio_timeline": "音频时间线",
+    "audio_clip_editor": "片段编辑"
+  }
+}

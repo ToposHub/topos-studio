@@ -101,6 +101,8 @@ where = ["."]
 include = ["src*", "apps*"]
 
 [tool.setuptools.package-data]
+"src.features.mixer" = ["assets/*.json", "locales/*.json"]
+"src.features.mixer.effects" = ["*.json"]
 "src.features.teaching_animation" = [
     "templates/motion_graphic/**/*",
     "presets/**/*",

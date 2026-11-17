@@ -20,6 +20,7 @@ from src.products import (
     FEATURE_LIBRARY,
     FEATURE_COLOR,
     FEATURE_EDIT,
+    FEATURE_MIXER,
     FEATURE_COMPOSITE,
     FEATURE_DELIVER,
     FEATURE_TEACHING_ANIMATION,
@@ -32,6 +33,7 @@ _FEATURE_TO_DIR: dict[str, str] = {
     FEATURE_LIBRARY: "color",      # library is bundled with color
     FEATURE_COLOR: "color",
     FEATURE_EDIT: "edit",
+    FEATURE_MIXER: "mixer",
     FEATURE_COMPOSITE: "composite",
     FEATURE_DELIVER: "deliver",
     FEATURE_TEACHING_ANIMATION: "teaching_animation",
