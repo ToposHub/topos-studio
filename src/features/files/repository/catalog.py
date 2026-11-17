@@ -569,3 +569,147 @@ class FilesCatalog:
                 (collection_id,),
             ).fetchall()
         return [row[0] for row in rows]
+
+    # ------------------------------------------------------------ 关系快照/恢复（B4/B5）
+
+    def snapshot_relations(self, library_id: str, path: str | Path) -> dict[str, Any]:
+        """某资产的全部组织关系（回收站清单与关系随行的数据源）。"""
+        key = nfc(path)
+        with self._read() as cursor:
+            tags = [
+                {"id": row["id"], "name": row["name"], "color": row["color"]}
+                for row in cursor.execute(
+                    "SELECT t.id, t.name, t.color FROM asset_tags at"
+                    " JOIN tags t ON t.id = at.tag_id"
+                    " WHERE at.library_id = ? AND at.path = ? ORDER BY t.name",
+                    (library_id, key),
+                ).fetchall()
+            ]
+            collections = [
+                {"id": row["id"], "name": row["name"]}
+                for row in cursor.execute(
+                    "SELECT c.id, c.name FROM collection_items ci"
+                    " JOIN collections c ON c.id = ci.collection_id"
+                    " WHERE ci.path = ? ORDER BY c.name",
+                    (key,),
+                ).fetchall()
+            ]
+            stacks = [
+                row["stack_id"]
+                for row in cursor.execute(
+                    "SELECT stack_id FROM stack_members WHERE path = ?", (key,)
+                ).fetchall()
+            ]
+        return {"tags": tags, "collections": collections, "stacks": stacks}
+
+    def delete_asset_tree(self, library_id: str, path: str | Path) -> int:
+        """删除主表行及其全部关系行（assets FTS 由触发器清理）。"""
+        key = nfc(path)
+        with self._write() as cursor:
+            cursor.execute(
+                "DELETE FROM asset_tags WHERE library_id = ? AND path = ?",
+                (library_id, key),
+            )
+            cursor.execute("DELETE FROM collection_items WHERE path = ?", (key,))
+            cursor.execute("DELETE FROM stack_members WHERE path = ?", (key,))
+            cursor.execute(
+                "DELETE FROM assets WHERE library_id = ? AND path = ?", (library_id, key)
+            )
+            removed = cursor.rowcount
+        return removed
+
+    def insert_asset_full(self, library_id: str, asset_row: dict[str, Any]) -> None:
+        """按快照整行恢复资产（回收站恢复/关系随行用；不覆盖既有行）。"""
+        key = nfc(asset_row["path"])
+        columns = [
+            "path", "name", "is_dir", "rating", "color", "flag", "comment",
+            "size", "mtime", "date_taken", "width", "height", "duration", "codec",
+            "camera", "lens", "iso", "aperture", "shutter", "focal",
+            "gps_lat", "gps_lon", "dom_color", "missing", "indexed_at",
+        ]
+        values: list[Any] = [key, asset_row.get("name") or os.path.basename(key)]
+        values.extend(asset_row.get(column) for column in columns[2:])
+        placeholders = ",".join("?" for _ in columns)
+        with self._write() as cursor:
+            cursor.execute(
+                f"INSERT OR IGNORE INTO assets (library_id, {','.join(columns)})"
+                f" VALUES (?, {placeholders})",
+                (library_id, *values),
+            )
+
+    def restore_relations(self, library_id: str, path: str | Path, *,
+                          tag_names: list[str] | None = None,
+                          collection_ids: list[int] | None = None,
+                          stack_ids: list[int] | None = None,
+                          old_path: str | Path | None = None) -> dict[str, int]:
+        """恢复/迁移组织关系到（可能是新的）资产身份。
+
+        old_path 提供时按旧身份迁移（B5 关系随行）；否则按名单新建（B4
+        恢复）。返回 {tags, collections, stacks} 实际落库数；标签按名
+        重建、集合/堆叠按 id 重挂（不存在的 id 计入丢失不计入失败）。
+        """
+        key = nfc(path)
+        source_key = nfc(old_path) if old_path is not None else key
+        counts = {"tags": 0, "collections": 0, "stacks": 0}
+        with self._write() as cursor:
+            if old_path is not None:
+                cursor.execute(
+                    "UPDATE OR REPLACE asset_tags SET path = ? WHERE library_id = ?"
+                    " AND path = ?",
+                    (key, library_id, source_key),
+                )
+                cursor.execute(
+                    "UPDATE OR REPLACE collection_items SET path = ? WHERE path = ?",
+                    (key, source_key),
+                )
+                cursor.execute(
+                    "UPDATE OR REPLACE stack_members SET path = ? WHERE path = ?",
+                    (key, source_key),
+                )
+                self._refresh_fts_tags(cursor, library_id, key)
+                return counts
+            for name in tag_names or []:
+                row = cursor.execute(
+                    "SELECT id FROM tags WHERE library_id = ? AND name = ?",
+                    (library_id, name),
+                ).fetchone()
+                if row is None:
+                    cursor.execute(
+                        "INSERT INTO tags (library_id, name, color, parent_id)"
+                        " VALUES (?, ?, 0, NULL)",
+                        (library_id, name),
+                    )
+                    tag_id = int(cursor.lastrowid)
+                else:
+                    tag_id = int(row["id"])
+                cursor.execute(
+                    "INSERT OR IGNORE INTO asset_tags (library_id, path, tag_id)"
+                    " VALUES (?, ?, ?)",
+                    (library_id, key, tag_id),
+                )
+                counts["tags"] += 1
+            for collection_id in collection_ids or []:
+                exists = cursor.execute(
+                    "SELECT 1 FROM collections WHERE id = ?", (collection_id,)
+                ).fetchone()
+                if exists is None:
+                    continue
+                cursor.execute(
+                    "INSERT OR IGNORE INTO collection_items"
+                    " (collection_id, path, sort_order, added_at) VALUES (?, ?, 0, ?)",
+                    (collection_id, key, time.time()),
+                )
+                counts["collections"] += 1
+            for stack_id in stack_ids or []:
+                exists = cursor.execute(
+                    "SELECT 1 FROM stacks WHERE id = ?", (stack_id,)
+                ).fetchone()
+                if exists is None:
+                    continue
+                cursor.execute(
+                    "INSERT OR IGNORE INTO stack_members (stack_id, path) VALUES (?, ?)",
+                    (stack_id, key),
+                )
+                counts["stacks"] += 1
+            self._refresh_fts_tags(cursor, library_id, key)
+        return counts
