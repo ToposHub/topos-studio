@@ -222,7 +222,7 @@ def test_cleanup_step_failure_is_aggregated_and_retryable():
     assert controller.is_stopped("files.tool") is False         # 未谎报停止
     retry = controller.deactivate("files.tool")                 # 幂等重试：close 成功
     assert retry["fully_stopped"] is True
-    assert events == ["close", "unbind", "release", "close", "unbind"]  # 宿主回调幂等，重试重跑清理序列
+    assert events == ["close", "unbind", "release", "close"]  # 成功步骤不重复执行
     assert controller.is_stopped("files.tool") is True
 
 
@@ -350,3 +350,131 @@ def test_cancel_confirmation_requires_an_existing_requested_job() -> None:
     assert jobs.request_cancel("job")
     jobs.confirm_cancelled("job")
     assert jobs.state("job") == "cancelled"
+
+
+def test_cancel_callback_failure_is_reported_and_retried_without_blocking_other_jobs() -> None:
+    calls: list[str] = []
+
+    def flaky() -> None:
+        calls.append("flaky")
+        if len(calls) == 1:
+            raise OSError("cancel transport unavailable")
+
+    controller = PluginLifecycleController()
+    controller.activate("files.tool", lambda contributions: None)
+    controller.jobs.start("broken", cancel=flaky, plugin_id="files.tool")
+    controller.jobs.start("other", plugin_id="files.tool")
+    first = controller.deactivate("files.tool", wait_jobs=False)
+    assert not first["fully_stopped"]
+    assert first["jobs_cancel_requested"] == 1
+    assert any("cancel broken: OSError" in error for error in first["cleanup_failures"])
+    assert controller.jobs.state("broken") == "running"
+    assert controller.jobs.state("other") == "cancel_requested"
+    second = controller.deactivate("files.tool", wait_jobs=False)
+    assert second["cleanup_failures"] == ()
+    assert second["jobs_cancel_requested"] == 1
+    assert calls == ["flaky", "flaky"]
+    controller.jobs.confirm_cancelled("broken")
+    controller.jobs.confirm_cancelled("other")
+    assert controller.deactivate("files.tool", wait_jobs=False)["fully_stopped"]
+
+
+def test_concurrent_deactivation_never_runs_cleanup_twice() -> None:
+    entered = threading.Event()
+    resume = threading.Event()
+    events: list[str] = []
+
+    def close_windows(plugin_id: str) -> None:
+        events.append("close")
+        entered.set()
+        assert resume.wait(2)
+
+    controller = PluginLifecycleController(close_windows=close_windows)
+    controller.activate("files.tool", lambda cs: cs.register("command", "c", lambda: events.append("release")))
+    worker = threading.Thread(target=lambda: controller.deactivate("files.tool", wait_jobs=False))
+    worker.start()
+    try:
+        assert entered.wait(2)
+        report = controller.deactivate("files.tool", wait_jobs=False)
+        assert report["cleanup_in_progress"] and not report["fully_stopped"]
+        assert events == ["close"]
+        with pytest.raises(RuntimeError, match="不能登记新任务"):
+            controller.jobs.start("late", plugin_id="files.tool")
+    finally:
+        resume.set()
+        worker.join(2)
+    assert not worker.is_alive()
+    assert events == ["close", "release"]
+    assert controller.is_stopped("files.tool")
+
+
+def test_failed_release_is_attempted_once_per_deactivation() -> None:
+    attempts: list[int] = []
+
+    def flaky() -> None:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("try again")
+
+    controller = PluginLifecycleController()
+    controller.activate("files.tool", lambda cs: cs.register("command", "c", flaky))
+    first = controller.deactivate("files.tool", wait_jobs=False)
+    assert not first["fully_stopped"] and len(attempts) == 1
+    assert controller.deactivate("files.tool", wait_jobs=False)["fully_stopped"]
+    assert len(attempts) == 2
+
+
+def test_entry_paths_are_frozen_when_caller_provides_a_list() -> None:
+    paths = ["/a.mov"]
+    context = make_invocation("cmd", "files.tool", entry_paths=paths)
+    paths.append("/b.mov")
+    assert context.entry_paths == ("/a.mov",)
+    with pytest.raises(ValueError, match="路径序列"):
+        make_invocation("cmd", "files.tool", entry_paths="/a.mov")
+
+
+def test_releasing_returned_handle_before_owner_rollback_is_idempotent() -> None:
+    calls: list[int] = []
+    contributions = ContributionSet("files.tool")
+    handle = contributions.register("command", "c", lambda: calls.append(1))
+    handle.release()
+    contributions.rollback()
+    handle.release()
+    assert calls == [1]
+
+
+def test_activation_callbacks_cannot_reenter_activation_or_stop_uncommitted_handles() -> None:
+    controller = PluginLifecycleController()
+    released: list[int] = []
+
+    def registrar(contributions: ContributionSet) -> None:
+        contributions.register("command", "c", lambda: released.append(1))
+        with pytest.raises(RuntimeError, match="已激活"):
+            controller.activate("files.tool", lambda cs: None)
+        assert controller.deactivate("files.tool", wait_jobs=False)["cleanup_in_progress"]
+
+    controller.activate("files.tool", registrar)
+    assert controller.accepting_calls("files.tool")
+    assert released == []
+    assert controller.deactivate("files.tool", wait_jobs=False)["fully_stopped"]
+    assert released == [1]
+
+
+def test_activation_failure_keeps_resources_until_started_jobs_terminate() -> None:
+    controller = PluginLifecycleController()
+    released: list[int] = []
+
+    def registrar(contributions: ContributionSet) -> None:
+        contributions.register("command", "c", lambda: released.append(1))
+        controller.jobs.start("initializing", plugin_id="files.tool")
+        raise ValueError("setup failed after starting a worker")
+
+    with pytest.raises(RuntimeError, match="待任务终止"):
+        controller.activate("files.tool", registrar)
+    assert controller.jobs.state("initializing") == "cancel_requested"
+    assert released == []
+    assert not controller.accepting_calls("files.tool")
+    assert not controller.deactivate("files.tool", wait_jobs=False)["fully_stopped"]
+    controller.jobs.confirm_cancelled("initializing")
+    assert controller.deactivate("files.tool", wait_jobs=False)["fully_stopped"]
+    assert released == [1]

@@ -6,8 +6,9 @@ every Files entry point (toolbar, launcher, center, shortcuts) goes through
 gesture.
 
 Honesty notes kept from the review plan (PR-05):
-- dispatch success only means the legacy service accepted the HTTP request;
-  it is not proof a tool window appeared (UI copy already says so)
+- dispatch success means the transport queued an HTTP request; only ``finish``
+  records its HTTP acknowledgement. Neither phase proves a window appeared
+  or a job completed
 - ``revalidate`` is the authoritative pre-dispatch recheck (plugin still
   launchable for the frozen selection). The controller runs it in its worker
   so the GUI thread never compensates with a synchronous scan; calling
@@ -19,7 +20,9 @@ Honesty notes kept from the review plan (PR-05):
 from __future__ import annotations
 
 from dataclasses import replace
+from threading import Lock
 from typing import Any, Iterable, Protocol
+from weakref import WeakValueDictionary
 
 from src.shared.plugins.lifecycle import InvocationContext, make_invocation
 from src.shared.plugins.services import (
@@ -45,6 +48,10 @@ class LegacyFilesCommandService:
     def __init__(self, catalog: Any, transport: _TransportLike) -> None:
         self.catalog = catalog
         self.transport = transport
+        # A caller-controlled DTO flag is not proof that this service checked it.
+        # Weak ownership also releases checks abandoned when a window closes.
+        self._checked: WeakValueDictionary[str, PreparedInvocation] = WeakValueDictionary()
+        self._checked_lock = Lock()
 
     # -- introspection ----------------------------------------------------
     def command_ids(self) -> tuple[str, ...]:
@@ -100,25 +107,35 @@ class LegacyFilesCommandService:
             raise CommandRejected("COMMAND_NOT_APPLICABLE", str(exc)) from exc
         if endpoint != f"/api/plugin/{legacy_id}/launch" or payload != prepared.to_payload():
             raise CommandRejected("INVOCATION_STALE", "插件状态或启动接口已变化，请重新发起。")
-        return replace(prepared, revalidated=True)
+        checked = replace(prepared, revalidated=True)
+        with self._checked_lock:
+            self._checked[checked.context.invocation_id] = checked
+        return checked
 
     def dispatch(self, prepared: PreparedInvocation) -> ServiceResult:
         """Send the frozen request; completion arrives via the transport signal."""
         legacy_id = prepared.plugin_id.partition(".")[2] if prepared.plugin_id.startswith("files.") else ""
         if (legacy_id not in LAUNCHABLE_LEGACY_IDS or prepared.command_id != f"files.{legacy_id}.launch"
                 or prepared.context.plugin_id != prepared.plugin_id or prepared.context.command_id != prepared.command_id):
-            return rejected(prepared.command_id, error_code="INVALID_INVOCATION", message="插件调用身份与命令不匹配。")
+            return rejected(prepared.command_id, error_code="INVALID_INVOCATION", message="插件调用身份与命令不匹配。",
+                            invocation_id=prepared.context.invocation_id)
         if prepared.context.cancelled:
-            return rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="插件调用已取消。")
+            return rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="插件调用已取消。",
+                            invocation_id=prepared.context.invocation_id)
         if prepared.context.timed_out():
-            return rejected(prepared.command_id, error_code="INVOCATION_EXPIRED", message="插件调用已过期。")
-        if not prepared.revalidated:
+            return rejected(prepared.command_id, error_code="INVOCATION_EXPIRED", message="插件调用已过期。",
+                            invocation_id=prepared.context.invocation_id)
+        with self._checked_lock:
+            checked_here = self._checked.get(prepared.context.invocation_id) is prepared
+        if not checked_here:
             # 直接调用 dispatch 的入口不能绕过权威复核：服务内补做
             try:
                 prepared = self.revalidate(prepared)
             except CommandRejected as exc:
                 return rejected(prepared.command_id, error_code=exc.error_code, message=exc.message,
                                 retriable=exc.retriable, invocation_id=prepared.context.invocation_id)
+        with self._checked_lock:
+            self._checked.pop(prepared.context.invocation_id, None)
         endpoint = f"/api/plugin/{legacy_id}/launch"
         try:
             submitted = self.transport.launch_plugin(legacy_id, endpoint, prepared.to_payload())
@@ -132,14 +149,15 @@ class LegacyFilesCommandService:
                             message="插件启动请求被同步拒绝，请检查插件状态或稍后重试。",
                             retriable=True, invocation_id=prepared.context.invocation_id)
         return accepted(prepared.command_id, invocation_id=prepared.context.invocation_id,
-                        stage="dispatched", message="已提交打开请求；工具窗口由插件创建。")
+                        stage="queued", message="已发出打开请求，等待插件服务确认；工具窗口由插件创建。")
 
     def finish(self, prepared: PreparedInvocation, success: bool, message: str) -> ServiceResult:
         """Translate the transport's async acknowledgement into a ServiceResult."""
         if success:
             return accepted(prepared.command_id, invocation_id=prepared.context.invocation_id,
-                            stage="completed", message=message)
-        return rejected(prepared.command_id, error_code="LAUNCH_NOT_ACCEPTED", message=message)
+                            stage="dispatched", message=message)
+        return rejected(prepared.command_id, error_code="LAUNCH_NOT_ACCEPTED", message=message,
+                        invocation_id=prepared.context.invocation_id)
 
 
 __all__ = ["LegacyFilesCommandService", "LAUNCHABLE_LEGACY_IDS"]

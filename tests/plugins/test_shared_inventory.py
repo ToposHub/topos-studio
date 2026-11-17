@@ -350,3 +350,34 @@ def test_legacy_source_is_host_policy_not_declaration(tmp_path):
     # 运行版本与声明版本分槽投影，互不覆盖
     assert unmanaged[0].runtime_version == ""
     assert "runtime_version" in unmanaged[0].to_dict()
+
+
+def test_stale_discovery_never_overwrites_authoritative_intent_or_runtime() -> None:
+    inventory = PluginInventory(**HOST)
+    old_scan = [_record()]
+    inventory.refresh(old_scan)
+    inventory.set_desired("files.demo", False)
+    inventory.mark_runtime("files.demo", "loaded", runtime_version="1.0.0")
+    snapshot = inventory.refresh([_record(version="2.0.0")])
+    record = snapshot.record("files.demo")
+    assert record is not None
+    assert record.version == "2.0.0" and record.runtime_version == "1.0.0"
+    assert record.runtime_state == "loaded"
+    assert not record.desired_enabled and record.pending_restart
+    inventory.mark_runtime("files.demo", "not_loaded")
+    record = inventory.refresh(old_scan).record("files.demo")
+    assert record.runtime_state == "not_loaded" and record.runtime_version == ""
+    assert not record.pending_restart
+
+
+def test_blocking_validation_diagnostic_cannot_be_hidden_by_warning_flood() -> None:
+    from src.shared.plugins.manifest import ManifestDiagnostic
+
+    warnings = tuple(ManifestDiagnostic(code="INFO", severity="info", message="noise")
+                     for _ in range(60))
+    snapshot = PluginInventory(**HOST).refresh([
+        _record(diagnostics=warnings, manifest=_manifest(host_api=[9, 9]))])
+    record = snapshot.record("files.demo")
+    assert record is not None and record.runtime_state == "rejected"
+    assert len(record.diagnostics) == 50
+    assert any(item.code == "HOST_API_INCOMPATIBLE" for item in record.diagnostics)

@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit,
                              QPushButton)
 
 from . import icons as _icons
+from .frame_geometry import fit_aspect_size
 from .base_player import (BasePlayer, DecoderBackend, _fmt_time,
                           _frame_to_qimage,
                           utils_get_tool_path)  # noqa: F401  (libav/外部沿用旧导入名)
@@ -245,8 +246,8 @@ class ToposMovieSession(DecoderBackend):
         frame.colorspace = int(self.info.color_matrix)
         frame.color_range = 2 if self.info.color_range == 1 else 1
         if size:
-            out = frame.reformat(width=int(size[0]), height=int(size[1]),
-                                 format='rgb24')
+            width, height = fit_aspect_size(self, int(size[0]), int(size[1]))
+            out = frame.reformat(width=width, height=height, format='rgb24')
         else:
             out = frame.reformat(format='rgb24')
         return out.to_ndarray()

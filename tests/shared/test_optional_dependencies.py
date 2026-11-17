@@ -52,3 +52,22 @@ def test_real_probe_runs_without_external_tools() -> None:
     status = optional_dependency_status(tool_path=lambda _n: None)
     assert isinstance(status["ai_model_packs"], dict)
     assert isinstance(summarize(status), str)
+
+
+def test_default_and_injected_locator_work_without_file_explorer(monkeypatch) -> None:
+    import builtins
+    from src.shared import ffmpeg_locator
+    real_import = builtins.__import__
+
+    def no_legacy_import(name, *args, **kwargs):
+        if name.startswith("external.file_explorer"):
+            raise AssertionError("diagnostics depends on the retired Files host")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_legacy_import)
+    monkeypatch.setattr(ffmpeg_locator, "find_binary", lambda name: "/bundled/" + name)
+    probes = {"qt_probe": lambda: {"available": True}, "ai_probe": lambda: {}}
+    status = optional_dependency_status(**probes)
+    assert "path=/bundled/ffmpeg" in status["external_ffmpeg"]["detail"]
+    injected = optional_dependency_status(tool_path=lambda _: None, **probes)
+    assert not injected["external_ffmpeg"]["available"]

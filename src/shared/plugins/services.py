@@ -109,9 +109,9 @@ class CommandRejected(ValueError):
 class PreparedInvocation:
     """A validated, frozen request ready for dispatch (GUI/worker split safe).
 
-    ``revalidated`` 表示手势冻结之后的执行前权威复核已通过（PR-05）：
-    worker 内复核过的调用交给 dispatch 时不再重复扫描，宿主也不需要在
-    GUI 线程补同步扫描。
+    ``revalidated`` 是执行前复核的展示状态，不能用作授权凭证。
+    命令服务须独立验证本服务签发的调用身份；worker 内复核过的原始对象
+    交给 dispatch 时不再重复扫描。
     """
 
     context: Any                     # lifecycle.InvocationContext (kept Any to avoid import cycle)

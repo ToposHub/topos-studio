@@ -104,19 +104,19 @@ class FileExplorerPluginCatalog:
                 diagnostics.append(f"无法读取插件配置：{exc}")
         return constants, config, diagnostics
 
-    def _declarative(self, folder: Path, plugin_id: str) -> tuple[PluginManifest | None, list[str]]:
+    def _declarative(self, folder: Path, plugin_id: str) -> tuple[PluginManifest | None, list[str], bool]:
         """Read topos.plugin.json when present; identity must match the folder."""
         path = folder / "topos.plugin.json"
-        if not path.is_file():
-            return None, []
+        if not path.exists() and not path.is_symlink():
+            return None, [], False
         if not path.resolve().is_relative_to(folder.resolve()):
-            return None, ["manifest 位于插件目录之外，未读取"]
+            return None, ["manifest 位于插件目录之外，未读取"], True
         manifest, diagnostics = parse_manifest_file(path)
         notes = [f"manifest：{item.message}" for item in diagnostics]
         if manifest is not None and manifest.plugin_id != f"files.{plugin_id}":
             notes.append(f"manifest 身份 {manifest.plugin_id} 与目录不符，已忽略")
-            return None, notes
-        return manifest, notes
+            return None, notes, True
+        return manifest, notes, manifest is None or any(item.severity == "error" for item in diagnostics)
 
     @staticmethod
     def _payload_kind(manifest: PluginManifest | None) -> str:
@@ -150,7 +150,7 @@ class FileExplorerPluginCatalog:
                 self.plugins_dir / plugin_id if self.plugins_dir is not None
                 else Path(plugin_id))
             constants, local, diagnostics = self._metadata(folder) if plugin_id in folders else ({}, {}, ["运行时插件目录已不存在"])
-            manifest, manifest_notes = self._declarative(folder, plugin_id) if plugin_id in folders else (None, [])
+            manifest, manifest_notes, manifest_blocked = self._declarative(folder, plugin_id) if plugin_id in folders else (None, [], False)
             diagnostics.extend(manifest_notes)
             runtime_info = active.get(plugin_id, {}).get("info", {})
             if not isinstance(runtime_info, Mapping):
@@ -202,7 +202,9 @@ class FileExplorerPluginCatalog:
                 diagnostics.append("声明的选择规则与旧版启动接口不匹配")
             launch_path = f"/api/plugin/{plugin_id}/launch" if payload_kind and expected_kind and not payload_mismatch else ""
             error = failed.get(plugin_id, "")
-            if error:
+            if manifest_blocked:
+                unavailable = "插件声明无效或不兼容，详情中可查看原因"
+            elif error:
                 unavailable = "插件加载失败，详情中可查看原因"
             elif self_disabled:
                 unavailable = "插件自身配置已停用，请先修改插件 config.json"

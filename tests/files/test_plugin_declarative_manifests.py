@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
 from src.shared.plugins.manifest import parse_manifest_file, validate_manifest_set
 
@@ -154,3 +156,26 @@ def test_manifest_symlink_outside_plugin_is_not_read(tmp_path):
     row = catalog.snapshot()[0]
     assert row.name == "Loaded old name"
     assert any("目录之外" in note for note in row.diagnostics)
+    assert not row.can_launch
+
+
+@pytest.mark.parametrize("problem", ["future_schema", "broken", "wrong_identity", "invalid_field", "dangling"])
+def test_invalid_manifest_never_falls_back_to_a_launchable_builtin(tmp_path, problem):
+    folder, catalog = _declared_tool(tmp_path, "image_factory")
+    path = folder / "topos.plugin.json"
+    data = json.loads(path.read_text())
+    if problem == "future_schema":
+        data["schema_version"] = "999.0"
+    elif problem == "wrong_identity":
+        data["plugin_id"] = "files.imposter"
+    elif problem == "invalid_field":
+        data["capabilities"][0]["run_location"] = "nowhere"
+    if problem == "dangling":
+        path.unlink()
+        path.symlink_to(folder / "missing.json")
+    else:
+        path.write_text("{ broken" if problem == "broken" else json.dumps(data))
+    row = catalog.snapshot()[0]
+    assert row.diagnostics and not row.can_launch
+    with pytest.raises(ValueError, match="声明"):
+        catalog.launch_request("image_factory", [])

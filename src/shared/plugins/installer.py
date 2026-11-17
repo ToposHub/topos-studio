@@ -47,6 +47,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import threading
 import zipfile
 from dataclasses import dataclass
@@ -59,7 +60,7 @@ from src.shared.plugins.manifest import (
     validate_manifest_set,
 )
 
-try:  # POSIX 跨进程事务锁；无 fcntl 的宿主退化为仅线程锁
+try:  # POSIX 跨进程事务锁；其他宿主明确拒绝，不能假装获得事务锁
     import fcntl
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
@@ -70,7 +71,7 @@ MAX_MEMBER_BYTES = 512 * 1024 * 1024
 _PLUGIN_ID_RE = re.compile(r"[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9._-]*")
 _PROVENANCE_SUFFIX = ".install.json"
 _LOCK_NAME = ".transactions.lock"
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+_SEMVER_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
 
 
 class InstallerError(Exception):
@@ -107,7 +108,7 @@ def _safe_extract_zip(package: Path, staging: Path) -> None:
                                      f"解压总大小超过 {MAX_PACKAGE_BYTES} 字节")
             for info in infos:
                 name = info.filename
-                if name.startswith("/") or ".." in Path(name).parts:
+                if name.startswith("/") or ".." in Path(name).parts or "\\" in name or ":" in name:
                     raise InstallerError("PACKAGE_PATH_TRAVERSAL",
                                          f"压缩包含非法路径：{name}")
                 if (info.external_attr >> 16) & 0o170000 == 0o120000:
@@ -122,6 +123,10 @@ def _safe_extract_zip(package: Path, staging: Path) -> None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as source, open(target, "wb") as sink:
                     shutil.copyfileobj(source, sink, length=1024 * 1024)
+                # Match author-side deterministic packaging and directory
+                # installs; never restore setuid or platform-specific bits.
+                executable = info.create_system == 3 and bool((info.external_attr >> 16) & 0o111)
+                target.chmod(0o755 if executable else 0o644)
     except zipfile.BadZipFile as exc:
         raise InstallerError("PACKAGE_NOT_ZIP", f"不是有效的 zip 包：{exc}") from exc
 
@@ -134,6 +139,9 @@ def _reject_source_symlinks(folder: Path) -> None:
         if entry.is_symlink():
             raise InstallerError("PACKAGE_SYMLINK_MEMBER",
                                  f"包内含符号链接：{entry.relative_to(folder)}")
+        if not (entry.is_dir() or entry.is_file()):
+            raise InstallerError("PACKAGE_SPECIAL_MEMBER",
+                                 f"包内含非常规文件：{entry.relative_to(folder)}")
 
 
 def _measure_source(folder: Path) -> None:
@@ -175,13 +183,16 @@ def _payload_digest(folder: Path) -> str:
 
 def _semver_key(version: str) -> tuple[tuple[int, int, int], int, tuple[tuple[int, Any], ...]]:
     """Full SemVer ordering: a prerelease sorts below its own release."""
-    match = _SEMVER_RE.match(version)
+    match = _SEMVER_RE.fullmatch(version)
     if match is None:
         raise InstallerError("VERSION_INVALID", f"版本不是语义化版本：{version}")
     core = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
     prerelease = match.group(4)
     if prerelease is None:
         return core, 1, ()
+    if any(chunk.isdigit() and len(chunk) > 1 and chunk.startswith("0")
+           for chunk in prerelease.split(".")):
+        raise InstallerError("VERSION_INVALID", f"预发布数字标识不能有前导零：{version}")
     identifiers = tuple(
         (0, int(chunk)) if chunk.isdigit() else (1, chunk)
         for chunk in prerelease.split("."))
@@ -199,17 +210,31 @@ class _Transaction:
     def __enter__(self) -> "_Transaction":
         self._thread_lock.acquire()
         parent = self._lock_path.parent
-        if fcntl is not None and not parent.is_symlink():
+        try:
+            if parent.is_symlink():
+                raise InstallerError("PATH_NOT_OWNED", "安装根是符号链接，拒绝落事务锁")
+            if fcntl is None:
+                raise InstallerError("LOCK_UNAVAILABLE", "当前平台没有跨进程安装事务锁")
             # 安装根是符号链接时不落锁文件（不能穿过链接写）；
             # 所有权核验随后会响亮拒绝整个事务。
-            try:
-                parent.mkdir(parents=True, exist_ok=True)
-                self._handle = open(self._lock_path, "a+b")
-                fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
-            except OSError:
-                if self._handle is not None:
-                    self._handle.close()
-                self._handle = None   # 退化为仅线程锁，不阻断安装
+            parent.mkdir(parents=True, exist_ok=True)
+            if self._lock_path.is_symlink():
+                raise InstallerError("PATH_NOT_OWNED", "事务锁不能是符号链接")
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            descriptor = os.open(self._lock_path, flags, 0o600)
+            self._handle = os.fdopen(descriptor, "a+b")
+            lock_stat = os.fstat(self._handle.fileno())
+            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1:
+                raise InstallerError("PATH_NOT_OWNED", "事务锁必须是独立的普通文件")
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
+        except (OSError, InstallerError) as exc:
+            if self._handle is not None:
+                self._handle.close()
+                self._handle = None
+            self._thread_lock.release()
+            if isinstance(exc, InstallerError):
+                raise
+            raise InstallerError("LOCK_UNAVAILABLE", f"无法取得安装事务锁：{exc}") from exc
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -291,6 +316,8 @@ class LocalPackageInstaller:
                                      f"current 指针异常（{plugin_id}）：{reason}")
             return ""
 
+        if self.install_root.is_symlink() or plugin_root.is_symlink():
+            return refuse("安装根或插件目录是符号链接")
         if not pointer.exists() and not pointer.is_symlink():
             return ""
         if not pointer.is_symlink():
@@ -327,6 +354,8 @@ class LocalPackageInstaller:
             if not version:
                 return None
             sidecar = self._provenance_path(self._versions_dir(plugin_id) / version)
+            if sidecar.is_symlink():
+                raise InstallerError("PATH_NOT_OWNED", "来源记录不能是符号链接")
             try:
                 data = json.loads(sidecar.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -335,13 +364,19 @@ class LocalPackageInstaller:
 
     def _stored_digest(self, version_dir: Path) -> str:
         sidecar = self._provenance_path(version_dir)
+        if sidecar.is_symlink():
+            raise InstallerError("PATH_NOT_OWNED", "来源记录不能是符号链接")
+        _reject_source_symlinks(version_dir)
+        actual = _payload_digest(version_dir)
         try:
             data = json.loads(sidecar.read_text(encoding="utf-8"))
             if isinstance(data, dict) and isinstance(data.get("content_digest"), str):
-                return data["content_digest"]
+                if data["content_digest"] != actual:
+                    raise InstallerError("PROVENANCE_INVALID", "已安装内容与来源摘要不符")
+                return actual
         except (OSError, ValueError):
             pass
-        return _payload_digest(version_dir)   # 无 sidecar 的旧安装：现算
+        return actual   # 无 sidecar 的旧安装：现算
 
     def _sweep_transactions(self) -> None:
         """锁内清理崩溃事务的残留（.staging 目录与临时指针），失败保留诊断。"""
@@ -351,7 +386,7 @@ class LocalPackageInstaller:
             for leftover in staging_parent.iterdir():
                 try:
                     if leftover.is_dir() and not leftover.is_symlink():
-                        shutil.rmtree(leftover, ignore_errors=True)
+                        shutil.rmtree(leftover)
                     else:
                         leftover.unlink()
                 except OSError as exc:
@@ -395,6 +430,8 @@ class LocalPackageInstaller:
             raise InstallerError("PACKAGE_SYMLINK_MEMBER", "安装来源不能是符号链接")
         if not package.exists():
             raise InstallerError("PACKAGE_MISSING", f"安装包不存在：{package}")
+        if package.is_dir() and self.install_root.resolve().is_relative_to(package.resolve()):
+            raise InstallerError("PACKAGE_SOURCE_OVERLAP", "安装根不能位于包来源目录内")
         with self._transaction():
             return self._install_locked(package, expected_plugin_id, allow_downgrade)
 
@@ -407,7 +444,11 @@ class LocalPackageInstaller:
         staging = self._ensure_real_dir(staging_parent / token, what="暂存目录")
         version_dir: Path | None = None
         provenance_path: Path | None = None
+        provenance_written = False
         moved = False
+        pointer_swapped = False
+        previous_version = ""
+        plugin_root: Path | None = None
         try:
             # 1) stage（解包/复制只进隔离目录，任何失败都不触碰已安装版本）
             if package.is_file():
@@ -444,6 +485,7 @@ class LocalPackageInstaller:
                 raise InstallerError("INSTALL_HOOK_FORBIDDEN",
                                      "manifest 声明了 runAfterInstall 钩子，宿主不执行")
             plugin_id = manifest.plugin_id
+            _semver_key(manifest.version)  # Also validate first installs, not only upgrades.
             if expected_plugin_id is not None and plugin_id != expected_plugin_id:
                 raise InstallerError("PLUGIN_ID_MISMATCH",
                                      f"包身份 {plugin_id} 与期望 {expected_plugin_id} 不符")
@@ -469,26 +511,46 @@ class LocalPackageInstaller:
             # 4) 版本目录就位（临时指针名带事务令牌，不跨事务冲突）后原子切换
             version_dir = versions / manifest.version
             if version_dir.exists() or version_dir.is_symlink():
-                raise InstallerError("VERSION_DIR_EXISTS",
-                                     f"版本目录已存在：{version_dir}")
-            os.rename(staging, version_dir)
-            moved = True
+                if version_dir.is_symlink() or not version_dir.is_dir():
+                    raise InstallerError("PATH_NOT_OWNED", f"版本目录异常：{version_dir}")
+                _reject_source_symlinks(version_dir)
+                if _payload_digest(version_dir) != digest:
+                    raise InstallerError("VERSION_CONTENT_CONFLICT",
+                                         f"保留版本 {manifest.version} 与待安装内容不同")
+                # A prior transaction may have crashed after moving the complete
+                # payload but before swapping current. Reuse only byte-identical
+                # versions; do not delete this pre-existing payload on failure.
+            else:
+                os.rename(staging, version_dir)
+                moved = True
             if version_dir.is_symlink() or not version_dir.is_dir():
                 raise InstallerError("PATH_NOT_OWNED", "版本目录就位后被替换，拒绝使用")
             provenance_path = self._provenance_path(version_dir)
             try:
-                provenance_path.write_text(json.dumps({
+                if provenance_path.is_symlink():
+                    raise InstallerError("PATH_NOT_OWNED", "来源记录不能是符号链接")
+                provenance = {
                     "plugin_id": plugin_id, "version": manifest.version,
-                    # 来源由安装器记录；包自己声明的 source 不产生信任
-                    "source": "local_package",
-                    "content_digest": digest,
-                }, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+                    "source": "local_package", "content_digest": digest,
+                }
+                if provenance_path.exists():
+                    try:
+                        existing_provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError) as provenance_exc:
+                        raise InstallerError("PROVENANCE_INVALID", "保留版本的来源记录不可解析") from provenance_exc
+                    if existing_provenance != provenance:
+                        raise InstallerError("PROVENANCE_INVALID", "保留版本的来源记录与验证内容不符")
+                if not provenance_path.exists():
+                    with provenance_path.open("x", encoding="utf-8") as provenance_file:
+                        provenance_written = True
+                        provenance_file.write(json.dumps(provenance, ensure_ascii=False, sort_keys=True))
                 temp_pointer = plugin_root / f".current.{token}.tmp"
                 if temp_pointer.is_symlink() or temp_pointer.exists():
                     temp_pointer.unlink()
                 os.symlink(Path("versions") / manifest.version, temp_pointer)
                 try:
                     os.replace(temp_pointer, plugin_root / "current")   # 原子切换
+                    pointer_swapped = True
                 except OSError:
                     if temp_pointer.is_symlink() or temp_pointer.exists():
                         temp_pointer.unlink()
@@ -501,21 +563,36 @@ class LocalPackageInstaller:
             return InstallOutcome(plugin_id, manifest.version, outcome, previous_version,
                                   rollback_path=str(versions / previous_version)
                                   if previous_version else "")
-        except OSError as exc:
-            # 指针切换前的任何失败：清掉新版本目录与暂存，旧版本原样可用
+        except (OSError, InstallerError) as exc:
+            # A post-swap validation failure must restore the previous pointer
+            # before removing the new payload. If that fails, retain both
+            # payloads so current never points at a directory we just deleted.
+            if pointer_swapped and plugin_root is not None:
+                rollback_pointer = plugin_root / f".current.{token}.rollback.tmp"
+                try:
+                    if previous_version:
+                        os.symlink(Path("versions") / previous_version, rollback_pointer)
+                        os.replace(rollback_pointer, plugin_root / "current")
+                    else:
+                        (plugin_root / "current").unlink()
+                except OSError as rollback_exc:
+                    raise InstallerError("INSTALL_ROLLBACK_FAILED",
+                                         f"安装失败且指针恢复失败，已保留版本目录供恢复：{rollback_exc}") from exc
+                finally:
+                    rollback_pointer.unlink(missing_ok=True)
             if moved and version_dir is not None:
                 shutil.rmtree(version_dir, ignore_errors=True)
-                if provenance_path is not None:
-                    provenance_path.unlink(missing_ok=True)
-            raise InstallerError("INSTALL_IO_ERROR", f"安装 I/O 失败（已回滚）：{exc}") from exc
-        except InstallerError:
-            if moved and version_dir is not None:
-                shutil.rmtree(version_dir, ignore_errors=True)
-                if provenance_path is not None:
-                    provenance_path.unlink(missing_ok=True)
+            if provenance_written and provenance_path is not None:
+                provenance_path.unlink(missing_ok=True)
+            if isinstance(exc, OSError):
+                raise InstallerError("INSTALL_IO_ERROR", f"安装 I/O 失败（已回滚）：{exc}") from exc
             raise
         finally:
-            shutil.rmtree(staging, ignore_errors=True)
+            if staging.exists():
+                try:
+                    shutil.rmtree(staging)
+                except OSError as cleanup_exc:
+                    self.last_cleanup_notes += (f"清理本次暂存失败 {staging.name}：{cleanup_exc}",)
 
     # -- uninstall -------------------------------------------------------
     def uninstall(self, plugin_id: str, *, is_active: Callable[[str], bool],

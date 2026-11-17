@@ -408,3 +408,157 @@ def test_concurrent_double_update_is_serialized(tmp_path):
     assert installer.current_version("files.my_tool") == "2.0.0"
     versions = tmp_path / "installed" / "files.my_tool" / "versions"
     assert sorted(p.name for p in versions.iterdir() if p.is_dir()) == ["1.0.0", "2.0.0"]  # 旧版本保留、无半包
+
+
+def test_symlinked_transaction_lock_never_opens_outside_file(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install_root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched", encoding="utf-8")
+    (installer.install_root / ".transactions.lock").symlink_to(outside)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path))
+    assert exc.value.code == "PATH_NOT_OWNED"
+    assert outside.read_text(encoding="utf-8") == "untouched"
+    assert not (installer.install_root / ".staging").exists()
+
+
+def test_transaction_lock_failure_rejects_and_releases_thread_lock(tmp_path, monkeypatch):
+    import src.shared.plugins.installer as module
+    installer = _installer(tmp_path)
+    package = _pkg(tmp_path)
+    with monkeypatch.context() as patch:
+        def fail_lock(*args):
+            raise OSError("locking unavailable")
+        patch.setattr(module.fcntl, "flock", fail_lock)
+        with pytest.raises(InstallerError) as exc:
+            installer.install(package)
+        assert exc.value.code == "LOCK_UNAVAILABLE"
+    assert installer.install(package).outcome == "installed"
+
+
+def test_preexisting_provenance_symlink_cannot_overwrite_outside_file(tmp_path):
+    installer = _installer(tmp_path)
+    versions = installer.install_root / "files.my_tool" / "versions"
+    versions.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text("untouched", encoding="utf-8")
+    (versions / "1.0.0.install.json").symlink_to(outside)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path))
+    assert exc.value.code == "PATH_NOT_OWNED"
+    assert outside.read_text(encoding="utf-8") == "untouched"
+    assert not (versions / "1.0.0").exists()
+    assert installer.current_version("files.my_tool") == ""
+
+
+@pytest.mark.parametrize("rollback_fails", [False, True])
+def test_failure_after_pointer_swap_preserves_a_resolvable_current(tmp_path, monkeypatch, rollback_fails):
+    import src.shared.plugins.installer as module
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    read_pointer = installer._read_pointer
+    rejected = False
+
+    def reject_new_once(plugin_id, *, strict=True):
+        nonlocal rejected
+        value = read_pointer(plugin_id, strict=strict)
+        if value == "2.0.0" and not rejected:
+            rejected = True
+            raise InstallerError("POINTER_INVALID", "injected post-swap verification failure")
+        return value
+
+    monkeypatch.setattr(installer, "_read_pointer", reject_new_once)
+    replace = module.os.replace
+
+    def replace_with_optional_failure(source, destination):
+        if rollback_fails and "rollback" in str(source):
+            raise OSError("injected rollback failure")
+        return replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", replace_with_optional_failure)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path / "v2", version="2.0.0"))
+    assert exc.value.code == ("INSTALL_ROLLBACK_FAILED" if rollback_fails else "POINTER_INVALID")
+    assert installer.current_version("files.my_tool") == ("2.0.0" if rollback_fails else "1.0.0")
+    assert (installer.install_root / "files.my_tool" / "current" / "code.txt").is_file()
+    assert installer.installed_manifest("files.my_tool") is not None
+
+
+def test_directory_and_built_zip_have_identical_executable_payload_identity(tmp_path):
+    from src.shared.plugins.pack import build_package
+    installer = _installer(tmp_path)
+    package = _pkg(tmp_path)
+    (package / "code.txt").chmod(0o755)
+    installer.install(package)
+    built, _ = build_package(package, tmp_path / "package.zip", host_facts=HOST)
+    assert installer.install(built).outcome == "unchanged"
+
+
+@pytest.mark.parametrize("version", ["01.0.0", "1.0.0-01", "1.0.0-a..b", "1.0.0-.", "1.0.0+a..b"])
+def test_invalid_semver_is_rejected_even_on_first_install(tmp_path, version):
+    installer = _installer(tmp_path)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path, version=version))
+    assert exc.value.code in {"VERSION_INVALID", "MANIFEST_INVALID", "MANIFEST_REJECTED"}
+    assert installer.current_version("files.my_tool") == ""
+
+
+def test_install_root_inside_source_is_rejected_before_staging(tmp_path):
+    package = _pkg(tmp_path)
+    installer = LocalPackageInstaller(package / "installed", host_facts=HOST)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(package)
+    assert exc.value.code == "PACKAGE_SOURCE_OVERLAP"
+    assert not installer.install_root.exists()
+
+
+def test_stale_staging_cleanup_failure_remains_visible(tmp_path, monkeypatch):
+    import src.shared.plugins.installer as module
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    stale = installer.install_root / ".staging" / "stale"
+    stale.mkdir()
+    real_remove = module.shutil.rmtree
+
+    def fail_one(path, *args, **kwargs):
+        if Path(path) == stale:
+            raise OSError("denied stale cleanup")
+        return real_remove(path, *args, **kwargs)
+
+    monkeypatch.setattr(module.shutil, "rmtree", fail_one)
+    assert installer.install(_pkg(tmp_path / "v2", version="2.0.0")).outcome == "updated"
+    assert any("stale" in note and "denied stale cleanup" in note for note in installer.last_cleanup_notes)
+
+
+def test_retry_after_crash_between_version_move_and_pointer_swap(tmp_path):
+    import shutil
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    package = _pkg(tmp_path / "v2", version="2.0.0")
+    # Simulate a process killed after rename(version) but before provenance/current.
+    orphan = installer.install_root / "files.my_tool" / "versions" / "2.0.0"
+    shutil.copytree(package, orphan)
+    assert installer.install(package).outcome == "updated"
+    assert installer.current_version("files.my_tool") == "2.0.0"
+    assert installer.installed_provenance("files.my_tool")["version"] == "2.0.0"
+
+
+def test_explicit_downgrade_can_reuse_unchanged_retained_version(tmp_path):
+    installer = _installer(tmp_path)
+    old = _pkg(tmp_path)
+    installer.install(old)
+    installer.install(_pkg(tmp_path / "v2", version="2.0.0"))
+    assert installer.install(old, allow_downgrade=True).outcome == "updated"
+    assert installer.current_version("files.my_tool") == "1.0.0"
+
+
+def test_same_version_never_uses_stale_digest_to_hide_installed_corruption(tmp_path):
+    installer = _installer(tmp_path)
+    package = _pkg(tmp_path)
+    installer.install(package)
+    installed = installer.install_root / "files.my_tool" / "versions" / "1.0.0" / "code.txt"
+    installed.write_text("corrupted after installation", encoding="utf-8")
+    with pytest.raises(InstallerError) as exc:
+        installer.install(package)
+    assert exc.value.code == "PROVENANCE_INVALID"
