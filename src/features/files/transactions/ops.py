@@ -222,6 +222,18 @@ class FileTransactionService:
             return OpResult(str(src), status="failed", code="SOURCE_SYMLINK",
                             message="拒绝操作符号链接源（不解引用）")
         is_dir = stat.S_ISDIR(source_stat.st_mode)
+        if is_dir:
+            # 目录重叠：目标在源子树内（含源自身）会造成自引用/数据丢失
+            try:
+                resolved_source = src.resolve()
+                resolved_destination = destination.resolve()
+                resolved_destination.relative_to(resolved_source)
+            except ValueError:
+                pass  # 目标不在源子树内，安全
+            else:
+                return OpResult(str(src), str(destination), status="failed",
+                                code="POLICY_FORBIDDEN",
+                                message="目标位于源目录子树内（目录重叠）")
 
         dst_parent = destination.parent
         parent_stat = _lstat(dst_parent)

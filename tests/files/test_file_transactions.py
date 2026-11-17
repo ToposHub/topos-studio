@@ -152,6 +152,18 @@ def test_directory_rename_keeps_children(svc, workdir):
     assert (workdir / "src-renamed" / "a.png").read_bytes() == b"payload-a"
 
 
+def test_directory_move_into_own_subtree_is_rejected(svc, workdir):
+    """B7 验收项：目录重叠（目标在源子树内）必须拒绝。"""
+    bundle = workdir / "src"
+    (bundle / "nested").mkdir()
+    result = svc.move(bundle, bundle / "nested")
+    assert result.status == "failed" and result.code == "POLICY_FORBIDDEN"
+    assert bundle.is_dir() and (bundle / "a.png").exists(), "源原样"
+    # 移到子树自身路径（自引用）同样拒绝
+    self_move = svc.move(bundle, bundle)
+    assert self_move.status == "failed" and self_move.code == "POLICY_FORBIDDEN"
+
+
 def test_rename_rejects_path_in_new_name(svc, workdir):
     result = svc.rename(workdir / "src" / "a.png", "../escape.png")
     assert result.status == "failed" and result.code == "BAD_NAME"

@@ -81,16 +81,18 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：A。范围：把文件与组织数据的正确性放到同一领域边界，再迁移调用方。
 
-- [ ] 实现真实原子 no-replace 或可证明等价策略；末级/父目录/源身份与软硬链接政策一致，不以占位后无条件 rename 作为保证。
-- [ ] copy/move/rename 的 error/rename/overwrite 覆盖文件、目录、同卷/跨卷；staging、取消、权限/磁盘满和中断有可恢复状态。
-- [ ] 单改名、批改名、任务 move/rename、恢复共用安全领域入口；真实解析后的读写目标统一锁/权限验证。
-- [ ] 文件与 DB 不能组成单一原子事务时使用持久操作日志、幂等键、补偿/待恢复状态；不得日志报错后仍宣称完整成功。
-- [ ] 新系统中的改名/移动完整处理 metadata、OCR、markers、标签、集合排序/时间、堆叠封面/时间、FTS和子树；新扩展字段按新schema规则保存。
-- [ ] 回收站使用版本化完整清单；快照失败禁止删除。恢复冲突、最终身份、实体/关系/清单更新均可重试。
-- [ ] 批改名 preview 返回计划 id、版本和源身份；execute 核验已确认计划，变化则要求重预览，不重新计算另一计划偷偷执行。
-- [ ] 建立独立 Files repository 和库定位器；Files/Library 改用同一新模型、键空间与事务政策，消除 CWD 双库。
-- [ ] 用户数据目录、库id、schema版本和初始化规则明确；停止旧路径自动发现/合库，旧 `topos.db/metadata.db/config.json` 不作为新系统输入。
-- [ ] 有界任务提交/执行/历史；活动任务不被淘汰，取消确认后才终态，退出/重启能够识别未完成操作。
+- [x] 实现真实原子 no-replace 或可证明等价策略；末级/父目录/源身份与软硬链接政策一致，不以占位后无条件 rename 作为保证。（B2 `transactions/ops.py`：文件同卷 link+unlink（内核 EEXIST）、跨卷 staging+fsync+link；inode 核验防检查后源替换；目录如实标注检查+rename+核验非内核原子；源/目标符号链接一律拒绝穿过。测试 `test_file_transactions.py` 22 项）
+- [x] copy/move/rename 的 error/rename/overwrite 覆盖文件、目录、同卷/跨卷；staging、取消、权限/磁盘满和中断有可恢复状态。（策略矩阵+目录覆盖拒绝+块边界协作取消+errno→结构化 code+retriable；中断恢复见 B3 journal。**跨卷经注入 `same_volume=False` 全路径演练，真实 EXDEV 块设备未接**——如实保留）
+- [x] 单改名、批改名、任务 move/rename、恢复共用安全领域入口；真实解析后的读写目标统一锁/权限验证。（B5 `FileOperationService` 唯一写入口 + B6 批改名 + B4 恢复全经此；目标 claim 锁防并发同目标。生产 UI 调用方接线属 C/D，未接前不得声称闭环）
+- [x] 文件与 DB 不能组成单一原子事务时使用持久操作日志、幂等键、补偿/待恢复状态；不得日志报错后仍宣称完整成功。（B3 `journal.py`：job_log 事件流、幂等键重放不重复执行、证据分类恢复（completed/清扫可重试/pending_recovery 不猜测）、失败只能 finish('failed')。测试 12 项）
+- [x] 新系统中的改名/移动完整处理 metadata、OCR、markers、标签、集合排序/时间、堆叠封面/时间、FTS和子树；新扩展字段按新schema规则保存。（B5：用户/技术列、标签、集合成员（sort_order/added_at 随行迁移）、堆叠成员+封面、FTS 键、目录子树全量改挂；OCR 列 schema 预留待 U4 决定；markers 为无调用方死代码不迁移（矩阵 §4.3））
+- [x] 回收站使用版本化完整清单；快照失败禁止删除。恢复冲突、最终身份、实体/关系/清单更新均可重试。（B4 `trash_service.py` version=1 清单先行、快照失败禁删、error 冲突保留可重试、rename 冲突关系挂最终身份、expire_at 过期清理。测试 9 项）
+- [x] 批改名 preview 返回计划 id、版本和源身份；execute 核验已确认计划，变化则要求重预览，不重新计算另一计划偷偷执行。（B6 `batch_plan.py`：(size,mtime_ns) 指纹、STALE_PLAN 整体拒绝、PLAN_CONSUMED/PLAN_HAS_CONFLICTS 拒绝。测试 8 项）
+- [x] 建立独立 Files repository 和库定位器；Files/Library 改用同一新模型、键空间与事务政策，消除 CWD 双库。（B1 `repository/`：FilesDataLocator + FilesCatalog schema v1；宿主 settings/layouts 库改显式 `<config_root>/host.db`（4 调用点+AST 守卫测试）。**Files/Library UI 数据源切到新模型属 C/D 接线**）
+- [x] 用户数据目录、库id、schema版本和初始化规则明确；停止旧路径自动发现/合库，旧 `topos.db/metadata.db/config.json` 不作为新系统输入。（B1：schema_version 双钉+版本不符拒绝打开、libraries.json 原子注册；新代码零读取旧库/旧 config——旧系统行为冻结不动随 I 退役）
+- [x] 有界任务提交/执行/历史；活动任务不被淘汰，取消确认后才终态，退出/重启能够识别未完成操作。（journal.trim 有界+未终态永不淘汰；协作取消只有真实停止才报 cancelled；pending()+recover_one 识别未完成。测试 `test_operation_journal.py` 12 项）
+
+**B 阶段边界（诚实）**：以上为**契约测试口径**（隔离夹具 745 passed/1 skipped）；生产 UI/transport 仍走旧 HTTP（C/D 替换）；跨卷为注入模拟非真实块设备；C 阶段完成前 FileOperationService 无生产调用方。
 
 生产调用：原生、插件和主应用的所有实际改名/删除/恢复入口只调用新服务；旧routes与旧任务实现直接退出，不维持薄HTTP适配。
 验收：并发同目标、父源目标换链、目录重叠、跨卷、故障注入；源/目标字节、全部关系、任务状态逐项断言。
