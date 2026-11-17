@@ -168,3 +168,86 @@ def test_dispatch_rejects_cancelled_expired_or_mismatched_invocations(reason):
     result = service.dispatch(prepared)
     assert not result.accepted and not result.ok
     assert transport.calls == []
+
+
+# ---------------------------------------------------------------------------
+# PR-05 回归：执行前权威复核与一致的受理结果
+# ---------------------------------------------------------------------------
+
+class _CountingCatalog(_Catalog):
+    def __init__(self, infos) -> None:
+        super().__init__(infos)
+        self.launch_requests = 0
+
+    def launch_request(self, plugin_id, paths):
+        self.launch_requests += 1
+        return super().launch_request(plugin_id, paths)
+
+
+def test_dispatch_rejects_when_disabled_between_prepare_and_dispatch():
+    """prepare 后被停用：dispatch（未复核）必须拒绝，不能照旧提交。"""
+    service, transport = _service()
+    prepared = service.prepare("image_factory", [])
+    service.catalog._infos = (_Info("image_factory", can_launch=False,
+                                    unavailable="插件已停用，重启后生效"),)
+    result = service.dispatch(prepared)
+    assert not result.accepted and not result.ok
+    assert result.error_code == "COMMAND_NOT_APPLICABLE"
+    assert "已停用" in result.message
+    assert transport.calls == []                            # 从未提交 HTTP
+
+
+def test_revalidate_rejects_stale_state_and_marks_prepared():
+    service, transport = _service()
+    prepared = service.prepare("image_factory", [])
+    checked = service.revalidate(prepared)
+    assert checked.revalidated is True                      # 复核通过：可交 dispatch
+    assert checked.payload == prepared.payload
+    assert transport.calls == []
+    service.catalog._infos = (_Info("image_factory", can_launch=False,
+                                    unavailable="插件已停用，重启后生效"),)
+    with pytest.raises(CommandRejected) as exc:
+        service.revalidate(prepared)                        # 停用后复核：响亮拒绝
+    assert exc.value.error_code == "COMMAND_NOT_APPLICABLE"
+
+
+def test_revalidated_dispatch_submits_without_rescanning():
+    """worker 复核过的调用，dispatch 不再重复扫描（GUI 线程只做提交）。"""
+    catalog = _CountingCatalog([_Info(pid) for pid in LAUNCHABLE_LEGACY_IDS])
+    transport = _Transport()
+    service = LegacyFilesCommandService(catalog, transport)
+    prepared = service.revalidate(service.prepare("shutdown_timer", []))
+    assert catalog.launch_requests == 2                     # prepare + revalidate 各一次
+    result = service.dispatch(prepared)
+    assert result.accepted and result.stage == "dispatched"
+    assert catalog.launch_requests == 2                     # dispatch 没有补扫描
+    assert len(transport.calls) == 1
+
+
+def test_transport_sync_rejection_is_never_reported_as_accepted():
+    class _SyncRefusal:
+        def launch_plugin(self, plugin_id, endpoint, payload):
+            return False
+
+    class _BrokenTransport:
+        def launch_plugin(self, plugin_id, endpoint, payload):
+            raise OSError("connection refused")
+
+    service = LegacyFilesCommandService(_Catalog([_Info("image_factory")]), _SyncRefusal())
+    result = service.dispatch(service.revalidate(service.prepare("image_factory", [])))
+    assert not result.accepted and result.error_code == "LAUNCH_REJECTED"
+    assert result.retriable is True                         # 同步拒绝可安全重试
+    broken = LegacyFilesCommandService(_Catalog([_Info("image_factory")]), _BrokenTransport())
+    result = broken.dispatch(broken.revalidate(broken.prepare("image_factory", [])))
+    assert not result.accepted and result.error_code == "LAUNCH_REJECTED"
+    assert result.retriable is True
+
+
+def test_stage_vocabulary_separates_queued_dispatched_and_completed():
+    from src.shared.plugins.services import STAGES
+    assert "queued" in STAGES and "dispatched" in STAGES and "completed" in STAGES
+    service, _ = _service()
+    prepared = service.prepare("image_factory", [])
+    assert service.dispatch(prepared).stage == "dispatched"  # HTTP 已受理 ≠ 窗口已开
+    assert service.finish(prepared, True, "ok").stage == "completed"
+    assert service.finish(prepared, False, "no").error_code == "LAUNCH_NOT_ACCEPTED"

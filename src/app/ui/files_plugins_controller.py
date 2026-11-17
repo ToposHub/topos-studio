@@ -93,6 +93,7 @@ class FilesPluginsController(QObject):
         if self._closed:
             return
         if operation.startswith("launch:"):
+            # worker 已完成 prepare+revalidate；此处只做 Qt 线程安全的提交
             plugin_id = operation.partition(":")[2]
             if error:
                 self._busy.discard(plugin_id)
@@ -182,7 +183,15 @@ class FilesPluginsController(QObject):
         paths = list(self.selected_paths())
         self._busy.add(plugin_id)
         self._project()
-        self._submit(f"launch:{plugin_id}", lambda: self._commands.prepare(plugin_id, paths))
+
+        def work() -> object:
+            prepared = self._commands.prepare(plugin_id, paths)
+            # [PR-05] 手势冻结后在 worker 内做执行前权威复核（停用/接口
+            # 变化在此拒绝）；dispatch 只剩 Qt 线程安全的提交，GUI 线程
+            # 不补同步扫描。
+            return self._commands.revalidate(prepared)
+
+        self._submit(f"launch:{plugin_id}", work)
 
     def _launch_finished(self, plugin_id: str, success: bool, message: str) -> None:
         if self._closed:
