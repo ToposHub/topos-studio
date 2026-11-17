@@ -563,6 +563,7 @@ class FilesPanel(QWidget):
         )
         from src.app.ui.files_plugins_controller import FilesPluginsController
         from src.features.files.repository import FilesDataLocator
+        from src.features.files.plugin_broker_host import PluginConfigStore
         from src.shared.plugins.discovery import (
             DesiredStateStore, DevSourceRegistry, PluginSourceConfig,
         )
@@ -587,14 +588,30 @@ class FilesPanel(QWidget):
                 install_root=locator.root / "plugins",
                 dev_roots=dev_registry.list())
 
+        desired_store = DesiredStateStore(locator.root / "plugin_desired.json")
         self._files_plugins = FilesPluginsController(
             catalog, self._native_transport, self._files_prefs, self._native_panel,
             lambda: [entry.path for entry in self._native_panel._selected_entries() if not entry.is_dir],
             lambda: self.mode_combo.setCurrentIndex(0), self,
             sources_factory=sources,
-            desired_store=DesiredStateStore(locator.root / "plugin_desired.json"))
+            desired_store=desired_store)
         self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
         self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
+        # [F11] 安装/更新/卸载编排：停用→安装事务→Inventory 重扫；
+        # 数据（配置命名空间）/凭据（secret 撤权）分开，素材不触及
+        from src.shared.plugins.installer import LocalPackageInstaller
+        from src.shared.plugins.package_lifecycle import PackageLifecycle
+        from src.shared.plugins.discovery import current_host_facts
+        config_store = PluginConfigStore(locator.root / "plugin_config.json")
+        self._files_plugins.host_session.config_store = config_store
+        self._files_plugins.package_lifecycle = PackageLifecycle(
+            LocalPackageInstaller(locator.root / "plugins",
+                                  host_facts=current_host_facts()),
+            self._files_plugins.host_session,
+            desired_store=desired_store,
+            delete_data=config_store.clear_namespace,
+            revoke_credentials=self._files_plugins.host_session.secrets.revoke_all,
+            refresh_inventory=self._files_plugins.refresh)
 
     def _on_collection_changed(self, ok: bool, message: str) -> None:
         """集合写反馈：面板提示；成功后刷新集合清单与当前视图。"""
