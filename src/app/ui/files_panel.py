@@ -564,7 +564,7 @@ class FilesPanel(QWidget):
         from src.app.ui.files_plugins_controller import FilesPluginsController
         from src.features.files.repository import FilesDataLocator
         from src.shared.plugins.discovery import (
-            DevSourceRegistry, PluginSourceConfig,
+            DesiredStateStore, DevSourceRegistry, PluginSourceConfig,
         )
         try:
             import file_explorer.main as fe_main
@@ -591,7 +591,8 @@ class FilesPanel(QWidget):
             catalog, self._native_transport, self._files_prefs, self._native_panel,
             lambda: [entry.path for entry in self._native_panel._selected_entries() if not entry.is_dir],
             lambda: self.mode_combo.setCurrentIndex(0), self,
-            sources_factory=sources)
+            sources_factory=sources,
+            desired_store=DesiredStateStore(locator.root / "plugin_desired.json"))
         self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
         self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
 

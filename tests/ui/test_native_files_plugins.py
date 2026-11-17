@@ -331,9 +331,10 @@ def test_controller_merges_three_sources_into_center(qtbot, catalog, tmp_path,
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)  # 5 legacy + 安装 + 开发
         by_id = {info.plugin_id: info for info in host._infos}
-        # builtin 行：来源/安装事实直达 UI 数据
-        builtin = by_id["format_factory"]
+        # builtin 行：来源/安装事实直达 UI 数据；[F2] 合并行携带命名空间新 id
+        builtin = by_id["files.format_factory"]
         assert builtin.source == "builtin" and builtin.install_state == "installed"
+        assert builtin.command_key == "format_factory"   # 命令键保留短 id
         # 仅存在于 inventory 的安装源：占位行，不可启动且原因如实
         installed = by_id["files.installed_tool"]
         assert installed.source == "installed"
@@ -350,7 +351,7 @@ def test_controller_merges_three_sources_into_center(qtbot, catalog, tmp_path,
         host.center.select_plugin("files.dev_tool")
         assert "开发源" in host.center.origin.text()
         assert "未验证" in host.center.origin.text()
-        host.center.select_plugin("format_factory")
+        host.center.select_plugin("files.format_factory")
         assert "内建" in host.center.origin.text()
     finally:
         host.shutdown()
@@ -390,9 +391,120 @@ def test_controller_duplicate_identity_shows_diagnostic(qtbot, catalog, tmp_path
     try:
         qtbot.waitUntil(lambda: len(host._infos) >= 6, timeout=8000)
         info = next(item for item in host._infos
-                    if item.plugin_id == "format_factory")
+                    if item.plugin_id == "files.format_factory")
         # builtin 优先保留；重复身份诊断并入该行（中心详情可见/可复制）
         assert info.source == "builtin"
         assert any("PLUGIN_ID_DUPLICATE" in note for note in info.diagnostics)
     finally:
         host.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# F2：新 id/状态模型——固定/最近/快捷键/启停偏好 + 命令读同一快照
+# ---------------------------------------------------------------------------
+
+def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
+        qtbot, catalog, tmp_path, endpoint, f1_sources):
+    """启动：最近使用按命名空间新 id 记账；线上仍是命令键（短 id）。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2a.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: ["/media/a.mov"], lambda: None, panel,
+                                  sources_factory=lambda: f1_sources)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
+        host.launch("files.format_factory")     # UI 新 id
+        qtbot.waitUntil(lambda: bool(endpoint[1]), timeout=8000)
+        # 线上：命令键寻址（legacy 路由不变）
+        path, token, payload = endpoint[1][0]
+        assert path == "/api/plugin/format_factory/launch"
+        assert token == "token" and payload == {"path": "/media/a.mov"}
+        qtbot.waitUntil(lambda: bool(prefs.plugin_recent), timeout=8000)
+        # 偏好：最近使用按新 id 建档
+        assert prefs.plugin_recent[0] == "files.format_factory"
+        qtbot.waitUntil(lambda: "files.format_factory" not in host._busy, timeout=8000)
+    finally:
+        host.shutdown()
+
+
+def test_f2_inventory_only_enable_persists_desired(
+        qtbot, catalog, tmp_path, endpoint, f1_sources):
+    """新模型插件（无命令键）启停：desired 持久化到 store 并反映到行。"""
+    from src.shared.plugins.discovery import DesiredStateStore
+
+    store = DesiredStateStore(tmp_path / "desired.json")
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2b.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel,
+                                  sources_factory=lambda: f1_sources,
+                                  desired_store=store)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
+        info = next(item for item in host._infos
+                    if item.plugin_id == "files.installed_tool")
+        assert info.desired_enabled is False
+        host._set_enabled("files.installed_tool", True)
+        qtbot.waitUntil(lambda: store.load().get("files.installed_tool") is True,
+                        timeout=8000)
+        qtbot.waitUntil(lambda: next(
+            item for item in host._infos
+            if item.plugin_id == "files.installed_tool").desired_enabled,
+            timeout=8000)
+        # 重启语义：新 store 实例读回同一偏好
+        assert store.load()["files.installed_tool"] is True
+        # legacy 目录插件的启停不进 store（仍走旧 catalog 配置）
+        host._set_enabled("files.format_factory", False)
+        qtbot.wait(300)
+        assert "files.format_factory" not in store.load()
+    finally:
+        host.shutdown()
+
+
+def test_f2_old_short_id_preferences_are_not_migrated(
+        qtbot, catalog, tmp_path, endpoint, f1_sources):
+    """旧短 id 偏好自然失效：不迁移、不别名——固定列表无匹配行即不显示。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2c.ini"), QSettings.Format.IniFormat))
+    prefs.plugin_pins = ["format_factory"]          # 旧口径的固定项
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel,
+                                  sources_factory=lambda: f1_sources)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
+        host.center.show()
+        host.center.select_plugin("files.format_factory")
+        # 旧固定项不映射到新 id：固定按钮仍是"固定"（未固定状态）
+        assert "固定到启动器" in host.center.pin.text()
+    finally:
+        host.shutdown()
+
+
+def test_f2_desired_state_store_roundtrip(tmp_path):
+    from src.shared.plugins.discovery import DesiredStateStore
+
+    store = DesiredStateStore(tmp_path / "nested" / "desired.json")
+    assert store.load() == {}
+    store.save({"files.a": True, "files.b": False})
+    assert DesiredStateStore(tmp_path / "nested" / "desired.json").load() == {
+        "files.a": True, "files.b": False}
+    store.save({})                                   # 清空即空档
+    assert store.load() == {}

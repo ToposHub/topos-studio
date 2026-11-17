@@ -17,7 +17,7 @@ from src.app.ui.native_files_transport import NativeFilesTransport
 from src.features.files.plugin_contracts import FilesPluginInfo
 from src.features.files.plugin_launch_service import LegacyFilesCommandService
 from src.shared.plugins.discovery import (
-    PluginSourceConfig, current_host_facts, scan_sources,
+    DesiredStateStore, PluginSourceConfig, current_host_facts, scan_sources,
 )
 from src.shared.plugins.inventory import InventorySnapshot, PluginInventory
 
@@ -45,14 +45,19 @@ class FilesPluginsController(QObject):
                  preferences: NativeFilesPreferences, panel: QWidget,
                  selected_paths: Callable[[], list[str]], legacy: Callable[[], None],
                  parent: QObject | None = None,
-                 sources_factory: Callable[[], PluginSourceConfig] | None = None) -> None:
+                 sources_factory: Callable[[], PluginSourceConfig] | None = None,
+                 desired_store: DesiredStateStore | None = None) -> None:
         super().__init__(parent)
         self.catalog, self.transport, self.preferences = catalog, transport, preferences
         self.panel, self.selected_paths, self.legacy = panel, selected_paths, legacy
         # [F1] 单一 Inventory：sources_factory 提供三源配置（builtin/安装根/
         # 开发源）时，refresh 经 scan_sources → PluginInventory → 合并投影；
-        # 缺省（旧接线/测试）保持纯 legacy catalog 投影不变
+        # 缺省（旧接线/测试）保持纯 legacy catalog 投影不变。
+        # [F2] 新 id 模型：合并行携带命名空间 plugin_id（files.<短id>），
+        # 固定/最近/快捷键/启停偏好全部按新 id 建档（不做旧偏好迁移）；
+        # 新模型插件的启停偏好持久化在 desired_store
         self._sources_factory = sources_factory
+        self._desired_store = desired_store
         self._inventory: PluginInventory | None = None
         if sources_factory is not None:
             facts = current_host_facts()
@@ -113,9 +118,12 @@ class FilesPluginsController(QObject):
         if self._sources_factory is None or self._inventory is None:
             return tuple(rows)
         # [F1] 单一聚合：三源扫描 → inventory 原子快照（重复身份打诊断、
-        # 声明/运行版本分槽）→ 与 legacy 行合并成增强投影
+        # 声明/运行版本分槽）→ 与 legacy 行合并成增强投影。
+        # [F2] 新模型插件的启停偏好从持久化 store 读入发现侧
+        desired = self._desired_store.load() if self._desired_store else None
         records = scan_sources(rows, self._sources_factory(),
-                               host_facts=current_host_facts())
+                               host_facts=current_host_facts(),
+                               desired_by_id=desired)
         return self._merge_infos(tuple(rows), self._inventory.refresh(records))
 
     def _merge_infos(self, rows: tuple[Any, ...],
@@ -140,8 +148,13 @@ class FilesPluginsController(QObject):
             matched_ids.add(record.plugin_id)
             typed_notes = tuple(f"[{item.code}/{item.severity}] {item.message}"
                                 for item in record.diagnostics)
+            # [F2] 合并行携带命名空间 plugin_id：固定/最近/快捷键/启停偏好
+            # 全部按新 id 建档（旧短 id 偏好自然失效，不做迁移）；
+            # 命令键保留 legacy 短 id（同快照内解析，不持久化别名）
             merged.append(_dc_replace(
-                info, source=record.source,
+                info, plugin_id=record.plugin_id,
+                command_key=info.plugin_id,
+                source=record.source,
                 install_state=record.install_state,
                 runtime_version=record.runtime_version,
                 diagnostics=tuple(info.diagnostics) + typed_notes))
@@ -251,23 +264,51 @@ class FilesPluginsController(QObject):
     def _set_enabled(self, plugin_id: str, enabled: bool) -> None:
         if self._writing:
             return
-        self._writing = True
-        self.center.enabled.setEnabled(False)
-        def work() -> object:
-            self.catalog.set_enabled(plugin_id, enabled)
-            return self._snapshot_and_merge()   # [F1] 启停后同口径聚合
-        self._submit("enable", work)
+        info = next((item for item in self._infos if item.plugin_id == plugin_id), None)
+        command_key = info.command_key if info is not None and info.command_key else ""
+        if not command_key and self._inventory is None:
+            command_key = plugin_id   # 旧接线：id 即命令键
+        if command_key:
+            # legacy 目录插件：启停偏好走旧 catalog 配置（命令键寻址）
+            self._writing = True
+            self.center.enabled.setEnabled(False)
+
+            def work() -> object:
+                self.catalog.set_enabled(command_key, enabled)
+                return self._snapshot_and_merge()   # [F1] 启停后同口径聚合
+            self._submit("enable", work)
+            return
+        # [F2] 新模型插件（受管安装/开发源）：desired 按 plugin_id 持久化
+        # 到 store 并写入 inventory（同一快照），不碰旧 catalog 配置
+        if self._inventory is not None:
+            try:
+                self._inventory.set_desired(plugin_id, enabled)
+            except KeyError:
+                self._message(_tr("unknown_plugin", "未知插件，无法更改启停。"))
+                return
+            if self._desired_store is not None:
+                desired = self._desired_store.load()
+                desired[plugin_id] = bool(enabled)
+                self._desired_store.save(desired)
+            self.refresh()
 
     def launch(self, plugin_id: str) -> None:
         if self._closed or plugin_id in self._busy or self._writing:
             return
+        info = next((item for item in self._infos if item.plugin_id == plugin_id), None)
+        if info is not None and not info.can_launch:
+            self._message(info.launch_unavailable_reason or "该插件没有可用命令入口。")
+            return
+        # [F2] 命令键：新 id（偏好/中心建档）→ legacy 短 id（命令层寻址），
+        # 从同一合并快照解析；旧接线（无 factory）id 即命令键
+        command_key = info.command_key if info is not None and info.command_key else plugin_id
         # Freeze the selection at the user's gesture, never at async completion.
         paths = list(self.selected_paths())
         self._busy.add(plugin_id)
         self._project()
 
         def work() -> object:
-            prepared = self._commands.prepare(plugin_id, paths)
+            prepared = self._commands.prepare(command_key, paths)
             # [PR-05] 手势冻结后在 worker 内做执行前权威复核（停用/接口
             # 变化在此拒绝）；dispatch 只剩 Qt 线程安全的提交，GUI 线程
             # 不补同步扫描。
@@ -278,9 +319,12 @@ class FilesPluginsController(QObject):
     def _launch_finished(self, plugin_id: str, success: bool, message: str) -> None:
         if self._closed:
             return
-        self._busy.discard(plugin_id)
+        # [F2] 回报携带命令键（线上短 id）→ 换回 UI 新 id（同快照解析）
+        ui_id = next((item.plugin_id for item in self._infos
+                      if item.command_key == plugin_id), plugin_id)
+        self._busy.discard(ui_id)
         if success:
-            self.preferences.plugin_recent = [plugin_id, *[pid for pid in self.preferences.plugin_recent if pid != plugin_id]]
+            self.preferences.plugin_recent = [ui_id, *[pid for pid in self.preferences.plugin_recent if pid != ui_id]]
             self.launcher.hide()
         self._project()
         self._message(message)

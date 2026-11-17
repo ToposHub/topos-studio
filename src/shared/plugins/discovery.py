@@ -113,6 +113,36 @@ class DevSourceRegistry:
         os.replace(tmp, self._path)
 
 
+class DesiredStateStore:
+    """[F2] 新模型插件的启停偏好持久化（plugin_id → desired_enabled）。
+
+    legacy 目录插件的启停仍走旧 catalog 配置；受管安装/开发源插件的
+    desired 存这里——按新 id 模型建档，不做旧 id 别名或旧偏好迁移。
+    """
+
+    def __init__(self, config_file: Path) -> None:
+        self._path = Path(config_file)
+        self._lock = threading.Lock()
+
+    def load(self) -> dict[str, bool]:
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {str(key): bool(value) for key, value in raw.items()
+                if isinstance(value, bool)}
+
+    def save(self, desired: dict[str, bool]) -> None:
+        with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(desired, ensure_ascii=False, indent=2),
+                           encoding="utf-8")
+            os.replace(tmp, self._path)
+
+
 # ---------------------------------------------------------------------------
 # 已安装（受管安装根）与开发源扫描
 # ---------------------------------------------------------------------------
@@ -263,7 +293,7 @@ def scan_sources(catalog_rows: Iterable[Any], config: PluginSourceConfig, *,
 
 
 __all__ = [
-    "DevSourceRegistry", "PluginSourceConfig", "dev_records",
+    "DevSourceRegistry", "DesiredStateStore", "PluginSourceConfig", "dev_records",
     "installed_records", "scan_sources", "source_label",
     "current_host_facts", "HOST_API",
 ]
