@@ -278,3 +278,121 @@ def test_native_panel_plugin_toolbar_and_context_actions(qtbot):
     menu = panel._build_context_menu(panel.icon_view, panel.icon_view.rect().center())
     assert any("使用插件" in action.text() for action in menu.actions())
     panel.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# F1：单一 Inventory 三源聚合进入真实控制器/中心 UI
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def f1_sources(tmp_path):
+    """受管安装根装一个新插件 + 一个开发源目录，与 legacy 目录并存。"""
+    import json as _json
+    from src.shared.plugins.discovery import PluginSourceConfig
+    from src.shared.plugins.installer import LocalPackageInstaller
+
+    host = dict(host_api=1, topos_version="3.0.0", platform="darwin", arch="x86_64")
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "topos.plugin.json").write_text(_json.dumps({
+        "plugin_id": "files.installed_tool", "display_name": "已安装工具",
+        "version": "1.2.0",
+        "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
+        encoding="utf-8")
+    LocalPackageInstaller(tmp_path / "managed", host_facts=host).install(package)
+    dev = tmp_path / "devsrc"
+    (dev / "files.dev_tool").mkdir(parents=True)
+    (dev / "files.dev_tool" / "topos.plugin.json").write_text(_json.dumps({
+        "plugin_id": "files.dev_tool", "display_name": "开发中工具",
+        "version": "0.1.0",
+        "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
+        encoding="utf-8")
+    return PluginSourceConfig.for_host(
+        builtin_ids={"format_factory", "image_factory", "shutdown_timer",
+                     "decode_benchmark", "code_editor"},
+        install_root=tmp_path / "managed", dev_roots=[dev])
+
+
+def test_controller_merges_three_sources_into_center(qtbot, catalog, tmp_path,
+                                                     endpoint, f1_sources):
+    """三源聚合：legacy 行带来源/状态增强，仅存在于 inventory 的安装/
+    开发源以占位行出现（不可启动、原因如实）。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f1.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel,
+                                  sources_factory=lambda: f1_sources)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)  # 5 legacy + 安装 + 开发
+        by_id = {info.plugin_id: info for info in host._infos}
+        # builtin 行：来源/安装事实直达 UI 数据
+        builtin = by_id["format_factory"]
+        assert builtin.source == "builtin" and builtin.install_state == "installed"
+        # 仅存在于 inventory 的安装源：占位行，不可启动且原因如实
+        installed = by_id["files.installed_tool"]
+        assert installed.source == "installed"
+        assert installed.version == "1.2.0"
+        assert not installed.can_launch
+        assert "尚未接入" in installed.launch_unavailable_reason
+        assert not installed.desired_enabled          # 第三方默认停用
+        # 开发源：未验证 + 默认停用
+        dev = by_id["files.dev_tool"]
+        assert dev.source == "local_dev" and dev.install_state == "discovered"
+        assert not dev.desired_enabled
+        # 中心 UI 渲染来源行
+        host.center.show()
+        host.center.select_plugin("files.dev_tool")
+        assert "开发源" in host.center.origin.text()
+        assert "未验证" in host.center.origin.text()
+        host.center.select_plugin("format_factory")
+        assert "内建" in host.center.origin.text()
+    finally:
+        host.shutdown()
+
+
+def test_controller_duplicate_identity_shows_diagnostic(qtbot, catalog, tmp_path,
+                                                        endpoint, f1_sources):
+    """同一 plugin_id 出现于 builtin 目录与安装根：诊断进入中心详情。"""
+    import json as _json
+    from dataclasses import replace as _replace
+    from src.shared.plugins.discovery import PluginSourceConfig
+    from src.shared.plugins.installer import LocalPackageInstaller
+
+    package = tmp_path / "dupe-pkg"
+    package.mkdir()
+    (package / "topos.plugin.json").write_text(_json.dumps({
+        "plugin_id": "files.format_factory", "display_name": "撞名安装包",
+        "version": "9.9.9",
+        "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
+        encoding="utf-8")
+    LocalPackageInstaller(f1_sources.install_root, host_facts=dict(
+        host_api=1, topos_version="3.0.0", platform="darwin",
+        arch="x86_64")).install(package)
+    sources = _replace(f1_sources)   # 同一安装根：现在有撞名包
+
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "dupe.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel,
+                                  sources_factory=lambda: sources)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) >= 6, timeout=8000)
+        info = next(item for item in host._infos
+                    if item.plugin_id == "format_factory")
+        # builtin 优先保留；重复身份诊断并入该行（中心详情可见/可复制）
+        assert info.source == "builtin"
+        assert any("PLUGIN_ID_DUPLICATE" in note for note in info.diagnostics)
+    finally:
+        host.shutdown()

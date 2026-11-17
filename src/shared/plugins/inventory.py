@@ -52,6 +52,9 @@ class PluginRecord:
     error_message: str = ""
     # 已安装/声明版本与运行时实际加载版本分开投影（PR-03）：空 = 宿主未上报
     runtime_version: str = ""
+    # [F1] 来源目录（builtin/installed/dev 扫描时记录；"" = 未知）——UI 的
+    # "打开插件目录"与诊断定位用，不参与身份/信任
+    origin_path: str = ""
     manifest: PluginManifest | None = None
     diagnostics: tuple[ManifestDiagnostic, ...] = ()
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace as _dc_replace
+from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, QPoint, QRunnable, QThreadPool, QTimer, Qt, pyqtSignal
@@ -12,7 +14,12 @@ from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
 from src.app.ui.native_files_plugins import PluginCenterDialog, PluginLauncherDialog, _tr
 from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.app.ui.native_files_transport import NativeFilesTransport
+from src.features.files.plugin_contracts import FilesPluginInfo
 from src.features.files.plugin_launch_service import LegacyFilesCommandService
+from src.shared.plugins.discovery import (
+    PluginSourceConfig, current_host_facts, scan_sources,
+)
+from src.shared.plugins.inventory import InventorySnapshot, PluginInventory
 
 
 class _TaskSignals(QObject):
@@ -37,10 +44,21 @@ class FilesPluginsController(QObject):
     def __init__(self, catalog: FileExplorerPluginCatalog, transport: NativeFilesTransport,
                  preferences: NativeFilesPreferences, panel: QWidget,
                  selected_paths: Callable[[], list[str]], legacy: Callable[[], None],
-                 parent: QObject | None = None) -> None:
+                 parent: QObject | None = None,
+                 sources_factory: Callable[[], PluginSourceConfig] | None = None) -> None:
         super().__init__(parent)
         self.catalog, self.transport, self.preferences = catalog, transport, preferences
         self.panel, self.selected_paths, self.legacy = panel, selected_paths, legacy
+        # [F1] 单一 Inventory：sources_factory 提供三源配置（builtin/安装根/
+        # 开发源）时，refresh 经 scan_sources → PluginInventory → 合并投影；
+        # 缺省（旧接线/测试）保持纯 legacy catalog 投影不变
+        self._sources_factory = sources_factory
+        self._inventory: PluginInventory | None = None
+        if sources_factory is not None:
+            facts = current_host_facts()
+            self._inventory = PluginInventory(
+                host_api=facts["host_api"], topos_version=facts["topos_version"],
+                platform=facts["platform"], arch=facts["arch"])
         # [PL-07] 所有启动入口（启动器/中心/快捷键/菜单）走同一命令服务：
         # prepare 冻结选择，dispatch 提交；完成语义仍由 transport 回报。
         self._commands = LegacyFilesCommandService(catalog, transport)
@@ -87,7 +105,71 @@ class FilesPluginsController(QObject):
     def refresh(self) -> None:
         if self._writing:
             return
-        self._submit("refresh", self.catalog.snapshot)
+        self._submit("refresh", self._snapshot_and_merge)
+
+    def _snapshot_and_merge(self) -> object:
+        """legacy 快照 ×（可选）三源聚合 → 增强投影；worker 线程执行。"""
+        rows = self.catalog.snapshot()
+        if self._sources_factory is None or self._inventory is None:
+            return tuple(rows)
+        # [F1] 单一聚合：三源扫描 → inventory 原子快照（重复身份打诊断、
+        # 声明/运行版本分槽）→ 与 legacy 行合并成增强投影
+        records = scan_sources(rows, self._sources_factory(),
+                               host_facts=current_host_facts())
+        return self._merge_infos(tuple(rows), self._inventory.refresh(records))
+
+    def _merge_infos(self, rows: tuple[Any, ...],
+                     snapshot: InventorySnapshot) -> tuple[Any, ...]:
+        """legacy ``FilesPluginInfo`` × inventory 快照 → 增强投影。
+
+        匹配键：inventory 记录的 legacy_ids 或 ``files.<短id>``。仅存在于
+        inventory 的记录（受管安装/开发源）合成为不可启动的占位行——
+        ``launch_unavailable_reason`` 如实说明尚未接入命令入口，不冒充
+        可用。
+        """
+        merged: list[Any] = []
+        matched_ids: set[str] = set()
+        for info in rows:
+            record = snapshot.by_legacy_id(info.plugin_id)
+            if record is None:
+                record = next((item for item in snapshot.records
+                               if item.plugin_id == f"files.{info.plugin_id}"), None)
+            if record is None:
+                merged.append(info)
+                continue
+            matched_ids.add(record.plugin_id)
+            typed_notes = tuple(f"[{item.code}/{item.severity}] {item.message}"
+                                for item in record.diagnostics)
+            merged.append(_dc_replace(
+                info, source=record.source,
+                install_state=record.install_state,
+                runtime_version=record.runtime_version,
+                diagnostics=tuple(info.diagnostics) + typed_notes))
+        for record in snapshot.records:
+            if record.plugin_id in matched_ids or record.manifest is None:
+                continue
+            manifest = record.manifest
+            typed_notes = tuple(f"[{item.code}/{item.severity}] {item.message}"
+                                for item in record.diagnostics)
+            merged.append(FilesPluginInfo(
+                plugin_id=record.plugin_id, name=record.display_name,
+                version=record.version, author=manifest.author,
+                description=manifest.description,
+                api_version=manifest.host_api[0],
+                category=manifest.category or "扩展",
+                capabilities=tuple(item.capability_id
+                                   for item in manifest.capabilities),
+                runtime_loaded=False,
+                desired_enabled=record.desired_enabled,
+                self_disabled=False, needs_restart=record.pending_restart,
+                error=record.error_message, launch_path="",
+                launch_payload_kind="none",
+                launch_unavailable_reason=record.error_message or "尚未接入本宿主命令入口",
+                path=Path(record.origin_path or "."),
+                diagnostics=typed_notes,
+                source=record.source, install_state=record.install_state,
+                runtime_version=record.runtime_version))
+        return tuple(merged)
 
     def _catalog_finished(self, generation: int, operation: str, result: object, error: str) -> None:
         if self._closed:
@@ -173,7 +255,7 @@ class FilesPluginsController(QObject):
         self.center.enabled.setEnabled(False)
         def work() -> object:
             self.catalog.set_enabled(plugin_id, enabled)
-            return self.catalog.snapshot()
+            return self._snapshot_and_merge()   # [F1] 启停后同口径聚合
         self._submit("enable", work)
 
     def launch(self, plugin_id: str) -> None:
