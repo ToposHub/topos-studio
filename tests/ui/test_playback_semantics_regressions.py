@@ -21,18 +21,26 @@ from src.shared.playback.topos_player import ToposMovieSession  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# FR-18：末帧推进与 EOF 哨兵
+# FR-18 + E3/FUP-07：末帧推进、producer 耗尽与"实际呈现完成才发 EOF"
 # ---------------------------------------------------------------------------
 
 def _run_decode_loop(frame_count: int, max_decodes: int = 64):
-    """用假状态直接驱动 BasePlayer._decode_loop，收集解码序号与 EOF 次数。"""
-    targets, eof_calls = [], []
+    """后台线程驱动 BasePlayer._decode_loop，收集解码序号与耗尽/收尾状态。
+
+    [E3] 哨兵分支只标记 ``_decode_exhausted`` 并泊车——线程不再自行退出，
+    所以循环必须放后台线程，由本函数观测到耗尽后停机。
+    """
+    import time as _time
+
+    targets, finishes = [], []
     state = SimpleNamespace(
         _cond=threading.Condition(), _ring_lock=threading.Lock(),
         _ring_space=None, _running=True, _playing=True, _seek_target=None,
         _next_index=0, _ring=[], RING_SIZE=4096,   # 测试无 UI 消费者，避免背压卡死
+        _decode_exhausted=False, _eof_published=False,
         _on_seek_jump=lambda: None,
-        _on_eof=lambda: (eof_calls.append(True), setattr(state, '_running', False)),
+        _on_playback_finished=lambda: finishes.append(True),
+        _audio_drained=lambda: True,
         _on_decode_error=lambda: None, _on_decode_stop=lambda: None,
     )
     state._ring_space = threading.Condition(state._ring_lock)
@@ -44,33 +52,104 @@ def _run_decode_loop(frame_count: int, max_decodes: int = 64):
         return object()
 
     state._decode_frame = decode
-    BasePlayer._decode_loop(state, SimpleNamespace(frame_count=frame_count))
-    return targets, eof_calls
+    thread = threading.Thread(
+        target=BasePlayer._decode_loop,
+        args=(state, SimpleNamespace(frame_count=frame_count)))
+    thread.start()
+    deadline = _time.monotonic() + 5
+    while not state._decode_exhausted and _time.monotonic() < deadline:
+        _time.sleep(0.01)
+    state._running = False
+    with state._cond:
+        state._cond.notify()
+    thread.join(timeout=5)
+    return targets, finishes, state
 
 
-def test_fr18_two_frame_session_reads_each_frame_once_then_eof():
-    targets, eof_calls = _run_decode_loop(frame_count=2)
+def test_fr18_two_frame_session_reads_each_frame_once_then_exhausts():
+    targets, finishes, state = _run_decode_loop(frame_count=2)
     assert targets == [0, 1]          # 不再是 0,1,1,1…
-    assert eof_calls == [True]         # EOF 恰好一次
+    assert state._decode_exhausted     # producer 耗尽（解码侧事实）
+    assert state._playing              # [E3/FUP-07] 耗尽不再立即停播（帧还在队列）
+    assert finishes == []              # EOF 不由 producer 侧发布
 
 
-def test_fr18_single_frame_session_eof_once():
-    targets, eof_calls = _run_decode_loop(frame_count=1)
+def test_fr18_single_frame_session_exhausts_without_pause():
+    targets, _, state = _run_decode_loop(frame_count=1)
     assert targets == [0]
-    assert len(eof_calls) == 1
+    assert state._decode_exhausted and state._playing
 
 
-def test_fr18_empty_session_eof_without_decode():
-    targets, eof_calls = _run_decode_loop(frame_count=0)
+def test_fr18_empty_session_exhausts_without_decode():
+    targets, _, state = _run_decode_loop(frame_count=0)
     assert targets == []
-    assert len(eof_calls) == 1
+    assert state._decode_exhausted
 
 
-def test_fr18_long_session_last_frame_then_eof():
+def test_fr18_long_session_last_frame_then_exhausts():
     frame_count = 24
-    targets, eof_calls = _run_decode_loop(frame_count=frame_count)
+    targets, _, state = _run_decode_loop(frame_count=frame_count)
     assert targets == list(range(frame_count))
-    assert len(eof_calls) == 1
+    assert state._decode_exhausted
+
+
+def _presentation_state(frame_count: int, *, shown=-1, pending=(), audio=True):
+    """呈现完成判定所需的假状态（_maybe_publish_eof/_request_seek 只读这些字段）。"""
+    state = SimpleNamespace(
+        _cond=threading.Condition(),
+        _ring_lock=threading.Lock(),
+        _session=SimpleNamespace(frame_count=frame_count),
+        _shown_index=shown,
+        _ring=[],
+        _pending=list(pending),
+        _decode_exhausted=True,
+        _eof_published=False,
+        _playing=True,
+    )
+    state._audio_drained = (lambda: True) if audio else (lambda: False)
+    state._on_playback_finished = lambda: setattr(state, 'finished', True)
+    state.finished = False
+    return state
+
+
+def test_e3_eof_published_only_after_presentation_completes():
+    # 末帧未呈现 → 不发布（FUP-07：2 帧会话 shown=-1、队列 [0,1] 的实况）
+    state = _presentation_state(2, shown=-1, pending=[(0, object()), (1, object())])
+    BasePlayer._maybe_publish_eof(state)
+    assert not state.finished and state._playing
+
+    # 队列还有未呈现帧 → 不发布
+    state = _presentation_state(2, shown=0, pending=[(1, object())])
+    BasePlayer._maybe_publish_eof(state)
+    assert not state.finished
+
+    # 末帧已呈现但音频未排空 → 不发布（有声素材的收尾要等声音放完）
+    state = _presentation_state(2, shown=1, audio=False)
+    BasePlayer._maybe_publish_eof(state)
+    assert not state.finished and state._playing
+
+    # 全部成立 → 发布恰好一次：停播 + GUI 收尾钩子
+    state = _presentation_state(2, shown=1)
+    BasePlayer._maybe_publish_eof(state)
+    BasePlayer._maybe_publish_eof(state)  # 第二次不得重复发布
+    assert state.finished and not state._playing and state._eof_published
+
+
+def test_e3_empty_session_publishes_without_frames():
+    # 0 帧会话：shown 初值 -1 == frame_count-1 == -1，无帧可呈现即完成
+    state = _presentation_state(0, shown=-1)
+    BasePlayer._maybe_publish_eof(state)
+    assert state.finished
+
+
+def test_e3_seek_rearms_eof_state():
+    state = _presentation_state(2, shown=1)
+    BasePlayer._maybe_publish_eof(state)
+    assert state._eof_published and state._decode_exhausted
+    state._on_seek_requested = lambda target: None
+    BasePlayer._request_seek(state, 0)  # 片尾重播 / 回跳
+    assert not state._eof_published and not state._decode_exhausted
+    assert state._shown_index == -1     # 显示基准回到目标前一帧
 
 
 # ---------------------------------------------------------------------------

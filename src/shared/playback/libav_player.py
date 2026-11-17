@@ -68,6 +68,11 @@ class _AudioPipeline:
         self._seek_to: float | None = None
         self._seek_trim: float | None = None
         self._volume: float | None = None  # [BUG-P1-17] 待应用的音量（None=未变）
+        # [E3] 排空状态（音频线程写、GUI 线程读，_slock 保护）：
+        # EOF 收尾要等"音源读完 + 待写清空 + sink 缓冲放完"三者同时成立
+        self._source_eof = False
+        self._pend_len = 0
+        self._sink_backlog = 0
 
     # -- 线程安全接口（GUI 线程调用） --
 
@@ -109,6 +114,12 @@ class _AudioPipeline:
         sink 由音频线程创建持有，按 Qt 线程亲和性不可跨线程调用。"""
         with self._slock:
             self._volume = max(0.0, min(1.0, v))
+
+    def drained(self) -> bool:
+        """[E3] 音频排空：音源读完 + 待写清空 + sink 缓冲放完（三者同时）。"""
+        with self._slock:
+            return self._source_eof and self._pend_len == 0 \
+                and self._sink_backlog == 0
 
     def stop(self) -> None:
         self._running = False
@@ -200,6 +211,8 @@ class _AudioPipeline:
                         traceback.print_exc()
                         logger.warning("音频 seek 失败（声音继续，位置可能短暂不同步）")
                     suspended = False
+                    with self._slock:  # [E3] seek 后重新判定排空
+                        self._source_eof = False
                     continue
                 if paused:
                     if not suspended:
@@ -231,6 +244,9 @@ class _AudioPipeline:
                             if not pend and t0 is not None:
                                 pend_t0 = t0  # 与真实 pts 对齐（含跳跃/间隙）
                             pend.extend(data)
+                    else:
+                        with self._slock:  # [E3] 音源读尽（EOF/持续失败）
+                            self._source_eof = True
                 # 2) 欠载快进：sink 空转且待写数据已落后时钟 → 丢音追平
                 if (self._sink.state() == QAudio.State.IdleState
                         and pend and pend_t0 < clock - 0.02):
@@ -252,6 +268,12 @@ class _AudioPipeline:
                         break
                     pend_t0 += w / _AUDIO_BYTES_PER_SEC
                     del pend[:w]
+                with self._slock:  # [E3] 排空观测：待写量 + sink 缓冲积压
+                    self._pend_len = len(pend)
+                    try:
+                        self._sink_backlog = self._sink.bufferSize() - self._sink.bytesFree()
+                    except Exception:
+                        self._sink_backlog = 0
                 time.sleep(0.004)
         except Exception:
             import traceback
@@ -476,9 +498,10 @@ class LibavPlayer(BasePlayer):
     PLAYER_TITLE = 'Libav Player'
     BADGE_TEXT = 'MEZZANINE'
     HAS_AUDIO = True
-    # [BUG-P0-09] _on_eof 在解码线程内被调用：QPushButton setIcon/重绘
-    # 必须回 GUI 线程，经信号投递
-    _eof_sig = pyqtSignal()
+    # [E3] _eof_sig 更名 _decode_stopped_sig：只承载"解码提前停止（文件截
+    # 断/时长高估）"的 GUI 收尾；自然播完改由呈现完成（_on_playback_finished）
+    # 发布，两者不再共用一个信号（FUP-07：StopIteration 与 EOF 混淆）
+    _decode_stopped_sig = pyqtSignal()
 
     def __init__(self, parent=None):
         self._audio: _AudioPipeline | None = None
@@ -486,7 +509,7 @@ class LibavPlayer(BasePlayer):
         self._t_base = 0.0        # 主时钟：最近一次起步的时间轴位置（秒）
         self._t_mark: float | None = None  # 播放中的墙钟锚点；暂停时为 None
         super().__init__(parent)
-        self._eof_sig.connect(self._on_eof_ui)
+        self._decode_stopped_sig.connect(self._on_decode_stopped_ui)
 
     # ---------- 会话 / 输出接线 ----------
 
@@ -568,15 +591,22 @@ class LibavPlayer(BasePlayer):
 
     # ---------- 帧消费：主时钟门控 ----------
 
-    def _on_eof(self) -> None:
-        # 播到片尾（解码线程内）：只发信号，UI/音频操作由 _on_eof_ui 执行
-        self._eof_sig.emit()
+    def _audio_drained(self) -> bool:
+        """[E3] 墙钟主时钟引擎：无声恒排空；有声按管线（音源读完+缓冲放完）。"""
+        if not self._audio_active or self._audio is None:
+            return True
+        return self._audio.drained()
 
-    def _on_eof_ui(self) -> None:
-        # 播到片尾：音频暂停（时钟继续走，重新播放时从头再来）
+    def _on_playback_finished(self) -> None:
+        # [E3] 末帧已实际呈现且音频已排空（GUI 线程）：音频暂停
+        # （时钟继续走，重新播放时从头再来）
         a = self._audio
         if a is not None:
             a.pause()
+        _icons.set_play_icon(self.btn_play, playing=False)
+
+    def _on_decode_stopped_ui(self) -> None:
+        # 解码提前停止（截断/时长高估）的 GUI 收尾：与自然播完区分（E3）
         _icons.set_play_icon(self.btn_play, playing=False)
 
     def _create_canvas(self):
@@ -603,10 +633,9 @@ class LibavPlayer(BasePlayer):
         # [BUG-P1-19] 文件截断/时长高估（duration×fps 估 frame_count）触发
         # StopIteration 时此前只静默暂停——用户只见画面冻结不知原因
         self.toast_requested.emit('播放停止：文件可能被截断或元数据时长异常')
-        # [U10] 与 _on_eof 路径对齐：此前画面冻结后音频继续播到自然 EOF、
-        # 播放键图标停留"播放中"——复用 _eof_sig 走 _on_eof_ui 收尾
-        # （音频 pause + 图标复位；主时钟冻结由 _playing=False 侧完成）
-        self._eof_sig.emit()
+        # [E3] 解码提前停止 ≠ 自然播完：不再复用 EOF 路径——只做图标复位；
+        # 播放完成（_on_playback_finished）只属于实际呈现完成的自然收尾
+        self._decode_stopped_sig.emit()
 
     def _on_decode_error(self) -> None:
         import traceback
@@ -643,6 +672,7 @@ class LibavPlayer(BasePlayer):
                     break
             self._ring_space.notify()
         if pick is None:
+            self._maybe_publish_eof()  # [E3] 无帧可显也查：音频排空后才收尾
             return
         idx, img = pick
         self._shown_index = idx
@@ -651,6 +681,7 @@ class LibavPlayer(BasePlayer):
         self.slider.setValue(idx)
         self.slider.blockSignals(False)
         self.lbl_pos.setText(_fmt_time(min(t, self._session.duration_sec)))
+        self._maybe_publish_eof()  # [E3] 末帧呈现 + 音频排空后才收尾
 
     def _handle_key(self, key) -> bool:
         from PyQt6.QtCore import Qt as _Qt

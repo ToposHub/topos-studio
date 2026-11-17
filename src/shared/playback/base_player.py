@@ -4,8 +4,12 @@
 自动隐藏、进度条、快照/封面、解码线程生命周期在此统一；两家差异经钩子注入：
 
 - 解码会话：_open_session() 返回 DecoderBackend 实现（TPIC 原生或 PyAV 多线程）；
-- 帧消费策略：_poll_ring 由子类实现（topos 严格按序；libav 主时钟门控）；
-- 解码线程差异：_decode_frame / _on_seek_jump / _on_eof / 解码异常钩子；
+- 帧消费策略：_poll_ring 由子类实现（topos 严格按序；libav 主时钟门控），
+  并在每 tick 末尾调 _maybe_publish_eof（E3：EOF 由呈现完成发布）；
+- 解码线程差异：_decode_frame / _on_seek_jump / 解码异常钩子；
+- EOF 语义（E3/FUP-07）：producer 耗尽只置 _decode_exhausted（解码侧事实）；
+  _maybe_publish_eof 判定"末帧已呈现 + 队列已清 + _audio_drained"后才
+  _on_playback_finished（GUI 线程恰好一次）——用户暂停/seek 与之分离；
 - 音频与主时钟：libav 经 _on_play_state_changed / _on_seek_requested 接入；
 - 面板扩展：topos 的片段截取面板经 _overlay_panels_open / _relayout_extra 接入。
 
@@ -213,6 +217,10 @@ class BasePlayer(QFrame):
         self._seek_target: int | None = None
         self._next_index = 0
         self._shown_index = -1
+        # [E3/FUP-07] EOF 语义分层：producer 耗尽（解码侧事实）与播放完成
+        # （末帧实际呈现 + 音频排空）分开标记——只有后者才发布收尾
+        self._decode_exhausted = False
+        self._eof_published = False
         self._current_path = ''
 
         self._build_ui()
@@ -385,6 +393,8 @@ class BasePlayer(QFrame):
         self._shown_index = -1
         self._next_index = 0
         self._seek_target = None
+        self._decode_exhausted = False   # [E3] 新会话重置 EOF 分层状态
+        self._eof_published = False
         self.slider.setRange(0, session.frame_count - 1)
         self.lbl_total.setText(_fmt_time(session.duration_sec))
         self.lbl_title.setText(os.path.basename(path))
@@ -528,12 +538,19 @@ class BasePlayer(QFrame):
         self._shown_index = -1
         self._next_index = 0
         self._seek_target = None
+        self._decode_exhausted = False
+        self._eof_published = False
 
     def _on_seek_jump(self) -> None:
         """解码线程消费到 seek 请求时（丢弃过期帧等）。"""
 
-    def _on_eof(self) -> None:
-        """自然播到片尾（libav：暂停音频 + 播放键归位）。"""
+    def _audio_drained(self) -> bool:
+        """[E3] 音频排空判定；子类覆写（有音轨按管线排空状态，无轨恒 True）。"""
+        return True
+
+    def _on_playback_finished(self) -> None:
+        """[E3/FUP-07] 自然播完且已实际呈现（GUI 线程，恰好一次）：
+        子类做图标/音频收尾。producer 耗尽、用户暂停、seek 不走这里。"""
 
     def _decode_frame(self, session: DecoderBackend, target: int) -> QImage:
         """解码 target 帧 → QImage（在工作线程内调用）。"""
@@ -631,8 +648,10 @@ class BasePlayer(QFrame):
         # 解码全速跑，ring 满即阻塞等待 UI 消费。
         while True:
             with self._cond:
-                while self._running and not self._playing and \
-                        self._seek_target is None:
+                # [E3] producer 耗尽后泊车：呈现侧还没消费完（或音频还在
+                # 排空），不能继续解码也不能退出——等 seek（重播/回跳）或停
+                while self._running and self._seek_target is None and \
+                        (not self._playing or self._decode_exhausted):
                     self._cond.wait(timeout=0.2)
                 if not self._running:
                     return
@@ -644,9 +663,14 @@ class BasePlayer(QFrame):
             if seek_jump:
                 self._on_seek_jump()
             if target >= session.frame_count:
+                # [E3/FUP-07] producer 耗尽只是解码侧事实：此刻帧可能还在
+                # ring/pending 未呈现、音频可能还在排空。不在此停播/发
+                # EOF——只做标记，由呈现侧 _maybe_publish_eof 在末帧实际
+                # 呈现且音频排空后发布播放完成（恰好一次）。
+                # 条件写（锁内）：seek 恰在此刻到达时不标记，回顶部消费 seek。
                 with self._cond:
-                    self._playing = False
-                self._on_eof()
+                    if self._seek_target is None:
+                        self._decode_exhausted = True
                 continue
             try:
                 img = self._decode_frame(session, target)
@@ -668,7 +692,7 @@ class BasePlayer(QFrame):
             with self._cond:
                 # [FR-18] 无条件推进到 target+1：末帧（target == frame_count-1）
                 # 之后 _next_index == frame_count，下一轮进入 EOF 哨兵分支
-                # 只触发一次 _on_eof。此前 `target+1 < frame_count` 把末帧
+                # 只标记一次耗尽。此前 `target+1 < frame_count` 把末帧
                 # 永远留在 _next_index——2 帧会话读成 0,1,1,1…，EOF 永不触发。
                 if self._seek_target is None:
                     self._next_index = target + 1
@@ -677,10 +701,39 @@ class BasePlayer(QFrame):
         """UI 消费钩子：由子类实现（topos 严格按序 / libav 时钟门控）。"""
         raise NotImplementedError
 
+    def _maybe_publish_eof(self) -> None:
+        """[E3/FUP-07] 呈现完成判定（GUI 线程，由 _poll_ring 每 tick 调用）。
+
+        发布条件全部成立才收尾：producer 耗尽 + 末帧已实际呈现 +
+        ring/pending 已清 + 音频已排空（有音轨时）。此前哨兵一到这里就
+        `_playing=False` 并发 EOF——2 帧会话在 `shown_index=-1`、队列仍
+        `[0,1]` 时就宣布播完（FUP-07 实测）。
+        """
+        if self._eof_published or self._session is None:
+            return
+        if not self._decode_exhausted:
+            return
+        if self._shown_index < self._session.frame_count - 1:
+            return  # 末帧还没呈现（0 帧会话 frame_count-1 == -1 == shown 初值）
+        if self._ring or self._pending:
+            return  # 已解码但未呈现的帧还在队列里
+        if not self._audio_drained():
+            return  # 音频缓冲还没排空（有声素材的收尾要等声音放完）
+        with self._cond:
+            if self._eof_published:
+                return
+            self._eof_published = True
+            self._playing = False
+            self._cond.notify()
+        self._on_playback_finished()
+
     def _request_seek(self, target: int) -> None:
         self._on_seek_requested(target)
         with self._cond:
             self._seek_target = target
+            # [E3] seek 重置 EOF 分层状态：重播/回跳后继续解码与发布资格
+            self._decode_exhausted = False
+            self._eof_published = False
             self._cond.notify()
         # 显示基准重置到目标前一帧（下一帧恰好是 target）。
         # pending 与 ring 都在本（UI）线程清空——与 _poll_ring 无竞争；

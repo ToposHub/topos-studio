@@ -297,15 +297,12 @@ class ToposPlayer(BasePlayer):
     PLAYER_TITLE = 'Topos Player'
     BADGE_TEXT = 'TOPOS'
     HAS_AUDIO = True  # 有音轨时显示音量条；无音轨在 _configure_session 隐藏
-    # [BUG-P1-15] _on_eof 在解码线程内被调用：图标更新经信号回 GUI 线程
-    # （与 libav _eof_sig 同模式，P0-09）
-    _eof_signal = pyqtSignal()
+    # [E3] EOF 不再由解码线程信号投递：呈现完成在 GUI 线程判定并收尾
     RING_SIZE = 6  # 音频主时钟下多留两帧，吸收解码抖动
 
     def __init__(self, parent=None):
         self._at_eof = False
         super().__init__(parent)
-        self._eof_signal.connect(self._on_eof_ui)
 
     def _open_session(self, path: str):
         return ToposMovieSession(path)
@@ -371,14 +368,18 @@ class ToposPlayer(BasePlayer):
 
     # ---------- EOF / 播放控制（与 LibavPlayer 行为对齐，[BUG-P1-15]） ----------
 
-    def _on_eof(self) -> None:
-        # 播到片尾（解码线程内）：音频停泵，图标更新走 GUI 信号
+    def _audio_drained(self) -> bool:
+        """[E3] 音频主时钟引擎：排空 = 音源读完 + 待写清空 + sink 缓冲放完。"""
+        audio = getattr(self, '_audio', None)
+        if audio is None:
+            return True
+        return audio.drained()
+
+    def _on_playback_finished(self) -> None:
+        # [E3] 末帧已实际呈现且音频已排空（GUI 线程）：音频停泵 + 片尾标记
         audio = getattr(self, '_audio', None)
         if audio is not None:
             audio.pause()
-        self._eof_signal.emit()
-
-    def _on_eof_ui(self) -> None:
         self._at_eof = True
         _icons.set_play_icon(self.btn_play, playing=False)
 
@@ -504,6 +505,7 @@ class ToposPlayer(BasePlayer):
                 self.slider.blockSignals(True)
                 self.slider.setValue(target)
                 self.slider.blockSignals(False)
+                self._maybe_publish_eof()  # [E3] 音频排空 + 末帧呈现后才收尾
                 return
         # 无音频或音频尚未起播：沿用严格的逐帧时钟。
         pick = None
@@ -523,8 +525,10 @@ class ToposPlayer(BasePlayer):
                     break
             self._ring_space.notify()
         if pick is None:
+            self._maybe_publish_eof()  # [E3] 无帧可显也查：末帧已显+音频排空即收尾
             return
         self._show_frame(pick)
+        self._maybe_publish_eof()
 
     def _show_frame(self, pick) -> None:
         idx, img = pick
