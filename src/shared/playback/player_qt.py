@@ -103,6 +103,9 @@ class UltimatePlayer(QFrame):
         self.duration = 0
         self.is_playing = False
         self.is_clipping_mode = False
+        # [E3/FUP-07] 自然播完（EndOfMedia）与用户停止分离：
+        # 只有前者置位 _at_eof——片尾按播放=从头重播，用户停止后再按=原地续播
+        self._at_eof = False
 
         self.setup_ui()
         self.setStyleSheet(STYLESHEET)
@@ -203,9 +206,10 @@ class UltimatePlayer(QFrame):
 
     def play_video(self, path):
         # Standardize path to NFC immediately
-        self.current_path = unicodedata.normalize('NFC', path)
+        self.current_path = unicodedata.normalize("NFC", path)
         self.duration = 0
         self._error_handled = False
+        self._at_eof = False  # [E3] 新源重置片尾状态
         self.lbl_total.setText("00:00")
         self.lbl_title.setStyleSheet("")
         self.mediaplayer.setSource(QUrl.fromLocalFile(self.current_path))
@@ -268,6 +272,10 @@ class UltimatePlayer(QFrame):
             QTimer.singleShot(300, self.update_metadata)
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self._show_play_error("媒体格式不受支持")
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # [E3/FUP-07] 自然播完：EndOfMedia 才是"实际呈现完成"的权威信号
+            # （随后到来的 StoppedState 不再与之混淆）；片尾重播语义见 toggle_play
+            self._at_eof = True
 
     def _on_video_frame(self, frame):
         img = frame.toImage()
@@ -347,6 +355,11 @@ class UltimatePlayer(QFrame):
         if self.is_playing:
             self.mediaplayer.pause()
         else:
+            # [E3] 片尾（EndOfMedia 已到）按播放 → 从头重播；
+            # 用户中途停止后再按 → 原地续播（与 topos/libav 语义对齐）
+            if self._at_eof:
+                self._at_eof = False
+                self.mediaplayer.setPosition(0)
             self.mediaplayer.play()
 
     def _capture_frame_ffmpeg(self, input_path, output_path, at_time_sec):
@@ -516,6 +529,7 @@ class UltimatePlayer(QFrame):
         if duration > 0:
             pos = self.slider.value() / 1000.0
             self.mediaplayer.setPosition(int(pos * duration))
+        self._at_eof = False  # [E3] seek 清除片尾状态：片尾回跳后继续播
         self.is_seeking = False
     def on_slider_moved(self, val):
         duration = self.mediaplayer.duration()

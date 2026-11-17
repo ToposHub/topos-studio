@@ -301,6 +301,11 @@ class ToposAudioPipeline(QObject):
         self._seek_to: Optional[float] = None
         self._volume = 1.0
         self._position = 0.0
+        # [E3] 排空状态（音频线程写、GUI 线程读，_lock 保护）：
+        # EOF 收尾要等"音源读完 + 待写清空 + sink 缓冲放完"三者同时成立
+        self._source_done = False
+        self._pending_len = 0
+        self._sink_backlog = 0
         self._thread = threading.Thread(
             target=self._run, name='topos-audio', daemon=True)
         self._thread.start()
@@ -312,6 +317,12 @@ class ToposAudioPipeline(QObject):
     def position(self) -> Optional[float]:
         with self._lock:
             return self._position
+
+    def drained(self) -> bool:
+        """[E3] 音频排空：音源读完 + 待写清空 + sink 缓冲放完（三者同时）。"""
+        with self._lock:
+            return self._source_done and self._pending_len == 0 \
+                and self._sink_backlog == 0
 
     def pause(self) -> None:
         with self._lock:
@@ -398,6 +409,10 @@ class ToposAudioPipeline(QObject):
                     if io is None:
                         self.failed.emit('音频 seek 后输出启动失败')
                         break
+                    with self._lock:  # [E3] seek 后重新判定排空
+                        self._source_done = False
+                        self._pending_len = 0
+                        self._sink_backlog = 0
                     if paused:
                         sink.suspend()
                         suspended = True
@@ -425,8 +440,9 @@ class ToposAudioPipeline(QObject):
                             pending_t = decoded_end
                         pending.extend(data.tobytes())
                         decoded_end += len(data) / OUT_RATE
-                    elif decoded_end <= clock:
-                        pass
+                    else:
+                        with self._lock:  # [E3] 音源读尽
+                            self._source_done = True
                 # 欠载丢音追时钟，避免越播越落后
                 if (sink.state() == QAudio.State.IdleState and pending
                         and pending_t < clock - 0.02):
@@ -449,6 +465,12 @@ class ToposAudioPipeline(QObject):
                         break
                     pending_t += written / OUT_BYTES_PER_SEC
                     del pending[:written]
+                with self._lock:  # [E3] 排空观测：待写量 + sink 缓冲积压
+                    self._pending_len = len(pending)
+                    try:
+                        self._sink_backlog = sink.bufferSize() - sink.bytesFree()
+                    except Exception:
+                        self._sink_backlog = 0
                 time.sleep(0.004)
         except Exception:
             logger.exception('Topos 音频线程异常')
