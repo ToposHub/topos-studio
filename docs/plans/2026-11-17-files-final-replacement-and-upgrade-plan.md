@@ -104,7 +104,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 依赖：B。范围：把DTO/Protocol变成可被UI、插件和新自动化入口调用的真实服务。
 
 - [ ] 实现 query/tree/search/collections/metadata/library/scan/thumbnail-preview/file-task/import-export/jobs/events 服务，复用可用核心并统一新repository/provider。（**部分**：C1 已落 query/tree/search/collections/metadata/library/scan/file-task + C3 events，`src/features/files/services/`，`tests/files/test_files_domain_services.py` 13 项；thumbnail-preview/import-export/jobs 属 E/后续批次）
-- [ ] UI 调用类型化异步 facade；阻塞扫描、探测、解码和 I/O 进入有界 worker，结果附库/位置/请求/版本身份。（**部分**：C2 `FilesFacade` 有界 worker+代际丢弃+错误通道，`tests/files/test_files_facade.py` 6 项；**UI 尚未接**——D 阶段把面板/transport 切到 facade 后才闭环）
+- [ ] UI 调用类型化异步 facade；阻塞扫描、探测、解码和 I/O 进入有界 worker，结果附库/位置/请求/版本身份。（**部分**：C2 `FilesFacade` 有界 worker+代际丢弃+错误通道；D1 `48108e08` 起 `NativeFilesTransport` 数据面 14 路由生产走 facade+本地直读、面板信号接线原样——缩略图/胶片条/插件仍走 HTTP 桥，等 E/F-G）
 - [ ] 明确 command 输入、错误码、revision、幂等、锁/权限、截止时间和取消；原生/插件/自动化入口使用同一实现，不保留旧HTTP协议。（**部分**：输入/错误码/revision/幂等键/协作取消在 C1 服务+B3 journal 落地；截止时间与"入口同一实现"待 D/F 换轨——旧 HTTP 仍在运行）
 - [ ] 受理、排队、服务确认、窗口 ready、作业完成分开；所有异步消息按 invocation/job id 关联，迟到消息不能覆盖新调用。（**部分**：facade 代际丢弃+request_id 关联已测；queued→completed 全阶段词表在共享层，UI 侧展示属 D）
 - [x] 事件订阅返回可注销句柄，带库作用域/版本；selection/progress 合并与背压，关闭/切库撤销旧订阅。（C3 `FilesEventBus`：幂等注销、库过滤+revision、progress last-wins 合并、有界 drop-oldest 计数、close_all；`tests/files/test_files_event_bus.py` 6 项）
@@ -122,7 +122,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：B/C；媒体部分依赖 E。范围：接真实 facade，移除旧页面作为功能兜底。
 
-- [ ] 独立 FilesPanel 默认只组装原生组件和 runtime；不导入旧 adapter，不建隐藏 browser，不启动旧 server/health/port。
+- [ ] 独立 FilesPanel 默认只组装原生组件和 runtime；不导入旧 adapter，不建隐藏 browser，不启动旧 server/health/port。（**部分**：D1 `48108e08` transport 数据面换轨完成——浏览/搜索/集合/元数据/任务/扫描/批改名/预览取字节对旧服务启停无感（网络哨兵测试自证）；面板仍默认启动旧 server+隐藏 browser 供缩略图/胶片条桥与模式切换，待 E 媒体 provider 后摘除，见 [D1 验证记录](../validation/files_replacement_phase_d1_20261117/README.md)）
 - [ ] 目录、树、搜索、集合、清空、返回/刷新共用不可变 location/request/generation；发出新意图即作废旧上下文。
 - [ ] 201/2001/10000 项真实分页或虚拟列表，排序/total/cursor/选择/缩略图身份一致；输入防抖不保留旧结果写权。
 - [ ] 四布局切换保持选择、滚动锚点、缩放偏好和多选命令语义，横竖混合素材无错位/裁切政策混淆。
