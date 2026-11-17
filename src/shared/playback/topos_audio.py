@@ -306,6 +306,10 @@ class ToposAudioPipeline(QObject):
         self._source_done = False
         self._pending_len = 0
         self._sink_backlog = 0
+        # [E6] 共享设备互斥：登记为本进程当前唯一音频拥有者；被接管时退役
+        from .audio_arbiter import shared_arbiter
+        self._arbiter_owner = f'topos-audio:{id(self):x}'
+        shared_arbiter().acquire(self._arbiter_owner, on_takeover=self.retire)
         self._thread = threading.Thread(
             target=self._run, name='topos-audio', daemon=True)
         self._thread.start()
@@ -344,6 +348,8 @@ class ToposAudioPipeline(QObject):
             self._volume = min(1.0, max(0.0, float(value)))
 
     def stop(self) -> None:
+        from .audio_arbiter import shared_arbiter
+        shared_arbiter().release(self._arbiter_owner)
         with self._lock:
             self._running = False
             self._lock.notify()
@@ -351,6 +357,13 @@ class ToposAudioPipeline(QObject):
         if self._thread.is_alive():
             logger.warning('Topos 音频线程未在 2s 内退出（延迟回收）')
         self._source.close()
+
+    def retire(self) -> None:
+        """[E6] 被音频仲裁者接管：置退役标志并唤醒——线程自行收尾
+        （sink 停止/音源关闭在其 finally），调用方（接管线程）不阻塞。"""
+        with self._lock:
+            self._running = False
+            self._lock.notify()
 
     def _run(self) -> None:
         sink = None

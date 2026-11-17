@@ -457,6 +457,11 @@ class UltimatePlayer(QFrame):
         start = self.inp_start.text()
         end = self.inp_end.text()
         if not start or not end: return
+        if getattr(self, '_clip_job', None) is not None and \
+                self._clip_job.is_alive() and not self._clip_job.cancelled:
+            self._clip_job.cancel()   # 再点一次 = 取消进行中的截取
+            self.show_toast("正在取消截取…")
+            return
         folder, filename = os.path.split(self.current_path)
         name_stem, ext = os.path.splitext(filename)
         out_name = f"{name_stem}_clip_{int(time.time())}{ext}"
@@ -465,23 +470,26 @@ class UltimatePlayer(QFrame):
         if not ffmpeg_bin:
             self.show_toast("FFmpeg not found")
             return
-        cmd = [ffmpeg_bin, '-y', '-ss', start, '-to', end, '-i', self.current_path, '-c', 'copy', '-avoid_negative_ts', '1', out_path]
-        self.show_toast("正在截取...")
-        def run():
-            # [BUG-P2-32] 后台线程此前 except: pass 吞掉 ffmpeg 全部错误——
-            # "正在截取..."之后永久沉默，成功也无反馈。结果经信号回 GUI 线程。
-            try:
-                subprocess.run(cmd, check=True, capture_output=True)
+        # [E6] 预算/取消/有界输出/原子交付统一走 ClipExportJob（此前
+        # 直接写目标路径 + 无预算不可取消 + capture_output 无上限）
+        from .clip_export import ClipExportJob
+        job = ClipExportJob(
+            [ffmpeg_bin, '-y', '-ss', start, '-to', end, '-i',
+             self.current_path, '-c', 'copy', '-avoid_negative_ts', '1'],
+            destination=out_path)
+        self._clip_job = job
+        self.show_toast("正在截取…（可再点一次取消）")
+
+        def on_done(ok: bool, message: str) -> None:
+            # [BUG-P2-32] 结果经信号回 GUI 线程（此前 except: pass 永久沉默）
+            if ok:
                 self.toast_requested.emit(f"截取完成: {out_name}")
                 QDesktopServices.openUrl(QUrl.fromLocalFile(out_path))
-            except subprocess.CalledProcessError as e:
-                err = (e.stderr or b'')[-300:].decode(errors='ignore')
-                logger.error(f"截取失败: {err}")
-                self.toast_requested.emit("截取失败（详见控制台）")
-            except Exception as e:
-                logger.error(f"截取异常: {e}")
-                self.toast_requested.emit("截取失败")
-        threading.Thread(target=run, daemon=True).start()
+            else:
+                logger.error("截取未完成: %s | ffmpeg 尾部输出: %s",
+                             message, job.stderr_tail[-300:])
+                self.toast_requested.emit(f"截取未完成：{message}")
+        job.start(on_done)
         self.toggle_clip_mode()
 
     def toggle_clip_mode(self):

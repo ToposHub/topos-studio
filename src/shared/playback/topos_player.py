@@ -645,6 +645,11 @@ class ToposPlayer(BasePlayer):
         if self._session is None or not self._current_path:
             self._toast('无媒体')
             return
+        if getattr(self, '_clip_job', None) is not None and \
+                self._clip_job.is_alive() and not self._clip_job.cancelled:
+            self.cancel_clip_export()   # 再点一次 = 取消进行中的导出
+            self.toast_requested.emit('正在取消导出…')
+            return
         try:
             a = self._parse_t(self.inp_a.text())
             b = self._parse_t(self.inp_b.text())
@@ -661,24 +666,30 @@ class ToposPlayer(BasePlayer):
         folder, filename = os.path.split(self._current_path)
         stem = os.path.splitext(filename)[0]
         out = os.path.join(folder, f'{stem}_clip_{int(time.time())}.mov')
-        tmp = out + '.part'  # 原子交付：写完才改名，避免半成品文件
-        cmd = [ffmpeg, '-y', '-ss', f'{a:.3f}', '-i', self._current_path,
-               '-t', f'{dur:.3f}', '-c:v', 'prores_ks', '-profile:v', '3',
-               '-pix_fmt', 'yuv422p10le', '-f', 'mov', tmp]
-        self._toast(f'正在导出片段 {dur:.1f}s → ProRes 422 HQ …')
+        # [E6] 预算/取消/有界输出/原子交付统一走 ClipExportJob；命令写
+        # 入 job 的 .part 临时文件，成功才 os.replace 到目标
+        from .clip_export import ClipExportJob
+        job = ClipExportJob(
+            [ffmpeg, '-y', '-ss', f'{a:.3f}', '-i', self._current_path,
+             '-t', f'{dur:.3f}', '-c:v', 'prores_ks', '-profile:v', '3',
+             '-pix_fmt', 'yuv422p10le', '-f', 'mov'],   # 输出 = tmp_path
+            destination=out)
+        self._clip_job = job
+        self._toast(f'正在导出片段 {dur:.1f}s → ProRes 422 HQ …（可再点一次取消）')
 
-        def run():
-            try:
-                subprocess.run(cmd, check=True, capture_output=True)
-                os.replace(tmp, out)
-                # [BUG-P0-07] 工作线程直接 _toast（setText + QTimer）间歇崩溃，
-                # 经信号投递到 GUI 线程
-                self.toast_requested.emit(f'片段导出完成: {os.path.basename(out)}')
-            except subprocess.CalledProcessError as e:
-                logger.error('ffmpeg probe 失败: %s', e.stderr.decode(errors='ignore')[-800:])
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-                self.toast_requested.emit('片段导出失败（详见控制台）')
-        threading.Thread(target=run, daemon=True).start()
+        def on_done(ok: bool, message: str) -> None:
+            # [BUG-P0-07] 工作线程只经信号投递 GUI 线程
+            if ok:
+                self.toast_requested.emit(
+                    f'片段导出完成: {os.path.basename(message)}')
+            else:
+                logger.error('片段导出失败: %s | ffmpeg 尾部输出: %s',
+                             message, job.stderr_tail[-800:])
+                self.toast_requested.emit(f'片段导出未完成：{message}')
+        job.start(on_done)
+
+    def cancel_clip_export(self) -> None:
+        """[E6] 取消进行中的片段导出（预算内协作终止）。"""
+        job = getattr(self, '_clip_job', None)
+        if job is not None:
+            job.cancel()

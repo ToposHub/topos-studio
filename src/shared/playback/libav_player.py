@@ -91,9 +91,17 @@ class _AudioPipeline:
             return False
 
     def start(self) -> None:
+        from .audio_arbiter import shared_arbiter
+        # [E6] 共享设备互斥：登记为本进程当前唯一音频拥有者；被接管时退役
+        self._arbiter_owner = f'libav-audio:{id(self):x}'
+        shared_arbiter().acquire(self._arbiter_owner, on_takeover=self.retire)
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+
+    def retire(self) -> None:
+        """[E6] 被音频仲裁者接管：置退役标志——线程 4ms 轮询自行收尾。"""
+        self._running = False
 
     def pause(self) -> None:
         with self._slock:
@@ -122,6 +130,8 @@ class _AudioPipeline:
                 and self._sink_backlog == 0
 
     def stop(self) -> None:
+        from .audio_arbiter import shared_arbiter
+        shared_arbiter().release(getattr(self, '_arbiter_owner', ''))
         self._running = False
         if self._thread is not None:
             # [BUG-P2-28] 此前在 GUI 线程 join 1.5s（拖动进度条/关播放器
