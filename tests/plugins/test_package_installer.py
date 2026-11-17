@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import zipfile
 from pathlib import Path
 
@@ -150,7 +151,8 @@ def test_failure_between_move_and_swap_restores_previous_state(tmp_path, monkeyp
     monkeypatch.undo()
     assert installer.current_version("files.my_tool") == "1.0.0"   # 旧版本完好
     versions = tmp_path / "installed" / "files.my_tool" / "versions"
-    assert [path.name for path in versions.iterdir()] == ["1.0.0"]  # 半包不留下
+    assert [path.name for path in versions.iterdir() if path.is_dir()] == ["1.0.0"]  # 半包目录不留下
+    assert not (versions / "2.0.0.install.json").exists()           # 半包来源记录同样回滚
 
 
 def test_validator_hook_can_veto_packages(tmp_path):
@@ -232,3 +234,177 @@ def test_missing_data_deletion_policy_is_rejected_before_removal(tmp_path):
         installer.uninstall("files.my_tool", is_active=lambda _: False, remove_data=True)
     assert exc.value.code == "DATA_POLICY_MISSING"
     assert installer.installed_manifest("files.my_tool") is not None
+
+
+# ---------------------------------------------------------------------------
+# PR-01 回归：安装根所有权、事务与版本身份
+# ---------------------------------------------------------------------------
+
+def test_versions_dir_linked_outside_never_receives_files(tmp_path):
+    """复现 7：versions 指向受管根之外时，不得把版本写到链接目标。"""
+    installer = _installer(tmp_path)
+    plugin_root = tmp_path / "installed" / "files.probe"
+    (plugin_root).mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (plugin_root / "versions").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path, plugin_id="files.probe"))
+    assert exc.value.code == "PATH_NOT_OWNED"
+    assert list(outside.iterdir()) == []                       # 链接目标未收到任何文件
+    assert installer.current_version("files.probe") == ""      # 也没有留下指针
+
+
+def test_symlinked_install_root_is_refused_before_any_write(tmp_path):
+    real = tmp_path / "real-root"
+    real.mkdir()
+    linked = tmp_path / "linked-root"
+    linked.symlink_to(real, target_is_directory=True)
+    installer = LocalPackageInstaller(linked, host_facts=HOST)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path))
+    assert exc.value.code == "PATH_NOT_OWNED"
+    assert list(real.iterdir()) == []                          # 没有穿过链接落任何文件/锁
+
+
+@pytest.mark.parametrize("target", ["../files.a/versions/1.0.0", "/tmp/escape", "versions"])
+def test_foreign_or_abnormal_current_pointer_is_refused(tmp_path, target):
+    """current 必须解析为本插件 versions 的直接子目录（跨插件/绝对/自指都拒绝）。"""
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path, plugin_id="files.a", version="1.0.0"))
+    other_root = tmp_path / "installed" / "files.b"
+    versions = other_root / "versions"
+    versions.mkdir(parents=True)
+    (versions / "1.0.0").mkdir()
+    pointer = other_root / "current"
+    pointer.symlink_to(Path(target))
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path / "b", plugin_id="files.b", version="2.0.0"))
+    assert exc.value.code == "POINTER_INVALID"
+    assert pointer.is_symlink()                                # 指针保持原状，未被改写
+    assert (versions / "2.0.0").exists() is False              # 新版本没有写入
+
+
+def test_current_pointer_that_is_a_regular_file_is_refused(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    pointer = tmp_path / "installed" / "files.my_tool" / "current"
+    pointer.unlink()
+    pointer.write_text("1.0.0", encoding="utf-8")              # 异常指针：普通文件
+    with pytest.raises(InstallerError) as exc:
+        installer.current_version("files.my_tool")
+    assert exc.value.code == "POINTER_INVALID"
+
+
+def test_prerelease_to_release_is_an_upgrade(tmp_path):
+    """复现 8：完整 SemVer 顺序——预发布低于同名正式版，标识按类型比较。"""
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path, version="1.0.0-beta.2"))
+    assert installer.install(_pkg(tmp_path / "v1", version="1.0.0-beta.10")).outcome == "updated"  # 数字按数值：10 > 2
+    assert installer.install(_pkg(tmp_path / "v2", version="1.0.0-rc.1")).outcome == "updated"     # 字母标识高于数字
+    assert installer.install(_pkg(tmp_path / "v3", version="1.0.0")).outcome == "updated"          # 预发布 → 正式是升级
+    with pytest.raises(InstallerError) as exc:
+        installer.install(_pkg(tmp_path / "v4", version="1.0.0-beta.999"))                          # 回退到预发布是降级
+    assert exc.value.code == "VERSION_NOT_NEWER"
+    assert installer.current_version("files.my_tool") == "1.0.0"
+
+
+def test_same_version_different_content_is_a_conflict(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    twin = _pkg(tmp_path / "twin", version="1.0.0")
+    (twin / "code.txt").write_text("different payload", encoding="utf-8")
+    with pytest.raises(InstallerError) as exc:
+        installer.install(twin)
+    assert exc.value.code == "VERSION_CONTENT_CONFLICT"
+    assert (tmp_path / "installed" / "files.my_tool" / "versions" / "1.0.0" / "code.txt"
+            ).read_text(encoding="utf-8") == "static"          # 已装内容原样
+    assert installer.install(_pkg(tmp_path / "same", version="1.0.0")).outcome == "unchanged"
+
+
+def test_folder_sources_use_the_same_size_budget_as_zip(tmp_path, monkeypatch):
+    import src.shared.plugins.installer as module
+    monkeypatch.setattr(module, "MAX_MEMBER_BYTES", 1024)
+    installer = _installer(tmp_path)
+    heavy = _pkg(tmp_path, plugin_id="files.heavy")
+    (heavy / "big.bin").write_bytes(b"\0" * 2048)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(heavy)
+    assert exc.value.code == "PACKAGE_MEMBER_TOO_LARGE"
+    monkeypatch.setattr(module, "MAX_MEMBER_BYTES", 1024 * 1024)
+    monkeypatch.setattr(module, "MAX_PACKAGE_BYTES", 2048)
+    total = _pkg(tmp_path / "total", plugin_id="files.total")
+    (total / "a.bin").write_bytes(b"\0" * 1500)
+    (total / "b.bin").write_bytes(b"\0" * 1500)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(total)
+    assert exc.value.code == "PACKAGE_TOO_LARGE"
+    assert not (tmp_path / "installed" / "files.total").exists()
+
+
+def test_uninstall_data_deletion_failure_reports_partial_state(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+
+    def failing_delete(plugin_id: str) -> None:
+        raise OSError("disk full")
+
+    with pytest.raises(InstallerError) as exc:
+        installer.uninstall("files.my_tool", is_active=lambda _: False,
+                            remove_data=True, delete_data=failing_delete)
+    assert exc.value.code == "DATA_DELETE_FAILED"              # 插件已移除、数据删除失败
+    assert not (tmp_path / "installed" / "files.my_tool").exists()
+    with pytest.raises(InstallerError) as retry:
+        installer.uninstall("files.my_tool", is_active=lambda _: False)
+    assert retry.value.code == "PLUGIN_NOT_INSTALLED"          # 重试卸载幂等且明确
+
+
+def test_provenance_is_installer_owned_not_package_declared(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path, source="builtin"))        # 包自称 builtin
+    provenance = installer.installed_provenance("files.my_tool")
+    assert provenance is not None
+    assert provenance["source"] == "local_package"             # 信任来自安装器，不来自声明
+    assert provenance["plugin_id"] == "files.my_tool"
+    assert len(provenance["content_digest"]) == 64
+
+
+def test_crashed_transaction_leftovers_are_swept_with_diagnostics(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    staging_junk = tmp_path / "installed" / ".staging" / "1111-deadbeef"
+    staging_junk.mkdir(parents=True)
+    (staging_junk / "half.txt").write_text("half", encoding="utf-8")
+    stale_pointer = tmp_path / "installed" / "files.my_tool" / ".current.2222-abcd.tmp"
+    stale_pointer.symlink_to(Path("versions") / "1.0.0")
+    outcome = installer.install(_pkg(tmp_path / "v2", version="2.0.0"))
+    assert outcome.outcome == "updated"
+    assert not staging_junk.exists()                           # 崩溃暂存被清
+    assert not stale_pointer.exists()                          # 崩溃临时指针被清
+    assert list((tmp_path / "installed" / "files.my_tool").glob(".current.*.tmp")) == []
+    assert installer.last_cleanup_notes == ()                  # 清理成功：无诊断残留
+
+
+def test_concurrent_double_update_is_serialized(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path, version="1.0.0"))
+    pkg2 = _pkg(tmp_path / "v2", version="2.0.0")
+    results: list[str] = []
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            results.append(installer.install(pkg2).outcome)
+        except Exception as exc:  # pragma: no cover - 失败即报
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert errors == []
+    assert sorted(results) == ["unchanged", "updated"]         # 串行化：一更新一幂等
+    assert installer.current_version("files.my_tool") == "2.0.0"
+    versions = tmp_path / "installed" / "files.my_tool" / "versions"
+    assert sorted(p.name for p in versions.iterdir() if p.is_dir()) == ["1.0.0", "2.0.0"]  # 旧版本保留、无半包
