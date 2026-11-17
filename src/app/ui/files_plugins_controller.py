@@ -104,8 +104,13 @@ class FilesPluginsController(QObject):
                 command_id="files.format_factory.open",
                 plugin_id="files.format_factory",
                 revision_provider=revision_provider),
+            "files.image_factory": NativeToolCommandService(
+                command_id="files.image_factory.open",
+                plugin_id="files.image_factory",
+                revision_provider=revision_provider),
         }
         self._format_factory_window = None
+        self._image_factory_window = None
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -359,7 +364,8 @@ class FilesPluginsController(QObject):
         # 注册表 + F3/F4 三段命令 + 原子边界）——不经旧 /launch
         native = self._native_commands.get(plugin_id)
         if native is not None and info is not None and info.can_launch:
-            self._launch_native(native, list(self.selected_paths()))
+            opener = self._native_opener(plugin_id)
+            self._launch_native(native, list(self.selected_paths()), opener)
             return
         command_key = info.command_key if info is not None and info.command_key else plugin_id
         # Freeze the selection at the user's gesture, never at async completion.
@@ -386,10 +392,20 @@ class FilesPluginsController(QObject):
 
         self._submit(f"launch:{plugin_id}", work)
 
-    def _launch_native(self, service, paths: list[str]) -> None:
-        """[G1] 原生命令三段：prepare 冻结→revalidate（worker）→dispatch
+    def _native_opener(self, plugin_id: str):
+        """[G2] 原生工具 → 窗口打开回调表。"""
+        openers = {
+            "files.format_factory": self._open_format_factory,
+            "files.image_factory": self._open_image_factory,
+        }
+        return openers.get(plugin_id)
+
+    def _launch_native(self, service, paths: list[str], opener) -> None:
+        """[G1/G2] 原生命令三段：prepare 冻结→revalidate（worker）→dispatch
         （GUI 打开窗口，F4 锁内提交）。完成即更新最近使用。"""
         plugin_id = service.plugin_id
+        legacy_key = plugin_id.partition(".")[2]
+        titles = {"format_factory": "格式工厂", "image_factory": "图片工厂"}
         self._busy.add(plugin_id)
         self._project()
 
@@ -404,14 +420,15 @@ class FilesPluginsController(QObject):
                 self._project()
                 self._message(error)
                 return
-            outcome = service.dispatch(result, self._open_format_factory)
+            outcome = service.dispatch(result, opener)
             if not outcome.accepted:
                 self._busy.discard(plugin_id)
                 self._project()
                 self._message(outcome.message)
                 return
             self._busy.discard(plugin_id)
-            self._launch_finished("format_factory", True, "格式工厂已打开。")
+            self._launch_finished(
+                legacy_key, True, f"{titles.get(legacy_key, '工具')}已打开。")
 
         self._generation += 1
         task = _CatalogTask(self._generation, f"native:{plugin_id}", work)
@@ -455,6 +472,51 @@ class FilesPluginsController(QObject):
         window.show()
         window.raise_()
         window.activateWindow()
+
+    def _open_image_factory(self, paths: tuple[str, ...]) -> None:
+        """[G2] 图片工厂窗口：F5 singleton；生成结果同一索引入口回库。"""
+        from src.app.ui.image_factory_window import (
+            ImageFactoryWindow,
+        )
+        from src.features.files.image_factory_service import (
+            ImageFactoryService,
+        )
+
+        windows = self.host_session.windows
+        if self._image_factory_window is None:
+            window = ImageFactoryWindow(
+                self.panel.window(), service=ImageFactoryService())
+
+            def close_window() -> None:
+                window.close()
+
+            windows.activate_window(
+                "files.image_factory", "main", singleton=True,
+                opener=lambda: None,
+                focuser=lambda: (window.show(), window.raise_(),
+                                 window.activateWindow()),
+                closer=close_window)
+            self._image_factory_window = window
+            window.closed.connect(
+                lambda: windows.close_window("files.image_factory", "main"))
+            # 同一索引入口回库：输出完成 → 同一刷新 + 素材库重扫
+            window.outputs_completed.connect(self._image_outputs_to_library)
+        window = self._image_factory_window
+        windows.activate_window("files.image_factory", "main",
+                                singleton=True, focuser=lambda: None)
+        window.set_inputs(tuple(paths))
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _image_outputs_to_library(self, outputs: list) -> None:
+        """[G2] 生成结果回库：同一刷新入口（refresh）+ 同一重扫（start_scan）。"""
+        count = len(outputs)
+        self.refresh()
+        scan = getattr(self.transport, "start_scan", None)
+        if callable(scan):
+            scan()
+        self._message(f"图片工厂生成 {count} 项，已按同一索引入口回库（正在重扫）。")
 
     def _launch_finished(self, plugin_id: str, success: bool, message: str) -> None:
         if self._closed:
@@ -585,10 +647,13 @@ class FilesPluginsController(QObject):
         if self._closed:
             return
         self._closed = True
-        # [G1] 原生工具窗口经注册表关闭（关闭即取消在途转码）
+        # [G1/G2] 原生工具窗口经注册表关闭（关闭即取消在途任务）
         if self._format_factory_window is not None:
             self.host_session.windows.close_all("files.format_factory")
             self._format_factory_window = None
+        if self._image_factory_window is not None:
+            self.host_session.windows.close_all("files.image_factory")
+            self._image_factory_window = None
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）

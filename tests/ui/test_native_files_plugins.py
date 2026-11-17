@@ -419,18 +419,18 @@ def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
                                   sources_factory=lambda: f1_sources)
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        # [G1] format_factory 已由原生窗口接管（零 HTTP）——本测试改用
-        # 仍走 legacy 路由的 image_factory 验证线上命令键口径
-        host.launch("files.image_factory")      # UI 新 id
+        # [G1/G2] format_factory/image_factory 已由原生窗口接管（零 HTTP）
+        # ——本测试改用仍走 legacy 路由的 decode_benchmark 验证线上命令键口径
+        host.launch("files.decode_benchmark")   # UI 新 id
         qtbot.waitUntil(lambda: bool(endpoint[1]), timeout=8000)
         # 线上：命令键寻址（legacy 路由不变）
         path, token, payload = endpoint[1][0]
-        assert path == "/api/plugin/image_factory/launch"
-        assert token == "token" and payload == {}
+        assert path == "/api/plugin/decode_benchmark/launch"
+        assert token == "token" and payload == {"paths": ["/media/a.mov"]}
         qtbot.waitUntil(lambda: bool(prefs.plugin_recent), timeout=8000)
         # 偏好：最近使用按新 id 建档
-        assert prefs.plugin_recent[0] == "files.image_factory"
-        qtbot.waitUntil(lambda: "files.image_factory" not in host._busy, timeout=8000)
+        assert prefs.plugin_recent[0] == "files.decode_benchmark"
+        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy, timeout=8000)
     finally:
         host.shutdown()
 
@@ -613,5 +613,31 @@ def test_f6_retire_async_advances_without_gui_sleep(qtbot, catalog, tmp_path, en
             timeout=5000)
         polls = host._retire_polls.get("files.format_factory", 0)
         assert polls <= 50
+    finally:
+        host.shutdown()
+
+
+def test_g2_image_outputs_return_via_same_index_entry(
+        qtbot, catalog, tmp_path, endpoint):
+    """[G2] 生成结果同一索引入口回库：refresh + start_scan（不开第二套索引）。"""
+    rescans = []
+    transport_backup = None
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g2.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    transport.start_scan = lambda: rescans.append(True)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        host._image_outputs_to_library(
+            [{"source": "/m/a.png", "output": "/m/a.jpg"}])
+        assert rescans == [True]
+        assert "回库" in panel.meta_status.text()
     finally:
         host.shutdown()
