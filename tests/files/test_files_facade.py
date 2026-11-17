@@ -229,8 +229,7 @@ def test_collection_members_hydrate_disk_truth_keep_offline(env):
     facade = FilesFacade(catalog, max_workers=1)
     try:
         collector = Collector()
-        facade.collection_members(cid, library_id=lib_id,
-                                  request_id="c1", listener=collector)
+        facade.collection_members(cid, request_id="c1", listener=collector)
         result = query_result_of(collector.wait(1)[0])
         by_path = {entry.path: entry for entry in result.entries}
         assert by_path[str(keep)].availability == Availability.ONLINE
