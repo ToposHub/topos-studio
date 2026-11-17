@@ -181,3 +181,54 @@ def test_uninstall_separates_plugin_removal_from_data_deletion(tmp_path):
     installer.uninstall("files.my_tool", is_active=lambda pid: False,
                         remove_data=True, delete_data=deleted.append)
     assert deleted == ["files.my_tool"]                           # 数据删除是显式动作
+
+
+@pytest.mark.parametrize("kind", ["file", "directory", "dangling", "manifest", "root"])
+def test_directory_symlinks_are_rejected_before_copy_or_manifest_read(tmp_path, monkeypatch, kind):
+    import src.shared.plugins.installer as module
+    package = _pkg(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "private_fixture.txt"
+    sentinel.write_text("temporary outside fixture", encoding="utf-8")
+    if kind == "manifest":
+        (package / "topos.plugin.json").unlink()
+        (package / "topos.plugin.json").symlink_to(sentinel)
+    elif kind == "root":
+        linked = tmp_path / "package_link"
+        linked.symlink_to(package, target_is_directory=True)
+        package = linked
+    else:
+        target = sentinel if kind == "file" else outside if kind == "directory" else outside / "missing"
+        (package / "linked").symlink_to(target, target_is_directory=kind == "directory")
+    copied = []
+    parsed = []
+    monkeypatch.setattr(module.shutil, "copytree", lambda *args, **kwargs: copied.append(args))
+    monkeypatch.setattr(module, "parse_manifest_file", lambda *args: parsed.append(args))
+    installer = _installer(tmp_path)
+    with pytest.raises(InstallerError) as exc:
+        installer.install(package)
+    assert exc.value.code == "PACKAGE_SYMLINK_MEMBER"
+    assert copied == parsed == []
+    assert sentinel.read_text(encoding="utf-8") == "temporary outside fixture"
+    assert not (installer.install_root / "files.my_tool").exists()
+
+
+@pytest.mark.parametrize("plugin_id", ["", " ", ".", "..", "../escape", "files/escape", r"files\escape", r"C:\escape"])
+def test_uninstall_invalid_identity_never_removes_install_root(tmp_path, plugin_id):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    with pytest.raises(InstallerError) as exc:
+        installer.uninstall(plugin_id, is_active=lambda _: False)
+    assert exc.value.code == "PLUGIN_ID_INVALID"
+    assert installer.current_version("files.my_tool") == "1.0.0"
+    assert installer.installed_manifest("files.my_tool") is not None
+
+
+def test_missing_data_deletion_policy_is_rejected_before_removal(tmp_path):
+    installer = _installer(tmp_path)
+    installer.install(_pkg(tmp_path))
+    with pytest.raises(InstallerError) as exc:
+        installer.uninstall("files.my_tool", is_active=lambda _: False, remove_data=True)
+    assert exc.value.code == "DATA_POLICY_MISSING"
+    assert installer.installed_manifest("files.my_tool") is not None

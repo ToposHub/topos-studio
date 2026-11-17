@@ -109,6 +109,8 @@ class FileExplorerPluginCatalog:
         path = folder / "topos.plugin.json"
         if not path.is_file():
             return None, []
+        if not path.resolve().is_relative_to(folder.resolve()):
+            return None, ["manifest 位于插件目录之外，未读取"]
         manifest, diagnostics = parse_manifest_file(path)
         notes = [f"manifest：{item.message}" for item in diagnostics]
         if manifest is not None and manifest.plugin_id != f"files.{plugin_id}":
@@ -161,20 +163,22 @@ class FileExplorerPluginCatalog:
                 if manifest is not None:
                     declared = getattr(manifest, declared_fields[key], "")
                     if isinstance(declared, str) and declared:
-                        fallback = declared
+                        return declared
                 value = runtime_info.get(key.lower(), constants.get(key, local.get(key.lower(), fallback)))
                 return str(value) if isinstance(value, (str, int)) else fallback
 
             if manifest is not None:
-                api_version = manifest.host_api[1]
-                api_raw = api_version
+                api_version = manifest.host_api[0]
+                api_raw = f"{manifest.host_api[0]}–{manifest.host_api[1]}"
+                api_compatible = manifest.host_api[0] <= _HOST_API_VERSION <= manifest.host_api[1]
             else:
                 api_raw = constants.get("API_VERSION", 1)
                 try:
                     api_version = int(api_raw)
                 except (ValueError, TypeError, OverflowError):
                     api_version = None
-            if api_version is None or api_version > _HOST_API_VERSION:
+                api_compatible = api_version is not None and api_version <= _HOST_API_VERSION
+            if not api_compatible:
                 diagnostics.append(f"宿主 API 不兼容：插件 {api_raw}，宿主 {_HOST_API_VERSION}")
             self_disabled = bool(local.get("disabled"))
             desired_enabled = plugin_id not in disabled and not self_disabled
@@ -190,7 +194,13 @@ class FileExplorerPluginCatalog:
             else:
                 category, capabilities = fallback_category, fallback_capabilities
                 payload_kind = _BUILTINS.get(plugin_id, ("其他", (), ""))[2]
-            launch_path = f"/api/plugin/{plugin_id}/launch" if payload_kind else ""
+            # A declaration cannot create a legacy HTTP route or change its
+            # payload contract. Only the verified builtin adapters may launch.
+            expected_kind = _BUILTINS.get(plugin_id, ("其他", (), ""))[2]
+            payload_mismatch = bool(payload_kind and expected_kind and payload_kind != expected_kind)
+            if payload_mismatch:
+                diagnostics.append("声明的选择规则与旧版启动接口不匹配")
+            launch_path = f"/api/plugin/{plugin_id}/launch" if payload_kind and expected_kind and not payload_mismatch else ""
             error = failed.get(plugin_id, "")
             if error:
                 unavailable = "插件加载失败，详情中可查看原因"
@@ -198,8 +208,10 @@ class FileExplorerPluginCatalog:
                 unavailable = "插件自身配置已停用，请先修改插件 config.json"
             elif not desired_enabled:
                 unavailable = "插件已停用，重启后生效" if runtime_loaded else "插件已停用"
-            elif api_version is None or api_version > _HOST_API_VERSION:
+            elif not api_compatible:
                 unavailable = "插件 API 与宿主不兼容"
+            elif payload_mismatch:
+                unavailable = "声明的选择规则与旧版启动接口不匹配"
             elif not runtime_loaded:
                 unavailable = "插件尚未加载，启用后请重启应用"
             elif not launch_path:

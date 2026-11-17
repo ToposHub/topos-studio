@@ -243,6 +243,17 @@ def test_shutdown_discards_late_launch_completion(controller):
     assert host.preferences.plugin_recent == []
 
 
+def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controller, endpoint, qtbot):
+    from src.shared.plugins.services import rejected
+    host, _, _, _ = controller
+    host._commands.dispatch = lambda prepared: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
+    host.launch("image_factory")
+    qtbot.waitUntil(lambda: not host._busy)
+    assert host.preferences.plugin_recent == []
+    assert endpoint[1] == []
+    assert host.center.notice.text() == "调用已取消"
+
+
 def test_shutdown_aborts_inflight_reply_and_discards_its_result(qtbot):
     from tests.ui.test_files_session_regressions import _FakeNetwork
     transport = NativeFilesTransport(lambda: "http://127.0.0.1:8000", "token")

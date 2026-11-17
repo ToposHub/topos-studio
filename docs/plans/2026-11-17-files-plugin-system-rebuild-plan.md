@@ -2,6 +2,8 @@
 
 日期：2026-11-17。适用项目：Topos Studio / Topos Color（PyQt6 + ModernGL + GLSL）。
 
+**最新完成情况复核**：原生 UI 已落地，完整插件系统尚未闭环。697 项回归通过之外，安装目标边界、生命周期归属/清理、清单原子性和 schema 往返仍有已复现缺陷；本轮小修与待办见 [新的复核计划](2026-11-17-files-plugin-completion-review-plan.md)。下表“契约/核心已有测试”不等于生产宿主完成验收。
+
 本计划回应“素材管理重构时一并重构插件系统；值得借鉴的地方写入计划，UI 与交互直接完成”，记录本轮落地情况与后续结构性改造的验收依据。
 
 ## 1. 范围、证据与进度口径
@@ -39,12 +41,12 @@
 
 | 阶段/任务 | 状态 | 交付与边界 |
 | --- | --- | --- |
-| PL-01 共享 manifest schema 与校验器 | 已验证 | `src/shared/plugins/manifest.py`：命名空间 id+legacy 映射、host_api 区间、平台/依赖/循环校验、未知贡献类型保留并标记不可用、凭据/用户路径拒绝；`legacy_python_manifest` 仅 AST 提取，发现不执行有写入即失败的验收测试。27 项回归 |
+| PL-01 共享 manifest schema 与校验器 | 部分（复核修正） | 有命名空间 id、API/平台/依赖校验与静态发现测试；畸形文件本轮转为诊断。未知字段往返、嵌套深冻结、未来 schema 拒绝和完整字段校验未通过，见新计划 PR-04 |
 | PL-02 独立安装清单与状态投影 | 部分 | `inventory.py`：installed/desired/runtime/failure_phase/pending_restart 分离、refresh 原子+revision、阻断诊断拒未加载/留已加载、旧目录行适配、第三方默认停用。13 项回归。**插件中心 UI 仍读旧 catalog 投影，未切到 PluginInventory** |
 | PL-03 调用上下文与生命周期 | 部分 | `lifecycle.py`：上下文冻结+执行前复核、贡献集全有或全无（半失败逆序回滚）、停用顺序（禁新调用→取消→关窗→解绑→释放）幂等、取消请求与确认分离。14 项回归。**旧插件停用仍是重启制，贡献句柄未挂到旧 Blueprint/JS 注册** |
 | PL-04/05 命令/窗口/格式声明 | 部分 | 10 个内建 `topos.plugin.json` 全量声明（4 个启动命令+窗口、6 个兼容/格式贡献），catalog 优先读取 manifest、身份不符忽略；`video_pro/topos_image` 声明 probe/metadata/thumbnail 且不含 playback。7 项回归。**窗口宿主、Inspector 运行时、provider 优先级仲裁未实施** |
 | PL-06 权限/信任/隔离/后台作业 | 部分 | broker 契约（BrokerDecision/HostIOResult/Protocol/PathGrant/NetworkGrant）抽取到 `src/shared/plugins/broker.py`，AI 实现复用同一类型（tests/ai 625 通过）；`PluginJobs` 统一取消语义。**Files 插件的实际路径/网络授权接线、隔离 worker、沙箱报告未实施** |
-| PL-08 安装/更新/卸载事务 | 已验证（本地包核心） | `installer.py`：staged 解包（防穿越/符号链接/炸弹/条目上限）→ manifest 宿主校验（含拒绝 runAfterInstall 钩子）→ 版本目录+current 指针原子切换 → 指针前失败自动回滚旧版本；卸载拒绝运行中插件，数据删除显式分离。12 项回归。**远程仓库签名索引、更新权限差异展示未实施（PL-09/D）** |
+| PL-08 安装/更新/卸载事务 | 部分（复核修正） | 已有 staged 解包/校验/版本指针和部分失败回滚；本轮补源树链接拒绝、非法卸载 id 与数据策略前置。安装目标根边界、事务并发/恢复和 SemVer 未通过，见新计划 PR-01；远程签名索引和权限差异仍未实施 |
 | PL-07 同一 Host API | 部分 | `services.py` 统一 ServiceResult/域 Protocol；`LegacyFilesCommandService` 首个实现接入全部启动入口（prepare 冻结→dispatch），文案与旧行为逐字一致，382 项插件回归通过。**Metadata/Collections/FileTask 等域服务仍走旧 HTTP（NR-06 抽取后换实现不改契约）** |
 | PL-09 市场与可发现性 | 未开始 | — |
 | PL-10 作者体验 | 部分（自动化） | `pack.py`：一键校验（错误拒绝/警告放行）+ 确定性 zip + sha256 sidecar 校验，产物可直接走 installer。4 项回归。**模板、SDK、调试工具未实施** |

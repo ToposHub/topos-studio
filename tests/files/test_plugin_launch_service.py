@@ -66,7 +66,7 @@ def test_prepare_freezes_selection_and_payload_kind():
     service, _ = _service()
     prepared = service.prepare("decode_benchmark", ["/a.mov", "", "/b.mov"])
     assert prepared.context.entry_paths == ("/a.mov", "/b.mov")   # 空串被剔除并冻结
-    assert prepared.payload == {"paths": ["/a.mov", "/b.mov"]}
+    assert prepared.to_payload() == {"paths": ["/a.mov", "/b.mov"]}
     single = service.prepare("format_factory", ["/only.mov"])
     assert single.payload == {"path": "/only.mov"}
     none = service.prepare("image_factory", [])
@@ -86,7 +86,7 @@ def test_prepare_rejects_unavailable_or_unknown():
                                  unavailable="插件已停用，重启后生效")])
     with pytest.raises(CommandRejected, match="插件已停用"):
         service.prepare("image_factory", [])
-    with pytest.raises(CommandRejected, match="未知插件"):
+    with pytest.raises(CommandRejected, match="没有受支持"):
         service.prepare("ghost", [])
 
 
@@ -125,3 +125,46 @@ def test_legacy_selection_paths_must_be_strings():
     with pytest.raises(CommandRejected) as exc:
         service.prepare("format_factory", [_NotStr()])          # 非字符串要拒绝，不静默丢弃
     assert exc.value.error_code == "INVALID_SELECTION"
+
+
+def test_nested_prepared_payload_cannot_change_the_frozen_selection():
+    service, transport = _service()
+    prepared = service.prepare("decode_benchmark", ["/a.mov"])
+    assert prepared.payload["paths"] == ("/a.mov",)
+    detached = prepared.to_payload()
+    detached["paths"].append("/other.mov")
+    service.dispatch(prepared)
+    assert transport.calls[0][2] == {"paths": ["/a.mov"]}
+    transport.calls[0][2]["paths"].append("/transport-only.mov")
+    assert prepared.context.entry_paths == ("/a.mov",)
+    assert prepared.to_payload() == {"paths": ["/a.mov"]}
+
+
+@pytest.mark.parametrize("paths", ["/one.mov", b"/one.mov"])
+def test_selection_does_not_treat_a_path_as_an_iterable_of_characters(paths):
+    service, _ = _service()
+    with pytest.raises(CommandRejected) as exc:
+        service.prepare("decode_benchmark", paths)
+    assert exc.value.error_code == "INVALID_SELECTION"
+
+
+def test_prepare_rejects_unverified_route_even_when_catalog_claims_it_exists():
+    service, _ = _service([_Info("third_party")])
+    with pytest.raises(CommandRejected, match="没有受支持"):
+        service.prepare("third_party", [])
+
+
+@pytest.mark.parametrize("reason", ["cancelled", "expired", "identity"])
+def test_dispatch_rejects_cancelled_expired_or_mismatched_invocations(reason):
+    from dataclasses import replace
+    service, transport = _service()
+    prepared = service.prepare("image_factory", [])
+    if reason == "cancelled":
+        prepared.context.cancel_token.request()
+    elif reason == "expired":
+        prepared = replace(prepared, context=replace(prepared.context, deadline=0.0))
+    else:
+        prepared = replace(prepared, plugin_id="files.shutdown_timer")
+    result = service.dispatch(prepared)
+    assert not result.accepted and not result.ok
+    assert transport.calls == []

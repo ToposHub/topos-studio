@@ -197,3 +197,50 @@ def test_diagnostics_are_bounded():
     inventory = PluginInventory(**HOST)
     snapshot = inventory.refresh([_record(diagnostics=flood)])
     assert len(snapshot.record("files.demo").diagnostics) <= 50
+
+
+def test_legacy_catalog_diagnostics_are_typed_and_survive_projection() -> None:
+    from src.shared.plugins.manifest import ManifestDiagnostic
+
+    original = ManifestDiagnostic(code="KNOWN", severity="info", message="已有诊断")
+    records = legacy_files_records([_LegacyRow(
+        "demo", diagnostics=("无法读取插件配置", original, object()),
+    )])
+    snapshot = PluginInventory(**HOST).refresh(records)
+    record = snapshot.record("files.demo")
+    assert record is not None
+    assert [diagnostic.code for diagnostic in record.diagnostics] == [
+        "LEGACY_CATALOG_DIAGNOSTIC", "KNOWN", "LEGACY_DIAGNOSTIC_INVALID",
+    ]
+    assert record.diagnostics[0].message == "无法读取插件配置"
+    assert record.diagnostics[1] is original
+    assert record.to_dict()["diagnostics"][0]["message"] == "无法读取插件配置"
+
+
+def test_legacy_single_string_diagnostic_is_not_split_into_characters() -> None:
+    records = legacy_files_records([_LegacyRow("demo", diagnostics="读取失败")])
+    assert len(records[0].diagnostics) == 1
+    assert records[0].diagnostics[0].message == "读取失败"
+
+
+def test_legacy_parser_diagnostics_are_preserved_ahead_of_catalog_flood(tmp_path: Path) -> None:
+    folder = tmp_path / "broken"
+    folder.mkdir()
+    (folder / "__init__.py").write_text("NAME = (", encoding="utf-8")
+    records = legacy_files_records([_LegacyRow(
+        "broken", path=folder, diagnostics=tuple("普通诊断" for _ in range(100)),
+    )])
+    snapshot = PluginInventory(**HOST).refresh(records)
+    record = snapshot.record("files.broken")
+    assert record is not None and record.runtime_state == "rejected"
+    assert record.failure_phase == "validate"
+    assert any(diagnostic.code == "LEGACY_INIT_UNREADABLE" for diagnostic in record.diagnostics)
+    assert len(record.diagnostics) <= 50
+
+
+def test_legacy_invalid_api_parser_warning_is_not_discarded(tmp_path: Path) -> None:
+    folder = tmp_path / "future"
+    folder.mkdir()
+    (folder / "__init__.py").write_text("API_VERSION = 'future'", encoding="utf-8")
+    records = legacy_files_records([_LegacyRow("future", path=folder)])
+    assert any(diagnostic.code == "LEGACY_API_VERSION_INVALID" for diagnostic in records[0].diagnostics)

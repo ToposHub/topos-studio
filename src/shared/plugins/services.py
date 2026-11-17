@@ -117,7 +117,33 @@ class PreparedInvocation:
         frozen = self.payload
         if not isinstance(frozen, Mapping):
             raise ValueError("payload 必须是键值对象")
-        object.__setattr__(self, "payload", MappingProxyType(dict(frozen)))
+        object.__setattr__(self, "payload", _freeze_payload(frozen))
+
+    def to_payload(self) -> dict[str, Any]:
+        """Return a detached JSON-shaped payload for a transport adapter."""
+        return _thaw_payload(self.payload)
+
+
+def _freeze_payload(value: Any, depth: int = 0) -> Any:
+    if depth > 50:
+        raise ValueError("payload 嵌套超过 50 层")
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("payload 的键必须是字符串")
+        return MappingProxyType({key: _freeze_payload(item, depth + 1) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_payload(item, depth + 1) for item in value)
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise ValueError("payload 必须由 JSON 数据组成")
+
+
+def _thaw_payload(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_payload(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_payload(item) for item in value]
+    return value
 
 
 @runtime_checkable

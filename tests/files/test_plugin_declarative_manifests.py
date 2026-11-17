@@ -109,3 +109,48 @@ def test_broken_manifest_falls_back_to_legacy_scan(tmp_path):
     assert row.name == "StillWorks"
     assert row.version == "3.1.4"
     assert any("manifest" in note for note in row.diagnostics)
+
+
+def _declared_tool(tmp_path, plugin_id, *, host_api=(1, 1), selection_mode="none"):
+    folder = tmp_path / plugin_id
+    folder.mkdir()
+    (folder / "__init__.py").write_text("NAME = 'Old name'\nVERSION = '0.0.1'\n", encoding="utf-8")
+    (folder / "topos.plugin.json").write_text(json.dumps({
+        "plugin_id": f"files.{plugin_id}", "display_name": "Declared name", "version": "2.0.0",
+        "host_api": list(host_api), "capabilities": [{"capability_id": "launch", "kind": "command", "selection_mode": selection_mode}],
+    }), encoding="utf-8")
+    from types import SimpleNamespace
+    manager = SimpleNamespace(plugins=[{"name": plugin_id, "info": {"name": "Loaded old name", "version": "0.0.1"}}], failed_plugins=[])
+    return folder, FileExplorerPluginCatalog(tmp_path, manager)
+
+
+def test_host_api_is_checked_against_the_whole_declared_range(tmp_path):
+    _, catalog = _declared_tool(tmp_path, "image_factory", host_api=(1, 9))
+    row = catalog.snapshot()[0]
+    assert row.can_launch
+    assert row.name == "Declared name" and row.version == "2.0.0"
+    assert not any("不兼容" in note for note in row.diagnostics)
+
+
+def test_manifest_cannot_invent_an_unverified_http_launcher(tmp_path):
+    _, catalog = _declared_tool(tmp_path, "third_party")
+    row = catalog.snapshot()[0]
+    assert not row.launch_path and not row.can_launch
+
+
+def test_manifest_cannot_change_legacy_route_payload_contract(tmp_path):
+    _, catalog = _declared_tool(tmp_path, "format_factory", selection_mode="many")
+    row = catalog.snapshot()[0]
+    assert not row.can_launch
+    assert "选择规则" in row.launch_unavailable_reason
+
+
+def test_manifest_symlink_outside_plugin_is_not_read(tmp_path):
+    folder, catalog = _declared_tool(tmp_path, "image_factory")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.json"
+    outside.write_text((folder / "topos.plugin.json").read_text(), encoding="utf-8")
+    (folder / "topos.plugin.json").unlink()
+    (folder / "topos.plugin.json").symlink_to(outside)
+    row = catalog.snapshot()[0]
+    assert row.name == "Loaded old name"
+    assert any("目录之外" in note for note in row.diagnostics)

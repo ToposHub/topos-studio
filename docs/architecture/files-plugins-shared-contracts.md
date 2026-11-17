@@ -3,6 +3,8 @@
 日期：2026-11-17。对应[插件系统重构计划](../plans/2026-11-17-files-plugin-system-rebuild-plan.md) A 阶段。
 起点 `fix-ui @ 7f025973` 之上的工作区；本文记录跨域插件契约的位置、语义与边界。
 
+**复核补充（2026-11-17）**：下表描述初次实现的意图，完整不变量尚未验收。Inventory 没有实现 revision/records 并发原子一致性，生命周期清理仍缺 owner 和失败重试，manifest 未知字段往返/深冻结、安装目标根所有权和版本比较也有已复现缺陷。具体事实、已修的小问题与后续任务见 [完成情况复核计划](../plans/2026-11-17-files-plugin-completion-review-plan.md)。不能据本表把共享层认定为生产宿主闭环。
+
 ## 决策
 
 新建 `src/shared/plugins/`（与 `src/shared/actions/`、`src/shared/diagnostics/` 平级）承载

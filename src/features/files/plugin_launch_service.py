@@ -20,6 +20,7 @@ from src.shared.plugins.services import (
     PreparedInvocation,
     ServiceResult,
     accepted,
+    rejected,
 )
 
 # Legacy ids that own a real HTTP launch route (verified in this repo).
@@ -46,6 +47,10 @@ class LegacyFilesCommandService:
 
     # -- PluginCommandService ---------------------------------------------
     def prepare(self, command_id: str, entry_paths: Iterable[str]) -> PreparedInvocation:
+        if command_id not in LAUNCHABLE_LEGACY_IDS:
+            raise CommandRejected("COMMAND_NOT_APPLICABLE", f"此插件没有受支持的原生启动接口：{command_id}")
+        if isinstance(entry_paths, (str, bytes)):
+            raise CommandRejected("INVALID_SELECTION", "所选路径必须是字符串列表")
         raw = list(entry_paths)
         if any(not isinstance(path, str) for path in raw):
             raise CommandRejected("INVALID_SELECTION", "所选路径必须是字符串列表")
@@ -66,8 +71,15 @@ class LegacyFilesCommandService:
     def dispatch(self, prepared: PreparedInvocation) -> ServiceResult:
         """Send the frozen request; completion arrives via the transport signal."""
         legacy_id = prepared.plugin_id.partition(".")[2] if prepared.plugin_id.startswith("files.") else ""
+        if (legacy_id not in LAUNCHABLE_LEGACY_IDS or prepared.command_id != f"files.{legacy_id}.launch"
+                or prepared.context.plugin_id != prepared.plugin_id or prepared.context.command_id != prepared.command_id):
+            return rejected(prepared.command_id, error_code="INVALID_INVOCATION", message="插件调用身份与命令不匹配。")
+        if prepared.context.cancelled:
+            return rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="插件调用已取消。")
+        if prepared.context.timed_out():
+            return rejected(prepared.command_id, error_code="INVOCATION_EXPIRED", message="插件调用已过期。")
         endpoint = f"/api/plugin/{legacy_id}/launch"
-        self.transport.launch_plugin(legacy_id, endpoint, dict(prepared.payload))
+        self.transport.launch_plugin(legacy_id, endpoint, prepared.to_payload())
         return accepted(prepared.command_id, invocation_id=prepared.context.invocation_id,
                         stage="dispatched", message="已提交打开请求；工具窗口由插件创建。")
 
@@ -76,7 +88,6 @@ class LegacyFilesCommandService:
         if success:
             return accepted(prepared.command_id, invocation_id=prepared.context.invocation_id,
                             stage="completed", message=message)
-        from src.shared.plugins.services import rejected
         return rejected(prepared.command_id, error_code="LAUNCH_NOT_ACCEPTED", message=message)
 
 
