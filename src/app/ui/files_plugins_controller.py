@@ -19,6 +19,7 @@ from src.features.files.plugin_launch_service import LegacyFilesCommandService
 from src.shared.plugins.discovery import (
     DesiredStateStore, PluginSourceConfig, current_host_facts, scan_sources,
 )
+from src.shared.plugins.host_session import PluginHostSession
 from src.shared.plugins.inventory import InventorySnapshot, PluginInventory
 
 
@@ -82,6 +83,10 @@ class FilesPluginsController(QObject):
         self._busy: set[str] = set()
         self._writing = False
         self._actions: list[QAction] = []
+        # [F5] 宿主会话：快捷键贡献所有权（注销/失败重试）+ 窗口注册表
+        # （owner/singleton——供 G 阶段原生窗口宿主消费）
+        self.host_session = PluginHostSession()
+        self._shortcut_plugins: set[str] = set()
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -282,6 +287,12 @@ class FilesPluginsController(QObject):
                 # [F4] 启停经权威边界：与在途提交原子串行
                 self._commands.set_enabled_atomic(command_key, enabled)
                 return self._snapshot_and_merge()   # [F1] 启停后同口径聚合
+
+            if not enabled:
+                # [F5] 停用即释放快捷键/窗口贡献（restart-bound：不走
+                # lifecycle 不可逆停用，再启用时贡献可重建）
+                self.host_session.release_contributions(plugin_id)
+                self._shortcut_plugins.discard(plugin_id)
             self._submit("enable", work)
             return
         # [F2] 新模型插件（受管安装/开发源）：desired 按 plugin_id 持久化
@@ -364,11 +375,11 @@ class FilesPluginsController(QObject):
         self._message(_tr("shortcut_saved", "快捷键已保存，仅在 Files 面板内生效。"))
 
     def _rebuild_shortcuts(self) -> None:
-        for action in self._actions:
-            self.panel.removeAction(action)
-            action.deleteLater()
-        self._actions.clear()
+        # [F5] 快捷键成为有所有权的贡献：QAction 的注销只由释放回调承载
+        # （整组替换时旧集先释放，失败保留可重试）——不设第二条清理路径
         assigned = self.preferences.plugin_shortcuts
+        entries_by_plugin: dict[str, list[tuple[str, Callable[[], None]]]] = {}
+        self._actions = []
         for info in self._infos:
             if not info.can_launch or info.plugin_id not in assigned:
                 continue
@@ -378,7 +389,23 @@ class FilesPluginsController(QObject):
             action.triggered.connect(lambda checked=False, pid=info.plugin_id: self.launch(pid))
             self.panel.addAction(action)
             self._actions.append(action)
+            entries_by_plugin.setdefault(info.plugin_id, []).append(
+                (assigned[info.plugin_id],
+                 lambda a=action: self._release_action(a)))
+        for plugin_id in self._shortcut_plugins - set(entries_by_plugin):
+            self.host_session.replace_shortcuts(plugin_id, [])   # 不再可启动：整组注销
+        for plugin_id, entries in entries_by_plugin.items():
+            self.host_session.replace_shortcuts(plugin_id, entries)
+        self._shortcut_plugins = set(entries_by_plugin)
         self._focus_changed(None, QApplication.focusWidget())
+
+    def _release_action(self, action: QAction) -> None:
+        try:
+            action.setEnabled(False)
+            self.panel.removeAction(action)
+        except RuntimeError:
+            return   # 动作已随面板销毁：无事可做
+        action.deleteLater()
 
     def _focus_changed(self, old: QWidget | None, current: QWidget | None) -> None:
         editing = isinstance(current, (QLineEdit, QPlainTextEdit, QTextEdit))
@@ -404,6 +431,11 @@ class FilesPluginsController(QObject):
         if self._closed:
             return
         self._closed = True
+        # [F5] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 + 停用
+        # 状态机收尾，失败可重试语义由会话保留）
+        for plugin_id in list(self._shortcut_plugins):
+            self.host_session.release_contributions(plugin_id)
+        self._shortcut_plugins.clear()
         self._pool.clear()
         self.center.close()
         self.launcher.close()
@@ -411,4 +443,7 @@ class FilesPluginsController(QObject):
         self.launcher.deleteLater()
         self._launcher_action.setEnabled(False)
         for action in self._actions:
-            action.setEnabled(False)
+            try:
+                action.setEnabled(False)
+            except RuntimeError:
+                pass   # 已随释放回调销毁
