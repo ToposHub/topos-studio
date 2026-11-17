@@ -8,6 +8,7 @@ import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -831,3 +832,131 @@ def test_releasing_inflight_thumbnail_keeps_network_deduplication(qtbot, thumbna
         release.set()
     assert len(state["calls"]) == 1
     transport.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# D2：回收站 + 集合写入
+# ---------------------------------------------------------------------------
+
+def _wait_task(qtbot, transport, *args, **kwargs):
+    with qtbot.waitSignal(transport.task_finished, timeout=8000) as received:
+        transport.run_task(*args, **kwargs)
+    return received.args[0]
+
+
+def test_trash_list_restore_roundtrip(qtbot, env):
+    asset = _seed(env, "tossed.png", b"T")
+    transport = make_transport(env)
+    try:
+        job = _wait_task(qtbot, transport, "trash", [str(asset)])
+        assert job["successes"] and not asset.exists()
+
+        with qtbot.waitSignal(transport.trash_loaded, timeout=8000) as listed:
+            transport.load_trash()
+        records = listed.args[0]
+        assert len(records) == 1
+        record = records[0]
+        assert record["item_name"] == "tossed.png"
+        assert record["original_path"] == str(asset)
+
+        restored = _wait_task(qtbot, transport, "restore", [str(record["id"])])
+        assert restored["successes"] and asset.exists()
+        with qtbot.waitSignal(transport.trash_loaded, timeout=8000) as after:
+            transport.load_trash()
+        assert after.args[0] == []
+    finally:
+        transport.shutdown()
+
+
+def test_trash_restore_conflict_then_rename_policy(qtbot, env):
+    asset = _seed(env, "clash.png", b"OLD")
+    transport = make_transport(env)
+    try:
+        _wait_task(qtbot, transport, "trash", [str(asset)])
+        asset.write_bytes(b"NEW")  # 原路径被新文件占用
+        with qtbot.waitSignal(transport.trash_loaded, timeout=8000) as listed:
+            transport.load_trash()
+        record_id = listed.args[0][0]["id"]
+
+        conflict = _wait_task(qtbot, transport, "restore", [str(record_id)],
+                              policy="error")
+        assert conflict["failures"] and conflict["failures"][0]["code"] == "DEST_EXISTS"
+
+        renamed = _wait_task(qtbot, transport, "restore", [str(record_id)],
+                             policy="rename")
+        assert renamed["successes"]
+        restored_to = renamed["successes"][0]["to"]
+        assert restored_to != str(asset) and "clash" in restored_to
+        assert Path(restored_to).exists() and asset.exists()  # 新旧并存
+    finally:
+        transport.shutdown()
+
+
+def test_trash_purge_removes_permanently(qtbot, env):
+    asset = _seed(env, "gone.png", b"G")
+    transport = make_transport(env)
+    try:
+        _wait_task(qtbot, transport, "trash", [str(asset)])
+        with qtbot.waitSignal(transport.trash_loaded, timeout=8000) as listed:
+            transport.load_trash()
+        record_id = listed.args[0][0]["id"]
+
+        purged = _wait_task(qtbot, transport, "purge", [str(record_id)])
+        assert purged["successes"]
+        with qtbot.waitSignal(transport.trash_loaded, timeout=8000) as after:
+            transport.load_trash()
+        assert after.args[0] == []
+        # 彻底删除后：文件本体与 trash 目录副本都不在
+        assert not asset.exists()
+        trash_dirs = list((env.root / "files-data" / "trash").glob("*/*"))
+        assert all("gone.png" not in item.name for item in trash_dirs)
+    finally:
+        transport.shutdown()
+
+
+def test_collection_write_roundtrip(qtbot, env):
+    a = _seed(env, "c1.png")
+    b = _seed(env, "c2.png")
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as created:
+            transport.create_collection("精选", [str(a), str(b)])
+        assert created.args[0] is True
+        with qtbot.waitSignal(transport.collections_loaded, timeout=8000) as listed:
+            transport.load_collections()
+        item = listed.args[0][0]
+        assert item["name"] == "精选" and item["item_count"] == 2
+        cid = item["id"]
+
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as renamed:
+            transport.rename_collection(cid, "重命名后")
+        assert renamed.args[0] is True
+
+        with qtbot.waitSignal(transport.collection_loaded, timeout=8000) as members:
+            transport.load_collection(cid)
+        assert [entry.path for entry in members.args[0]["files"]] == [str(a), str(b)]
+
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as removed:
+            transport.remove_collection_members(cid, [str(a)])
+        assert removed.args[0] is True
+        with qtbot.waitSignal(transport.collection_loaded, timeout=8000) as after:
+            transport.load_collection(cid)
+        assert [entry.path for entry in after.args[0]["files"]] == [str(b)]
+
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as added:
+            transport.add_collection_members(cid, [str(a)])
+        assert added.args[0] is True
+
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as deleted:
+            transport.delete_collection(cid)
+        assert deleted.args[0] is True
+        with qtbot.waitSignal(transport.collections_loaded, timeout=8000) as empty:
+            transport.load_collections()
+        assert empty.args[0] == []
+
+        # 空名/未选择：同步拒绝并说明原因
+        with qtbot.waitSignal(transport.collection_changed, timeout=8000) as refused:
+            transport.create_collection("   ", [str(a)])
+        assert refused.args[0] is False
+    finally:
+        transport.shutdown()

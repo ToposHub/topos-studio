@@ -259,3 +259,37 @@ def test_collection_member_paths_preserve_order(env):
     b = _seed_file(env["lib"], "m2.png")
     env["collections"].add_members(cid, [str(b), str(a)])
     assert env["collections"].member_paths(cid) == [str(b), str(a)]
+
+
+# ---------------------------------------------------------------- D2 补口
+def test_collection_rename_remove_delete(env):
+    lib_id = env["library"].library_id
+    cid = env["catalog"].create_collection(lib_id, "原名")
+    duplicate = env["collections"].create_collection(lib_id, "原名")
+    assert not duplicate.ok and duplicate.error_code == "CONFLICT"  # 同库重名被拒
+    renamed = env["collections"].rename_collection(cid, "新名")
+    assert renamed.ok
+    missing = env["collections"].rename_collection(99999, "不存在")
+    assert not missing.ok and missing.error_code == "NOT_FOUND"
+
+    asset = _seed_file(env["lib"], "member.png")
+    env["collections"].add_members(cid, [str(asset)])
+    removed = env["collections"].remove_members(cid, [str(asset)])
+    assert removed.ok and removed.items[0].ok
+    ghost = env["collections"].remove_members(cid, [str(asset)])
+    assert ghost.ok and not ghost.items[0].ok  # 非成员：逐项失败不抛
+
+    env["collections"].add_members(cid, [str(asset)])
+    deleted = env["collections"].delete_collection(cid)
+    assert deleted.ok
+    assert env["catalog"].collection_member_paths(cid) == []  # FK 级联清成员
+
+
+def test_task_service_lists_trash(env):
+    lib_id = env["library"].library_id
+    asset = _seed_file(env["lib"], "tossed.png")
+    trashed = env["tasks"].start_task(lib_id, "trash", [str(asset)])
+    assert trashed.ok
+    records = env["tasks"].list_trash()
+    assert [r.item_name for r in records] == ["tossed.png"]
+    assert records[0].original_path == str(asset)
