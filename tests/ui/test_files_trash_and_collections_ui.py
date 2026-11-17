@@ -208,3 +208,20 @@ def test_panel_collection_change_feedback(qtbot):
     assert "X" in panel.meta_status.text()
     panel.show_collection_change(False, "集合名不能为空")
     assert "集合名" in panel.meta_status.text()
+
+
+def test_metadata_pending_state_is_visible_and_cleared(qtbot):
+    """D 表第 7 项：忙状态可见（在途提示 + pending 记录），确认后清位。"""
+    panel = _panel(qtbot)
+    _select(panel, 0)
+    emitted = []
+    panel.metadata_patch_requested.connect(
+        lambda paths, patch, op: emitted.append((patch, op)))
+    panel._submit_patch({"rating": 4})
+    assert panel._pending_patch is not None
+    assert "正在保存" in panel.meta_status.text()  # 忙状态显式可见
+    panel.apply_metadata_result(["/media/A.mov"], {"rating": 4}, "已保存")
+    assert panel._pending_patch is None          # 服务确认清位
+    assert "已保存" in panel.meta_status.text()
+    panel.metadata_failed(["/media/A.mov"], {"rating": 5}, "只读挂载")
+    assert panel._pending_patch is None          # 失败同样清位（不假忙）
