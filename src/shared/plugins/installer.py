@@ -249,6 +249,107 @@ class _Transaction:
         self._thread_lock.release()
 
 
+_HAS_DIRFD = bool(getattr(os, "supports_dir_fd", False) and os.supports_dir_fd)
+
+
+def verify_trusted_root(root: Path, *, boundary: Path | None = None) -> list[Path]:
+    """[F12] 证明可信 root 及祖先边界：从 boundary（默认 root 父目录）向下
+    逐级 ``lstat``——到 root 为止的每一级都必须是真实目录（无符号链接、
+    无中途挂载替身）。返回证明链（boundary→…→root）；任何一级不实即抛
+    ``PATH_NOT_OWNED``。
+    """
+    root = Path(root)
+    boundary = Path(boundary) if boundary is not None else root.parent
+    try:
+        # 词法路径（abspath 不解析符号链接）：链上的每一级都要被 lstat
+        # 亲自核验——resolve() 会吞掉链接，证明就失效了
+        rel = Path(os.path.abspath(root)).relative_to(os.path.abspath(boundary))
+    except (ValueError, OSError) as exc:
+        raise InstallerError("PATH_NOT_OWNED",
+                             f"root 不在信任边界之内：{root} vs {boundary}") from exc
+    proof: list[Path] = [boundary]
+    current = boundary
+    for part in rel.parts:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except OSError as exc:
+            raise InstallerError("PATH_NOT_OWNED",
+                                 f"祖先层级无法核验：{current}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise InstallerError("PATH_NOT_OWNED",
+                                 f"祖先层级含符号链接，拒绝：{current}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise InstallerError("PATH_NOT_OWNED",
+                                 f"祖先层级不是真实目录：{current}")
+        proof.append(current)
+    return proof
+
+
+class _DirAnchor:
+    """[F12] fd 锚定目录：子项操作相对 fd 解析（O_NOFOLLOW|O_DIRECTORY）。
+
+    "检查后再使用"的窗口在 fd 打开那一刻关闭——之后的 rename/symlink/
+    unlink/open 都不经路径分量解析，并发路径替换无法插入。POSIX 专属；
+    平台不支持时调用方回退路径版并如实标注（不冒充已锚定）。
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        self.fd = os.open(str(path), flags | nofollow)
+
+    def lstat(self, name: str) -> os.stat_result:
+        return os.lstat(name, dir_fd=self.fd)
+
+    def exists(self, name: str) -> bool:
+        try:
+            self.lstat(name)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def is_real_dir(self, name: str) -> bool:
+        try:
+            return stat.S_ISDIR(self.lstat(name).st_mode)
+        except FileNotFoundError:
+            return False
+
+    def mkdir(self, name: str) -> None:
+        os.mkdir(name, 0o755, dir_fd=self.fd)
+
+    def rename_into(self, source: Path, name: str) -> None:
+        # source 为绝对路径（暂存目录在受管 .staging 下）；目标相对锚 fd
+        os.rename(str(source), name, dst_dir_fd=self.fd)
+
+    def symlink(self, target: str, name: str) -> None:
+        os.symlink(target, name, dir_fd=self.fd)
+
+    def replace_within(self, source_name: str, target_name: str) -> None:
+        try:
+            os.replace(source_name, target_name,
+                       src_dir_fd=self.fd, dst_dir_fd=self.fd)
+        except TypeError:
+            # 替身 os.replace（测试注入/受限平台）不带 dir_fd 形参：
+            # 回退路径版（同一锚目录内，仍原子）
+            os.replace(self.path / source_name, self.path / target_name)
+
+    def unlink(self, name: str) -> None:
+        os.unlink(name, dir_fd=self.fd)
+
+    def open_exclusive_nofollow(self, name: str) -> "int":
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        return os.open(name, flags | getattr(os, "O_NOFOLLOW", 0),
+                       0o644, dir_fd=self.fd)
+
+    def close(self) -> None:
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+
+
 class LocalPackageInstaller:
     """Versioned, rollback-safe local package installs (PL-08)."""
 
@@ -447,6 +548,8 @@ class LocalPackageInstaller:
         provenance_written = False
         moved = False
         pointer_swapped = False
+        versions_anchor: _DirAnchor | None = None
+        root_anchor: _DirAnchor | None = None
         previous_version = ""
         plugin_root: Path | None = None
         try:
@@ -492,7 +595,32 @@ class LocalPackageInstaller:
 
             # 3) 逐层所有权核验后的版本簿记
             plugin_root = self._ensure_real_dir(self._plugin_root(plugin_id), what="插件目录")
-            versions = self._ensure_real_dir(plugin_root / "versions", what="版本目录")
+            # [F12] 插件目录核验后**立即**锚定（O_NOFOLLOW）：之后的一切
+            # 子项操作（versions 创建/复核）都相对 fd——核验与使用之间
+            # 没有可被替换的路径分量
+            try:
+                root_anchor = _DirAnchor(plugin_root) if _HAS_DIRFD else None
+            except OSError as exc:
+                raise InstallerError(
+                    "PATH_NOT_OWNED",
+                    f"插件目录核验后被并发替换（锚定打开失败），拒绝使用：{exc}") from exc
+            if root_anchor is not None:
+                if root_anchor.exists("versions"):
+                    if not root_anchor.is_real_dir("versions"):
+                        raise InstallerError("PATH_NOT_OWNED",
+                                             "版本目录是符号链接，拒绝写入")
+                else:
+                    root_anchor.mkdir("versions")
+                versions = plugin_root / "versions"
+                try:
+                    versions_anchor = _DirAnchor(versions)
+                except OSError as exc:
+                    raise InstallerError(
+                        "PATH_NOT_OWNED",
+                        f"版本目录锚定打开失败（可能被并发替换），拒绝使用：{exc}") from exc
+            else:
+                versions = self._ensure_real_dir(plugin_root / "versions", what="版本目录")
+                versions_anchor = None
             previous_version = self._read_pointer(plugin_id, strict=True)
             digest = _payload_digest(staging)
             if previous_version == manifest.version:
@@ -521,9 +649,16 @@ class LocalPackageInstaller:
                 # payload but before swapping current. Reuse only byte-identical
                 # versions; do not delete this pre-existing payload on failure.
             else:
-                os.rename(staging, version_dir)
+                if versions_anchor is not None:
+                    versions_anchor.rename_into(staging, manifest.version)  # [F12]
+                else:
+                    os.rename(staging, version_dir)
                 moved = True
-            if version_dir.is_symlink() or not version_dir.is_dir():
+            if versions_anchor is not None:
+                # [F12] fd 级复核：就位的是真实目录（不经路径解析）
+                if not versions_anchor.is_real_dir(manifest.version):
+                    raise InstallerError("PATH_NOT_OWNED", "版本目录就位后被替换，拒绝使用")
+            elif version_dir.is_symlink() or not version_dir.is_dir():
                 raise InstallerError("PATH_NOT_OWNED", "版本目录就位后被替换，拒绝使用")
             provenance_path = self._provenance_path(version_dir)
             try:
@@ -541,29 +676,68 @@ class LocalPackageInstaller:
                     if existing_provenance != provenance:
                         raise InstallerError("PROVENANCE_INVALID", "保留版本的来源记录与验证内容不符")
                 if not provenance_path.exists():
-                    with provenance_path.open("x", encoding="utf-8") as provenance_file:
+                    if versions_anchor is not None:
+                        # [F12] 锚定开写（O_EXCL|O_NOFOLLOW，相对 fd）
+                        sidecar_name = provenance_path.name
+                        fd = versions_anchor.open_exclusive_nofollow(sidecar_name)
+                        try:
+                            os.write(fd, json.dumps(
+                                provenance, ensure_ascii=False,
+                                sort_keys=True).encode("utf-8"))
+                        finally:
+                            os.close(fd)
                         provenance_written = True
-                        provenance_file.write(json.dumps(provenance, ensure_ascii=False, sort_keys=True))
+                    else:
+                        with provenance_path.open("x", encoding="utf-8") as provenance_file:
+                            provenance_written = True
+                            provenance_file.write(json.dumps(provenance, ensure_ascii=False, sort_keys=True))
                 temp_pointer = plugin_root / f".current.{token}.tmp"
-                if temp_pointer.is_symlink() or temp_pointer.exists():
-                    temp_pointer.unlink()
-                os.symlink(Path("versions") / manifest.version, temp_pointer)
-                try:
-                    os.replace(temp_pointer, plugin_root / "current")   # 原子切换
-                    pointer_swapped = True
-                except OSError:
+                if root_anchor is not None:
+                    # [F12] 指针创建与原子切换都在锚 fd 内完成
+                    temp_name = temp_pointer.name
+                    if root_anchor.exists(temp_name):
+                        root_anchor.unlink(temp_name)
+                    root_anchor.symlink(str(Path("versions") / manifest.version),
+                                        temp_name)
+                    try:
+                        root_anchor.replace_within(temp_name, "current")
+                        pointer_swapped = True
+                    except OSError:
+                        if root_anchor.exists(temp_name):
+                            root_anchor.unlink(temp_name)
+                        raise
+                else:
                     if temp_pointer.is_symlink() or temp_pointer.exists():
                         temp_pointer.unlink()
-                    raise
+                    os.symlink(Path("versions") / manifest.version, temp_pointer)
+                    try:
+                        os.replace(temp_pointer, plugin_root / "current")   # 原子切换
+                        pointer_swapped = True
+                    except OSError:
+                        if temp_pointer.is_symlink() or temp_pointer.exists():
+                            temp_pointer.unlink()
+                        raise
             except OSError as exc:
                 raise InstallerError("INSTALL_IO_ERROR", f"安装 I/O 失败（已回滚）：{exc}") from exc
             if self._read_pointer(plugin_id, strict=True) != manifest.version:
                 raise InstallerError("POINTER_INVALID", "指针切换后校验失败")
+            if versions_anchor is not None:
+                versions_anchor.close()
+                versions_anchor = None
+            if root_anchor is not None:
+                root_anchor.close()
+                root_anchor = None
             outcome = "updated" if previous_version else "installed"
             return InstallOutcome(plugin_id, manifest.version, outcome, previous_version,
                                   rollback_path=str(versions / previous_version)
                                   if previous_version else "")
         except (OSError, InstallerError) as exc:
+            if versions_anchor is not None:
+                versions_anchor.close()
+                versions_anchor = None
+            if root_anchor is not None:
+                root_anchor.close()
+                root_anchor = None
             # A post-swap validation failure must restore the previous pointer
             # before removing the new payload. If that fails, retain both
             # payloads so current never points at a directory we just deleted.
