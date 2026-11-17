@@ -117,6 +117,18 @@ class FilesEntryModel(QAbstractTableModel):
         self.entries = [_coerce_entry(entry) for entry in entries]
         self.endResetModel()
 
+    def append_entries(self, entries: list[Any]) -> None:
+        """分页续页：增量插入，不重置模型（选择/滚动/展开状态保留）。"""
+        fresh = [_coerce_entry(entry) for entry in entries
+                 if _coerce_entry(entry).path not in
+                 {existing.path for existing in self.entries}]
+        if not fresh:
+            return
+        self.beginInsertRows(QModelIndex(), len(self.entries),
+                             len(self.entries) + len(fresh) - 1)
+        self.entries.extend(fresh)
+        self.endInsertRows()
+
     def apply_patch(self, paths: list[str], patch: dict[str, Any]) -> None:
         """按服务确认结果更新受影响行：不重建模型，保滚动与选择。"""
         from dataclasses import replace
@@ -278,6 +290,7 @@ class NativeFilesPanel(QWidget):
     metadata_patch_requested = pyqtSignal(list, dict, str)
     file_task_requested = pyqtSignal(str, list, dict)
     library_search_requested = pyqtSignal(str, int, int)
+    directory_more_requested = pyqtSignal(str, int)  # D3：目录分页续页
     collections_requested = pyqtSignal()
     collection_requested = pyqtSignal(int, str)
     # D2：集合写入 + 回收站（意图经 transport，写入全部走 B/C 服务）
@@ -327,6 +340,10 @@ class NativeFilesPanel(QWidget):
         self._comment_display = ""
         self._library_active = False
         self._collection_active = False
+        # D3 分页：当前视图的 total/truncated 与续页来源（offset=已消费条数）
+        self._view_total: int = 0
+        self._view_truncated: bool = False
+        self._append_next_page: bool = False
         # [FR-08] 统一 Location：directory / library-search / collection。
         # 虚拟位置（搜索/集合）绝不"假装"还在上一个真实目录——目录写入类
         # 操作必须显式拒绝，而不是落到 _requested_path 指向的旧目录。
@@ -677,6 +694,13 @@ class NativeFilesPanel(QWidget):
         self.detail_view.header().moveSection(self.detail_view.header().visualIndex(6), 2)
         self.view_combo.currentIndexChanged.connect(self._change_layout)
         content_layout.addWidget(self.pages, 1)
+        # D3 分页续页：目录过大时按页追加，不截断也不假称全量
+        self.load_more_button = QPushButton(
+            _tr("load_more", "加载更多"), content)
+        self.load_more_button.setObjectName("filesLoadMore")
+        self.load_more_button.clicked.connect(self._load_more)
+        self.load_more_button.hide()
+        content_layout.addWidget(self.load_more_button)
         self.message = QLabel(content)
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
@@ -1173,6 +1197,10 @@ class NativeFilesPanel(QWidget):
         self._clear_thumbnail_work()
         self._entry_paths.clear()
         self._entry_rows.clear()
+        self._view_total = 0
+        self._view_truncated = False
+        self._append_next_page = False
+        self.load_more_button.hide()
         self.path_edit.setText(path)
         self._update_path_label(path)
         self.model.set_entries([])
@@ -1185,6 +1213,9 @@ class NativeFilesPanel(QWidget):
         if not self.is_browsable_path(path):
             self.show_error(path, _tr("system_location", "此位置不用于素材浏览，请选择 Home 或素材文件夹。"))
             return
+        self._view_total = 0
+        self._view_truncated = False
+        self._append_next_page = False
         try:
             parsed = [entry if isinstance(entry, Entry) else parse_entry(entry) for entry in entries]
         except FilesError as error:
@@ -1223,6 +1254,55 @@ class NativeFilesPanel(QWidget):
         self.locations.reveal(path)
         self._update_navigation()
         self._update_info()
+
+    # ------------------------------------------------------------ 分页（D3）
+    def set_page_meta(self, path: str, total: int, truncated: bool) -> None:
+        """目录分页元信息（transport page_meta）：只认当前导航目标。"""
+        if path not in (self._requested_path, self.current_path):
+            return  # 晚到的旧目录：视图已换，不覆盖
+        self._view_total = int(total)
+        self._view_truncated = bool(truncated)
+        self._update_page_status()
+
+    def show_directory_page(self, path: str, entries: list[Any]) -> None:
+        """目录页送达：首页重建视图；续页增量追加（选择/滚动保留）。"""
+        if self._append_next_page and path == self.current_path:
+            self._append_next_page = False
+            parsed = [entry if isinstance(entry, Entry) else parse_entry(entry)
+                      for entry in entries]
+            self.model.append_entries(parsed)
+            fresh_paths = {entry.path for entry in parsed}
+            self._entry_paths.update(fresh_paths)
+            for offset, entry in enumerate(parsed, start=len(self._entry_rows)):
+                self._entry_rows[entry.path] = offset
+            self._update_page_status()
+            return
+        self.set_entries(path, entries)
+
+    def _update_page_status(self) -> None:
+        shown = len(self.model.entries)
+        kind = self._view_location.get("kind")
+        if not self._view_truncated or kind not in ("directory", "library-search"):
+            self.load_more_button.hide()
+            return
+        remaining = max(self._view_total - shown, 0)
+        self.load_more_button.setText(
+            _tr("load_more_with", "加载更多（还有 {n} 项）").format(n=remaining))
+        self.load_more_button.show()
+
+    def _load_more(self) -> None:
+        """续页意图：offset = 已消费条数（模型累计，过滤不影响）。"""
+        kind = self._view_location.get("kind")
+        offset = len(self.model.entries)
+        if kind == "directory":
+            target = self._requested_path or self.current_path
+            if not target:
+                return
+            self._append_next_page = True
+            self.directory_more_requested.emit(target, offset)
+        elif kind == "library-search" and self._last_search_query:
+            self._append_next_page = True
+            self.library_search_requested.emit(self._last_search_query, 200, offset)
 
     def show_error(self, path: str, message: str) -> None:
         self.set_loading(path)
@@ -1865,12 +1945,37 @@ class NativeFilesPanel(QWidget):
         raw_entries = payload.get("files") if isinstance(payload, dict) else None
         if not isinstance(raw_entries, list):
             return
+        if self._append_next_page and self._view_location.get("kind") == "library-search":
+            # 搜索续页：增量追加（选择/滚动保留），不重建虚拟视图
+            self._append_next_page = False
+            parsed = []
+            for raw in raw_entries:
+                try:
+                    parsed.append(parse_entry(raw))
+                except Exception:
+                    continue
+            self.model.append_entries(parsed)
+            self._entry_paths.update(entry.path for entry in parsed)
+            for offset, entry in enumerate(parsed, start=len(self._entry_rows)):
+                self._entry_rows[entry.path] = offset
+            self._view_total = int(payload.get("total") or 0)
+            self._view_truncated = bool(payload.get("truncated"))
+            self._update_page_status()
+            self.status.setText(
+                _tr("library_status", "{shown} / {total} 项{more}").format(
+                    shown=len(self.model.entries), total=self._view_total,
+                    more="（结果已截断）" if self._view_truncated else ""))
+            self._update_info()
+            return
+        self._view_total = int(payload.get("total") or 0)
+        self._view_truncated = bool(payload.get("truncated"))
         self._commit_virtual_view(
             "library-search", payload,
             title=_tr("library_results", "素材库搜索 · {n} 项"))
         entries = self.model.entries
         total = int(payload.get("total") or len(entries))
         truncated = bool(payload.get("truncated"))
+        self._update_page_status()
         self._update_info()
         self.status.setText(
             _tr("library_status", "{shown} / {total} 项{more}").format(

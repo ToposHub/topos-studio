@@ -422,7 +422,13 @@ class FilesPanel(QWidget):
             self._native_panel = NativeFilesPanel(self, preferences=self._files_prefs)
             self._native_transport = NativeFilesTransport(
                 self.adapter.get_server_url, _FE_APP_TOKEN, self)
-            self._native_panel.directory_requested.connect(self._native_transport.load_directory)
+            self._native_panel.directory_requested.connect(
+                lambda path: self._native_transport.load_directory(path))
+            self._native_panel.directory_more_requested.connect(
+                lambda path, offset: self._native_transport.load_directory(
+                    path, offset=offset))
+            self._native_transport.page_meta.connect(
+                self._native_panel.set_page_meta)
             self._native_panel.thumbnail_requested.connect(self._native_transport.request_thumbnail)
             self._native_panel.thumbnail_released.connect(self._native_transport.release_thumbnail)
             self._native_transport.thumbnail_loaded.connect(self._native_panel.set_thumbnail)
@@ -639,7 +645,7 @@ class FilesPanel(QWidget):
         )
 
     def _on_native_directory_loaded(self, path: str, entries: list) -> None:
-        self._native_panel.set_entries(path, entries)
+        self._native_panel.show_directory_page(path, entries)
         changed = self._files_root_path != path
         self._files_root_path = path
         # Hydrate the compatibility host only when it becomes visible. Native

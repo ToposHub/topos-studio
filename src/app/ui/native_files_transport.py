@@ -74,6 +74,8 @@ class NativeFilesTransport(QObject):
     loading = pyqtSignal(str)
     loaded = pyqtSignal(str, list)
     failed = pyqtSignal(str, str)
+    # D3 分页：目录页元信息（path, total, truncated），先于 loaded 送达
+    page_meta = pyqtSignal(str, int, bool)
     thumbnail_loaded = pyqtSignal(str, bytes)
     thumbnail_failed = pyqtSignal(str)
     thumbnail_pending = pyqtSignal(str)
@@ -383,22 +385,28 @@ class NativeFilesTransport(QObject):
         self._pump_thumbnails()
 
     # ------------------------------------------------------------ 目录内容（facade）
-    def load_directory(self, path: str) -> None:
+    PAGE_SIZE = 500  # 目录分页大小（D3）；测试可实例级收紧
+
+    def load_directory(self, path: str, offset: int = 0) -> None:
         if self._closed:
             return
-        self.cancel()
+        if offset <= 0:
+            self.cancel()  # 首页导航才作废旧上下文；续页共享当前代际
         generation = self._nav_generation
-        self.loading.emit(path)
+        if offset <= 0:
+            self.loading.emit(path)
         facade = self._runtime()
         if facade is None:
             self.failed.emit(path, self._runtime_error_message())
             return
         request = QueryRequest(request_id=uuid.uuid4().hex, path=path)
+        limit = int(self.PAGE_SIZE)
 
         def _work():
             record = facade.libraries.library_for_path(request.path)
             return facade.query.list_directory(
-                request, library_id=record.library_id if record else "")
+                request, library_id=record.library_id if record else "",
+                limit=limit, offset=int(offset))
 
         def _deliver(outcome) -> None:
             if self._closed or generation != self._nav_generation:
@@ -406,7 +414,9 @@ class NativeFilesTransport(QObject):
             if outcome.error is not None:
                 self.failed.emit(path, _dir_error_message(outcome.error))
                 return
-            self.loaded.emit(path, list(outcome.result.entries))
+            result = outcome.result
+            self.page_meta.emit(path, result.total, result.truncated)
+            self.loaded.emit(path, list(result.entries))
 
         facade.run(key=f"list:{identity_key(path)}", request_id=request.request_id,
                    work=_work, listener=_deliver)
