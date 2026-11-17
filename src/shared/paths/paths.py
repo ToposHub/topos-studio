@@ -129,3 +129,32 @@ def get_cache_dir() -> str:
             logger.warning("创建缓存目录失败 %s: %s", cache_dir, exc)
 
     return cache_dir
+
+
+def get_config_root() -> str:
+    """
+    配置根目录（配置文件所在目录），不依赖 os.getcwd()。
+
+    与 ``config_manager.ConfigManager.get_default_config_path`` 同源：
+    ``TOPOS_CONFIG_PATH`` 指向配置**文件**（开发形态 src/main.py 注入
+    ``<root>/.topos/config.json``），取其父目录；未设置时为平台用户级
+    数据目录（打包形态）。B 阶段起持久化路径（宿主库、files-data/）
+    一律由本函数派生，消除按 CWD 解析的分叉库。
+    """
+    override = os.environ.get("TOPOS_CONFIG_PATH")
+    if override:
+        return os.path.dirname(os.path.abspath(os.path.expanduser(override)))
+    from src.shared.config.config_manager import ConfigManager
+
+    return ConfigManager.get_platform_data_dir()
+
+
+def get_host_db_path() -> str:
+    """
+    宿主 settings/layouts 库的显式绝对路径（``<config_root>/host.db``）。
+
+    [数据边界 §6] 生产代码禁止再用 ``Database()`` 无参默认（按 CWD 解析
+    topos.db，历史上分叉出 src/topos.db）。旧 repo 根 topos.db 仍归旧
+    file_explorer 使用，不做迁移。
+    """
+    return os.path.join(get_config_root(), "host.db")
