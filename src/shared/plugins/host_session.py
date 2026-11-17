@@ -156,6 +156,21 @@ class PluginHostSession:
         """注册插件贡献；registrar 抛错 ⇒ 全量回滚（共享层契约）。"""
         return self.lifecycle.activate(plugin_id, registrar)
 
+    def reactivate_plugin(self, plugin_id: str,
+                          registrar: Callable[[ContributionSet], None]) -> tuple[ContributionSet, int]:
+        """[F7] 新代重激活 → (贡献集, 新代数)。旧代消息按代数拒绝。"""
+        contributions = self.lifecycle.reactivate(plugin_id, registrar)
+        return contributions, self.lifecycle.generation(plugin_id)
+
+    def accepting(self, plugin_id: str, generation: int | None = None) -> bool:
+        """受理判定（可带代数）：旧代在途消息不得污染新窗口/作业。"""
+        return self.lifecycle.accepting_calls(plugin_id, generation=generation)
+
+    def job_history(self, plugin_id: str | None = None,
+                    limit: int | None = None):
+        """[F7] 作业历史（终态、有界）——作业历史视图数据源。"""
+        return self.lifecycle.jobs.history(plugin_id=plugin_id, limit=limit)
+
     def _release_shortcut_set(self, shortcuts: ContributionSet) -> int:
         """释放一个贡献集；失败保留在 _failed_sets 供重试（所有权不移除）。"""
         released = shortcuts.retry_failed_releases() + shortcuts.rollback()
