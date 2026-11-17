@@ -732,3 +732,43 @@ def test_g4_decode_benchmark_native_zero_http_singleton(
         host._decode_benchmark_window = None
     finally:
         host.shutdown()
+
+
+def test_g5_code_editor_native_launch_and_availability(
+        qtbot, catalog, tmp_path, endpoint):
+    """[G5] 原生接管：code_editor 可启动（native:// 路径）、零 HTTP、
+    singleton、停用后可用性消失。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g5.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        info = next(item for item in host._infos
+                    if item.plugin_id == "code_editor")
+        assert info.can_launch and info.launch_path == "native://code_editor"
+        host.launch("code_editor")
+        qtbot.waitUntil(lambda: host._code_editor_window is not None,
+                        timeout=8000)
+        window = host._code_editor_window
+        assert window.isVisible()
+        qtbot.waitUntil(lambda: "files.code_editor" not in host._busy,
+                        timeout=8000)
+        host.launch("code_editor")              # singleton：同一实例
+        qtbot.waitUntil(lambda: "files.code_editor" not in host._busy,
+                        timeout=8000)
+        assert host._code_editor_window is window
+        assert endpoint[1] == []                # 零 HTTP
+        host._set_enabled("code_editor", False)
+        qtbot.waitUntil(lambda: not host._writing, timeout=8000)
+        info2 = next(item for item in host._infos
+                     if item.plugin_id == "code_editor")
+        assert not info2.desired_enabled and not info2.can_launch
+    finally:
+        host.shutdown()
