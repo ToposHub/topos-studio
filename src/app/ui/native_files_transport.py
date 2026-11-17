@@ -171,6 +171,16 @@ class NativeFilesTransport(QObject):
             self._facade_error = f"{exc.__class__.__name__}: {exc}"
         return self._facade
 
+    def library_revision(self) -> int | None:
+        """[F3] 当前素材库 revision（facade 未就绪返回 None，不冒充 0）。"""
+        facade = self._facade
+        if facade is None:
+            return None
+        try:
+            return int(facade.revision)
+        except Exception:
+            return None
+
     def _runtime_error_message(self) -> str:
         return f"素材数据不可用：{self._facade_error or '未知错误'}"
 
