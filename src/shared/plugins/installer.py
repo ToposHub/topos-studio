@@ -49,6 +49,7 @@ import re
 import shutil
 import stat
 import threading
+import time
 import zipfile
 from dataclasses import dataclass
 
@@ -201,6 +202,92 @@ def _semver_key(version: str) -> tuple[tuple[int, int, int], int, tuple[tuple[in
     return core, 0, identifiers
 
 
+class TransactionJournal:
+    """[F14] 安装事务持久日志（append-only JSONL + 每条 fsync）。
+
+    崩溃恢复口径：下次事务启动时扫描无 ``committed``/``aborted`` 收尾的
+    ``begin``——按磁盘事实判定（不是按日志自称）：
+    * current 严格校验通过且 payload/provenance 摘要一致 → 追加
+      ``recovered:committed``（换轨已原子完成，前滚）；
+    * current 校验失败/摘要不符 → 指针回指 ``previous_version``，坏
+      payload 目录隔离（``.quarantined-<token>``），追加
+      ``recovered:rolled_back``；
+    * 无 current（交换前崩溃）→ 追加 ``recovered:aborted``（暂存清扫
+      由既有 ``_sweep_transactions`` 负责）。
+    """
+
+    def __init__(self, install_root: Path) -> None:
+        self._path = Path(install_root) / ".transactions.log"
+        self._lock = threading.Lock()
+
+    def _append(self, entry: dict[str, Any]) -> None:
+        entry = {"ts": time.time(), **entry}
+        line = json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+        with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self._path,
+                         os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(fd, line.encode("utf-8"))
+                os.fsync(fd)                      # 每条落盘：崩溃后日志可信
+            finally:
+                os.close(fd)
+
+    def begin(self, token: str, plugin_id: str, previous_version: str) -> None:
+        self._append({"event": "begin", "token": token,
+                      "plugin_id": plugin_id,
+                      "previous_version": previous_version})
+
+    def committed(self, token: str) -> None:
+        self._append({"event": "committed", "token": token})
+
+    def aborted(self, token: str, reason: str) -> None:
+        self._append({"event": "aborted", "token": token, "reason": reason[:200]})
+
+    def recovered(self, token: str, outcome: str) -> None:
+        self._append({"event": "recovered", "token": token, "outcome": outcome})
+
+    def entries(self) -> list[dict[str, Any]]:
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            return []
+        result = []
+        for line in raw.splitlines():
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    result.append(item)
+            except ValueError:
+                continue   # 崩溃截断的尾行：忽略（下一条 begin 会重新记账）
+        return result
+
+    def pending_tokens(self) -> dict[str, dict[str, Any]]:
+        """无收尾（committed/aborted/recovered）的 begin 记录。"""
+        closed = {item.get("token") for item in self.entries()
+                  if item.get("event") in ("committed", "aborted", "recovered")}
+        pending: dict[str, dict[str, Any]] = {}
+        for item in self.entries():
+            if item.get("event") == "begin" and item.get("token") not in closed:
+                pending[str(item.get("token"))] = item
+        return pending
+
+
+def fsync_directory(path: Path) -> None:
+    """[F14] 目录同步（POSIX）：rename/symlink 落盘后才算事务完成。"""
+    if os.name != "posix":
+        return   # Windows 无目录 fsync 等价（CreateFile/FlushBuffers 语义
+                 # 不同）：日志已逐条 fsync，恢复按磁盘事实判定
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
 class _Transaction:
     """One install/uninstall mutation at a time, per process and per host.
 
@@ -339,6 +426,8 @@ class LocalPackageInstaller:
         self._lock = threading.RLock()
         # 崩溃事务残留的清理诊断：保留可见，不假装从未发生
         self.last_cleanup_notes: tuple[str, ...] = ()
+        # [F14] 持久事务日志：begin/committed/aborted/recovered 全程记账
+        self.journal = TransactionJournal(self.install_root)
 
     # -- layout & ownership ----------------------------------------------
     def _plugin_root(self, plugin_id: str) -> Path:
@@ -481,7 +570,88 @@ class LocalPackageInstaller:
                     temp_pointer.unlink()
                 except OSError as exc:
                     notes.append(f"清理残留指针失败 {temp_pointer}：{exc}")
+        notes.extend(self._recover_pending_transactions())
         self.last_cleanup_notes = tuple(notes)
+
+    def _recover_pending_transactions(self) -> list[str]:
+        """[F14] 崩溃恢复：按磁盘事实收尾无 committed/aborted 的事务。
+
+        中断后 current/payload/provenance 必须一致——指针可验证且摘要
+        相符则前滚记账；否则回指 previous_version 并隔离坏 payload。
+        """
+        notes: list[str] = []
+        for token, record in self.journal.pending_tokens().items():
+            plugin_id = str(record.get("plugin_id", ""))
+            previous = str(record.get("previous_version", ""))
+            if not plugin_id:
+                self.journal.recovered(token, "aborted:bad-record")
+                continue
+            plugin_root = self._plugin_root(plugin_id)
+            try:
+                current = self._read_pointer(plugin_id, strict=True)
+            except InstallerError:
+                current = ""
+            if current:
+                if current == previous:
+                    # 交换从未发生（current 仍是 previous）：按磁盘事实，
+                    # 这不是前滚——是交换前中止
+                    self.journal.recovered(token, "aborted:before-swap")
+                    notes.append(f"事务 {token} 崩溃恢复：交换前中止（current 未变）")
+                    continue
+                try:
+                    versions = self._versions_dir(plugin_id)
+                    # 恢复期校验比运行期严：provenance 必须在（安装器总在
+                    # 交换前写 sidecar）且摘要一致——无 sidecar 的版本不可
+                    # 能出自本安装器的完整事务
+                    provenance = self.installed_provenance(plugin_id) or {}
+                    actual = self._stored_digest(versions / current)
+                    if provenance.get("content_digest") != actual:
+                        raise InstallerError(
+                            "PROVENANCE_INVALID",
+                            "崩溃恢复：payload/来源记录不一致")
+                    fsync_directory(plugin_root)
+                    self.journal.recovered(token, f"committed:{current}")
+                    notes.append(f"事务 {token} 崩溃恢复：前滚至 {current}")
+                    continue
+                except InstallerError as exc:
+                    if not previous:
+                        # 无可回退版本：隔离坏目录，指针摘除
+                        bad = versions / current if current else None
+                        if bad is not None and bad.is_dir() and not bad.is_symlink():
+                            quarantine = plugin_root / f".quarantined-{token}"
+                            try:
+                                os.rename(bad, quarantine)
+                                notes.append(
+                                    f"事务 {token} 恢复：坏 payload 已隔离 {quarantine.name}")
+                            except OSError:
+                                pass
+                        try:
+                            (plugin_root / "current").unlink()
+                        except OSError:
+                            pass
+                        self.journal.recovered(token, "rolled_back:no-previous")
+                        notes.append(f"事务 {token} 崩溃恢复：无前版可回，指针已摘除")
+                        continue
+                    # 回指 previous_version（内容仍完整保留）
+                    rollback_pointer = plugin_root / f".current.{token}.rollback"
+                    try:
+                        if rollback_pointer.is_symlink() or rollback_pointer.exists():
+                            rollback_pointer.unlink()
+                        os.symlink(Path("versions") / previous, rollback_pointer)
+                        os.replace(rollback_pointer, plugin_root / "current")
+                        fsync_directory(plugin_root)
+                        self.journal.recovered(token, f"rolled_back:{previous}")
+                        notes.append(
+                            f"事务 {token} 崩溃恢复：回滚至 {previous}（{exc.message}）")
+                        continue
+                    except OSError as recovery_exc:
+                        notes.append(
+                            f"事务 {token} 回滚失败（可重试）：{recovery_exc}")
+                        continue
+            # 交换前崩溃：暂存已由上方清扫，无指针动作
+            self.journal.recovered(token, "aborted:before-swap")
+            notes.append(f"事务 {token} 崩溃恢复：交换前中止，记账收尾")
+        return notes
 
     def _transaction(self) -> _Transaction:
         return _Transaction(self._lock, self.install_root / _LOCK_NAME)
@@ -566,6 +736,7 @@ class LocalPackageInstaller:
                 raise InstallerError("INSTALL_HOOK_FORBIDDEN",
                                      "manifest 声明了 runAfterInstall 钩子，宿主不执行")
             plugin_id = manifest.plugin_id
+            self.journal.begin(token, plugin_id, self._read_pointer(plugin_id, strict=False))
             _semver_key(manifest.version)  # Also validate first installs, not only upgrades.
             if expected_plugin_id is not None and plugin_id != expected_plugin_id:
                 raise InstallerError("PLUGIN_ID_MISMATCH",
@@ -699,6 +870,8 @@ class LocalPackageInstaller:
                 raise InstallerError("INSTALL_IO_ERROR", f"安装 I/O 失败（已回滚）：{exc}") from exc
             if self._read_pointer(plugin_id, strict=True) != manifest.version:
                 raise InstallerError("POINTER_INVALID", "指针切换后校验失败")
+            fsync_directory(plugin_root)      # [F14] 指针落盘后事务才算完成
+            self.journal.committed(token)
             if versions_anchor is not None:
                 versions_anchor.close()
                 versions_anchor = None
@@ -716,6 +889,11 @@ class LocalPackageInstaller:
             if root_anchor is not None:
                 root_anchor.close()
                 root_anchor = None
+            # [F14] 非崩溃失败即时记账收尾（崩溃路径由恢复按磁盘事实收尾）
+            try:
+                self.journal.aborted(token, getattr(exc, "code", type(exc).__name__))
+            except Exception:
+                pass
             # A post-swap validation failure must restore the previous pointer
             # before removing the new payload. If that fails, retain both
             # payloads so current never points at a directory we just deleted.
