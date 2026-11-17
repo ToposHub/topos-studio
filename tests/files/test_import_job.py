@@ -167,3 +167,36 @@ def test_drop_context_describes_identity_and_target():
     context = DropContext(7, "proj-1", 3, 11, "track-2", False, "video", 240, 25.0)
     assert "proj-1@3" in context.describe()
     assert "track-2" in context.describe()
+
+
+def test_runner_cancel_keeps_running_job_reference_until_finished(qtbot):
+    """[E1/FUP-06] 取消时已在运行的任务：引用保留到真实完成。
+
+    setAutoDelete(False) 的 job 若只剩 C++ 侧指针，Python 包装被 GC 后
+    run() 会退化为抽象基类——runner 必须持有强引用直到 finished 送达。
+    """
+    import gc
+    import weakref
+
+    release = threading.Event()
+    entered = threading.Event()
+
+    def gated_probe(path):
+        entered.set()
+        release.wait(5)
+        return {}
+
+    runner = ImportProbeRunner()
+    runner.start(["/m/stuck.mov"], [], probe=gated_probe,
+                 classify=lambda path: "video")
+    qtbot.waitUntil(entered.is_set, timeout=5000)  # 确认已真正运行
+    job = runner._job
+    assert job is not None
+    ref = weakref.ref(job)
+    del job
+    runner.cancel()
+    gc.collect()
+    assert ref() is not None, "取消不得丢运行中任务的强引用"
+    release.set()
+    qtbot.waitUntil(lambda: ref() is None, timeout=8000)  # 完成后真实回收
+    assert runner._retired == []

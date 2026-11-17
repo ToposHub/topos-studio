@@ -202,6 +202,10 @@ class ImportProbeRunner(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._job: ImportProbeJob | None = None
+        # [E1/FUP-06] 已取消但仍在运行的任务：保留强引用直到真实完成，
+        # 否则 setAutoDelete(False) 的 job 只剩 C++ 侧指针，Python 包装
+        # 被 GC 后 run() 退化为抽象基类
+        self._retired: list[ImportProbeJob] = []
         self._job_id = 0
 
     @property
@@ -228,10 +232,15 @@ class ImportProbeRunner(QObject):
         job, self._job = self._job, None
         if job is not None:
             job.cancel()
-            # 仍在队列里的任务直接丢弃；已运行的靠 cancel 标志提前返回
-            QThreadPool.globalInstance().tryTake(job)
+            # 仍在队列里的任务直接丢弃（tryTake 成功即回收）；已运行的靠
+            # cancel 标志提前返回，引用保留到 finished 送达时回收
+            if not QThreadPool.globalInstance().tryTake(job):
+                self._retired.append(job)
 
     def _on_finished(self, job_id: int, result: ImportProbeResult) -> None:
+        # 真实完成即回收退役引用（含被取消的旧任务：它们的 finished 同样会到）
+        if self._retired:
+            self._retired = [job for job in self._retired if job.job_id != job_id]
         if job_id != self._job_id:
             return
         self._job = None

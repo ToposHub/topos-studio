@@ -141,8 +141,8 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：B 的任务/资源契约；与 C/D 可按稳定接口推进。范围：共享 runtime 和既有渲染队列。
 
-- [ ] runtime 持有在途 decode job/pool；完成即释放压缩/解码数据，取消排队和取消在途分开，关闭先作废回包。
-- [ ] 跨预览/比较窗口统一并发、总字节/像素预算；tryTake 失败不丢运行任务引用，GUI 不同步等两秒伪装退出完成。
+- [ ] runtime 持有在途 decode job/pool；完成即释放压缩/解码数据，取消排队和取消在途分开，关闭先作废回包。（**部分**：E1 `9e0c4b07` 图片预览/比较换共享 `ImageDecodeRuntime`——单一无父对象线程池、完成即释放压缩字节/归预算、排队即丢与在途作废分层、关闭先作废回包且零同步等待；视频播放器仍各 widget 独立解码线程（有界泄漏关停纪律已在），共享化归 E3/E5 批次，见 [E1 验证记录](../validation/files_replacement_phase_e1_20261117/README.md)）
+- [x] 跨预览/比较窗口统一并发、总字节/像素预算；tryTake 失败不丢运行任务引用，GUI 不同步等两秒伪装退出完成。（E1/E2：预览+比较窗口共用同一池与总字节/像素预算，超限立即回绝可解释；Compare/ImportProbe 两处 `tryTake`-后-清引用 的 GC 风险点改为引用保留到真实完成；Preview/Compare shutdown 不再 `waitForDone`——慢解码>2s 时关闭<0.5s 且迟到结果不回 GUI；100 次开关循环内存收敛，见 [E1 验证记录](../validation/files_replacement_phase_e1_20261117/README.md)）
 - [ ] 分离 producer 耗尽、最后帧呈现、音频排空、用户暂停和 seek；只有实际呈现完成才发布 EOF。
 - [ ] 复用共享 decoder/时基，RGB/YUV 的比例、SAR、旋转、奇数尺寸、色彩/HDR 一致；保留本轮 Topos RGB 等比回归。
 - [ ] GPU 转换/上传/绘制/释放接既有任务队列与 deferred release；UI 只提交尺寸/DPR快照和呈现结果。

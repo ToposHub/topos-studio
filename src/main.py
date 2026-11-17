@@ -152,6 +152,14 @@ def _orderly_shutdown(app: QCoreApplication | None, exit_code: int) -> None:
     except Exception as exc:  # pragma: no cover - 尽力而为的清理
         logger.debug(f"thread pool shutdown: {exc}")
     try:
+        # E1/FUP-06：共享图片解码 runtime 先作废全部回包（GUI 正在拆除，
+        # 迟到的预览/比较结果不再送达）；运行中的解码任务自然结束。
+        from src.app.ui.image_decode_runtime import shutdown_shared_runtime
+
+        shutdown_shared_runtime()
+    except Exception as exc:  # pragma: no cover
+        logger.debug(f"image decode runtime shutdown: {exc}")
+    try:
         # file_explorer 的缩略图线程持有 ffmpeg 子进程，显式停止。
         from file_explorer.main import shutdown_thumbnail_worker
 
