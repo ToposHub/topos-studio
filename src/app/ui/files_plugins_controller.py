@@ -116,12 +116,17 @@ class FilesPluginsController(QObject):
                 command_id="files.decode_benchmark.open",
                 plugin_id="files.decode_benchmark",
                 revision_provider=revision_provider),
+            "code_editor": NativeToolCommandService(
+                command_id="files.code_editor.open",
+                plugin_id="files.code_editor",
+                revision_provider=revision_provider),
         }
         self._format_factory_window = None
         self._image_factory_window = None
         self._shutdown_timer_window = None
         self._decode_benchmark_window = None
         self._decode_benchmark_service = None
+        self._code_editor_window = None
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -255,11 +260,26 @@ class FilesPluginsController(QObject):
             self._project()
             self._message(error)
             return
-        self._infos = tuple(result)
+        self._infos = self._native_availability(tuple(result))
         self._project()
         self._rebuild_shortcuts()
         if operation == "enable":
             self._message(_tr("saved_restart", "设置已保存，重启后生效；当前会话的插件仍保持原来的加载状态。"))
+
+    def _native_availability(self, infos: tuple) -> tuple:
+        """[G5] 原生接管的工具启动可用：native 窗口即能力（无需 legacy
+        launch_path）——中心/启动器按 can_launch 展示，launch 走原生。"""
+        from dataclasses import replace as _replace
+        patched = []
+        for info in infos:
+            key = info.command_key or info.plugin_id
+            if key in self._native_commands and not info.can_launch \
+                    and info.desired_enabled:
+                info = _replace(
+                    info, launch_path=f"native://{key}",
+                    launch_unavailable_reason="")
+            patched.append(info)
+        return tuple(patched)
 
     def _project(self) -> None:
         for view in (self.center, self.launcher):
@@ -411,6 +431,7 @@ class FilesPluginsController(QObject):
             "image_factory": self._open_image_factory,
             "shutdown_timer": self._open_shutdown_timer,
             "decode_benchmark": self._open_decode_benchmark,
+            "code_editor": self._open_code_editor,
         }
         return openers.get(plugin_id)
 
@@ -420,7 +441,8 @@ class FilesPluginsController(QObject):
         plugin_id = service.plugin_id
         legacy_key = plugin_id.partition(".")[2]
         titles = {"format_factory": "格式工厂", "image_factory": "图片工厂",
-                  "shutdown_timer": "定时关机", "decode_benchmark": "解码跑分"}
+                  "shutdown_timer": "定时关机", "decode_benchmark": "解码跑分",
+                  "code_editor": "代码编辑器"}
         self._busy.add(plugin_id)
         self._project()
 
@@ -594,6 +616,34 @@ class FilesPluginsController(QObject):
         window.raise_()
         window.activateWindow()
 
+    def _open_code_editor(self, paths: tuple[str, ...]) -> None:
+        """[G5] 等价编辑工具窗口（F5 singleton；新建/多文件/安全保存）。"""
+        from src.app.ui.code_editor_window import CodeEditorWindow
+
+        windows = self.host_session.windows
+        if self._code_editor_window is None:
+            window = CodeEditorWindow(self.panel.window())
+
+            def close_window() -> None:
+                window.close()
+
+            windows.activate_window(
+                "files.code_editor", "main", singleton=True,
+                opener=lambda: None,
+                focuser=lambda: (window.show(), window.raise_(),
+                                 window.activateWindow()),
+                closer=close_window)
+            self._code_editor_window = window
+            window.closed.connect(
+                lambda: windows.close_window("files.code_editor", "main"))
+        window = self._code_editor_window
+        windows.activate_window("files.code_editor", "main",
+                                singleton=True, focuser=lambda: None)
+        window.set_paths(tuple(paths))       # 多文件入口/聚焦已有
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
     def _image_outputs_to_library(self, outputs: list) -> None:
         """[G2] 生成结果回库：同一刷新入口（refresh）+ 同一重扫（start_scan）。"""
         count = len(outputs)
@@ -746,6 +796,9 @@ class FilesPluginsController(QObject):
             # [G4] 关闭即取消在途解码（既有 closeEvent 帧边界协作取消）
             self.host_session.windows.close_all("files.decode_benchmark")
             self._decode_benchmark_window = None
+        if self._code_editor_window is not None:
+            self.host_session.windows.close_all("files.code_editor")
+            self._code_editor_window = None
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）
