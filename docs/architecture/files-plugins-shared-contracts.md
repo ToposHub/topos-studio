@@ -3,7 +3,7 @@
 日期：2026-11-17。对应[插件系统重构计划](../plans/2026-11-17-files-plugin-system-rebuild-plan.md) A 阶段。
 起点 `fix-ui @ 7f025973` 之上的工作区；本文记录跨域插件契约的位置、语义与边界。
 
-**复核补充（2026-11-17）**：下表描述初次实现的意图，完整不变量尚未验收。Inventory 没有实现 revision/records 并发原子一致性，生命周期清理仍缺 owner 和失败重试，manifest 未知字段往返/深冻结、安装目标根所有权和版本比较也有已复现缺陷。具体事实、已修的小问题与后续任务见 [完成情况复核计划](../plans/2026-11-17-files-plugin-completion-review-plan.md)。不能据本表把共享层认定为生产宿主闭环。
+**复核补充（2026-11-17，两轮后更新）**：下表描述初次实现的意图。第一轮复核修复了独立边界问题；第二轮（PR-01～05，`886dfaa1`→`8628fc6b`）补齐了此前已复现的全部不变量缺陷：Inventory 单锁原子快照与重复身份诊断、生命周期任务归属与可重试停用、manifest 深冻结（`freeze.py`）与未知字段往返/未来 schema 阻断、安装器逐层所有权/单事务/完整 SemVer/内容冲突诊断、启动路径 prepare→revalidate→dispatch 的执行前权威复核。各项均有隔离测试，但均为**契约测试口径**——生产宿主接线（插件中心读 Inventory、真实窗口/provider 贡献、broker 执行、域服务抽取）仍未闭环。详见 [完成情况复核计划](../plans/2026-11-17-files-plugin-completion-review-plan.md)。不能据本表把共享层认定为生产宿主闭环。
 
 ## 决策
 

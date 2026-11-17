@@ -13,20 +13,22 @@
 
 原始 JUnit 报告保留在本机临时目录；提交只保存不含素材路径的汇总，避免把机器路径和媒体参数名带进新的报告。
 
-## 仍未通过的结构性不变量
+## 仍未通过的结构性不变量（第一轮复现 → 第二轮已修复）
 
-本轮以纯内存和 TemporaryDirectory 夹具复现，见 [结果](remaining_reproductions.json)：
+第一轮以纯内存和 TemporaryDirectory 夹具复现 8 项缺陷 + 快照原子性问题（当时全部未修复，如实记录于本页与 [计划](../../plans/2026-11-17-files-plugin-completion-review-plan.md)，未混入通过数量）。**第二轮（同日，`886dfaa1`→`8628fc6b`）已逐项修复**，每项的当前状态与验证测试见 [结果](remaining_reproductions.json)：
 
-1. 未知 manifest 字段经 parse → to_dict → parse 后丢失。
-2. 修改输入的嵌套 schema 字典会改变解析后的 manifest。
-3. schema 999 没有被兼容校验拒绝。
-4. 两个贡献句柄中后者 release 抛错，前者未被尝试释放。
-5. 停用插件 A 会取消同一 controller 下插件 B 的任务。
-6. 同 id 两个清单记录没有产生重复身份诊断。
-7. 安装目标 versions 指向临时根之外时，安装写到了链接目标。
-8. 从预发布升级到正式版本被误判为 VERSION_NOT_NEWER。
+1. 未知 manifest 字段经 parse → to_dict → parse 后丢失 → 已修（顶层与能力级往返）。
+2. 修改输入的嵌套 schema 字典会改变解析后的 manifest → 已修（deep_freeze 统一深冻结）。
+3. schema 999 没有被兼容校验拒绝 → 已修（SCHEMA_VERSION_UNSUPPORTED 阻断级）。
+4. 两个贡献句柄中后者 release 抛错，前者未被尝试释放 → 已修（失败聚合+可重试）。
+5. 停用插件 A 会取消同一 controller 下插件 B 的任务 → 已修（任务归属插件）。
+6. 同 id 两个清单记录没有产生重复身份诊断 → 已修（保留首个+显式诊断）。
+7. 安装目标 versions 指向临时根之外时，安装写到了链接目标 → 已修（逐层所有权核验）。
+8. 从预发布升级到正式版本被误判为 VERSION_NOT_NEWER → 已修（完整 SemVer）。
+9. snapshot 可混合旧 revision 与新 records → 已修（单锁成对快照，成对采样验证）。
+10. dispatch 前不复核插件状态、transport 同步拒绝误报 accepted → 已修（revalidate + 受理事实）。
 
-另外通过读线程屏障验证 snapshot 可混合旧 revision 与新 records。以上均写入[新计划](../../plans/2026-11-17-files-plugin-completion-review-plan.md)，没有标成已修复，也没有将这些故障例混入通过数量。
+修复均为**契约测试口径**；PR-06（真实贡献宿主/broker 执行）与 PR-07（市场/签名/SDK）未动。
 
 ## 提交隐私范围
 

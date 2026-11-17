@@ -41,18 +41,18 @@
 
 | 阶段/任务 | 状态 | 交付与边界 |
 | --- | --- | --- |
-| PL-01 共享 manifest schema 与校验器 | 部分（复核修正） | 有命名空间 id、API/平台/依赖校验与静态发现测试；畸形文件本轮转为诊断。未知字段往返、嵌套深冻结、未来 schema 拒绝和完整字段校验未通过，见新计划 PR-04 |
-| PL-02 独立安装清单与状态投影 | 部分 | `inventory.py`：installed/desired/runtime/failure_phase/pending_restart 分离、refresh 原子+revision、阻断诊断拒未加载/留已加载、旧目录行适配、第三方默认停用。13 项回归。**插件中心 UI 仍读旧 catalog 投影，未切到 PluginInventory** |
-| PL-03 调用上下文与生命周期 | 部分 | `lifecycle.py`：上下文冻结+执行前复核、贡献集全有或全无（半失败逆序回滚）、停用顺序（禁新调用→取消→关窗→解绑→释放）幂等、取消请求与确认分离。14 项回归。**旧插件停用仍是重启制，贡献句柄未挂到旧 Blueprint/JS 注册** |
-| PL-04/05 命令/窗口/格式声明 | 部分 | 10 个内建 `topos.plugin.json` 全量声明（4 个启动命令+窗口、6 个兼容/格式贡献），catalog 优先读取 manifest、身份不符忽略；`video_pro/topos_image` 声明 probe/metadata/thumbnail 且不含 playback。7 项回归。**窗口宿主、Inspector 运行时、provider 优先级仲裁未实施** |
-| PL-06 权限/信任/隔离/后台作业 | 部分 | broker 契约（BrokerDecision/HostIOResult/Protocol/PathGrant/NetworkGrant）抽取到 `src/shared/plugins/broker.py`，AI 实现复用同一类型（tests/ai 625 通过）；`PluginJobs` 统一取消语义。**Files 插件的实际路径/网络授权接线、隔离 worker、沙箱报告未实施** |
-| PL-08 安装/更新/卸载事务 | 部分（复核修正） | 已有 staged 解包/校验/版本指针和部分失败回滚；本轮补源树链接拒绝、非法卸载 id 与数据策略前置。安装目标根边界、事务并发/恢复和 SemVer 未通过，见新计划 PR-01；远程签名索引和权限差异仍未实施 |
-| PL-07 同一 Host API | 部分 | `services.py` 统一 ServiceResult/域 Protocol；`LegacyFilesCommandService` 首个实现接入全部启动入口（prepare 冻结→dispatch），文案与旧行为逐字一致，382 项插件回归通过。**Metadata/Collections/FileTask 等域服务仍走旧 HTTP（NR-06 抽取后换实现不改契约）** |
+| PL-01 共享 manifest schema 与校验器 | 部分（PR-04 修复） | 有命名空间 id、API/平台/依赖校验与静态发现测试；PR-04 批次补齐：深冻结（`freeze.py` 统一策略）、顶层与能力级未知字段往返、未来 schema 保留但阻断、身份严格完整匹配、逐字段带路径诊断。**完整 JSON Schema 级字段矩阵仍非穷尽** |
+| PL-02 独立安装清单与状态投影 | 部分（PR-03 修复） | `inventory.py`：installed/desired/runtime/failure_phase/pending_restart 分离、refresh 单锁原子+revision/records 成对、重复 id/legacy 冲突显式诊断（保留首个）、旧目录行优先读 topos.plugin.json、来源改宿主政策、声明/运行版本分槽。**插件中心 UI 仍读旧 catalog 投影，未切到 PluginInventory** |
+| PL-03 调用上下文与生命周期 | 部分（PR-02 修复） | `lifecycle.py`：上下文冻结+深冻结 params、贡献集全有或全无（单句柄失败不中止回滚、失败可重试）、任务归属插件（停用 A 不取消 B）、停用状态机（任务未确认不释放、清理失败聚合可重试、不谎报 stopped）。**旧插件停用仍是重启制，贡献句柄未挂到旧 Blueprint/JS 注册** |
+| PL-04/05 命令/窗口/格式声明 | 部分 | 10 个内建 `topos.plugin.json` 全量声明（4 个启动命令+窗口、6 个兼容/格式贡献），catalog 优先读取 manifest、身份不符忽略；`video_pro/topos_image` 声明 probe/metadata/thumbnail 且不含 playback。7 项回归。**窗口宿主、Inspector 运行时、provider 优先级仲裁未实施（PR-06）** |
+| PL-06 权限/信任/隔离/后台作业 | 部分 | broker 契约（BrokerDecision/HostIOResult/Protocol/PathGrant/NetworkGrant）抽取到 `src/shared/plugins/broker.py`，AI 实现复用同一类型（tests/ai 625 通过）；`PluginJobs` 统一取消语义并带插件归属。**Files 插件的实际路径/网络授权接线、隔离 worker、沙箱报告未实施** |
+| PL-08 安装/更新/卸载事务 | 部分（PR-01 修复） | staged 解包/校验/版本指针/失败回滚之上，PR-01 批次补齐：受管层逐级真实目录核验（拒绝越界链接）、current 严格指针校验、单事务（线程锁+flock）与崩溃残留清扫、完整 SemVer、同版本不同内容冲突、目录/zip 同一预算、卸载失败协议、安装器自记来源（包声明不产生信任）。**远程签名索引和权限差异仍未实施（PR-07）** |
+| PL-07 同一 Host API | 部分（PR-05 修复） | `services.py` 统一 ServiceResult/域 Protocol；`LegacyFilesCommandService` 接入全部启动入口（prepare 冻结→worker 内 revalidate 权威复核→dispatch 提交），transport 同步拒绝不再误报受理；文案与旧行为逐字一致。**Metadata/Collections/FileTask 等域服务仍走旧 HTTP（NR-06 抽取后换实现不改契约）** |
 | PL-09 市场与可发现性 | 未开始 | — |
 | PL-10 作者体验 | 部分（自动化） | `pack.py`：一键校验（错误拒绝/警告放行）+ 确定性 zip + sha256 sidecar 校验，产物可直接走 installer。4 项回归。**模板、SDK、调试工具未实施** |
 | E 旧宿主退役 | 未开始 | §7 退役门槛全部未满足，`external/file_explorer/` 保留 |
 
-新增回归合计约 **81 项**（tests/plugins 68 + files 侧 13），命令：
+新增回归合计约 **81 项 + 第二轮 33 个测试函数**（PR-01～05 批次，参数化展开后 tests/plugins 收集 327 项、启动服务 20 项），命令：
 `.venv/bin/python -m pytest tests/plugins -q` 与
 `.venv/bin/python -m pytest tests/files/test_plugin_launch_service.py tests/files/test_plugin_declarative_manifests.py tests/files/test_files_plugin_catalog.py -q`。
 
