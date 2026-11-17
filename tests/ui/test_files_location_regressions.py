@@ -1,8 +1,8 @@
 """NR-02 回归：Location/查询/标记/任务状态一致性（FR-08/09/11/12/16）。
 
 面板级：位置身份、虚拟位置拒绝目录写入、防抖、能力门控、快照回显；
-transport 级：在途搜索作废、多任务轮询互不覆盖。不启动真实 HTTP——
-QNetworkAccessManager 用假 reply 替身。
+transport 级（D1 换轨后）：在途搜索作废、多任务并行互不覆盖——
+走真实 facade + 合成素材，不再有 HTTP 替身。
 """
 from __future__ import annotations
 
@@ -186,106 +186,116 @@ def test_fr12_capability_disables_and_stays_disabled_on_selection(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# FR-09/16（transport）：在途搜索作废 + 多任务轮询
+# FR-09/16（transport）：在途搜索作废 + 多任务并行互不覆盖
+# D1 换轨口径：数据面走 facade（真实 catalog + 合成素材），无 HTTP 替身。
 # ---------------------------------------------------------------------------
 
-class _FakeReply(QObject):
-    finished = pyqtSignal()
+import threading as _threading
 
-    def __init__(self, payload: dict | None = None, status: int = 200):
-        super().__init__()
-        self._payload = payload
-        self._status = status
-        self.aborted = False
-        self.deleted = False
-
-    def attribute(self, *_):
-        return self._status
-
-    def readAll(self):
-        return json.dumps(self._payload or {}).encode("utf-8")
-
-    def error(self):
-        from PyQt6.QtNetwork import QNetworkReply
-        return QNetworkReply.NetworkError.NoError
-
-    def errorString(self):
-        return ""
-
-    def deleteLater(self):
-        self.deleted = True
-
-    def abort(self):
-        self.aborted = True
+from src.features.files.contracts import identity_key as _identity_key
+from src.features.files.repository import FilesDataLocator as _Locator
+from src.features.files.repository.catalog import FilesCatalog as _Catalog
+from src.features.files.services.facade import FilesFacade as _FilesFacade
+from src.features.files.services.query import FilesQueryService as _QueryService
 
 
-class _FakeNetwork:
-    def __init__(self):
-        self.pending: list[_FakeReply] = []
+class _GatedQuery(_QueryService):
+    """按 key 闸住在途查询：让"旧响应未回"可控。"""
 
-    def get(self, request):
-        reply = _FakeReply()
-        self.pending.append(reply)
-        return reply
+    def __init__(self, catalog):
+        super().__init__(catalog)
+        self.gates: dict[str, _threading.Event] = {}
 
-
-def _transport():
-    transport = NativeFilesTransport(lambda: "http://127.0.0.1:8765", "token")
-    transport._network = _FakeNetwork()
-    return transport
+    def search(self, query, **kwargs):
+        gate = self.gates.get(f"search:{query}")
+        if gate is not None:
+            gate.wait(5)
+        return super().search(query, **kwargs)
 
 
-def test_fr09_stale_search_reply_is_discarded(qtbot):
-    transport = _transport()
+def _facade_env(tmp_path):
+    locator = _Locator.for_config_root(tmp_path)
+    locator.ensure_layout()
+    catalog = _Catalog(locator)
+    catalog.open()
+    library = catalog.register_library(tmp_path / "lib")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    return catalog, library, lib
+
+
+def test_fr09_stale_search_result_is_discarded(qtbot, tmp_path):
+    catalog, library, lib = _facade_env(tmp_path)
+    for name in ("old-hit.png", "new-hit.png"):
+        asset = lib / name
+        asset.write_bytes(b"x")
+        catalog.upsert_asset(library.library_id, asset)
+    query = _GatedQuery(catalog)
+    gate = _threading.Event()
+    query.gates["search:old"] = gate
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1, query=query))
     loaded = []
     transport.search_loaded.connect(lambda payload: loaded.append(payload))
-    transport.search_library("old")
-    transport.search_library("new")
-    stale, current = transport._network.pending
-    assert stale.aborted  # 新请求作废旧请求
-    current._payload = _search_payload()
-    current.finished.emit()  # 新响应先到
-    assert len(loaded) == 1
-    loaded.clear()
-    stale._payload = _search_payload()
-    stale.finished.emit()  # 旧响应晚到：不得覆盖
-    qtbot.wait(50)
-    assert loaded == []
+    try:
+        transport.search_library("old")   # 在途（闸住）
+        transport.search_library("new")   # 新请求：同 key 作废旧搜索
+        gate.set()
+        with qtbot.waitSignal(transport.search_loaded, timeout=8000) as received:
+            qtbot.wait(10)
+        qtbot.wait(150)
+        assert len(loaded) == 1
+        assert loaded[0] is received.args[0]
+        assert {entry.name for entry in loaded[0]["files"]} == {"new-hit.png"}
+    finally:
+        gate.set()
+        transport.shutdown()
+        catalog.close()
 
 
-def test_fr16_two_jobs_poll_independently(qtbot):
-    transport = _transport()
+def test_fr09_navigation_cancels_pending_search(qtbot, tmp_path):
+    catalog, library, lib = _facade_env(tmp_path)
+    (lib / "hit.png").write_bytes(b"x")
+    catalog.upsert_asset(library.library_id, lib / "hit.png")
+    query = _GatedQuery(catalog)
+    gate = _threading.Event()
+    query.gates["search:hit"] = gate
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1, query=query))
+    loaded = []
+    transport.search_loaded.connect(lambda payload: loaded.append(payload))
+    try:
+        transport.search_library("hit")
+        with qtbot.waitSignal(transport.loaded, timeout=8000):
+            transport.load_directory(str(lib))  # 导航 cancel()：作废在途搜索
+            gate.set()
+        qtbot.wait(150)
+        assert loaded == []  # 切目录后晚到的搜索结果不得覆盖新视图
+    finally:
+        gate.set()
+        transport.shutdown()
+        catalog.close()
+
+
+def test_fr16_two_jobs_run_independently(qtbot, tmp_path):
+    catalog, library, lib = _facade_env(tmp_path)
+    a = lib / "a.png"
+    b = lib / "b.png"
+    a.write_bytes(b"a")
+    b.write_bytes(b"b")
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1))
     finished = []
-    transport.task_finished.connect(lambda job: finished.append(job["job_id"]))
-    transport._start_task_poll("job-a")
-    transport._start_task_poll("job-b")
-    assert sorted(transport.active_task_jobs()) == ["job-a", "job-b"]
-    # 两个 job 各自的轮询都已发出（不覆盖）
-    replies = list(transport._network.pending)
-    assert len(replies) == 2
-    first, second = replies
-    first._payload = {"job": {"job_id": "job-a", "status": "running",
-                              "total": 2, "completed": 0}}
-    second._payload = {"job": {"job_id": "job-b", "status": "running",
-                              "total": 1, "completed": 0}}
-    first.finished.emit()
-    second.finished.emit()
-    qtbot.wait(30)
-    assert transport._task_polls.get("job-a") is not None  # running 不终止
-    # 手动推进下一轮：两个任务仍各自有轮询请求
-    transport._poll_task_once()
-    second_round = transport._network.pending[2:]
-    assert len(second_round) == 2
-    reply_a, reply_b = second_round
-    reply_a._payload = {"job": {"job_id": "job-a", "status": "completed",
-                                "total": 2, "completed": 2}}
-    reply_b._payload = {"job": {"job_id": "job-b", "status": "cancelled",
-                                "total": 1, "completed": 0}}
-    reply_a.finished.emit()
-    qtbot.wait(30)
-    assert finished == ["job-a"]
-    assert "job-b" in transport.active_task_jobs()  # 第二个任务不受影响
-    reply_b.finished.emit()
-    qtbot.wait(30)
-    assert sorted(finished) == ["job-a", "job-b"]
-    assert transport.active_task_jobs() == []
+    transport.task_finished.connect(lambda job: finished.append(job))
+    try:
+        transport.run_task("rename", [str(a)], options={"new_name": "a2.png"})
+        transport.run_task("rename", [str(b)], options={"new_name": "b2.png"})
+        qtbot.waitUntil(lambda: len(finished) == 2, timeout=8000)
+        job_ids = {job["job_id"] for job in finished}
+        assert len(job_ids) == 2                 # 两个任务各自独立完成
+        assert all(job["completed"] == 1 for job in finished)
+        assert (lib / "a2.png").exists() and (lib / "b2.png").exists()
+        assert transport.active_task_jobs() == []
+    finally:
+        transport.shutdown()
+        catalog.close()

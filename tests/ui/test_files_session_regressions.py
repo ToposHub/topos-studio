@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -14,6 +15,9 @@ from src.app.ui.native_files_batch_rename import BatchRenameDialog  # noqa: E402
 from src.app.ui.native_files_compare import CompareDialog, MAX_PIXMAP_PIXELS  # noqa: E402
 from src.app.ui.native_files_preview import PreviewDecoder  # noqa: E402
 from src.app.ui.native_files_transport import NativeFilesTransport  # noqa: E402
+from src.features.files.repository import FilesDataLocator  # noqa: E402
+from src.features.files.repository.catalog import FilesCatalog  # noqa: E402
+from src.features.files.services.facade import FilesFacade as _FilesFacade  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -215,98 +219,148 @@ def _transport():
     return transport
 
 
-@pytest.mark.parametrize("failure", [None, "http", "network", "payload", "unconfirmed", "domain"])
-def test_fr13_execute_reply_keeps_session_and_reports_transport_failure(qtbot, failure) -> None:
-    from PyQt6.QtNetwork import QNetworkReply
-
-    transport = _transport()
+@pytest.mark.parametrize("failure", [None, "unconfirmed", "missing_source"])
+def test_fr13_execute_reply_keeps_session_and_reports_transport_failure(
+        qtbot, tmp_path, failure) -> None:
+    """D1 换轨口径：执行结果携带会话身份；失败如实上报不假成功。"""
+    catalog, library, lib = _facade_env(tmp_path)
+    a = lib / "a.png"
+    b = lib / "b.png"
+    a.write_bytes(b"a")
+    if failure != "missing_source":
+        b.write_bytes(b"b")
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1))
     results = []
     transport.batch_rename_finished.connect(results.append)
     try:
-        transport.execute_batch_rename(["/a.png"], "template", {"template": "{name}_x"}, "window-a")
-        reply = transport._network.pending[-1]
-        reply._payload = {"success": True, "processed": 1}
-        if failure == "http":
-            reply._status = 500
-        elif failure == "network":
-            reply._error = QNetworkReply.NetworkError.ConnectionRefusedError
-        elif failure == "payload":
-            reply._payload = []
-        elif failure == "unconfirmed":
-            reply._payload = {}
-        elif failure == "domain":
-            reply._payload = {"success": False, "message": "目录只读"}
-        reply.finished.emit()
+        if failure == "missing_source":
+            # 源缺失：预览失败如实上报（不是空的"可执行计划"）
+            with qtbot.waitSignal(transport.batch_rename_preview_failed, timeout=8000) as bad:
+                transport.preview_batch_rename(
+                    [str(a), str(b)], "template", {"template": "{name}_x.{ext}"},
+                    session_id="window-a")
+            assert bad.args[1] == "window-a" and bad.args[0]
+        elif failure != "unconfirmed":
+            with qtbot.waitSignal(transport.batch_rename_preview_ready, timeout=8000):
+                transport.preview_batch_rename(
+                    [str(a), str(b)], "template", {"template": "{name}_x.{ext}"},
+                    session_id="window-a")
+        transport.execute_batch_rename(
+            [str(a), str(b)], "template", {"template": "{name}_x.{ext}"},
+            session_id="window-a")
+        qtbot.waitUntil(lambda: bool(results), timeout=8000)
         assert len(results) == 1
         assert results[0]["session_id"] == "window-a"
-        assert results[0]["success"] is (failure is None)
-        if failure:
+        if failure is None:
+            assert results[0]["success"] is True
+            assert (lib / "a_x.png").exists()
+        else:
+            assert results[0]["success"] is False
             assert results[0]["message"]
-        if failure == "domain":
-            assert results[0]["message"] == "目录只读"
     finally:
         transport.shutdown()
+        catalog.close()
 
 
-@pytest.mark.parametrize("old_finishes_first", [True, False])
-def test_fr14_same_path_fetch_discards_stale_reply(qtbot, old_finishes_first) -> None:
-    transport = _transport()
-    results, failures = [], []
-    transport.preview_loaded.connect(lambda p, data: results.append((p, data)))
-    transport.preview_failed.connect(lambda p, message: failures.append((p, message)))
+def _facade_env(tmp_path):
+    locator = FilesDataLocator.for_config_root(tmp_path)
+    locator.ensure_layout()
+    catalog = FilesCatalog(locator)
+    catalog.open()
+    library = catalog.register_library(tmp_path / "lib")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    return catalog, library, lib
+
+
+def test_fr14_cancel_discards_late_fetch(qtbot, tmp_path, monkeypatch):
+    """取消预览后，晚到的字节不得成为新的解码任务。"""
+    from src.features.files.services import facade as facade_module
+    catalog, library, lib = _facade_env(tmp_path)
+    asset = lib / "late.png"
+    asset.write_bytes(b"LATE")
+    release = threading.Event()
+    original = facade_module.read_file_bytes
+
+    def gated(path, max_bytes):
+        release.wait(5)
+        return original(path, max_bytes)
+
+    monkeypatch.setattr(facade_module, "read_file_bytes", gated)
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1))
+    loaded = []
+    transport.preview_loaded.connect(lambda *args: loaded.append(args))
     try:
-        transport.load_preview("/same.png")
-        old = transport._network.pending[-1]
-        old._chunk = b"OLD"
-        old_state = transport._preview_state
-        transport.load_preview("/same.png")
-        new = transport._network.pending[-1]
-        new._chunk = b"NEW"
-        assert old.aborted
-        old.metaDataChanged.emit()
-        old.readyRead.emit()
-        assert not old_state.data
-        for reply in ((old, new) if old_finishes_first else (new, old)):
-            reply.finished.emit()
-        assert results == [("/same.png", b"NEW")]
-        assert failures == []
+        transport.load_preview(str(asset))
+        transport.cancel_preview()
+        release.set()
+        with qtbot.assertNotEmitted(transport.preview_loaded):
+            qtbot.wait(200)
+        assert loaded == []
     finally:
+        release.set()
         transport.shutdown()
+        catalog.close()
 
 
-def test_fr15_two_compare_sessions_do_not_interleave(qtbot):
-    transport = _transport()
+def test_fr15_two_compare_sessions_do_not_interleave(qtbot, tmp_path):
+    catalog, library, lib = _facade_env(tmp_path)
+    a = lib / "a.png"
+    b = lib / "b.png"
+    c = lib / "c.png"
+    for asset, payload in ((a, b"AAA"), (b, b"BBB"), (c, b"CCC")):
+        asset.write_bytes(payload)
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1))
     loaded = []
     transport.compare_image_loaded.connect(
         lambda p, data, s: loaded.append((s, p)))
     finished = []
-    transport.compare_set_finished.connect(lambda s: finished.append(s))
+    transport.compare_set_finished.connect(finished.append)
+    try:
+        transport.load_compare_images([str(a), str(b)], session_id="s1")
+        transport.load_compare_images([str(c)], session_id="s2")
+        qtbot.waitUntil(lambda: len(loaded) == 3, timeout=8000)
+        qtbot.waitUntil(lambda: sorted(finished) == ["s1", "s2"], timeout=8000)
+        by_session = {}
+        for session, path in loaded:
+            by_session.setdefault(session, set()).add(path)
+        assert by_session == {"s1": {str(a), str(b)}, "s2": {str(c)}}
+    finally:
+        transport.shutdown()
+        catalog.close()
 
-    transport.load_compare_images(["/a.png", "/b.png"], session_id="s1")
-    transport.load_compare_images(["/c.png"], session_id="s2")
-    # 两个会话各有自己的在途请求（此前共享单槽会互相吞）
-    replies = list(transport._network.pending)
-    assert len(replies) == 2
 
-    replies[0]._payload = {}
-    replies[0].readyRead.emit()   # 数据就位（进入 state.data）
-    replies[0].finished.emit()    # s1 第一张完成 → 自动拉第二张
-    qtbot.wait(20)
-    sessions_in_flight = {s for s, _ in loaded}
-    assert sessions_in_flight == {"s1"}       # s1 的进度不会串到 s2
+def test_fr15_cancelled_session_discards_results(qtbot, tmp_path, monkeypatch):
+    from src.features.files.services import facade as facade_module
+    catalog, library, lib = _facade_env(tmp_path)
+    asset = lib / "x.png"
+    asset.write_bytes(b"X")
+    release = threading.Event()
+    original = facade_module.read_file_bytes
 
+    def gated(path, max_bytes):
+        release.wait(5)
+        return original(path, max_bytes)
 
-def test_fr15_cancelled_session_discards_results(qtbot):
-    transport = _transport()
+    monkeypatch.setattr(facade_module, "read_file_bytes", gated)
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=_FilesFacade(catalog, max_workers=1))
     loaded = []
-    transport.compare_image_loaded.connect(lambda p, data, s: loaded.append(p))
-    transport.load_compare_images(["/x.png"], session_id="gone")
-    reply = transport._network.pending[0]
-    transport.cancel_compare("gone")           # 关窗
-    assert reply.aborted                       # 在途请求被取消
-    reply.finished.emit()                      # 迟到响应
-    qtbot.wait(20)
-    assert loaded == []
+    transport.compare_image_loaded.connect(lambda *args: loaded.append(args))
+    try:
+        transport.load_compare_images([str(asset)], session_id="gone")
+        transport.cancel_compare("gone")           # 关窗
+        release.set()
+        with qtbot.assertNotEmitted(transport.compare_image_loaded):
+            qtbot.wait(200)
+        assert loaded == []
+    finally:
+        release.set()
+        transport.shutdown()
+        catalog.close()
 
 
 def test_fr15_dialog_closed_guard_ignores_results(qtbot):
@@ -333,20 +387,35 @@ def test_fr15_pixmap_budget_caps_giant_zoom(qtbot):
             assert pixmap.width() * pixmap.height() <= MAX_PIXMAP_PIXELS + 4096
 
 
-def test_fr17_shutdown_aborts_metadata_and_compare(qtbot):
-    transport = _transport()
-
-    class _Reply(_FakeReply):
-        def readyRead(self):
-            pass
-
-    metadata_reply = _FakeReply()
-    transport._metadata_replies[metadata_reply] = object()
-    transport.load_compare_images(["/m.png"], session_id="s")
-    compare_reply = transport._network.pending[0]
-
-    transport.shutdown()
-    assert metadata_reply.aborted
-    assert compare_reply.aborted
-    assert transport._compare_sessions == {}
-    assert transport._compare_replies == {}
+def test_fr17_shutdown_suppresses_metadata_and_compare(qtbot, tmp_path, monkeypatch):
+    """关闭后：比较/元数据的迟到回调一律静默（投递门，不再是 HTTP abort）。"""
+    from src.features.files.services.facade import FacadeOutcome, FilesFacade
+    catalog, library, lib = _facade_env(tmp_path)
+    captured = []
+    facade = FilesFacade(catalog, max_workers=1)
+    monkeypatch.setattr(
+        facade, "run",
+        lambda key, request_id, work, listener: captured.append(listener))
+    transport = NativeFilesTransport(lambda: "", None, facade=facade)
+    metadata_applied, compare_loaded = [], []
+    transport.metadata_applied.connect(lambda *args: metadata_applied.append(args))
+    transport.compare_image_loaded.connect(lambda *args: compare_loaded.append(args))
+    try:
+        (lib / "m.png").write_bytes(b"m")
+        catalog.upsert_asset(library.library_id, lib / "m.png")
+        transport.patch_metadata([str(lib / "m.png")], {"rating": 3})
+        transport.load_compare_images([str(lib / "m.png")], session_id="s")
+        assert len(captured) == 2
+        transport.shutdown()
+        captured[0](FacadeOutcome(request_id="m", key="meta:x", generation=1,
+                                  result=None))  # 元数据迟到成功
+        outcome = FacadeOutcome(request_id="c", key="compare:s:1",
+                                generation=1, result=b"BYTES")
+        captured[1](outcome)                     # 比较迟到字节
+        with qtbot.assertNotEmitted(transport.metadata_applied):
+            qtbot.wait(100)
+        assert metadata_applied == [] and compare_loaded == []
+        assert transport._compare_sessions == {}
+    finally:
+        transport.shutdown()
+        catalog.close()

@@ -153,45 +153,29 @@ class FilesFacade:
         超限/缺失/无权限以 FilesError 送达，不部分传输。
         """
         def _work() -> bytes:
-            target = Path(path)
-            try:
-                size = target.stat().st_size
-            except FileNotFoundError as exc:
-                raise not_found_error(path, "文件不存在或已被移动") from exc
-            except PermissionError as exc:
-                raise permission_error(path, "没有读取权限") from exc
-            if size > max_bytes:
-                raise unsupported_error(
-                    path, f"文件超过 {max_bytes // (1024 * 1024)}MB 预览上限")
-            try:
-                with open(target, "rb") as handle:
-                    data = handle.read(max_bytes + 1)
-            except PermissionError as exc:
-                raise permission_error(path, "没有读取权限") from exc
-            if len(data) > max_bytes:  # 读取期间被追加：同样按超限拒绝
-                raise unsupported_error(
-                    path, f"文件超过 {max_bytes // (1024 * 1024)}MB 预览上限")
-            if not data:
-                raise not_found_error(path, "该文件没有可预览内容")
-            return data
+            return read_file_bytes(path, max_bytes)
 
         self._submit(
             key=f"read:{identity_key(path)}", request_id=request_id,
-            work=_work, listener=listener,
+            work=_work,
+            listener=listener,
             wrap=lambda result: result,
         )
 
-    def collection_members(self, collection_id: int, *, library_id: str,
+    def collection_members(self, collection_id: int, *,
                            request_id: str, listener: Listener) -> None:
-        """集合成员 → 目录条目（成员路径 + 磁盘真值水合）。"""
-        self._submit(
-            key="collection", request_id=request_id,
-            work=lambda: self.query.entries_for_paths(
+        """集合成员 → 目录条目（归属库内部解析；成员路径 + 磁盘真值水合）。"""
+        def _work() -> QueryResult:
+            library_id = self.collections.library_of(collection_id)
+            return self.query.entries_for_paths(
                 self.collections.member_paths(collection_id),
                 request_id=request_id,
                 path_label=f"collection://{collection_id}",
-                library_id=library_id),
-            listener=listener,
+                library_id=library_id)
+
+        self._submit(
+            key="collection", request_id=request_id,
+            work=_work, listener=listener,
             wrap=lambda result: result,
         )
 
@@ -343,6 +327,37 @@ class FilesFacade:
             listener(outcome)
 
         future.add_done_callback(_deliver)
+
+
+def _size_limit_label(max_bytes: int) -> str:
+    if max_bytes >= 1024 * 1024:
+        return f"{max_bytes // (1024 * 1024)}MB"
+    return f"{max(max_bytes // 1024, 1)}KB"
+
+
+def read_file_bytes(path: str, max_bytes: int) -> bytes:
+    """同进程本地直读（预览/比较取字节）；超限/缺失/无权限以 FilesError 拒绝。"""
+    target = Path(path)
+    try:
+        size = target.stat().st_size
+    except FileNotFoundError as exc:
+        raise not_found_error(path, "文件不存在或已被移动") from exc
+    except PermissionError as exc:
+        raise permission_error(path, "没有读取权限") from exc
+    if size > max_bytes:
+        raise unsupported_error(
+            path, f"文件过大，超过 {_size_limit_label(max_bytes)} 预览上限")
+    try:
+        with open(target, "rb") as handle:
+            data = handle.read(max_bytes + 1)
+    except PermissionError as exc:
+        raise permission_error(path, "没有读取权限") from exc
+    if len(data) > max_bytes:  # 读取期间被追加：同样按超限拒绝
+        raise unsupported_error(
+            path, f"文件过大，超过 {_size_limit_label(max_bytes)} 预览上限")
+    if not data:
+        raise not_found_error(path, "该文件没有可预览内容")
+    return data
 
 
 def query_result_of(outcome: FacadeOutcome) -> QueryResult:
