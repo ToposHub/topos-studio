@@ -184,7 +184,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 | 旧 id | 新接管方式与真实能力 | 专门退出验收 |
 | --- | --- | --- |
-| `format_factory` | 独立Qt工具 command/window，单输入与多选政策明确；安全转码/封装服务 | 输入快照、输出计划/冲突、进度/取消/失败恢复；不走旧 `/launch` |
+| `format_factory` | 独立Qt工具 command/window，单输入与多选政策明确；安全转码/封装服务（G1 `415da3ac`：FormatFactoryService——InputSnapshot 冻结/计划冲突政策 rename·skip·overwrite/ClipExportJob 执行预算取消原子交付/失败重试；NativeToolCommandService 三段+F4 原子边界；FormatFactoryWindow 独立窗口经 F5 singleton 注册表） | 输入快照、输出计划/冲突、进度/取消/失败恢复；不走旧 `/launch`（11 项真 ffmpeg 验收：快照漂移拒绝/取消终止无残留/重试换政策交付/零 HTTP 断言） |
 | `image_factory` | 批处理command，传真实选中数组和输出计划 | 色彩/HDR、逐项结果、取消/关闭，生成结果同一索引入口回库 |
 | `shutdown_timer` | 独立utility window，single instance/owner | 启动只开窗口；系统动作有明确意图，取消/退出无遗留倒计时 |
 | `decode_benchmark` | 诊断command直接接既有Edit host service | 来源/时间线上下文、预算、取消、零素材写入；不借旧bridge |
