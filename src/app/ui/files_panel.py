@@ -501,7 +501,13 @@ class FilesPanel(QWidget):
             self._native_transport.task_started.connect(self._files_jobs.on_task_started)
             self._native_transport.task_finished.connect(self._files_jobs.on_task_finished)
             self._native_transport.task_failed.connect(self._files_jobs.on_task_failed)
+            self._native_transport.recovery_loaded.connect(
+                self._files_jobs.on_recovery_loaded)
+            self._native_transport.recovery_applied.connect(
+                self._on_recovery_applied)
             self._native_panel.jobs_requested.connect(self._open_jobs)
+            # B3：上次运行遗留的未终态任务进入台账（待恢复可操作）
+            self._native_transport.load_recoveries()
             # F11 / B10：常用位置、索引状态、缩略图重试
             self._native_panel.libraries_requested.connect(
                 self._native_transport.load_libraries)
@@ -603,6 +609,13 @@ class FilesPanel(QWidget):
         dialog.show()
         transport.load_trash()
 
+    def _on_recovery_applied(self, verdict: dict) -> None:
+        registry = getattr(self, "_files_jobs", None)
+        if registry is not None:
+            registry.on_recovery_applied(verdict)
+        if self._native_panel is not None and verdict.get("state") == "completed":
+            self._native_panel.refresh()
+
     def _open_jobs(self) -> None:
         """D5 任务列表：注册表常驻，对话框可关/重开不丢账。"""
         if self._native_transport is None:
@@ -618,6 +631,7 @@ class FilesPanel(QWidget):
             return
         dialog = JobsDialog(registry, self)
         dialog.cancel_requested.connect(self._native_transport.cancel_task)
+        dialog.recover_requested.connect(self._native_transport.recover_job)
         dialog.retry_requested.connect(
             lambda operation, targets, policy, options:
             self._native_transport.run_task(

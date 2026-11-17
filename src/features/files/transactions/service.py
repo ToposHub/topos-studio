@@ -74,28 +74,35 @@ class FileOperationService:
         return self._transfer("move", library_id, source,
                               lambda: self._ops.move(
                                   source, destination_dir, policy=policy, cancel=cancel,
-                                  on_identity_moved=None))
+                                  on_identity_moved=None),
+                              intended_destination=Path(destination_dir) / Path(source).name)
 
     def rename(self, library_id: str, source: str | Path, new_name: str,
                *, policy: str = "error", cancel: CancelToken | None = None) -> ItemOutcome:
         return self._transfer("rename", library_id, source,
                               lambda: self._ops.rename(
                                   source, new_name, policy=policy, cancel=cancel,
-                                  on_identity_moved=None))
+                                  on_identity_moved=None),
+                              intended_destination=Path(source).parent / new_name)
 
     def copy(self, library_id: str, source: str | Path, destination_dir: str | Path,
              *, policy: str = "error", cancel: CancelToken | None = None) -> ItemOutcome:
         return self._transfer("copy", library_id, source,
                               lambda: self._ops.copy(
-                                  source, destination_dir, policy=policy, cancel=cancel))
+                                  source, destination_dir, policy=policy, cancel=cancel),
+                              intended_destination=Path(destination_dir) / Path(source).name)
 
     def _transfer(self, op: str, library_id: str, source: str | Path,
-                  executor) -> ItemOutcome:
+                  executor, *, intended_destination: Path | None = None) -> ItemOutcome:
         handle = None
         if self._journal is not None:
+            args = {"source": str(source)}
+            if intended_destination is not None:
+                # B3 恢复证据：意图目的地（策略改名会有后缀，证据分类按
+                # 存在性 best-effort 判定）
+                args["destination"] = str(intended_destination)
             handle = self._journal.begin(
-                library_id, op,
-                {"source": str(source)},
+                library_id, op, args,
                 idempotency_key=f"{op}:{nfc(source)}",
             )
             if handle.replayed:

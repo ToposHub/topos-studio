@@ -140,3 +140,84 @@ def test_transport_first_task_event_carries_call_params(qtbot, tmp_path):
     finally:
         transport.shutdown()
         catalog.close()
+
+
+# ---------------------------------------------------------------------------
+# D5'/B3：中断恢复入账与操作
+# ---------------------------------------------------------------------------
+
+def test_transport_recovery_flow(qtbot, tmp_path):
+    """遗留未终态任务 → recovery_loaded；recover_job → recovery_applied。"""
+    from src.features.files.transactions.journal import OperationJournal
+
+    locator = FilesDataLocator.for_config_root(tmp_path)
+    locator.ensure_layout()
+    catalog = FilesCatalog(locator)
+    catalog.open()
+    library = catalog.register_library(tmp_path / "lib")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    moved = lib / "left.png"
+    moved.write_bytes(b"x")
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=FilesFacade(catalog, max_workers=1))
+    try:
+        # 模拟上个进程中断：目标已就位、源已不在（=已完成证据）
+        journal = transport._facade.journal
+        journal.begin(library.library_id, "move",
+                      {"source": str(moved), "destination": str(moved) + ".moved"},
+                      idempotency_key="move:fake")
+        (lib / "left.png.moved").write_bytes(b"x")
+        moved.unlink()
+
+        with qtbot.waitSignal(transport.recovery_loaded, timeout=8000) as listed:
+            transport.load_recoveries()
+        records = listed.args[0]
+        assert len(records) == 1
+        assert records[0]["operation"] == "move"
+        assert records[0]["source"] == str(moved)
+
+        with qtbot.waitSignal(transport.recovery_applied, timeout=8000) as applied:
+            transport.recover_job(records[0]["job_id"])
+        verdict = applied.args[0]
+        assert verdict["state"] == "completed"
+    finally:
+        transport.shutdown()
+        catalog.close()
+
+
+def test_registry_and_dialog_handle_pending_recovery(qtbot):
+    registry = FilesJobsRegistry()
+    dialog = JobsDialog(registry)
+    qtbot.addWidget(dialog)
+    registry.on_recovery_loaded([
+        {"job_id": "job-x", "operation": "move", "state": "renaming",
+         "source": "/media/mid.mov"}])
+    job = registry.job("job-x")
+    assert job["state"] == "pending_recovery"
+    assert dialog.table.rowCount() == 1
+    assert dialog.table.item(0, 2).text() == "待恢复"
+
+    dialog.table.selectRow(0)
+    assert dialog.recover_button.isEnabled()
+    assert not dialog.cancel_button.isEnabled()  # 不是运行中
+    recovers = []
+    dialog.recover_requested.connect(recovers.append)
+    dialog._recover_selected()
+    assert recovers == ["job-x"]
+
+    registry.on_recovery_applied({"job_id": "job-x", "state": "completed",
+                                  "classification": "completed", "action": "none"})
+    assert registry.job("job-x")["state"] == "done"
+    assert not dialog.recover_button.isEnabled()
+
+    # 证据不足：保持待恢复并展示分类原因
+    registry.on_recovery_loaded([
+        {"job_id": "job-y", "operation": "copy", "state": "staged",
+         "source": "/media/amb.png"}])
+    registry.on_recovery_applied({"job_id": "job-y",
+                                  "state": "pending_recovery",
+                                  "classification": "ambiguous", "action": "none"})
+    job_y = registry.job("job-y")
+    assert job_y["state"] == "pending_recovery"
+    assert "证据不足" in job_y["failures"][0]["error"]

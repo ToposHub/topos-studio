@@ -30,3 +30,25 @@
 ## 隐私
 
 仅源码/测试/Markdown；合成素材与临时目录。
+
+## 追加批次（同日）：B3 生产接线 + 恢复入口（第 5 项「恢复」缺口收口）
+
+| 层 | 内容 |
+| --- | --- |
+| facade | 默认持有 `OperationJournal` 并注入任务/批改名服务——此前生产路径 journal=None 纯内存运行，崩溃零记录（B3 落地缺口） |
+| 写路径 | `_transfer` begin 落**意图目的地**（恢复证据分类依据；策略改名后缀按存在性 best-effort） |
+| 服务 | `FilesTaskService.pending_recoveries()`（job_log ACTIVE 态遗留）/ `recover(job_id)`（证据分类；无法判定保持待恢复） |
+| transport | `recovery_loaded`/`recovery_applied` 信号 + `load_recoveries`/`recover_job` |
+| 台账/对话框 | 待恢复态入账（含中断原因）、恢复按钮（仅待恢复可用）、判定落账（completed→done；failed→可重试；证据不足保持并展示分类原因） |
+| 接线 | FilesPanel 原生分支启动即 `load_recoveries()`；恢复完成刷新面板 |
+
+### 验证（追加）
+
+- services：facade 默认 journal 终态落账（含意图目的地断言）；崩溃遗留→待恢复清单→磁盘证据分类（`tests/files` 20 项全绿，248 项全量两连绿）。
+- UI：transport 恢复流（遗留→清单→判定）；台账/对话框待恢复行、恢复门控、证据不足保持（`test_files_jobs_ui.py` 6 项）。
+- 组合回归 367 passed；早前两次全量各现 1 例不同时序偶发（单独与复跑均绿，与既往顺序脆弱记录一致，非本批归属）。
+
+### 边界更新
+
+- 「恢复」=B3 证据分类（completed/retriable/pending_recovery）；**跨进程任务历史浏览**未做（job_log 有界 200 条，trim 保留非终态；历史 UI 属可选后续）。
+- 证据分类依赖意图目的地入账；策略改名的后缀路径不预判（分类按源/目标存在性 best-effort，证据不足如实保持待恢复）。

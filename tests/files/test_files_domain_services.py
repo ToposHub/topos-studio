@@ -293,3 +293,58 @@ def test_task_service_lists_trash(env):
     records = env["tasks"].list_trash()
     assert [r.item_name for r in records] == ["tossed.png"]
     assert records[0].original_path == str(asset)
+
+
+# ---------------------------------------------------------------- D5'/B3 生产接线
+def test_facade_journal_records_terminal_state(env):
+    """facade 默认持久 journal：任务终态落 job_log（此前生产路径纯内存）。"""
+    from src.features.files.services.facade import FilesFacade
+    lib_id = env["library"].library_id
+    a = _seed_file(env["lib"], "j1.png")
+    target_dir = env["lib"] / "归档"
+    target_dir.mkdir()
+    facade = FilesFacade(env["catalog"], max_workers=1)
+    try:
+        result = facade.tasks.start_task(lib_id, "move", [str(a)],
+                                         options={"destination": str(target_dir)})
+        assert result.ok
+        pending = facade.tasks.pending_recoveries()
+        assert pending == []  # 终态不遗留
+        rows = facade.journal.pending()  # 无 ACTIVE 态
+        assert rows == []
+        with env["catalog"]._read() as cursor:
+            row = cursor.execute(
+                "SELECT state, args FROM job_log WHERE op = 'move'").fetchone()
+        assert row["state"] == "completed"
+        import json as _json
+        args = _json.loads(row["args"])
+        assert args["destination"].endswith("j1.png")  # 意图目的地入账
+    finally:
+        facade.shutdown()
+
+
+def test_pending_recoveries_and_evidence_classification(env):
+    """崩溃遗留（begin 未 finish）→ 待恢复清单 → 磁盘证据分类。"""
+    from src.features.files.transactions.journal import OperationJournal
+    from src.features.files.services.facade import FilesFacade
+    lib_id = env["library"].library_id
+    moved = _seed_file(env["lib"], "left.png")
+    facade = FilesFacade(env["catalog"], max_workers=1)
+    journal = facade.journal
+    try:
+        # 模拟上个进程中断：begin 后未 finish，目标已就位（=已完成的证据）
+        journal.begin(lib_id, "move", {"source": str(moved),
+                                       "destination": str(moved) + ".moved"},
+                      idempotency_key="move:fake")
+        (env["lib"] / "left.png.moved").write_bytes(b"x")
+        moved.unlink()
+        pending = facade.tasks.pending_recoveries()
+        assert [row["op"] for row in pending] == ["move"]
+
+        verdict = facade.tasks.recover(pending[0]["id"])
+        assert verdict.ok
+        result = verdict.items[0].result
+        assert result["state"] == "completed"
+        assert facade.tasks.pending_recoveries() == []
+    finally:
+        facade.shutdown()
