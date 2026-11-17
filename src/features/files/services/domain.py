@@ -131,19 +131,34 @@ class FilesCollectionsService:
         with self._catalog._read() as cursor:
             if library_id:
                 rows = cursor.execute(
-                    "SELECT id, name, color, created_at FROM collections"
-                    " WHERE library_id = ? ORDER BY name", (library_id,)).fetchall()
+                    "SELECT c.id, c.name, c.color, c.library_id,"
+                    " (SELECT COUNT(*) FROM collection_items ci"
+                    "  WHERE ci.collection_id = c.id) AS item_count"
+                    " FROM collections c WHERE c.library_id = ? ORDER BY c.name",
+                    (library_id,)).fetchall()
             else:
                 rows = cursor.execute(
-                    "SELECT id, name, color, created_at FROM collections"
-                    " ORDER BY name").fetchall()
+                    "SELECT c.id, c.name, c.color, c.library_id,"
+                    " (SELECT COUNT(*) FROM collection_items ci"
+                    "  WHERE ci.collection_id = c.id) AS item_count"
+                    " FROM collections c ORDER BY c.name").fetchall()
         return ServiceResult(
             command_id="files.collections.list", ok=True, accepted=True,
             stage="completed",
             items=tuple(ItemResult(str(row["id"]), ok=True, result={
-                "id": row["id"], "name": row["name"], "color": row["color"]})
+                "id": row["id"], "name": row["name"], "color": row["color"],
+                "library_id": row["library_id"],
+                "item_count": row["item_count"]})
                 for row in rows),
             revision=self._catalog.revision)
+
+    def library_of(self, collection_id: int) -> str:
+        """集合归属库（成员水合叠加用）；未知集合返回空串。"""
+        with self._catalog._read() as cursor:
+            row = cursor.execute(
+                "SELECT library_id FROM collections WHERE id = ?",
+                (int(collection_id),)).fetchone()
+        return str(row["library_id"]) if row is not None else ""
 
     def create_collection(self, library_id: str, name: str) -> ServiceResult:
         if not name.strip():
