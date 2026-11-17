@@ -31,6 +31,7 @@ from src.shared.plugins.lifecycle import (
     ContributionSet,
     PluginLifecycleController,
 )
+from src.shared.plugins.providers import ProviderRegistry
 
 WindowCallback = Callable[[], Any]
 
@@ -145,6 +146,8 @@ class PluginHostSession:
         self.lifecycle = PluginLifecycleController(
             close_windows=self.windows.close_all,
             job_wait_timeout=job_wait_timeout)
+        # [F8] 格式 provider 注册表：owner 归属，停用/退役整体摘除
+        self.providers = ProviderRegistry()
         self._lock = threading.RLock()
         self._shortcuts: dict[str, ContributionSet] = {}
         # 释放失败但所有权未完成的旧贡献集：保留可重试（不得随替换丢失）
@@ -191,7 +194,9 @@ class PluginHostSession:
         released = self._release_shortcut_set(shortcuts) \
             if shortcuts is not None else 0
         closed = self.windows.close_all(plugin_id)
+        providers_removed = self.providers.unregister_owner(plugin_id)
         return {"released_shortcuts": released, "closed_windows": closed,
+                "providers_removed": providers_removed,
                 "shortcut_failures": self.shortcut_failures(plugin_id)}
 
     def retire_plugin(self, plugin_id: str) -> dict[str, Any]:
@@ -205,9 +210,11 @@ class PluginHostSession:
         for stale in failed:
             released_shortcuts += self._release_shortcut_set(stale)
         closed_windows = self.windows.close_all(plugin_id)
+        providers_removed = self.providers.unregister_owner(plugin_id)
         report = self.lifecycle.deactivate(plugin_id, wait_jobs=False)
         report["released_shortcuts"] = released_shortcuts
         report["closed_windows"] = closed_windows
+        report["providers_removed"] = providers_removed
         return report
 
     # ------------------------------------------------------------ 快捷键贡献
