@@ -34,6 +34,10 @@ def _load_finish_method() -> Any:
         # 它承载子命令（真正的时间线语义由集成/实机验证覆盖）
         "MacroCommand": SimpleNamespace(
             create=lambda label, commands: SimpleNamespace(sub_commands=commands)),
+        # C5：投放宏携带新导入素材回调（测试里记录不执行）
+        "ImportDropMacroCommand": SimpleNamespace(
+            create=lambda label, commands, **kw: SimpleNamespace(
+                sub_commands=commands, **kw)),
         "AddTrackCommand": SimpleNamespace(create=lambda *a, **k: None),
     }
     exec(compile(module, "timeline_view._finish_external_import", "exec"), namespace)
@@ -63,6 +67,8 @@ def _make_view(project: EditProject, *, fail_macro: bool,
         project_changed=SimpleNamespace(emit=recorder["published"].append),
         status_message_requested=SimpleNamespace(emit=recorder["messages"].append),
         _ensure_first_asset_timeline_settings=lambda asset: True,
+        _undo_imported_assets=lambda assets, timeline: None,
+        _redo_imported_assets=lambda assets: None,
         _get_asset_duration_frames=lambda asset: 25,
         timeline_changed=SimpleNamespace(emit=lambda *_: None),
         project_timeline_transaction_committed=SimpleNamespace(

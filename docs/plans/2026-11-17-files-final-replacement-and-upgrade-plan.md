@@ -103,13 +103,15 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：B。范围：把DTO/Protocol变成可被UI、插件和新自动化入口调用的真实服务。
 
-- [ ] 实现 query/tree/search/collections/metadata/library/scan/thumbnail-preview/file-task/import-export/jobs/events 服务，复用可用核心并统一新repository/provider。
-- [ ] UI 调用类型化异步 facade；阻塞扫描、探测、解码和 I/O 进入有界 worker，结果附库/位置/请求/版本身份。
-- [ ] 明确 command 输入、错误码、revision、幂等、锁/权限、截止时间和取消；原生/插件/自动化入口使用同一实现，不保留旧HTTP协议。
-- [ ] 受理、排队、服务确认、窗口 ready、作业完成分开；所有异步消息按 invocation/job id 关联，迟到消息不能覆盖新调用。
-- [ ] 事件订阅返回可注销句柄，带库作用域/版本；selection/progress 合并与背压，关闭/切库撤销旧订阅。
-- [ ] 工程导入先暂存 assets/bins/轨道/片段，再由既有 command/事务一次提交；构造、取消、切工程/删轨和提交失败统一回滚。
-- [ ] 一次 Undo/Redo 覆盖新增素材与落轨；复用旧素材不误删，revision/dirty/preview/通知与实际提交一致。
+- [ ] 实现 query/tree/search/collections/metadata/library/scan/thumbnail-preview/file-task/import-export/jobs/events 服务，复用可用核心并统一新repository/provider。（**部分**：C1 已落 query/tree/search/collections/metadata/library/scan/file-task + C3 events，`src/features/files/services/`，`tests/files/test_files_domain_services.py` 13 项；thumbnail-preview/import-export/jobs 属 E/后续批次）
+- [ ] UI 调用类型化异步 facade；阻塞扫描、探测、解码和 I/O 进入有界 worker，结果附库/位置/请求/版本身份。（**部分**：C2 `FilesFacade` 有界 worker+代际丢弃+错误通道，`tests/files/test_files_facade.py` 6 项；**UI 尚未接**——D 阶段把面板/transport 切到 facade 后才闭环）
+- [ ] 明确 command 输入、错误码、revision、幂等、锁/权限、截止时间和取消；原生/插件/自动化入口使用同一实现，不保留旧HTTP协议。（**部分**：输入/错误码/revision/幂等键/协作取消在 C1 服务+B3 journal 落地；截止时间与"入口同一实现"待 D/F 换轨——旧 HTTP 仍在运行）
+- [ ] 受理、排队、服务确认、窗口 ready、作业完成分开；所有异步消息按 invocation/job id 关联，迟到消息不能覆盖新调用。（**部分**：facade 代际丢弃+request_id 关联已测；queued→completed 全阶段词表在共享层，UI 侧展示属 D）
+- [x] 事件订阅返回可注销句柄，带库作用域/版本；selection/progress 合并与背压，关闭/切库撤销旧订阅。（C3 `FilesEventBus`：幂等注销、库过滤+revision、progress last-wins 合并、有界 drop-oldest 计数、close_all；`tests/files/test_files_event_bus.py` 6 项）
+- [x] 工程导入先暂存 assets/bins/轨道/片段，再由既有 command/事务一次提交；构造、取消、切工程/删轨和提交失败统一回滚。（既有 B08 异步投放路径经本轮复核确认：stale job/取消/切工程/revision 变化/删轨/锁定/宏失败七类守卫与补偿；`tests/edit/test_external_import_compensation.py` 3 项 + `tests/edit/test_timeline_external_file_drop.py` 8 项）
+- [x] 一次 Undo/Redo 覆盖新增素材与落轨；复用旧素材不误删，revision/dirty/preview/通知与实际提交一致。（C5：`ImportDropMacroCommand` 携带新导入素材的 undo/redo 回调，仍被引用素材跳过、按原 asset_id 复位；`MacroCommand` 重建改 `dataclasses.replace` 保子类；`tests/edit/test_import_undo_covers_assets.py` 4 项。revision/dirty 由既有 bump 机制；preview 一致性属 D/实机）
+
+**C 阶段边界（诚实）**：服务/facade/事件均为**契约测试口径**，无生产 UI 调用方（D 换轨后闭环）；thumbnail/import-export/jobs 服务未做；tests/edit 全量 13601 passed/25 failed 中 25 个失败经干净树复跑归因为先于本轮的顺序/环境脆弱（channel_layout/disable_shortcut/pointer_chrome 等逐一确认与本轮改动无关），定向命令/宏/撤销/投放批次 154 passed。
 
 生产调用：Native Files、Library、插件和实际需要的新API注入同一service；feature不回调旧routes/globals。没有明确用途不新增HTTP层。
 验收：同一命令由各实际入口调用，产生相同最终实体/DB/revision/错误；失败与取消无半提交工程。
