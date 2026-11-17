@@ -186,7 +186,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 | --- | --- | --- |
 | `format_factory` | 独立Qt工具 command/window，单输入与多选政策明确；安全转码/封装服务（G1 `415da3ac`：FormatFactoryService——InputSnapshot 冻结/计划冲突政策 rename·skip·overwrite/ClipExportJob 执行预算取消原子交付/失败重试；NativeToolCommandService 三段+F4 原子边界；FormatFactoryWindow 独立窗口经 F5 singleton 注册表） | 输入快照、输出计划/冲突、进度/取消/失败恢复；不走旧 `/launch`（11 项真 ffmpeg 验收：快照漂移拒绝/取消终止无残留/重试换政策交付/零 HTTP 断言） |
 | `image_factory` | 批处理command，传真实选中数组和输出计划（G2 `71cd1ca6`：ImageFactoryService——快照/冲突政策/项间取消/整批预算；Pillow 同进程 ICC 透传+16-bit 位深保留；BatchResult source→output 映射） | 色彩/HDR、逐项结果、取消/关闭，生成结果同一索引入口回库（9+1 项验收：ICC 可解析/I;16 保留/部分失败如实/取消 5+25/回库走同一 start_scan） |
-| `shutdown_timer` | 独立utility window，single instance/owner | 启动只开窗口；系统动作有明确意图，取消/退出无遗留倒计时 |
+| `shutdown_timer` | 独立utility window，single instance/owner（G3 `55f3dbe5`：状态机 idle→counting→awaiting_confirmation——到零待确认不自动执行、confirm 才触发；系统动作宿主注入 osascript 列表参数；原生命令表短 id 键修正） | 启动只开窗口；系统动作有明确意图，取消/退出无遗留倒计时（8+1 项验收：到零零执行/确认一次/任意取消清零/关闭停表/零 HTTP singleton） |
 | `decode_benchmark` | 诊断command直接接既有Edit host service | 来源/时间线上下文、预算、取消、零素材写入；不借旧bridge |
 | `code_editor` | Monaco独立受控宿主或等价编辑工具/provider | 读取/编码/外部变更/安全保存/恢复，新建与多文件入口；不依赖旧routes/JS globals |
 | `image_editor` | 既有Color/Effect Catalog或独立图片编辑command | 预览/导出一致、undo、默认安全输出与写入事务，不能照搬直接写原图接口 |
