@@ -159,7 +159,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 依赖：C/D；格式贡献依赖 E。范围：接共享层已有实现，补其真实运行边界。
 
 - [ ] 单一 Inventory 汇总builtin/已安装/显式开发源；安装根与发现根闭环，真实来源、声明/运行版本、重复身份和诊断进入 UI。（**部分**：F1 `16cec5db` discovery 三源聚合（builtin>installed>dev 明确优先级）+ 安装根读侧与 installer current 指针/来源校验同语义闭环（指针坏→missing+诊断）+ DevSourceRegistry 持久化 + 控制器/中心 UI 生产接线（来源行/安装状态/未验证标注/typed 诊断/占位行如实不可启动）；运行版本分槽就绪且有不被发现快照覆盖的锁定测试（宿主 mark_runtime 接线归 F6）。边界：安装/卸载/添加开发源的 UI 动作未做（第 11 项）、preferences 第二处列表仍读旧投影、inventory-only 插件不可启动（第 3/5/6 项前），见 [F1 验证记录](../validation/files_replacement_phase_f1_20261118/README.md)）
-- [ ] 按新ID/状态模型重建固定项、最近项、快捷键和启停偏好；偏好/中心/命令读同一快照，无需旧id别名或旧偏好迁移。
+- [ ] 按新ID/状态模型重建固定项、最近项、快捷键和启停偏好；偏好/中心/命令读同一快照，无需旧id别名或旧偏好迁移。（**部分**：F2 `57f9fb53` 合并行换命名空间 id（`files.<短id>`）——固定/最近/快捷键全按新 id 建档、旧短 id 偏好自然失效（测试锁定不迁移）；命令层经同一合并快照的 `command_key`（短 id）寻址，线上路由不变；启停双轨如实：legacy 走旧 catalog 配置、新模型插件走 DesiredStateStore+inventory（跨重启）；447 项回归全绿。边界：命令服务内部仍短 id 寻址（快照内换轨非重写，归 F3/F4）、新模型 desired 的运行时消费待 F6，见 [F2 验证记录](../validation/files_replacement_phase_f2_20261118/README.md)）
 - [ ] command 为唯一启动入口；菜单/工具栏/右键/快捷键统一参数、权限、选择、库 revision 和 deadline 复核。
 - [ ] 权威复核与调度在同一持有revision/grant/token的边界内原子判断；停用/切库/撤权发生在worker复核与GUI提交之间时拒绝过期调用。DTO票据防伪不能代替该原子边界。
 - [ ] 实现 window owner/singleton/context 更新，贡献注册 token、事件/菜单/快捷键注销；真实激活半失败完整回滚。
