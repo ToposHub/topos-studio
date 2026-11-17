@@ -19,9 +19,10 @@ Honesty notes kept from the review plan (PR-05):
 """
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from threading import Lock
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 from weakref import WeakValueDictionary
 
 from src.shared.plugins.lifecycle import InvocationContext, make_invocation
@@ -36,6 +37,9 @@ from src.shared.plugins.services import (
 # Legacy ids that own a real HTTP launch route (verified in this repo).
 LAUNCHABLE_LEGACY_IDS = frozenset({"format_factory", "image_factory", "shutdown_timer", "decode_benchmark"})
 
+# [F3] 手势→提交的 deadline 预算：过期调用一律拒绝，不无限期放行
+GESTURE_DEADLINE_SEC = 30.0
+
 
 class _TransportLike(Protocol):
     def launch_plugin(self, plugin_id: str, endpoint: str,
@@ -45,9 +49,13 @@ class _TransportLike(Protocol):
 class LegacyFilesCommandService:
     """Implements ``PluginCommandService`` for the legacy Files host."""
 
-    def __init__(self, catalog: Any, transport: _TransportLike) -> None:
+    def __init__(self, catalog: Any, transport: _TransportLike,
+                 revision_provider: Callable[[], int | None] | None = None) -> None:
         self.catalog = catalog
         self.transport = transport
+        # [F3] 库 revision 复核：手势时冻结、复核时比对——重扫/切库后的
+        # 过期调用拒绝重发。None/0 = 宿主未提供（跳过该项，不冒装）
+        self._revision_provider = revision_provider
         # A caller-controlled DTO flag is not proof that this service checked it.
         # Weak ownership also releases checks abandoned when a window closes.
         self._checked: WeakValueDictionary[str, PreparedInvocation] = WeakValueDictionary()
@@ -79,6 +87,8 @@ class LegacyFilesCommandService:
         context: InvocationContext = make_invocation(
             command_id=f"files.{command_id}.launch", plugin_id=f"files.{command_id}",
             entry_paths=tuple(paths),
+            entry_revision=self._current_revision(),
+            deadline=time.monotonic() + GESTURE_DEADLINE_SEC,
         )
         return PreparedInvocation(context=context, command_id=context.command_id,
                                   plugin_id=context.plugin_id, payload=payload)
@@ -100,6 +110,7 @@ class LegacyFilesCommandService:
             raise CommandRejected("INVOCATION_CANCELLED", "插件调用已取消。")
         if prepared.context.timed_out():
             raise CommandRejected("INVOCATION_EXPIRED", "插件调用已过期。")
+        self._check_revision(prepared.context.entry_revision)
         paths = list(prepared.context.entry_paths)
         try:
             endpoint, payload = self.catalog.launch_request(legacy_id, paths)
@@ -111,6 +122,22 @@ class LegacyFilesCommandService:
         with self._checked_lock:
             self._checked[checked.context.invocation_id] = checked
         return checked
+
+    def _current_revision(self) -> int:
+        try:
+            return int(self._revision_provider() or 0) if self._revision_provider else 0
+        except Exception:
+            return 0
+
+    def _check_revision(self, frozen: int) -> None:
+        """[F3] 库 revision 复核：手势后重扫/切库 → 拒绝过期调用。"""
+        if not frozen:
+            return                      # 宿主未提供 revision：不冒装已复核
+        current = self._current_revision()
+        if current and current != frozen:
+            raise CommandRejected(
+                "LIBRARY_REVISED",
+                "素材库在启动期间已更新（重扫/切库），请重新发起。", retriable=True)
 
     def dispatch(self, prepared: PreparedInvocation) -> ServiceResult:
         """Send the frozen request; completion arrives via the transport signal."""
@@ -125,6 +152,12 @@ class LegacyFilesCommandService:
         if prepared.context.timed_out():
             return rejected(prepared.command_id, error_code="INVOCATION_EXPIRED", message="插件调用已过期。",
                             invocation_id=prepared.context.invocation_id)
+        try:
+            self._check_revision(prepared.context.entry_revision)
+        except CommandRejected as exc:
+            # 已复核的调用在提交前再做一次库代数比对（复核→提交间的漂移）
+            return rejected(prepared.command_id, error_code=exc.error_code, message=exc.message,
+                            retriable=exc.retriable, invocation_id=prepared.context.invocation_id)
         with self._checked_lock:
             checked_here = self._checked.get(prepared.context.invocation_id) is prepared
         if not checked_here:

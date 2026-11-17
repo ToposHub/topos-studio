@@ -274,3 +274,69 @@ def test_revalidation_is_bound_to_the_authoritative_service():
     second, transport = _service([_Info("image_factory", can_launch=False)])
     result = second.dispatch(checked)
     assert not result.accepted and transport.calls == []
+
+
+# ---------------------------------------------------------------------------
+# F3：库 revision / deadline 复核——重扫切库后的过期调用拒绝重发
+# ---------------------------------------------------------------------------
+
+class _RevisionSource:
+    def __init__(self, revision: int) -> None:
+        self.revision = revision
+
+
+def test_f3_prepare_freezes_library_revision_and_deadline():
+    transport = _Transport()
+    service = LegacyFilesCommandService(
+        _Catalog([_Info("image_factory")]), transport,
+        revision_provider=lambda: 42)
+    prepared = service.prepare("image_factory", ["/m/a.png"])
+    assert prepared.context.entry_revision == 42
+    assert prepared.context.deadline is not None and prepared.context.deadline > 0
+
+
+def test_f3_revalidate_rejects_when_library_revised():
+    source = _RevisionSource(7)
+    transport = _Transport()
+    service = LegacyFilesCommandService(
+        _Catalog([_Info("image_factory")]), transport,
+        revision_provider=lambda: source.revision)
+    prepared = service.prepare("image_factory", ["/m/a.png"])
+    source.revision = 9                    # 手势后重扫/切库
+    with pytest.raises(CommandRejected) as exc:
+        service.revalidate(prepared)
+    assert exc.value.error_code == "LIBRARY_REVISED"
+    assert exc.value.retriable
+
+
+def test_f3_dispatch_rejects_revision_drift_after_revalidate():
+    source = _RevisionSource(7)
+    transport = _Transport()
+    service = LegacyFilesCommandService(
+        _Catalog([_Info("image_factory")]), transport,
+        revision_provider=lambda: source.revision)
+    prepared = service.prepare("image_factory", ["/m/a.png"])
+    checked = service.revalidate(prepared)
+    source.revision = 8                    # 复核→提交之间漂移
+    outcome = service.dispatch(checked)
+    assert not outcome.accepted and outcome.error_code == "LIBRARY_REVISED"
+    assert transport.calls == []           # 过期调用不得发出
+
+
+def test_f3_no_revision_provider_skips_check_without_pretending():
+    transport = _Transport()
+    service = LegacyFilesCommandService(_Catalog([_Info("image_factory")]), transport)
+    prepared = service.prepare("image_factory", ["/m/a.png"])
+    assert prepared.context.entry_revision == 0
+    checked = service.revalidate(prepared)    # 0 = 宿主未提供：跳过不冒装
+    assert service.dispatch(checked).accepted
+
+
+def test_f3_revision_none_from_provider_treated_as_unavailable():
+    transport = _Transport()
+    service = LegacyFilesCommandService(
+        _Catalog([_Info("image_factory")]), transport,
+        revision_provider=lambda: None)    # facade 未就绪
+    prepared = service.prepare("image_factory", ["/m/a.png"])
+    assert prepared.context.entry_revision == 0
+    assert service.dispatch(service.revalidate(prepared)).accepted

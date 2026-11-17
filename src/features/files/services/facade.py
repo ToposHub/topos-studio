@@ -112,6 +112,11 @@ class FilesFacade:
         with self._lock:
             return self._dropped
 
+    @property
+    def revision(self) -> int:
+        """[F3] 当前素材库 revision（命令复核的库代数事实）。"""
+        return self._catalog.revision
+
     def shutdown(self) -> None:
         """取消未开始的任务并回收线程池；进行中的回调不再送达。"""
         with self._lock:

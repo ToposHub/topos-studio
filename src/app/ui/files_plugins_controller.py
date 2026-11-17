@@ -66,7 +66,12 @@ class FilesPluginsController(QObject):
                 platform=facts["platform"], arch=facts["arch"])
         # [PL-07] 所有启动入口（启动器/中心/快捷键/菜单）走同一命令服务：
         # prepare 冻结选择，dispatch 提交；完成语义仍由 transport 回报。
-        self._commands = LegacyFilesCommandService(catalog, transport)
+        # [F3] 库 revision 复核：手势时冻结、复核/提交时比对（重扫/切库
+        # 后的过期调用拒绝重发）；transport 未就绪时如实跳过（不冒装）
+        revision_provider = getattr(transport, "library_revision", None)
+        self._commands = LegacyFilesCommandService(
+            catalog, transport,
+            revision_provider=revision_provider)
         self.center = PluginCenterDialog(panel.window())
         self.launcher = PluginLauncherDialog(panel)
         self._pool = QThreadPool(self)
