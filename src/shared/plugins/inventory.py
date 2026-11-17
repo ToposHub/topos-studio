@@ -199,14 +199,37 @@ def legacy_files_records(catalog_rows: Iterable[Any]) -> list[PluginRecord]:
     records: list[PluginRecord] = []
     for row in catalog_rows:
         legacy_id = getattr(row, "plugin_id", "")
-        diagnostics: tuple[ManifestDiagnostic, ...] = tuple(getattr(row, "diagnostics", ()) or ())
+        raw_diagnostics = getattr(row, "diagnostics", ()) or ()
+        if not isinstance(raw_diagnostics, (tuple, list)):
+            raw_diagnostics = (raw_diagnostics,)
+        catalog_diagnostics: list[ManifestDiagnostic] = []
+        for diagnostic in raw_diagnostics[:_MAX_RECORD_DIAGNOSTICS]:
+            if isinstance(diagnostic, ManifestDiagnostic):
+                catalog_diagnostics.append(diagnostic)
+            elif isinstance(diagnostic, str):
+                catalog_diagnostics.append(ManifestDiagnostic(
+                    code="LEGACY_CATALOG_DIAGNOSTIC", severity="warning",
+                    message=diagnostic,
+                ))
+            else:
+                catalog_diagnostics.append(ManifestDiagnostic(
+                    code="LEGACY_DIAGNOSTIC_INVALID", severity="warning",
+                    message=f"旧插件诊断类型不受支持：{type(diagnostic).__name__}",
+                ))
+        diagnostics: list[ManifestDiagnostic] = []
         manifest_path = getattr(row, "path", None)
         manifest = None
         if manifest_path is not None:
             try:
-                manifest, _ = legacy_python_manifest(manifest_path)
-            except (OSError, ValueError):
+                manifest, findings = legacy_python_manifest(manifest_path)
+                diagnostics.extend(findings)
+            except (OSError, ValueError) as exc:
                 manifest = None
+                diagnostics.append(ManifestDiagnostic(
+                    code="LEGACY_MANIFEST_UNREADABLE", severity="error",
+                    message=f"无法读取旧插件声明：{exc}",
+                ))
+        diagnostics.extend(catalog_diagnostics)
         if manifest is not None:
             plugin_id = manifest.plugin_id
             display_name, version = manifest.display_name, manifest.version

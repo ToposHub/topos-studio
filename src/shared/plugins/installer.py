@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -42,6 +43,7 @@ from src.shared.plugins.manifest import (
 MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_ENTRIES = 20_000
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
+_PLUGIN_ID_RE = re.compile(r"[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9._-]*")
 
 
 class InstallerError(Exception):
@@ -97,6 +99,16 @@ def _safe_extract_zip(package: Path, staging: Path) -> None:
         raise InstallerError("PACKAGE_NOT_ZIP", f"不是有效的 zip 包：{exc}") from exc
 
 
+def _reject_source_symlinks(folder: Path) -> None:
+    """Inspect names before any source file is read or copied."""
+    if folder.is_symlink():
+        raise InstallerError("PACKAGE_SYMLINK_MEMBER", "安装来源不能是符号链接")
+    for entry in folder.rglob("*"):
+        if entry.is_symlink():
+            raise InstallerError("PACKAGE_SYMLINK_MEMBER",
+                                 f"包内含符号链接：{entry.relative_to(folder)}")
+
+
 class LocalPackageInstaller:
     """Versioned, rollback-safe local package installs (PL-08)."""
 
@@ -108,7 +120,7 @@ class LocalPackageInstaller:
 
     # -- layout ----------------------------------------------------------
     def _plugin_root(self, plugin_id: str) -> Path:
-        if "/" in plugin_id or plugin_id in (".", ".."):
+        if not isinstance(plugin_id, str) or _PLUGIN_ID_RE.fullmatch(plugin_id) is None:
             raise InstallerError("PLUGIN_ID_INVALID", f"非法插件 id：{plugin_id}")
         return self.install_root / plugin_id
 
@@ -131,6 +143,8 @@ class LocalPackageInstaller:
                 allow_downgrade: bool = False) -> InstallOutcome:
         """Install or update from a zip/folder package; atomic, rollback-safe."""
         package = Path(package)
+        if package.is_symlink():
+            raise InstallerError("PACKAGE_SYMLINK_MEMBER", "安装来源不能是符号链接")
         if not package.exists():
             raise InstallerError("PACKAGE_MISSING", f"安装包不存在：{package}")
         staging = self.install_root / ".staging" / f"{os.getpid()}-{os.urandom(4).hex()}"
@@ -142,13 +156,13 @@ class LocalPackageInstaller:
             if package.is_file():
                 _safe_extract_zip(package, staging)
             elif package.is_dir():
+                _reject_source_symlinks(package)
                 if sum(1 for _ in package.rglob("*")) > MAX_PACKAGE_ENTRIES:
                     raise InstallerError("PACKAGE_TOO_MANY_ENTRIES", "目录条目过多")
-                shutil.copytree(package, staging, dirs_exist_ok=True)
-                for link in staging.rglob("*"):
-                    if link.is_symlink():
-                        raise InstallerError("PACKAGE_SYMLINK_MEMBER",
-                                             f"包内含符号链接：{link.relative_to(staging)}")
+                # Also preserve and reject links introduced after preflight;
+                # never silently dereference them into the installed payload.
+                shutil.copytree(package, staging, dirs_exist_ok=True, symlinks=True)
+                _reject_source_symlinks(staging)
             else:
                 raise InstallerError("PACKAGE_KIND_UNKNOWN", "安装包必须是 zip 或目录")
 
@@ -221,17 +235,17 @@ class LocalPackageInstaller:
                   remove_data: bool = False,
                   delete_data: Callable[[str], None] | None = None) -> InstallOutcome:
         """Remove versions; "remove plugin" and "delete data" stay separate."""
+        plugin_root = self._plugin_root(plugin_id)
+        if remove_data and delete_data is None:
+            raise InstallerError("DATA_POLICY_MISSING",
+                                 "要求删除数据但宿主未提供数据删除入口")
         if is_active(plugin_id):
             raise InstallerError("PLUGIN_ACTIVE", "插件仍在运行/加载，先停用再卸载")
-        plugin_root = self._plugin_root(plugin_id)
         if not plugin_root.exists():
             raise InstallerError("PLUGIN_NOT_INSTALLED", f"未安装：{plugin_id}")
         previous = self.current_version(plugin_id)
         shutil.rmtree(plugin_root)
         if remove_data:
-            if delete_data is None:
-                raise InstallerError("DATA_POLICY_MISSING",
-                                     "要求删除数据但宿主未提供数据删除入口")
             delete_data(plugin_id)                    # 用户数据绝不属于插件目录
         return InstallOutcome(plugin_id, "", "uninstalled", previous)
 

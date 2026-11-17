@@ -198,14 +198,16 @@ class PluginJobs:
 
     def confirm_cancelled(self, job_id: str) -> None:
         with self._lock:
-            if job_id in self._cancel_requested:
+            job = self._jobs.get(job_id)
+            if job is not None and job["state"] == "cancel_requested":
                 self._cancelled_confirmed.add(job_id)
-                self._jobs[job_id]["state"] = "cancelled"
+                job["state"] = "cancelled"
 
     def finish(self, job_id: str) -> None:
         with self._lock:
-            if job_id in self._jobs:
-                self._jobs[job_id]["state"] = "finished"
+            job = self._jobs.get(job_id)
+            if job is not None and job["state"] in ("running", "cancel_requested"):
+                job["state"] = "finished"
                 self._finished.add(job_id)
 
     def state(self, job_id: str) -> str:

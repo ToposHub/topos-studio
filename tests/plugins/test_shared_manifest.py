@@ -219,3 +219,19 @@ def test_window_must_reference_command_and_provider_provides_valid():
 def test_contribution_kinds_are_the_planned_set():
     assert set(CONTRIBUTION_KINDS) == {"command", "window", "background_service",
                                        "format_provider", "inspector", "menu"}
+
+
+@pytest.mark.parametrize("fields", [
+    {"windows": 1},
+    {"format_providers": [{"provider_id": "p", "priority": "bad-number"}]},
+    {"legacy_ids": True},
+    {"platform": {"arches": 1}},
+])
+def test_malformed_file_fields_are_diagnostics_not_worker_exceptions(tmp_path, fields):
+    import json
+    from src.shared.plugins.manifest import parse_manifest_file
+    path = tmp_path / "topos.plugin.json"
+    path.write_text(json.dumps({"plugin_id": "files.bad", "display_name": "Bad", "version": "1.0.0", **fields}), encoding="utf-8")
+    manifest, diagnostics = parse_manifest_file(path)
+    assert manifest is None
+    assert any(item.code == "MANIFEST_INVALID" and item.severity == "error" for item in diagnostics)

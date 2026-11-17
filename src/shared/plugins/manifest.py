@@ -448,7 +448,12 @@ def parse_manifest_file(path: Path) -> tuple[PluginManifest | None, tuple[Manife
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         return None, (_diagnostic("MANIFEST_UNREADABLE", "error", f"无法读取 manifest：{exc}", str(path)),)
-    return parse_manifest_mapping(data)
+    try:
+        return parse_manifest_mapping(data)
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        # User-controlled field shapes must not escape a discovery worker.
+        # Per-field schema validation is separate from this file boundary.
+        return None, (_diagnostic("MANIFEST_INVALID", "error", f"manifest 字段无效：{exc}", str(path)),)
 
 
 def legacy_python_manifest(folder: Path) -> tuple[PluginManifest | None, tuple[ManifestDiagnostic, ...]]:

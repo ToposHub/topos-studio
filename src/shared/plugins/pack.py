@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import shutil
+import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,8 +54,19 @@ def validate_package_folder(folder: Path, *, host_facts: dict[str, Any]) -> Vali
         diagnostics.append(ManifestDiagnostic(code=code, severity=severity,
                                               message=message, field=field))
 
+    if folder.is_symlink():
+        note("PACKAGE_SYMLINK_MEMBER", "error", "安装来源不能是符号链接")
+        return ValidationReport(False, "", "", tuple(diagnostics))
     if not folder.is_dir():
         note("FOLDER_MISSING", "error", f"目录不存在：{folder}")
+        return ValidationReport(False, "", "", tuple(diagnostics))
+    # Check links, including dangling and directory links, before parsing the
+    # manifest or reading any source contents into the package.
+    linked = [path for path in folder.rglob("*") if path.is_symlink()]
+    if linked:
+        for path in linked:
+            label = str(path.relative_to(folder)) if path != folder else "."
+            note("PACKAGE_SYMLINK_MEMBER", "error", f"包内含符号链接：{label}")
         return ValidationReport(False, "", "", tuple(diagnostics))
     manifest, parse_diagnostics = parse_manifest_file(folder / MANIFEST_NAME)
     diagnostics.extend(parse_diagnostics)
@@ -82,13 +96,24 @@ def build_package(folder: Path, output: Path, *,
     package when ``strict`` (errors) — warnings still ship."""
     folder, output = Path(folder), Path(output)
     report = validate_package_folder(folder, host_facts=host_facts)
+    if any(item.code == "PACKAGE_SYMLINK_MEMBER" for item in report.diagnostics):
+        raise ValueError("包内含符号链接，拒绝构建")
     if strict and not report.ok:
         raise ValueError(f"包校验未通过，拒绝构建：{report.plugin_id or folder}；"
                          f"{';'.join(item.message for item in report.diagnostics if item.severity == 'error')}")
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name in sorted(report.entry_files):
-            archive.write(folder / name, name)
+            path = folder / name
+            # Source mtimes and platform-specific permission bits must not
+            # change package identity. Preserve only executable intent.
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+            info.external_attr = (stat.S_IFREG | mode) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with path.open("rb") as source, archive.open(info, "w") as sink:
+                shutil.copyfileobj(source, sink, length=1024 * 1024)
     digest = package_digest(output)
     sidecar = output.with_name(output.name + ".sha256")
     sidecar.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
@@ -109,12 +134,20 @@ def package_digest(package: Path) -> str:
 def verify_package(package: Path, digest: str | None = None) -> bool:
     """Integrity check; uses the ``.sha256`` sidecar when digest not given."""
     package = Path(package)
-    if digest is None:
-        sidecar = package.with_name(package.name + ".sha256")
-        if not sidecar.is_file():
+    try:
+        if digest is None:
+            sidecar = package.with_name(package.name + ".sha256")
+            if not sidecar.is_file():
+                return False
+            parts = sidecar.read_text(encoding="utf-8").split()
+            if not parts:
+                return False
+            digest = parts[0]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
             return False
-        digest = sidecar.read_text(encoding="utf-8").split()[0]
-    return hashlib.sha256(package.read_bytes()).hexdigest() == digest
+        return package_digest(package) == digest.lower()
+    except (OSError, UnicodeError):
+        return False
 
 
 __all__ = ["MANIFEST_NAME", "ValidationReport", "validate_package_folder",

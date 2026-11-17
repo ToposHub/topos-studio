@@ -194,3 +194,34 @@ def test_cancel_token_is_shareable_between_context_and_jobs():
     jobs.start("j", cancel=token.request)
     jobs.request_cancel("j")
     assert token.cancelled is True                             # 任务取消联动调用取消
+
+
+@pytest.mark.parametrize("first_terminal", ["finished", "cancelled"])
+def test_job_terminal_state_survives_late_opposite_confirmation(first_terminal: str) -> None:
+    jobs = PluginJobs()
+    jobs.start("job")
+    assert jobs.request_cancel("job")
+    if first_terminal == "finished":
+        jobs.finish("job")
+        jobs.confirm_cancelled("job")
+    else:
+        jobs.confirm_cancelled("job")
+        jobs.finish("job")
+    assert jobs.state("job") == first_terminal
+    assert jobs.active() == ()
+    assert not jobs.request_cancel("job")
+    jobs.finish("job")
+    jobs.confirm_cancelled("job")
+    assert jobs.state("job") == first_terminal
+
+
+def test_cancel_confirmation_requires_an_existing_requested_job() -> None:
+    jobs = PluginJobs()
+    jobs.confirm_cancelled("unknown")
+    assert jobs.state("unknown") == "unknown"
+    jobs.start("job")
+    jobs.confirm_cancelled("job")
+    assert jobs.state("job") == "running"
+    assert jobs.request_cancel("job")
+    jobs.confirm_cancelled("job")
+    assert jobs.state("job") == "cancelled"

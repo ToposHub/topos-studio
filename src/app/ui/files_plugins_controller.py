@@ -99,7 +99,11 @@ class FilesPluginsController(QObject):
                 self._project()
                 self._message(error)
             else:
-                self._commands.dispatch(result)
+                outcome = self._commands.dispatch(result)
+                if not outcome.accepted:
+                    self._busy.discard(plugin_id)
+                    self._project()
+                    self._message(outcome.message)
             return
         if operation == "enable":
             self._writing = False
