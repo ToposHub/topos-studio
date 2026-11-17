@@ -837,6 +837,10 @@ class BasePlayer(QFrame):
     def _reset_title(self, text: str = None, gen: int = -1) -> None:
         if gen != -1 and gen != getattr(self, '_toast_gen', gen):
             return  # 已有更新的 toast 接管标题
-        self.lbl_title.setText(text if text is not None
-                               else getattr(self, '_real_title', self.lbl_title.text()))
-        self.lbl_title.setStyleSheet('')
+        try:
+            self.lbl_title.setText(text if text is not None
+                                   else getattr(self, '_real_title', self.lbl_title.text()))
+            self.lbl_title.setStyleSheet('')
+        except RuntimeError:
+            # [E6] toast 后 2.5s 内关窗：标签随窗口销毁，迟到计时器无事可做
+            pass

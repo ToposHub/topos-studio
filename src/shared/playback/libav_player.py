@@ -306,16 +306,25 @@ _MEZZANINE_CACHE_MAX = 512
 
 
 def _compute_mezzanine(path: str) -> bool:
+    # [E7] 路由决策的打开也有界：异常源挂起不得阻塞 GUI 的路由询问
     try:
-        with av.open(path) as c:
-            st = c.streams.video[0]
-            name = (st.codec_context.name or '').lower()
-            if name in _MEZZANINE_CODECS:
-                return True
-            return (name in _SLOW_UHD_CODECS
-                    and (st.codec_context.width or 0) >= 3840)
+        c = _av_open_with_timeout(path)
     except Exception:
         return False
+    try:
+        st = c.streams.video[0]
+        name = (st.codec_context.name or '').lower()
+        if name in _MEZZANINE_CODECS:
+            return True
+        return (name in _SLOW_UHD_CODECS
+                and (st.codec_context.width or 0) >= 3840)
+    except Exception:
+        return False
+    finally:
+        try:
+            c.close()
+        except Exception:
+            pass
 
 
 def is_mezzanine(path: str) -> bool:
@@ -342,12 +351,71 @@ def is_mezzanine(path: str) -> bool:
     return result
 
 
+# [E7] RAW 家族按四字符码（codec tag）识别——FFmpeg 按 tag 判定解码器
+# 兼容性（伪造 tag 的封装直接拒绝写头），与本判定同源。
+_PRORES_RAW_TAGS = {'aprh', 'aprn', 'apro'}
+_UNDECODABLE_TAGS = {'braw', 'r3d', 'r3d2'}
+_UNDECODABLE_CODECS = {'prores_raw', 'braw', 'r3d'}
+
+
+class UndecodableRawError(ValueError):
+    """[E7] 后端无解码器的 RAW 素材——按能力拒绝，不冒充可播。"""
+
+
+def raw_capability(codec_tag: str, codec_name: str) -> tuple[bool, str]:
+    """[E7] 按真实后端报告 RAW 可解码性 → ``(可否, 原因)``。
+
+    ProRes RAW（aprh 家族）/BRAW/R3D 在当前 PyAV/FFmpeg 构建没有解码
+    器：metadata 能开（~0.5s），尝试解码只会长时间挂起或黑屏（FUP-07
+    实测 8K ProRes RAW 首帧 35s+ 未返回）。常规 ProRes（apco/apcs/apcn/
+    apch/ap4x）可正常软解——不把"常规 ProRes 通过"推广为"ProRes RAW
+    可播"。SDK 接入后从这里的白名单放行。
+    """
+    tag = (codec_tag or '').strip().lower()
+    name = (codec_name or '').strip().lower()
+    if tag in _PRORES_RAW_TAGS:
+        return False, (f'ProRes RAW（{codec_tag.strip()}）无解码后端：'
+                       'SDK 未接入，不支持预览')
+    if tag in _UNDECODABLE_TAGS or name in _UNDECODABLE_CODECS:
+        return False, (f'{codec_tag.strip() or codec_name} 无解码后端：'
+                       'SDK 未接入，不支持预览')
+    return True, ''
+
+
+def _av_open_with_timeout(path: str, timeout: float = 5.0):
+    """[E7] 有界 ``av.open``：异常源挂起时按超时失败收尾，不无限等待。
+
+    打开线程 daemon 化（有界泄漏纪律）：杀不死的卡死打开留给 OS 回收，
+    绝不阻塞 GUI 等它。
+    """
+    box: dict = {}
+
+    def _open() -> None:
+        try:
+            box['ctx'] = av.open(path)
+        except BaseException as exc:  # noqa: BLE001 - 原样转递给调用方
+            box['error'] = exc
+
+    thread = threading.Thread(target=_open, daemon=True, name='av-open')
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise TimeoutError(
+            f'打开超时（>{timeout:.0f}s）：文件可能损坏或在慢速存储上')
+    if 'error' in box:
+        raise box['error']
+    return box['ctx']
+
+
 class _LibavSession(DecoderBackend):
     """PyAV 会话：顺序解码 + 断点自动 seek，接口对齐 ToposMovieSession。"""
 
     def __init__(self, path: str):
         self._path = path
-        self._container = av.open(path)
+        # [E7] 有界打开：av.open 对异常源（网络盘/半损坏头）可能挂起，
+        # 不能让 GUI 无限等待。超时按失败收尾；卡住的打开线程泄漏交给
+        # OS（daemon，有界泄漏纪律——与 stop_decoder 同款取舍）
+        self._container = _av_open_with_timeout(path)
         try:
             # [BUG-P0-06] 纯音频/损坏文件没有视频流：IndexError 上抛前
             # 必须 close container，否则每次误开都泄漏 native demuxer + 句柄
@@ -376,6 +444,15 @@ class _LibavSession(DecoderBackend):
             self.frame_count = int(fc) if fc else max(1, int(self.duration_sec * self.fps))
             vs = self._stream.codec_context
             self.codec_name = (vs.name or '?').lower()
+            # [E7] RAW 能力按真实后端报告：ProRes RAW/BRAW/R3D 在当前
+            # PyAV/FFmpeg 构建无解码器——metadata 开得了（~0.5s）但首帧
+            # 35s+ 挂起（FUP-07 实测 8K ProRes RAW）。打开时按 codec tag
+            # 拒绝：快、明确、不冒充可播，绝不用黑屏/无限等待兜底。
+            decodable, reason = raw_capability(
+                str(getattr(vs, 'codec_tag', '') or ''), self.codec_name)
+            if not decodable:
+                self.close()
+                raise UndecodableRawError(reason)
             self.width, self.height = vs.width, vs.height
             self.pix_fmt = str(vs.pix_fmt)
             self.bit_depth = (getattr(vs, 'bits_per_raw_sample', 0)
@@ -396,23 +473,42 @@ class _LibavSession(DecoderBackend):
 
     # -- 索引/时间换算 --
 
-    def _probe_rotation(self) -> int:
+    def _probe_rotation(self, timeout: float = 3.0) -> int:
         """[E4] 解码首帧读 DISPLAYMATRIX → 90° 象限（顺时针显示旋转）。
 
-        探测后作废迭代器位置（首帧解码会重新 seek）；镜像/任意角返回 0
-        并告警——预览不支持，不做错误呈现。
+        [E7] 有界探测：首帧解码对慢源可能长时间不返回（8K RAW 实测
+        35s+）——超时按未旋转收尾并告警（旋转是尽力而为的元数据，不是
+        播放前置条件）。探测线程 daemon（有界泄漏纪律）。
         """
-        from .frame_geometry import display_rotation_quarters
-        try:
-            for probe in self._container.decode(video=0):
-                for data in probe.side_data:
-                    if 'DISPLAYMATRIX' in str(getattr(data, 'type', '')):
-                        return display_rotation_quarters(
-                            np.frombuffer(bytes(data), dtype=np.int32))
-                break
-        except Exception:
+        box: dict = {}
+
+        def _probe() -> None:
+            try:
+                box['quarters'] = self._probe_rotation_unlocked()
+            except BaseException as exc:  # noqa: BLE001 - 探测失败按未旋转
+                box['error'] = exc
+
+        thread = threading.Thread(target=_probe, daemon=True,
+                                  name='rotation-probe')
+        thread.start()
+        thread.join(timeout)
+        if thread.is_alive():
+            logger.warning('rotation probe timed out (>%.0fs); '
+                           'treating as unrotated', timeout)
+            return 0
+        if 'error' in box:
             logger.debug('rotation probe failed; treating as unrotated',
-                         exc_info=True)
+                         exc_info=box['error'])
+        return int(box.get('quarters', 0))
+
+    def _probe_rotation_unlocked(self) -> int:
+        from .frame_geometry import display_rotation_quarters
+        for probe in self._container.decode(video=0):
+            for data in probe.side_data:
+                if 'DISPLAYMATRIX' in str(getattr(data, 'type', '')):
+                    return display_rotation_quarters(
+                        np.frombuffer(bytes(data), dtype=np.int32))
+            break
         return 0
 
     def _pts_of(self, index: int) -> int:
