@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
+from src.shared.plugins.freeze import deep_freeze
 from src.shared.plugins.manifest import PluginCapability
 
 
@@ -73,7 +74,8 @@ class InvocationContext:
         frozen = self.params
         if not isinstance(frozen, Mapping):
             raise ValueError("params 必须是键值对象")
-        object.__setattr__(self, "params", MappingProxyType(dict(frozen)))
+        # 深冻结（PR-04）：嵌套 dict/list 不再与调用方共享可变结构
+        object.__setattr__(self, "params", deep_freeze(frozen, strict_keys=True))
 
     @property
     def cancelled(self) -> bool:

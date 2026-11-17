@@ -3,6 +3,7 @@
 Stage A (PL-01/02/03/07) of docs/plans/2026-11-17-files-plugin-system-rebuild-plan.md.
 Pure-Python, Qt-free; hosts and feature packages import these, never reverse.
 """
+from src.shared.plugins.freeze import deep_freeze, deep_thaw
 from src.shared.plugins.inventory import (
     FAILURE_PHASES,
     INSTALL_STATES,
@@ -44,5 +45,5 @@ __all__ = [
     "default_desired_for", "CancelToken", "InvocationCancelled", "InvocationContext",
     "make_invocation", "ContributionSet", "PluginJobs", "PluginLifecycleController",
     "check_command_applicability", "ItemResult", "ServiceResult", "CommandRejected",
-    "PreparedInvocation",
+    "PreparedInvocation", "deep_freeze", "deep_thaw",
 ]
