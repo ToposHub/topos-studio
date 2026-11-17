@@ -100,17 +100,22 @@ class FilesPluginsController(QObject):
         )
         revision_provider = getattr(transport, "library_revision", None)
         self._native_commands: dict[str, NativeToolCommandService] = {
-            "files.format_factory": NativeToolCommandService(
+            "format_factory": NativeToolCommandService(
                 command_id="files.format_factory.open",
                 plugin_id="files.format_factory",
                 revision_provider=revision_provider),
-            "files.image_factory": NativeToolCommandService(
+            "image_factory": NativeToolCommandService(
                 command_id="files.image_factory.open",
                 plugin_id="files.image_factory",
+                revision_provider=revision_provider),
+            "shutdown_timer": NativeToolCommandService(
+                command_id="files.shutdown_timer.open",
+                plugin_id="files.shutdown_timer",
                 revision_provider=revision_provider),
         }
         self._format_factory_window = None
         self._image_factory_window = None
+        self._shutdown_timer_window = None
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -360,14 +365,15 @@ class FilesPluginsController(QObject):
                 return
         # [F2] 命令键：新 id（偏好/中心建档）→ legacy 短 id（命令层寻址），
         # 从同一合并快照解析；旧接线（无 factory）id 即命令键
-        # [G1] 原生工具接管：format_factory 走独立 Qt 工具窗口（F5 单例
-        # 注册表 + F3/F4 三段命令 + 原子边界）——不经旧 /launch
-        native = self._native_commands.get(plugin_id)
+        command_key = info.command_key if info is not None and info.command_key else plugin_id
+        # [G1-G3] 原生工具接管：独立 Qt 工具窗口（F5 单例注册表 + F3/F4
+        # 三段命令 + 原子边界）——不经旧 /launch。按短 id 寻址（两种
+        # 控制器模式——命名空间合并/legacy 投影——都能命中）
+        native = self._native_commands.get(command_key)
         if native is not None and info is not None and info.can_launch:
-            opener = self._native_opener(plugin_id)
+            opener = self._native_opener(command_key)
             self._launch_native(native, list(self.selected_paths()), opener)
             return
-        command_key = info.command_key if info is not None and info.command_key else plugin_id
         # Freeze the selection at the user's gesture, never at async completion.
         paths = list(self.selected_paths())
         self._busy.add(plugin_id)
@@ -395,8 +401,9 @@ class FilesPluginsController(QObject):
     def _native_opener(self, plugin_id: str):
         """[G2] 原生工具 → 窗口打开回调表。"""
         openers = {
-            "files.format_factory": self._open_format_factory,
-            "files.image_factory": self._open_image_factory,
+            "format_factory": self._open_format_factory,
+            "image_factory": self._open_image_factory,
+            "shutdown_timer": self._open_shutdown_timer,
         }
         return openers.get(plugin_id)
 
@@ -405,7 +412,8 @@ class FilesPluginsController(QObject):
         （GUI 打开窗口，F4 锁内提交）。完成即更新最近使用。"""
         plugin_id = service.plugin_id
         legacy_key = plugin_id.partition(".")[2]
-        titles = {"format_factory": "格式工厂", "image_factory": "图片工厂"}
+        titles = {"format_factory": "格式工厂", "image_factory": "图片工厂",
+                  "shutdown_timer": "定时关机"}
         self._busy.add(plugin_id)
         self._project()
 
@@ -505,6 +513,40 @@ class FilesPluginsController(QObject):
         windows.activate_window("files.image_factory", "main",
                                 singleton=True, focuser=lambda: None)
         window.set_inputs(tuple(paths))
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _open_shutdown_timer(self, paths: tuple[str, ...]) -> None:
+        """[G3] 独立 utility window：启动只开窗口（不倒计时/不执行动作）。"""
+        from src.app.ui.shutdown_timer_window import (
+            ShutdownTimerWindow, default_actions,
+        )
+        from src.features.files.shutdown_timer_service import (
+            ShutdownTimerService,
+        )
+
+        windows = self.host_session.windows
+        if self._shutdown_timer_window is None:
+            window = ShutdownTimerWindow(
+                self.panel.window(),
+                service=ShutdownTimerService(default_actions()))
+
+            def close_window() -> None:
+                window.close()
+
+            windows.activate_window(
+                "files.shutdown_timer", "main", singleton=True,
+                opener=lambda: None,
+                focuser=lambda: (window.show(), window.raise_(),
+                                 window.activateWindow()),
+                closer=close_window)
+            self._shutdown_timer_window = window
+            window.closed.connect(
+                lambda: windows.close_window("files.shutdown_timer", "main"))
+        window = self._shutdown_timer_window
+        windows.activate_window("files.shutdown_timer", "main",
+                                singleton=True, focuser=lambda: None)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -654,6 +696,9 @@ class FilesPluginsController(QObject):
         if self._image_factory_window is not None:
             self.host_session.windows.close_all("files.image_factory")
             self._image_factory_window = None
+        if self._shutdown_timer_window is not None:
+            self.host_session.windows.close_all("files.shutdown_timer")
+            self._shutdown_timer_window = None
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）
