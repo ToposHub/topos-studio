@@ -410,3 +410,31 @@ class FilesTaskService:
     def list_trash(self, library_id: str = "") -> list:
         """回收站清单（B4 manifest 一等公民；UI 列表入口用）。"""
         return self._operations.trash_service.list_items(library_id)
+
+    # ------------------------------------------------------------ 中断恢复（B3）
+    def pending_recoveries(self) -> list[dict[str, Any]]:
+        """上个进程遗留的未终态任务（running/staged/renaming）。"""
+        journal = self._operations_journal()
+        if journal is None:
+            return []
+        return journal.pending()
+
+    def recover(self, job_id: str) -> ServiceResult:
+        """按磁盘证据分类恢复一个未终态任务；无法判定保持待恢复。"""
+        journal = self._operations_journal()
+        if journal is None:
+            return rejected("files.task.recover", error_code="NO_JOURNAL",
+                            message="当前配置没有持久任务日志")
+        try:
+            verdict = journal.recover_one(str(job_id))
+        except Exception as exc:
+            return rejected("files.task.recover", error_code="RECOVERY_FAILED",
+                            message=str(exc))
+        return ServiceResult(
+            command_id="files.task.recover", ok=True, accepted=True,
+            stage="completed",
+            items=(ItemResult(str(job_id), ok=True, result=verdict),),
+            revision=self._catalog.revision)
+
+    def _operations_journal(self):
+        return getattr(self._operations, "_journal", None)

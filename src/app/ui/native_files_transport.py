@@ -100,6 +100,8 @@ class NativeFilesTransport(QObject):
     collection_changed = pyqtSignal(bool, str)  # D2 集合写操作反馈
     trash_loaded = pyqtSignal(list)             # D2 回收站清单
     trash_failed = pyqtSignal(str)
+    recovery_loaded = pyqtSignal(list)          # D5' 上次运行遗留的未终态任务
+    recovery_applied = pyqtSignal(dict)         # D5' 恢复判定结果
     libraries_loaded = pyqtSignal(list)
     library_changed = pyqtSignal(bool, str)
     scan_status_loaded = pyqtSignal(dict)
@@ -979,6 +981,63 @@ class NativeFilesTransport(QObject):
 
         facade.run(key=f"collection-write:{request_id}", request_id=request_id,
                    work=lambda: work(facade), listener=_deliver)
+
+    # ------------------------------------------------------------ 中断恢复（D5'/B3）
+    def load_recoveries(self) -> None:
+        """上个进程遗留的未终态任务清单（job_log ACTIVE 态）。"""
+        if self._closed:
+            return
+        facade = self._runtime()
+        if facade is None:
+            return
+
+        def _deliver(outcome) -> None:
+            if self._closed or outcome.error is not None:
+                return
+            import json as _json
+            records = []
+            for row in outcome.result:
+                try:
+                    args = _json.loads(row.get("args") or "{}")
+                except ValueError:
+                    args = {}
+                records.append({
+                    "job_id": str(row.get("id") or ""),
+                    "operation": str(row.get("op") or ""),
+                    "state": str(row.get("state") or ""),
+                    "source": str(args.get("source") or ""),
+                })
+            if records:
+                self.recovery_loaded.emit(records)
+
+        facade.run(key="recovery", request_id=uuid.uuid4().hex,
+                   work=lambda: facade.tasks.pending_recoveries(),
+                   listener=_deliver)
+
+    def recover_job(self, job_id: str) -> None:
+        """按磁盘证据分类恢复一个未终态任务（无法判定则保持待恢复）。"""
+        if self._closed or not job_id:
+            return
+        facade = self._runtime()
+        if facade is None:
+            return
+
+        def _deliver(outcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.recovery_applied.emit({
+                    "job_id": str(job_id), "state": "failed",
+                    "classification": str(outcome.error.message or "恢复失败"),
+                    "action": "none"})
+                return
+            verdict = dict(outcome.result.items[0].result or {})
+            verdict.setdefault("job_id", str(job_id))
+            self.recovery_applied.emit(verdict)
+
+        facade.run(key=f"recover:{job_id}", request_id=uuid.uuid4().hex,
+                   work=lambda: facade.tasks.recover(str(job_id)),
+                   listener=_deliver)
 
     # ------------------------------------------------------------ 回收站（D2）
     def load_trash(self) -> None:

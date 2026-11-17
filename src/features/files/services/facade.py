@@ -37,8 +37,9 @@ from src.features.files.services.query import (
     FilesLibraryService,
     FilesQueryService,
 )
-from src.features.files.transactions import CancelToken
+from src.features.files.transactions import CancelToken, FileOperationService
 from src.features.files.transactions.batch_plan import BatchPlan, BatchRenamePlanner, PlanError
+from src.features.files.transactions.journal import OperationJournal
 from src.shared.plugins.services import ItemResult, ServiceResult
 
 MAX_WORKERS = 2
@@ -81,15 +82,21 @@ class FilesFacade:
                  query: FilesQueryService | None = None,
                  metadata: FilesMetadataService | None = None,
                  scan: FilesScanService | None = None,
-                 tasks: FilesTaskService | None = None) -> None:
+                 tasks: FilesTaskService | None = None,
+                 journal: OperationJournal | None = None) -> None:
         self._catalog = catalog
+        # B3 生产接线：崩溃可恢复的写路径必须有持久 job_log（None=纯内存
+        # 运行仅用于测试注入）。任务与批改名共用同一 journal。
+        self.journal = journal if journal is not None else OperationJournal(catalog)
         self.query = query or FilesQueryService(catalog)
         self.metadata = metadata or FilesMetadataService(catalog)
         self.scan = scan or FilesScanService(catalog)
-        self.tasks = tasks or FilesTaskService(catalog)
+        self.tasks = tasks or FilesTaskService(
+            catalog, journal=self.journal)
         self.libraries = FilesLibraryService(catalog)
         self.collections = FilesCollectionsService(catalog)
-        self._planner = BatchRenamePlanner(catalog)
+        self._planner = BatchRenamePlanner(
+            catalog, service=FileOperationService(catalog, journal=self.journal))
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="files-facade")
         self._lock = threading.Lock()

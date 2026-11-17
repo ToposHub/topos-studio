@@ -84,6 +84,50 @@ class FilesJobsRegistry(QObject):
         }
         self.jobs_changed.emit()
 
+    # ------------------------------------------------------------ B3 中断恢复
+    def on_recovery_loaded(self, records: list[dict[str, Any]]) -> None:
+        """上次运行遗留的未终态任务：入账为待恢复。"""
+        for record in records or []:
+            job_id = str(record.get("job_id") or "")
+            if not job_id or job_id in self._jobs:
+                continue
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "operation": str(record.get("operation") or ""),
+                "targets": [str(record.get("source") or "")],
+                "policy": "error", "options": {},
+                "total": 1, "completed": 0, "state": "pending_recovery",
+                "successes": [],
+                "failures": [{"path": str(record.get("source") or ""),
+                              "error": "上次运行中断；按磁盘证据恢复",
+                              "code": "INTERRUPTED"}],
+            }
+        self.jobs_changed.emit()
+
+    def on_recovery_applied(self, verdict: dict[str, Any]) -> None:
+        """恢复判定落账：completed→done；failed→failed；证据不足保持待恢复。"""
+        job_id = str(verdict.get("job_id") or "")
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        state = str(verdict.get("state") or "")
+        classification = str(verdict.get("classification") or "")
+        if state == "completed":
+            job["state"] = "done"
+            job["successes"] = [{"path": job["targets"][0] if job["targets"] else ""}]
+            job["failures"] = []
+            job["completed"] = 1
+        elif state == "failed":
+            job["state"] = "failed"
+            job["failures"] = [{"path": job["targets"][0] if job["targets"] else "",
+                                "error": f"中断可重试（{classification}）",
+                                "code": "INTERRUPTED_RETRIABLE"}]
+        else:  # 证据不足：保持待恢复并展示分类原因
+            job["failures"] = [{"path": job["targets"][0] if job["targets"] else "",
+                                "error": f"证据不足（{classification}），保持待恢复",
+                                "code": "PENDING_RECOVERY"}]
+        self.jobs_changed.emit()
+
     # ------------------------------------------------------------ 查询
     def jobs(self) -> list[dict[str, Any]]:
         return [dict(job) for job in self._jobs.values()]
@@ -117,6 +161,7 @@ class JobsDialog(QDialog):
 
     cancel_requested = pyqtSignal(str)
     retry_requested = pyqtSignal(str, list, str, dict)  # operation, targets, policy, options
+    recover_requested = pyqtSignal(str)                 # B3 待恢复任务的 job_id
 
     def __init__(self, registry: FilesJobsRegistry,
                  parent: QWidget | None = None) -> None:
@@ -141,14 +186,17 @@ class JobsDialog(QDialog):
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("取消任务", self)
         self.retry_button = QPushButton("重试失败项", self)
+        self.recover_button = QPushButton("恢复…", self)
         clear_button = QPushButton("清空已完成", self)
         close_button = QPushButton("关闭", self)
         self.cancel_button.clicked.connect(self._cancel_selected)
         self.retry_button.clicked.connect(self._retry_selected)
+        self.recover_button.clicked.connect(self._recover_selected)
         clear_button.clicked.connect(registry.clear_finished)
         close_button.clicked.connect(self.reject)
         actions.addWidget(self.cancel_button)
         actions.addWidget(self.retry_button)
+        actions.addWidget(self.recover_button)
         actions.addStretch(1)
         actions.addWidget(clear_button)
         actions.addWidget(close_button)
@@ -170,7 +218,7 @@ class JobsDialog(QDialog):
         jobs = self._jobs_view()
         self.table.setRowCount(0)
         state_labels = {"running": "进行中", "done": "完成", "failed": "有失败",
-                        "cancelled": "已取消"}
+                        "cancelled": "已取消", "pending_recovery": "待恢复"}
         for job in jobs:
             row = self.table.rowCount()
             self.table.insertRow(row)
@@ -206,6 +254,8 @@ class JobsDialog(QDialog):
         job = self._registry.job(self._selected_job_id()) if self._selected_job_id() else None
         self.cancel_button.setEnabled(bool(job and job["state"] == "running"))
         self.retry_button.setEnabled(bool(job and job["failures"]))
+        self.recover_button.setEnabled(
+            bool(job and job["state"] == "pending_recovery"))
         if job and job["failures"]:
             reasons = "；".join(str(item.get("error") or "失败")
                                for item in job["failures"][:3])
@@ -221,6 +271,12 @@ class JobsDialog(QDialog):
         job_id = self._selected_job_id()
         if job_id:
             self.cancel_requested.emit(job_id)
+
+    def _recover_selected(self) -> None:
+        job_id = self._selected_job_id()
+        job = self._registry.job(job_id) if job_id else None
+        if job is not None and job["state"] == "pending_recovery":
+            self.recover_requested.emit(job_id)
 
     def _retry_selected(self) -> None:
         job_id = self._selected_job_id()
