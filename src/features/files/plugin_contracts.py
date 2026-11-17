@@ -31,6 +31,10 @@ class FilesPluginInfo:
     source: str = "builtin"
     install_state: str = "installed"
     runtime_version: str = ""
+    # [F2] 命令键：合并行携带命名空间 plugin_id（偏好/固定/快捷键建档），
+    # 命令层（legacy 目录/命令服务）仍以短 id 寻址——空 = 无命令入口
+    # （inventory-only 占位行，不可启动）
+    command_key: str = ""
 
     @property
     def can_launch(self) -> bool:
