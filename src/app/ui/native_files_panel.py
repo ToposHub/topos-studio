@@ -300,6 +300,7 @@ class NativeFilesPanel(QWidget):
     collection_remove_members_requested = pyqtSignal(int, list)
     collection_delete_requested = pyqtSignal(int)
     trash_requested = pyqtSignal()
+    jobs_requested = pyqtSignal()  # D5：文件任务列表
     libraries_requested = pyqtSignal()
     library_pin_requested = pyqtSignal(str)
     library_unpin_requested = pyqtSignal(str)
@@ -885,6 +886,7 @@ class NativeFilesPanel(QWidget):
     def _show_tools(self) -> None:
         menu = QMenu(self)
         menu.addAction(_tr("choose", "选择文件夹"), self._choose_folder)
+        menu.addAction(_tr("jobs", "文件任务…"), self.jobs_requested.emit)
         layout_menu = menu.addMenu(_tr("layout_heading", "布局方式"))
         for index in range(self.view_combo.count()):
             action = layout_menu.addAction(self.view_combo.itemText(index))
