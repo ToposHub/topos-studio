@@ -854,6 +854,18 @@ class NativeFilesPanel(QWidget):
             self.search_edit.selectAll()
         else:
             self.search_edit.clear()
+            # 清空/收起搜索=放弃本次全库检索（新意图作废旧上下文）：
+            # 退出搜索虚拟视图回目录，而不是留一份旧结果冒充当前视图
+            if self.library_button.isChecked():
+                with QSignalBlocker(self.library_button):
+                    self.library_button.setChecked(False)
+                if self._library_active:
+                    self._library_active = False
+                    self._view_location = {
+                        "kind": "directory",
+                        "path": self._requested_path or self.current_path,
+                        "writable": True}
+                    self.refresh()
             self.pages.currentWidget().setFocus()
 
     def _layout_search(self) -> None:

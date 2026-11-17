@@ -186,3 +186,112 @@ def test_panel_debounced_search_keeps_only_latest_view(qtbot):
                                 "total": 1, "truncated": False, "query": "other"})
     assert panel.model.entries[0].path != first_path
     assert len(panel.model.entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# D 表第 2 项：不可变 location/request/generation——新意图作废旧上下文
+# ---------------------------------------------------------------------------
+
+def test_tree_not_invalidated_by_content_navigation(qtbot, tmp_path):
+    """树请求独立于内容导航：目录导航不得作废已展开的树节点。"""
+    locator = FilesDataLocator.for_config_root(tmp_path / "t")
+    locator.ensure_layout()
+    catalog = FilesCatalog(locator)
+    catalog.open()
+    catalog.register_library(tmp_path / "t" / "lib")
+    lib = tmp_path / "t" / "lib"
+    lib.mkdir(parents=True)
+    (lib / "sub").mkdir()
+    (lib / "f.png").write_bytes(b"x")
+    transport = NativeFilesTransport(
+        lambda: "", None, facade=FilesFacade(catalog, max_workers=1))
+    try:
+        with qtbot.waitSignal(transport.tree_loaded, timeout=8000):
+            transport.load_tree(str(lib))
+        # 树节点仍在待定集合之外：目录导航（cancel）不影响已完成的树；
+        # 再发一次树请求也照常送达
+        with qtbot.waitSignal(transport.loaded, timeout=8000):
+            transport.load_directory(str(lib))
+        with qtbot.waitSignal(transport.tree_loaded, timeout=8000) as again:
+            transport.load_tree(str(lib))
+        assert [item["name"] for item in again.args[1]] == ["sub"]
+    finally:
+        transport.shutdown()
+        catalog.close()
+
+
+def test_collection_switch_discards_stale_response(qtbot, tmp_path):
+    """连续切换集合：旧集合响应晚到不得覆盖新集合成员。"""
+    from src.features.files.contracts import identity_key
+
+    class _GatedCollectionsFacade(FilesFacade):
+        """闸住首个 collection_members 工作，制造旧响应在途。"""
+
+        def collection_members(self, collection_id, *, request_id, listener):
+            import threading as _t
+            if not getattr(self, "_gate", None):
+                self._gate = _t.Event()
+            gate = self._gate
+            def _work():
+                gate.wait(5)
+                library_id = self.collections.library_of(collection_id)
+                return self.query.entries_for_paths(
+                    self.collections.member_paths(collection_id),
+                    request_id=request_id,
+                    path_label=f"collection://{collection_id}",
+                    library_id=library_id)
+            return self.run(key="collection", request_id=request_id,
+                            work=_work, listener=listener)
+
+    locator = FilesDataLocator.for_config_root(tmp_path / "c")
+    locator.ensure_layout()
+    catalog = FilesCatalog(locator)
+    catalog.open()
+    library = catalog.register_library(tmp_path / "c" / "lib")
+    lib = tmp_path / "c" / "lib"
+    lib.mkdir()
+    (lib / "one.png").write_bytes(b"1")
+    (lib / "two.png").write_bytes(b"2")
+    cid = catalog.create_collection(library.library_id, "c1")
+    catalog.add_to_collection(cid, str(lib / "one.png"))
+    other = catalog.create_collection(library.library_id, "c2")
+    catalog.add_to_collection(other, str(lib / "two.png"))
+    facade = _GatedCollectionsFacade(catalog, max_workers=1)
+    transport = NativeFilesTransport(lambda: "", None, facade=facade)
+    loaded = []
+    transport.collection_loaded.connect(lambda payload: loaded.append(payload))
+    try:
+        transport.load_collection(cid)      # 闸在 c1
+        transport.load_collection(other)   # 同 key 作废 c1；c2 排队
+        facade._gate.set()
+        with qtbot.waitSignal(transport.collection_loaded, timeout=8000):
+            qtbot.wait(20)
+        qtbot.wait(150)
+        assert len(loaded) == 1             # 只有新集合送达
+        paths = [entry.path for entry in loaded[0]["files"]]
+        assert paths == [str(lib / "two.png")]
+    finally:
+        if getattr(facade, "_gate", None) is not None:
+            facade._gate.set()
+        transport.shutdown()
+        catalog.close()
+
+
+def test_clearing_search_exits_library_view(qtbot):
+    from PyQt6.QtCore import QItemSelectionModel  # noqa: F401
+
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    panel.set_entries("/media", _entry_dicts(2))
+    panel._last_search_query = "needle"
+    panel.library_button.setChecked(True)
+    panel.show_library_results({"files": _entry_dicts(1, start=50),
+                                "total": 1, "truncated": False, "query": "needle"})
+    assert panel._view_location["kind"] == "library-search"
+    replays = []
+    panel.directory_requested.connect(lambda path: replays.append(path))
+    panel._toggle_search(False)  # 收起/清空搜索
+    assert panel._view_location["kind"] == "directory"
+    assert not panel.library_button.isChecked()
+    assert replays == ["/media"]  # 退回目录并重放，不滞留旧结果
+    panel.shutdown()
