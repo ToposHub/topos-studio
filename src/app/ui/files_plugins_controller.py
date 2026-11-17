@@ -112,10 +112,16 @@ class FilesPluginsController(QObject):
                 command_id="files.shutdown_timer.open",
                 plugin_id="files.shutdown_timer",
                 revision_provider=revision_provider),
+            "decode_benchmark": NativeToolCommandService(
+                command_id="files.decode_benchmark.open",
+                plugin_id="files.decode_benchmark",
+                revision_provider=revision_provider),
         }
         self._format_factory_window = None
         self._image_factory_window = None
         self._shutdown_timer_window = None
+        self._decode_benchmark_window = None
+        self._decode_benchmark_service = None
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -404,6 +410,7 @@ class FilesPluginsController(QObject):
             "format_factory": self._open_format_factory,
             "image_factory": self._open_image_factory,
             "shutdown_timer": self._open_shutdown_timer,
+            "decode_benchmark": self._open_decode_benchmark,
         }
         return openers.get(plugin_id)
 
@@ -413,7 +420,7 @@ class FilesPluginsController(QObject):
         plugin_id = service.plugin_id
         legacy_key = plugin_id.partition(".")[2]
         titles = {"format_factory": "格式工厂", "image_factory": "图片工厂",
-                  "shutdown_timer": "定时关机"}
+                  "shutdown_timer": "定时关机", "decode_benchmark": "解码跑分"}
         self._busy.add(plugin_id)
         self._project()
 
@@ -547,6 +554,42 @@ class FilesPluginsController(QObject):
         window = self._shutdown_timer_window
         windows.activate_window("files.shutdown_timer", "main",
                                 singleton=True, focuser=lambda: None)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _open_decode_benchmark(self, paths: tuple[str, ...]) -> None:
+        """[G4] 诊断 command 直接接既有跑分实现（F5 singleton；零 HTTP）。"""
+        from src.features.files.decode_benchmark_service import (
+            DecodeBenchmarkHostService,
+        )
+
+        windows = self.host_session.windows
+        if self._decode_benchmark_service is None:
+            self._decode_benchmark_service = DecodeBenchmarkHostService()
+        if self._decode_benchmark_window is None:
+            try:
+                window = self._decode_benchmark_service.create_window(
+                    self.panel.window(), paths)
+            except (ImportError, OSError) as exc:
+                self._message(f"跑分实现不可用：{exc}")
+                return
+
+            def close_window() -> None:
+                window.close()   # 既有 closeEvent 即请求 worker 取消
+
+            windows.activate_window(
+                "files.decode_benchmark", "main", singleton=True,
+                opener=lambda: None,
+                focuser=lambda: (window.show(), window.raise_(),
+                                 window.activateWindow()),
+                closer=close_window)
+            self._decode_benchmark_window = window
+        window = self._decode_benchmark_window
+        windows.activate_window("files.decode_benchmark", "main",
+                                singleton=True, focuser=lambda: None)
+        if paths and hasattr(window, "add_paths"):
+            window.add_paths(paths)          # 来源/时间线上下文补充
         window.show()
         window.raise_()
         window.activateWindow()
@@ -699,6 +742,10 @@ class FilesPluginsController(QObject):
         if self._shutdown_timer_window is not None:
             self.host_session.windows.close_all("files.shutdown_timer")
             self._shutdown_timer_window = None
+        if self._decode_benchmark_window is not None:
+            # [G4] 关闭即取消在途解码（既有 closeEvent 帧边界协作取消）
+            self.host_session.windows.close_all("files.decode_benchmark")
+            self._decode_benchmark_window = None
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）
