@@ -235,3 +235,43 @@ def test_short_inspector_scroll_and_narrow_cover_preserve_edit_and_full_image(
     pixmap = panel.preview_cover.pixmap()
     assert pixmap.height() <= panel.preview_cover.contentsRect().height()
     assert abs(pixmap.width() / pixmap.height() - 4.0) < 0.1
+
+
+def test_layout_switch_keeps_top_visible_anchor(qtbot: QtBot, panel: NativeFilesPanel) -> None:
+    """D4：布局切换保持滚动锚点——顶部可见行在列表页仍置顶。"""
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QAbstractItemView
+
+    panel.set_entries("/media", _entries() * 15)  # 60 行，制造滚动空间
+    qtbot.waitUntil(lambda: panel.icon_view.visualRect(panel.proxy.index(0, 0)).isValid())
+    target = panel.proxy.index(20, 0)
+    panel.icon_view.scrollTo(target, QAbstractItemView.ScrollHint.PositionAtTop)
+    visible = panel.icon_view.visibleIndexes()
+    anchor_row = min(visible,
+                     key=lambda item: panel.icon_view.visualRect(item).top()).row()
+    panel._change_layout(panel.view_combo.findData("list"))
+    top = panel.detail_view.indexAt(QPoint(4, 4))
+    assert top.isValid()
+    # 切换前首个可见行（锚点）在新布局仍置顶（允许 1 行装饰偏移）
+    assert abs(top.row() - anchor_row) <= 1
+
+
+def test_zoom_preference_survives_reopen(qtbot: QtBot, tmp_path: Path) -> None:
+    """D4：缩放偏好（密度滑杆）持久化，重开面板恢复。"""
+    path = str(tmp_path / "zoom.ini")
+    settings = QSettings(path, QSettings.Format.IniFormat)
+    first = NativeFilesPanel(preferences=NativeFilesPreferences(settings))
+    qtbot.addWidget(first)
+    try:
+        first.density_slider.setValue(240)
+        assert NativeFilesPreferences(QSettings(path, QSettings.Format.IniFormat)).density == 240
+    finally:
+        first.shutdown()
+    reopened = NativeFilesPanel(preferences=NativeFilesPreferences(
+        QSettings(path, QSettings.Format.IniFormat)))
+    qtbot.addWidget(reopened)
+    try:
+        assert reopened.density_slider.value() == 240
+        assert reopened.card_delegate.card_width == 240
+    finally:
+        reopened.shutdown()
