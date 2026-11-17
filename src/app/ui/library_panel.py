@@ -19,6 +19,7 @@ from PyQt6.QtCore import (QDir, pyqtSignal, QSize, Qt, QRect, QPoint, QTimer,
 from PyQt6.QtGui import (QFileSystemModel, QPainter, QColor, QBrush, QPen,
                          QLinearGradient, QDrag)
 from src.shared.db.database import Database
+from src.shared.paths.paths import get_host_db_path
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.config.config_manager import ConfigManager
 from src.shared.assets.icon_manager import (
@@ -140,7 +141,7 @@ def _delete_file_meta_rows(db_path: str, path: str, *, is_dir: bool) -> None:
 class LibraryDelegate(QStyledItemDelegate):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.db = Database()
+        self.db = Database(db_path=get_host_db_path())
         self.thumb_provider = ThumbnailProvider.instance()
         self.thumb_provider.thumbnail_ready.connect(self.on_thumbnail_ready)
         self.view = None # Will be set by panel
@@ -487,7 +488,7 @@ class LibraryDelegate(QStyledItemDelegate):
 class LibraryProxyModel(QSortFilterProxyModel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.db = Database()
+        self.db = Database(db_path=get_host_db_path())
         self.sort_criteria = "name"
         # [AUD-3802] Rating 排序的比较器不得逐次建 SQLite 连接
         self._rating_cache = _RatingCache(self.db)
@@ -563,7 +564,7 @@ class LibraryPanel(QWidget):
     def __init__(self, start_path=None, parent=None) -> None:
         super().__init__(parent)
         self.config = ConfigManager()
-        self.db = Database()  # 添加数据库实例
+        self.db = Database(db_path=get_host_db_path())  # 添加数据库实例
         if start_path is None:
             start_path = self.config.get("last_library_path") or QDir.homePath()
         self.start_path = start_path

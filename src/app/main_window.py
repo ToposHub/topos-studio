@@ -42,6 +42,7 @@ from src.shared.io.file_io import FileIO
 from src.shared.ui.style_sheet import DARK_THEME
 from src.shared.ui.panel_divider import paint_shared_dock_dividers
 from src.shared.db.database import Database
+from src.shared.paths.paths import get_host_db_path
 from src.shared.config.config_manager import ConfigManager
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.shortcut_manager import ShortcutManager
@@ -404,7 +405,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # 不再让进程带着裸 traceback 直接崩溃 —— 明确报错后安全退出，
         # 避免留下半初始化窗口。
         try:
-            self.db = Database()
+            self.db = Database(db_path=get_host_db_path())
             self.engine = ImageEngine()
             self.engine.history.max_steps = self.config_manager.get("undo_history_limit") or 50
         except Exception as exc:
