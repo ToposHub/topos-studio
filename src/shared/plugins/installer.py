@@ -51,6 +51,8 @@ import stat
 import threading
 import zipfile
 from dataclasses import dataclass
+
+from src.shared.plugins import install_lock
 from pathlib import Path
 from typing import Any, Callable
 
@@ -200,53 +202,29 @@ def _semver_key(version: str) -> tuple[tuple[int, int, int], int, tuple[tuple[in
 
 
 class _Transaction:
-    """One install/uninstall mutation at a time, per process and per host."""
+    """One install/uninstall mutation at a time, per process and per host.
+
+    [F13] 跨进程锁按平台选择等价原语（POSIX flock / Windows msvcrt.locking
+    ——见 ``install_lock``）；无任何原语的平台由 ``LockUnavailable`` 如实
+    拒绝（拒绝≠支持）。线程锁仍包在外层（同进程串行）。
+    """
 
     def __init__(self, thread_lock: threading.RLock, lock_path: Path) -> None:
-        self._thread_lock = thread_lock
-        self._lock_path = lock_path
-        self._handle = None
+        self._held = install_lock.HeldTransactionLock(thread_lock, lock_path)
 
     def __enter__(self) -> "_Transaction":
-        self._thread_lock.acquire()
-        parent = self._lock_path.parent
         try:
-            if parent.is_symlink():
-                raise InstallerError("PATH_NOT_OWNED", "安装根是符号链接，拒绝落事务锁")
-            if fcntl is None:
-                raise InstallerError("LOCK_UNAVAILABLE", "当前平台没有跨进程安装事务锁")
-            # 安装根是符号链接时不落锁文件（不能穿过链接写）；
-            # 所有权核验随后会响亮拒绝整个事务。
-            parent.mkdir(parents=True, exist_ok=True)
-            if self._lock_path.is_symlink():
-                raise InstallerError("PATH_NOT_OWNED", "事务锁不能是符号链接")
-            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-            descriptor = os.open(self._lock_path, flags, 0o600)
-            self._handle = os.fdopen(descriptor, "a+b")
-            lock_stat = os.fstat(self._handle.fileno())
-            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1:
-                raise InstallerError("PATH_NOT_OWNED", "事务锁必须是独立的普通文件")
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
-        except (OSError, InstallerError) as exc:
-            if self._handle is not None:
-                self._handle.close()
-                self._handle = None
-            self._thread_lock.release()
-            if isinstance(exc, InstallerError):
-                raise
+            self._held.__enter__()
+        except install_lock.LockUnavailable as exc:
+            raise InstallerError("LOCK_UNAVAILABLE", str(exc)) from exc
+        except OSError as exc:
             raise InstallerError("LOCK_UNAVAILABLE", f"无法取得安装事务锁：{exc}") from exc
+        except RuntimeError as exc:
+            raise InstallerError("PATH_NOT_OWNED", str(exc)) from exc
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        if self._handle is not None:
-            try:
-                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                pass
-            finally:
-                self._handle.close()
-                self._handle = None
-        self._thread_lock.release()
+        self._held.__exit__(*exc_info)
 
 
 _HAS_DIRFD = bool(getattr(os, "supports_dir_fd", False) and os.supports_dir_fd)
