@@ -60,6 +60,13 @@ def endpoint():
     thread.join(timeout=2)
 
 
+def _legacy_http_mode(host):
+    """[G1-G4] 四个可启动 builtin 已全部原生接管——需验证仍存在的
+    legacy HTTP 通道行为的测试，显式禁用原生命令表。"""
+    host._native_commands = {}
+    return host
+
+
 @pytest.fixture
 def controller(qtbot, catalog, tmp_path, endpoint):
     prefs = NativeFilesPreferences(QSettings(str(tmp_path / "plugins.ini"), QSettings.Format.IniFormat))
@@ -186,6 +193,7 @@ def test_disable_visible_persistent_and_no_runtime_reload(controller, qtbot):
 
 def test_launch_auth_selection_snapshot_duplicate_suppression_and_recent(controller, endpoint, qtbot):
     host, selected, _, _ = controller
+    _legacy_http_mode(host)
     host.launch("decode_benchmark")
     host.launch("decode_benchmark")
     selected[:] = ["/other.mov"]
@@ -197,6 +205,7 @@ def test_launch_auth_selection_snapshot_duplicate_suppression_and_recent(control
 
 def test_multiselection_is_rejected_without_losing_files(controller, endpoint, qtbot):
     host, selected, _, _ = controller
+    _legacy_http_mode(host)
     selected.append("/second.mov")
     # [G1] format_factory 已原生接管（多选在原生计划层处理）——单选政策
     # 的 HTTP 拒绝口径改用仍走 legacy 的 decode_benchmark（kind=paths
@@ -212,6 +221,7 @@ def test_multiselection_is_rejected_without_losing_files(controller, endpoint, q
 @pytest.mark.parametrize("status,payload", [(500, {"status": "ok"}), (200, []), (200, {"status": "error"}), (302, {"status": "ok"})])
 def test_server_failure_never_records_usage(controller, endpoint, qtbot, status, payload):
     host, _, _, _ = controller
+    _legacy_http_mode(host)
     endpoint[2].update(status=status, payload=payload)
     # [G2] image_factory 已原生接管——服务失败语义改用 legacy 通道的
     # decode_benchmark 验证（native 无 HTTP，不存在此路径）
@@ -252,6 +262,7 @@ def test_shutdown_discards_late_launch_completion(controller):
 def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controller, endpoint, qtbot):
     from src.shared.plugins.services import rejected
     host, _, _, _ = controller
+    _legacy_http_mode(host)
     host._commands.dispatch = lambda prepared: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
     # [G2] image_factory 已原生接管——dispatch 拒绝语义改用 legacy 通道
     host.launch("decode_benchmark")
@@ -424,6 +435,7 @@ def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
     host = FilesPluginsController(catalog, transport, prefs, panel,
                                   lambda: ["/media/a.mov"], lambda: None, panel,
                                   sources_factory=lambda: f1_sources)
+    _legacy_http_mode(host)   # [G4] 四 builtin 已全原生——显式验 legacy 通道
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
         # [G1/G2] format_factory/image_factory 已由原生窗口接管（零 HTTP）
@@ -562,6 +574,7 @@ def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
     transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
     host = FilesPluginsController(catalog, transport, prefs, panel,
                                   lambda: ["/m/a.mov"], lambda: None, panel)
+    _legacy_http_mode(host)   # [G4] 显式验证仍存在的 legacy 通道生命周期
 
     # 应答不自动到达：拦截 transport 提交（任务保持 running，不 emit 完成信号）
     submitted: list[tuple] = []
@@ -682,5 +695,40 @@ def test_g3_shutdown_timer_native_singleton_zero_http(
         assert host.host_session.windows.windows_for(
             "files.shutdown_timer") == ()
         assert window._service.state == "idle"     # 关闭即取消
+    finally:
+        host.shutdown()
+
+
+def test_g4_decode_benchmark_native_zero_http_singleton(
+        qtbot, catalog, tmp_path, endpoint):
+    """[G4] 原生接管：直接接既有跑分实现（F5 singleton；零 HTTP）。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g4.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        host.launch("decode_benchmark")
+        qtbot.waitUntil(lambda: host._decode_benchmark_window is not None,
+                        timeout=10000)
+        window = host._decode_benchmark_window
+        assert window.isVisible()
+        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy,
+                        timeout=8000)
+        host.launch("decode_benchmark")          # singleton：同一实例
+        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy,
+                        timeout=8000)
+        assert host._decode_benchmark_window is window
+        assert endpoint[1] == []                 # 零 HTTP
+        host.host_session.windows.close_all("files.decode_benchmark")
+        assert host.host_session.windows.windows_for(
+            "files.decode_benchmark") == ()
+        host._decode_benchmark_window = None
     finally:
         host.shutdown()
