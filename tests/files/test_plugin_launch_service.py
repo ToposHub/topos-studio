@@ -27,6 +27,11 @@ class _Catalog:
     def snapshot(self):
         return tuple(self._infos)
 
+    def launchable_now(self, plugin_id):
+        # [F4] 廉价探测：供权威边界锁内复核（不做目录扫描）
+        info = next((i for i in self._infos if i.plugin_id == plugin_id), None)
+        return bool(info and info.can_launch)
+
     def launch_request(self, plugin_id, paths):
         info = next((i for i in self._infos if i.plugin_id == plugin_id), None)
         if info is None:
@@ -194,7 +199,8 @@ def test_dispatch_rejects_when_disabled_between_prepare_and_dispatch():
     result = service.dispatch(prepared)
     assert not result.accepted and not result.ok
     assert result.error_code == "COMMAND_NOT_APPLICABLE"
-    assert "已停用" in result.message
+    # [F4] 边界内廉价探测给通用原因（具体停用文案属 revalidate 全量复核）
+    assert "不可启动" in result.message or "已停用" in result.message
     assert transport.calls == []                            # 从未提交 HTTP
 
 
@@ -340,3 +346,117 @@ def test_f3_revision_none_from_provider_treated_as_unavailable():
     prepared = service.prepare("image_factory", ["/m/a.png"])
     assert prepared.context.entry_revision == 0
     assert service.dispatch(service.revalidate(prepared)).accepted
+
+
+# ---------------------------------------------------------------------------
+# F4：权威边界——票据不放行、变更串行、绕过边界的停用仍被锁内探测拦下
+# ---------------------------------------------------------------------------
+
+def test_f4_authority_invalidate_rejects_dispatch_without_submit():
+    """切库/撤权经边界 invalidate：冻结 epoch 过期 → 拒绝且零提交。"""
+    service, transport = _service()
+    prepared = service.prepare("image_factory", [])
+    checked = service.revalidate(prepared)
+    service.authority.invalidate("library-switch")
+    result = service.dispatch(checked)     # 票据（revalidated）不放行
+    assert not result.accepted and result.error_code == "AUTHORITY_EPOCH_MOVED"
+    assert result.retriable
+    assert transport.calls == []
+
+
+def test_f4_revalidated_ticket_alone_never_submits_when_stale():
+    """票据防伪不能代替原子边界：复核后停用（经边界）→ 锁内拒绝。"""
+    from pathlib import Path as _Path
+    import src.features.files.plugin_launch_service as pls
+
+    class _ConfigCatalog(_Catalog):
+        def __init__(self, infos):
+            super().__init__(infos)
+            self.disabled: set[str] = set()
+
+        def launchable_now(self, plugin_id):
+            return plugin_id not in self.disabled
+
+        def set_enabled(self, plugin_id, enabled):
+            (self.disabled.discard if enabled else self.disabled.add)(plugin_id)
+
+    catalog = _ConfigCatalog([_Info("image_factory")])
+    transport = _Transport()
+    service = pls.LegacyFilesCommandService(catalog, transport)
+    checked = service.revalidate(service.prepare("image_factory", []))
+    service.set_enabled_atomic("image_factory", False)   # 经边界停用
+    result = service.dispatch(checked)
+    assert not result.accepted
+    assert result.error_code in ("AUTHORITY_EPOCH_MOVED", "COMMAND_NOT_APPLICABLE")
+    assert transport.calls == []
+
+
+def test_f4_bypassed_disable_still_caught_by_in_lock_probe():
+    """未经边界直接改 catalog（绕过 mutate）：epoch 不动，但锁内廉价
+    探测读实时配置——停用仍被拦下（belt and braces，不靠假设）。"""
+    class _LiveCatalog(_Catalog):
+        def __init__(self, infos):
+            super().__init__(infos)
+            self.disabled: set[str] = set()
+
+        def launchable_now(self, plugin_id):
+            return plugin_id not in self.disabled
+
+    catalog = _LiveCatalog([_Info("image_factory")])
+    transport = _Transport()
+    service = LegacyFilesCommandService(catalog, transport)
+    checked = service.revalidate(service.prepare("image_factory", []))
+    catalog.disabled.add("image_factory")    # 绕过权威边界直改状态
+    result = service.dispatch(checked)
+    assert not result.accepted and result.error_code == "COMMAND_NOT_APPLICABLE"
+    assert transport.calls == []
+
+
+def test_f4_set_enabled_atomic_serializes_with_in_flight_submit():
+    """停用与在途提交串行：提交持锁时停用等待，提交完成后才生效。"""
+    import threading as _t
+
+    entered = _t.Event()
+    release = _t.Event()
+    order: list[str] = []
+
+    class _BlockingTransport(_Transport):
+        def launch_plugin(self, plugin_id, endpoint, payload):
+            order.append("submit")
+            entered.set()
+            release.wait(5)
+            return True
+
+    catalog = _Catalog([_Info("image_factory")])
+    catalog.set_enabled = lambda plugin_id, enabled: order.append("disable")
+    transport = _BlockingTransport()
+    service = LegacyFilesCommandService(catalog, transport)
+    checked = service.revalidate(service.prepare("image_factory", []))
+
+    outcome: list = []
+
+    def run_dispatch():
+        outcome.append(service.dispatch(checked))
+
+    dispatch_thread = _t.Thread(target=run_dispatch)
+    dispatch_thread.start()
+    assert entered.wait(5)
+    disable_done = _t.Event()
+
+    def run_disable():
+        try:
+            service.set_enabled_atomic("image_factory", False)
+        except Exception:
+            order.append("disable-failed")
+        finally:
+            disable_done.set()
+
+    disable_thread = _t.Thread(target=run_disable)
+    disable_thread.start()
+    assert not disable_done.wait(0.3)       # 停用被在途提交挡住（原子边界）
+    release.set()
+    dispatch_thread.join(timeout=5)
+    disable_thread.join(timeout=5)
+    assert disable_done.is_set()
+    assert outcome and outcome[0].accepted
+    assert order[0] == "submit"             # 提交完整在前，停用落地在后
