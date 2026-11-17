@@ -723,12 +723,11 @@ class MacroCommand:
             f"({len(self.sub_commands)} sub-commands)"
         )
 
-        # Return updated macro with stored sub-commands for proper undo
-        updated_macro = MacroCommand(
-            command_id=self.command_id,
-            label=self.label,
-            sub_commands=tuple(updated_sub_commands),
-        )
+        # Return updated macro with stored sub-commands for proper undo.
+        # replace() 保留子类与其余字段：ImportDropMacroCommand 等携带
+        # 素材补偿回调的宏在子命令自我更新后不退化为裸 MacroCommand。
+        updated_macro = replace(
+            self, sub_commands=tuple(updated_sub_commands))
         return current_timeline, updated_macro
 
     @staticmethod
@@ -991,6 +990,7 @@ from .track_commands import (
 # P6 拆分·第五刀：asset 簇（29 类）已纯搬移至 asset_commands.py，
 # 此处显式 re-export 保住 `from src.features.edit.core.commands import X` 深导入。
 from .asset_commands import (
+    ImportDropMacroCommand as ImportDropMacroCommand,
     CreateBinCommand as CreateBinCommand,
     DeleteBinCommand as DeleteBinCommand,
     DeleteAssetCommand as DeleteAssetCommand,

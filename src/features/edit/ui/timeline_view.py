@@ -16927,6 +16927,71 @@ class TimelineView(QGraphicsView):
     def _is_subtitle_path(path: str) -> bool:
         return os.path.splitext(path)[1].lower() in SUPPORTED_SUBTITLE_EXTENSIONS
 
+    def _undo_imported_assets(self, assets: tuple, timeline_after_undo: Any) -> None:
+        """[C5] 撤销投放时移除本次**新导入**素材；仍被引用的跳过。
+
+        幂等：素材已不在库（重复 undo/补偿已跑）直接跳过。工程是不可变
+        结构，逐个 remove_asset 归档后统一发布 project_changed。
+        """
+        current = self._project
+        removed = 0
+        for asset in assets:
+            if current is None:
+                break
+            existing = current.get_asset_by_path(asset.path)
+            if existing is None or existing.asset_id != asset.asset_id:
+                continue
+            still_used = False
+            if timeline_after_undo is not None:
+                for track in getattr(timeline_after_undo, "all_tracks", ()) or ():
+                    for clip in getattr(track, "clips", ()) or ():
+                        if clip.asset_id == asset.asset_id:
+                            still_used = True
+                            break
+                    if still_used:
+                        break
+            if still_used:
+                continue  # 其他片段仍引用：不产生悬挂引用，如实保留
+            try:
+                current = current.remove_asset(asset.asset_id)
+                removed += 1
+            except Exception:  # noqa: BLE001 - 单素材失败不阻断其余撤销
+                logger.warning("Import undo: remove asset failed for %s",
+                               asset.asset_id)
+        if removed and current is not None:
+            self._project = current
+            self.project_changed.emit(current)
+
+    def _redo_imported_assets(self, assets: tuple) -> None:
+        """[C5] 重做投放时按原 asset_id 复位素材（幂等 ensure）。
+
+        import_asset 会生成新 UUID，破坏 clip.asset_id 引用，因此直接
+        按原对象复位并保证 root bin 成员关系。
+        """
+        current = self._project
+        if current is None:
+            return
+        restored = 0
+        import time as _time
+        from dataclasses import replace as _dc_replace
+
+        for asset in assets:
+            if current.get_asset_by_id(asset.asset_id) is not None:
+                continue
+            new_assets = dict(current.assets)
+            new_assets[asset.asset_id] = asset
+            bins = current.bins
+            root = bins.get(current.root_bin_id)
+            if root is not None and asset.asset_id not in root.asset_ids:
+                bins = dict(bins)
+                bins[current.root_bin_id] = root.with_asset_added(asset.asset_id)
+            current = _dc_replace(current, assets=new_assets, bins=bins,
+                                  modified_at=_time.time())
+            restored += 1
+        if restored:
+            self._project = current
+            self.project_changed.emit(current)
+
     def _finish_external_import(self, result: Any) -> None:
         """探测完成后的主线程提交：重新校验目标上下文，再单宏落轨。
 
@@ -17067,8 +17132,17 @@ class TimelineView(QGraphicsView):
             return
 
         try:
-            self._execute_command(MacroCommand.create(
-                f"Drop {len(imported)} external file(s)", batch_commands))
+            # [C5] 一次 Undo/Redo 覆盖新增素材与落轨：宏携带本次新导入
+            # 素材的撤销/重做回调；复用素材不在列表内，永不因此被删。
+            from src.features.edit.core.commands import ImportDropMacroCommand
+
+            new_assets = tuple(asset for asset in imported
+                               if asset.path in new_paths)
+            self._execute_command(ImportDropMacroCommand.create(
+                f"Drop {len(imported)} external file(s)", batch_commands,
+                imported_assets=new_assets,
+                on_undo_assets=self._undo_imported_assets,
+                on_redo_assets=self._redo_imported_assets))
         except (RuntimeError, ValueError) as exc:
             # MacroCommand 内部已逆序回滚时间线；工程侧同步补偿新导入素材，
             # 播报内容与实际状态一致（FR-06：不得宣称不存在的整批回滚）

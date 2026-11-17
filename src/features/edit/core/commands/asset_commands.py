@@ -3642,3 +3642,59 @@ class UpdateTimelineSettingsCommand:
             before_sequence=before_sequence,
             after_sequence=after_sequence,
         )
+
+
+# ================================================================
+# ImportDropMacroCommand - C 阶段：一次 Undo/Redo 覆盖新增素材与落轨
+# ================================================================
+
+def _macro_base() -> Any:
+    """延迟取 MacroCommand 基类（cluster 模块先于注册表被 __init__ 导入）。"""
+    from . import MacroCommand  # noqa: PLC0415 - 规避循环导入
+
+    return MacroCommand
+
+
+@dataclass(frozen=True)
+class ImportDropMacroCommand(_macro_base()):
+    """外部文件投放宏：撤销/重做连同**本次新导入素材**一起回退/恢复。
+
+    素材在宏执行前已由 ``prepare_import`` 写入工程（片段构造需要真实
+    asset）；本宏把"移除/复位这些素材"挂在 undo/redo 上，使一次
+    Undo 同时覆盖落轨与新增素材。复用的既有素材不在
+    ``imported_assets`` 里，永不因此被删（总计划 C 表第 7 行）。
+
+    回调由视图注入（核心命令不持视图引用）；撤销时若素材仍被其他
+    片段引用则跳过该素材（不产生悬挂引用）。apply 的素材侧是幂等
+    ensure：首次执行时素材已在库，重放/重做时按原 asset_id 复位。
+    """
+
+    imported_assets: tuple = ()
+    on_undo_assets: Any = None    # (assets, timeline_after_undo) -> None
+    on_redo_assets: Any = None    # (assets) -> None
+
+    def apply(self, timeline: Any) -> Any:
+        result = super().apply(timeline)
+        if self.imported_assets and self.on_redo_assets is not None:
+            self.on_redo_assets(self.imported_assets)
+        return result
+
+    def undo(self, timeline: Any) -> Any:
+        restored = super().undo(timeline)
+        if self.imported_assets and self.on_undo_assets is not None:
+            self.on_undo_assets(self.imported_assets, restored)
+        return restored
+
+    @staticmethod
+    def create(label: str, sub_commands: tuple, *,
+               imported_assets: tuple = (),
+               on_undo_assets: Any = None,
+               on_redo_assets: Any = None) -> "ImportDropMacroCommand":
+        return ImportDropMacroCommand(
+            command_id=str(uuid.uuid4()),
+            label=label,
+            sub_commands=tuple(sub_commands),
+            imported_assets=tuple(imported_assets),
+            on_undo_assets=on_undo_assets,
+            on_redo_assets=on_redo_assets,
+        )
