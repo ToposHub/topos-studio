@@ -637,6 +637,60 @@ class FilesCatalog:
                 (library_id, *values),
             )
 
+    def move_subtree(self, library_id: str, old_dir: str | Path,
+                     new_dir: str | Path) -> dict[str, int]:
+        """目录身份迁移：old_dir/ 前缀下的资产主表、FTS 与三张关系表
+        全部改挂 new_dir/ 前缀。
+
+        前缀匹配在 Python 侧用 ``startswith`` 精确比较（SQLite LIKE 对
+        ASCII 不区分大小写，路径匹配会误伤）。返回各表迁移行数。
+        """
+        old_prefix = nfc(old_dir).rstrip("/") + "/"
+        new_prefix = nfc(new_dir).rstrip("/") + "/"
+        counts = {"assets": 0, "asset_tags": 0, "collection_items": 0,
+                  "stack_members": 0, "stacks_cover": 0, "fts": 0}
+        with self._write() as cursor:
+            paths = [
+                row["path"]
+                for row in cursor.execute(
+                    "SELECT path FROM assets WHERE library_id = ?"
+                    " AND substr(path, 1, ?) = ?",
+                    (library_id, len(old_prefix), old_prefix),
+                ).fetchall()
+            ]
+            for path in paths:
+                target = new_prefix + path[len(old_prefix):]
+                cursor.execute(
+                    "UPDATE assets SET path = ?, name = ? WHERE library_id = ?"
+                    " AND path = ?",
+                    (target, os.path.basename(target), library_id, path),
+                )
+                counts["assets"] += cursor.rowcount
+                cursor.execute(
+                    "UPDATE assets_fts SET path = ? WHERE library_id = ? AND path = ?",
+                    (target, library_id, path),
+                )
+                counts["fts"] += cursor.rowcount
+                for table in ("asset_tags",):
+                    cursor.execute(
+                        f"UPDATE {table} SET path = ? WHERE library_id = ? AND path = ?",
+                        (target, library_id, path),
+                    )
+                    counts[table] += cursor.rowcount
+                for table in ("collection_items", "stack_members"):
+                    cursor.execute(
+                        f"UPDATE {table} SET path = ? WHERE path = ?",
+                        (target, path),
+                    )
+                    counts[table] += cursor.rowcount
+                cursor.execute(
+                    "UPDATE stacks SET cover_path = ? WHERE library_id = ?"
+                    " AND cover_path = ?",
+                    (target, library_id, path),
+                )
+                counts["stacks_cover"] += cursor.rowcount
+        return counts
+
     def restore_relations(self, library_id: str, path: str | Path, *,
                           tag_names: list[str] | None = None,
                           collection_ids: list[int] | None = None,
