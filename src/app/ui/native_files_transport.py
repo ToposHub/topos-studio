@@ -509,8 +509,12 @@ class NativeFilesTransport(QObject):
             targets = [os.path.join(targets[0], str(options.pop("name")))]
         job_id = f"task-{operation}-{uuid.uuid4().hex[:10]}"
         self._running_jobs.add(job_id)
-        self.task_started.emit({"job_id": job_id, "operation": operation,
-                                "total": len(targets), "completed": 0})
+        # 首发（completed=0）附完整调用参数：任务列表据此提供"重试失败项"
+        self.task_started.emit({
+            "job_id": job_id, "operation": operation,
+            "total": len(targets), "completed": 0,
+            "targets": list(targets), "policy": str(policy),
+            "options": dict(options or {})})
 
         def _progress(done: int, total: int) -> None:
             if not self._closed:

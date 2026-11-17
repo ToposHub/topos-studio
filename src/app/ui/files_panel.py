@@ -86,6 +86,8 @@ class FilesPanel(QWidget):
         self._files_root_path: str | None = None
         self._native_panel = None
         self._native_transport = None
+        self._files_jobs = None
+        self._jobs_dialog = None
         self._native_active = False
         self._pending_native_open: tuple[str, str] | None = None
         from src.app.ui.native_files_prefs import NativeFilesPreferences
@@ -336,6 +338,9 @@ class FilesPanel(QWidget):
         native_transport = getattr(self, "_native_transport", None)
         if native_transport is not None:
             native_transport.shutdown()
+        jobs_dialog = getattr(self, "_jobs_dialog", None)
+        if jobs_dialog is not None:
+            jobs_dialog.close()
         native_panel = getattr(self, "_native_panel", None)
         if native_panel is not None:
             native_panel.shutdown()
@@ -490,6 +495,13 @@ class FilesPanel(QWidget):
             self._native_transport.collection_changed.connect(
                 self._on_collection_changed)
             self._native_panel.trash_requested.connect(self._open_trash)
+            # D5：文件任务台账——切目录/关窗不丢归属（registry 常驻本面板）
+            from src.app.ui.native_files_jobs import FilesJobsRegistry
+            self._files_jobs = FilesJobsRegistry(self)
+            self._native_transport.task_started.connect(self._files_jobs.on_task_started)
+            self._native_transport.task_finished.connect(self._files_jobs.on_task_finished)
+            self._native_transport.task_failed.connect(self._files_jobs.on_task_failed)
+            self._native_panel.jobs_requested.connect(self._open_jobs)
             # F11 / B10：常用位置、索引状态、缩略图重试
             self._native_panel.libraries_requested.connect(
                 self._native_transport.load_libraries)
@@ -590,6 +602,31 @@ class FilesPanel(QWidget):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.show()
         transport.load_trash()
+
+    def _open_jobs(self) -> None:
+        """D5 任务列表：注册表常驻，对话框可关/重开不丢账。"""
+        if self._native_transport is None:
+            return
+        existing = getattr(self, "_jobs_dialog", None)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+        from src.app.ui.native_files_jobs import JobsDialog
+        registry = getattr(self, "_files_jobs", None)
+        if registry is None:
+            return
+        dialog = JobsDialog(registry, self)
+        dialog.cancel_requested.connect(self._native_transport.cancel_task)
+        dialog.retry_requested.connect(
+            lambda operation, targets, policy, options:
+            self._native_transport.run_task(
+                str(operation), list(targets), policy=str(policy),
+                options=dict(options or {})))
+        dialog.finished.connect(lambda *_: setattr(self, "_jobs_dialog", None))
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._jobs_dialog = dialog
+        dialog.show()
 
     def _open_batch_rename(self, paths: list[str]) -> None:
         from src.app.ui.native_files_batch_rename import BatchRenameDialog
