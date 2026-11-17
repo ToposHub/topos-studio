@@ -86,6 +86,9 @@ class ToposMovieSession(DecoderBackend):
         self.width = info.width
         self.height = info.height
         self.frame_count = info.sample_count
+        # [E4] Topos 容器无旋转元数据概念：显示旋转恒 0（与 libav 会话
+        # 的 rotation_quarters 契约对齐，播放器侧守卫统一生效）
+        self.rotation_quarters = 0
         # [FR-19] timescale 不是 fps：MOV media timescale 是"每秒 tick 数"，
         # 与帧率无关（timescale=24000、每帧 1000 ticks 的 24fps 片会算出
         # 24000fps/0.01s）。复用 ToposSource 的精确时基公式：
@@ -326,8 +329,11 @@ class ToposPlayer(BasePlayer):
         4K 素材预览解码到 1920×1080，快照仍走 ``_native_frame`` 全尺寸。
         """
         canvas = self.canvas
+        # [E4] 与 libav 同款守卫：有显示旋转走 RGB 路径（Topos 格式本身
+        # 无旋转概念，rotation_quarters 恒 0——守卫保持两引擎语义一致）
         if getattr(canvas, 'gpu_active', False) and \
-                hasattr(session, 'frame_yuv'):
+                hasattr(session, 'frame_yuv') and \
+                getattr(session, 'rotation_quarters', 0) == 0:
             try:
                 return session.frame_yuv(target, size=canvas.display_size())
             except Exception:

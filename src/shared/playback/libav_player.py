@@ -373,6 +373,10 @@ class _LibavSession(DecoderBackend):
             # [FR-20] VideoFrame 不暴露 SAR；等比解码尺寸需要源 SAR，
             # 打开时从 CodecContext 记录一次（Fraction 或 None）
             self.sar = getattr(vs, 'sample_aspect_ratio', None)
+            # [E4] 显示旋转（MOV tkhd → FFmpeg DISPLAYMATRIX）：只挂在解码
+            # 帧的 side data 上（包上没有），打开时解一帧探取；探测失败/
+            # 非法值按未旋转处理——绝不静默转 90° 凑比例
+            self.rotation_quarters = self._probe_rotation()
         except Exception:
             self.close()
             raise
@@ -381,6 +385,25 @@ class _LibavSession(DecoderBackend):
         self._lock = threading.Lock()
 
     # -- 索引/时间换算 --
+
+    def _probe_rotation(self) -> int:
+        """[E4] 解码首帧读 DISPLAYMATRIX → 90° 象限（顺时针显示旋转）。
+
+        探测后作废迭代器位置（首帧解码会重新 seek）；镜像/任意角返回 0
+        并告警——预览不支持，不做错误呈现。
+        """
+        from .frame_geometry import display_rotation_quarters
+        try:
+            for probe in self._container.decode(video=0):
+                for data in probe.side_data:
+                    if 'DISPLAYMATRIX' in str(getattr(data, 'type', '')):
+                        return display_rotation_quarters(
+                            np.frombuffer(bytes(data), dtype=np.int32))
+                break
+        except Exception:
+            logger.debug('rotation probe failed; treating as unrotated',
+                         exc_info=True)
+        return 0
 
     def _pts_of(self, index: int) -> int:
         tb = float(self._stream.time_base)
@@ -397,14 +420,18 @@ class _LibavSession(DecoderBackend):
     # -- 随机访问解码（顺序命中时不 seek，享受多线程吞吐） --
 
     def frame_rgb(self, index: int, size=None):
+        from .frame_geometry import rotate_rgb_quarters
         with self._lock:
             frame = self._decode_frame_locked(index, size)
             if size:
                 # [FR-20] _decode_frame_locked 已等比重采样到框内尺寸，
                 # 这里不再二次拉伸到整个框
-                return np.ascontiguousarray(
-                    frame.to_ndarray(format='rgb24'))
-            return frame.to_ndarray(format='rgb24')
+                rgb = np.ascontiguousarray(frame.to_ndarray(format='rgb24'))
+            else:
+                rgb = frame.to_ndarray(format='rgb24')
+        # [E4] 显示旋转在 RGB 路径落地（YUV/GPU 路径不支持旋转，播放器
+        # 侧已按 rotation_quarters 回退 RGB）
+        return rotate_rgb_quarters(rgb, self.rotation_quarters)
 
     def frame_yuv(self, index: int, size=None):
         """解码第 index 帧 → ``YuvFrame``（GPU 预览路径）。
@@ -465,7 +492,9 @@ class _LibavSession(DecoderBackend):
             # SAR（只有 CodecContext 有），用会话打开时记录的源 SAR；
             # 解码结果即方形像素，画布用解码尺寸即可恢复几何。
             w, h = _fit_aspect_size(frame, int(size[0]), int(size[1]),
-                                    getattr(self, 'sar', None))
+                                    getattr(self, 'sar', None),
+                                    rotation_quarters=getattr(
+                                        self, 'rotation_quarters', 0))
             frame = frame.reformat(width=w, height=h,
                                    format=frame.format.name)
         return frame
@@ -616,8 +645,11 @@ class LibavPlayer(BasePlayer):
     def _decode_frame(self, session, target: int):
         canvas = self.canvas
         size = canvas.display_size()
+        # [E4] YUV/GPU 上传路径不支持旋转：有显示旋转时直接走 RGB 路径
+        # （frame_rgb 内完成旋转）
         if getattr(canvas, 'gpu_active', False) and \
-                hasattr(session, 'frame_yuv'):
+                hasattr(session, 'frame_yuv') and \
+                getattr(session, 'rotation_quarters', 0) == 0:
             try:
                 return session.frame_yuv(target, size=size)
             except Exception:
