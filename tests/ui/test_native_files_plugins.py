@@ -508,3 +508,32 @@ def test_f2_desired_state_store_roundtrip(tmp_path):
         "files.a": True, "files.b": False}
     store.save({})                                   # 清空即空档
     assert store.load() == {}
+
+
+def test_f5_shortcuts_are_owned_contributions(qtbot, catalog, tmp_path, endpoint):
+    """[F5] 快捷键经宿主会话持有所有权：替换释放旧句柄、停用整组注销。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f5.ini"), QSettings.Format.IniFormat))
+    prefs.plugin_shortcuts = {"format_factory": "Ctrl+Alt+F"}
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        qtbot.waitUntil(lambda: host.host_session.shortcut_count("format_factory") == 1,
+                        timeout=8000)
+        # 停用（restart-bound）：贡献整组释放，快捷键注销
+        host._set_enabled("format_factory", False)
+        qtbot.waitUntil(lambda: host.host_session.shortcut_count("format_factory") == 0,
+                        timeout=8000)
+        from PyQt6.QtGui import QAction as _QAction
+        actions = [a for a in panel.findChildren(_QAction)
+                   if a.shortcut().toString() == "Ctrl+Alt+F"]
+        assert not actions or not actions[0].isEnabled()
+    finally:
+        host.shutdown()
