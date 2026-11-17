@@ -8,9 +8,12 @@ Core rules from the plan:
   user's gesture and re-validated before execution (stale selections fail
   loudly, multi-select is never silently narrowed to the first item)
 - activation is all-or-nothing: a ``setup()`` that fails halfway leaves no
-  residual contributions (rollback releases every registered handle)
-- deactivation forbids new calls first, then cancels/waits jobs, closes
-  windows, unbinds events, releases handles; it is idempotent
+  residual contributions (rollback releases every registered handle; a
+  failing ``release()`` never aborts the remaining ones)
+- deactivation forbids new calls first, then cancels/waits *that plugin's*
+  jobs, closes windows, unbinds events, releases handles; it is idempotent,
+  resumable, and never frees a plugin's contributions while its jobs are
+  still terminating or a cleanup step keeps failing (PR-02)
 - cancellation is a *request*; "cancelled" is only published after the job
   confirms termination
 """
@@ -123,12 +126,17 @@ class _FunctionHandle:
 
 
 class ContributionSet:
-    """All-or-nothing registration: ``rollback()`` releases everything."""
+    """All-or-nothing registration: ``rollback()`` releases everything.
+
+    单个 ``release()`` 抛错不会中止其余释放（PR-02）：失败句柄保留在
+    本集合内，用 ``retry_failed_releases()`` 重试——注册所有权不提前移除。
+    """
 
     def __init__(self, plugin_id: str) -> None:
         self.plugin_id = plugin_id
-        self._handles: list[ContributionHandle] = []
+        self._handles: list[tuple[str, str, ContributionHandle]] = []
         self._keys: set[tuple[str, str]] = set()
+        self._failures: list[tuple[str, str, ContributionHandle, str]] = []
         self._committed = False
         self._released = False
 
@@ -140,7 +148,7 @@ class ContributionSet:
             raise ValueError(f"贡献重复注册：{kind}:{key}")
         self._keys.add((kind, key))
         handle = _FunctionHandle(release)
-        self._handles.append(handle)
+        self._handles.append((kind, key, handle))
         return handle
 
     def commit(self) -> None:
@@ -149,18 +157,38 @@ class ContributionSet:
         self._committed = True
 
     def rollback(self) -> int:
-        """Release every handle in reverse order; returns released count."""
+        """Release every pending handle in reverse order; returns released count."""
         released = 0
         while self._handles:
-            handle = self._handles.pop()
-            handle.release()
-            released += 1
+            kind, key, handle = self._handles.pop()
+            try:
+                handle.release()
+                released += 1
+            except BaseException as exc:  # noqa: BLE001 - 清理失败必须继续释放其余句柄
+                self._failures.append((kind, key, handle, f"{type(exc).__name__}: {exc}"))
         self._released = True
         return released
 
+    def retry_failed_releases(self) -> int:
+        """Retry handles whose release previously failed; returns freed count."""
+        retried = 0
+        remaining: list[tuple[str, str, ContributionHandle, str]] = []
+        for kind, key, handle, _error in self._failures:
+            try:
+                handle.release()
+                retried += 1
+            except BaseException as exc:  # noqa: BLE001
+                remaining.append((kind, key, handle, f"{type(exc).__name__}: {exc}"))
+        self._failures = remaining
+        return retried
+
+    @property
+    def release_failures(self) -> tuple[str, ...]:
+        return tuple(f"{kind}:{key} {error}" for kind, key, _handle, error in self._failures)
+
     @property
     def size(self) -> int:
-        return len(self._handles)
+        return len(self._handles) + len(self._failures)   # 尚未成功释放的句柄
 
     @property
     def committed(self) -> bool:
@@ -168,7 +196,11 @@ class ContributionSet:
 
 
 class PluginJobs:
-    """Job bookkeeping with honest cancellation semantics (PL-03/06)."""
+    """Job bookkeeping with honest cancellation semantics (PL-03/06).
+
+    任务记录归属插件（PR-02）：停用插件 A 只取消 A 自己的任务，
+    ``cancel_all`` 仅供宿主整体关闭时使用。
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -177,11 +209,18 @@ class PluginJobs:
         self._cancelled_confirmed: set[str] = set()
         self._finished: set[str] = set()
 
-    def start(self, job_id: str, cancel: Callable[[], None] | None = None) -> None:
+    def start(self, job_id: str, cancel: Callable[[], None] | None = None,
+              *, plugin_id: str = "") -> None:
         with self._lock:
             if job_id in self._jobs:
                 raise ValueError(f"任务已存在：{job_id}")
-            self._jobs[job_id] = {"cancel": cancel, "state": "running"}
+            self._jobs[job_id] = {"cancel": cancel, "state": "running",
+                                  "plugin_id": plugin_id}
+
+    def owner(self, job_id: str) -> str:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return str(job["plugin_id"]) if job else ""
 
     def request_cancel(self, job_id: str) -> bool:
         """Cancellation is a request; completion is confirmed by the worker."""
@@ -220,15 +259,32 @@ class PluginJobs:
             return tuple(job_id for job_id, job in self._jobs.items()
                          if job["state"] in ("running", "cancel_requested"))
 
+    def active_for(self, plugin_id: str) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(job_id for job_id, job in self._jobs.items()
+                         if job["state"] in ("running", "cancel_requested")
+                         and job["plugin_id"] == plugin_id)
+
     def cancel_all(self) -> int:
+        """宿主整体关闭：取消所有仍在跑的任务，与单插件停用无关。"""
         return sum(1 for job_id in list(self.active()) if self.request_cancel(job_id))
+
+    def cancel_owned(self, plugin_id: str) -> int:
+        """只取消归属 ``plugin_id`` 的任务（PR-02：不跨插件取消）。"""
+        return sum(1 for job_id in list(self.active_for(plugin_id))
+                   if self.request_cancel(job_id))
 
 
 class PluginLifecycleController:
-    """Per-plugin lifecycle with rollback and ordered shutdown (PL-03).
+    """Per-plugin lifecycle with rollback and ordered shutdown (PL-03/PR-02).
 
     The host supplies platform callbacks (close windows, unbind events);
     this controller owns the ordering and the idempotency guarantees.
+
+    停用状态机（PR-02）：active → stopping → stopped。贡献所有权在停用
+    全部完成前保留在本控制器（重试不丢失所有权）；任务未确认终止、或
+    任一清理步骤失败时，``fully_stopped`` 为 False，再次调用 ``deactivate``
+    从断点继续。GUI 线程不应等待时传 ``wait_jobs=False`` 轮询重入。
     """
 
     def __init__(self, *, close_windows: Callable[[str], None] | None = None,
@@ -241,7 +297,8 @@ class PluginLifecycleController:
         self._contributions: dict[str, ContributionSet] = {}
         self._jobs = PluginJobs()
         self._accepting: set[str] = set()   # plugins accepting new invocations
-        self._stopped: set[str] = set()
+        self._stopped: set[str] = set()     # 停用流程已启动（不可再激活）
+        self._fully_stopped: set[str] = set()
 
     # -- activation -----------------------------------------------------
     def activate(self, plugin_id: str, registrar: Callable[[ContributionSet], None]) -> ContributionSet:
@@ -255,8 +312,15 @@ class PluginLifecycleController:
             try:
                 registrar(contributions)
                 contributions.commit()
-            except BaseException:
+            except BaseException as exc:
                 contributions.rollback()
+                if contributions.release_failures:
+                    # 回滚本身有残留：保留所有权，deactivate(plugin_id) 可重试清理
+                    self._contributions[plugin_id] = contributions
+                    self._stopped.add(plugin_id)
+                    raise RuntimeError(
+                        f"插件激活失败，且回滚清理未完成（可调用 deactivate 重试清理）："
+                        f"{'; '.join(contributions.release_failures)}") from exc
                 raise
             self._contributions[plugin_id] = contributions
             self._accepting.add(plugin_id)
@@ -273,37 +337,64 @@ class PluginLifecycleController:
 
     # -- deactivation ---------------------------------------------------
     def deactivate(self, plugin_id: str, *, wait_jobs: bool = True) -> dict[str, Any]:
-        """Forbid new calls → cancel jobs → close windows → unbind → release.
+        """Forbid new calls → cancel own jobs → wait → close windows → unbind → release.
 
-        Idempotent; reports what happened so the UI never prints a fake
-        "已停止" while a job is still terminating.
+        Idempotent and resumable; reports what happened so the UI never prints
+        a fake "已停止" while a job is still terminating or a cleanup step
+        failed. 不跨插件取消任务（PR-02）。
         """
         with self._lock:
-            self._accepting.discard(plugin_id)
-            contributions = self._contributions.pop(plugin_id, None)
             first_stop = plugin_id not in self._stopped
             self._stopped.add(plugin_id)
-        active_before = self._jobs.active()
-        self._jobs.cancel_all()
+            self._accepting.discard(plugin_id)
+            contributions = self._contributions.get(plugin_id)
+            if plugin_id in self._fully_stopped:
+                return {"first_stop": False, "released_handles": 0,
+                        "jobs_cancel_requested": 0, "jobs_still_terminating": (),
+                        "cleanup_failures": (), "fully_stopped": True}
+        active_before = self._jobs.active_for(plugin_id)
+        self._jobs.cancel_owned(plugin_id)
         if wait_jobs and active_before:
             deadline = time.monotonic() + self._job_wait_timeout
-            while time.monotonic() < deadline and self._jobs.active():
+            while time.monotonic() < deadline and self._jobs.active_for(plugin_id):
                 time.sleep(0.01)
-        still_active = self._jobs.active()
-        self._close_windows(plugin_id)
-        self._unbind_events(plugin_id)
-        released = contributions.rollback() if contributions is not None else 0
-        return {
-            "first_stop": first_stop,
-            "released_handles": released,
-            "jobs_cancel_requested": len(active_before),
-            "jobs_still_terminating": tuple(still_active),
-            "fully_stopped": not still_active,
-        }
+        still_active = self._jobs.active_for(plugin_id)
+        if still_active:
+            # 任务未确认终止：不关窗/不释放贡献，如实报告（所有权保留供重试）
+            return {"first_stop": first_stop, "released_handles": 0,
+                    "jobs_cancel_requested": len(active_before),
+                    "jobs_still_terminating": tuple(still_active),
+                    "cleanup_failures": (), "fully_stopped": False}
+        cleanup_failures: list[str] = []
+        for label, callback in (("close_windows", self._close_windows),
+                                ("unbind_events", self._unbind_events)):
+            try:
+                callback(plugin_id)
+            except BaseException as exc:  # noqa: BLE001 - 单步失败不中止其余清理
+                cleanup_failures.append(f"{label}: {type(exc).__name__}: {exc}")
+        released = 0
+        if contributions is not None:
+            released = contributions.rollback() + contributions.retry_failed_releases()
+            cleanup_failures.extend(f"release {item}" for item in contributions.release_failures)
+        with self._lock:
+            if cleanup_failures or self._jobs.active_for(plugin_id):
+                # 清理有失败或迟到任务：保留 _contributions 供下一次 deactivate 重试
+                self._fully_stopped.discard(plugin_id)
+                return {"first_stop": first_stop, "released_handles": released,
+                        "jobs_cancel_requested": len(active_before),
+                        "jobs_still_terminating": tuple(self._jobs.active_for(plugin_id)),
+                        "cleanup_failures": tuple(cleanup_failures),
+                        "fully_stopped": False}
+            self._contributions.pop(plugin_id, None)
+            self._fully_stopped.add(plugin_id)
+        return {"first_stop": first_stop, "released_handles": released,
+                "jobs_cancel_requested": len(active_before),
+                "jobs_still_terminating": (), "cleanup_failures": (),
+                "fully_stopped": True}
 
     def is_stopped(self, plugin_id: str) -> bool:
         with self._lock:
-            return plugin_id in self._stopped
+            return plugin_id in self._fully_stopped
 
 
 def check_command_applicability(capability: PluginCapability, *,
