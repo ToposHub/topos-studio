@@ -463,6 +463,8 @@ def legacy_python_manifest(folder: Path) -> tuple[PluginManifest | None, tuple[M
     module: NAME/VERSION/AUTHOR/DESCRIPTION/API_VERSION only. The result is a
     minimal manifest with a ``files.<folder>`` id plus legacy id mapping, so
     the unified inventory can host legacy and declarative records together.
+    ``source`` 固定为 local_dev（未验证）：是否内建由宿主政策决定，不由
+    目录位置自证（PR-03）。
     """
     init = folder / "__init__.py"
     diagnostics: list[ManifestDiagnostic] = []
@@ -506,7 +508,7 @@ def legacy_python_manifest(folder: Path) -> tuple[PluginManifest | None, tuple[M
         host_api=host_api, legacy_ids=(folder.name,),
         author=str(constants.get("AUTHOR", "Unknown"))[:200],
         description=str(constants.get("DESCRIPTION", ""))[:_MAX_TEXT_FIELD],
-        source="builtin",
+        source="local_dev",
     )
     return manifest, tuple(diagnostics)
 

@@ -1,6 +1,7 @@
 """PL-02 回归：安装清单与状态投影——安装/期望/运行三态分离。"""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -244,3 +245,108 @@ def test_legacy_invalid_api_parser_warning_is_not_discarded(tmp_path: Path) -> N
     (folder / "__init__.py").write_text("API_VERSION = 'future'", encoding="utf-8")
     records = legacy_files_records([_LegacyRow("future", path=folder)])
     assert any(diagnostic.code == "LEGACY_API_VERSION_INVALID" for diagnostic in records[0].diagnostics)
+
+
+# ---------------------------------------------------------------------------
+# PR-03 回归：原子快照、重复身份与宿主管理的来源
+# ---------------------------------------------------------------------------
+
+def test_snapshot_revision_and_records_never_mix_refresh_halves():
+    """复现：读线程在 refresh 途中取快照，revision 与 records 必须成对。"""
+    import threading
+    inventory = PluginInventory(**HOST)
+    inventory.refresh([_record()])
+    stop = threading.Event()
+    errors: list[str] = []
+
+    def refresher() -> None:
+        counter = 0
+        while not stop.is_set():
+            counter += 1
+            inventory.refresh([_record(),
+                               *(_record(plugin_id=f"files.extra{index}",
+                                         manifest=_manifest(f"files.extra{index}"))
+                                 for index in range(counter))])
+
+    worker = threading.Thread(target=refresher, daemon=True)
+    worker.start()
+    for _ in range(400):
+        snapshot = inventory.snapshot()
+        # 每次恰好新增一个 id：revision 与记录数必须一致，否则就是半刷新
+        if snapshot.revision != len(snapshot.records):
+            errors.append(f"revision={snapshot.revision} records={len(snapshot.records)}")
+    stop.set()
+    worker.join(2)
+    assert errors == []
+
+
+def test_duplicate_ids_are_flagged_not_last_write_wins():
+    """复现 6：同 id 两个来源——保留首个、显式诊断，不做静默覆盖。"""
+    inventory = PluginInventory(**HOST)
+    snapshot = inventory.refresh([
+        _record(version="1.0.0"),
+        _record(version="9.9.9"),
+    ])
+    record = snapshot.record("files.demo")
+    assert record is not None
+    assert record.version == "1.0.0"                       # 首个保留，9.9.9 被拒绝
+    assert any(d.code == "PLUGIN_ID_DUPLICATE" and d.severity == "error"
+               for d in record.diagnostics)
+    assert len(snapshot.records) == 1
+
+
+def test_legacy_alias_conflict_across_records_is_flagged():
+    first = _record(plugin_id="files.a", display_name="A",
+                    manifest=_manifest("files.a", legacy_ids=["old"]))
+    second = _record(plugin_id="files.b", display_name="B", source="local_dev",
+                     manifest=_manifest("files.b", legacy_ids=["old"]))
+    snapshot = PluginInventory(**HOST).refresh([first, second])
+    assert any(d.code == "LEGACY_ID_CONFLICT" for d in snapshot.record("files.b").diagnostics)
+    assert snapshot.record("files.a") is not None          # 两个记录都保留可见
+
+
+def test_legacy_adapter_prefers_declarative_manifest_with_matching_identity(tmp_path):
+    folder = tmp_path / "image_factory"
+    folder.mkdir()
+    (folder / "__init__.py").write_text("NAME = '旧名'\nVERSION = '1.0.0'\nAPI_VERSION = 1\n",
+                                        encoding="utf-8")
+    (folder / "topos.plugin.json").write_text(json.dumps({
+        "plugin_id": "files.image_factory", "display_name": "声明名", "version": "2.0.0",
+        "legacy_ids": ["image_factory"],
+        "capabilities": [{"capability_id": "launch", "kind": "command"}],
+    }), encoding="utf-8")
+    records = legacy_files_records([_LegacyRow("image_factory", path=folder)])
+    manifest = records[0].manifest
+    assert manifest is not None and manifest.display_name == "声明名"    # 声明优先于常量
+    assert records[0].version == "2.0.0"
+    assert manifest.legacy_ids == ("image_factory",)
+
+
+def test_legacy_adapter_rejects_foreign_declared_identity(tmp_path):
+    folder = tmp_path / "image_factory"
+    folder.mkdir()
+    (folder / "__init__.py").write_text("NAME = '旧名'\nAPI_VERSION = 1\n", encoding="utf-8")
+    (folder / "topos.plugin.json").write_text(json.dumps({
+        "plugin_id": "files.imposter", "display_name": "冒名", "version": "1.0.0",
+    }), encoding="utf-8")
+    records = legacy_files_records([_LegacyRow("image_factory", path=folder)])
+    assert records[0].manifest is None                     # 身份不符：声明整体忽略
+    assert any(d.code == "DECLARED_ID_MISMATCH" and d.severity == "error"
+               for d in records[0].diagnostics)
+    snapshot = PluginInventory(**HOST).refresh(records)    # 阻断级诊断→可见且拒绝
+    assert snapshot.record("files.image_factory").runtime_state == "rejected"
+
+
+def test_legacy_source_is_host_policy_not_declaration(tmp_path):
+    folder = tmp_path / "image_factory"
+    folder.mkdir()
+    (folder / "__init__.py").write_text("NAME='X'\nAPI_VERSION=1\n", encoding="utf-8")
+    unmanaged = legacy_files_records([_LegacyRow("image_factory", path=folder)])
+    assert unmanaged[0].source == "local_dev"              # 未在宿主内建名单：未验证
+    managed = legacy_files_records([_LegacyRow("image_factory", path=folder)],
+                                   builtin_ids={"image_factory"})
+    assert managed[0].source == "builtin"
+    assert default_desired_for(unmanaged[0].source, None) is False   # 未知来源默认停用
+    # 运行版本与声明版本分槽投影，互不覆盖
+    assert unmanaged[0].runtime_version == ""
+    assert "runtime_version" in unmanaged[0].to_dict()
