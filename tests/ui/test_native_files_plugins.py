@@ -419,16 +419,18 @@ def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
                                   sources_factory=lambda: f1_sources)
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        host.launch("files.format_factory")     # UI 新 id
+        # [G1] format_factory 已由原生窗口接管（零 HTTP）——本测试改用
+        # 仍走 legacy 路由的 image_factory 验证线上命令键口径
+        host.launch("files.image_factory")      # UI 新 id
         qtbot.waitUntil(lambda: bool(endpoint[1]), timeout=8000)
         # 线上：命令键寻址（legacy 路由不变）
         path, token, payload = endpoint[1][0]
-        assert path == "/api/plugin/format_factory/launch"
-        assert token == "token" and payload == {"path": "/media/a.mov"}
+        assert path == "/api/plugin/image_factory/launch"
+        assert token == "token" and payload == {}
         qtbot.waitUntil(lambda: bool(prefs.plugin_recent), timeout=8000)
         # 偏好：最近使用按新 id 建档
-        assert prefs.plugin_recent[0] == "files.format_factory"
-        qtbot.waitUntil(lambda: "files.format_factory" not in host._busy, timeout=8000)
+        assert prefs.plugin_recent[0] == "files.image_factory"
+        qtbot.waitUntil(lambda: "files.image_factory" not in host._busy, timeout=8000)
     finally:
         host.shutdown()
 

@@ -94,6 +94,18 @@ class FilesPluginsController(QObject):
         self._shortcut_plugins: set[str] = set()
         self._launch_jobs: dict[str, str] = {}          # [F6] ui_id -> job_id
         self._retire_polls: dict[str, int] = {}          # [F6] 异步退役轮次
+        # [G1] 原生工具命令：不经旧 HTTP /launch（F3/F4 三段 + 原子边界）
+        from src.features.files.format_factory_service import (
+            NativeToolCommandService,
+        )
+        revision_provider = getattr(transport, "library_revision", None)
+        self._native_commands: dict[str, NativeToolCommandService] = {
+            "files.format_factory": NativeToolCommandService(
+                command_id="files.format_factory.open",
+                plugin_id="files.format_factory",
+                revision_provider=revision_provider),
+        }
+        self._format_factory_window = None
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -343,6 +355,12 @@ class FilesPluginsController(QObject):
                 return
         # [F2] 命令键：新 id（偏好/中心建档）→ legacy 短 id（命令层寻址），
         # 从同一合并快照解析；旧接线（无 factory）id 即命令键
+        # [G1] 原生工具接管：format_factory 走独立 Qt 工具窗口（F5 单例
+        # 注册表 + F3/F4 三段命令 + 原子边界）——不经旧 /launch
+        native = self._native_commands.get(plugin_id)
+        if native is not None and info is not None and info.can_launch:
+            self._launch_native(native, list(self.selected_paths()))
+            return
         command_key = info.command_key if info is not None and info.command_key else plugin_id
         # Freeze the selection at the user's gesture, never at async completion.
         paths = list(self.selected_paths())
@@ -367,6 +385,76 @@ class FilesPluginsController(QObject):
             return self._commands.revalidate(prepared)
 
         self._submit(f"launch:{plugin_id}", work)
+
+    def _launch_native(self, service, paths: list[str]) -> None:
+        """[G1] 原生命令三段：prepare 冻结→revalidate（worker）→dispatch
+        （GUI 打开窗口，F4 锁内提交）。完成即更新最近使用。"""
+        plugin_id = service.plugin_id
+        self._busy.add(plugin_id)
+        self._project()
+
+        def work() -> object:
+            prepared = service.prepare(paths)
+            return service.revalidate(prepared)
+
+        def on_result(generation: int, operation: str, result: object,
+                      error: str) -> None:
+            if error:
+                self._busy.discard(plugin_id)
+                self._project()
+                self._message(error)
+                return
+            outcome = service.dispatch(result, self._open_format_factory)
+            if not outcome.accepted:
+                self._busy.discard(plugin_id)
+                self._project()
+                self._message(outcome.message)
+                return
+            self._busy.discard(plugin_id)
+            self._launch_finished("format_factory", True, "格式工厂已打开。")
+
+        self._generation += 1
+        task = _CatalogTask(self._generation, f"native:{plugin_id}", work)
+        task.signals.finished.connect(on_result)
+        self._pool.start(task)
+
+    def _open_format_factory(self, paths: tuple[str, ...]) -> None:
+        """[G1][F5] WindowRegistry singleton：二次打开聚焦现有并刷新快照。"""
+        import shutil as _shutil
+        from src.app.ui.format_factory_window import FormatFactoryWindow
+        from src.features.files.format_factory_service import (
+            FormatFactoryService,
+        )
+
+        windows = self.host_session.windows
+        if self._format_factory_window is None:
+            ffmpeg = _shutil.which("ffmpeg")
+            if not ffmpeg:
+                self._message("未找到 ffmpeg，格式工厂不可用。")
+                return
+            window = FormatFactoryWindow(
+                self.panel.window(),
+                service=FormatFactoryService(ffmpeg=ffmpeg))
+
+            def close_window() -> None:
+                window.close()
+
+            windows.activate_window(
+                "files.format_factory", "main", singleton=True,
+                opener=lambda: None,
+                focuser=lambda: (window.show(), window.raise_(),
+                                 window.activateWindow()),
+                closer=close_window)
+            self._format_factory_window = window
+            window.closed.connect(
+                lambda: windows.close_window("files.format_factory", "main"))
+        window = self._format_factory_window
+        windows.activate_window("files.format_factory", "main",
+                                singleton=True, focuser=lambda: None)
+        window.set_inputs(tuple(paths))
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _launch_finished(self, plugin_id: str, success: bool, message: str) -> None:
         if self._closed:
@@ -497,6 +585,10 @@ class FilesPluginsController(QObject):
         if self._closed:
             return
         self._closed = True
+        # [G1] 原生工具窗口经注册表关闭（关闭即取消在途转码）
+        if self._format_factory_window is not None:
+            self.host_session.windows.close_all("files.format_factory")
+            self._format_factory_window = None
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）
