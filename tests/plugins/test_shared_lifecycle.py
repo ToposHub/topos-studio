@@ -128,12 +128,137 @@ def test_deactivate_reports_jobs_still_terminating_honestly():
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     started.wait(1)
-    controller.jobs.start("hang-1", cancel=lambda: None)       # cancel 不真正停止 worker
+    controller.jobs.start("hang-1", cancel=lambda: None,
+                          plugin_id="files.hang")              # 任务归属该插件
     report = controller.deactivate("files.hang", wait_jobs=True)
     release.set()
     thread.join(1)
     assert report["fully_stopped"] is False                    # 未确认终止不谎报
     assert "hang-1" in report["jobs_still_terminating"]
+
+
+# ---------------------------------------------------------------------------
+# PR-02 回归：按插件归属清理、失败聚合与可重试停用
+# ---------------------------------------------------------------------------
+
+def test_stopping_plugin_a_never_cancels_plugin_b_jobs():
+    """复现 5：停用 A 不取消同一 controller 下 B 的任务。"""
+    controller = PluginLifecycleController()
+    controller.activate("files.a", lambda cs: None)
+    controller.activate("files.b", lambda cs: None)
+    controller.jobs.start("job-b", plugin_id="files.b")
+    controller.deactivate("files.a")
+    assert controller.jobs.state("job-b") == "running"          # B 的任务原样
+    assert controller.is_stopped("files.a") is True
+    assert controller.accepting_calls("files.b") is True        # B 完全不受影响
+
+
+def test_rollback_continues_when_one_release_raises():
+    """复现 4：后注册句柄 release 抛错，其余句柄仍被释放且可重试。"""
+    released: list[str] = []
+    calls = {"flaky": 0}
+
+    def flaky() -> None:
+        calls["flaky"] += 1
+        if calls["flaky"] == 1:
+            raise RuntimeError("release 失败一次")
+
+    fresh = ContributionSet("files.x")
+    fresh.register("route", "r1", lambda: released.append("r1"))
+    fresh.register("route", "r2", flaky)                        # 后注册：回滚时先弹出行内错误
+    fresh.register("menu", "m1", lambda: released.append("m1"))
+    assert fresh.rollback() == 2                                # r1/m1 仍被释放
+    assert sorted(released) == ["m1", "r1"]                     # 逆序释放没有中断
+    assert fresh.release_failures != ()
+    assert fresh.size == 1                                      # 失败句柄仍在集合内
+    assert fresh.retry_failed_releases() == 1                   # 重试成功
+    assert fresh.release_failures == () and fresh.size == 0
+
+
+def test_deactivate_keeps_ownership_until_jobs_confirm_and_cleanup_succeeds():
+    """任务未确认终止不释放贡献；迟到完成后重试 deactivate 才真正停。"""
+    controller = PluginLifecycleController(job_wait_timeout=0.05)
+    released: list[str] = []
+
+    def registrar(contributions: ContributionSet) -> None:
+        contributions.register("route", "r", lambda: released.append("r"))
+
+    controller.activate("files.tool", registrar)
+    controller.jobs.start("slow-job", plugin_id="files.tool", cancel=lambda: None)
+    first = controller.deactivate("files.tool")
+    assert first["fully_stopped"] is False
+    assert released == []                                       # 贡献未被提前释放
+    assert controller.is_stopped("files.tool") is False
+    controller.jobs.finish("slow-job")                          # 迟到的完成确认
+    second = controller.deactivate("files.tool")
+    assert second["fully_stopped"] is True
+    assert released == ["r"]                                    # 确认终止后才释放
+    assert controller.is_stopped("files.tool") is True
+
+
+def test_cleanup_step_failure_is_aggregated_and_retryable():
+    """close_windows 抛错不阻断 unbind/release；重试从断点继续。"""
+    events: list[str] = []
+    attempts = {"close": 0}
+
+    def close_windows(plugin_id: str) -> None:
+        events.append("close")
+        attempts["close"] += 1
+        if attempts["close"] == 1:
+            raise RuntimeError("窗口句柄失效")
+
+    controller = PluginLifecycleController(
+        close_windows=close_windows,
+        unbind_events=lambda pid: events.append("unbind"))
+
+    def registrar(contributions: ContributionSet) -> None:
+        contributions.register("route", "r", lambda: events.append("release"))
+
+    controller.activate("files.tool", registrar)
+    report = controller.deactivate("files.tool")
+    assert report["fully_stopped"] is False
+    assert any(item.startswith("close_windows:") for item in report["cleanup_failures"])
+    assert events == ["close", "unbind", "release"]             # 独立资源继续清理，不互相阻断
+    assert controller.is_stopped("files.tool") is False         # 未谎报停止
+    retry = controller.deactivate("files.tool")                 # 幂等重试：close 成功
+    assert retry["fully_stopped"] is True
+    assert events == ["close", "unbind", "release", "close", "unbind"]  # 宿主回调幂等，重试重跑清理序列
+    assert controller.is_stopped("files.tool") is True
+
+
+def test_activation_failure_with_dirty_rollback_stays_retryable():
+    """激活半失败且回滚也有句柄失败：所有权保留，deactivate 可清理。"""
+    calls = {"flaky": 0}
+
+    def flaky() -> None:
+        calls["flaky"] += 1
+        if calls["flaky"] < 2:
+            raise RuntimeError("release 失败")
+
+    controller = PluginLifecycleController()
+
+    def registrar(contributions: ContributionSet) -> None:
+        contributions.register("route", "r", flaky)
+        raise ValueError("setup() 第三步抛异常")
+
+    with pytest.raises(RuntimeError, match="回滚清理未完成"):
+        controller.activate("files.broken", registrar)
+    assert controller.accepting_calls("files.broken") is False
+    report = controller.deactivate("files.broken")              # 重试清理
+    assert report["fully_stopped"] is True
+    assert calls["flaky"] == 2                                  # 第二次重试成功释放
+
+
+def test_jobs_owner_scoped_cancellation():
+    jobs = PluginJobs()
+    jobs.start("owned", plugin_id="files.a")
+    jobs.start("free")                                          # 兼容旧用法：无归属
+    assert jobs.owner("owned") == "files.a" and jobs.owner("free") == ""
+    assert jobs.active_for("files.a") == ("owned",)
+    assert jobs.cancel_owned("files.a") == 1
+    assert jobs.state("owned") == "cancel_requested"
+    assert jobs.state("free") == "running"                      # 无归属任务不受影响
+    assert jobs.cancel_all() == 1                               # 宿主整体关闭才全取消
 
 
 # ---------------------------------------------------------------------------
