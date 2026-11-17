@@ -21,8 +21,9 @@ Result honesty rules:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
+
+from src.shared.plugins.freeze import deep_freeze, deep_thaw
 
 STAGES = ("validated", "accepted", "dispatched", "running", "completed", "failed", "cancelled")
 
@@ -124,26 +125,13 @@ class PreparedInvocation:
         return _thaw_payload(self.payload)
 
 
-def _freeze_payload(value: Any, depth: int = 0) -> Any:
-    if depth > 50:
-        raise ValueError("payload 嵌套超过 50 层")
-    if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
-            raise ValueError("payload 的键必须是字符串")
-        return MappingProxyType({key: _freeze_payload(item, depth + 1) for key, item in value.items()})
-    if isinstance(value, (list, tuple)):
-        return tuple(_freeze_payload(item, depth + 1) for item in value)
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    raise ValueError("payload 必须由 JSON 数据组成")
+def _freeze_payload(value: Any) -> Any:
+    # 与 manifest/params 同一套深冻结策略（PR-04）：键必须是字符串、值必须是 JSON
+    return deep_freeze(value, depth_limit=50, strict_keys=True)
 
 
 def _thaw_payload(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _thaw_payload(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_payload(item) for item in value]
-    return value
+    return deep_thaw(value)
 
 
 @runtime_checkable

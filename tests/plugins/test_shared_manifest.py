@@ -67,18 +67,62 @@ def test_field_validation_errors(field, value, code):
 
 
 def test_unknown_fields_survive_round_trip():
-    manifest, _ = parse_manifest_mapping(_base(metadata={"future_key": {"nested": 1}},
-                                              extra_future_field="keep-me"))
+    manifest, diagnostics = parse_manifest_mapping(
+        _base(metadata={"future_key": {"nested": 1}}, extra_future_field="keep-me"))
+    assert diagnostics == ()
     assert manifest.unknown_fields["extra_future_field"] == "keep-me"
     assert manifest.metadata["future_key"] == {"nested": 1}
-    assert manifest.to_dict()["unknown_fields"]["extra_future_field"] == "keep-me"
+    # 往返：to_dict 把未知字段原样回填顶层，再解析不丢、不变形（PR-04 复现 1）
+    round_tripped, round_diagnostics = parse_manifest_mapping(manifest.to_dict())
+    assert round_diagnostics == ()
+    assert round_tripped.unknown_fields == {"extra_future_field": "keep-me"}
+    assert round_tripped.metadata == manifest.metadata
+    assert round_tripped.to_dict() == manifest.to_dict()
 
 
-def test_future_schema_version_is_warning_not_silent():
-    manifest, diagnostics = parse_manifest_mapping(_base(schema_version="9.9"))
-    assert manifest is not None
-    assert any(d.code == "SCHEMA_VERSION_UNKNOWN" and d.severity == "warning"
+def test_capability_unknown_fields_survive_round_trip():
+    manifest, _ = parse_manifest_mapping(_base(capabilities=[
+        {"capability_id": "launch", "kind": "command", "future_cap_field": {"deep": [1, 2]}},
+    ]))
+    capability = manifest.capabilities[0]
+    assert capability.unknown_fields["future_cap_field"] == {"deep": (1, 2)}   # 冻结形态：列表→元组
+    round_tripped, _ = parse_manifest_mapping(manifest.to_dict())             # 序列化回到 JSON 形态
+    assert round_tripped.capabilities[0].unknown_fields == capability.unknown_fields
+    assert round_tripped.to_dict() == manifest.to_dict()
+
+
+def test_manifest_is_deeply_immutable():
+    """复现 2：修改输入的嵌套 schema 不得改变已解析的 manifest。"""
+    nested = {"properties": {"threshold": {"type": "number"}}}
+    manifest, _ = parse_manifest_mapping(_base(capabilities=[
+        {"capability_id": "launch", "kind": "command", "params_schema": nested,
+         "resource_policy": {"max_mb": 512}}]))
+    nested["properties"]["threshold"]["type"] = "string"       # 改输入
+    capability = manifest.capabilities[0]
+    assert capability.params_schema["properties"]["threshold"]["type"] == "number"
+    with pytest.raises(TypeError):
+        capability.params_schema["properties"]["threshold"]["type"] = "evil"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        capability.resource_policy["max_mb"] = 1               # type: ignore[index]
+
+
+def test_future_schema_version_is_preserved_but_blocked():
+    """复现 3：未来 schema 声明保留，但阻断级诊断使其不可安装/启用。"""
+    manifest, diagnostics = parse_manifest_mapping(_base(schema_version="999.0"))
+    assert manifest is not None and manifest.schema_version == "999.0"
+    assert any(d.code == "SCHEMA_VERSION_UNSUPPORTED" and d.severity == "error"
                for d in diagnostics)
+    # 经由 to_dict 往返后策略一致，不会因为序列化降级
+    again, again_diagnostics = parse_manifest_mapping(manifest.to_dict())
+    assert any(d.code == "SCHEMA_VERSION_UNSUPPORTED" and d.severity == "error"
+               for d in again_diagnostics)
+
+
+def test_plugin_id_is_strict_full_match():
+    for bad_id in ["files.a\n", "files.a ", "files.a/b", "FILES.a"]:
+        manifest, diagnostics = parse_manifest_mapping(_base(plugin_id=bad_id))
+        assert manifest is None
+        assert any(d.code == "PLUGIN_ID_INVALID" for d in diagnostics)
 
 
 def test_unknown_contribution_kind_is_preserved_and_unavailable():
@@ -221,17 +265,63 @@ def test_contribution_kinds_are_the_planned_set():
                                        "format_provider", "inspector", "menu"}
 
 
-@pytest.mark.parametrize("fields", [
-    {"windows": 1},
-    {"format_providers": [{"provider_id": "p", "priority": "bad-number"}]},
-    {"legacy_ids": True},
-    {"platform": {"arches": 1}},
+@pytest.mark.parametrize("fields,code", [
+    ({"windows": 1}, "WINDOWS_NOT_LIST"),
+    ({"format_providers": "nope"}, "FORMAT_PROVIDERS_NOT_LIST"),
+    ({"legacy_ids": True}, "LEGACY_ID_INVALID"),
+    ({"platform": {"arches": 1}}, "PLATFORM_FIELD_INVALID"),   # 损坏平台声明不得默认"无限制"
+    ({"author": 42}, "FIELD_TYPE_INVALID"),
+    ({"metadata": "not-an-object"}, "METADATA_NOT_OBJECT"),
 ])
-def test_malformed_file_fields_are_diagnostics_not_worker_exceptions(tmp_path, fields):
+def test_malformed_top_level_fields_reject_manifest(tmp_path, fields, code):
     import json
     from src.shared.plugins.manifest import parse_manifest_file
     path = tmp_path / "topos.plugin.json"
-    path.write_text(json.dumps({"plugin_id": "files.bad", "display_name": "Bad", "version": "1.0.0", **fields}), encoding="utf-8")
+    path.write_text(json.dumps(
+        {"plugin_id": "files.bad", "display_name": "Bad", "version": "1.0.0", **fields}),
+        encoding="utf-8")
     manifest, diagnostics = parse_manifest_file(path)
-    assert manifest is None
-    assert any(item.code == "MANIFEST_INVALID" and item.severity == "error" for item in diagnostics)
+    matching = [item for item in diagnostics if item.code == code and item.severity == "error"]
+    assert matching and manifest is None
+    assert all(item.field for item in matching)                # 诊断必须带字段路径
+
+
+@pytest.mark.parametrize("fields,code,path", [
+    ({"format_providers": [{"provider_id": "p", "priority": "bad-number"}]},
+     "PROVIDER_FIELD_INVALID", "format_providers[0].priority"),
+    ({"background_services": [{"service_id": "s", "scope": "galaxy"}]},
+     "SERVICE_FIELD_INVALID", "background_services[0].scope"),
+    ({"capabilities": [{"capability_id": "c", "kind": "command", "cancellable": "yes"}]},
+     "CAPABILITY_FIELD_TYPE_INVALID", "capabilities[0].cancellable"),
+])
+def test_malformed_items_are_dropped_but_manifest_is_kept(tmp_path, fields, code, path):
+    """条目级错误：条目被拒、诊断带路径，manifest 其余部分保留可见。"""
+    import json
+    from src.shared.plugins.manifest import parse_manifest_file
+    manifest_path = tmp_path / "topos.plugin.json"
+    manifest_path.write_text(json.dumps(
+        {"plugin_id": "files.bad", "display_name": "Bad", "version": "1.0.0", **fields}),
+        encoding="utf-8")
+    manifest, diagnostics = parse_manifest_file(manifest_path)
+    assert manifest is not None
+    assert any(item.code == code and item.field == path for item in diagnostics)
+
+
+@pytest.mark.parametrize("window,path_field", [
+    ({"window_id": " ", "command_id": "launch"}, "windows[0].window_id"),
+    ({"window_id": "w", "command_id": ""}, "windows[0].command_id"),
+    ({"window_id": "w", "command_id": "launch", "min_size": [0, 240]}, "windows[0].min_size"),
+    ({"window_id": "w", "command_id": "launch", "min_size": [320]}, "windows[0].min_size"),
+    ({"window_id": "w", "command_id": "launch", "single_instance": "yes"}, "windows[0].single_instance"),
+    ({"window_id": "w", "command_id": "launch", "ownership": "alien"}, "windows[0].ownership"),
+])
+def test_window_fields_validate_with_paths(tmp_path, window, path_field):
+    import json
+    from src.shared.plugins.manifest import parse_manifest_file
+    path = tmp_path / "topos.plugin.json"
+    path.write_text(json.dumps({"plugin_id": "files.bad", "display_name": "Bad",
+                                "version": "1.0.0", "windows": [window]}), encoding="utf-8")
+    manifest, diagnostics = parse_manifest_file(path)
+    assert manifest is not None                                # 窗口本身被拒，manifest 其余保留
+    assert any(item.code == "WINDOW_FIELD_INVALID" and item.field == path_field
+               for item in diagnostics)

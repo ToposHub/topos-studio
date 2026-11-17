@@ -1,15 +1,22 @@
-"""Cross-domain plugin manifest schema and validator (PL-01).
+"""Cross-domain plugin manifest schema and validator (PL-01 / PR-04).
 
 Shared by the GLSL/AI/Files plugin hosts. Discovery reads these declarations
 without importing or executing plugin code; unknown contribution kinds are
 preserved and marked unavailable instead of being dropped.
 
 Design invariants (see docs/architecture/files-plugins-shared-contracts.md):
-- manifest records are immutable; ``metadata`` is frozen (MappingProxyType)
-- identity is a namespaced ``plugin_id`` (``<domain>.<name>``); legacy ids map
-  to it and never define identity by translated name or absolute path
+- manifest records are deeply immutable (nested mappings frozen recursively);
+  parsing never aliases caller-owned mutable data
+- identity is a namespaced ``plugin_id`` (``<domain>.<name>``) checked by
+  strict full match; legacy ids map to it and never define identity by
+  translated name or absolute path
 - manifests must not contain secrets or user absolute paths
-- schema evolution is additive: unknown fields survive a round-trip
+- schema evolution is additive: unknown fields (top level and per capability)
+  survive ``parse → to_dict → parse`` unchanged
+- future schema versions are *preserved but blocked*: the declaration is kept
+  and diagnosed as unsupported so it can never install or enable (PR-04)
+- per-field validation reports structured diagnostics with field paths; a
+  wrong type is never silently coerced into a "valid" declaration
 """
 from __future__ import annotations
 
@@ -20,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
+
+from src.shared.plugins.freeze import deep_freeze, deep_thaw
 
 SCHEMA_VERSION = "1.0"
 KNOWN_SCHEMA_VERSIONS = ("1.0",)
@@ -37,11 +46,15 @@ CONTRIBUTION_KINDS = (
 RUN_LOCATIONS = ("host", "worker", "process")
 WRITE_SEMANTICS = ("read", "write")
 SELECTION_MODES = ("none", "single", "many")
+SERVICE_SCOPES = ("library", "global")
+IDLE_POLICIES = ("stop", "pause", "continue")
+NETWORK_POLICIES = ("deny", "allow")
+WINDOW_OWNERSHIPS = ("plugin", "host")
 
-_PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9._-]*$")
-_LEGACY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
-_DOTTED_VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+_PLUGIN_ID_RE = re.compile(r"[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9._-]*")
+_LEGACY_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?")
+_DOTTED_VERSION_RE = re.compile(r"\d+(?:\.\d+)*")
 # Keys that must never appear in a manifest (leaked credentials / private paths).
 _FORBIDDEN_METADATA_KEYS = re.compile(
     r"(token|secret|api[_-]?key|password|credential|authorization)", re.IGNORECASE)
@@ -65,12 +78,23 @@ class ManifestDiagnostic:
                 "message": self.message[:500], "field": self.field}
 
 
+def _diagnostic(code: str, severity: str, message: str, field_name: str = "") -> ManifestDiagnostic:
+    return ManifestDiagnostic(code=code, severity=severity, message=message, field=field_name)
+
+
 def _frozen_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Freeze one contract mapping deeply; nested data stops aliasing callers."""
     if value is None:
         return MappingProxyType({})
     if not isinstance(value, Mapping):
         raise ValueError("必须是键值对象")
-    return MappingProxyType(dict(value))
+    return deep_freeze(value)
+
+
+def _string_list(value: Any) -> tuple[str, ...] | None:
+    if not isinstance(value, (list, tuple)) or any(not isinstance(item, str) for item in value):
+        return None
+    return tuple(value)
 
 
 @dataclass(frozen=True)
@@ -84,8 +108,8 @@ class PlatformConstraint:
         return ((not self.platforms or platform in self.platforms)
                 and (not self.arches or arch in self.arches))
 
-    def to_dict(self) -> dict[str, tuple[str, ...]]:
-        return {"platforms": self.platforms, "arches": self.arches}
+    def to_dict(self) -> dict[str, Any]:
+        return {"platforms": list(self.platforms), "arches": list(self.arches)}
 
 
 @dataclass(frozen=True)
@@ -107,26 +131,32 @@ class PluginCapability:
     retriable: bool = False
     run_location: str = "host"    # host/worker/process
     resource_policy: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    unknown_fields: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_schema", _frozen_mapping(self.input_schema))
         object.__setattr__(self, "output_schema", _frozen_mapping(self.output_schema))
         object.__setattr__(self, "params_schema", _frozen_mapping(self.params_schema))
         object.__setattr__(self, "resource_policy", _frozen_mapping(self.resource_policy))
+        object.__setattr__(self, "unknown_fields", _frozen_mapping(self.unknown_fields))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "capability_id": self.capability_id, "kind": self.kind,
             "title": self.title[:200], "description": self.description[:_MAX_TEXT_FIELD],
             "available": self.available,
-            "input_schema": dict(self.input_schema), "output_schema": dict(self.output_schema),
-            "params_schema": dict(self.params_schema),
+            "input_schema": deep_thaw(self.input_schema),
+            "output_schema": deep_thaw(self.output_schema),
+            "params_schema": deep_thaw(self.params_schema),
             "selection_mode": self.selection_mode,
-            "applies_to_kinds": self.applies_to_kinds,
+            "applies_to_kinds": list(self.applies_to_kinds),
             "write_semantics": self.write_semantics,
             "cancellable": self.cancellable, "retriable": self.retriable,
-            "run_location": self.run_location, "resource_policy": dict(self.resource_policy),
+            "run_location": self.run_location, "resource_policy": deep_thaw(self.resource_policy),
         }
+        for key, value in self.unknown_fields.items():
+            data[key] = deep_thaw(value)     # 未知字段原样回填（往返不变）
+        return data
 
 
 @dataclass(frozen=True)
@@ -158,7 +188,8 @@ class FormatProviderDeclaration:
 
     def to_dict(self) -> dict[str, Any]:
         return {"provider_id": self.provider_id, "priority": self.priority,
-                "formats": self.formats, "magic": self.magic, "provides": self.provides,
+                "formats": list(self.formats), "magic": list(self.magic),
+                "provides": list(self.provides),
                 "version": self.version, "cache_signature": self.cache_signature}
 
 
@@ -216,24 +247,26 @@ class PluginManifest:
         return self.source == "local_dev"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "plugin_id": self.plugin_id, "display_name": self.display_name,
             "version": self.version, "schema_version": self.schema_version,
             "host_api": list(self.host_api), "topos_min_version": self.topos_min_version,
-            "legacy_ids": self.legacy_ids, "author": self.author[:200],
+            "legacy_ids": list(self.legacy_ids), "author": self.author[:200],
             "support": self.support[:200], "license": self.license[:100],
-            "category": self.category, "keywords": self.keywords,
+            "category": self.category, "keywords": list(self.keywords),
             "description": self.description[:_MAX_TEXT_FIELD],
-            "dependencies": self.dependencies,
-            "optional_dependencies": self.optional_dependencies,
+            "dependencies": list(self.dependencies),
+            "optional_dependencies": list(self.optional_dependencies),
             "platform": self.platform.to_dict(),
             "capabilities": [item.to_dict() for item in self.capabilities],
             "windows": [item.to_dict() for item in self.windows],
             "format_providers": [item.to_dict() for item in self.format_providers],
             "background_services": [item.to_dict() for item in self.background_services],
-            "source": self.source, "metadata": dict(self.metadata),
-            "unknown_fields": dict(self.unknown_fields),
+            "source": self.source, "metadata": deep_thaw(self.metadata),
         }
+        for key, value in self.unknown_fields.items():
+            data[key] = deep_thaw(value)     # 未知字段原样回填顶层（往返不变）
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -241,56 +274,246 @@ class PluginManifest:
 # ---------------------------------------------------------------------------
 
 
-def _diagnostic(code: str, severity: str, message: str, field_name: str = "") -> ManifestDiagnostic:
-    return ManifestDiagnostic(code=code, severity=severity, message=message, field=field_name)
-
-
 def _capability_from_mapping(raw: Mapping[str, Any], index: int) -> tuple[PluginCapability | None, list[ManifestDiagnostic]]:
     diagnostics: list[ManifestDiagnostic] = []
+    path = f"capabilities[{index}]"
     capability_id = raw.get("capability_id")
     if not isinstance(capability_id, str) or not capability_id.strip():
         diagnostics.append(_diagnostic("CAPABILITY_ID_MISSING", "error",
-                                       f"能力 #{index} 缺少 capability_id", f"capabilities[{index}]"))
+                                       f"能力 #{index} 缺少 capability_id", path))
         return None, diagnostics
     kind = raw.get("kind", "")
     known = kind in CONTRIBUTION_KINDS
     if not isinstance(kind, str) or not kind:
         diagnostics.append(_diagnostic("CAPABILITY_KIND_MISSING", "error",
-                                       f"{capability_id}: 缺少 kind", f"capabilities[{index}].kind"))
+                                       f"{capability_id}: 缺少 kind", f"{path}.kind"))
         return None, diagnostics
     if not known:
         # Future contribution kind: keep the declaration, mark unavailable.
         diagnostics.append(_diagnostic("CAPABILITY_KIND_UNKNOWN", "warning",
                                        f"{capability_id}: 未知贡献类型 {kind}，保留声明并标记不可用",
-                                       f"capabilities[{index}].kind"))
+                                       f"{path}.kind"))
     for name, allowed in (("selection_mode", SELECTION_MODES), ("run_location", RUN_LOCATIONS),
                           ("write_semantics", WRITE_SEMANTICS)):
         value = raw.get(name)
         if value is not None and value not in allowed:
             diagnostics.append(_diagnostic(f"CAPABILITY_{name.upper()}_INVALID", "error",
                                            f"{capability_id}: {name} 必须是 {allowed}",
-                                           f"capabilities[{index}].{name}"))
+                                           f"{path}.{name}"))
             return None, diagnostics
+    title = raw.get("title", "")
+    description = raw.get("description", "")
+    for name, value, limit in (("title", title, 200), ("description", description, _MAX_TEXT_FIELD)):
+        if value is not None and not isinstance(value, str):
+            diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
+                                           f"{capability_id}: {name} 必须是字符串", f"{path}.{name}"))
+            return None, diagnostics
+    applies_raw = raw.get("applies_to_kinds", ())
+    applies = _string_list(applies_raw) if applies_raw is not None else ()
+    if applies is None:
+        diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
+                                       f"{capability_id}: applies_to_kinds 必须是字符串列表",
+                                       f"{path}.applies_to_kinds"))
+        return None, diagnostics
+    schema_fields: dict[str, Mapping[str, Any]] = {}
+    for name in ("input_schema", "output_schema", "params_schema", "resource_policy"):
+        value = raw.get(name)
+        if value is None:
+            schema_fields[name] = {}
+        elif isinstance(value, Mapping):
+            schema_fields[name] = value
+        else:
+            diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
+                                           f"{capability_id}: {name} 必须是键值对象", f"{path}.{name}"))
+            return None, diagnostics
+    flags: dict[str, bool] = {}
+    for name, default in (("cancellable", True), ("retriable", False)):
+        value = raw.get(name, default)
+        if not isinstance(value, bool):
+            diagnostics.append(_diagnostic("CAPABILITY_FIELD_TYPE_INVALID", "error",
+                                           f"{capability_id}: {name} 必须是布尔值", f"{path}.{name}"))
+            return None, diagnostics
+        flags[name] = value
+    known_keys = set(PluginCapability.__dataclass_fields__)
+    unknown = {key: value for key, value in raw.items() if key not in known_keys}
     return PluginCapability(
         capability_id=capability_id, kind=kind,
-        title=str(raw.get("title", ""))[:200],
-        description=str(raw.get("description", ""))[:_MAX_TEXT_FIELD],
+        title=(title or "")[:200],
+        description=(description or "")[:_MAX_TEXT_FIELD],
         available=known,
-        input_schema=_frozen_mapping(raw.get("input_schema") if isinstance(raw.get("input_schema"), Mapping) else {}),
-        output_schema=_frozen_mapping(raw.get("output_schema") if isinstance(raw.get("output_schema"), Mapping) else {}),
-        params_schema=_frozen_mapping(raw.get("params_schema") if isinstance(raw.get("params_schema"), Mapping) else {}),
-        selection_mode=str(raw.get("selection_mode", "none")),
-        applies_to_kinds=tuple(raw.get("applies_to_kinds", ()) or ()),
-        write_semantics=str(raw.get("write_semantics", "read")),
-        cancellable=bool(raw.get("cancellable", True)),
-        retriable=bool(raw.get("retriable", False)),
-        run_location=str(raw.get("run_location", "host")),
-        resource_policy=_frozen_mapping(raw.get("resource_policy") if isinstance(raw.get("resource_policy"), Mapping) else {}),
+        input_schema=schema_fields["input_schema"],
+        output_schema=schema_fields["output_schema"],
+        params_schema=schema_fields["params_schema"],
+        selection_mode=raw.get("selection_mode") if raw.get("selection_mode") is not None else "none",
+        applies_to_kinds=applies,
+        write_semantics=raw.get("write_semantics") if raw.get("write_semantics") is not None else "read",
+        cancellable=flags["cancellable"], retriable=flags["retriable"],
+        run_location=raw.get("run_location") if raw.get("run_location") is not None else "host",
+        resource_policy=schema_fields["resource_policy"],
+        unknown_fields=unknown,
     ), diagnostics
 
 
+def _parse_windows(raw: Mapping[str, Any], diagnostics: list[ManifestDiagnostic]) -> list[WindowDeclaration]:
+    windows: list[WindowDeclaration] = []
+    section = raw.get("windows", ())
+    if not isinstance(section, (list, tuple)):
+        diagnostics.append(_diagnostic("WINDOWS_NOT_LIST", "error", "windows 必须是列表", "windows"))
+        return windows
+    for index, item in enumerate(section):
+        path = f"windows[{index}]"
+        if not isinstance(item, Mapping):
+            diagnostics.append(_diagnostic("WINDOW_NOT_OBJECT", "error",
+                                           f"窗口 #{index} 不是对象", path))
+            continue
+        ok = True
+        window_id = item.get("window_id")
+        command_id = item.get("command_id")
+        if not isinstance(window_id, str) or not window_id.strip():
+            diagnostics.append(_diagnostic("WINDOW_FIELD_INVALID", "error",
+                                           f"{path}.window_id 必须是非空字符串", f"{path}.window_id"))
+            ok = False
+        if not isinstance(command_id, str) or not command_id.strip():
+            diagnostics.append(_diagnostic("WINDOW_FIELD_INVALID", "error",
+                                           f"{path}.command_id 必须是非空字符串", f"{path}.command_id"))
+            ok = False
+        sizes: dict[str, tuple[int, int]] = {}
+        for size_field, default in (("min_size", (320, 240)), ("default_size", (800, 600))):
+            value = item.get(size_field, list(default))
+            if (not isinstance(value, (list, tuple)) or len(value) != 2
+                    or any(isinstance(v, bool) or not isinstance(v, int) for v in value)
+                    or any(v <= 0 for v in value)):
+                diagnostics.append(_diagnostic("WINDOW_FIELD_INVALID", "error",
+                                               f"{path}.{size_field} 必须是两个正整数",
+                                               f"{path}.{size_field}"))
+                ok = False
+            else:
+                sizes[size_field] = (value[0], value[1])
+        single_instance = item.get("single_instance", True)
+        if not isinstance(single_instance, bool):
+            diagnostics.append(_diagnostic("WINDOW_FIELD_INVALID", "error",
+                                           f"{path}.single_instance 必须是布尔值",
+                                           f"{path}.single_instance"))
+            ok = False
+        ownership = item.get("ownership", "plugin")
+        if ownership not in WINDOW_OWNERSHIPS:
+            diagnostics.append(_diagnostic("WINDOW_FIELD_INVALID", "error",
+                                           f"{path}.ownership 必须是 {WINDOW_OWNERSHIPS}",
+                                           f"{path}.ownership"))
+            ok = False
+        if ok:
+            windows.append(WindowDeclaration(
+                window_id=window_id, command_id=command_id,
+                min_size=sizes.get("min_size", (320, 240)),
+                default_size=sizes.get("default_size", (800, 600)),
+                single_instance=single_instance, ownership=ownership))
+    return windows
+
+
+def _parse_providers(raw: Mapping[str, Any],
+                     diagnostics: list[ManifestDiagnostic]) -> list[FormatProviderDeclaration]:
+    providers: list[FormatProviderDeclaration] = []
+    section = raw.get("format_providers", ())
+    if not isinstance(section, (list, tuple)):
+        diagnostics.append(_diagnostic("FORMAT_PROVIDERS_NOT_LIST", "error",
+                                       "format_providers 必须是列表", "format_providers"))
+        return providers
+    for index, item in enumerate(section):
+        path = f"format_providers[{index}]"
+        if not isinstance(item, Mapping):
+            diagnostics.append(_diagnostic("FORMAT_PROVIDER_NOT_OBJECT", "error",
+                                           f"provider #{index} 不是对象", path))
+            continue
+        ok = True
+        provider_id = item.get("provider_id")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            diagnostics.append(_diagnostic("PROVIDER_FIELD_INVALID", "error",
+                                           f"{path}.provider_id 必须是非空字符串",
+                                           f"{path}.provider_id"))
+            ok = False
+        priority = item.get("priority", 100)
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            diagnostics.append(_diagnostic("PROVIDER_FIELD_INVALID", "error",
+                                           f"{path}.priority 必须是整数", f"{path}.priority"))
+            ok = False
+        lists: dict[str, tuple[str, ...]] = {}
+        for name in ("formats", "magic", "provides"):
+            value = item.get(name)
+            parsed = _string_list(value) if value is not None else ()
+            if parsed is None:
+                diagnostics.append(_diagnostic("PROVIDER_FIELD_INVALID", "error",
+                                               f"{path}.{name} 必须是字符串列表", f"{path}.{name}"))
+                ok = False
+            else:
+                lists[name] = parsed
+        texts: dict[str, str] = {}
+        for name in ("version", "cache_signature"):
+            value = item.get(name, "")
+            if not isinstance(value, str):
+                diagnostics.append(_diagnostic("PROVIDER_FIELD_INVALID", "error",
+                                               f"{path}.{name} 必须是字符串", f"{path}.{name}"))
+                ok = False
+            else:
+                texts[name] = value
+        if ok:
+            providers.append(FormatProviderDeclaration(
+                provider_id=provider_id, priority=priority,
+                formats=lists.get("formats", ()), magic=lists.get("magic", ()),
+                provides=lists.get("provides", ()),
+                version=texts.get("version", ""), cache_signature=texts.get("cache_signature", "")))
+    return providers
+
+
+def _parse_services(raw: Mapping[str, Any],
+                    diagnostics: list[ManifestDiagnostic]) -> list[BackgroundServiceDeclaration]:
+    services: list[BackgroundServiceDeclaration] = []
+    section = raw.get("background_services", ())
+    if not isinstance(section, (list, tuple)):
+        diagnostics.append(_diagnostic("BACKGROUND_SERVICES_NOT_LIST", "error",
+                                       "background_services 必须是列表", "background_services"))
+        return services
+    for index, item in enumerate(section):
+        path = f"background_services[{index}]"
+        if not isinstance(item, Mapping):
+            diagnostics.append(_diagnostic("BACKGROUND_SERVICE_NOT_OBJECT", "error",
+                                           f"服务 #{index} 不是对象", path))
+            continue
+        ok = True
+        service_id = item.get("service_id")
+        if not isinstance(service_id, str) or not service_id.strip():
+            diagnostics.append(_diagnostic("SERVICE_FIELD_INVALID", "error",
+                                           f"{path}.service_id 必须是非空字符串", f"{path}.service_id"))
+            ok = False
+        enums = (("scope", SERVICE_SCOPES, "library"), ("idle_policy", IDLE_POLICIES, "stop"),
+                 ("network_policy", NETWORK_POLICIES, "deny"))
+        values: dict[str, str] = {}
+        for name, allowed, default in enums:
+            value = item.get(name, default)
+            if value not in allowed:
+                diagnostics.append(_diagnostic("SERVICE_FIELD_INVALID", "error",
+                                               f"{path}.{name} 必须是 {allowed}", f"{path}.{name}"))
+                ok = False
+            else:
+                values[name] = value
+        auto_start = item.get("auto_start", False)
+        if not isinstance(auto_start, bool):
+            diagnostics.append(_diagnostic("SERVICE_FIELD_INVALID", "error",
+                                           f"{path}.auto_start 必须是布尔值", f"{path}.auto_start"))
+            ok = False
+        if ok:
+            services.append(BackgroundServiceDeclaration(
+                service_id=service_id, scope=values.get("scope", "library"),
+                auto_start=auto_start, idle_policy=values.get("idle_policy", "stop"),
+                network_policy=values.get("network_policy", "deny")))
+    return services
+
+
 def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | None, tuple[ManifestDiagnostic, ...]]:
-    """Build a manifest from a JSON-like mapping. Never executes plugin code."""
+    """Build a manifest from a JSON-like mapping. Never executes plugin code.
+
+    字段类型错误一律返回结构化诊断（含字段路径），绝不以 str()/int()/bool()
+    强转冒充合法声明；阻断级错误时 manifest 为 None。
+    """
     diagnostics: list[ManifestDiagnostic] = []
     if not isinstance(data, Mapping):
         return None, (_diagnostic("MANIFEST_NOT_OBJECT", "error", "manifest 必须是 JSON 对象"),)
@@ -299,7 +522,7 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
     unknown = {key: value for key, value in data.items() if key not in known_keys}
 
     plugin_id = data.get("plugin_id")
-    if not isinstance(plugin_id, str) or not _PLUGIN_ID_RE.match(plugin_id):
+    if not isinstance(plugin_id, str) or _PLUGIN_ID_RE.fullmatch(plugin_id) is None:
         diagnostics.append(_diagnostic("PLUGIN_ID_INVALID", "error",
                                        "plugin_id 必须形如 <domain>.<name>（小写字母数字）", "plugin_id"))
         return None, tuple(diagnostics)
@@ -307,22 +530,30 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
     if not isinstance(display_name, str) or not display_name.strip():
         diagnostics.append(_diagnostic("DISPLAY_NAME_MISSING", "error", "缺少 display_name", "display_name"))
         return None, tuple(diagnostics)
-    version = str(data.get("version", "1.0.0"))
-    if not _SEMVER_RE.match(version):
-        diagnostics.append(_diagnostic("VERSION_INVALID", "error", f"version 不是语义化版本：{version}", "version"))
+    version = data.get("version", "1.0.0")
+    if not isinstance(version, str) or _SEMVER_RE.fullmatch(version) is None:
+        diagnostics.append(_diagnostic("VERSION_INVALID", "error",
+                                       f"version 不是语义化版本：{version}", "version"))
         return None, tuple(diagnostics)
 
-    legacy_ids = tuple(data.get("legacy_ids", ()) or ())
-    if any(not isinstance(item, str) or not _LEGACY_ID_RE.match(item) for item in legacy_ids):
-        diagnostics.append(_diagnostic("LEGACY_ID_INVALID", "error", "legacy_ids 含非法 id", "legacy_ids"))
+    legacy_raw = data.get("legacy_ids", ()) or ()
+    if not isinstance(legacy_raw, (list, tuple)) or any(
+            not isinstance(item, str) or _LEGACY_ID_RE.fullmatch(item) is None for item in legacy_raw):
+        diagnostics.append(_diagnostic("LEGACY_ID_INVALID", "error",
+                                       "legacy_ids 必须是小写字母数字的字符串列表", "legacy_ids"))
         return None, tuple(diagnostics)
+    legacy_ids = tuple(legacy_raw)
 
-    schema_version = str(data.get("schema_version", SCHEMA_VERSION))
-    if schema_version not in KNOWN_SCHEMA_VERSIONS:
-        # Future schema: parse what we can, surface a warning, mark unusable later.
-        diagnostics.append(_diagnostic("SCHEMA_VERSION_UNKNOWN", "warning",
-                                       f"manifest schema {schema_version} 高于宿主已知 {KNOWN_SCHEMA_VERSIONS}",
-                                       "schema_version"))
+    schema_raw = data.get("schema_version", SCHEMA_VERSION)
+    if isinstance(schema_raw, str) and schema_raw in KNOWN_SCHEMA_VERSIONS:
+        schema_version = schema_raw
+    else:
+        # 未来 schema：声明保留，但阻断级诊断使其不可安装/启用（PR-04）
+        schema_version = str(schema_raw)
+        diagnostics.append(_diagnostic(
+            "SCHEMA_VERSION_UNSUPPORTED", "error",
+            f"manifest schema {schema_version} 不被宿主支持（已知 {KNOWN_SCHEMA_VERSIONS}）；"
+            "声明保留，但不可安装/启用", "schema_version"))
 
     host_api_raw = data.get("host_api", [1, 1])
     if (not isinstance(host_api_raw, (list, tuple)) or len(host_api_raw) != 2
@@ -334,8 +565,8 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
         diagnostics.append(_diagnostic("HOST_API_RANGE_INVALID", "error", "host_api 区间 min 大于 max", "host_api"))
         return None, tuple(diagnostics)
 
-    topos_min = str(data.get("topos_min_version", "") or "")
-    if topos_min and not _DOTTED_VERSION_RE.match(topos_min):
+    topos_min = data.get("topos_min_version", "") or ""
+    if not isinstance(topos_min, str) or (topos_min and _DOTTED_VERSION_RE.fullmatch(topos_min) is None):
         diagnostics.append(_diagnostic("TOPOS_MIN_VERSION_INVALID", "error",
                                        f"topos_min_version 必须是点分数字：{topos_min}", "topos_min_version"))
         return None, tuple(diagnostics)
@@ -355,14 +586,28 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
         diagnostics.append(_diagnostic("FIELD_NOT_STRING_LIST", "error", f"{field_name} 必须是字符串列表", field_name))
         return None, tuple(diagnostics)
 
-    for secret_key in data.get("metadata", {}) if isinstance(data.get("metadata"), Mapping) else {}:
+    # 顶层文本字段：类型错即诊断，不做 str() 强转
+    texts: dict[str, str] = {}
+    for name, limit in (("author", 200), ("support", 200), ("license", 100),
+                        ("category", 200), ("description", _MAX_TEXT_FIELD)):
+        value = data.get(name, "")
+        if not isinstance(value, str):
+            diagnostics.append(_diagnostic("FIELD_TYPE_INVALID", "error",
+                                           f"{name} 必须是字符串", name))
+            return None, tuple(diagnostics)
+        texts[name] = value[:limit]
+
+    metadata_raw = data.get("metadata", {})
+    if not isinstance(metadata_raw, Mapping):
+        diagnostics.append(_diagnostic("METADATA_NOT_OBJECT", "error", "metadata 必须是键值对象", "metadata"))
+        return None, tuple(diagnostics)
+    for secret_key in metadata_raw:
         if _FORBIDDEN_METADATA_KEYS.search(str(secret_key)):
             diagnostics.append(_diagnostic("SECRET_IN_METADATA", "error",
                                            f"manifest 不允许保存凭据类字段：{secret_key}", f"metadata.{secret_key}"))
     for text_field in ("description", "support"):
-        value = str(data.get(text_field, "") or "")
-        lowered = value.lower()
-        if any(hint in lowered for hint in _SECRET_PATH_HINT):
+        value = texts[text_field].lower()
+        if any(hint in value for hint in _SECRET_PATH_HINT):
             diagnostics.append(_diagnostic("USER_PATH_IN_MANIFEST", "error",
                                            f"{text_field} 含用户绝对路径，不允许", text_field))
 
@@ -381,60 +626,46 @@ def parse_manifest_mapping(data: Mapping[str, Any]) -> tuple[PluginManifest | No
         if capability is not None:
             capabilities.append(capability)
 
-    windows: list[WindowDeclaration] = []
-    for raw in data.get("windows", ()) or ():
-        if not isinstance(raw, Mapping):
-            continue
-        windows.append(WindowDeclaration(
-            window_id=str(raw.get("window_id", "")), command_id=str(raw.get("command_id", "")),
-            min_size=tuple(raw.get("min_size", (320, 240))) if isinstance(raw.get("min_size", []), (list, tuple)) else (320, 240),  # type: ignore[arg-type]
-            default_size=tuple(raw.get("default_size", (800, 600))) if isinstance(raw.get("default_size", []), (list, tuple)) else (800, 600),  # type: ignore[arg-type]
-            single_instance=bool(raw.get("single_instance", True)),
-            ownership=str(raw.get("ownership", "plugin")),
-        ))
-
-    providers: list[FormatProviderDeclaration] = []
-    for raw in data.get("format_providers", ()) or ():
-        if not isinstance(raw, Mapping):
-            continue
-        providers.append(FormatProviderDeclaration(
-            provider_id=str(raw.get("provider_id", "")), priority=int(raw.get("priority", 100)),
-            formats=tuple(raw.get("formats", ()) or ()), magic=tuple(raw.get("magic", ()) or ()),
-            provides=tuple(raw.get("provides", ()) or ()), version=str(raw.get("version", "")),
-            cache_signature=str(raw.get("cache_signature", "")),
-        ))
-
-    services: list[BackgroundServiceDeclaration] = []
-    for raw in data.get("background_services", ()) or ():
-        if not isinstance(raw, Mapping):
-            continue
-        services.append(BackgroundServiceDeclaration(
-            service_id=str(raw.get("service_id", "")), scope=str(raw.get("scope", "library")),
-            auto_start=bool(raw.get("auto_start", False)), idle_policy=str(raw.get("idle_policy", "stop")),
-            network_policy=str(raw.get("network_policy", "deny")),
-        ))
+    windows = _parse_windows(data, diagnostics)
+    providers = _parse_providers(data, diagnostics)
+    services = _parse_services(data, diagnostics)
+    # 整段结构性错误（非列表/非对象）：无法安全投影，拒绝整个 manifest
+    fatal_section = {"WINDOWS_NOT_LIST", "FORMAT_PROVIDERS_NOT_LIST",
+                     "BACKGROUND_SERVICES_NOT_LIST", "CAPABILITIES_NOT_LIST"}
+    if any(item.code in fatal_section for item in diagnostics):
+        return None, tuple(diagnostics)
 
     platform_raw = data.get("platform", {}) or {}
     if not isinstance(platform_raw, Mapping):
-        platform_raw = {}
-    platform = PlatformConstraint(
-        platforms=tuple(platform_raw.get("platforms", ()) or ()),
-        arches=tuple(platform_raw.get("arches", ()) or ()),
-    )
+        diagnostics.append(_diagnostic("PLATFORM_NOT_OBJECT", "error", "platform 必须是键值对象", "platform"))
+        return None, tuple(diagnostics)
+    platforms = _string_list(platform_raw.get("platforms", ()) or ())
+    arches = _string_list(platform_raw.get("arches", ()) or ())
+    if platforms is None or arches is None:
+        # 平台声明损坏时不能默认"无限制"——那比拒绝更宽松（PR-04）
+        diagnostics.append(_diagnostic("PLATFORM_FIELD_INVALID", "error",
+                                       "platform.platforms/arches 必须是字符串列表", "platform"))
+        return None, tuple(diagnostics)
+    platform = PlatformConstraint(platforms=platforms, arches=arches)
+
+    source = data.get("source", "builtin")
+    if not isinstance(source, str):
+        diagnostics.append(_diagnostic("FIELD_TYPE_INVALID", "error", "source 必须是字符串", "source"))
+        return None, tuple(diagnostics)
 
     manifest = PluginManifest(
         plugin_id=plugin_id, display_name=display_name, version=version,
         schema_version=schema_version, host_api=host_api, topos_min_version=topos_min,
         legacy_ids=legacy_ids,
-        author=str(data.get("author", ""))[:200], support=str(data.get("support", ""))[:200],
-        license=str(data.get("license", ""))[:100], category=str(data.get("category", "")),
-        keywords=keywords, description=str(data.get("description", ""))[:_MAX_TEXT_FIELD],
+        author=texts["author"], support=texts["support"],
+        license=texts["license"], category=texts["category"],
+        keywords=keywords, description=texts["description"],
         dependencies=dependencies, optional_dependencies=optional_dependencies,
         platform=platform, capabilities=tuple(capabilities), windows=tuple(windows),
         format_providers=tuple(providers), background_services=tuple(services),
-        source=str(data.get("source", "builtin")),
-        metadata=_frozen_mapping(data.get("metadata") if isinstance(data.get("metadata"), Mapping) else {}),
-        unknown_fields=_frozen_mapping(unknown),
+        source=source,
+        metadata=metadata_raw,
+        unknown_fields=unknown,
     )
     return manifest, tuple(diagnostics)
 
@@ -502,9 +733,14 @@ def legacy_python_manifest(folder: Path) -> tuple[PluginManifest | None, tuple[M
         host_api = (0, 0)  # never intersects a real host range
     else:
         host_api = (api_version, api_version)
+    version = str(constants.get("VERSION", "0.0.1")) or "0.0.1"
+    if _SEMVER_RE.fullmatch(version) is None:
+        diagnostics.append(_diagnostic("LEGACY_VERSION_NOT_SEMVER", "warning",
+                                       f"旧插件版本不是语义化版本：{version}", "VERSION"))
+        version = "0.0.1"
     manifest = PluginManifest(
         plugin_id=f"files.{folder.name}", display_name=str(constants.get("NAME", folder.name)),
-        version=str(constants.get("VERSION", "0.0.1")) or "0.0.1",
+        version=version,
         host_api=host_api, legacy_ids=(folder.name,),
         author=str(constants.get("AUTHOR", "Unknown"))[:200],
         description=str(constants.get("DESCRIPTION", ""))[:_MAX_TEXT_FIELD],
