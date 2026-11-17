@@ -25,6 +25,7 @@ from threading import Lock
 from typing import Any, Callable, Iterable, Protocol
 from weakref import WeakValueDictionary
 
+from src.shared.plugins.dispatch import AuthorityRejected, DispatchAuthority
 from src.shared.plugins.lifecycle import InvocationContext, make_invocation
 from src.shared.plugins.services import (
     CommandRejected,
@@ -56,6 +57,10 @@ class LegacyFilesCommandService:
         # [F3] 库 revision 复核：手势时冻结、复核时比对——重扫/切库后的
         # 过期调用拒绝重发。None/0 = 宿主未提供（跳过该项，不冒装）
         self._revision_provider = revision_provider
+        # [F4] 权威复核与调度的原子边界：停用/切库/撤权等变更经
+        # authority.mutate/invalidate 与提交串行；revalidate→dispatch 之间
+        # 的开放窗口关闭——DTO 票据（revalidated 标记）不再是放行依据
+        self.authority = DispatchAuthority()
         # A caller-controlled DTO flag is not proof that this service checked it.
         # Weak ownership also releases checks abandoned when a window closes.
         self._checked: WeakValueDictionary[str, PreparedInvocation] = WeakValueDictionary()
@@ -67,6 +72,28 @@ class LegacyFilesCommandService:
         return tuple(sorted(
             info.plugin_id for info in self.catalog.snapshot()
             if info.plugin_id in LAUNCHABLE_LEGACY_IDS and info.can_launch))
+
+    def set_enabled_atomic(self, legacy_id: str, enabled: bool) -> None:
+        """[F4] 启停变更经权威边界：与在途提交串行（开放窗口关闭）。"""
+        self.authority.mutate(
+            f"{'enable' if enabled else 'disable'}:{legacy_id}",
+            lambda: self.catalog.set_enabled(legacy_id, enabled))
+
+    def _launchable_probe(self, legacy_id: str, prepared: PreparedInvocation) -> None:
+        """[F4] 锁内廉价可启动复核：catalog 提供探测则不做目录扫描；
+        没有探测的 catalog 回退 launch_request（正确性优先于扫描成本）。"""
+        probe = getattr(self.catalog, "launchable_now", None)
+        if callable(probe):
+            if not probe(legacy_id):
+                raise CommandRejected("COMMAND_NOT_APPLICABLE", "插件当前不可启动（停用/无命令入口）。")
+            return
+        try:
+            endpoint, payload = self.catalog.launch_request(
+                legacy_id, list(prepared.context.entry_paths))
+        except ValueError as exc:
+            raise CommandRejected("COMMAND_NOT_APPLICABLE", str(exc)) from exc
+        if endpoint != f"/api/plugin/{legacy_id}/launch" or payload != prepared.to_payload():
+            raise CommandRejected("INVOCATION_STALE", "插件状态或启动接口已变化，请重新发起。")
 
     # -- PluginCommandService ---------------------------------------------
     def prepare(self, command_id: str, entry_paths: Iterable[str]) -> PreparedInvocation:
@@ -88,6 +115,7 @@ class LegacyFilesCommandService:
             command_id=f"files.{command_id}.launch", plugin_id=f"files.{command_id}",
             entry_paths=tuple(paths),
             entry_revision=self._current_revision(),
+            host_revision=self.authority.epoch,
             deadline=time.monotonic() + GESTURE_DEADLINE_SEC,
         )
         return PreparedInvocation(context=context, command_id=context.command_id,
@@ -152,26 +180,27 @@ class LegacyFilesCommandService:
         if prepared.context.timed_out():
             return rejected(prepared.command_id, error_code="INVOCATION_EXPIRED", message="插件调用已过期。",
                             invocation_id=prepared.context.invocation_id)
-        try:
-            self._check_revision(prepared.context.entry_revision)
-        except CommandRejected as exc:
-            # 已复核的调用在提交前再做一次库代数比对（复核→提交间的漂移）
-            return rejected(prepared.command_id, error_code=exc.error_code, message=exc.message,
-                            retriable=exc.retriable, invocation_id=prepared.context.invocation_id)
-        with self._checked_lock:
-            checked_here = self._checked.get(prepared.context.invocation_id) is prepared
-        if not checked_here:
-            # 直接调用 dispatch 的入口不能绕过权威复核：服务内补做
-            try:
-                prepared = self.revalidate(prepared)
-            except CommandRejected as exc:
-                return rejected(prepared.command_id, error_code=exc.error_code, message=exc.message,
-                                retriable=exc.retriable, invocation_id=prepared.context.invocation_id)
+        # [F4] 权威复核与提交在同一持有 epoch/revision/token 的边界内原子
+        # 完成：经边界的停用/切库/撤权要么整体在前（此处拒绝），要么整体
+        # 在后（提交已完成）。revalidated 票据不再是放行依据——锁内必复核。
         with self._checked_lock:
             self._checked.pop(prepared.context.invocation_id, None)
-        endpoint = f"/api/plugin/{legacy_id}/launch"
+
+        def recheck() -> None:
+            self._check_revision(prepared.context.entry_revision)
+            self._launchable_probe(legacy_id, prepared)
+
+        def submit() -> Any:
+            return self.transport.launch_plugin(
+                legacy_id, f"/api/plugin/{legacy_id}/launch", prepared.to_payload())
+
         try:
-            submitted = self.transport.launch_plugin(legacy_id, endpoint, prepared.to_payload())
+            submitted = self.authority.check_and_submit(
+                prepared.context.host_revision, recheck, submit)
+        except (AuthorityRejected, CommandRejected) as exc:
+            return rejected(prepared.command_id, error_code=exc.error_code, message=exc.message,
+                            retriable=getattr(exc, "retriable", False),
+                            invocation_id=prepared.context.invocation_id)
         except (OSError, ValueError, RuntimeError) as exc:
             return rejected(prepared.command_id, error_code="LAUNCH_REJECTED",
                             message=f"插件启动请求未能提交：{exc}", retriable=True,

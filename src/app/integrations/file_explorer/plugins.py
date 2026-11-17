@@ -251,6 +251,22 @@ class FileExplorerPluginCatalog:
             payload = {}
         return info.launch_path, payload
 
+    def launchable_now(self, plugin_id: str) -> bool:
+        """[F4] 廉价可启动探测（无目录扫描）：权威边界锁内复核用。
+
+        只看宿主政策（builtin 启动路由）与停用配置；self_disabled/加载
+        失败等慢事实仍由 revalidate 的全量复核负责——锁内只需覆盖
+        "经边界的变更"（启停）。
+        """
+        entry = _BUILTINS.get(plugin_id)
+        if entry is None or not entry[2]:
+            return False
+        try:
+            disabled = set(self._config().get("disabled_plugins", []))
+        except (OSError, ValueError):
+            return False   # 配置读不了：保守拒绝，不冒进
+        return plugin_id not in disabled
+
     def set_enabled(self, plugin_id: str, enabled: bool) -> FilesPluginInfo:
         """Persist next-start preference; do not unload active Python/Qt code."""
         if not isinstance(enabled, bool):

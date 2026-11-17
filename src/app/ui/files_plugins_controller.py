@@ -279,7 +279,8 @@ class FilesPluginsController(QObject):
             self.center.enabled.setEnabled(False)
 
             def work() -> object:
-                self.catalog.set_enabled(command_key, enabled)
+                # [F4] 启停经权威边界：与在途提交原子串行
+                self._commands.set_enabled_atomic(command_key, enabled)
                 return self._snapshot_and_merge()   # [F1] 启停后同口径聚合
             self._submit("enable", work)
             return
