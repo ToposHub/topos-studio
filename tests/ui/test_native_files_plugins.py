@@ -537,3 +537,79 @@ def test_f5_shortcuts_are_owned_contributions(qtbot, catalog, tmp_path, endpoint
         assert not actions or not actions[0].isEnabled()
     finally:
         host.shutdown()
+
+
+def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
+        qtbot, catalog, tmp_path, endpoint):
+    """[F6] 启动=归属插件的任务：在途时停用进入 cancel_requested，
+    应答到达确认终止后停用才完成（贡献保留到确认之后）。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f6.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: ["/m/a.mov"], lambda: None, panel)
+
+    # 应答不自动到达：拦截 transport 提交（任务保持 running，不 emit 完成信号）
+    submitted: list[tuple] = []
+    host._commands.transport.launch_plugin = (
+        lambda plugin_id, ep, payload:
+        (submitted.append((plugin_id, ep, payload)), True)[1])
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        host.launch("format_factory")
+        qtbot.waitUntil(lambda: bool(submitted), timeout=8000)
+        qtbot.waitUntil(lambda: "format_factory" in host._launch_jobs,
+                        timeout=8000)
+        jobs = host.host_session.lifecycle.jobs
+        job_id = host._launch_jobs["format_factory"]
+        assert jobs.owner(job_id) == "format_factory"
+        assert jobs.state(job_id) == "running"
+        # 在途时停用：停新 → 按 owner 取消 → 未确认 → 停用不完成
+        report = host.host_session.retire_plugin("format_factory")
+        assert not report["fully_stopped"]
+        assert job_id in report["jobs_still_terminating"]
+        assert jobs.state(job_id) == "cancel_requested"
+        assert not host.host_session.lifecycle.accepting_calls("format_factory")
+        # 停新：停用中拒绝新调用（不再产生第二个提交）
+        host.launch("format_factory")
+        assert len(submitted) == 1
+        # 应答到达 = 终态确认 → 停用可完成
+        host._launch_finished("format_factory", True, "完成")
+        qtbot.waitUntil(lambda: jobs.state(job_id) == "cancelled", timeout=8000)
+        report2 = host.host_session.retire_plugin("format_factory")
+        assert report2["fully_stopped"]
+    finally:
+        host.shutdown()
+
+
+def test_f6_retire_async_advances_without_gui_sleep(qtbot, catalog, tmp_path, endpoint):
+    """[F6] 异步退役：QTimer 轮询推进到 fully_stopped（GUI 不 sleep）。"""
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f6b.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(catalog, transport, prefs, panel,
+                                  lambda: [], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
+        host.host_session.lifecycle.activate(
+            "files.format_factory",
+            lambda contributions: contributions.register(
+                "menu", "m", lambda: None))
+        host._retire_plugin_async("files.format_factory")
+        qtbot.waitUntil(
+            lambda: host.host_session.lifecycle.is_stopped("files.format_factory"),
+            timeout=5000)
+        polls = host._retire_polls.get("files.format_factory", 0)
+        assert polls <= 50
+    finally:
+        host.shutdown()

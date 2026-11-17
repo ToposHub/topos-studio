@@ -87,6 +87,8 @@ class FilesPluginsController(QObject):
         # （owner/singleton——供 G 阶段原生窗口宿主消费）
         self.host_session = PluginHostSession()
         self._shortcut_plugins: set[str] = set()
+        self._launch_jobs: dict[str, str] = {}          # [F6] ui_id -> job_id
+        self._retire_polls: dict[str, int] = {}          # [F6] 异步退役轮次
         self.center.refresh_requested.connect(self.refresh)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
@@ -312,6 +314,11 @@ class FilesPluginsController(QObject):
     def launch(self, plugin_id: str) -> None:
         if self._closed or plugin_id in self._busy or self._writing:
             return
+        # [F6] 停新调用：已进入停用流程的插件拒绝新调用（不排队）
+        if not self.host_session.lifecycle.accepting_calls(plugin_id) and \
+                self.host_session.lifecycle.is_stopped(plugin_id):
+            self._message(_tr("plugin_stopping", "该插件正在停用，暂不能发起新调用。"))
+            return
         info = next((item for item in self._infos if item.plugin_id == plugin_id), None)
         if info is not None and not info.can_launch:
             self._message(info.launch_unavailable_reason or "该插件没有可用命令入口。")
@@ -322,6 +329,16 @@ class FilesPluginsController(QObject):
         # Freeze the selection at the user's gesture, never at async completion.
         paths = list(self.selected_paths())
         self._busy.add(plugin_id)
+        # [F6] 启动即登记为归属该插件的任务：停用时按 owner 取消、
+        # 完成回报（transport 应答）确认终止——贡献保留到确认之后
+        job_id = f"launch:{plugin_id}:{len(self._launch_jobs) + 1}"
+        try:
+            self.host_session.lifecycle.jobs.start(job_id, plugin_id=plugin_id)
+        except RuntimeError as exc:
+            self._busy.discard(plugin_id)
+            self._message(str(exc))
+            return
+        self._launch_jobs[plugin_id] = job_id
         self._project()
 
         def work() -> object:
@@ -339,6 +356,12 @@ class FilesPluginsController(QObject):
         # [F2] 回报携带命令键（线上短 id）→ 换回 UI 新 id（同快照解析）
         ui_id = next((item.plugin_id for item in self._infos
                       if item.command_key == plugin_id), plugin_id)
+        # [F6] 应答到达 = 任务终态确认（取消请求若有也已就此收口）
+        job_id = self._launch_jobs.pop(ui_id, None)
+        if job_id is not None:
+            self.host_session.lifecycle.jobs.confirm_cancelled(job_id) \
+                if self.host_session.lifecycle.jobs.state(job_id) == "cancel_requested" \
+                else self.host_session.lifecycle.jobs.finish(job_id)
         self._busy.discard(ui_id)
         if success:
             self.preferences.plugin_recent = [ui_id, *[pid for pid in self.preferences.plugin_recent if pid != ui_id]]
@@ -427,15 +450,43 @@ class FilesPluginsController(QObject):
         self.launcher.hide()
         self.legacy()
 
+    def _retire_plugin_async(self, plugin_id: str, attempt: int = 0) -> None:
+        """[F6] 异步推进停用：停新→按 owner 取消→等确认→清理贡献。
+
+        QTimer 轮询重入（GUI 不 sleep）；清理失败/任务未确认时按次重试
+        （上限后如实报告残留，不假装 stopped）。
+        """
+        if self._closed and attempt == 0:
+            pass   # 关停路径也走同一异步推进（应用退出由进程兜底）
+        report = self.host_session.retire_plugin(plugin_id)
+        if report.get("fully_stopped"):
+            self._retire_polls.pop(plugin_id, None)
+            residue = report.get("jobs_still_terminating") or ()
+            if residue or report.get("cleanup_failures"):
+                self._message(_tr(
+                    "retire_pending",
+                    "插件停用仍在收尾（任务终止/清理重试），稍后自动完成。"))
+            return
+        attempt += 1
+        self._retire_polls[plugin_id] = attempt
+        if attempt > 50:   # ~5s：如实报告，不再无限轮询
+            self._message(_tr("retire_stuck",
+                              "插件停用未完成：任务尚未确认终止或清理失败（可重试）。"))
+            return
+        QTimer.singleShot(100, lambda: self._retire_plugin_async(plugin_id, attempt))
+
     def shutdown(self) -> None:
         if self._closed:
             return
         self._closed = True
-        # [F5] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 + 停用
-        # 状态机收尾，失败可重试语义由会话保留）
+        # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
+        # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
+        # 未确认终止的任务由异步轮询推进，如实报告残留）
         for plugin_id in list(self._shortcut_plugins):
             self.host_session.release_contributions(plugin_id)
         self._shortcut_plugins.clear()
+        for plugin_id in list(self._launch_jobs):
+            self._retire_plugin_async(plugin_id)
         self._pool.clear()
         self.center.close()
         self.launcher.close()
