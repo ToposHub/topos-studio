@@ -25,7 +25,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from src.shared.plugins.freeze import deep_freeze, deep_thaw
 
-STAGES = ("validated", "accepted", "dispatched", "running", "completed", "failed", "cancelled")
+STAGES = ("validated", "queued", "accepted", "dispatched", "running", "completed", "failed", "cancelled")
 
 
 @dataclass(frozen=True)
@@ -107,12 +107,18 @@ class CommandRejected(ValueError):
 
 @dataclass(frozen=True)
 class PreparedInvocation:
-    """A validated, frozen request ready for dispatch (GUI/worker split safe)."""
+    """A validated, frozen request ready for dispatch (GUI/worker split safe).
+
+    ``revalidated`` 表示手势冻结之后的执行前权威复核已通过（PR-05）：
+    worker 内复核过的调用交给 dispatch 时不再重复扫描，宿主也不需要在
+    GUI 线程补同步扫描。
+    """
 
     context: Any                     # lifecycle.InvocationContext (kept Any to avoid import cycle)
     command_id: str
     plugin_id: str
     payload: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    revalidated: bool = False
 
     def __post_init__(self) -> None:
         frozen = self.payload

@@ -126,22 +126,28 @@ class NativeFilesTransport(QObject):
         self._scan_poll_timer: QTimer | None = None
         self._plugin_replies: dict[QNetworkReply, str] = {}
 
-    def launch_plugin(self, plugin_id: str, endpoint: str, payload: dict[str, Any]) -> None:
-        """Open an existing tool; HTTP acknowledgement is not window-ready proof."""
+    def launch_plugin(self, plugin_id: str, endpoint: str, payload: dict[str, Any]) -> bool:
+        """Open an existing tool; HTTP acknowledgement is not window-ready proof.
+
+        [PR-05] 返回提交事实：True = HTTP 请求已发出；False = 同步拒绝
+        （通道关闭/插件不受支持/服务未就绪/同插件在途）。同步拒绝仍发
+        plugin_launch_finished 信号（在途去重除外），受理与否不撒谎。
+        """
         if self._closed:
-            return
+            return False
         if plugin_id not in ("format_factory", "image_factory", "shutdown_timer", "decode_benchmark") or endpoint != f"/api/plugin/{plugin_id}/launch":
             self.plugin_launch_finished.emit(plugin_id, False, "此插件没有受支持的原生启动接口。")
-            return
+            return False
         if plugin_id in self._plugin_replies.values():
-            return
+            return False
         request = self._make_post(endpoint)
         if request is None:
             self.plugin_launch_finished.emit(plugin_id, False, "素材服务尚未就绪，无法打开插件。")
-            return
+            return False
         reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
         self._plugin_replies[reply] = plugin_id
         reply.finished.connect(lambda r=reply: self._finish_plugin_launch(r))
+        return True
 
     def _finish_plugin_launch(self, reply: QNetworkReply) -> None:
         plugin_id = self._plugin_replies.pop(reply, None)
