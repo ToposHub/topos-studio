@@ -217,3 +217,45 @@ def test_task_rename_conflict_is_itemized_not_silent(env):
     statuses = [(i.ok, i.error_code) for i in result.items]
     assert statuses[0][0] is True
     assert statuses[1] == (False, "DEST_EXISTS")
+
+
+def test_tags_clear_removes_all_tags(env):
+    """UI 空输入=清空 的显式语义（tags_op=clear）。"""
+    lib_id = env["library"].library_id
+    path = _seed_file(env["lib"], "clear.png")
+    env["catalog"].upsert_asset(lib_id, path, size=4)
+    env["metadata"].patch_metadata([str(path)], {"tags": "a, b"},
+                                   library_id=lib_id)
+    assert env["catalog"].tags_of(lib_id, str(path)) == ["a", "b"]
+    result = env["metadata"].patch_metadata(
+        [str(path)], {"tags": ""}, library_id=lib_id, tags_op="clear")
+    assert result.ok
+    assert env["catalog"].tags_of(lib_id, str(path)) == []
+    # 快照语义：结果里 tags 为空列表
+    assert result.items[0].result["tags"] == []
+
+
+def test_task_job_id_and_progress_reporting(env):
+    """D1：调用方预生成 job_id（UI 先发 task_started 再执行）+ 逐项进度。"""
+    lib_id = env["library"].library_id
+    a = _seed_file(env["lib"], "p1.png")
+    b = _seed_file(env["lib"], "p2.png")
+    events: list[tuple[int, int]] = []
+    result = env["tasks"].start_task(
+        lib_id, "rename", [str(a), str(b)],
+        options={"new_name": "p1.png"},  # 第一项 UNCHANGED 改名自身、第二项冲突
+        job_id="job-ui-1", progress=lambda done, total: events.append((done, total)))
+    assert result.job_id == "job-ui-1"
+    assert events == [(1, 2), (2, 2)]
+    # 完成后 cancel 该 job：不在运行中，如实拒绝
+    late = env["tasks"].cancel_task("job-ui-1")
+    assert not late.ok and late.error_code == "JOB_UNKNOWN"
+
+
+def test_collection_member_paths_preserve_order(env):
+    lib_id = env["library"].library_id
+    cid = env["catalog"].create_collection(lib_id, "选集")
+    a = _seed_file(env["lib"], "m1.png")
+    b = _seed_file(env["lib"], "m2.png")
+    env["collections"].add_members(cid, [str(b), str(a)])
+    assert env["collections"].member_paths(cid) == [str(b), str(a)]

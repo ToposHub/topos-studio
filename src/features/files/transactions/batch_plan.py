@@ -72,15 +72,21 @@ class BatchPlan:
         return any(item.conflict for item in self.items)
 
 
-_TEMPLATE_TOKEN = re.compile(r"\{(name|ext|seq|date|camera)\}")
+_TEMPLATE_TOKEN = re.compile(r"\{(name|ext|seq|date|camera)(?::(\d+))?\}")
 
 
 def render_template(template: str, *, name: str, ext: str, seq: int,
                     date: str, camera: str) -> str:
-    """极简模板渲染；未知 token 原样保留（可读性优先，不静默吞）。"""
+    """极简模板渲染；未知 token 原样保留（可读性优先，不静默吞）。
+
+    ``{seq:N}`` 支持显式宽度（UI 批改名默认模板 ``{name}_{seq:3}`` 依赖它）；
+    其余 token 的 ``:N`` 后缀按未知 token 原样保留。
+    """
 
     def _sub(match: re.Match) -> str:
-        token = match.group(1)
+        token, width = match.group(1), match.group(2)
+        if token == "seq" and width:
+            return f"{seq:0{max(1, min(9, int(width)))}d}"
         values = {"name": name, "ext": ext, "seq": f"{seq:03d}",
                   "date": date, "camera": camera or "unknown"}
         return values[token]

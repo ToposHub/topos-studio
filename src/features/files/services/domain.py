@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from src.features.files.contracts import split_tags
 from src.features.files.repository.catalog import FilesCatalog, nfc
 from src.features.files.transactions import (
     CancelToken,
@@ -63,7 +64,7 @@ class FilesMetadataService:
             return rejected("files.metadata.patch",
                             error_code="INVALID_PATCH",
                             message=f"未知字段: {sorted(unknown)}")
-        if tags_op not in ("replace", "add", "remove"):
+        if tags_op not in ("replace", "add", "remove", "clear"):
             return rejected("files.metadata.patch", error_code="INVALID_PATCH",
                             message=f"未知 tags_op: {tags_op}")
         items: list[ItemResult] = []
@@ -91,15 +92,18 @@ class FilesMetadataService:
             items=tuple(items), revision=self._catalog.revision)
 
     def _apply_tags(self, library_id: str, path: str,
-                    tags: Iterable[str], op: str) -> None:
-        desired = {tag for tag in (str(t).strip() for t in tags) if tag}
+                    tags: Any, op: str) -> None:
+        # UI 语义是逗号分隔文本；列表/元组调用方也兼容
+        desired = set(split_tags(tags))
+        if op == "clear":
+            desired = set()  # clear = 全量移除（UI 空输入即清空的显式语义）
         with self._catalog._read() as cursor:
             existing_rows = cursor.execute(
                 "SELECT t.id, t.name FROM asset_tags at JOIN tags t"
                 " ON t.id = at.tag_id WHERE at.library_id = ? AND at.path = ?",
                 (library_id, path)).fetchall()
         existing = {row["name"]: row["id"] for row in existing_rows}
-        if op == "replace":
+        if op in ("replace", "clear"):
             for name, tag_id in existing.items():
                 if name not in desired:
                     self._catalog.untag_asset(library_id, path, tag_id)
@@ -166,6 +170,10 @@ class FilesCollectionsService:
         return ServiceResult(command_id="files.collections.add", ok=True,
                              accepted=True, stage="completed", items=tuple(items),
                              revision=self._catalog.revision)
+
+    def member_paths(self, collection_id: int) -> list[str]:
+        """成员路径按入集顺序返回；水合（磁盘真值+叠加）归查询服务。"""
+        return list(self._catalog.collection_member_paths(collection_id))
 
 
 class FilesScanService:
@@ -265,7 +273,9 @@ class FilesTaskService:
     def start_task(self, library_id: str, operation: str,
                    targets: Iterable[str], *,
                    options: dict[str, Any] | None = None,
-                   policy: str = "error") -> ServiceResult:
+                   policy: str = "error",
+                   job_id: str | None = None,
+                   progress: Callable[[int, int], None] | None = None) -> ServiceResult:
         if operation not in self.OPERATIONS:
             return rejected("files.task.start", error_code="INVALID_OPERATION",
                             message=f"未知操作 {operation}")
@@ -275,7 +285,7 @@ class FilesTaskService:
                             message="没有目标")
         options = dict(options or {})
         cancel = CancelToken()
-        job_id = f"task-{operation}-{int(time.time() * 1000):x}-{len(targets)}"
+        job_id = job_id or f"task-{operation}-{int(time.time() * 1000):x}-{len(targets)}"
         self._running[job_id] = _RunningTask(job_id=job_id, cancel=cancel,
                                              outcomes=[])
         outcomes: list[ItemOutcome] = []
@@ -286,6 +296,8 @@ class FilesTaskService:
                 continue
             outcomes.append(self._run_one(
                 library_id, operation, target, options, policy, cancel))
+            if progress is not None:
+                progress(len(outcomes), len(targets))
         record = self._running.pop(job_id)
         record.outcomes.extend(outcomes)
         ok_all = all(o.ok for o in outcomes)
