@@ -31,6 +31,9 @@ from src.shared.plugins.lifecycle import (
     ContributionSet,
     PluginLifecycleController,
 )
+from src.features.files.plugin_broker_host import (
+    FilesPluginBroker, PluginConfigStore, SecretProxy,
+)
 from src.shared.plugins.providers import ProviderRegistry
 
 WindowCallback = Callable[[], Any]
@@ -148,6 +151,11 @@ class PluginHostSession:
             job_wait_timeout=job_wait_timeout)
         # [F8] 格式 provider 注册表：owner 归属，停用/退役整体摘除
         self.providers = ProviderRegistry()
+        # [F9] 实际资源边界：broker（路径/网络授权执行）+ 配置命名空间 +
+        # secret 代理——停用/退役整体撤权（声明权限不构成授权）
+        self.broker = FilesPluginBroker()
+        self.config_store: PluginConfigStore | None = None   # 宿主接线时注入
+        self.secrets = SecretProxy()
         self._lock = threading.RLock()
         self._shortcuts: dict[str, ContributionSet] = {}
         # 释放失败但所有权未完成的旧贡献集：保留可重试（不得随替换丢失）
@@ -195,8 +203,11 @@ class PluginHostSession:
             if shortcuts is not None else 0
         closed = self.windows.close_all(plugin_id)
         providers_removed = self.providers.unregister_owner(plugin_id)
+        grants_revoked = (self.broker.revoke_all(plugin_id)
+                          + self.secrets.revoke_all(plugin_id))
         return {"released_shortcuts": released, "closed_windows": closed,
                 "providers_removed": providers_removed,
+                "grants_revoked": grants_revoked,
                 "shortcut_failures": self.shortcut_failures(plugin_id)}
 
     def retire_plugin(self, plugin_id: str) -> dict[str, Any]:
@@ -211,10 +222,16 @@ class PluginHostSession:
             released_shortcuts += self._release_shortcut_set(stale)
         closed_windows = self.windows.close_all(plugin_id)
         providers_removed = self.providers.unregister_owner(plugin_id)
+        grants_revoked = (self.broker.revoke_all(plugin_id)
+                          + self.secrets.revoke_all(plugin_id))
+        config_cleared = (self.config_store.clear_namespace(plugin_id)
+                          if self.config_store is not None else 0)
         report = self.lifecycle.deactivate(plugin_id, wait_jobs=False)
         report["released_shortcuts"] = released_shortcuts
         report["closed_windows"] = closed_windows
         report["providers_removed"] = providers_removed
+        report["grants_revoked"] = grants_revoked
+        report["config_entries_cleared"] = config_cleared
         return report
 
     # ------------------------------------------------------------ 快捷键贡献
