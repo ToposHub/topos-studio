@@ -22,6 +22,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, Protocol
@@ -219,15 +220,24 @@ class PluginJobs:
 
     任务记录归属插件（PR-02）：停用插件 A 只取消 A 自己的任务，
     ``cancel_all`` 仅供宿主整体关闭时使用。
+
+    [F7] 长期运行不无界积累：终态任务移入**有界历史环**（``history_limit``，
+    先进先出淘汰）并退出在册表；每任务日志行数有预算（``log``/``job_logs``）。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, history_limit: int = 200,
+                 per_job_log_lines: int = 64) -> None:
+        if history_limit < 1 or per_job_log_lines < 1:
+            raise ValueError("history_limit/per_job_log_lines 必须是正整数")
         self._lock = threading.Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._cancel_requested: set[str] = set()
         self._cancelled_confirmed: set[str] = set()
         self._finished: set[str] = set()
         self._stopping_owners: set[str] = set()
+        self._history_limit = history_limit
+        self._per_job_log_lines = per_job_log_lines
+        self._history: deque = deque(maxlen=history_limit)
 
     def start(self, job_id: str, cancel: Callable[[], None] | None = None,
               *, plugin_id: str = "") -> None:
@@ -237,7 +247,7 @@ class PluginJobs:
             if job_id in self._jobs:
                 raise ValueError(f"任务已存在：{job_id}")
             self._jobs[job_id] = {"cancel": cancel, "state": "running",
-                                  "plugin_id": plugin_id}
+                                  "plugin_id": plugin_id, "logs": ()}
 
     def owner(self, job_id: str) -> str:
         with self._lock:
@@ -285,19 +295,72 @@ class PluginJobs:
             job = self._jobs.get(job_id)
             if job is not None and job["state"] == "cancel_requested":
                 self._cancelled_confirmed.add(job_id)
-                job["state"] = "cancelled"
+                self._retire_to_history(job_id, job, "cancelled")
 
     def finish(self, job_id: str) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is not None and job["state"] in ("running", "cancel_requested"):
-                job["state"] = "finished"
                 self._finished.add(job_id)
+                self._retire_to_history(job_id, job, "finished")
+
+    def _retire_to_history(self, job_id: str, job: dict[str, Any],
+                           terminal: str) -> None:
+        """[F7] 终态任务入有界历史环并退出在册表（长期运行有界）。"""
+        job["state"] = terminal
+        record = {"job_id": job_id, "plugin_id": str(job.get("plugin_id", "")),
+                  "state": terminal,
+                  "logs": tuple(job.get("logs", ()))}
+        self._history.append(record)          # deque(maxlen) 自带淘汰
+        self._jobs.pop(job_id, None)
+        self._cancel_requested.discard(job_id)
+        self._cancelled_confirmed.discard(job_id)
+        self._finished.discard(job_id)
+
+    def log(self, job_id: str, line: str) -> None:
+        """[F7] 附加一行任务日志（每任务有界；终态后在历史记录上补记）。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                logs = list(job.get("logs", ()))
+                logs.append(str(line))
+                job["logs"] = tuple(logs[-self._per_job_log_lines:])
+                return
+            for record in reversed(self._history):
+                if record["job_id"] == job_id:
+                    logs = list(record["logs"]) + [str(line)]
+                    record["logs"] = tuple(logs[-self._per_job_log_lines:])
+                    return
+
+    def job_logs(self, job_id: str) -> tuple[str, ...]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                return tuple(job.get("logs", ()))
+            for record in reversed(self._history):
+                if record["job_id"] == job_id:
+                    return tuple(record["logs"])
+            return ()
+
+    def history(self, plugin_id: str | None = None,
+                limit: int | None = None) -> tuple[dict[str, Any], ...]:
+        """近期终态任务（新→旧）；可按插件过滤——作业历史视图的数据源。"""
+        with self._lock:
+            records = [dict(record) for record in reversed(self._history)
+                       if plugin_id is None or record["plugin_id"] == plugin_id]
+        if limit is not None:
+            records = records[:max(0, int(limit))]
+        return tuple(records)
 
     def state(self, job_id: str) -> str:
         with self._lock:
             job = self._jobs.get(job_id)
-            return job["state"] if job else "unknown"
+            if job is not None:
+                return job["state"]
+            for record in reversed(self._history):
+                if record["job_id"] == job_id:
+                    return str(record["state"])
+            return "unknown"
 
     def active(self) -> tuple[str, ...]:
         with self._lock:
@@ -356,6 +419,9 @@ class PluginLifecycleController:
         self._deactivating: set[str] = set()
         self._activating: set[str] = set()
         self._cleanup_completed: dict[str, set[str]] = {}
+        # [F7] 重激活代数：完全停用后可重新激活，代数+1——晚到的旧代
+        # 消息（窗口 context/调用受理）按代数拒绝，不污染新窗口/作业
+        self._generations: dict[str, int] = {}
 
     # -- activation -----------------------------------------------------
     def activate(self, plugin_id: str, registrar: Callable[[ContributionSet], None]) -> ContributionSet:
@@ -395,9 +461,41 @@ class PluginLifecycleController:
             self._accepting.add(plugin_id)
             return contributions
 
-    def accepting_calls(self, plugin_id: str) -> bool:
+    def accepting_calls(self, plugin_id: str,
+                        *, generation: int | None = None) -> bool:
+        """插件当前是否受理调用；``generation`` 给出时按代数判定。
+
+        [F7] 旧代（重激活前捕获的代数）调用一律拒绝——晚到消息不得
+        污染新窗口/作业。
+        """
         with self._lock:
-            return plugin_id in self._accepting
+            if plugin_id not in self._accepting:
+                return False
+            if generation is not None:
+                return int(generation) == self._generations.get(plugin_id, 0)
+            return True
+
+    def generation(self, plugin_id: str) -> int:
+        """插件当前代数（未激活过为 0；每次完全停用后重激活 +1）。"""
+        with self._lock:
+            return self._generations.get(plugin_id, 0)
+
+    def reactivate(self, plugin_id: str,
+                   registrar: Callable[[ContributionSet], None]) -> ContributionSet:
+        """[F7] 新 generation 重激活：仅限完全停用（fully_stopped）之后。
+
+        代数 +1 后走同一 ``activate`` 路径（半失败全量回滚等契约不变）；
+        旧代在途消息/受理按 ``accepting_calls(generation=旧)`` 拒绝。
+        """
+        with self._lock:
+            if plugin_id not in self._fully_stopped:
+                raise RuntimeError(
+                    f"插件未完全停用（任务终止/清理未确认），不能重激活：{plugin_id}")
+            self._fully_stopped.discard(plugin_id)
+            self._stopped.discard(plugin_id)
+            self._cleanup_completed.pop(plugin_id, None)
+            self._generations[plugin_id] = self._generations.get(plugin_id, 0) + 1
+        return self.activate(plugin_id, registrar)
 
     # -- jobs -----------------------------------------------------------
     @property
