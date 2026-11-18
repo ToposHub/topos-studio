@@ -941,3 +941,50 @@ def test_clip_editor_spectral_repair_commits_and_undoes(
     assert panel._process_steps[0]["type"] == "spectral_repair"
     view.undo()
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
+
+
+def test_timeline_shows_clip_volume_envelope_overlay(
+        project_host, qtbot, tmp_path) -> None:
+    """P1-4 余项：包络提交命令后，时间线音频片段叠加包络折线（模型驱动）。"""
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    rate = 48000
+    audio_path = tmp_path / "env.wav"
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"\x10\x01\x10\x01" * rate * 4)  # 4 s 恒定电平
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Env",
+        metadata={"audio_info": {"sample_rate": rate, "channels": 2},
+                  "duration_seconds": 4.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Env", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+
+    item = view._items_map.get(clip_id)
+    assert item is not None and item._envelope_nodes == []
+
+    # 画布包络（拖拽结束/增删节点发一次）→ 命令 → 时间线叠加折线。
+    panel.envelopeChanged.emit([
+        {"t": 0.0, "db": 0.0}, {"t": 2.0, "db": -12.0}])
+    qtbot.waitUntil(lambda: bool(view._items_map[clip_id]._envelope_nodes),
+                    timeout=5000)
+    nodes = view._items_map[clip_id]._envelope_nodes
+    fractions = [round(fraction, 3) for fraction, _db in nodes]
+    assert [round(db, 2) for _f, db in nodes] == [0.0, -12.0]
+    assert fractions[0] == 0.0
+    assert 0.3 <= fractions[1] <= 0.5  # 2 s / 4~5 s 显示域
+
+    # 撤销后折线消失。
+    view.undo()
+    qtbot.waitUntil(
+        lambda: not bool(view._items_map[clip_id]._envelope_nodes), timeout=5000)

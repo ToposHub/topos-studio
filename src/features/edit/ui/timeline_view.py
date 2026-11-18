@@ -1599,6 +1599,28 @@ class TimelineView(QGraphicsView):
             total += self._track_height_for(track) + TRACK_GAP
         return total
 
+    def _push_clip_volume_envelope(self, clip_item: ClipItem, clip: Any) -> None:
+        """P1-4 余项：``audio_edit`` 包络节点 → 片段波形上的叠加折线。
+
+        模型驱动、只读可视化：节点编辑在 Clip Editor 画布提交命令，时间线
+        在下一次布局刷新折线（0 dB 基线 + 节点 + 选中读数）。
+        """
+        try:
+            from src.features.edit.core.audio_edit import envelope_nodes
+            nodes = envelope_nodes(getattr(clip, "audio_edit", None))
+            if not nodes:
+                if clip_item._envelope_nodes:
+                    clip_item.set_volume_envelope(None)
+                return
+            fps = float(getattr(self._timeline, "fps", 24.0) or 24.0)
+            total = max(1, int(round(
+                float(clip.timeline_duration or 0) / fps * 48000)))
+            clip_item.set_volume_envelope([
+                (node["local_sample"] / total, float(node.get("gain_db", 0.0)))
+                for node in nodes])
+        except Exception:  # noqa: BLE001 - 包络可视化失败不影响布局
+            logger.debug("clip envelope overlay failed", exc_info=True)
+
     def _layout_track_items(self, *, geometry_only: bool = False) -> None:
         """Position items; resizing retains existing cut and tool metadata."""
         if self._timeline is None:
@@ -1675,6 +1697,10 @@ class TimelineView(QGraphicsView):
                 clip_item = self._items_map.get(clip.clip_id)
                 if clip_item and isinstance(clip_item, ClipItem):
                     clip_item.set_audio_display_color(display_color)
+                    # P1-4 余项：包络叠加随每次布局刷新（命令提交 → 模型
+                    # 变更 → 布局 → 折线更新）。
+                    if track.track_type == "audio":
+                        self._push_clip_volume_envelope(clip_item, clip)
                     extra = expansion if clip.clip_id not in self._retime_control_clip_ids else 0
                     clip_item.set_track_height(track_h - extra)
                     clip_item.update_track_index(track_index)
@@ -2374,6 +2400,8 @@ class TimelineView(QGraphicsView):
                     self._configure_clip_presentation(item)
                     # 轨道音量驱动的波形显示缩放（W-gain: 视觉联动）
                     item.set_waveform_gain(getattr(track, 'volume', 1.0))
+                    if track.track_type == "audio":
+                        self._push_clip_volume_envelope(item, clip)
 
                     # Phase 6: Propagate comp clip state from ClipInstance to ClipItem
                     if hasattr(clip, 'composite_id') and clip.composite_id:
@@ -7956,6 +7984,8 @@ class TimelineView(QGraphicsView):
         self._configure_clip_presentation(item)
         # 轨道音量驱动的波形显示缩放（W-gain: 视觉联动）
         item.set_waveform_gain(getattr(track, 'volume', 1.0))
+        if track.track_type == "audio":
+            self._push_clip_volume_envelope(item, clip)
 
         # Connect signals
         item.clip_clicked.connect(self._on_clip_clicked)
