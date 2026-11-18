@@ -210,31 +210,20 @@ def test_media_pool_column_zoom(qapp, clean_column_settings):
         panel.deleteLater()
 
 
-def test_library_panel_column_zoom_and_list_mode(qapp, tmp_path,
-                                                 clean_column_settings):
-    for index in range(12):
-        (tmp_path / f"img_{index:02d}.jpg").write_bytes(b"")
+def test_library_reuses_files_four_layout_model(qapp, tmp_path, monkeypatch):
     from src.app.ui.library_panel import LibraryPanel
+    from src.app.ui.native_files_panel import NativeFilesPanel
+    from src.features.files.repository import FilesDataLocator
+    locator = FilesDataLocator.for_config_root(tmp_path / "settings")
+    monkeypatch.setattr(FilesDataLocator, "default", classmethod(lambda cls: locator))
+    monkeypatch.setattr(NativeFilesPanel, "is_browsable_path", lambda self, path: True)
     panel = LibraryPanel(start_path=str(tmp_path))
-    panel.resize(520, 360)
-    panel.show()
-    # QFileSystemModel populates asynchronously.
-    for _ in range(60):
-        _process_ui(qapp, rounds=1)
-        if panel.list_view.model() and panel.list_view.model().rowCount() >= 12:
-            break
     try:
-        panel._column_grid.apply_columns(3)
-        _process_ui(qapp, rounds=3)
-        _assert_flush(panel.list_view, 3)
-        # List mode suspends the controller and owns its geometry.
-        panel.set_view_mode("list")
-        assert panel.list_view.viewMode() == panel.list_view.viewMode().ListMode
-        assert not panel.zoom_slider.isEnabled()
-        panel.set_view_mode("grid")
-        _process_ui(qapp, rounds=3)
-        assert panel.zoom_slider.isEnabled()
-        _assert_flush(panel.list_view, panel._column_grid.columns)
+        assert panel.model is panel._native_panel.model
+        assert panel.proxy_model is panel._native_panel.proxy
+        for mode in ("adaptive", "masonry", "grid", "list"):
+            panel.set_view_mode(mode)
+            assert panel._native_panel.view_combo.currentData() == mode
     finally:
-        panel.hide()
+        panel.shutdown()
         panel.deleteLater()

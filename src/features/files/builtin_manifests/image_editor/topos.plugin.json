@@ -1,0 +1,34 @@
+{
+  "plugin_id": "files.image_editor",
+  "display_name": "Darkroom",
+  "version": "0.0.1",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [],
+  "author": "AssetDeck Team",
+  "description": "旧 Web 图片编辑器（Darkroom）；经兼容入口打开，效果仍走现有 Effect Catalog",
+  "category": "图片",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "open",
+      "kind": "command",
+      "title": "Darkroom",
+      "selection_mode": "single",
+      "run_location": "host"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "version_note": "旧插件仅声明 NAME，其余沿用回退"
+  },
+  "windows": [
+    {
+      "window_id": "main",
+      "command_id": "open"
+    }
+  ]
+}

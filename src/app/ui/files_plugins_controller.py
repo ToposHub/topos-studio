@@ -5,12 +5,12 @@ from collections.abc import Callable
 from dataclasses import replace as _dc_replace
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from PyQt6.QtCore import QObject, QPoint, QRunnable, QThreadPool, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
+from PyQt6.QtWidgets import QApplication, QFileDialog, QLineEdit, QMessageBox, QPlainTextEdit, QTextEdit, QWidget
 
-from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
 from src.app.ui.native_files_plugins import PluginCenterDialog, PluginLauncherDialog, _tr
 from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.app.ui.native_files_transport import NativeFilesTransport
@@ -47,7 +47,9 @@ class _CatalogTask(QRunnable):
 
 
 class FilesPluginsController(QObject):
-    def __init__(self, catalog: FileExplorerPluginCatalog, transport: NativeFilesTransport,
+    request_refresh = pyqtSignal()
+
+    def __init__(self, catalog: Any, transport: NativeFilesTransport,
                  preferences: NativeFilesPreferences, panel: QWidget,
                  selected_paths: Callable[[], list[str]], legacy: Callable[[], None],
                  parent: QObject | None = None,
@@ -78,7 +80,11 @@ class FilesPluginsController(QObject):
         self._commands = LegacyFilesCommandService(
             catalog, transport,
             revision_provider=revision_provider)
+        if getattr(catalog, "native_only", False):
+            self._commands.authority = catalog.authority
         self.center = PluginCenterDialog(panel.window())
+        if getattr(catalog, "native_only", False):
+            self.center.legacy.hide()
         self.launcher = PluginLauncherDialog(panel)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
@@ -87,6 +93,8 @@ class FilesPluginsController(QObject):
         self._infos: tuple[Any, ...] = ()
         self._busy: set[str] = set()
         self._writing = False
+        self.package_lifecycle: Any = None
+        self._package_pending: tuple[Path, Any] | None = None
         self._actions: list[QAction] = []
         # [F5] 宿主会话：快捷键贡献所有权（注销/失败重试）+ 窗口注册表
         # （owner/singleton——供 G 阶段原生窗口宿主消费）
@@ -120,14 +128,33 @@ class FilesPluginsController(QObject):
                 command_id="files.code_editor.open",
                 plugin_id="files.code_editor",
                 revision_provider=revision_provider),
+            "image_editor": NativeToolCommandService(
+                command_id="files.image_editor.open", plugin_id="files.image_editor",
+                revision_provider=revision_provider),
+            "ai_library_browser": NativeToolCommandService(
+                command_id="files.ai_library_browser.open", plugin_id="files.ai_library_browser",
+                revision_provider=revision_provider),
+            "audio_pro": NativeToolCommandService(
+                command_id="files.audio_pro.open", plugin_id="files.audio_pro",
+                revision_provider=revision_provider),
         }
+        for key, service in self._native_commands.items():
+            service.authority = self._commands.authority
+            if getattr(catalog, "native_only", False):
+                service._enabled_provider = lambda key=key: catalog.is_enabled(key)
         self._format_factory_window = None
         self._image_factory_window = None
         self._shutdown_timer_window = None
         self._decode_benchmark_window = None
         self._decode_benchmark_service = None
         self._code_editor_window = None
+        self._image_editor_window = None
+        self._ai_library_window = None
+        self._audio_window = None
         self.center.refresh_requested.connect(self.refresh)
+        self.request_refresh.connect(self.refresh)
+        self.center.install_requested.connect(self._choose_package)
+        self.center.uninstall_requested.connect(self._choose_uninstall)
         self.center.enabled_requested.connect(self._set_enabled)
         self.center.pin_requested.connect(self._pin)
         self.center.shortcut_requested.connect(self._set_shortcut)
@@ -237,6 +264,41 @@ class FilesPluginsController(QObject):
     def _catalog_finished(self, generation: int, operation: str, result: object, error: str) -> None:
         if self._closed:
             return
+        if operation.startswith("package:"):
+            self._writing = False
+            self.center.install.setEnabled(True)
+            if error:
+                self._message(error)
+                self.refresh()
+                return
+            if operation == "package:review":
+                package = self._package_pending[0] if self._package_pending else None
+                if package is None:
+                    return
+                approved = result
+                permissions = "、".join(approved.permissions) or "未声明额外权限"
+                answer = QMessageBox.question(
+                    self.center, "安装本地插件", f"{approved.plugin_id} {approved.version}\n权限：{permissions}\n"
+                    "安装仅保存代码，不授予执行能力。继续安装？")
+                if answer != QMessageBox.StandardButton.Yes:
+                    self._package_pending = None
+                    return
+                self._writing = True
+                self.center.install.setEnabled(False)
+                def install() -> object:
+                    current = self.package_lifecycle.review(package)
+                    if current != approved:
+                        raise ValueError("包声明或权限已变化，请重新选择并确认")
+                    return self.package_lifecycle.install_or_update(
+                        package, expected_plugin_id=approved.plugin_id,
+                        confirm_permissions=lambda added: set(added) <= set(approved.added_permissions))
+                self._submit("package:install", install)
+                return
+            self._package_pending = None
+            self._message("插件已安装；第三方执行仍受隔离策略限制。" if operation == "package:install"
+                          else "插件代码已卸载，素材未受影响。")
+            self.refresh()
+            return
         if operation.startswith("launch:"):
             # worker 已完成 prepare+revalidate；此处只做 Qt 线程安全的提交
             plugin_id = operation.partition(":")[2]
@@ -261,10 +323,15 @@ class FilesPluginsController(QObject):
             self._message(error)
             return
         self._infos = self._native_availability(tuple(result))
+        from src.features.files.media_providers import register_native_media
+        register_native_media(self.host_session.providers, {
+            (info.command_key or info.plugin_id.removeprefix("files."))
+            for info in self._infos if info.desired_enabled and not info.error})
         self._project()
         self._rebuild_shortcuts()
         if operation == "enable":
-            self._message(_tr("saved_restart", "设置已保存，重启后生效；当前会话的插件仍保持原来的加载状态。"))
+            self._message("插件设置已保存并生效。" if getattr(self.catalog, "native_only", False)
+                          else _tr("saved_restart", "设置已保存，重启后生效；当前会话的插件仍保持原来的加载状态。"))
 
     def _native_availability(self, infos: tuple) -> tuple:
         """[G5] 原生接管的工具启动可用：native 窗口即能力（无需 legacy
@@ -274,7 +341,8 @@ class FilesPluginsController(QObject):
         for info in infos:
             key = info.command_key or info.plugin_id
             if key in self._native_commands and not info.can_launch \
-                    and info.desired_enabled:
+                    and info.desired_enabled and not info.error \
+                    and not any("/error]" in note for note in info.diagnostics):
                 info = _replace(
                     info, launch_path=f"native://{key}",
                     launch_unavailable_reason="")
@@ -289,6 +357,8 @@ class FilesPluginsController(QObject):
         self.launcher.context.setText(_tr("launcher_context", "已选 {count} 个文件 · 固定优先，最近使用其次").format(count=len(self.selected_paths())))
         if self._writing:
             self.center.enabled.setEnabled(False)
+        if getattr(self.catalog, "native_only", False):
+            self.center.legacy.hide()
 
     def show_center(self) -> None:
         if self._closed:
@@ -311,6 +381,8 @@ class FilesPluginsController(QObject):
         self.refresh()
 
     def _message(self, message: str) -> None:
+        if self._closed:
+            return
         self.center.notice.setText(message)
         self.launcher.context.setText(message)
         # Keep failures visible after the popup closes or a shortcut is used.
@@ -364,8 +436,8 @@ class FilesPluginsController(QObject):
                 self._desired_store.save(desired)
             self.refresh()
 
-    def launch(self, plugin_id: str) -> None:
-        if self._closed or plugin_id in self._busy or self._writing:
+    def launch(self, plugin_id: str, *, paths: tuple[str, ...] | None = None) -> None:
+        if self._closed or plugin_id in self._busy or f"files.{plugin_id}" in self._busy or self._writing:
             return
         # [F6] 停新调用：已进入停用流程的插件拒绝新调用（不排队）
         if not self.host_session.lifecycle.accepting_calls(plugin_id) and \
@@ -398,7 +470,11 @@ class FilesPluginsController(QObject):
         native = self._native_commands.get(command_key)
         if native is not None and info is not None and info.can_launch:
             opener = self._native_opener(command_key)
-            self._launch_native(native, list(self.selected_paths()), opener)
+            selection = self.selected_paths() if paths is None else paths
+            self._launch_native(native, list(selection), opener)
+            return
+        if getattr(self.catalog, "native_only", False):
+            self._message("该插件没有可用的原生命令。")
             return
         # Freeze the selection at the user's gesture, never at async completion.
         paths = list(self.selected_paths())
@@ -432,6 +508,9 @@ class FilesPluginsController(QObject):
             "shutdown_timer": self._open_shutdown_timer,
             "decode_benchmark": self._open_decode_benchmark,
             "code_editor": self._open_code_editor,
+            "image_editor": self._open_image_editor,
+            "ai_library_browser": self._open_ai_library,
+            "audio_pro": self._open_audio,
         }
         return openers.get(plugin_id)
 
@@ -442,9 +521,27 @@ class FilesPluginsController(QObject):
         legacy_key = plugin_id.partition(".")[2]
         titles = {"format_factory": "格式工厂", "image_factory": "图片工厂",
                   "shutdown_timer": "定时关机", "decode_benchmark": "解码跑分",
-                  "code_editor": "代码编辑器"}
+                  "code_editor": "代码编辑器", "image_editor": "图片编辑器",
+                  "ai_library_browser": "AI 素材库", "audio_pro": "音频预览"}
         self._busy.add(plugin_id)
         self._project()
+        jobs = self.host_session.lifecycle.jobs
+        job_id = f"native-open:{uuid4().hex}"
+        try:
+            jobs.start(job_id, plugin_id=plugin_id)
+        except RuntimeError as exc:
+            self._busy.discard(plugin_id)
+            self._project()
+            self._message(str(exc))
+            return
+        self._launch_jobs[plugin_id] = job_id
+
+        def finish_job() -> None:
+            if jobs.state(job_id) == "cancel_requested":
+                jobs.confirm_cancelled(job_id)
+            else:
+                jobs.finish(job_id)
+            self._launch_jobs.pop(plugin_id, None)
 
         def work() -> object:
             prepared = service.prepare(paths)
@@ -452,18 +549,36 @@ class FilesPluginsController(QObject):
 
         def on_result(generation: int, operation: str, result: object,
                       error: str) -> None:
+            if self._closed:
+                finish_job()
+                return
+            if jobs.state(job_id) == "cancel_requested":
+                finish_job()
+                self._busy.discard(plugin_id)
+                self._project()
+                return
             if error:
+                finish_job()
                 self._busy.discard(plugin_id)
                 self._project()
                 self._message(error)
                 return
-            outcome = service.dispatch(result, opener)
+            try:
+                outcome = service.dispatch(result, opener)
+            except (OSError, ValueError, RuntimeError) as exc:
+                finish_job()
+                self._busy.discard(plugin_id)
+                self._project()
+                self._message(str(exc))
+                return
             if not outcome.accepted:
+                finish_job()
                 self._busy.discard(plugin_id)
                 self._project()
                 self._message(outcome.message)
                 return
             self._busy.discard(plugin_id)
+            finish_job()
             self._launch_finished(
                 legacy_key, True, f"{titles.get(legacy_key, '工具')}已打开。")
 
@@ -484,8 +599,7 @@ class FilesPluginsController(QObject):
         if self._format_factory_window is None:
             ffmpeg = _shutil.which("ffmpeg")
             if not ffmpeg:
-                self._message("未找到 ffmpeg，格式工厂不可用。")
-                return
+                raise ValueError("未找到 ffmpeg，格式工厂不可用。")
             window = FormatFactoryWindow(
                 self.panel.window(),
                 service=FormatFactoryService(ffmpeg=ffmpeg))
@@ -594,8 +708,7 @@ class FilesPluginsController(QObject):
                 window = self._decode_benchmark_service.create_window(
                     self.panel.window(), paths)
             except (ImportError, OSError) as exc:
-                self._message(f"跑分实现不可用：{exc}")
-                return
+                raise ValueError(f"跑分实现不可用：{exc}") from exc
 
             def close_window() -> None:
                 window.close()   # 既有 closeEvent 即请求 worker 取消
@@ -640,6 +753,80 @@ class FilesPluginsController(QObject):
         windows.activate_window("files.code_editor", "main",
                                 singleton=True, focuser=lambda: None)
         window.set_paths(tuple(paths))       # 多文件入口/聚焦已有
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _open_image_editor(self, paths: tuple[str, ...]) -> None:
+        """[G6] 图片编辑工具（源只读；导出为 -edited 副本）。"""
+        from src.app.ui.image_editor_window import ImageEditorWindow
+        from src.features.files.image_editor_service import (
+            ImageEditorError, ImageEditorService,
+        )
+
+        windows = self.host_session.windows
+        first = next((path for path in paths if path), "")
+        if not first:
+            raise ValueError("请先选择一张图片再打开图片编辑器。")
+        try:
+            service = ImageEditorService(first)
+        except (ImageEditorError, OSError) as exc:
+            raise ValueError(f"无法打开图片：{exc}") from exc
+        if self._image_editor_window is not None:
+            # 换源重开：旧会话关闭（编辑单源；聚焦语义=新会话）
+            self.host_session.windows.close_window("files.image_editor", "main")
+            self._image_editor_window = None
+        window = ImageEditorWindow(self.panel.window(), service=service)
+
+        def close_window() -> None:
+            window.close()
+
+        windows.activate_window(
+            "files.image_editor", "main", singleton=True,
+            opener=lambda: None,
+            focuser=lambda: (window.show(), window.raise_(),
+                             window.activateWindow()),
+            closer=close_window)
+        self._image_editor_window = window
+        window.closed.connect(
+            lambda: windows.close_window("files.image_editor", "main"))
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _open_ai_library(self, paths: tuple[str, ...]) -> None:
+        from src.app.ui.ai_library_window import AILibraryWindow
+        if self._ai_library_window is None:
+            window = AILibraryWindow(self.panel.window())
+            window.path_requested.connect(self._open_search_path)
+            self._ai_library_window = window
+        self._show_owned_window("ai_library_browser", self._ai_library_window)
+
+    def _open_search_path(self, path: str) -> None:
+        self.panel.file_activated.emit(path)
+
+    def open_audio(self, path: str) -> None:
+        """Native Files activation uses the same owned audio window as commands."""
+        row = next((item for item in self._infos if item.plugin_id in {"files.audio_pro", "audio_pro"}), None)
+        if row is None:
+            self._message("音频工具尚未就绪。")
+            return
+        self.launch(row.plugin_id, paths=(path,))
+
+    def _open_audio(self, paths: tuple[str, ...]) -> None:
+        from src.app.ui.audio_preview_window import AudioPreviewWindow
+        if not paths:
+            raise ValueError("请先选择一个音频文件")
+        if self._audio_window is None:
+            self._audio_window = AudioPreviewWindow(self.panel.window())
+        self._audio_window.set_paths(paths)
+        self._show_owned_window("audio_pro", self._audio_window)
+
+    def _show_owned_window(self, key: str, window: QWidget) -> None:
+        windows = self.host_session.windows
+        windows.activate_window(
+            f"files.{key}", "main", singleton=True,
+            opener=lambda: None, focuser=window.show, closer=window.close)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -748,6 +935,46 @@ class FilesPluginsController(QObject):
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(plugins_dir))):
             self._message(_tr("directory_failed", "无法打开插件目录。"))
 
+    def _choose_package(self) -> None:
+        if self._writing or self.package_lifecycle is None:
+            self._message("安装服务尚未就绪。")
+            return
+        path, _ = QFileDialog.getOpenFileName(self.center, "选择插件包", "", "Topos 插件包 (*.zip)")
+        if not path:
+            return
+        package = Path(path)
+        self._package_pending = (package, None)
+        self._writing = True
+        self.center.install.setEnabled(False)
+        def review() -> object:
+            from src.features.files.builtin_plugins import BUILTIN_IDS
+            result = self.package_lifecycle.review(package)
+            if result.plugin_id in {f"files.{name}" for name in BUILTIN_IDS}:
+                raise ValueError("内建工具随应用更新，不能用外部包替换")
+            return result
+        self._submit("package:review", review)
+
+    def _choose_uninstall(self, plugin_id: str) -> None:
+        if self._writing or self.package_lifecycle is None:
+            return
+        info = next((row for row in self._infos if row.plugin_id == plugin_id), None)
+        if info is None or info.source != "installed":
+            self._message("只能卸载受管安装的插件。")
+            return
+        box = QMessageBox(self.center)
+        box.setWindowTitle("卸载插件")
+        box.setText(f"卸载 {info.name} 的代码？凭据授权将一并撤销；源素材不会删除。")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        from PyQt6.QtWidgets import QCheckBox
+        remove_data = QCheckBox("同时删除此插件的数据和设置")
+        box.setCheckBox(remove_data)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        delete_data = remove_data.isChecked()
+        self._writing = True
+        self.center.install.setEnabled(False)
+        self._submit("package:uninstall", lambda: self.package_lifecycle.uninstall(plugin_id, remove_data=delete_data))
+
     def _open_legacy(self) -> None:
         self.center.hide()
         self.launcher.hide()
@@ -799,6 +1026,11 @@ class FilesPluginsController(QObject):
         if self._code_editor_window is not None:
             self.host_session.windows.close_all("files.code_editor")
             self._code_editor_window = None
+        if self._image_editor_window is not None:
+            self.host_session.windows.close_all("files.image_editor")
+            self._image_editor_window = None
+        for key in ("ai_library_browser", "audio_pro"):
+            self.host_session.windows.close_all(f"files.{key}")
         # [F5/F6] 关停：全部插件贡献退役（快捷键释放 + 名下窗口关闭 +
         # 停用状态机收尾，失败可重试语义由会话保留；GUI 不 sleep——
         # 未确认终止的任务由异步轮询推进，如实报告残留）
@@ -807,7 +1039,8 @@ class FilesPluginsController(QObject):
         self._shortcut_plugins.clear()
         for plugin_id in list(self._launch_jobs):
             self._retire_plugin_async(plugin_id)
-        self._pool.clear()
+        # Pending tiny command workers must still deliver terminal ownership
+        # callbacks. Clearing QRunnables here would strand their job records.
         self.center.close()
         self.launcher.close()
         self.center.deleteLater()

@@ -1,8 +1,7 @@
-"""Transport 层测试：D1 换轨后数据面走 facade/本地直读，媒体桥保留 HTTP。
+"""Transport 层测试：D1 换轨后数据面走 facade/本地直读，媒体也走本地共享 provider。
 
 facade 部分：注入 tmp 配置根的真实 catalog/facade（合成素材），不启动
-任何 HTTP 服务——数据路由对旧服务启停无感是本批的验收点。缩略图桥
-（等 E 阶段 provider 接管）仍按本地 HTTP 协议夹具验证。
+任何 HTTP 服务——数据路由对旧服务启停无感是本批的验收点。缩略图/胶片条不依赖 HTTP 服务，全部使用本地后端。
 """
 import base64
 import json
@@ -246,6 +245,20 @@ def test_metadata_tags_clear_roundtrip(qtbot, env):
         transport.shutdown()
 
 
+def test_rejected_metadata_is_not_reported_as_saved(qtbot, env):
+    asset = _seed(env, "rating.png")
+    env.catalog.upsert_asset(env.library.library_id, asset)
+    transport = make_transport(env)
+    try:
+        with qtbot.assertNotEmitted(transport.metadata_applied):
+            with qtbot.waitSignal(transport.metadata_failed, timeout=8000) as rejected:
+                transport.patch_metadata([str(asset)], {"rating": 10})
+        assert "rating" in rejected.args[2]
+        assert env.catalog.asset(env.library.library_id, asset)["rating"] == 0
+    finally:
+        transport.shutdown()
+
+
 def test_task_rename_progress_and_itemized_result(qtbot, env):
     asset = _seed(env, "a.png")
     transport = make_transport(env)
@@ -292,6 +305,24 @@ def test_task_mkdir_joins_name_option(qtbot, env):
         assert received.args[0]["successes"]
         assert (env.lib / "新建").is_dir()
     finally:
+        transport.shutdown()
+
+
+def test_cancel_queued_mutation_before_worker_can_start(qtbot, env):
+    asset = _seed(env, "queued.png")
+    transport = make_transport(env)
+    gate = threading.Event()
+    try:
+        transport._facade.run("gate", "gate", lambda: gate.wait(5), lambda _: None)
+        transport.run_task("rename", [str(asset)], options={"new_name": "renamed.png"})
+        job_id, = transport.active_task_jobs()
+        transport.cancel_task(job_id)
+        with qtbot.waitSignal(transport.task_finished, timeout=8000) as completed:
+            gate.set()
+        assert completed.args[0]["cancelled"]
+        assert asset.exists() and not (env.lib / "renamed.png").exists()
+    finally:
+        gate.set()
         transport.shutdown()
 
 
@@ -591,247 +622,122 @@ def test_shutdown_suppresses_late_results(qtbot, env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# HTTP 媒体桥：缩略图（等 E 阶段 provider 接管前保留原协议）
+# Local media providers: lifecycle, byte bounds and superseded requests.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def thumbnail_service():
+def local_media(env, monkeypatch):
+    from src.features.files.services import media
     png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9V0AAAAASUVORK5CYII=")
     release = threading.Event()
-    state = {"calls": [], "active": 0, "peak": 0, "ready": False}
+    state = {"calls": [], "active": 0, "peak": 0}
     lock = threading.Lock()
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed = urlsplit(self.path)
-            query = parse_qs(parsed.query)
-            path = query.get("path", [""])[0]
+    def decode(path, *, cancel=None, strip=False):
+        with lock:
+            state["calls"].append((path, strip))
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            if path.startswith("/slow"):
+                while not release.wait(0.02):
+                    if cancel is not None and cancel.is_set():
+                        raise ValueError("cancelled")
+            if path == "/bad":
+                raise ValueError("no backend")
+            if path == "/large":
+                return b"x" * (NativeFilesTransport.MAX_THUMBNAIL_BYTES + 1)
+            return png
+        finally:
             with lock:
-                state["calls"].append((parsed.path, query, self.headers.get("X-Auth-Token")))
-                state["active"] += 1
-                state["peak"] = max(state["peak"], state["active"])
-            try:
-                if path.startswith("/slow"):
-                    release.wait(3)
-                if parsed.path == "/api/list":
-                    body, mime, status = b'{"files": []}', "application/json", 200
-                elif path == "/redirect":
-                    self.send_response(302)
-                    self.send_header("Location", "/leak")
-                    self.end_headers()
-                    return
-                elif path == "/empty":
-                    body, mime, status = b"", "image/png", 204
-                elif path == "/pending" or (path == "/cold-image" and not state["ready"]):
-                    body, mime, status = b"", "image/png", 202
-                elif path == "/invalid":
-                    body, mime, status = b'{"error":"bad"}', "application/json", 200
-                elif path.startswith("/large"):
-                    body, mime, status = b"x" * (NativeFilesTransport.MAX_THUMBNAIL_BYTES + 1), "image/png", 200
-                else:
-                    body, mime, status = png, "image/png", 200
-                self.send_response(status)
-                self.send_header("Content-Type", mime)
-                if path != "/large-stream":
-                    self.send_header("Content-Length", str(len(body)))
-                if path == "/placeholder":
-                    self.send_header("Content-Disposition", "inline; filename=logo.webp")
-                self.end_headers()
-                self.wfile.write(body)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                with lock:
-                    state["active"] -= 1
+                state["active"] -= 1
 
-        def log_message(self, *_):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
-    worker.start()
-    yield f"http://127.0.0.1:{server.server_port}", state, release, png
+    monkeypatch.setattr(media, "thumbnail_bytes", decode)
+    transport = make_transport(env)
+    # No service URL or credentials may be consulted for any media request.
+    transport._server_url = lambda: (_ for _ in ()).throw(AssertionError("retired service accessed"))
+    yield transport, state, release, png
     release.set()
-    server.shutdown()
-    server.server_close()
-    worker.join(2)
+    transport.shutdown()
 
 
-def test_thumbnail_path_version_auth_and_duplicate_requests(qtbot, thumbnail_service):
-    base, state, _, png = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
+def test_local_thumbnail_version_dedup_and_reload(qtbot, local_media):
+    transport, state, _, png = local_media
     path = "/media/+100%20 #素材.png"
     with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000) as received:
         transport.request_thumbnail(path, 17)
         transport.request_thumbnail(path, 17)
     assert received.args == [path, png]
-    assert state["calls"] == [("/api/thumb", {"path": [path], "size": ["small"], "v": ["17"]}, "secret")]
-    transport.request_thumbnail(path, 17)
-    qtbot.wait(30)
     assert len(state["calls"]) == 1
+    transport.release_thumbnail(path)
     with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
-        transport.request_thumbnail(path, 18)
+        transport.request_thumbnail(path, 17)
     assert len(state["calls"]) == 2
-    transport.shutdown()
 
 
-def test_thumbnail_concurrency_queue_bounds_and_shutdown(qtbot, thumbnail_service):
-    base, state, release, _ = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
+def test_local_thumbnail_queue_bounds_cancel_and_shutdown(qtbot, local_media):
+    transport, state, release, _ = local_media
     loaded = []
-    transport.thumbnail_loaded.connect(lambda path, _: loaded.append(path))
+    transport.thumbnail_loaded.connect(lambda *args: loaded.append(args))
     for index in range(200):
         transport.request_thumbnail(f"/slow/{index}")
     assert len(transport._thumbnail_replies) == 4
     assert len(transport._thumbnail_queue) == 128
-    qtbot.waitUntil(lambda: len(state["calls"]) == 4, timeout=3000)
-    assert state["peak"] <= 4
+    qtbot.waitUntil(lambda: bool(state["calls"]), timeout=3000)
     transport.shutdown()
-    assert not transport._thumbnail_replies
-    assert not transport._thumbnail_queue
     release.set()
     qtbot.wait(100)
-    transport.request_thumbnail("/after-shutdown")
-    assert loaded == []
-    assert len(state["calls"]) == 4
-
-
-@pytest.mark.parametrize("path", ["/empty", "/invalid", "/large", "/large-stream", "/redirect"])
-def test_failed_thumbnail_is_bounded_and_not_retried(qtbot, thumbnail_service, path):
-    base, state, _, _ = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    loaded = []
-    transport.thumbnail_loaded.connect(lambda *args: loaded.append(args))
-    with qtbot.waitSignal(transport.thumbnail_failed, timeout=3000) as received:
-        transport.request_thumbnail(path)
-    assert received.args == [path]
-    transport.request_thumbnail(path)
-    qtbot.wait(30)
-    assert len(state["calls"]) == 1
-    assert loaded == []
-    assert not transport._thumbnail_replies
-    transport.shutdown()
-
-
-@pytest.mark.parametrize("path", ["/pending", "/placeholder"])
-def test_pending_thumbnail_is_distinct_from_failure(qtbot, thumbnail_service, path):
-    base, state, _, _ = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    loaded, failed = [], []
-    transport.thumbnail_loaded.connect(lambda *args: loaded.append(args))
-    transport.thumbnail_failed.connect(failed.append)
-    with qtbot.waitSignal(transport.thumbnail_pending, timeout=3000) as received:
-        transport.request_thumbnail(path)
-    assert received.args == [path]
-    transport.request_thumbnail(path)
-    qtbot.wait(30)
-    assert len(state["calls"]) == 1  # Retry belongs to the view's bounded schedule.
-    assert not loaded and not failed
-    transport.shutdown()
-
-
-def test_cold_thumbnail_can_be_released_and_loaded_after_generation(qtbot, thumbnail_service):
-    base, state, _, png = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    with qtbot.waitSignal(transport.thumbnail_pending, timeout=3000):
-        transport.request_thumbnail("/cold-image", 5)
-    state["ready"] = True
-    transport.release_thumbnail("/cold-image")
-    with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000) as received:
-        transport.request_thumbnail("/cold-image", 5)
-    assert received.args == ["/cold-image", png]
-    assert len(state["calls"]) == 2
-    transport.shutdown()
-
-
-def test_directory_navigation_cancels_inflight_and_queued_thumbnails(
-        qtbot, thumbnail_service, tmp_path):
-    """数据面换轨后，目录导航仍作废在途/排队缩略图（cancel 语义保留）。"""
-    base, state, release, _ = thumbnail_service
-    target = tmp_path / "new"
-    target.mkdir()
-    locator = FilesDataLocator.for_config_root(tmp_path / "data")
-    locator.ensure_layout()
-    catalog = FilesCatalog(locator)
-    catalog.open()
-    transport = NativeFilesTransport(
-        lambda: base, "secret", facade=FilesFacade(catalog, max_workers=1))
-    loaded, failed = [], []
-    transport.thumbnail_loaded.connect(lambda path, _: loaded.append(path))
-    transport.thumbnail_failed.connect(failed.append)
-    try:
-        for index in range(8):
-            transport.request_thumbnail(f"/slow/{index}")
-        qtbot.waitUntil(lambda: len(state["calls"]) >= 4, timeout=3000)
-        with qtbot.waitSignal(transport.loaded, timeout=8000):
-            transport.load_directory(str(target))  # 本地直读，无需 HTTP
-        assert not transport._thumbnail_replies
-        assert not transport._thumbnail_queue
-        release.set()
-        qtbot.wait(100)
-        assert loaded == []
-        assert failed == []
-        calls_before = len(state["calls"])
-        with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
-            transport.request_thumbnail("/slow/0")  # New generation permits a fresh attempt.
-        assert len(state["calls"]) > calls_before
-    finally:
-        transport.shutdown()
-        catalog.close()
-
-
-def test_thumbnail_nonlocal_runtime_is_rejected(qtbot):
-    transport = NativeFilesTransport(lambda: "http://example.com", "secret")
-    with qtbot.waitSignal(transport.thumbnail_failed, timeout=100):
-        transport.request_thumbnail("/media/image.png")
-    assert not transport._thumbnail_replies
-    transport.shutdown()
-
-
-def test_thumbnail_queue_drains_and_superseded_version_is_not_published(qtbot, thumbnail_service):
-    base, state, release, _ = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    loaded = []
-    transport.thumbnail_loaded.connect(lambda path, _: loaded.append(path))
-    transport.request_thumbnail("/slow/version", 1)
-    qtbot.waitUntil(lambda: len(state["calls"]) == 1, timeout=3000)
-    transport.request_thumbnail("/slow/version", 2)
-    for index in range(10):
-        transport.request_thumbnail(f"/image/{index}")
-    release.set()
-    qtbot.waitUntil(lambda: len(loaded) == 11, timeout=3000)
-    assert loaded.count("/slow/version") == 1
-    assert len(state["calls"]) == 12
+    assert not loaded and not transport._thumbnail_replies and not transport._thumbnail_queue
     assert state["peak"] <= 4
-    assert not transport._thumbnail_replies
-    assert not transport._thumbnail_queue
-    transport.shutdown()
 
 
-def test_released_completed_thumbnail_can_reload_same_version(qtbot, thumbnail_service):
-    base, state, _, png = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
-        transport.request_thumbnail("/image", 7)
-    transport.release_thumbnail("/image")
-    with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000) as received:
-        transport.request_thumbnail("/image", 7)
-    assert received.args == ["/image", png]
-    assert len(state["calls"]) == 2
-    transport.shutdown()
-
-
-def test_releasing_inflight_thumbnail_keeps_network_deduplication(qtbot, thumbnail_service):
-    base, state, release, _ = thumbnail_service
-    transport = NativeFilesTransport(lambda: base, "secret")
-    transport.request_thumbnail("/slow/image", 7)
-    qtbot.waitUntil(lambda: len(state["calls"]) == 1, timeout=3000)
-    transport.release_thumbnail("/slow/image")
-    transport.request_thumbnail("/slow/image", 7)
-    with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
-        release.set()
+@pytest.mark.parametrize("path", ["/bad", "/large"])
+def test_local_thumbnail_errors_are_bounded_and_deduplicated(qtbot, local_media, path):
+    transport, state, _, _ = local_media
+    with qtbot.waitSignal(transport.thumbnail_failed, timeout=3000) as failed:
+        transport.request_thumbnail(path)
+    assert failed.args == [path]
+    transport.request_thumbnail(path)
+    qtbot.wait(30)
     assert len(state["calls"]) == 1
-    transport.shutdown()
+
+
+def test_navigation_invalidates_all_inflight_media(qtbot, local_media, env):
+    transport, state, release, _ = local_media
+    loaded, failed = [], []
+    transport.thumbnail_loaded.connect(lambda *args: loaded.append(args))
+    transport.thumbnail_failed.connect(failed.append)
+    transport.request_thumbnail("/slow/one")
+    qtbot.waitUntil(lambda: bool(state["calls"]), timeout=3000)
+    with qtbot.waitSignal(transport.loaded, timeout=8000):
+        transport.load_directory(str(env.lib))
+    release.set()
+    qtbot.wait(100)
+    assert not loaded and not failed
+    with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
+        transport.request_thumbnail("/slow/one")
+
+
+def test_superseded_thumbnail_version_and_inflight_release(qtbot, local_media):
+    transport, state, release, _ = local_media
+    loaded = []
+    transport.thumbnail_loaded.connect(lambda *args: loaded.append(args))
+    transport.request_thumbnail("/slow/version", 1)
+    qtbot.waitUntil(lambda: bool(state["calls"]), timeout=3000)
+    transport.release_thumbnail("/slow/version")
+    transport.request_thumbnail("/slow/version", 1)
+    transport.request_thumbnail("/slow/version", 2)
+    release.set()
+    qtbot.waitUntil(lambda: len(loaded) == 1, timeout=3000)
+    assert len(state["calls"]) == 2
+
+
+def test_strip_uses_local_backend_and_is_bounded(qtbot, local_media):
+    transport, state, _, png = local_media
+    with qtbot.waitSignal(transport.strip_loaded, timeout=3000) as received:
+        transport.request_strip("/movie.mov")
+    assert received.args == ["/movie.mov", png]
+    assert state["calls"] == [("/movie.mov", True)]
 
 
 # ---------------------------------------------------------------------------

@@ -277,7 +277,7 @@ def test_collection_rename_remove_delete(env):
     removed = env["collections"].remove_members(cid, [str(asset)])
     assert removed.ok and removed.items[0].ok
     ghost = env["collections"].remove_members(cid, [str(asset)])
-    assert ghost.ok and not ghost.items[0].ok  # 非成员：逐项失败不抛
+    assert ghost.accepted and not ghost.ok and not ghost.items[0].ok
 
     env["collections"].add_members(cid, [str(asset)])
     deleted = env["collections"].delete_collection(cid)
@@ -332,7 +332,7 @@ def test_pending_recoveries_and_evidence_classification(env):
     facade = FilesFacade(env["catalog"], max_workers=1)
     journal = facade.journal
     try:
-        # 模拟上个进程中断：begin 后未 finish，目标已就位（=已完成的证据）
+        # 只有同名目标，缺少事务的提交证据，仍须保留恢复记录。
         journal.begin(lib_id, "move", {"source": str(moved),
                                        "destination": str(moved) + ".moved"},
                       idempotency_key="move:fake")
@@ -344,7 +344,7 @@ def test_pending_recoveries_and_evidence_classification(env):
         verdict = facade.tasks.recover(pending[0]["id"])
         assert verdict.ok
         result = verdict.items[0].result
-        assert result["state"] == "completed"
-        assert facade.tasks.pending_recoveries() == []
+        assert result["state"] == "pending_recovery"
+        assert [row["id"] for row in facade.tasks.pending_recoveries()] == [pending[0]["id"]]
     finally:
         facade.shutdown()

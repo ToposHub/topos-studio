@@ -210,9 +210,10 @@ def make_dialog(qapp, monkeypatch, tmp_path) -> Iterator[
         cfg = _RecordingConfig(initial)
         dlg = PreferencesDialog(
             cfg, module_pages=list(module_pages or []), feature_flags=feature_flags)
-        # 默认切断真实 file_explorer 桥，防止 _on_apply 写开发者本机 FE config。
-        # 需要 FE 行为的用例在测试体内重新覆盖该实例属性。
-        dlg._fe_plugin_bridge = lambda: None  # type: ignore[method-assign]
+        from src.features.files.builtin_plugins import NativePluginCatalog
+        from src.shared.plugins.discovery import DesiredStateStore
+        store = DesiredStateStore(tmp_path / "plugin_desired.json")
+        dlg._plugin_catalog = lambda: NativePluginCatalog(desired_store=store)
         created.append(dlg)
         return dlg, cfg
 
@@ -1102,127 +1103,82 @@ class TestModulePageDelegation:
 # ── file_explorer 插件列表 ──────────────────────────────────────
 
 
-class TestFileExplorerPluginSync:
+class TestNativePluginState:
 
-    def test_apply_without_refresh_preserves_fe_disabled_plugins(
-            self, make_dialog, make_fe) -> None:
-        # BUG-B3-01 / AUD-03900 已修复：对话框构造时不刷新插件列表，用户
-        # 未点 Advanced > Refresh 就按 Apply/Save 时，_apply_settings 必须
-        # 跳过对 file_explorer config 的 disabled_plugins 写回（列表无真实
-        # 条目 = 无数据可写），FE 侧停用状态保持原值，不被清空。
-        dlg, _cfg = make_dialog()
-        fe = make_fe(disabled=["fe.alpha", "fe.beta"])
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        assert dlg._plugin_list.count() == 0
+    def test_apply_without_refresh_preserves_state(self, make_dialog):
+        dlg, _ = make_dialog()
+        catalog = dlg._plugin_catalog()
+        catalog.set_enabled("image_factory", False)
         dlg._on_apply()
-        assert fe.saved is None  # 未刷新：不得写回 FE config
-        assert fe.conf["disabled_plugins"] == ["fe.alpha", "fe.beta"]
-        assert dlg._disabled_plugins == []
+        assert not next(p for p in catalog.snapshot() if p.plugin_id == "image_factory").desired_enabled
 
-    def test_apply_after_refresh_writes_unchecked_entries(
-            self, make_dialog, make_fe) -> None:
-        dlg, _cfg = make_dialog()
-        fe = make_fe(
-            disabled=["fe.alpha"],
-            plugins=[
-                {"name": "fe.alpha", "info": {"version": "1.0", "description": "a"}},
-                {"name": "fe.gamma", "info": {}},
-            ],
-        )
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+    def test_apply_after_refresh_saves_to_same_authority(self, make_dialog):
+        dlg, _ = make_dialog()
         dlg._refresh_plugins()
-        assert dlg._plugin_list.count() == 2
+        assert dlg._plugin_list.count() == 10
         for i in range(dlg._plugin_list.count()):
             item = dlg._plugin_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == "fe.gamma":
+            if item.data(Qt.ItemDataRole.UserRole) == "image_factory":
                 item.setCheckState(Qt.CheckState.Unchecked)
         dlg._on_apply()
-        assert fe.saved is not None
-        assert fe.saved["disabled_plugins"] == ["fe.alpha", "fe.gamma"]
+        assert not next(p for p in dlg._plugin_catalog().snapshot()
+                        if p.plugin_id == "image_factory").desired_enabled
 
-    def test_refresh_without_bridge_shows_disabled_placeholder(self, make_dialog) -> None:
+    def test_refresh_uses_persisted_desired_state(self, make_dialog):
         dlg, _ = make_dialog()
-        dlg._fe_plugin_bridge = lambda: None  # type: ignore[method-assign]
+        dlg._plugin_catalog().set_enabled("image_factory", False)
         dlg._refresh_plugins()
-        assert dlg._plugin_list.count() == 1
-        item = dlg._plugin_list.item(0)
-        assert not (item.flags() & Qt.ItemFlag.ItemIsEnabled)
+        states = {dlg._plugin_list.item(i).data(Qt.ItemDataRole.UserRole):
+                  dlg._plugin_list.item(i).checkState()
+                  for i in range(dlg._plugin_list.count())}
+        assert states["image_factory"] == Qt.CheckState.Unchecked
+        assert states["format_factory"] == Qt.CheckState.Checked
 
-    def test_refresh_populates_check_states_from_fe_config(
-            self, make_dialog, make_fe) -> None:
+    def test_enable_disabled_builtin_does_not_execute_it(self, make_dialog):
         dlg, _ = make_dialog()
-        fe = make_fe(
-            disabled=["fe.alpha"],
-            plugins=[{"name": "fe.alpha", "info": {"version": "2.0"}},
-                     {"name": "fe.gamma", "info": {}}],
-        )
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        catalog = dlg._plugin_catalog()
+        catalog.set_enabled("image_factory", False)
         dlg._refresh_plugins()
-        states = {
-            dlg._plugin_list.item(i).data(Qt.ItemDataRole.UserRole):
-                dlg._plugin_list.item(i).checkState()
-            for i in range(dlg._plugin_list.count())
-        }
-        assert states == {
-            "fe.alpha": Qt.CheckState.Unchecked,
-            "fe.gamma": Qt.CheckState.Checked,
-        }
-
-    def test_disabled_plugin_remains_visible_after_restart_and_can_be_enabled(
-            self, make_dialog, make_fe) -> None:
-        fe = make_fe(disabled=["fe.alpha"], installed=["fe.alpha"])
-        # A restarted runtime skips disabled code entirely, so its success list
-        # is empty. The installed declaration must still appear and be editable.
-        assert fe.plugin_manager.plugins == []
-        dlg, _ = make_dialog()
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        dlg._refresh_plugins()
-        assert dlg._plugin_list.count() == 1
-        item = dlg._plugin_list.item(0)
-        assert item.data(Qt.ItemDataRole.UserRole) == "fe.alpha"
-        assert item.checkState() == Qt.CheckState.Unchecked
-        assert item.flags() & Qt.ItemFlag.ItemIsEnabled
-        assert item.flags() & Qt.ItemFlag.ItemIsUserCheckable
-
-        item.setCheckState(Qt.CheckState.Checked)
+        for i in range(dlg._plugin_list.count()):
+            item = dlg._plugin_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == "image_factory":
+                item.setCheckState(Qt.CheckState.Checked)
         dlg._on_apply()
-        assert fe.saved is not None
-        assert fe.saved["disabled_plugins"] == []
-        # Persisting next-start intent does not load Python code in this session.
-        assert fe.plugin_manager.plugins == []
+        assert next(p for p in catalog.snapshot() if p.plugin_id == "image_factory").desired_enabled
 
-        restarted, _ = make_dialog()
-        restarted._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        restarted._refresh_plugins()
-        assert restarted._plugin_list.item(0).checkState() == Qt.CheckState.Checked
-
-    def test_apply_preserves_uninstalled_disabled_ids_and_other_fe_config(
-            self, make_dialog, make_fe) -> None:
-        fe = make_fe(disabled=["fe.removed", "fe.alpha"], installed=["fe.alpha"])
-        fe.conf["future_schema"] = {"preserve": [1, "value"]}
+    def test_cancel_restores_only_plugin_intent(self, make_dialog):
         dlg, _ = make_dialog()
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
+        catalog = dlg._plugin_catalog()
         dlg._refresh_plugins()
-        assert dlg._plugin_list.count() == 1
-        dlg._plugin_list.item(0).setCheckState(Qt.CheckState.Checked)
-
+        dlg._plugin_list.item(0).setCheckState(Qt.CheckState.Unchecked)
         dlg._on_apply()
-        assert fe.saved is not None
-        assert fe.saved["disabled_plugins"] == ["fe.removed"]
-        assert fe.saved["future_schema"] == {"preserve": [1, "value"]}
+        assert not catalog.snapshot()[0].desired_enabled
+        dlg._restore_plugin_state_snapshot()
+        assert catalog.snapshot()[0].desired_enabled
 
-    def test_open_plugin_directory_uses_fe_location_not_shader_setting(
-            self, make_dialog, make_fe, monkeypatch) -> None:
-        dlg, _ = make_dialog({"plugin_directory": "/wrong-shader-plugin-path"})
-        fe = make_fe(installed=["fe.alpha"])
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        opened: list[str] = []
+    def test_open_directory_uses_managed_install_root(self, make_dialog, monkeypatch, tmp_path):
+        from src.features.files.repository import FilesDataLocator
+        locator = FilesDataLocator.for_config_root(tmp_path / "settings")
+        monkeypatch.setattr(FilesDataLocator, "default", classmethod(lambda cls: locator))
+        dlg, _ = make_dialog({"plugin_directory": "/shader-plugin-path"})
+        opened = []
         monkeypatch.setattr(dlg, "_open_in_file_manager", opened.append)
-
         dlg._open_plugin_directory()
+        assert opened == [str(locator.plugins_install_root)]
 
-        assert opened == [str(Path(fe.__file__).parent / "plugins")]
-
-    def test_fe_disabled_plugins_empty_without_bridge(self, make_dialog) -> None:
+    def test_no_plugins_uses_disabled_placeholder(self, make_dialog):
+        from types import SimpleNamespace
         dlg, _ = make_dialog()
-        assert dlg._fe_disabled_plugins(None) == []
+        dlg._plugin_catalog = lambda: SimpleNamespace(snapshot=lambda: ())
+        dlg._refresh_plugins()
+        assert dlg._plugin_list.count() == 1
+        assert not dlg._plugin_list.item(0).flags() & Qt.ItemFlag.ItemIsEnabled
+
+    def test_discovery_error_is_visible(self, make_dialog):
+        from types import SimpleNamespace
+        def broken():
+            raise OSError("declaration unavailable")
+        dlg, _ = make_dialog()
+        dlg._plugin_catalog = lambda: SimpleNamespace(snapshot=broken)
+        dlg._refresh_plugins()
+        assert "declaration unavailable" in dlg._plugin_list.item(0).text()

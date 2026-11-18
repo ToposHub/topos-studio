@@ -79,6 +79,7 @@ class FilesFacade:
     """UI → 领域服务的唯一异步边界。"""
 
     def __init__(self, catalog: FilesCatalog, *, max_workers: int = MAX_WORKERS,
+                 max_pending: int = 64,
                  query: FilesQueryService | None = None,
                  metadata: FilesMetadataService | None = None,
                  scan: FilesScanService | None = None,
@@ -99,8 +100,13 @@ class FilesFacade:
             catalog, service=FileOperationService(catalog, journal=self.journal))
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="files-facade")
-        self._lock = threading.Lock()
-        self._generations: dict[str, int] = {}
+        if max_pending < max_workers or max_workers < 1:
+            raise ValueError("max_pending 必须不小于正数 max_workers")
+        self._lock = threading.RLock()
+        self._max_pending = max_pending
+        self._all_pending: set[Future] = set()
+        self._idle_callbacks: list[Callable[[], None]] = []
+        self._sequence = 0
         self._pending: dict[str, Future] = {}
         self._dropped = 0
         self._closed = False
@@ -117,15 +123,24 @@ class FilesFacade:
         """[F3] 当前素材库 revision（命令复核的库代数事实）。"""
         return self._catalog.revision
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, wait: bool = False) -> None:
         """取消未开始的任务并回收线程池；进行中的回调不再送达。"""
         with self._lock:
             self._closed = True
-            pending = list(self._pending.values())
+            pending = list(self._all_pending)
             self._pending.clear()
+        self.tasks.cancel_all()
         for future in pending:
             future.cancel()
-        self._executor.shutdown(wait=True)
+        self._executor.shutdown(wait=wait, cancel_futures=True)
+
+    def when_idle(self, callback: Callable[[], None]) -> None:
+        """Release owned resources only after every running/stale job completes."""
+        with self._lock:
+            if self._all_pending:
+                self._idle_callbacks.append(callback)
+                return
+        callback()
 
     # ------------------------------------------------------------ 浏览/搜索
 
@@ -294,33 +309,31 @@ class FilesFacade:
 
     def _submit(self, *, key: str, request_id: str, work: Callable[[], Any],
                 listener: Listener, wrap: Callable[[Any], Any]) -> None:
-        with self._lock:
-            if self._closed:
-                raise FacadeError("facade 已关闭")
-            generation = self._generations.get(key, 0) + 1
-            self._generations[key] = generation
-            stale = self._pending.pop(key, None)
-        if stale is not None:
-            stale.cancel()  # 未开始即取消；已开始的靠代际丢弃
-
         def _run() -> Any:
             return wrap(work())
 
-        future = self._executor.submit(_run)
         with self._lock:
             if self._closed:
-                future.cancel()
-                return
-            # 同 key 又来了新请求：这个 future 完成时也只算过期
-            self._pending[key] = future
+                raise FacadeError("facade 已关闭")
+            saturated = len(self._all_pending) >= self._max_pending
+            if not saturated:
+                self._sequence += 1
+                generation = self._sequence
+                stale = self._pending.pop(key, None)
+                if stale is not None:
+                    stale.cancel()
+                future = self._executor.submit(_run)
+                self._all_pending.add(future)
+                self._pending[key] = future
+        if saturated:
+            listener(FacadeOutcome(request_id=request_id, key=key, generation=0,
+                                   error=FilesError(code="busy",message="Files 任务队列已满，请稍后重试",retriable=True)))
+            return
 
-        def _deliver(completed: Future) -> None:
+        def _deliver_result(completed: Future) -> None:
             with self._lock:
-                current = self._generations.get(key, 0)
-                superseded = generation < current or self._closed
-                if superseded:
+                if self._closed or self._pending.get(key) is not completed:
                     self._dropped += 1
-                    self._pending.pop(key, None)
                     return
                 self._pending.pop(key, None)
             try:
@@ -337,6 +350,18 @@ class FilesFacade:
                                      message=f"{exc.__class__.__name__}: {exc}",
                                      retriable=True))
             listener(outcome)
+
+        def _deliver(completed: Future) -> None:
+            try:
+                _deliver_result(completed)
+            finally:
+                with self._lock:
+                    self._all_pending.discard(completed)
+                    callbacks = self._idle_callbacks if not self._all_pending else []
+                    if callbacks:
+                        self._idle_callbacks = []
+                for callback in callbacks:
+                    callback()
 
         future.add_done_callback(_deliver)
 

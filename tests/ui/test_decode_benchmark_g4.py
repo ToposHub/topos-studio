@@ -29,7 +29,7 @@ def test_loads_existing_host_implementation_not_a_copy():
     for name in ("DecodeBenchmarkWindow", "BenchmarkWorker"):
         assert hasattr(module, name)
     core = __import__("importlib", fromlist=["util"]).import_module(
-        "files_host_plugins.decode_benchmark.benchmark")
+        "src.features.files.benchmark.benchmark")
     for name in ("DecodeBenchmarkRunner", "BenchmarkConfig", "BenchmarkResult",
                  "SUPPORTED_CODECS", "export_results_json",
                  "export_results_csv"):
@@ -40,7 +40,7 @@ def test_load_is_cached_and_namespaced():
     first = load_benchmark_module()
     second = load_benchmark_module()
     assert first is second                      # 单次加载（包注册复用）
-    assert first.__name__.startswith("files_host_plugins.")
+    assert first.__name__.startswith("src.features.files.benchmark.")
 
 
 def test_host_service_creates_window_with_paths(qtbot, tmp_path):

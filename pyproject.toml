@@ -95,12 +95,15 @@ topos-edit = "apps.topos_edit.main:main"
 topos-composite = "apps.topos_composite.main:main"
 toposctl = "src.features.edit.ai_editing.toposctl:main"
 topos-vault = "apps.topos_vault.cli:main"
+topos-files = "src.features.files.services.maintenance:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "apps*"]
+exclude = ["src.app.integrations.file_explorer*"]
 
 [tool.setuptools.package-data]
+"src.features.files" = ["builtin_manifests/*/*.json"]
 "src.features.mixer" = ["assets/*.json", "locales/*.json"]
 "src.features.mixer.effects" = ["*.json"]
 "src.features.teaching_animation" = [

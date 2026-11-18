@@ -98,7 +98,7 @@ class PreferencesDialog(QDialog):
         self._needs_restart = False
         self._preview_snapshot = {}  # Store snapshot for preview rollback
         self._config_snapshot = dict(config_manager.config)  # Full config snapshot for Cancel rollback
-        self._fe_config_snapshot: dict | None = None  # [AUD-03903] FE config snapshot for Cancel rollback
+        self._plugin_state_snapshot: dict[str, bool] | None = None
         self._applied_config_keys: set = set()  # [AUD-03904] keys touched by Apply
         self._applied = False  # Track if Apply was pressed
 
@@ -1693,74 +1693,45 @@ class PreferencesDialog(QDialog):
         os.makedirs(log_dir, exist_ok=True)
         self._open_in_file_manager(log_dir)
 
-    def _fe_plugin_bridge(self):
-        """[R1-15] 访问 file_explorer 的插件系统模块（可能未随宿主可用）。
-
-        import 零副作用（ARCH-6）；插件列表只在 ensure_runtime() 后有内容。"""
-        try:
-            import file_explorer.main as fe_main
-            return fe_main
-        except Exception:
-            return None
-
-    def _fe_disabled_plugins(self, fe_main) -> list:
-        if fe_main is None:
-            return []
-        try:
-            conf = fe_main.load_config() or {}
-            return list(conf.get("disabled_plugins", []) or [])
-        except Exception:
-            return []
+    def _plugin_catalog(self):
+        """The same builtin declarations and desired-state authority as Files."""
+        from src.features.files.builtin_plugins import NativePluginCatalog
+        from src.features.files.repository import FilesDataLocator
+        from src.shared.plugins.discovery import DesiredStateStore
+        store = DesiredStateStore(FilesDataLocator.default().root / "plugin_desired.json")
+        return NativePluginCatalog(desired_store=store)
 
     def _refresh_plugins(self) -> None:
-        """Include disabled and failed extensions without importing their code."""
-        from pathlib import Path
-        from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
+        """Read declarations without loading plugin Python modules."""
         from src.app.ui.native_files_plugins import plugin_status
         self._plugin_list.clear()
-        fe_main = self._fe_plugin_bridge()
         try:
-            # 桥接模块可能只提供部分属性（测试替身/旧宿主）：缺 __file__ 时
-            # 不猜目录（CWD 相对路径会扫到宿主 GLSL plugins/），按 None 走
-            # manager-only 投影。
-            module_file = getattr(fe_main, "__file__", None)
-            plugins_dir = Path(module_file).parent / "plugins" if module_file else None
-            plugins = FileExplorerPluginCatalog(
-                plugins_dir, getattr(fe_main, "plugin_manager", None),
-                getattr(fe_main, "load_config", None),
-                getattr(fe_main, "save_config", None)).snapshot() if fe_main else ()
+            plugins = self._plugin_catalog().snapshot()
         except (OSError, ValueError) as exc:
             item = QListWidgetItem(str(exc))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self._plugin_list.addItem(item)
             return
-
         if not plugins:
-            item = QListWidgetItem(
-                I18N.tr("preferences.plugin_management.no_plugins_found",
-                        "No plugins found"))
+            item = QListWidgetItem(I18N.tr(
+                "preferences.plugin_management.no_plugins_found", "No plugins found"))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self._plugin_list.addItem(item)
             return
-
         for plugin in plugins:
-            label = f"{plugin.name} v{plugin.version} — {plugin_status(plugin)}"
-            item = QListWidgetItem(label)
+            item = QListWidgetItem(f"{plugin.name} v{plugin.version} — {plugin_status(plugin)}")
             item.setToolTip(plugin.description or plugin.launch_unavailable_reason)
             item.setData(Qt.ItemDataRole.UserRole, plugin.plugin_id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked if plugin.desired_enabled else Qt.CheckState.Unchecked)
-            if plugin.self_disabled:
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            item.setCheckState(Qt.CheckState.Checked if plugin.desired_enabled
+                               else Qt.CheckState.Unchecked)
             self._plugin_list.addItem(item)
 
     def _open_plugin_directory(self) -> None:
-        """Open the directory belonging to this list, not the GLSL directory."""
-        fe_main = self._fe_plugin_bridge()
-        module_file = getattr(fe_main, "__file__", None)
-        if fe_main is not None and module_file:
-            self._open_in_file_manager(os.path.join(os.path.dirname(module_file), "plugins"))
+        from src.features.files.repository import FilesDataLocator
+        directory = FilesDataLocator.default().plugins_install_root
+        directory.mkdir(parents=True, exist_ok=True)
+        self._open_in_file_manager(str(directory))
 
     # ── Utility Methods ──────────────────────────────────────────────
 
@@ -2191,51 +2162,22 @@ class PreferencesDialog(QDialog):
         cfg.set('developer_mode', self._widgets['developer_mode'].isChecked(), auto_save=False)
         cfg.set('plugin_directory', self._widgets['plugin_directory'].text(), auto_save=False)
         cfg.set('auto_scan_plugins', self._widgets['auto_scan_plugins'].isChecked(), auto_save=False)
-        # Collect disabled plugins from check states. [AUD-03900] The list is
-        # only populated by an explicit "Refresh Plugins" click; a never
-        # refreshed (or placeholder-only) list carries no real data, and
-        # writing it back would wipe file_explorer's disabled_plugins and
-        # silently re-enable every plugin the user disabled there.
-        disabled_plugins: list = []
-        listed_plugins: set[str] = set()
-        has_plugin_entries = False
-        for i in range(self._plugin_list.count()):
-            item = self._plugin_list.item(i)
-            entry = item.data(Qt.ItemDataRole.UserRole)
-            if not entry:
-                continue  # placeholder rows ("No plugins found") hold no data
-            has_plugin_entries = True
-            listed_plugins.add(entry)
-            if item.checkState() == Qt.CheckState.Unchecked:
-                disabled_plugins.append(entry)
-        # [R1-15] 停用列表写回 file_explorer 自己的 config.json（FE 插件
-        # 系统运行时读的是它），不再误写宿主 config。
-        # [AUD-03900] 仅在列表含真实插件条目（已 Refresh 且 FE 返回了插件）
-        # 时才写回；否则跳过，保留 FE 侧现有的停用状态。
-        fe_main = self._fe_plugin_bridge()
+        # An untouched/placeholder-only list cannot overwrite plugin intent.
+        entries = [self._plugin_list.item(i) for i in range(self._plugin_list.count())
+                   if self._plugin_list.item(i).data(Qt.ItemDataRole.UserRole)]
         plugin_apply_error = ""
-        if fe_main is not None and has_plugin_entries:
+        if entries:
             try:
-                fe_conf = fe_main.load_config() or {}
-                if self._fe_config_snapshot is None:
-                    # [AUD-03903] 本会话首次覆写 FE config：先留快照，
-                    # 供 Cancel 时撤销这次直写（fe_main.save_config 直接
-                    # 写 FE 自己的 config.json，绕过宿主 config 快照）。
-                    self._fe_config_snapshot = dict(fe_conf)
-                previous_disabled = fe_conf.get("disabled_plugins", [])
-                if not isinstance(previous_disabled, list):
-                    raise ValueError("Files disabled_plugins 配置格式无效")
-                fe_conf["disabled_plugins"] = sorted(
-                    (set(previous_disabled) - listed_plugins) | set(disabled_plugins))
-                fe_main.save_config(fe_conf)
-                persisted = fe_main.load_config() or {}
-                if set(persisted.get("disabled_plugins", [])) != set(fe_conf["disabled_plugins"]):
-                    raise OSError("素材插件启停设置未能保存")
+                catalog = self._plugin_catalog()
+                if self._plugin_state_snapshot is None:
+                    self._plugin_state_snapshot = {
+                        row.plugin_id: row.desired_enabled for row in catalog.snapshot()}
+                for item in entries:
+                    catalog.set_enabled(item.data(Qt.ItemDataRole.UserRole),
+                                        item.checkState() == Qt.CheckState.Checked)
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                logger.exception("Failed to write file_explorer disabled_plugins")
+                logger.exception("Failed to save Files plugin state")
                 plugin_apply_error = str(exc)
-            else:
-                self._disabled_plugins = list(fe_conf["disabled_plugins"])
 
         # Delegate apply to module preference pages
         module_apply_failures: list[str] = [f"Files: {plugin_apply_error}"] if plugin_apply_error else []
@@ -2301,11 +2243,11 @@ class PreferencesDialog(QDialog):
     def _on_cancel(self) -> None:
         """Restore settings and close dialog."""
         # If Apply was pressed, restore everything it wrote: the host config
-        # snapshot, the file_explorer config snapshot and module page side
+        # snapshot, Files plugin intent and module page side
         # effects (see the helpers below).
         if self._applied:
             self._restore_config_snapshot()
-            self._restore_fe_config_snapshot()
+            self._restore_plugin_state_snapshot()
             self._rollback_module_pages()
         self._restore_preview_snapshot()
         self.reject()
@@ -2365,17 +2307,16 @@ class PreferencesDialog(QDialog):
                 mgr.config.pop(key, None)
         mgr.save_config()
 
-    def _restore_fe_config_snapshot(self) -> None:
-        """[AUD-03903] Undo the file_explorer config write done by Apply."""
-        if self._fe_config_snapshot is None:
-            return
-        fe_main = self._fe_plugin_bridge()
-        if fe_main is None:
+    def _restore_plugin_state_snapshot(self) -> None:
+        """Cancel reverts only plugin intent touched by this dialog."""
+        if self._plugin_state_snapshot is None:
             return
         try:
-            fe_main.save_config(dict(self._fe_config_snapshot))
-        except Exception:
-            logger.exception("Failed to restore file_explorer config on cancel")
+            catalog = self._plugin_catalog()
+            for plugin_id, desired in self._plugin_state_snapshot.items():
+                catalog.set_enabled(plugin_id, desired)
+        except (OSError, ValueError, RuntimeError):
+            logger.exception("Failed to restore Files plugin state on cancel")
 
     def _rollback_module_pages(self) -> None:
         """[AUD-03903] Undo module preference page side effects on Cancel.

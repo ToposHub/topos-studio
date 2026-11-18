@@ -123,7 +123,9 @@ def test_idempotency_key_replays_existing_job(env):
     assert second.replayed is True
     rows = journal.pending()
     assert rows == []
-    journal.finish("failed", "replay 不重复执行，直接收口")  # 重放任务由调用方决定收口
+    with pytest.raises(JournalError):
+        journal.finish("failed", "重放调用不得改写已完成的历史任务")
+    assert journal.get(first.job_id)["state"] == "completed"
 
 
 def test_distinct_keys_create_distinct_jobs(env):
@@ -148,7 +150,7 @@ def test_recovery_completes_finished_move(env):
     asset.unlink()  # move 已完成但进程在 finish 前崩溃
     handle = journal.begin(library.library_id, "move",
                            {"source": str(asset), "destination": str(dst)})
-    journal.record("copy", "staged", {"source": str(asset), "tmp": "/nonexistent"})
+    journal.record("move", "fs_published", {"source": str(asset), "destination": str(dst)})
     # 模拟崩溃：不 finish，直接恢复
     report = journal.recover_one(handle.job_id)
     assert report["classification"] == "completed"
@@ -166,10 +168,10 @@ def test_recovery_sweeps_tmp_and_marks_retriable(env):
                            {"source": str(asset), "destination": str(tmp / "out" / asset.name)})
     journal.record("copy", "staged", {"source": str(asset), "tmp": str(tmp_file)})
     report = journal.recover_one(handle.job_id)
-    assert report["classification"] == "interrupted_retriable"
-    assert report["action"] == "swept_tmp"
-    assert not tmp_file.exists()
-    assert journal.get(handle.job_id)["state"] == "failed"
+    assert report["classification"] == "no_evidence"
+    assert report["action"] == "none"
+    assert tmp_file.exists(), "没有落盘身份凭据不能删除同名临时文件"
+    assert journal.get(handle.job_id)["state"] == "pending_recovery"
     assert asset.exists(), "源完好，可重试"
 
 

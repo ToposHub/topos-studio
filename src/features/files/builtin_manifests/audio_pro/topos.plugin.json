@@ -1,0 +1,34 @@
+{
+  "plugin_id": "files.audio_pro",
+  "display_name": "Audio Pro",
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [],
+  "author": "AssetDeck Team",
+  "description": "专业音频播放器，支持波形图和截辑；播放复用既有共享播放器",
+  "category": "音频",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "open",
+      "kind": "command",
+      "title": "Audio Pro",
+      "selection_mode": "many",
+      "run_location": "host"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "compatibility": "音频 handler 仍在旧 FE 宿主内"
+  },
+  "windows": [
+    {
+      "window_id": "main",
+      "command_id": "open"
+    }
+  ]
+}

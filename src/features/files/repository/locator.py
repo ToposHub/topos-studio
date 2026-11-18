@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +25,9 @@ class FilesDataLocator:
 
     @classmethod
     def for_config_root(cls, config_root: Path | str) -> "FilesDataLocator":
-        return cls(root=Path(config_root).resolve() / FILES_DATA_DIRNAME)
+        # Keep lexical user-controlled components so ensure_layout can reject
+        # symlinks instead of silently treating their destination as trusted.
+        return cls(root=Path(os.path.abspath(config_root)) / FILES_DATA_DIRNAME)
 
     @classmethod
     def default(cls) -> "FilesDataLocator":
@@ -51,6 +54,8 @@ class FilesDataLocator:
     # ------------------------------------------------------------ 回收站 / 缓存
 
     def trash_dir(self, library_id: str) -> Path:
+        if not isinstance(library_id, str) or re.fullmatch(r"[A-Za-z0-9_-]+", library_id) is None:
+            raise ValueError("library_id 必须是非空安全标识符")
         return self.root / "trash" / library_id
 
     @property
@@ -92,6 +97,18 @@ class FilesDataLocator:
 
     def ensure_layout(self) -> None:
         """幂等创建受管目录骨架（不含库级 trash/<id>，注册库时建）。"""
+        # macOS /var and /tmp are platform-owned aliases. Canonicalize only
+        # those fixed prefixes; every application-controlled component remains
+        # lexical and must never be followed through a link.
+        root = self.root
+        prefix = Path(root.anchor)
+        parts = root.parts[1:]
+        for index, part in enumerate(parts):
+            prefix = prefix / part
+            if prefix.is_symlink():
+                if str(prefix) in ("/var", "/tmp"):
+                    continue
+                raise ValueError(f"Files 受管目录不能穿过符号链接：{prefix.name}")
         for directory in (
             self.root,
             self.root / "trash",
@@ -102,4 +119,8 @@ class FilesDataLocator:
             self.plugins_logs_dir,
             self.backups_dir,
         ):
+            if directory.is_symlink():
+                raise ValueError(f"Files 受管目录不能是符号链接：{directory.name}")
             directory.mkdir(parents=True, exist_ok=True)
+            if not directory.is_dir() or directory.is_symlink():
+                raise ValueError("Files 受管目录类型无效")

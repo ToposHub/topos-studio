@@ -28,11 +28,11 @@ from src.features.files.contracts import (
     permission_error,
 )
 from src.features.files.repository.catalog import FilesCatalog, LibraryRecord, nfc
+from src.shared.media.format_registry import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff", ".tif",
-              ".heic", ".avif", ".toos"}
-VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".mkv", ".avi", ".webm", ".topos"}
-AUDIO_EXTS = {".wav", ".mp3", ".aiff", ".aif", ".flac", ".m4a", ".aac", ".ogg"}
+IMAGE_EXTS = IMAGE_EXTENSIONS | {".avif"}
+VIDEO_EXTS = VIDEO_EXTENSIONS | {".topos"}
+AUDIO_EXTS = AUDIO_EXTENSIONS
 DOC_EXTS = {".txt", ".md", ".pdf", ".json", ".xml", ".csv", ".log", ".srt"}
 
 _PAGE_LIMIT = 500
@@ -70,16 +70,11 @@ class FilesQueryService:
             raise not_found_error(request.path, "目录不存在") from exc
         except PermissionError as exc:
             raise permission_error(request.path, "没有访问权限") from exc
-        entries: list[Entry] = []
-        total = 0
         with scanner as it:
-            for dir_entry in it:
-                if dir_entry.name.startswith("."):
-                    continue
-                total += 1
-                if total <= offset or len(entries) >= limit:
-                    continue
-                entries.append(self._entry(dir_entry, library_id))
+            ordered = sorted((item for item in it if not item.name.startswith(".")),
+                             key=lambda item: (nfc(item.name).casefold(), item.name))
+        total = len(ordered)
+        entries = [self._entry(item, library_id) for item in ordered[offset:offset + limit]]
         truncated = (offset + len(entries)) < total
         return QueryResult(
             request_id=request.request_id, path=request.path,

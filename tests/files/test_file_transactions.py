@@ -114,16 +114,16 @@ def test_symlink_destination_is_never_traversed(svc, workdir):
     assert link.is_symlink(), "链接未被替换为实体文件"
 
 
-def test_copy_skips_symlink_children_in_directories(svc, workdir):
+def test_copy_refuses_symlink_children_without_publishing_partial_directories(svc, workdir):
     folder = workdir / "src" / "bundle"
     folder.mkdir()
     (folder / "real.txt").write_bytes(b"r")
     (folder / "alias.txt").symlink_to(folder / "real.txt")
     result = svc.copy(folder, workdir / "dst")
-    assert result.ok
+    assert not result.ok and result.code == "SOURCE_SYMLINK"
     copied = workdir / "dst" / "bundle"
-    assert (copied / "real.txt").read_bytes() == b"r"
-    assert not (copied / "alias.txt").exists(), "目录拷贝不复制符号链接"
+    assert not copied.exists(), "目录拷贝不得跳过一部分内容却冒充完整成功"
+    assert (folder / "real.txt").read_bytes() == b"r"
 
 
 # ---------------------------------------------------------------- 目录语义
