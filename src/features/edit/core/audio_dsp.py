@@ -3661,9 +3661,11 @@ def _ensure_effect_registry() -> dict:
         # P1（2026-11-19 计划第三阶段 #1/#3）：De-Esser / True Peak Limiter
         from src.features.edit.core.audio_effects.adapters import (
             DeEsserAdapter,
+            DynamicEqAdapter,
             TruePeakLimiterAdapter,
         )
         _EFFECT_CLASS_REGISTRY["de_esser"] = DeEsserAdapter
+        _EFFECT_CLASS_REGISTRY["dynamic_eq"] = DynamicEqAdapter
         _EFFECT_CLASS_REGISTRY["true_peak_limiter"] = TruePeakLimiterAdapter
     return _EFFECT_CLASS_REGISTRY
 

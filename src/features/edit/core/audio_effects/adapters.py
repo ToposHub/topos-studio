@@ -91,6 +91,18 @@ class TruePeakLimiterAdapter(_CompositeAdapterBase):
         return TruePeakLimiterEffect(sr)
 
 
+class DynamicEqAdapter(_CompositeAdapterBase):
+    """P1 · Dynamic EQ（对白/音乐避让、轨道与 Bus）。"""
+
+    effect_type = "dynamic_eq"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.dynamic_eq import (
+            DynamicEqEffect,
+        )
+        return DynamicEqEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 
