@@ -3669,9 +3669,13 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["de_esser"] = DeEsserAdapter
         _EFFECT_CLASS_REGISTRY["dynamic_eq"] = DynamicEqAdapter
         _EFFECT_CLASS_REGISTRY["true_peak_limiter"] = TruePeakLimiterAdapter
-        # P1（2026-11-19 计划第三阶段 #5）：Bus / Multiband 压缩
+        # P1（2026-11-19 计划第三阶段 #5/#6）：Bus / Multiband / 卷积
         _EFFECT_CLASS_REGISTRY["bus_comp"] = BusCompAdapter
         _EFFECT_CLASS_REGISTRY["multiband_comp"] = MultibandCompAdapter
+        from src.features.edit.core.audio_effects.adapters import (
+            ConvolutionReverbAdapter,
+        )
+        _EFFECT_CLASS_REGISTRY["convolution_reverb"] = ConvolutionReverbAdapter
     return _EFFECT_CLASS_REGISTRY
 
 
