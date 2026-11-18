@@ -724,6 +724,38 @@ def inline_audio_edit(audio_edit: Any) -> Any:
     return updated
 
 
+def upsert_step(audio_edit: Any, step: dict) -> dict:
+    """P1 · 同约束幂等插入：替换"同处理器 + 同区间 + 同声道"的既有步骤。
+
+    Normalize/LUFS 连击同一选区不得叠加同一个增益——测量基于插入阶段
+    的实际数据，重复提交应以**替换**语义保持单一增益。无匹配则按
+    ``append_step`` 追加（机架顺序保留）。
+    """
+    if not isinstance(audio_edit, dict):
+        return append_step(audio_edit, step)
+    params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+    identity = (step.get("processor_id"),
+                params.get("start"), params.get("end"),
+                tuple(params.get("channels") or ()))
+    updated = copy.deepcopy(audio_edit)
+    for existing in updated.get("steps", []) or []:
+        if not isinstance(existing, dict):
+            continue
+        e_params = (existing.get("params", {})
+                    if isinstance(existing.get("params"), dict) else {})
+        e_identity = (existing.get("processor_id"),
+                      e_params.get("start"), e_params.get("end"),
+                      tuple(e_params.get("channels") or ()))
+        if e_identity == identity:
+            replacement = dict(step)
+            replacement["step_id"] = existing.get("step_id") or step.get("step_id")
+            steps = list(updated.get("steps", []))
+            steps[steps.index(existing)] = replacement
+            updated["steps"] = steps
+            return updated
+    return append_step(updated, step)
+
+
 def replace_processor_step(audio_edit: Any, processor_id: str, step: dict) -> dict:
     """用 ``step`` 替换该处理器的既有步骤（没有则追加；其余步骤保持原序）。
 
@@ -1406,11 +1438,16 @@ def markers_from_canvas(
 def canvas_markers_from(
     markers: list[dict], duration_seconds: float, output_total_samples: int,
 ) -> list[dict]:
-    """模型标记 → 画布标记（时间/标签）。"""
+    """模型标记 → 画布标记（时间/标签）。
+
+    P1 · 稳 ID：``id`` 随标记往返——下一次 ``markers_from_canvas`` 按
+    同一 id 写回（拖动/改名不换身份，引用与自动化锚点不漂移）。
+    """
     if not markers or duration_seconds <= 0.0 or output_total_samples <= 0:
         return []
     return [
         {
+            "id": m.get("id"),
             "time": max(0.0, min(duration_seconds,
                                  m["local_sample"] / output_total_samples * duration_seconds)),
             "label": str(m.get("name", "") or ""),

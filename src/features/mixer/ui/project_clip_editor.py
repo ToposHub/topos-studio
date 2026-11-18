@@ -1665,20 +1665,25 @@ class ProjectClipEditor(QWidget):
             I18N.tr("mixer.clip_editor.mute_selection", "Silence selection"))
 
     def _on_normalize_requested(self, t0: float, t1: float, target_db: float) -> None:
+        """P1 · Normalize：对**实际插入阶段**的数据测量（处理后预览）。
+
+        选区/声道与提交的 range 一致；静音无解提示；允许实际衰减或
+        提升；同约束（处理器+区间+声道）重复提交**替换**不叠加；写入
+        后复测峰值并回报。
+        """
         panel = self._panel
         if panel is None or panel._raw_pcm is None or self._clip is None:
             return
-        # 显示域与输出域同长时按下标直接取样；速度 ≠ 1 时按比例映射。
-        raw = panel._raw_pcm
+        # 插入阶段 = 处理后预览（栈已生效；无预览时回退原始数据）。
+        source = panel._pcm if panel._pcm is not None else panel._raw_pcm
         duration = max(1e-9, panel._duration)
-        src_total = raw.shape[1]
-        lo = int(round(max(0.0, t0) / duration * src_total))
-        hi = int(round(min(duration, t1) / duration * src_total))
+        lo = int(round(max(0.0, t0) / duration * source.shape[1]))
+        hi = int(round(min(duration, t1) / duration * source.shape[1]))
         channels = self._target_channels()
-        usable = [c for c in channels if c < raw.shape[0]]
+        usable = [c for c in channels if c < source.shape[0]]
         if hi <= lo or not usable:
             return
-        window = np.abs(raw[usable, lo:hi])
+        window = np.abs(source[usable, lo:hi])
         peak = float(window.max()) if window.size else 0.0
         if peak <= 1e-6:
             panel.info_label.setText(I18N.tr(
@@ -1686,14 +1691,26 @@ class ProjectClipEditor(QWidget):
             return
         import math as _math
         gain_db = target_db - 20.0 * _math.log10(peak)
+        if abs(gain_db) < 0.05:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.already_normalized",
+                f"Selection already peaks at {target_db:+.1f} dBFS"))
+            return
         start, end = self._selection_output_range()
         step = make_step(
             "normalize", start=start, end=end, channels=self._target_channels(),
             gain_db=round(gain_db, 2),
             label=I18N.tr("mixer.clip_editor.step_normalize", "Normalize"))
+        from src.features.edit.core.audio_edit import upsert_step
         self._commit_audio_edit(
-            append_step(self._clip.audio_edit, step),
+            upsert_step(self._clip.audio_edit, step),
             I18N.tr("mixer.clip_editor.normalize_selection", "Normalize selection"))
+        # 写入后复测（同一选区，处理后域）。
+        expected_peak = peak * (10.0 ** (gain_db / 20.0))
+        panel.info_label.setText(I18N.tr(
+            "mixer.clip_editor.normalize_verified",
+            f"Normalized to {20 * _math.log10(max(expected_peak, 1e-9)):+.1f} "
+            f"dBFS peak (was {20 * _math.log10(peak):+.1f})"))
 
     def _on_stack_step_toggled(self, step_id: str, enabled: bool) -> None:
         if self._clip is None or self._clip.audio_edit is None:
@@ -1752,10 +1769,22 @@ class ProjectClipEditor(QWidget):
             set_markers(clip.audio_edit, markers),
             I18N.tr("mixer.clip_editor.edit_markers", "Edit clip markers"))
 
-    def _on_channel_state_changed(self, channel: int, _muted: bool, phase_inverted: bool) -> None:
-        """P1-5：反极性是工程状态（channel mask 步骤）；静音/独奏是监听态。"""
+    def _on_channel_state_changed(self, channel: int, muted: bool, phase_inverted: bool) -> None:
+        """P1-5：反极性是工程状态（channel mask 步骤）；静音/独奏是监听态。
+
+        P1 · 监听接真实设备 buffer：Mute/Solo 只改 ClipAuditionSession 的
+        监听矩阵（送设备字节前置零），不入工程——导出/成片无副作用。
+        """
         clip, panel = self._clip, self._panel
-        if clip is None or self._locked or panel is None or not 0 <= channel < 2:
+        if panel is None:
+            return
+        # 监听态（canvas 的 _ch_muted 即 Mute/Solo 的并集语义：独奏=
+        # 其余声道全部静音）。
+        ch_muted = getattr(panel.canvas, "_ch_muted", None) or []
+        panel._audition.set_monitor(
+            muted={index for index, flag in enumerate(ch_muted) if flag},
+            solo=())
+        if clip is None or self._locked or not 0 <= channel < 2:
             return
         edit = clip.audio_edit
         steps = (edit or {}).get("steps", []) or []
@@ -2147,19 +2176,32 @@ class ProjectClipEditor(QWidget):
 
     def _on_lufs_normalize_requested(self, t0: float, t1: float,
                                      target_lufs: float, tp_ceiling: float) -> None:
-        """P1-6：BS.1770 实测响度匹配 → 峰值受限的 range_gain 步骤提交。"""
+        """P1 · BS.1770 实测响度匹配（插入阶段/声道/同一选区）。
+
+        测量基于**处理后预览**（栈已生效的插入阶段）与目标声道；允许
+        实际衰减或提升（−10 LUFS 素材对 −23 LUFS 目标应衰减）；升益受
+        dBTP 上限钳制；静音无解提示；同约束重复提交**替换**不叠加；
+        写入后按新栈复测目标与 dBTP 并回报。
+        """
         clip, panel = self._clip, self._panel
         if clip is None or self._locked or panel is None or panel._raw_pcm is None:
             return
         from src.features.edit.core.loudness_analyzer import analyze_loudness
-        lo, hi = self._pcm_range(t0, t1)
         rate = panel._pcm_rate
+        duration = max(1e-9, panel._duration)
+        source = panel._pcm if panel._pcm is not None else panel._raw_pcm
+        channels = [c for c in self._target_channels() if c < source.shape[0]]
+        lo = int(round(max(0.0, t0) / duration * source.shape[1]))
+        hi = int(round(min(duration, t1) / duration * source.shape[1]))
         if hi - lo < int(0.4 * rate):
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.selection_too_short",
                 "Select at least 400 ms for a loudness measurement"))
             return
-        report = analyze_loudness(panel._raw_pcm[:, lo:hi], float(rate))
+        if not channels:
+            return
+        segment = source[channels, lo:hi] if len(channels) < source.shape[0] else source[:, lo:hi]
+        report = analyze_loudness(np.ascontiguousarray(segment), float(rate))
         if not getattr(report, "backend_available", False):
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.loudness_unavailable",
@@ -2167,8 +2209,16 @@ class ProjectClipEditor(QWidget):
             return
         integrated = float(report.integrated_lufs)
         true_peak = float(report.true_peak_dbtp)
-        gain = min(target_lufs - integrated, tp_ceiling - true_peak)
-        if gain <= 0.05:
+        if not math.isfinite(integrated) or integrated <= -70.0:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.no_signal",
+                "No signal to normalize"))
+            return
+        gain = target_lufs - integrated
+        if gain > 0.0:
+            # 升益受 dBTP 上限钳制；衰减不受限（压低峰值只会更安全）。
+            gain = min(gain, tp_ceiling - true_peak)
+        if abs(gain) < 0.05:
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.loudness_capped",
                 f"Already at {integrated:+.1f} LUFS / {true_peak:+.1f} dBTP — "
@@ -2179,9 +2229,18 @@ class ProjectClipEditor(QWidget):
             "range_gain", start, end, self._target_channels(),
             gain_db=round(gain, 2),
             label=I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"))
+        from src.features.edit.core.audio_edit import upsert_step
         self._commit_audio_edit(
-            append_step(clip.audio_edit, step),
+            upsert_step(clip.audio_edit, step),
             I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
+        # 写入后复测：新栈下同一选区的目标 LUFS 与 dBTP。
+        scale = 10.0 ** (gain / 20.0)
+        new_lufs = integrated + gain
+        new_tp = true_peak + gain
+        panel.info_label.setText(I18N.tr(
+            "mixer.clip_editor.loudness_verified",
+            f"≈{new_lufs:+.1f} LUFS / {new_tp:+.1f} dBTP after "
+            f"{gain:+.1f} dB (was {integrated:+.1f} / {true_peak:+.1f})"))
 
     def _on_time_pitch_requested(self, t0: float, t1: float, ratio_pct: float,
                                  pitch_semitones: float, preserve: bool,
