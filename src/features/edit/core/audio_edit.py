@@ -102,6 +102,15 @@ PROCESSORS: dict[str, dict[str, Any]] = {
             "crossfade (pre-rendered)."
         ),
     },
+    "spectral_repair": {
+        "algorithm_version": 1,
+        "length_preserving": True,
+        "pre_render": True,
+        "description": (
+            "Brush/selection spectral repair: attenuate the masked time-freq "
+            "region or heal it from neighbouring frames (pre-rendered)."
+        ),
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 # 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
@@ -251,7 +260,8 @@ def validate_audio_edit(
                 f"{where}: channel index out of range for {channel_count}-channel clip")
         gain_db = params.get("gain_db")
         if (processor_id not in ("mute", "channel_polarity", "spectral_denoise",
-                                 "time_stretch", "delete_range")
+                                 "time_stretch", "delete_range",
+                                 "spectral_repair")
                 and not isinstance(gain_db, (int, float))):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
         if processor_id in PRE_RENDER_PROCESSORS:
@@ -382,6 +392,51 @@ def _validate_pre_render_step(
                     diagnostics.append(
                         f"{where}: output_length {output_length} does not match "
                         f"splice mapping (expected {expected})")
+        return diagnostics
+    if processor_id == "spectral_repair":
+        from src.features.edit.core.audio_repair import SUPPORTED_MODES, SUPPORTED_NFFT
+        amount = params.get("amount_db", 24.0)
+        if (not isinstance(amount, (int, float))
+                or not 0.0 <= float(amount) <= 48.0):
+            diagnostics.append(
+                f"{where}: amount_db {amount!r} must be within [0, 48]")
+        if params.get("mode", "attenuate") not in SUPPORTED_MODES:
+            diagnostics.append(
+                f"{where}: mode {params.get('mode')!r} must be one of "
+                f"{SUPPORTED_MODES}")
+        if params.get("nfft", 2048) not in SUPPORTED_NFFT:
+            diagnostics.append(
+                f"{where}: nfft {params.get('nfft')!r} must be one of "
+                f"{SUPPORTED_NFFT}")
+        strokes = params.get("strokes")
+        if not isinstance(strokes, list) or not strokes:
+            diagnostics.append(f"{where}: spectral_repair requires strokes")
+            return diagnostics
+        nyquist = rate / 2.0
+        for index, stroke in enumerate(strokes):
+            if not isinstance(stroke, dict):
+                diagnostics.append(f"{where}: strokes[{index}] must be a dict")
+                continue
+            sample = stroke.get("sample")
+            hz = stroke.get("hz")
+            radius = stroke.get("time_radius")
+            band = stroke.get("bandwidth_oct")
+            if not isinstance(sample, int) or not 0 <= sample:
+                diagnostics.append(
+                    f"{where}: strokes[{index}].sample must be a non-negative int")
+            elif clip_output_samples is not None and sample > clip_output_samples:
+                diagnostics.append(
+                    f"{where}: strokes[{index}].sample {sample} exceeds domain "
+                    f"{clip_output_samples}")
+            if (not isinstance(hz, (int, float)) or not 0.0 < float(hz) <= nyquist):
+                diagnostics.append(
+                    f"{where}: strokes[{index}].hz must be within (0, Nyquist]")
+            if (not isinstance(radius, (int, float)) or float(radius) <= 0.0):
+                diagnostics.append(
+                    f"{where}: strokes[{index}].time_radius must be positive")
+            if (not isinstance(band, (int, float)) or float(band) <= 0.0):
+                diagnostics.append(
+                    f"{where}: strokes[{index}].bandwidth_oct must be positive")
         return diagnostics
     if processor_id != "spectral_denoise":
         return diagnostics
@@ -660,6 +715,19 @@ def render_pre_render_steps(
                 progress=progress, cancel_check=cancel_check)
         elif processor_id == "delete_range":
             out = _render_delete_range_step(out, params, sample_rate)
+        elif processor_id == "spectral_repair":
+            from src.features.edit.core.audio_repair import repair_spectral
+            out = repair_spectral(
+                out,
+                sample_rate,
+                list(params.get("strokes", []) or []),
+                (int(params.get("start", 0)), int(params.get("end", 0))),
+                amount_db=float(params.get("amount_db", 24.0)),
+                mode=str(params.get("mode", "attenuate")),
+                nfft=int(params.get("nfft", 2048)),
+                link_stereo=bool(params.get("link_stereo", True)),
+                progress=progress,
+            )
         else:  # 注册表扩张时漏接的实现——显式失败而非静默跳过
             raise RuntimeError(
                 f"pre-render processor {processor_id!r} has no renderer")

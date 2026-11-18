@@ -887,3 +887,57 @@ def test_clip_editor_delete_range_commits_and_undoes(
     restored = view.get_timeline().get_clip_by_id(clip_id)
     assert restored.timeline_duration == old_duration
     assert restored.audio_edit is None
+
+
+def test_clip_editor_spectral_repair_commits_and_undoes(
+        project_host, qtbot, tmp_path) -> None:
+    """§5 画笔：频谱选区修复 → spectral_repair 预渲染步骤 → 撤销还原。"""
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    rate = 48000
+    audio_path = tmp_path / "repair.wav"
+    t = np.arange(2 * rate) / rate
+    sig = (0.2 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    interfer = np.zeros_like(t, dtype=np.float32)
+    interfer[int(0.5 * rate):int(0.58 * rate)] = \
+        (0.3 * np.sin(2 * np.pi * 2000.0 * t[int(0.5 * rate):int(0.58 * rate)]))
+    stereo = sig + interfer
+    interleaved = np.empty((stereo.size, 2), dtype="<i2")
+    interleaved[:, 0] = (stereo * 32000).astype("<i2")
+    interleaved[:, 1] = (stereo * 32000).astype("<i2")
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(interleaved.tobytes())
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Repair",
+        metadata={"audio_info": {"sample_rate": rate, "channels": 2},
+                  "duration_seconds": 2.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Repair", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+
+    # 频谱选区修复（时间 × 频带）→ 修复按钮提交。
+    panel.canvas.setSelection(0.45, 0.62, 1200.0, 3200.0)
+    panel._trigger_quick_heal()
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert edited.audio_edit is not None
+    step = edited.audio_edit["steps"][0]
+    assert step["processor_id"] == "spectral_repair"
+    params = step["params"]
+    assert params["mode"] == "heal"
+    assert params["strokes"] and params["strokes"][0]["hz"] > 1000.0
+    assert params["strokes"][0]["time_radius"] > 0
+    assert params["strokes"][0]["bandwidth_oct"] > 0.0
+    # 机架显示修复步骤；一次撤销清栈。
+    assert panel._process_steps[0]["type"] == "spectral_repair"
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None

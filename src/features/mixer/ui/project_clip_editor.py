@@ -96,6 +96,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     stack_clear_requested = pyqtSignal()
     # §6.2：变速/音高/删除区间/裁剪的改长度提交（走项目/序列事务）。
     time_pitch_commit_requested = pyqtSignal()
+    # §5 画笔：频谱修复提交（载荷已换算到数据域：秒/Hz/半径/带宽）。
+    repair_commit_requested = pyqtSignal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -146,6 +148,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # §6.2：待提交的变速/音高参数（预览时记录；提交按钮消费）。
         self._pending_timepitch: tuple | None = None
         self._timepitch_commit_button: QPushButton | None = None
+        # §5 画笔：挂起的频谱修复笔迹（数据域载荷；修复按钮/H 键消费）。
+        self._pending_repair: dict | None = None
+        self.canvas.spectralBrushApplied.connect(self._on_canvas_brush_applied)
 
     def set_status_message(self, text: str) -> None:
         hook = self._status_hook
@@ -181,6 +186,46 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             button.setToolTip("" if pending is not None else I18N.tr(
                 "mixer.clip_editor.timepitch_commit_hint",
                 "Preview speed & pitch first, then commit the length change"))
+
+    # ------------------------------------------------------------------
+    # §5 画笔：频谱修复（生产路径）
+    # ------------------------------------------------------------------
+    def _apply_local_brush_heal(self, stroke: list[tuple[float, float]]) -> None:
+        # 生产路径：demo 本地修复不参与（提交走 spectral_repair 步骤）。
+        return
+
+    def _on_canvas_brush_applied(self, stroke: list, radius_px: float) -> None:
+        """笔迹松开 → 数据域载荷挂起（提交按钮或 H 键消费）。"""
+        try:
+            payload = self.canvas.brush_stroke_payload(stroke, radius_px)
+        except Exception:  # noqa: BLE001 - 几何异常时忽略本次笔迹
+            return
+        if not payload.get("strokes"):
+            return
+        self._pending_repair = payload
+
+    def _trigger_quick_heal(self) -> None:
+        """修复按钮/H 键：优先消费挂起笔迹；否则用频谱选区合成修复载荷。"""
+        payload = self._pending_repair
+        if payload is None:
+            t0, t1, f_low, f_high = self.canvas.getSelection()
+            if t1 <= t0 or f_high <= f_low:
+                self.set_status_message(I18N.tr(
+                    "mixer.clip_editor.repair_needs_region",
+                    "Brush over the spectrogram or set a time-frequency "
+                    "selection first"))
+                return
+            payload = {
+                "strokes": [((t0 + t1) / 2.0, (f_low * f_high) ** 0.5)],
+                "time_radius_s": max(0.01, (t1 - t0) / 2.0),
+                "bandwidth_oct": max(0.05, __import__("math").log2(
+                    max(1.01, f_high / max(1.0, f_low)))),
+            }
+        payload = dict(payload)
+        payload["mode"] = "heal" if payload.get("mode") in (None, "heal") \
+            else payload["mode"]
+        self._pending_repair = None
+        self.repair_commit_requested.emit(payload)
 
     def ensure_timepitch_commit_button(self) -> None:
         """在时间/音高卡内补一个“提交入栈”按钮（只创建一次）。"""
@@ -323,6 +368,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     "mixer.clip_editor.step_timepitch", "Speed / pitch"),
                 "delete_range": I18N.tr(
                     "mixer.clip_editor.step_delete_range", "Delete range"),
+                "spectral_repair": I18N.tr(
+                    "mixer.clip_editor.step_repair", "Spectral repair"),
             }.get(processor, processor)
             gain_db = params.get("gain_db")
             if processor == "spectral_denoise":
@@ -346,6 +393,13 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
                     + I18N.tr("mixer.clip_editor.step_splice", "spliced")
                     + " · " + I18N.tr(
+                        "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            elif processor == "spectral_repair":
+                repair_strokes = params.get("strokes") or []
+                detail = (
+                    f"{len(repair_strokes)} pts · "
+                    f"{str(params.get('mode', 'attenuate'))} · "
+                    + I18N.tr(
                         "mixer.clip_editor.step_pre_render", "pre-rendered"))
             else:
                 detail = (
@@ -951,6 +1005,9 @@ class ProjectClipEditor(QWidget):
                 self._on_time_pitch_commit_requested)
             self._panel.trimRequested.connect(self._on_trim_requested)
             self._panel.deleteRangeRequested.connect(self._on_delete_requested)
+            # §5 画笔：频谱修复提交（spectral_repair 预渲染步骤）。
+            self._panel.repair_commit_requested.connect(
+                self._on_repair_commit_requested)
             self._panel.stack_clear_requested.connect(self._on_stack_cleared)
             # P1-4：包络节点提交（画布拖拽结束/增删时各发一次）。
             self._panel.envelopeChanged.connect(self._on_envelope_changed)
@@ -1806,6 +1863,54 @@ class ProjectClipEditor(QWidget):
         self._commit_length_change(
             append_step(clip.audio_edit, step),
             I18N.tr("mixer.clip_editor.delete_selection", "Delete selection"))
+
+    def _on_repair_commit_requested(self, payload: dict) -> None:
+        """§5 画笔：把数据域修复载荷提交为 spectral_repair 步骤（保长）。"""
+        from src.features.edit.core.audio_repair import scipy_available
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._raw_pcm is None:
+            return
+        if not scipy_available():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.repair_unavailable",
+                "Spectral repair requires the SciPy DSP backend"))
+            return
+        rate = panel._pcm_rate
+        strokes_payload = payload.get("strokes") or []
+        if not strokes_payload:
+            return
+        radius_s = max(0.002, float(payload.get("time_radius_s", 0.02)))
+        band_oct = max(0.02, float(payload.get("bandwidth_oct", 0.25)))
+        mode = str(payload.get("mode", "heal"))
+        strokes = []
+        for t_seconds, hz in strokes_payload:
+            raw = max(0, min(panel._raw_pcm.shape[1], int(round(t_seconds * rate))))
+            start, end = self._raw_to_output_range(raw, raw + 1)
+            strokes.append({
+                "sample": int(start),
+                "hz": float(max(20.0, min(rate / 2.0, float(hz)))),
+                "time_radius": max(1, int(round(radius_s * rate))),
+                "bandwidth_oct": float(band_oct),
+            })
+        span = max(1, int(round(radius_s * rate)))
+        lo = max(0, min(s["sample"] for s in strokes) - span)
+        hi = min(self._output_total_samples(),
+                 max(s["sample"] for s in strokes) + span)
+        if hi <= lo:
+            return
+        nfft = panel.current_fft_size()
+        if nfft not in (512, 1024, 2048, 4096):
+            nfft = 2048
+        step = make_step(
+            "spectral_repair", start=lo, end=hi, channels=self._target_channels(),
+            strokes=strokes, amount_db=24.0, mode=mode, nfft=nfft,
+            label=I18N.tr("mixer.clip_editor.step_repair", "Spectral repair"))
+        self._commit_audio_edit(
+            append_step(clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.repair_region", "Spectral repair"))
+        panel.set_status_message(I18N.tr(
+            "mixer.clip_editor.repair_committed",
+            "Repair added to the stack — pre-rendering in the background"))
 
     def _on_trim_requested(self, t0: float, t1: float) -> None:
         """§3 控件映射：裁剪保留选区 —— 头/尾两个 delete_range 步骤。
