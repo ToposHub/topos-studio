@@ -63,6 +63,11 @@ PROCESSORS: dict[str, dict[str, Any]] = {
         "length_preserving": True,
         "description": "range_gain with the gain pre-computed from the measured sample peak.",
     },
+    "channel_polarity": {
+        "algorithm_version": 1,
+        "length_preserving": True,
+        "description": "Multiply selected channels by −1 (polarity invert) over a range.",
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 
@@ -181,7 +186,7 @@ def validate_audio_edit(
             diagnostics.append(
                 f"{where}: channel index out of range for {channel_count}-channel clip")
         gain_db = params.get("gain_db")
-        if processor_id != "mute" and not isinstance(gain_db, (int, float)):
+        if processor_id not in ("mute", "channel_polarity") and not isinstance(gain_db, (int, float)):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
     envelope = audio_edit.get("envelope", [])
     if envelope is not None:
@@ -206,6 +211,26 @@ def validate_audio_edit(
                 if node.get("interpolation", "linear") != "linear":
                     diagnostics.append(
                         f"{where}: unsupported interpolation {node.get('interpolation')!r}")
+    markers = audio_edit.get("markers", [])
+    if markers is not None:
+        if not isinstance(markers, list):
+            diagnostics.append("audio_edit.markers must be a list")
+        else:
+            marker_ids: set[str] = set()
+            for index, marker in enumerate(markers):
+                where = f"markers[{index}]"
+                if not isinstance(marker, dict):
+                    diagnostics.append(f"{where}: must be a dict")
+                    continue
+                marker_id = marker.get("id")
+                if not isinstance(marker_id, str) or not marker_id:
+                    diagnostics.append(f"{where}: missing id")
+                elif marker_id in marker_ids:
+                    diagnostics.append(f"{where}: duplicate marker id")
+                else:
+                    marker_ids.add(marker_id)
+                if not isinstance(marker.get("local_sample"), int) or marker["local_sample"] < 0:
+                    diagnostics.append(f"{where}: local_sample must be a non-negative int")
     return diagnostics
 
 
@@ -408,6 +433,9 @@ def apply_clip_audio_edit(
         if processor_id == "normalize":
             # normalize 的增益在提交时已按实测 peak 预计算并持久化。
             gain_linear = 10.0 ** (float(params.get("gain_db", 0.0)) / 20.0)
+        elif processor_id == "channel_polarity":
+            # 反极性 = 对选定通道乘 −1（与 range 包络同路径，边缘同样有短过渡）。
+            gain_linear = -1.0
         range_env = _range_gain_envelope(
             samples.shape[1], block_start_sample, int(start), int(end), fade)
         if range_env is None:
@@ -474,3 +502,80 @@ def db_to_linear(gain_db: float) -> float:
 
 def linear_to_db(linear: float) -> float:
     return 20.0 * math.log10(max(1e-12, linear))
+
+
+# ----------------------------------------------------------------------
+# 片段标记点（P1-5）：随片段移动，局部样本域；复制片段时重新分配 ID。
+# ----------------------------------------------------------------------
+def marker_list(audio_edit: Any) -> list[dict]:
+    """读取标记点（按 local_sample 升序）。"""
+    if not isinstance(audio_edit, dict):
+        return []
+    markers = []
+    for marker in audio_edit.get("markers", []) or []:
+        if (isinstance(marker, dict) and isinstance(marker.get("local_sample"), int)
+                and marker.get("local_sample") >= 0):
+            markers.append(marker)
+    markers.sort(key=lambda m: m["local_sample"])
+    return markers
+
+
+def set_markers(audio_edit: Any, markers: list[dict] | None) -> Any:
+    """写入标记点（None/空 → 移除键；无原栈时建立最小结构）。"""
+    updated = copy_audio_edit(audio_edit) if isinstance(audio_edit, dict) else new_audio_edit()
+    if markers:
+        updated["markers"] = sorted(markers, key=lambda m: m["local_sample"])
+    else:
+        updated.pop("markers", None)
+    return updated
+
+
+def markers_from_canvas(
+    points: list[dict], duration_seconds: float, output_total_samples: int,
+) -> list[dict]:
+    """画布标记（{"time": 秒, "label": str}）→ 模型标记（含稳定 ID）。"""
+    import uuid
+
+    if not points or duration_seconds <= 0.0 or output_total_samples <= 0:
+        return []
+    markers = []
+    for point in points:
+        t = float(point.get("time", 0.0))
+        fraction = max(0.0, min(1.0, t / duration_seconds))
+        markers.append({
+            "id": point.get("id") or str(uuid.uuid4()),
+            "local_sample": int(round(fraction * output_total_samples)),
+            "name": str(point.get("label", "") or ""),
+            "color": point.get("color"),
+        })
+    markers.sort(key=lambda m: m["local_sample"])
+    return markers
+
+
+def canvas_markers_from(
+    markers: list[dict], duration_seconds: float, output_total_samples: int,
+) -> list[dict]:
+    """模型标记 → 画布标记（时间/标签）。"""
+    if not markers or duration_seconds <= 0.0 or output_total_samples <= 0:
+        return []
+    return [
+        {
+            "time": max(0.0, min(duration_seconds,
+                                 m["local_sample"] / output_total_samples * duration_seconds)),
+            "label": str(m.get("name", "") or ""),
+        }
+        for m in markers
+    ]
+
+
+def regenerate_marker_ids(audio_edit: Any) -> Any:
+    """复制片段时重新分配 marker ID（内容保持同一源位置）。"""
+    if not isinstance(audio_edit, dict) or not audio_edit.get("markers"):
+        return audio_edit
+    import uuid
+
+    updated = copy_audio_edit(audio_edit)
+    updated["markers"] = [
+        {**marker, "id": str(uuid.uuid4())} for marker in updated["markers"]
+    ]
+    return updated

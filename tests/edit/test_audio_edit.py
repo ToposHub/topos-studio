@@ -26,6 +26,7 @@ from src.features.edit.core.audio_edit import (
     remove_step,
     replace_step_enabled,
     set_envelope,
+    set_markers,
     steps_signature,
     validate_audio_edit,
 )
@@ -282,6 +283,63 @@ class TestEnvelope:
         diagnostics = validate_audio_edit(bad)
         assert any("duplicate local_sample" in d for d in diagnostics)
         assert any("unsupported interpolation" in d for d in diagnostics)
+
+
+class TestMarkersAndPolarity:
+    def test_marker_round_trip_and_copy_reassigns_ids(self) -> None:
+        from src.features.edit.core.audio_edit import (
+            canvas_markers_from, marker_list, markers_from_canvas,
+            regenerate_marker_ids, set_markers,
+        )
+        points = [{"time": 0.5, "label": "breath"}, {"time": 2.0, "label": "pop"}]
+        markers = markers_from_canvas(points, 2.0, 96000)
+        assert [m["local_sample"] for m in markers] == [24000, 96000]
+        assert len({m["id"] for m in markers}) == 2
+        edit = set_markers(new_audio_edit([]), markers)
+        assert marker_list(edit) == markers
+        back = canvas_markers_from(marker_list(edit), 2.0, 96000)
+        assert [p["label"] for p in back] == ["breath", "pop"]
+        # 复制片段：同一源位置、全新 marker ID。
+        copied = regenerate_marker_ids(edit)
+        assert [m["local_sample"] for m in marker_list(copied)] == [24000, 96000]
+        assert {m["id"] for m in marker_list(copied)}.isdisjoint(
+            {m["id"] for m in markers})
+        assert set_markers(edit, None).get("markers") is None
+        # 诊断：重复/缺失 ID。
+        bad = set_markers(edit, [
+            {"id": "m1", "local_sample": 10, "name": "a"},
+            {"id": "m1", "local_sample": 20, "name": "b"},
+            {"id": "", "local_sample": 30, "name": "c"},
+        ])
+        diagnostics = validate_audio_edit(bad)
+        assert any("duplicate marker id" in d for d in diagnostics)
+        assert any("missing id" in d for d in diagnostics)
+
+    def test_polarity_step_inverts_channel(self) -> None:
+        rate = 48000
+        pcm = np.full((2, rate), 0.25, dtype=np.float32)
+        edit = new_audio_edit([make_step("channel_polarity", 0, rate, (1,))])
+        out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)
+        # 左声道不变，右声道取反（边缘 3 ms 过渡带除外）。
+        assert np.array_equal(out[0], pcm[0])
+        assert abs(float(out[1][24000]) + 0.25) < 1e-6
+        # 标记点不进声音签名（不影响引擎重建）。
+        edit_with_marker = set_markers(edit, [
+            {"id": "m", "local_sample": 100, "name": "x"}])
+        assert steps_signature(edit_with_marker) == steps_signature(edit)
+
+    def test_clip_copy_site_regenerates_marker_ids(self) -> None:
+        from src.features.edit.core.audio_edit import set_markers
+        edit = set_markers(None, [{"id": "orig", "local_sample": 5, "name": "m"}])
+        clip = make_clip(audio_edit=edit)
+        data = clip.to_dict()
+        data["clip_id"] = "new-clip"
+        # 与 Alt-拖动复制/粘贴相同的处理路径。
+        from src.features.edit.core.audio_edit import regenerate_marker_ids
+        data["audio_edit"] = regenerate_marker_ids(data["audio_edit"])
+        copied = ClipInstance.from_dict(data)
+        assert copied.audio_edit["markers"][0]["id"] != "orig"
+        assert copied.audio_edit["markers"][0]["local_sample"] == 5
 
 
 class TestRoutingSignatures:
