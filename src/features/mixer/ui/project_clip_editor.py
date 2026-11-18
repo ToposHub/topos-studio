@@ -110,6 +110,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
         self._noise_profile: Any = None
         self._denoise_preview: tuple[tuple[int, int], tuple[int, int], float, int] | None = None
+        # P2-7：变速/音高预览（改长度的事务提交需输出长度映射，后续批次）。
+        self._timepitch_pcm: np.ndarray | None = None
         self._audition = ClipAuditionSession(self)
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
@@ -148,6 +150,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm = pcm
         self._raw_pcm = pcm
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
+        self._timepitch_pcm = None
+        self._denoise_preview = None
         self._audition.load(pcm, sample_rate)
         self._is_playing = False
         self._skip_selection_mode = False
@@ -155,9 +159,19 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_play.setText("▶ 播放")
         for widget in (self.btn_play, self.btn_loop, self.btn_snap_zero,
                        self.btn_spectral, self.fft_combo,
-                       self.btn_noise_print, self.btn_denoise, self.denoise_knob):
+                       self.btn_noise_print, self.btn_denoise, self.denoise_knob,
+                       self.stretch_knob, self.pitch_knob, self.pitch_pill,
+                       self.stretch_ratio_pill, self.target_dur_pill,
+                       self.stretch_algo_combo, self.preserve_pitch_sw):
             widget.setEnabled(True)
             widget.setToolTip("")
+        timepitch_button = getattr(self, "_timepitch_button", None)
+        if timepitch_button is not None:
+            timepitch_button.setEnabled(True)
+            timepitch_button.setToolTip(I18N.tr(
+                "mixer.clip_editor.timepitch_preview",
+                "Preview speed & pitch — committing length changes comes with "
+                "the ripple transaction"))
         self.btn_play.setToolTip(I18N.tr("mixer.clip_editor.play_audition", "Audition this clip (Space)"))
         self.btn_loop.setToolTip(I18N.tr("mixer.clip_editor.loop_audition", "Loop the selection, or the whole clip"))
 
@@ -304,7 +318,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _base_pcm(self) -> np.ndarray | None:
         raw = self._raw_pcm
-        if raw is None or self._denoise_preview is None:
+        if raw is None:
+            return None
+        if self._timepitch_pcm is not None:
+            return self._timepitch_pcm
+        if self._denoise_preview is None:
             return raw
         from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
         noise_range, target_range, reduction_db, nfft = self._denoise_preview
@@ -315,6 +333,20 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         except Exception as exc:  # noqa: BLE001 - 预览失败保持原声并提示
             self.info_label.setText(str(exc))
             return raw
+
+    def set_timepitch_preview(self, pcm: np.ndarray) -> None:
+        """P2-7：变速/音高后的 PCM 作为预览基底（时长随之变化）。"""
+        self._timepitch_pcm = pcm
+        self._duration = max(0.01, pcm.shape[1] / self._pcm_rate)
+        self._refresh_stack_preview()
+
+    def clear_timepitch_preview(self) -> None:
+        if self._timepitch_pcm is None:
+            return
+        self._timepitch_pcm = None
+        if self._raw_pcm is not None:
+            self._duration = max(0.01, self._raw_pcm.shape[1] / self._pcm_rate)
+        self._refresh_stack_preview()
 
     def current_fft_size(self) -> int:
         try:
@@ -487,6 +519,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 button.setToolTip(unavailable)
             elif button.text() in ("静音", "标准化"):
                 self._selection_edit_buttons.append(button)
+                button.setEnabled(False)
+                button.setToolTip(unavailable)
+            elif button.text() == "应用时间与音高":
+                # P2-7：预览态（提交需输出长度映射事务，后续批次）。
+                self._timepitch_button = button
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
             elif button.text() == "应用增益到选区":
@@ -779,6 +816,8 @@ class ProjectClipEditor(QWidget):
             self._panel.noisePrintCaptured.connect(self._on_noise_print_captured)
             self._panel.denoiseRequested.connect(self._on_denoise_requested)
             self._panel.lufsNormalizeRequested.connect(self._on_lufs_normalize_requested)
+            # P2-7：变速/音高预览（长度事务提交待输出映射合同）。
+            self._panel.timePitchApplied.connect(self._on_time_pitch_requested)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -1436,6 +1475,39 @@ class ProjectClipEditor(QWidget):
         self._commit_audio_edit(
             append_step(clip.audio_edit, step),
             I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
+
+    def _on_time_pitch_requested(self, t0: float, t1: float, ratio_pct: float,
+                                 pitch_semitones: float, preserve: bool,
+                                 _algo: str) -> None:
+        """P2-7：选区变速/音高——预览态（选区两侧上下文保持原样拼接）。"""
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None:
+            return
+        from src.features.edit.core.audio_timepitch import (
+            pitch_shift, retime_nopreserve, retime_preserve,
+        )
+        raw = panel._raw_pcm
+        rate = panel._pcm_rate
+        duration = max(1e-9, raw.shape[1] / rate)
+        lo = int(round(max(0.0, t0) / duration * raw.shape[1]))
+        hi = int(round(min(duration, t1) / duration * raw.shape[1]))
+        lo, hi = max(0, lo), min(raw.shape[1], max(lo + 1, hi))
+        segment = raw[:, lo:hi]
+        try:
+            if abs(pitch_semitones) > 1e-6:
+                segment = pitch_shift(segment, rate, float(pitch_semitones))
+            if abs(ratio_pct - 100.0) > 1e-6:
+                segment = (retime_preserve if preserve else retime_nopreserve)(
+                    segment, rate, float(ratio_pct))
+        except ValueError as exc:
+            panel.info_label.setText(str(exc))
+            return
+        preview = np.concatenate([raw[:, :lo], segment, raw[:, hi:]], axis=1)
+        panel.set_timepitch_preview(np.ascontiguousarray(preview, dtype=np.float32))
+        panel.info_label.setText(I18N.tr(
+            "mixer.clip_editor.timepitch_preview_applied",
+            f"Preview: {preview.shape[1] / rate:.3f} s "
+            f"(was {duration:.3f} s) — commit needs the length transaction"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:
