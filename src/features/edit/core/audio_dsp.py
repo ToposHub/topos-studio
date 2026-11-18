@@ -3658,6 +3658,11 @@ def _ensure_effect_registry() -> dict:
         )
         _EFFECT_CLASS_REGISTRY["spectral_mangler"] = SpectralManglerAdapter
         _EFFECT_CLASS_REGISTRY["voice_changer"] = VoiceChangerAdapter
+        # P1（2026-11-19 计划第三阶段 #1）：De-Esser
+        from src.features.edit.core.audio_effects.adapters import (
+            DeEsserAdapter,
+        )
+        _EFFECT_CLASS_REGISTRY["de_esser"] = DeEsserAdapter
     return _EFFECT_CLASS_REGISTRY
 
 

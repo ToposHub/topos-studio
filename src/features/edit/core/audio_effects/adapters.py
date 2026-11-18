@@ -67,6 +67,18 @@ class SpectralManglerAdapter(_CompositeAdapterBase):
         return SpectralManglerEffect(sr)
 
 
+class DeEsserAdapter(_CompositeAdapterBase):
+    """P1 · De-Esser（对白片段/ADR/对白 Bus 的齿音抑制）。"""
+
+    effect_type = "de_esser"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.de_esser import (
+            DeEsserEffect,
+        )
+        return DeEsserEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 
