@@ -4712,6 +4712,16 @@ class EditControllerMixin:
             ),
         )
 
+    def _commit_mixer_clip_audio_edit(self, clip_id: str, audio_edit, label: str) -> None:
+        """P0-3：Clip Editor 处理栈事务（新增/旁路/删除/清空共用入口）。"""
+        from src.features.edit.core.commands import UpdateClipAudioEditCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id,
+            lambda clip: UpdateClipAudioEditCommand.create(
+                clip.track_id, clip, audio_edit, label=label),
+        )
+
     def _execute_mixer_clip_editor_command(
         self, clip_id: str, build_command: Callable[[Any], Any],
     ) -> None:

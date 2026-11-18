@@ -618,3 +618,63 @@ def test_audio_workspace_media_drop_semantics(project_host, qtbot, monkeypatch) 
         monkeypatch.setattr(TimelineSequence, "get_track_by_id", real_get_track)
     drop = view._resolve_media_drop_target(QPointF(300.0, 60.0), "audio", False)
     assert drop.is_valid and drop.track_id == "audio-track"
+
+
+def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tmp_path) -> None:
+    """P0-3：静音选区 → 工程命令 → 机架/预览刷新 → 一次撤销还原。"""
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    audio_path = tmp_path / "stack.wav"
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(48000)
+        wav.writeframes(b"\x30\x01\x30\x01" * 48000 * 5)  # 5 s 恒定电平
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Stack",
+        metadata={"audio_info": {"sample_rate": 48000, "channels": 2},
+                  "duration_seconds": 5.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Stack", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+
+    # 选区中段静音（信号路径与「静音」按钮一致）。
+    panel.canvas.setSelection(1.0, 4.0)
+    panel.silenceRequested.emit(1.0, 4.0)
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert edited.audio_edit is not None
+    steps = edited.audio_edit["steps"]
+    assert len(steps) == 1 and steps[0]["processor_id"] == "mute"
+    assert steps[0]["params"]["start"] == 48000 and steps[0]["params"]["end"] == 192000
+    # 命令落地后机架与预览刷新：中段被静音，边缘保持 3 ms 过渡。
+    assert len(panel._process_steps) == 1 and panel._process_steps[0]["type"] == "mute"
+    raw_mid = float(panel._raw_pcm[0][96000])
+    edited_mid = float(panel._pcm[0][96000])
+    assert raw_mid > 0.005 and abs(edited_mid) < 1e-6
+    assert abs(float(panel._pcm[0][48144])) < float(panel._raw_pcm[0][48144])
+    revision = view.get_timeline().revision
+
+    # 旁路是命令（可撤销），A/B 开关只是监听状态。
+    step_id = steps[0]["step_id"]
+    panel.processStepToggled.emit(step_id, False)
+    assert view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"][0]["enabled"] is False
+    qtbot.wait(10)
+    # 步骤在模型中已旁路 → 预览回原始；A/B 开关在此基础上只是监听态。
+    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
+    panel.btn_bypass.setChecked(True)
+    qtbot.wait(10)
+    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
+    panel.btn_bypass.setChecked(False)
+    qtbot.wait(10)
+    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
+
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"][0]["enabled"] is True
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
+    assert view.get_timeline().revision > revision  # 命令与撤销都入历史

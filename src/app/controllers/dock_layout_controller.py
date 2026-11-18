@@ -1380,6 +1380,8 @@ class DockLayoutMixin:
         panel.fade_curve_committed.connect(self._commit_mixer_clip_fade_curve)
         # P0-2：试听开始时暂停时间线播放，两套输出不叠音。
         panel.audition_active_changed.connect(self._pause_timeline_for_clip_audition)
+        # P0-3：处理栈提交走时间线命令（旁路/删除/清空可撤销）。
+        panel.audio_edit_committed.connect(self._commit_mixer_clip_audio_edit)
         panel.undo_requested.connect(view.undo)
         panel.redo_requested.connect(view.redo)
         panel.float_requested.connect(self._float_project_audio_clip_editor)

@@ -104,6 +104,7 @@ from src.features.edit.core.audio_dsp import (
     pan_gains_for_channels,
     balance_gains,
 )
+from src.features.edit.core.audio_edit import apply_clip_audio_edit
 from src.features.edit.core.channel_layout import adapt_channels
 from src.features.edit.core.source_patch import SourcePatchSpec
 from src.features.edit.core.timeline_v2 import StripEQParams, EffectChainParams
@@ -975,6 +976,8 @@ class AudioDecoder:
         self._fade: Optional[dict] = None
         # C3: 片段级增益（dB）
         self._gain_db: float = 0.0
+        # P0-3: Clip Editor 非破坏性处理栈（clip 增益/淡化之前应用）。
+        self._audio_edit: Optional[dict] = None
 
         # 小数采样累积器（消除 int() 截断导致的累积漂移）
         self._fractional_offset: float = 0.0
@@ -1082,6 +1085,14 @@ class AudioDecoder:
         （混音顺序：clip gain → clip 包络 → track automation → volume）。
         """
         self._gain_db = max(-48.0, min(12.0, float(gain_db)))
+
+    def set_audio_edit(self, audio_edit: Any) -> None:
+        """P0-3：Clip Editor 非破坏性处理栈（clip 增益/淡化之前应用）。
+
+        结构与校验合同见 core/audio_edit.py；None 清除。未知 processor
+        的载荷已在命令构造时阻断，这里只做消费。
+        """
+        self._audio_edit = audio_edit if isinstance(audio_edit, dict) else None
 
     def set_fade(self, timeline_start: int, timeline_duration: int,
                  fade_in_frames: int = 0, fade_out_frames: int = 0,
@@ -2900,6 +2911,21 @@ class AudioMixer:
                                 # 与导出侧回退一致：首声道广播到目标声道。
                                 samples = np.repeat(
                                     samples[:1], output_channels, axis=0)
+
+                    # P0-3: Clip Editor 处理栈（非破坏性 audio_edit 步骤）。
+                    # 固定顺序：源解码/裁剪/retime → 处理栈 → clip 增益/淡化
+                    # → Clip FX → 轨链。块首样本 = (当前帧 - 片段起始帧) 折算
+                    # 的片段局部输出样本（processing_rate 域）。
+                    audio_edit = getattr(decoder, "_audio_edit", None)
+                    if audio_edit is not None and samples.shape[-1] > 0:
+                        clip_start_frame = int(
+                            getattr(decoder, "_timeline_start", 0) or 0)
+                        block_start_sample = int(round(
+                            (current_frame - clip_start_frame)
+                            * self._sample_rate / fps))
+                        samples = apply_clip_audio_edit(
+                            samples, block_start_sample, audio_edit,
+                            sample_rate=int(self._sample_rate))
 
                     # RMA-03: clip 淡入/淡出（实时路径此前完全不处理，与离线导出漂移）。
                     # 在声道扩展后、clip-FX/track 处理前应用，作用于该 clip 原始信号。
@@ -5198,6 +5224,7 @@ class AudioPlaybackManager(QObject):
         fade_curve: Optional[str] = None,
         fade_curve_in: Optional[str] = None,
         fade_curve_out: Optional[str] = None,
+        audio_edit: Optional[dict] = None,
     ) -> bool:
         """
         添加音频轨道。
@@ -5279,6 +5306,9 @@ class AudioPlaybackManager(QObject):
                              fade_curve_out=fade_curve_out)
         # C3: 片段级增益
         decoder.set_gain_db(gain_db)
+        # P0-3: Clip Editor 处理栈（clip 增益/淡化之前应用；None = 无编辑）
+        if audio_edit:
+            decoder.set_audio_edit(audio_edit)
 
         # 创建状态
         state = initial_state or AudioTrackState(track_id=track_id)

@@ -29,6 +29,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
+from src.features.edit.core.audio_edit import steps_signature
+
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
@@ -54,6 +56,8 @@ class ClipNodeSnapshot:
     fade_curve_in: Optional[str] = None
     fade_curve_out: Optional[str] = None
     effects_signature: Tuple = ()  # clip FX 摘要
+    # P0-3：Clip Editor 处理栈摘要（enabled 步骤的有序指纹；变化必须重建）。
+    audio_edit_signature: Tuple = ()
 
 
 @dataclass(frozen=True)
@@ -124,7 +128,7 @@ class AudioGraphSnapshot:
             "c": [(c.clip_id, c.asset_id, c.source_start, c.timeline_start,
                    c.timeline_duration, c.speed, c.fade_in_frames, c.fade_out_frames,
                    c.fade_curve, c.fade_curve_in, c.fade_curve_out,
-                   c.effects_signature) for c in self.clips],
+                   c.effects_signature, c.audio_edit_signature) for c in self.clips],
             # track: is_enabled（禁用轨不发声）
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
                    t.output_bus_id, t.sends, t.strip_eq_signature,
@@ -239,6 +243,8 @@ def build_audio_graph_snapshot(
                 fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
                 fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
                 effects_signature=_clip_effects_signature(clip),
+                audio_edit_signature=steps_signature(
+                    getattr(clip, "audio_edit", None)),
             ))
 
     # track/bus 节点
