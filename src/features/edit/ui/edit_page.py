@@ -1671,6 +1671,9 @@ class EditPage(QWidget):
                         clip, "effective_fade_curve_out", None),
                     # P0-3：Clip Editor 处理栈（混音顺序在 clip 增益/淡化前）
                     audio_edit=getattr(clip, "audio_edit", None),
+                    # §3.3：预渲染处理栈（STFT 类步骤）绑定缓存基底
+                    pre_render_plan=self._resolve_pre_render_plan(
+                        project, track, clip, asset),
                 ):
                     registered_any = True
                     # P-clip-FX: 把该 clip 的 audio 效果同步到引擎
@@ -1992,6 +1995,9 @@ class EditPage(QWidget):
                     tuple(fx_sig),
                     # P0-3：处理栈变更必须重建引擎（旁路/删除/新增步骤）。
                     steps_signature(getattr(clip, "audio_edit", None)),
+                    # §3.3：预渲染缓存就绪状态入签名——后台构建完成时
+                    # pending→ready 变化触发重建，播放接入降噪基底。
+                    self._pre_render_signature_state(project, clip, asset),
                 ))
             # AM-02: Bus 轨即使无 clips 也生成 entry（否则 Bus 变更不扰动签名）。
             # 普通轨无 clips 且非 Bus 仍可跳过（无声音贡献）。
@@ -2049,6 +2055,69 @@ class EditPage(QWidget):
             master_auto_sig,
             master_strip_sig,
         )
+
+    # ------------------------------------------------------------------
+    # §3.3：预渲染 PCM 缓存的构建排队与签名就绪状态
+    # ------------------------------------------------------------------
+    def _resolve_pre_render_plan(self, project: Any, track: Any,
+                                 clip: Any, asset: Any) -> Any:
+        """片段的预渲染构建计划（无预渲染步骤返回 None）。"""
+        from src.features.edit.core.audio_edit import requires_pre_render
+        audio_edit = getattr(clip, "audio_edit", None)
+        if audio_edit is None or not requires_pre_render(audio_edit):
+            return None
+        from src.features.edit.core.pcm_render_cache import build_pre_render_plan
+        return build_pre_render_plan(project, self._current_timeline, clip, asset)
+
+    def _pre_render_signature_state(self, project: Any, clip: Any,
+                                    asset: Any) -> Any:
+        """签名的缓存就绪状态；pending 时排队一次后台构建。"""
+        from src.features.edit.core.audio_edit import requires_pre_render
+        audio_edit = getattr(clip, "audio_edit", None)
+        if audio_edit is None or not requires_pre_render(audio_edit):
+            return None
+        from src.features.edit.core.pcm_render_cache import (
+            build_pre_render_plan, get_pcm_render_cache,
+        )
+        plan = build_pre_render_plan(project, self._current_timeline, clip, asset)
+        if plan is None:
+            return None
+        if plan.blocked_reason:
+            return ("blocked", plan.blocked_reason)
+        cache = get_pcm_render_cache()
+        spec = plan.spec()
+        if cache.has(spec):
+            return ("ready", spec.key)
+        cache.spawn_build(spec, plan.builder())
+        self._ensure_pre_render_bridge()
+        return ("pending", spec.key)
+
+    def _ensure_pre_render_bridge(self) -> Any:
+        """缓存构建完成 → 主线程重同步（跨线程信号排队，构建线程安全）。"""
+        bridge = getattr(self, "_pre_render_bridge", None)
+        if bridge is not None:
+            return bridge
+        from PyQt6.QtCore import QObject, pyqtSignal
+
+        class _PreRenderBridge(QObject):
+            built = pyqtSignal(str)
+
+        bridge = _PreRenderBridge(self)
+        bridge.built.connect(self._on_pre_render_built)
+        from src.features.edit.core.pcm_render_cache import get_pcm_render_cache
+
+        def _listener(key: str) -> None:
+            bridge.built.emit(key)
+
+        get_pcm_render_cache().add_listener(_listener)
+        self._pre_render_bridge = bridge
+        return bridge
+
+    def _on_pre_render_built(self, key: str) -> None:
+        """一条预渲染缓存落盘：重算签名（pending→ready 触发引擎重建）。"""
+        if not self._audio_active:
+            return
+        self._sync_audio_tracks_from_timeline()
 
     def _build_timeline_preview_signature(self, timeline: Any) -> tuple[Any, ...]:
         """Return timeline state that can change visible program preview pixels."""

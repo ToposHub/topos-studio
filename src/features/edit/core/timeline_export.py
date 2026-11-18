@@ -806,6 +806,14 @@ def preflight_audio_export(
     degraded: List[str] = []
     blockers: List[Any] = []
 
+    # §3.3：预渲染处理栈可构建性（缺 SciPy/超长/倒放都会让交付静默
+    # 少掉降噪——与 EQ/LUFS 同一 RMA-01 阻断语义）。
+    if sequence is not None and config.include_audio:
+        from src.features.edit.core.pcm_render_cache import (
+            preflight_pre_render_steps,
+        )
+        blocking.extend(preflight_pre_render_steps(sequence))
+
     # H01：FX 链逐实例能力（future 版本 / 后端缺失 / 未知类型）。
     # 预览与导出共用 collect_chain_diagnostics 同一判断。Bus 与普通轨
     # 同在 audio_tracks（is_bus 区分），外加 master 链。
@@ -4848,8 +4856,25 @@ class TimelineExporter:
                             _audio_edit = getattr(clip, "audio_edit", None)
                             if _audio_edit and samples.shape[-1] > 0:
                                 from src.features.edit.core.audio_edit import (
-                                    apply_clip_audio_edit as _apply_audio_edit,
+                                    apply_clip_audio_edit_block as _apply_audio_edit,
                                 )
+                                # §3.3：预渲染步骤走缓存基底（离线同步构建）。
+                                _pre_base = None
+                                from src.features.edit.core.audio_edit import (
+                                    requires_pre_render,
+                                )
+                                if requires_pre_render(_audio_edit):
+                                    from src.features.edit.core.pcm_render_cache import (
+                                        resolve_export_pre_render_base,
+                                    )
+                                    _pre_base, _pre_diag = (
+                                        resolve_export_pre_render_base(
+                                            self._project, self._sequence,
+                                            clip, asset))
+                                    for _msg in _pre_diag:
+                                        logger.warning(
+                                            "clip %s pre-render degraded: %s",
+                                            clip.clip_id, _msg)
                                 samples = _apply_audio_edit(
                                     samples,
                                     int(round(
@@ -4857,6 +4882,7 @@ class TimelineExporter:
                                         * sample_rate / fps)),
                                     _audio_edit,
                                     sample_rate=int(sample_rate),
+                                    pre_render_base=_pre_base,
                                 )
 
                             # C3: 片段级增益（clip gain → renderer 节点链之前）

@@ -694,3 +694,76 @@ def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tm
     view.undo()
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
     assert view.get_timeline().revision > revision  # 命令与撤销都入历史
+
+
+def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_path) -> None:
+    """§3.3 + P1-6：采集噪声 → 降噪入栈（spectral_denoise 预渲染步骤）。
+
+    入栈后：模型持步骤（幂等替换）、机架显示、预览 PCM 与缓存基底
+    同语义（噪声区 RMS 显著下降）、撤销还原。
+    """
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    rate = 48000
+    rng = np.random.default_rng(20261118)
+    noise = (rng.standard_normal((2, 4 * rate)) * 0.02).astype(np.float32)
+    audio_path = tmp_path / "noisy.wav"
+    interleaved = np.empty((noise.shape[1], 2), dtype="<i2")
+    interleaved[:, 0] = (noise[0] * 32000).astype("<i2")
+    interleaved[:, 1] = (noise[1] * 32000).astype("<i2")
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(interleaved.tobytes())
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Noisy",
+        metadata={"audio_info": {"sample_rate": rate, "channels": 2},
+                  "duration_seconds": 4.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Noisy", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+
+    # 采集 [0.05, 0.95) s 的纯噪声 → 降噪入栈选区 [1.0, 4.0) s。
+    panel.canvas.setSelection(0.05, 0.95)
+    panel.noisePrintCaptured.emit(0.05, 0.95)
+    assert panel._noise_profile is not None and panel._noise_profile.is_valid
+    panel.canvas.setSelection(1.0, 4.0)
+    panel.denoiseRequested.emit(1.0, 4.0, 12.0)
+
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert edited.audio_edit is not None
+    steps = edited.audio_edit["steps"]
+    assert len(steps) == 1 and steps[0]["processor_id"] == "spectral_denoise"
+    params = steps[0]["params"]
+    assert params["start"] == 48000 and params["end"] == 192000
+    assert params["noise_end"] > params["noise_start"] >= 0
+    assert params["reduction_db"] == 12.0
+    # 机架由模型驱动显示降噪步骤。
+    assert len(panel._process_steps) == 1
+    assert panel._process_steps[0]["type"] == "spectral_denoise"
+
+    # 预览与缓存基底同语义：噪声区 RMS 显著下降（≥4 dB）。
+    def _rms(data: np.ndarray) -> float:
+        return float(np.sqrt(np.mean(np.square(data[0, 60000:180000].astype(np.float64)))))
+
+    raw_rms = _rms(panel._raw_pcm)
+    edited_rms = _rms(panel._pcm)
+    assert raw_rms > 0.005
+    assert edited_rms < raw_rms * 10 ** (-4.0 / 20.0)
+
+    # 重复提交是幂等替换（同一处理器只保留最新参数）。
+    panel.denoiseRequested.emit(1.0, 4.0, 6.0)
+    steps = view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"]
+    assert len(steps) == 1 and steps[0]["params"]["reduction_db"] == 6.0
+
+    view.undo()  # 撤销 6 dB 替换提交
+    view.undo()  # 撤销首次入栈
+    assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None

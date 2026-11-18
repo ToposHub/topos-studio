@@ -241,6 +241,7 @@ def _iter_stem_pcm_chunks(
     sequence_resolver: Optional[Callable] = None,
     asset_lookup: Optional[Callable] = None,
     chunk_frames: Optional[int] = None,
+    pre_render_base_fn: Optional[Callable] = None,
 ) -> Iterator[np.ndarray]:
     """按时间块流式渲染单个 stem 的 PCM（AUD-18216）。
 
@@ -605,8 +606,13 @@ def _iter_stem_pcm_chunks(
                 _audio_edit = getattr(clip, "audio_edit", None)
                 if _audio_edit and samples.shape[-1] > 0:
                     from src.features.edit.core.audio_edit import (
-                        apply_clip_audio_edit as _apply_audio_edit,
+                        apply_clip_audio_edit_block as _apply_audio_edit,
+                        requires_pre_render,
                     )
+                    # §3.3：预渲染步骤走缓存基底（调用方提供解析回调）。
+                    _pre_base = None
+                    if requires_pre_render(_audio_edit) and pre_render_base_fn is not None:
+                        _pre_base = pre_render_base_fn(clip)
                     samples = _apply_audio_edit(
                         samples,
                         int(round(
@@ -614,6 +620,7 @@ def _iter_stem_pcm_chunks(
                             * sample_rate / fps)),
                         _audio_edit,
                         sample_rate=int(sample_rate),
+                        pre_render_base=_pre_base,
                     )
 
                 # C3: 片段级增益（renderer 节点链之前）。
@@ -835,6 +842,7 @@ def render_stem_pcm(
     decode_clip_fn: Optional[Callable] = None,
     sequence_resolver: Optional[Callable] = None,
     asset_lookup: Optional[Callable] = None,
+    pre_render_base_fn: Optional[Callable] = None,
 ) -> Optional[np.ndarray]:
     """渲染单个 stem 的完整 PCM（兼容入口；模型/测试用）。
 
@@ -859,6 +867,7 @@ def render_stem_pcm(
         decode_clip_fn=decode_clip_fn,
         sequence_resolver=sequence_resolver,
         asset_lookup=asset_lookup,
+        pre_render_base_fn=pre_render_base_fn,
     ))
     if not chunks:
         return None
@@ -1044,6 +1053,7 @@ def export_all_stems(
     cancel_check: Optional[Callable[[], bool]] = None,
     sequence_resolver: Optional[Callable] = None,
     asset_lookup: Optional[Callable] = None,
+    pre_render_base_fn: Optional[Callable] = None,
 ) -> StemExportResult:
     """导出工程的全部 stem（AM-10 阶段 3.5 顶层入口）。
 
@@ -1102,6 +1112,7 @@ def export_all_stems(
             # 先探测首块：无内容的 stem 保持旧行为（不产出文件）。
             gen = _iter_stem_pcm_chunks(
                 sequence, spec, sample_rate, channels, decode_clip_fn,
+                pre_render_base_fn=pre_render_base_fn,
             )
             first = next(gen, None)
             if first is None:
@@ -1202,6 +1213,42 @@ def build_routing_manifest(sequence: "TimelineSequence") -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # B2: 生产解码工厂（对话框 worker 用）
 # ─────────────────────────────────────────────────────────────────────────────
+
+def create_pre_render_base_fn(
+    project: Any,
+    sequence: "TimelineSequence",
+) -> Callable[[Any], Optional[np.ndarray]]:
+    """§3.3：Stem 导出的预渲染基底工厂（按 clip_id 记忆化 + 同步构建）。
+
+    只有含预渲染步骤的 clip 才触发解析；诊断降级留痕（SciPy 缺席/
+    超长/倒放时该 clip 走 inline-only，与成片导出的回退一致）。
+    """
+    memo: Dict[str, Optional[np.ndarray]] = {}
+
+    def _base_for(clip: Any) -> Optional[np.ndarray]:
+        clip_id = str(getattr(clip, "clip_id", "") or "")
+        if clip_id in memo:
+            return memo[clip_id]
+        from src.features.edit.core.audio_edit import requires_pre_render
+        audio_edit = getattr(clip, "audio_edit", None)
+        if audio_edit is None or not requires_pre_render(audio_edit):
+            memo[clip_id] = None
+            return None
+        from src.features.edit.core.pcm_render_cache import (
+            resolve_export_pre_render_base,
+        )
+        asset = getattr(project, "assets", {}).get(
+            getattr(clip, "asset_id", "")) if project is not None else None
+        base, diagnostics = resolve_export_pre_render_base(
+            project, sequence, clip, asset)
+        for message in diagnostics:
+            logger.warning("stem pre-render degraded for clip %s: %s",
+                           clip_id, message)
+        memo[clip_id] = base
+        return base
+
+    return _base_for
+
 
 def create_clip_decode_fn(
     project: Any,

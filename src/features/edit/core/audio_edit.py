@@ -25,6 +25,10 @@ Coordinate contract (roadmap §3):
 - V1 processors are all length-preserving; a step that would change length
   must additionally persist an input/output mapping and is rejected by this
   registry with an explicit diagnostic until those land (P2).
+- ``pre_render`` processors (``spectral_denoise``) apply as a group over the
+  whole clip before the inline steps — their STFT semantics cannot survive
+  block splitting, so they are baked into a cached base PCM
+  (``pcm_render_cache``) that the three render paths slice per block.
 
 Render order guarantee: source decode → trim/binding/retime → **this stack**
 → native clip gain / envelope / fades → Clip FX → Track FX → Master.
@@ -67,8 +71,22 @@ PROCESSORS: dict[str, dict[str, Any]] = {
         "length_preserving": True,
         "description": "Multiply selected channels by −1 (polarity invert) over a range.",
     },
+    "spectral_denoise": {
+        "algorithm_version": 1,
+        "length_preserving": True,
+        # §3.3：STFT 类处理器不能按块保持整段语义，走预渲染 PCM 缓存。
+        "pre_render": True,
+        "description": (
+            "Soft spectral-subtraction denoise over a range using a captured "
+            "noise print (pre-rendered)."
+        ),
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
+# 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
+# 其有序签名索引（pcm_render_cache）。
+PRE_RENDER_PROCESSORS = frozenset(
+    pid for pid, meta in PROCESSORS.items() if meta.get("pre_render"))
 
 
 def new_audio_edit(steps: Optional[list[dict]] = None, **extra: Any) -> dict:
@@ -185,8 +203,14 @@ def validate_audio_edit(
             diagnostics.append(
                 f"{where}: channel index out of range for {channel_count}-channel clip")
         gain_db = params.get("gain_db")
-        if processor_id not in ("mute", "channel_polarity") and not isinstance(gain_db, (int, float)):
+        if (processor_id not in ("mute", "channel_polarity", "spectral_denoise")
+                and not isinstance(gain_db, (int, float))):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
+        if processor_id in PRE_RENDER_PROCESSORS:
+            diagnostics.extend(_validate_pre_render_step(
+                where, processor_id, params,
+                rate=audio_edit.get("processing_rate", PROCESSING_RATE),
+                clip_output_samples=clip_output_samples))
     envelope = audio_edit.get("envelope", [])
     if envelope is not None:
         if not isinstance(envelope, list):
@@ -231,6 +255,199 @@ def validate_audio_edit(
                 if not isinstance(marker.get("local_sample"), int) or marker["local_sample"] < 0:
                     diagnostics.append(f"{where}: local_sample must be a non-negative int")
     return diagnostics
+
+
+def _validate_pre_render_step(
+    where: str,
+    processor_id: str,
+    params: dict,
+    *,
+    rate: int,
+    clip_output_samples: int | None,
+) -> list[str]:
+    """预渲染处理器的逐条诊断（值域/区间/依赖 SciPy）。"""
+    if processor_id != "spectral_denoise":
+        return []
+    from src.features.edit.core.audio_denoise import MIN_NOISE_SECONDS, SUPPORTED_NFFT
+    diagnostics: list[str] = []
+    nfft = params.get("nfft", 2048)
+    if nfft not in SUPPORTED_NFFT:
+        diagnostics.append(f"{where}: nfft {nfft!r} must be one of {SUPPORTED_NFFT}")
+        nfft = 2048
+    reduction_db = params.get("reduction_db", 12.0)
+    if not isinstance(reduction_db, (int, float)) or not 0.0 <= float(reduction_db) <= 48.0:
+        diagnostics.append(
+            f"{where}: reduction_db {reduction_db!r} must be within [0, 48]")
+    noise_start, noise_end = params.get("noise_start"), params.get("noise_end")
+    if (not isinstance(noise_start, int) or not isinstance(noise_end, int)
+            or not 0 <= noise_start < noise_end):
+        diagnostics.append(
+            f"{where}: noise range [{noise_start!r}, {noise_end!r}) is not half-open valid")
+        return diagnostics
+    if clip_output_samples is not None and noise_end > clip_output_samples:
+        diagnostics.append(
+            f"{where}: noise end {noise_end} exceeds clip output samples "
+            f"{clip_output_samples}")
+    # 采集时长与 DSP 同一门槛（≥ max(0.25 s, nfft + 5 hops)）。
+    minimum = max(round(MIN_NOISE_SECONDS * rate), int(nfft) + 5 * (int(nfft) // 4))
+    if noise_end - noise_start < minimum:
+        diagnostics.append(
+            f"{where}: noise print needs ≥ {minimum} samples "
+            f"(≥ {MIN_NOISE_SECONDS:.2f} s) at {rate} Hz")
+    return diagnostics
+
+
+def requires_pre_render(audio_edit: Any) -> bool:
+    """enabled 步骤里是否含预渲染处理器（决定渲染路径走缓存基底）。"""
+    if not isinstance(audio_edit, dict):
+        return False
+    for step in audio_edit.get("steps", []) or []:
+        if (isinstance(step, dict) and step.get("enabled", True)
+                and step.get("processor_id") in PRE_RENDER_PROCESSORS):
+            return True
+    return False
+
+
+def pre_render_steps(audio_edit: Any) -> list[dict]:
+    """按栈序取出 enabled 的预渲染步骤（整段烘焙的输入）。"""
+    if not isinstance(audio_edit, dict):
+        return []
+    return [
+        step for step in audio_edit.get("steps", []) or []
+        if (isinstance(step, dict) and step.get("enabled", True)
+            and step.get("processor_id") in PRE_RENDER_PROCESSORS)
+    ]
+
+
+def inline_audio_edit(audio_edit: Any) -> Any:
+    """去掉预渲染步骤的 audio_edit 副本（块路径在缓存基底上应用的部分）。
+
+    包络/标记保留（块求值器只处理 inline 步骤 + 包络）；无步骤且无包络时
+    返回仅含空 steps 的结构，``apply_clip_audio_edit`` 自然恒等。
+    """
+    if not isinstance(audio_edit, dict):
+        return audio_edit
+    updated = copy.deepcopy(audio_edit)
+    updated["steps"] = [
+        step for step in updated.get("steps", []) or []
+        if not (isinstance(step, dict)
+                and step.get("processor_id") in PRE_RENDER_PROCESSORS)
+    ]
+    return updated
+
+
+def replace_processor_step(audio_edit: Any, processor_id: str, step: dict) -> dict:
+    """用 ``step`` 替换该处理器的既有步骤（没有则追加；其余步骤保持原序）。
+
+    降噪等“重调参数”类提交的幂等入口——重复点击不会堆叠同处理器步骤。
+    """
+    base = copy_audio_edit(audio_edit) if isinstance(audio_edit, dict) else new_audio_edit()
+    steps = [
+        existing for existing in base.get("steps", []) or []
+        if not (isinstance(existing, dict)
+                and existing.get("processor_id") == processor_id)
+    ]
+    steps.append(step)
+    base["steps"] = steps
+    return base
+
+
+def render_pre_render_steps(
+    pcm: np.ndarray,
+    audio_edit: Any,
+    *,
+    sample_rate: int = PROCESSING_RATE,
+    progress: Any = None,
+    cancel_check: Any = None,
+) -> np.ndarray:
+    """整段应用预渲染步骤（缓存构建/编辑器预览共用；不修改输入）。
+
+    SciPy 缺席时显式抛错——静默旁路会破坏「试听 == 播放 == 导出」合同。
+    ``progress``: Callable[[float], None]；``cancel_check``: Callable[[], bool]。
+    """
+    steps = pre_render_steps(audio_edit)
+    if not steps:
+        return pcm
+    from src.features.edit.core.audio_denoise import (
+        denoise_spectral_subtraction, scipy_available,
+    )
+    if not scipy_available():
+        raise RuntimeError("SciPy DSP backend unavailable for pre-render steps")
+    out = pcm
+    for step in steps:
+        processor_id = step.get("processor_id")
+        params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+        if processor_id == "spectral_denoise":
+            def _progress(fraction: float, _params=params) -> bool:
+                if progress is not None:
+                    progress(float(fraction))
+                return not (cancel_check is not None and cancel_check())
+
+            out = denoise_spectral_subtraction(
+                out,
+                sample_rate,
+                (int(params.get("noise_start", 0)), int(params.get("noise_end", 0))),
+                (int(params.get("start", 0)), int(params.get("end", 0))),
+                float(params.get("reduction_db", 12.0)),
+                nfft=int(params.get("nfft", 2048)),
+                link_stereo=bool(params.get("link_stereo", True)),
+                progress=_progress,
+            )
+        else:  # 注册表扩张时漏接的实现——显式失败而非静默跳过
+            raise RuntimeError(
+                f"pre-render processor {processor_id!r} has no renderer")
+    return out
+
+
+def _slice_pre_render_base(
+    base: np.ndarray, block_start: int, count: int,
+) -> np.ndarray:
+    """从整段基底切出块（尾端不足补零——帧↔样本舍入会多出少量样本）。"""
+    lo = max(0, int(block_start))
+    hi = min(base.shape[1], lo + max(0, count))
+    if hi <= lo:
+        return np.zeros((base.shape[0], max(0, count)), dtype=np.float32)
+    block = base[:, lo:hi]
+    if hi - lo < count:
+        block = np.concatenate([
+            block,
+            np.zeros((base.shape[0], count - (hi - lo)), dtype=np.float32),
+        ], axis=1)
+    return block
+
+
+def apply_clip_audio_edit_block(
+    samples: np.ndarray,
+    block_start_sample: int,
+    audio_edit: Any,
+    *,
+    sample_rate: int = PROCESSING_RATE,
+    pre_render_base: np.ndarray | None = None,
+) -> np.ndarray:
+    """三条渲染路径共用的块入口：预渲染基底 + inline 步骤/包络。
+
+    - ``pre_render_base`` 提供时（缓存命中）：以基底切块替换解码块，再应用
+      inline 步骤 + 包络（预渲染步骤已烘焙在基底里）。
+    - 缺席时（缓存构建中）：临时回退为 inline-only——构建完成由引擎签名
+      变化触发重建接入降噪基底，栈状态可见（排队/计算/已提交）。
+    """
+    if audio_edit is None or not isinstance(audio_edit, dict):
+        return samples
+    if requires_pre_render(audio_edit):
+        audio_edit = inline_audio_edit(audio_edit)
+        if pre_render_base is not None and samples.shape[-1] > 0:
+            block = _slice_pre_render_base(
+                pre_render_base, block_start_sample, samples.shape[-1])
+            if block.shape[0] != samples.shape[0]:
+                # 解码层 >2ch 已混到 stereo；基底与输出声道数不一致时按
+                # 导出/播放的同一保守策略（首声道广播/截断）对齐。
+                if block.shape[0] == 1:
+                    block = np.repeat(block, samples.shape[0], axis=0)
+                else:
+                    block = block[:samples.shape[0]]
+            samples = np.ascontiguousarray(block, dtype=np.float32)
+    return apply_clip_audio_edit(
+        samples, block_start_sample, audio_edit, sample_rate=sample_rate)
 
 
 def steps_signature(audio_edit: Any) -> tuple:
@@ -416,6 +633,10 @@ def apply_clip_audio_edit(
         processor_id = step.get("processor_id")
         if processor_id not in KNOWN_PROCESSOR_IDS:
             return samples  # 未知处理器：保持原样（上游 validate 负责阻断）
+        if processor_id in PRE_RENDER_PROCESSORS:
+            # 预渲染处理器在基底 PCM 中烘焙（apply_clip_audio_edit_block
+            # 负责 inline/基底分派）；直接走块路径的旧调用方同样安全跳过。
+            continue
         params = step.get("params", {})
         start, end = params.get("start", 0), params.get("end", 0)
         channels = params.get("channels") or []
