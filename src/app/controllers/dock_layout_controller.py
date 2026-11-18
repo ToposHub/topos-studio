@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Literal
 
 from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction
@@ -1299,7 +1299,7 @@ class DockLayoutMixin:
     def _create_audio_workspace_docks(
         self, factory: Callable[[str, QWidget, str], QDockWidget],
     ) -> None:
-        """Parent the local Mixer session's panels into independent native docks."""
+        """Create independent hosts for the Mixer workspace."""
         for dock_attr in ("dock_audio_console", "dock_audio_viewer",
                           "dock_audio_timeline", "dock_audio_clip_editor"):
             setattr(self, dock_attr, None)
@@ -1308,13 +1308,31 @@ class DockLayoutMixin:
             return
         # The feature directory can be physically absent from other products.
         from src.features.mixer.module import MIXER_PANEL_SPECS
+        page.project_backed = bool(
+            getattr(self, "_edit_available", False)
+            and self.edit_page is not None and self.timeline_panel is not None
+            and self.program_viewer_widget is not None and self.edit_properties_panel is not None
+        )
         object_names = {
             "console": "dockAudioConsole", "viewer": "dockAudioViewer",
             "timeline": "dockAudioTimeline", "clip_editor": "dockAudioClipEditor",
         }
         for key, dock_attr, panel_attr, title in MIXER_PANEL_SPECS:
-            dock = factory(I18N.tr(f"panel.audio_{key}", title),
-                           getattr(page, panel_attr), object_names[key])
+            if page.project_backed and key == "clip_editor":
+                from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
+
+                panel = ProjectClipEditor()
+            elif page.project_backed:
+                panel = QWidget()
+                layout = QVBoxLayout(panel)
+                layout.setContentsMargins(0, 0, 0, 0)
+            else:
+                panel = getattr(page, panel_attr)
+            title_key = {
+                "console": "panel.audio_mixer", "viewer": "panel.edit_viewport",
+            }.get(key, f"panel.audio_{key}")
+            dock = factory(I18N.tr(title_key, title),
+                           panel, object_names[key])
             dock.setProperty("mixer_workspace_panel", True)
             # A visible native drag handle matters for independent panels;
             # unlike tabbed legacy docks these must not have a 1px titlebar.
@@ -1324,6 +1342,211 @@ class DockLayoutMixin:
                                Qt.DockWidgetArea.BottomDockWidgetArea, dock)
             dock.hide()
             setattr(self, dock_attr, dock)
+        if page.project_backed:
+            self._bind_project_audio_clip_editor()
+
+    def _bind_project_audio_clip_editor(self) -> None:
+        dock = self.dock_audio_clip_editor
+        panel = dock.widget()
+        view = self.timeline_panel.get_timeline_view()
+        view.set_professional_audio_editor_available(True)
+        view.audio_clip_editor_requested.connect(self._open_project_audio_clip_editor)
+        view.track_record_requested.connect(self._on_mixer_timeline_record_requested)
+        display_changed = getattr(self.edit_page, "timeline_display_changed", None)
+        if display_changed is not None:
+            display_changed.connect(panel.sync_clip)
+            display_changed.connect(self._sync_mixer_timeline_recorders)
+        else:
+            view.timeline_changed.connect(panel.sync_clip)
+        media_pool = getattr(self, "media_pool_panel", None)
+        if media_pool is not None:
+            media_pool.project_changed.connect(panel.sync_project)
+            media_pool.set_professional_audio_editor_available(True)
+            media_pool.professional_audio_editor_requested.connect(self._open_project_audio_source_editor)
+        panel.gain_committed.connect(self._commit_mixer_clip_gain)
+        panel.fade_committed.connect(self._commit_mixer_clip_fade)
+        panel.sample_fade_committed.connect(self._commit_mixer_clip_sample_fade)
+        panel.fade_curve_committed.connect(self._commit_mixer_clip_fade_curve)
+        panel.undo_requested.connect(view.undo)
+        panel.redo_requested.connect(view.redo)
+        panel.float_requested.connect(self._float_project_audio_clip_editor)
+        panel.tab_requested.connect(self._tab_project_audio_clip_editor)
+        panel.timeline_requested.connect(self._raise_mixer_audio_timeline)
+        panel.close_requested.connect(dock.hide)
+        self._audio_clip_editor_placed = False
+        self._opening_audio_clip_editor = False
+        self.tabifiedDockWidgetActivated.connect(self._on_mixer_audio_dock_activated)
+        dock.topLevelChanged.connect(self._sync_mixer_clip_editor_title_bar)
+        dock.visibilityChanged.connect(self._on_project_audio_clip_editor_visibility_changed)
+
+    def _load_project_audio_clip_editor(self, clip_id: str, *, activate_workspace: bool = False) -> bool:
+        view = self.timeline_panel.get_timeline_view()
+        timeline = view.get_timeline()
+        clip = timeline.get_clip_by_id(clip_id) if timeline is not None else None
+        track = timeline.get_track_by_id(clip.track_id) if clip is not None else None
+        project = getattr(self, "_current_edit_project", None)
+        asset = project.assets.get(clip.asset_id) if clip is not None and project is not None else None
+        if track is None or track.track_type != "audio" or asset is None:
+            self.statusBar().showMessage(I18N.tr("mixer.clip_editor.offline", "Audio media is unavailable"), 4000)
+            return False
+        if activate_workspace and not self._activate_workspace_for_audio_editor():
+            return False
+        self.dock_audio_clip_editor.widget().open_clip(timeline, clip, asset, project=project)
+        return True
+
+    def _open_project_audio_clip_editor(self, clip_id: str) -> None:
+        if not self._load_project_audio_clip_editor(clip_id, activate_workspace=True):
+            return
+        self._show_project_audio_clip_editor("clip")
+
+    def _on_mixer_audio_dock_activated(self, active_dock: QDockWidget) -> None:
+        dock = self.dock_audio_clip_editor
+        if active_dock not in (dock, self.dock_audio_timeline) or self.current_page != "Mixer":
+            return
+        self._sync_mixer_clip_editor_title_bar()
+        if active_dock is dock:
+            self._load_selected_audio_clip_for_editor()
+
+    def _on_project_audio_clip_editor_visibility_changed(self, visible: bool) -> None:
+        dock = self.dock_audio_clip_editor
+        if visible and self.current_page == "Mixer" and not self.tabifiedDockWidgets(dock):
+            self._load_selected_audio_clip_for_editor()
+
+    def _load_selected_audio_clip_for_editor(self) -> None:
+        if self._opening_audio_clip_editor:
+            return
+        panel = self.dock_audio_clip_editor.widget()
+        clip_id = self.timeline_panel.get_timeline_view().selected_audio_clip_id()
+        if clip_id is not None and self._load_project_audio_clip_editor(clip_id):
+            return
+        if clip_id is not None or panel.clip_id is not None:
+            panel.reset()
+
+    def _sync_mixer_clip_editor_title_bar(self, _floating: bool = False) -> None:
+        dock = self.dock_audio_clip_editor
+        floating = dock.isFloating()
+        tabbed = not floating and self.dock_audio_timeline in self.tabifiedDockWidgets(dock)
+        dock.titleBarWidget().setFixedHeight(0 if tabbed else _FLOATING_TITLEBAR_HEIGHT)
+        dock.widget().set_dock_mode(floating=floating, tabbed=tabbed)
+
+    def _open_project_audio_source_editor(self, asset_id: str) -> None:
+        project = getattr(self, "_current_edit_project", None)
+        asset = project.assets.get(asset_id) if project is not None else None
+        if asset is None or not asset.is_audio or not self._activate_workspace_for_audio_editor():
+            return
+        self.dock_audio_clip_editor.widget().open_source(asset, project=project)
+        self._show_project_audio_clip_editor("source")
+
+    def _activate_workspace_for_audio_editor(self) -> bool:
+        if self.current_page != "Mixer":
+            self.switch_to_page("Mixer")
+        return self.current_page == "Mixer"
+
+    def _show_project_audio_clip_editor(self, placement: Literal["clip", "source", "tabbed", "floating"]) -> None:
+        dock = self.dock_audio_clip_editor
+        self._opening_audio_clip_editor = True
+        try:
+            first_open = not (self._audio_clip_editor_placed or dock.isVisible() or dock.isFloating()
+                              or self.tabifiedDockWidgets(dock))
+            if placement == "tabbed" or (placement == "clip" and first_open):
+                self._dock_project_audio_clip_editor_with_timeline()
+            elif placement == "floating" or (placement == "source" and first_open):
+                dock.setFloating(True)
+                dock.resize(1220, 780)
+            self._audio_clip_editor_placed = True
+            self._sync_mixer_clip_editor_title_bar()
+            self._focus_project_audio_clip_editor()
+        finally:
+            self._opening_audio_clip_editor = False
+        if dock.isFloating():
+            # The native context menu may be relinquishing focus this turn.
+            QTimer.singleShot(0, self._refocus_floating_audio_clip_editor)
+
+    def _focus_project_audio_clip_editor(self) -> None:
+        dock = self.dock_audio_clip_editor
+        if dock.isFloating() and dock.isMinimized():
+            dock.showNormal()
+        dock.show()
+        if dock.isFloating():
+            self._ensure_window_on_screen(dock)
+        dock.raise_()
+        if dock.isFloating():
+            dock.activateWindow()
+        dock.widget().focus_waveform()
+
+    def _refocus_floating_audio_clip_editor(self) -> None:
+        dock = self.dock_audio_clip_editor
+        if self.current_page == "Mixer" and dock.isFloating() and dock.isVisible():
+            self._focus_project_audio_clip_editor()
+
+    def _clear_project_audio_clip_editor(self) -> None:
+        dock = getattr(self, "dock_audio_clip_editor", None)
+        if dock is not None and getattr(getattr(self, "mixer_page", None), "project_backed", False):
+            dock.widget().reset()
+            dock.hide()
+
+    def _float_project_audio_clip_editor(self) -> None:
+        self._show_project_audio_clip_editor("floating")
+
+    def _tab_project_audio_clip_editor(self) -> None:
+        self._show_project_audio_clip_editor("tabbed")
+
+    def _dock_project_audio_clip_editor_with_timeline(self) -> None:
+        dock = self.dock_audio_clip_editor
+        timeline = self.dock_audio_timeline
+        dock.setFloating(False)
+        if timeline not in self.tabifiedDockWidgets(dock):
+            self.tabifyDockWidget(timeline, dock)
+        # The editor has its own compact header in this tab group.
+        self._sync_mixer_clip_editor_title_bar()
+        timeline.show()
+
+    def _raise_mixer_audio_timeline(self) -> None:
+        dock = self.dock_audio_clip_editor
+        if self.dock_audio_timeline not in self.tabifiedDockWidgets(dock):
+            dock.hide()
+        self.dock_audio_timeline.show()
+        self.dock_audio_timeline.raise_()
+        self.timeline_panel.get_timeline_view().setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _attach_edit_panels_to_mixer(self) -> None:
+        """Borrow Edit's live widgets without rebinding their signals or history."""
+        if not getattr(getattr(self, "mixer_page", None), "project_backed", False):
+            return
+        self.program_viewer_widget.get_viewer().exit_fullscreen()
+        if self.edit_viewport is not None:
+            self.edit_viewport.set_program_only(True)
+        self.timeline_panel.get_timeline_view().set_audio_only(True)
+        self.audio_mixer_panel.close_effect_editors()
+        for dock, widget in (
+            (self.dock_audio_console, self.audio_mixer_panel),
+            (self.dock_audio_viewer, self.edit_viewport or self.program_viewer_widget),
+            (self.dock_audio_timeline, self.timeline_panel),
+        ):
+            dock.widget().layout().addWidget(widget)
+            widget.show()
+        self.timeline_panel.set_audio_mixer_dock(self.dock_audio_console)
+
+    def _restore_edit_panels_from_mixer(self) -> None:
+        """Return the shared widgets before restoring the destination dock state."""
+        if not getattr(getattr(self, "mixer_page", None), "project_backed", False):
+            return
+        self.program_viewer_widget.get_viewer().exit_fullscreen()
+        self.audio_mixer_panel.close_effect_editors()
+        self.dock_audio_clip_editor.widget().reset()
+        self.timeline_panel.get_timeline_view().set_audio_only(False)
+        for dock, widget in (
+            (self.dock_audio_mixer, self.audio_mixer_panel),
+            (self.dock_edit_timeline, self.timeline_panel),
+        ):
+            dock.setWidget(widget)
+            widget.show()
+        viewport = self.edit_viewport or self.program_viewer_widget
+        self.dock_program_viewer.setWidget(viewport)
+        if self.edit_viewport is not None:
+            self.edit_viewport.set_program_only(False)
+        viewport.show()
+        self.timeline_panel.set_audio_mixer_dock(self.dock_audio_mixer)
 
     def _audio_workspace_docks(self) -> tuple[QDockWidget, ...]:
         """Include the optional Clip Editor for visibility and layout persistence."""
@@ -1333,7 +1556,7 @@ class DockLayoutMixin:
         ) if isinstance((dock := getattr(self, attr, None)), QDockWidget))
 
     def _seed_audio_workspace_layout(self) -> bool:
-        """Capture the three-panel factory layout without disturbing the active page."""
+        """Capture the factory layout without disturbing the active page."""
         docks = self._audio_workspace_docks()
         if len(docks) < 3:
             return False
@@ -1353,7 +1576,12 @@ class DockLayoutMixin:
             for dock in (console, viewer, timeline):
                 dock.show()
             for dock in docks[3:]:
-                dock.hide()
+                if getattr(getattr(self, "mixer_page", None), "project_backed", False):
+                    self.tabifyDockWidget(timeline, dock)
+                    dock.show()
+                    timeline.raise_()
+                else:
+                    dock.hide()
             self.resizeDocks([console, viewer], [760, 420], Qt.Orientation.Horizontal)
             self.resizeDocks([console, timeline], [370, 330], Qt.Orientation.Vertical)
             self._mixer_default_layout = self.saveState()
@@ -3380,13 +3608,14 @@ class DockLayoutMixin:
         """
         mixer_docks = self._audio_workspace_docks()
         mixer_active = self.current_page == "Mixer"
+        if getattr(getattr(self, "mixer_page", None), "project_backed", False):
+            self.dock_audio_mixer.toggleViewAction().setEnabled(not mixer_active)
         for dock in mixer_docks:
             dock.toggleViewAction().setEnabled(mixer_active)
             if not mixer_active:
                 dock.hide()
         if mixer_active:
-            # This UI-only workspace owns its three panels, never the Color
-            # canvas, Edit viewer, or the production AudioMixerPanel.
+            # Only Mixer dock frames are visible while they host the shared widgets.
             for dock in getattr(self, "all_docks", ()):
                 if dock not in mixer_docks:
                     dock.hide()

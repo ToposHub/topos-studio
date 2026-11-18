@@ -22,7 +22,7 @@ from typing import Optional, Any, List, Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton,
     QSlider, QFrame, QLineEdit, QDialog, QDialogButtonBox,
-    QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy
+    QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy, QDockWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QEvent, QPointF, QRect
 import math
@@ -257,6 +257,7 @@ class TimelinePanel(QWidget):
         self._toolbar_display_mode: str = "edit"
         self._toolbar_visibility_backup: Optional[dict[QWidget, bool]] = None
         self._deliver_range_type: Optional[str] = None
+        self._audio_mixer_dock: QDockWidget | None = None
         
         # Setup UI
         self._setup_ui()
@@ -2541,10 +2542,18 @@ class TimelinePanel(QWidget):
         if self._audio_level_meter is not None:
             self._audio_level_meter.set_audio_values(levels)
 
+    def set_audio_mixer_dock(self, dock: QDockWidget) -> None:
+        """Follow the shared mixer when this timeline moves to another dock."""
+        if self._audio_mixer_dock is not dock:
+            if self._audio_mixer_dock is not None:
+                self._audio_mixer_dock.visibilityChanged.disconnect(self.sync_mixer_button)
+            self._audio_mixer_dock = dock
+            dock.visibilityChanged.connect(self.sync_mixer_button)
+        self.sync_mixer_button(dock.isVisible())
+
     def _toggle_mixer_panel(self) -> None:
         """切换主窗口 Audio Mixer 面板显示（toggle dock_audio_mixer）。"""
-        main_win = self.window()
-        dock = getattr(main_win, 'dock_audio_mixer', None)
+        dock = self._audio_mixer_dock or getattr(self.window(), "dock_audio_mixer", None)
         if dock is None:
             self.btn_mixer.setChecked(False)
             return
@@ -2554,7 +2563,7 @@ class TimelinePanel(QWidget):
             dock.raise_()
             # 显示时懒同步：从当前 timeline 的音频轨填充 mixer strips。
             # 持续同步由 _on_edit_timeline_changed 维护，这里只补首次显示。
-            self._sync_mixer_from_current_timeline(main_win)
+            self._sync_mixer_from_current_timeline(dock.parentWidget())
         else:
             dock.hide()
 
@@ -2818,7 +2827,7 @@ class TimelinePanel(QWidget):
 
     def clear_project(self) -> None:
         """Clear the project reference and reset timeline."""
-        self.timeline_view.set_project(None)
+        self.set_project(None)
         self.clear()
 
     def set_playhead_frame(self, frame: int) -> None:

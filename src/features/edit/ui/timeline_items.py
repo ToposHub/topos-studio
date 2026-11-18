@@ -716,6 +716,7 @@ class ClipItem(QGraphicsObject):
         # dashed seam indicates a cut between two pieces of one source asset.
         self._right_seam_is_same_source: bool = False
         self._label_color = label_color  # P2: User-set label color
+        self._audio_display_color: str | None = None
         # W05：clip 级彩色旗标（与 label_color 配色独立）；未知历史值
         # 保留在模型，绘制端 fallback 默认色（契约 D4）。
         self._flag_color = flag_color
@@ -1513,7 +1514,7 @@ class ClipItem(QGraphicsObject):
         # Setup gradient colors based on media type. A custom label color
         # contributes hue only; its original saturation/lightness is not used
         # directly, which prevents neon clip bodies in older projects.
-        label_palette = _derive_label_palette(self._label_color)
+        label_palette = self._display_label_palette()
         if label_palette is not None:
             gradient_start, gradient_end = label_palette[0], label_palette[1]
         elif is_audio:
@@ -3057,7 +3058,7 @@ class ClipItem(QGraphicsObject):
         # Keep the waveform brighter and calmer than the clip body. The
         # custom palette preserves hue without allowing a saturated label to
         # make the envelope disappear into its background.
-        label_palette = _derive_label_palette(self._label_color)
+        label_palette = self._display_label_palette()
         if label_palette is not None:
             waveform_fill_color = label_palette[3]
         else:
@@ -3126,7 +3127,7 @@ class ClipItem(QGraphicsObject):
 
         # Keep stereo channels distinct, but use a pale, low-saturation pair
         # so both channels remain visible on dark or custom-colored clips.
-        label_palette = _derive_label_palette(self._label_color)
+        label_palette = self._display_label_palette()
         if label_palette is not None:
             stereo_l_color = label_palette[3]
             stereo_r_color = QColor(label_palette[3]).lighter(112)
@@ -3199,10 +3200,17 @@ class ClipItem(QGraphicsObject):
             waveform_height: Height of waveform area
             failed: If True, draw with error styling (red tint)
         """
+        if self._audio_display_color is not None:
+            color = QColor("#8F5258" if failed else self._audio_display_color)
+            color.setAlpha(120)
+            painter.setPen(QPen(color, 1))
+            painter.drawLine(QPointF(x_start, y_center), QPointF(x_end, y_center))
+            return
+
         # P5-5: Use different color for failed state
         if failed:
             waveform_color = QColor(100, 50, 50, 150)  # Dim red for failed
-        elif (label_palette := _derive_label_palette(self._label_color)) is not None:
+        elif (label_palette := self._display_label_palette()) is not None:
             waveform_color = label_palette[3]
         else:
             waveform_color = WAVEFORM_COLOR_AUDIO_TRACK
@@ -4792,6 +4800,15 @@ class ClipItem(QGraphicsObject):
         # Create menu
         menu = QMenu()
 
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        view = views[0] if views else None
+        editor_action = None
+        if self._is_audio_track() and getattr(view, "audio_clip_editor_available", False):
+            editor_action = menu.addAction(I18N.tr("mixer.clip_editor.open", "Open Professional Audio Editor…"))
+            editor_action.setObjectName("openProfessionalAudioEditor")
+            menu.addSeparator()
+
         # Initialize action variables (to avoid NameError when referenced later)
         add_transition_after = None
         add_transition_after_dip = None
@@ -5291,6 +5308,9 @@ class ClipItem(QGraphicsObject):
             return  # Don't process other actions
 
         # Handle actions
+        if selected(editor_action):
+            view.request_audio_clip_editor(self._clip_id)
+            return
         if action is change_speed_action:
             self.change_speed_dialog_requested.emit(self._clip_id, self._track_id)
             return
@@ -6046,6 +6066,25 @@ class ClipItem(QGraphicsObject):
             # No need to toggle ItemIsMovable — we never set it.
             # Drag prevention is handled in mousePressEvent by checking _is_track_locked.
             self.update()
+
+    def set_audio_display_color(self, color: str | None) -> None:
+        if self._audio_display_color != color:
+            self._audio_display_color = color
+            self.update()
+
+    def _display_label_palette(self) -> tuple[QColor, QColor, QColor, QColor] | None:
+        label_palette = _derive_label_palette(self._label_color)
+        if label_palette is not None or self._audio_display_color is None:
+            return label_palette
+        color = QColor(self._audio_display_color)
+        hue, saturation, _, _ = color.getHslF()
+        hue = max(0.0, hue)
+        return (
+            QColor.fromHslF(hue, saturation * 0.35, 0.22),
+            QColor.fromHslF(hue, saturation * 0.3, 0.14),
+            QColor.fromHslF(hue, saturation * 0.45, 0.30),
+            color.lighter(130),
+        )
 
     def set_track_height(self, height: int) -> None:
         """Set track height (external call)."""
@@ -7158,6 +7197,7 @@ class TrackHeaderItem(QGraphicsObject):
     source_patch_requested = pyqtSignal(str, bool)  # UI-only source destination request
     visibility_changed = pyqtSignal(str, bool)  # track_id, visible
     volume_changed = pyqtSignal(str, float)  # track_id, volume
+    record_requested = pyqtSignal(str)
     rename_requested = pyqtSignal(str)  # track_id
     delete_requested = pyqtSignal(str)  # track_id
     add_track_requested = pyqtSignal(str, str, int)  # track_type, position ('above'/'below'), track_index
@@ -7207,6 +7247,9 @@ class TrackHeaderItem(QGraphicsObject):
         self._badge_index = track_index
         self._track_type = track_type
         self._track_color = track_color
+        self._audio_workspace_style = False
+        self._show_record_button = False
+        self._recording_state = "idle"
         self._track_role = track_role
         self._track_height = track_height
         self._is_muted = is_muted
@@ -7369,6 +7412,10 @@ class TrackHeaderItem(QGraphicsObject):
         rect = self._get_solo_button_rect()
         return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
+    def _get_record_button_rect(self) -> QRectF:
+        rect = self._get_mute_button_rect()
+        return QRectF(rect.right() + 6.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
+
     def _get_resize_handle_rect(self) -> QRectF:
         """Get resize handle bounding rect (at bottom of header)."""
         return QRectF(
@@ -7407,6 +7454,8 @@ class TrackHeaderItem(QGraphicsObject):
             return "lock"
         if self._get_mute_button_rect().contains(pos):
             return "mute" if self._track_type == "audio" else "visibility"
+        if self._show_record_button and self._get_record_button_rect().contains(pos):
+            return "record"
         if self._track_type != "subtitle":
             if self._get_source_patch_rect().contains(pos):
                 return "source_patch"
@@ -7441,7 +7490,7 @@ class TrackHeaderItem(QGraphicsObject):
         use_two_rows = self._track_height >= 40
 
         # Background color
-        bg_color = QColor(get_color("track_header_bg"))  # #1D1E24
+        bg_color = QColor("#27272B") if self._audio_workspace_style else QColor(get_color("track_header_bg"))
         if self._is_locked:
             bg_color = QColor(0x1A, 0x1A, 0x1D)
 
@@ -7491,7 +7540,7 @@ class TrackHeaderItem(QGraphicsObject):
 
         # Identity remains readable for every track, including target/locked tracks.
         # Target state is still expressed by the existing badge highlight.
-        painter.fillRect(0, 0, 2, self._track_height,
+        painter.fillRect(0, 0, 3 if self._audio_workspace_style else 2, self._track_height,
                          QColor(resolve_track_color(self._track_id, self._track_color)))
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
@@ -7689,6 +7738,13 @@ class TrackHeaderItem(QGraphicsObject):
                 MUTE_ACTIVE_COLOR,
                 "M",
             )
+            if self._show_record_button:
+                self._draw_button(
+                    painter, self._get_record_button_rect(), "record",
+                    self._recording_state != "idle", QColor("#9A3947"),
+                    "■" if self._recording_state == "recording" else "R",
+                    enabled=self._record_button_enabled(),
+                )
 
     def _draw_button(
         self,
@@ -7697,11 +7753,13 @@ class TrackHeaderItem(QGraphicsObject):
         button_type: str,
         is_active: bool,
         active_color: QColor,
-        fallback_text: str
+        fallback_text: str,
+        *,
+        enabled: bool = True,
     ) -> None:
         """Draw a single button with crisp vector icons."""
         # Resolve uses letter buttons for audio Solo/Mute and an auto-select glyph.
-        if button_type in {"solo", "mute", "sync_lock"}:
+        if button_type in {"solo", "mute", "sync_lock", "record"}:
             if button_type != "sync_lock" or is_active or self._hover_button == button_type:
                 background = (active_color if is_active else
                               QColor(255, 255, 255, 28 if self._hover_button == button_type else 12))
@@ -7722,7 +7780,8 @@ class TrackHeaderItem(QGraphicsObject):
             font.setPixelSize(14)
             font.setWeight(QFont.Weight.Normal)
             painter.setFont(font)
-            painter.setPen(QPen(TEXT_COLOR if is_active else QColor("#B8BDC5")))
+            color = TEXT_COLOR if is_active else QColor("#B8BDC5")
+            painter.setPen(QPen(color if enabled else QColor("#767680")))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, fallback_text)
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -8017,6 +8076,16 @@ class TrackHeaderItem(QGraphicsObject):
             return "取消独奏" if self._is_solo else "独奏轨道"
         if button == "mute":
             return "取消静音" if self._is_muted else "静音轨道"
+        if button == "record":
+            if self._recording_state in {"stopping", "flushing"}:
+                return I18N.tr("mixer.record.finishing", "Finishing the recording…")
+            if self._recording_state == "pre_roll":
+                return I18N.tr("mixer.record.preroll", "Pre-roll · click to stop")
+            if self._recording_state == "recording":
+                return I18N.tr("mixer.record.stop", "Stop recording")
+            if self._is_locked:
+                return I18N.tr("mixer.record.locked", "Unlock this track to record")
+            return I18N.tr("mixer.record.start", "Record to this track at the playhead")
         if button == "visibility":
             return "显示轨道" if not self._is_visible else "隐藏轨道"
         if button == "volume":
@@ -8064,6 +8133,11 @@ class TrackHeaderItem(QGraphicsObject):
                 return
             elif button == "solo":
                 self._toggle_solo()
+                event.accept()
+                return
+            elif button == "record":
+                if self._record_button_enabled():
+                    self.record_requested.emit(self._track_id)
                 event.accept()
                 return
             elif button == "lock":
@@ -8187,6 +8261,24 @@ class TrackHeaderItem(QGraphicsObject):
         if color != self._track_color:
             self._track_color = color
             self.update()
+
+    def set_audio_workspace_style(self, enabled: bool) -> None:
+        if enabled != self._audio_workspace_style:
+            self._audio_workspace_style = enabled
+            self.update()
+
+    def set_recording_control(self, visible: bool, state: str) -> None:
+        if (visible, state) != (self._show_record_button, self._recording_state):
+            self._show_record_button = visible
+            self._recording_state = state
+            if self._hover_button == "record":
+                self.setToolTip(self._button_tooltip("record") if visible else "")
+            self.update()
+
+    def _record_button_enabled(self) -> bool:
+        if self._recording_state in {"pre_roll", "recording"}:
+            return True
+        return self._recording_state == "idle" and not self._is_locked
 
     def set_volume(self, volume: float) -> None:
         """Set volume level (external call)."""

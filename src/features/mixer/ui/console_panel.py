@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 
 from src.features.mixer.effects import EFFECT_CATALOG, EffectInstance, EffectWindowManager, get_effect
 from .session import MixerUiSession, effect_scope
-from .console_controls import EditableValuePill, LevelMeter, MiniEQCurve, RotaryKnob, StudioFader, format_db
+from .console_controls import EditableValuePill, LevelMeter, RotaryKnob, StudioFader, format_db
 from src.shared.assets.icon_manager import get_icon, icon_add, icon_fx
 from .workspace_style import PANEL_QSS, compact_combo, tool_button, toolbar_divider
 
@@ -24,7 +24,7 @@ class ChannelStrip(QFrame):
         self._gesture: tuple | None = None
         self._effect_signature: tuple | None = None
         self._appearance: tuple[str, bool] | None = None
-        self.setFixedWidth(128)
+        self.setFixedWidth(104)
         self.setObjectName("MixerChannel")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 5, 7, 6)
@@ -96,15 +96,10 @@ class ChannelStrip(QFrame):
         self.send_pre.setCheckable(True)
         self.send_pre.clicked.connect(lambda checked: self.session.set_track_value(track_id, "send_pre", checked))
         send_row.insertWidget(0, self.send_pre)
-        self.send_pre.setFixedWidth(23)
-        self.send_level.setFixedWidth(39)
+        self.send_pre.setFixedWidth(19)
+        self.send_level.setFixedWidth(30)
         self.send.setMinimumWidth(30)
-        self.eq_widget = MiniEQCurve(accent_color=self._track_color())
-        self.eq_widget.eqChanged.connect(lambda low, mid, high: self._track_slider("eq", (low, mid, high)))
-        self.eq_widget.installEventFilter(self)
-        self.eq_widget.setToolTip("拖动低 / 中 / 高频曲线调整本地 EQ；双击归零；音频处理待接线")
-        layout.addWidget(self.eq_widget)
-        self._section_panels = {"前级": self.preamp, "插入": rack, "发送": send_panel, "EQ": self.eq_widget}
+        self._section_panels = {"前级": self.preamp, "插入": rack, "发送": send_panel}
         flags = QHBoxLayout()
         flags.setSpacing(3)
         self.flag_buttons: dict[str, QPushButton] = {}
@@ -113,7 +108,7 @@ class ChannelStrip(QFrame):
             controls = (("M", "muted"), ("MONO", "monitor_mono"), ("DIM", "dim"))
         for text, key in controls:
             button = QPushButton(text)
-            button.setFixedWidth({"MONO": 47, "DIM": 35}.get(text, 24))
+            button.setFixedWidth({"MONO": 34, "DIM": 27}.get(text, 20))
             button.setCheckable(True)
             button.setToolTip({
                 "M": "静音", "S": "独奏", "R": "录音待命", "Ø": "相位反转",
@@ -211,7 +206,7 @@ class ChannelStrip(QFrame):
             self._appearance = appearance
             fill = "#303036" if selected else "#27272B"
             self.setStyleSheet(f"QFrame#MixerChannel {{ background: {fill}; border-top: 2px solid {track.color}; border-right: 1px solid #34363E; }}")
-            for instrument in (self.pan, self.fader, self.eq_widget):
+            for instrument in (self.pan, self.fader):
                 instrument.accent_color = QColor(track.color)
                 instrument.update()
         self.name_button.setText(track.name)
@@ -236,9 +231,6 @@ class ChannelStrip(QFrame):
         self.fader.setDb(track.volume_db, emit_signal=False)
         self.trim.setValue(track.trim_db, emit_signal=False)
         self.width.setValue(track.width, emit_signal=False)
-        self.eq_widget.gains = list(track.eq)
-        self.eq_widget.setHpfEnabled(track.hpf)
-        self.eq_widget.update()
         self.volume.setText(format_db(track.volume_db))
         blocker = QSignalBlocker(self.send_level)
         self.send_level.setValue(track.send_db)
@@ -390,7 +382,7 @@ class ConsolePanel(QWidget):
         toolbar = QHBoxLayout(toolbar_frame)
         toolbar.setContentsMargins(4, 0, 4, 0)
         toolbar.setSpacing(4)
-        self.sections = {"前级", "插入", "发送", "EQ"}
+        self.sections = {"插入"}
         self.filter = compact_combo()
         self.filter.addItems(["所有通道", "DX", "FX", "MX", "BUS"])
         self.filter.currentIndexChanged.connect(self._filter)
@@ -449,7 +441,7 @@ class ConsolePanel(QWidget):
 
     def _section_menu(self) -> None:
         menu = QMenu(self)
-        for label in ("前级", "插入", "发送", "EQ"):
+        for label in ("前级", "插入", "发送"):
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(label in self.sections)

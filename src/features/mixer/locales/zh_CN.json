@@ -3,9 +3,51 @@
     "mixer": "混音"
   },
   "panel": {
-    "audio_console": "混音台",
     "audio_viewer": "视频监看",
     "audio_timeline": "音频时间线",
     "audio_clip_editor": "片段编辑"
+  },
+  "mixer": {
+    "clip_editor": {
+      "open": "专业音频编辑…",
+      "offline": "此片段的音频素材不可用",
+      "float": "独立窗口",
+      "tab": "与时间线合并",
+      "timeline": "回到时间线",
+      "close": "关闭",
+      "gain_range": "片段增益（−48 至 +12 dB）",
+      "apply_gain": "应用片段增益",
+      "match_loudness": "匹配目标响度",
+      "back": "返回时间线",
+      "timeline_mode": "● 时间线片段",
+      "source_mode": "● 源音频",
+      "source_read_only": "源音频波形 · 添加到时间线后可编辑增益和淡入淡出",
+      "waveform_tip": "滚轮缩放 · Alt+滚轮放大波形",
+      "keys": "Ctrl+A 全选 · E 缩放至选区 · Esc 清除选区",
+      "empty": "双击时间线上的音频片段开始编辑",
+      "equal_power": "等功率",
+      "set_fades": "调整片段淡入淡出",
+      "set_fade_curve": "调整淡入淡出曲线",
+      "loading_waveform": "正在读取源音频波形…",
+      "no_waveform": "源音频波形不可用",
+      "source_waveform": "源音频波形 · 增益和淡入淡出写入时间线",
+      "source_peak": "根据源音频包络估算的峰值",
+      "unavailable": "此工具需要音频处理后端"
+    },
+    "record": {
+      "start": "在当前播放头位置向这条轨录音",
+      "stop": "停止录音",
+      "preroll": "预卷中 · 点击停止",
+      "finishing": "正在完成录音…",
+      "locked": "解锁轨道后可录音",
+      "busy": "请先结束当前录音",
+      "failed": "无法从所选输入设备录音",
+      "save_failed": "未能保存录音"
+    },
+    "routing": {
+      "output": "轨道输出",
+      "missing_bus": "总线不可用",
+      "add_bus": "添加总线"
+    }
   }
 }

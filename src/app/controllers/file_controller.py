@@ -1267,7 +1267,7 @@ class FileOpsMixin:
 
         # E11: Edit 页激活时以时间线/媒体池命令栈为准——时间线编辑此前
         # 只进 TimelineView 独立命令栈，菜单 Undo 一直 disabled。
-        if getattr(self, "_edit_available", False) and getattr(self, "current_page", None) == "Edit":
+        if getattr(self, "_edit_available", False) and getattr(self, "current_page", None) in ("Edit", "Mixer"):
             panel = getattr(self, "timeline_panel", None)
             view = (
                 panel.get_timeline_view()
@@ -1500,7 +1500,7 @@ class FileOpsMixin:
         SaveRouter 使用回调模式获取状态，避免直接依赖 MainWindow 内部状态。
         """
         self.save_router.set_callbacks({
-            "get_current_page": lambda: self.current_page,
+            "get_current_page": lambda: "Edit" if self.current_page == "Mixer" else self.current_page,
             "get_current_file_path": lambda: self.current_file_path,
             "get_current_edit_project": lambda: self._current_edit_project,
             "get_edit_project_filepath": lambda: self._current_edit_project_filepath,

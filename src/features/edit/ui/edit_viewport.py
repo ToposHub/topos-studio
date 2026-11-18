@@ -375,6 +375,7 @@ class EditViewport(QWidget):
         self._dual_view = False
         self._active_monitor = "program"
         self._deliver_mode = False
+        self._program_only = False
         self._program_fps = 24.0
         self._dual_sizes: list[int] | None = None
         self._timeline_widget: QWidget | None = None
@@ -697,7 +698,7 @@ class EditViewport(QWidget):
     def set_dual_view(self, enabled: bool) -> None:
         """Switch monitor presentation while retaining both viewer instances."""
         enabled = bool(enabled)
-        if self._deliver_mode or enabled == self._dual_view:
+        if self._deliver_mode or self._program_only or enabled == self._dual_view:
             self._sync_buttons()
             return
         if self._dual_view:
@@ -710,7 +711,7 @@ class EditViewport(QWidget):
 
     def show_source(self, focus: bool = True) -> None:
         """Reveal an opened asset without changing the single/dual preference."""
-        if not self._deliver_mode:
+        if not self._deliver_mode and not self._program_only:
             self._activate("source", focus)
 
     def restore_splitter_sizes(self, sizes: list[int]) -> None:
@@ -726,7 +727,7 @@ class EditViewport(QWidget):
 
     def show_program(self, focus: bool = True) -> None:
         """Reveal the timeline monitor and optionally transfer keyboard focus."""
-        if not self._deliver_mode:
+        if not self._deliver_mode and not self._program_only:
             self._activate("program", focus)
 
     def _activate(self, monitor: str, focus: bool) -> None:
@@ -740,11 +741,12 @@ class EditViewport(QWidget):
             self.active_monitor_changed.emit(monitor)
 
     def _apply_mode(self) -> None:
-        self.source_pane.setVisible(self._dual_view or self._active_monitor == "source")
-        self.program_pane.setVisible(self._dual_view or self._active_monitor == "program")
+        self.source_pane.setVisible(not self._program_only and (self._dual_view or self._active_monitor == "source"))
+        self.program_pane.setVisible(self._program_only or self._dual_view or self._active_monitor == "program")
         self._sync_buttons()
 
     def _sync_buttons(self) -> None:
+        switches_locked = self._deliver_mode or self._program_only
         for monitor, header in (("source", self.source_header), ("program", self.program_header)):
             for button, checked in (
                 (header.source_button, self._active_monitor == "source"),
@@ -755,12 +757,24 @@ class EditViewport(QWidget):
                 blocker = QSignalBlocker(button)
                 button.setChecked(checked)
                 del blocker
-                button.setEnabled(not self._deliver_mode)
-            header.show_monitor_switches = (not self._dual_view or monitor == "source") and not self._deliver_mode
-            modes_visible = (not self._dual_view or monitor == "program") and not self._deliver_mode
+                button.setEnabled(not switches_locked)
+            header.show_monitor_switches = (not self._dual_view or monitor == "source") and not switches_locked
+            modes_visible = (not self._dual_view or monitor == "program") and not switches_locked
             header.single_button.setVisible(modes_visible and self._dual_view)
             header.dual_button.setVisible(modes_visible and not self._dual_view)
-            header.set_active(monitor == self._active_monitor and self._dual_view)
+            header.set_active(monitor == self._active_monitor and self._dual_view and not self._program_only)
+
+    def set_program_only(self, enabled: bool) -> None:
+        """Show Program while the viewport is hosted in Mixer."""
+        if enabled == self._program_only:
+            return
+        previous_sizes = self.splitter.sizes()
+        if enabled and self._dual_view and all(previous_sizes):
+            self._dual_sizes = previous_sizes
+        self._program_only = enabled
+        self._apply_mode()
+        if not enabled and self._dual_view and self._dual_sizes:
+            self.splitter.setSizes(self._dual_sizes)
 
     def set_deliver_mode(self, enabled: bool) -> None:
         """Hide workspace-only switches while Deliver borrows Program."""
@@ -820,7 +834,7 @@ class EditViewport(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Activate the clicked/focused monitor without swallowing its input."""
-        if not self._deliver_mode and event.type() in {QEvent.Type.MouseButtonPress, QEvent.Type.FocusIn}:
+        if not (self._deliver_mode or self._program_only) and event.type() in {QEvent.Type.MouseButtonPress, QEvent.Type.FocusIn}:
             if isinstance(watched, QWidget):
                 if watched is self.source_viewer or self.source_viewer.isAncestorOf(watched):
                     self._activate("source", False)

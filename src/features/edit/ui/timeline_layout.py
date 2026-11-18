@@ -203,6 +203,7 @@ class TimelineLayoutEngine:
         self._video_tracks: List[TrackInfo] = []
         self._audio_tracks: List[TrackInfo] = []
         self._subtitle_tracks: List[TrackInfo] = []  # P10.3
+        self._audio_only = False
         self._state = TimelineLayoutState()
         self._viewport_width: float = 800.0
         self._viewport_height: float = 400.0
@@ -223,9 +224,12 @@ class TimelineLayoutEngine:
         viewport_width: float,
         viewport_height: float,
         pixels_per_frame: float,
+        *,
+        audio_only: bool = False,
     ) -> None:
         """(Re)configure the engine — call whenever tracks, state, zoom, or size change."""
         self._tracks = tracks
+        self._audio_only = audio_only
         self._video_tracks = [t for t in tracks if t.track_type == "video"]
         self._audio_tracks = [t for t in tracks if t.track_type == "audio"]
         self._subtitle_tracks = [t for t in tracks if t.track_type == "subtitle"]
@@ -308,6 +312,10 @@ class TimelineLayoutEngine:
         on top of the picture — matching DaVinci Resolve / Final Cut Pro.
         """
         area_h = self._track_area_height
+        if self._audio_only:
+            audio_area = QRectF(0, TRACK_AREA_TOP, self._total_width(), area_h)
+            self._area = AreaLayout(audio_area=audio_area, total_track_area=QRectF(audio_area))
+            return
         has_sub = bool(self._subtitle_tracks)
         usable = max(0.0, area_h - SPLITTER_HEIGHT)
         ratio = self._state.video_area_ratio

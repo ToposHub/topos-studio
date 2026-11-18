@@ -2011,15 +2011,20 @@ class MenuToolbarMixin:
         if timeline_view is None:
             return
 
+        widget_scoped = {"edit.timeline.delete", "edit.timeline.ripple_delete"}
+        # A floating timeline has its own shortcut window. Associate the same
+        # configured actions with the view so they follow the shared panel.
         for action_id in (
-            "edit.timeline.delete",
-            "edit.timeline.ripple_delete",
+            "edit.timeline.delete", "edit.timeline.ripple_delete",
+            "edit.timeline.cut", "edit.timeline.copy", "edit.timeline.paste",
+            "edit.timeline.split",
         ):
             action = actions.get(action_id)
             if action is None:
                 continue
-            action.setProperty("force_widget_shortcut", True)
-            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+            if action_id in widget_scoped:
+                action.setProperty("force_widget_shortcut", True)
+                action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
             if action not in timeline_view.actions():
                 timeline_view.addAction(action)
 

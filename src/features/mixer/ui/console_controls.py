@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPointF
 from PyQt6.QtGui import (
     QPainter, QPen, QBrush, QColor, QLinearGradient,
-    QPainterPath, QFont, QAction
+    QPainterPath, QFont, QAction, QHideEvent
 )
 
 # ============================================================================
@@ -30,28 +30,28 @@ MONO_FONT_CSS = "'Menlo'"
 MONO_FONT_FAM = "Menlo"
 
 
-def db_to_fader_pos(db: float) -> float:
+def db_to_fader_pos(db: float, max_db: float = 12.0) -> float:
     """将 dB 值 (-60.0 ~ +12.0, -inf) 映射到推子归一化位置 (0.0 ~ 1.0)"""
     if db <= -60.0:
         return 0.0
-    if db >= 12.0:
+    if db >= max_db:
         return 1.0
     # 分段曲线：让 0dB 位于约 75% 高度，提供极佳的常用音量区分辨率
     if db >= -10.0:
-        return 0.55 + ((db + 10.0) / 22.0) * 0.45
+        return 0.55 + ((db + 10.0) / (max_db + 10.0)) * 0.45
     elif db >= -30.0:
         return 0.25 + ((db + 30.0) / 20.0) * 0.30
     else:
         return ((db + 60.0) / 30.0) * 0.25
 
 
-def fader_pos_to_db(pos: float) -> float:
+def fader_pos_to_db(pos: float, max_db: float = 12.0) -> float:
     """将推子归一化位置 (0.0 ~ 1.0) 映射回 dB 值"""
     pos = max(0.0, min(1.0, pos))
     if pos == 0.0:
         return -float('inf')
     if pos >= 0.55:
-        return -10.0 + ((pos - 0.55) / 0.45) * 22.0
+        return -10.0 + ((pos - 0.55) / 0.45) * (max_db + 10.0)
     elif pos >= 0.25:
         return -30.0 + ((pos - 0.25) / 0.30) * 20.0
     else:
@@ -82,11 +82,23 @@ class EditableValuePill(QWidget):
 
         self._editor = QLineEdit(self)
         self._editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._apply_editor_color()
+        self._editor.hide()
+        self._editor.returnPressed.connect(self._commit_edit)
+        self._editor.editingFinished.connect(self._commit_edit)
+
+    def set_accent_color(self, color: str) -> None:
+        if color != self._accent:
+            self._accent = color
+            self._apply_editor_color()
+            self.update()
+
+    def _apply_editor_color(self) -> None:
         self._editor.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #0E0E11;
-                color: {accent_color};
-                border: 1px solid {accent_color};
+                color: {self._accent};
+                border: 1px solid {self._accent};
                 border-radius: 3px;
                 font-family: {MONO_FONT_CSS};
                 font-size: 9px;
@@ -94,9 +106,6 @@ class EditableValuePill(QWidget):
                 padding: 0px;
             }}
         """)
-        self._editor.hide()
-        self._editor.returnPressed.connect(self._commit_edit)
-        self._editor.editingFinished.connect(self._commit_edit)
 
     def resizeEvent(self, event):
         self._editor.setGeometry(0, 0, self.width(), self.height())
@@ -310,6 +319,7 @@ class LevelMeter(QWidget):
         # GR 表：压下去要快，松开要慢
         self.gr_db = min(0.0, max(-20.0, min(gr_db, self.gr_db + 0.8)))
 
+        self._advance_peak_hold()
         if db_l >= self.peak_l:
             self.peak_l = db_l
             self._hold_ticks_l = 45  # 约 1.5 秒 (30fps)
@@ -337,6 +347,11 @@ class LevelMeter(QWidget):
             self.gr_db = min(0.0, self.gr_db + 0.9)
             changed = True
 
+        if self._advance_peak_hold() or changed:
+            self.update()
+
+    def _advance_peak_hold(self) -> bool:
+        changed = False
         if self._hold_ticks_l > 0:
             self._hold_ticks_l -= 1
         elif self.peak_l > self.level_l:
@@ -349,8 +364,7 @@ class LevelMeter(QWidget):
             self.peak_r = max(self.level_r, self.peak_r - 1.2)
             changed = True
 
-        if changed:
-            self.update()
+        return changed
 
     def reset_clip(self):
         self.clipped_l = False
@@ -358,6 +372,12 @@ class LevelMeter(QWidget):
         self.peak_l = self.level_l
         self.peak_r = self.level_r
         self.update()
+
+    def clear_levels(self) -> None:
+        self.level_l = self.level_r = -60.0
+        self.gr_db = 0.0
+        self._hold_ticks_l = self._hold_ticks_r = 0
+        self.reset_clip()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -455,10 +475,16 @@ class LevelMeter(QWidget):
 # ============================================================================
 class StudioFader(QWidget):
     dbChanged = pyqtSignal(float)
+    dragStarted = pyqtSignal()
+    dragFinished = pyqtSignal()
 
-    def __init__(self, initial_db: float = 0.0, accent_color: str = ACCENT_CYAN, parent=None):
+    def __init__(
+        self, initial_db: float = 0.0, accent_color: str = ACCENT_CYAN,
+        parent: QWidget | None = None, *, max_db: float = 12.0,
+    ) -> None:
         super().__init__(parent)
         self.db = initial_db
+        self.max_db = max_db
         self.accent_color = QColor(accent_color)
         self.setFixedWidth(44)
         self.setMinimumHeight(130)
@@ -471,7 +497,7 @@ class StudioFader(QWidget):
         self._cap_width = 21.0
 
     def setDb(self, db: float, emit_signal: bool = True):
-        db = max(-60.0, min(12.0, db)) if not math.isinf(db) else -float('inf')
+        db = max(-60.0, min(self.max_db, db))
         if db != self.db:
             self.db = db
             self.update()
@@ -501,11 +527,12 @@ class StudioFader(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
+            self.dragStarted.emit()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             # 点击滑槽空白处平滑跳到该位置；点在推子帽上保持相对位置防止跳变
-            cap_y = self._pos_to_y(db_to_fader_pos(self.db))
+            cap_y = self._pos_to_y(db_to_fader_pos(self.db, self.max_db))
             if abs(event.position().y() - cap_y) > self._cap_height / 2.0:
-                self.setDb(fader_pos_to_db(self._y_to_pos(event.position().y())))
+                self.setDb(fader_pos_to_db(self._y_to_pos(event.position().y()), self.max_db))
             self._last_y = event.position().y()
             event.accept()
 
@@ -515,19 +542,28 @@ class StudioFader(QWidget):
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 # Shift 精细微调模式
                 dy = self._last_y - y
-                cur_pos = db_to_fader_pos(self.db)
+                cur_pos = db_to_fader_pos(self.db, self.max_db)
                 track_h = max(1.0, self.height() - self._cap_height - 8.0)
-                self.setDb(fader_pos_to_db(max(0.0, min(1.0, cur_pos + (dy / track_h) * 0.2))))
+                self.setDb(fader_pos_to_db(cur_pos + (dy / track_h) * 0.2, self.max_db))
             else:
-                self.setDb(fader_pos_to_db(self._y_to_pos(y)))
+                self.setDb(fader_pos_to_db(self._y_to_pos(y), self.max_db))
             self._last_y = y
             event.accept()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self._finish_drag()
+            event.accept()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._finish_drag()
+        super().hideEvent(event)
+
+    def _finish_drag(self) -> None:
+        if self._dragging:
             self._dragging = False
             self.setCursor(Qt.CursorShape.OpenHandCursor)
-            event.accept()
+            self.dragFinished.emit()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -551,11 +587,11 @@ class StudioFader(QWidget):
         track_x = 12.5
 
         # 1. Menlo 精密 dB 刻度尺
-        ticks = [12, 6, 0, -5, -10, -20, -30, -45, -60]
+        ticks = ([12] if self.max_db >= 12.0 else []) + [6, 0, -5, -10, -20, -30, -45, -60]
         p.setFont(QFont(MONO_FONT_FAM, 6))
 
         for t in ticks:
-            ty = self._pos_to_y(db_to_fader_pos(float(t)))
+            ty = self._pos_to_y(db_to_fader_pos(float(t), self.max_db))
             is_unity = (t == 0)
             pen_col = self.accent_color if is_unity else QColor("#4A4A54")
             p.setPen(QPen(pen_col, 1.3 if is_unity else 1.0))
@@ -573,7 +609,7 @@ class StudioFader(QWidget):
         p.drawRoundedRect(slot_rect, 2.0, 2.0)
 
         # 3. 推子位置指示发光带
-        cap_y = self._pos_to_y(db_to_fader_pos(self.db))
+        cap_y = self._pos_to_y(db_to_fader_pos(self.db, self.max_db))
         active_rect = QRectF(track_x - 1.2, cap_y, 2.4, (h - margin) - cap_y)
         glow = QColor(self.accent_color)
         glow.setAlpha(155)

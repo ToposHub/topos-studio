@@ -38,6 +38,7 @@ class AudioMixerPanel(QWidget):
     # 信号（track_id 统一为 str，与 EditTrack.track_id 的 UUID 一致）
     master_mute_toggled = pyqtSignal(bool)
     master_volume_changed = pyqtSignal(float)          # dB
+    master_volume_preview = pyqtSignal(float)          # dB
     # W11: 是否存在 LUFS 模式的表（AudioMixer 据此开/关 K-weighting 计算）
     lufs_metering_changed = pyqtSignal(bool)
     # CW-A1: 空间声像器（payload {"pan": -1..1, "panner": dict}）+ 频谱门控
@@ -146,11 +147,10 @@ class AudioMixerPanel(QWidget):
         master_container = QHBoxLayout()
         master_container.setContentsMargins(0, 0, 0, 0)
         self._master_container = master_container
-        self._master_mixer = TrackMixerWidget(
+        self._master_mixer = self._create_strip(
             track_id=MASTER_TRACK_ID,
             track_name="",
             track_tag=I18N.tr("audio.mixer.master", "Master"),
-            parent=self,
             is_master=True
         )
         self._master_mixer.installEventFilter(self)
@@ -201,6 +201,7 @@ class AudioMixerPanel(QWidget):
             self._master_mixer.mixer_menu_requested.connect(self._append_mixer_options)
             self._master_mixer.mute_toggled.connect(lambda tid, muted: self.master_mute_toggled.emit(muted))
             self._master_mixer.volume_changed.connect(lambda tid, db: self.master_volume_changed.emit(db))
+            self._master_mixer.volume_preview.connect(lambda tid, db: self.master_volume_preview.emit(db))
             self._master_mixer.show_effects.connect(lambda tid: self.show_effects_for_track.emit(tid))
             # MX-03: Master EQ/FX 条带（与普通轨同一转发路径）
             self._master_mixer.strip_eq_preview.connect(lambda tid, p: self.track_strip_eq_preview.emit(tid, p))
@@ -238,6 +239,11 @@ class AudioMixerPanel(QWidget):
 
     # ========== 公共接口 ==========
 
+    def _create_strip(
+        self, track_id: str, track_name: str, track_tag: str, *, is_master: bool = False,
+    ) -> TrackMixerWidget:
+        return TrackMixerWidget(track_id, track_name, track_tag, self, is_master)
+
     def register_track(
         self,
         track_id: str,
@@ -248,11 +254,10 @@ class AudioMixerPanel(QWidget):
         if track_id in self._track_mixers:
             return
 
-        mixer = TrackMixerWidget(
+        mixer = self._create_strip(
             track_id=track_id,
             track_name=track_name,
             track_tag=track_tag or "",
-            parent=self
         )
         mixer.set_engine_sample_rate(self._engine_sample_rate)
         mixer.setContentsMargins(MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER, MARGIN_AROUND_MIXER)
@@ -609,7 +614,7 @@ class AudioMixerPanel(QWidget):
                 if isinstance(vals, dict):
                     # 获取该 strip 的电平表模式
                     meter = getattr(mixer, '_meter', None)
-                    mode = getattr(meter, 'meter_mode', None)
+                    mode = mixer.display_meter_mode
                     if mode is not None and mode.name == "RMS":
                         meter_vals = vals.get("rms", vals.get("peak", [-100.0, -100.0]))
                     elif mode is not None and mode.name == "LUFS":
@@ -932,8 +937,7 @@ class AudioMixerPanel(QWidget):
         if self._master_mixer is not None:
             mixers.append(self._master_mixer)  # MX-03: Master 表纳入汇总
         for mixer in mixers:
-            meter = getattr(mixer, "_meter", None)
-            mode = getattr(meter, "meter_mode", None)
+            mode = mixer.display_meter_mode
             if mode is not None and getattr(mode, "name", "") == "LUFS":
                 active = True
                 break

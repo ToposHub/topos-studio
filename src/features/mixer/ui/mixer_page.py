@@ -1,8 +1,4 @@
-"""UI workspace coordinator; the app owns the independently docked panels.
-
-The local session is a deliberate presentation prototype. It does not construct
-an EditPage, mutate an EditProject, decode audio, or create an audio device.
-"""
+"""Mixer workspace registration and standalone prototype preview."""
 from __future__ import annotations
 
 from typing import Any
@@ -28,15 +24,18 @@ from .workspace_style import PANEL_QSS
 class MixerPage(QWidget):
     """One UI session with three main docks and an optional per-clip editor dock."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, project_backed: bool = False) -> None:
         super().__init__(parent)
+        self.active = False
+        self.project_backed = project_backed
+        self._disposed = False
+        if project_backed:
+            return
         self.session = MixerUiSession(self)
         self.effects_manager = EffectWindowManager(self)
         self.console_panel = ConsolePanel(self.session, self.effects_manager)
         self.viewer_panel = ViewerPanel(self.session)
         self.timeline_panel = TimelinePanel(self.session)
-        self.active = False
-        self._disposed = False
         self._effect_before: tuple | None = None
         self._clip_panels: dict[str, QWidget] = {}
         self._clip_wrappers: dict[str, QWidget] = {}
@@ -344,10 +343,13 @@ class MixerPage(QWidget):
 
     def on_enter(self) -> None:
         self.active = True
-        self.viewer_panel.sync_timecode()
+        if not self.project_backed:
+            self.viewer_panel.sync_timecode()
 
     def on_leave(self) -> None:
         self.active = False
+        if self.project_backed:
+            return
         self.stop_preview()
         self.effects_manager.pause_all()
         self.browser_window.hide()
@@ -355,13 +357,16 @@ class MixerPage(QWidget):
             stop_panel_timers(panel)
 
     def stop_preview(self) -> None:
-        self.viewer_panel.stop_preview()
+        if not self.project_backed:
+            self.viewer_panel.stop_preview()
 
     def dispose_ui(self) -> None:
         if self._disposed:
             return
         self._disposed = True
         self.on_leave()
+        if self.project_backed:
+            return
         self.effects_manager.dispose_all()
         for clip_id, panel in self._clip_panels.items():
             stop_panel_timers(panel)
