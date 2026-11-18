@@ -486,6 +486,20 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     assert not host._mixer_timeline_recorders
 
 
+def test_audio_workspace_switches_ruler_to_sample_display(project_host, qtbot) -> None:
+    """P2-8（P0）：音频工作区时间尺用采样域，返回 Edit 恢复帧域。"""
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    assert view._ruler_item._display_mode == "frames"
+    host.show_mixer()
+    assert view._audio_only
+    assert view._ruler_item._display_mode == "samples"
+    host._restore_edit_panels_from_mixer()
+    host.current_page = "Edit"
+    assert not view._audio_only
+    assert view._ruler_item._display_mode == "frames"
+
+
 def test_media_pool_and_effects_borrow_across_workspaces(project_host, qtbot, tmp_path) -> None:
     """P0-1：Media Pool / Effects 面板跨页借用 + 音频作用域可还原。"""
     host = project_host

@@ -1398,6 +1398,10 @@ class TimelineView(QGraphicsView):
         if not self._interaction.is_idle:
             self._cancel_current_interaction()
         self._audio_only = enabled
+        # P2-8（P0）：音频工作区的时间尺切到采样域（子帧位置显式可见），
+        # 返回 Edit 恢复帧域；尺渲染本身支持两种模式。
+        if self._ruler_item is not None:
+            self._ruler_item.set_display_mode("samples" if enabled else "frames")
         if self._timeline is not None:
             if enabled:
                 self._set_selected_edit_edges({})
