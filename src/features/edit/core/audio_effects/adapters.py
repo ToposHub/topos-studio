@@ -103,6 +103,30 @@ class DynamicEqAdapter(_CompositeAdapterBase):
         return DynamicEqEffect(sr)
 
 
+class BusCompAdapter(_CompositeAdapterBase):
+    """P1 · Bus 压缩（CompressorEffect 核心 + 胶合模板 + SC 高通）。"""
+
+    effect_type = "bus_comp"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.bus_multiband import (
+            BusCompEffect,
+        )
+        return BusCompEffect(sr)
+
+
+class MultibandCompAdapter(_CompositeAdapterBase):
+    """P1 · 多段压缩（LR4 相位对齐分频 + 每段独立 envelope）。"""
+
+    effect_type = "multiband_comp"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.bus_multiband import (
+            MultibandCompressorEffect,
+        )
+        return MultibandCompressorEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 

@@ -3660,13 +3660,18 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["voice_changer"] = VoiceChangerAdapter
         # P1（2026-11-19 计划第三阶段 #1/#3）：De-Esser / True Peak Limiter
         from src.features.edit.core.audio_effects.adapters import (
+            BusCompAdapter,
             DeEsserAdapter,
             DynamicEqAdapter,
+            MultibandCompAdapter,
             TruePeakLimiterAdapter,
         )
         _EFFECT_CLASS_REGISTRY["de_esser"] = DeEsserAdapter
         _EFFECT_CLASS_REGISTRY["dynamic_eq"] = DynamicEqAdapter
         _EFFECT_CLASS_REGISTRY["true_peak_limiter"] = TruePeakLimiterAdapter
+        # P1（2026-11-19 计划第三阶段 #5）：Bus / Multiband 压缩
+        _EFFECT_CLASS_REGISTRY["bus_comp"] = BusCompAdapter
+        _EFFECT_CLASS_REGISTRY["multiband_comp"] = MultibandCompAdapter
     return _EFFECT_CLASS_REGISTRY
 
 
