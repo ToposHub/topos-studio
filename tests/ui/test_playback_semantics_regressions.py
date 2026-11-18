@@ -17,7 +17,7 @@ av = pytest.importorskip("av")
 
 from src.shared.playback.base_player import BasePlayer  # noqa: E402
 from src.shared.playback.libav_player import _LibavSession, _fit_aspect_size  # noqa: E402
-from src.shared.playback.topos_player import ToposMovieSession  # noqa: E402
+from src.shared.playback.topos_player import ToposMovieSession, _DecodeBuffer  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +171,8 @@ class _FakeMovie:
         return SimpleNamespace(
             width=self._w, height=self._h, sample_count=self._sample_count,
             timescale=self._timescale, duration_ticks=self._sample_count * self._ticks,
-            pixel_format=0, bit_depth=10, alpha_mode=0)
+            pixel_format=0, bit_depth=10, alpha_mode=0, color_matrix=1,
+            color_range=0, chroma_siting=0)
 
     def audio_track_count(self):
         return 0
@@ -201,11 +202,11 @@ class _FakeDecoder:
         pass
 
 
-def _session_with_movie(movie):
+def _session_with_movie(movie: _FakeMovie, *, prefetch: bool = False) -> ToposMovieSession:
     movie_cls = lambda codec, path: movie
     with patch('src.shared.playback.topos_player._load_binding',
                return_value=(_FakeCodec, movie_cls, _FakeDecoder)):
-        session = ToposMovieSession('/not-opened/audit.mov')
+        session = ToposMovieSession('/not-opened/audit.mov', prefetch=prefetch)
     return session
 
 
@@ -247,6 +248,108 @@ def test_fr19_missing_pts_falls_back_to_sane_default():
         assert session.fps == 24.0
     finally:
         _close_session(session)
+
+
+def test_topos_prefetch_overlaps_output_and_discards_stale_seek(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('TOPOS_DISABLE_PREFETCH', raising=False)
+    session = _session_with_movie(_FakeMovie(sample_count=6, ticks_per_frame=1, timescale=24),
+                                  prefetch=True)
+    prefetched = threading.Event()
+    convert_started = threading.Event()
+    decoded = []
+    av_module = session._av
+
+    def allocate_frame(*args: object, **kwargs: object) -> av.VideoFrame:
+        convert_started.set()
+        assert prefetched.wait(timeout=5)
+        return av_module.VideoFrame(*args, **kwargs)
+
+    def decode(index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
+        decoded.append((index, preview))
+        if index == 1:
+            assert convert_started.wait(timeout=5)
+            prefetched.set()
+        buffer.ensure(session._decoder, ((16, 8), (8, 8), (8, 8)))
+        buffer.planes[0].fill(64 + index * 100)
+        for plane in buffer.planes[1:]:
+            plane.fill(512)
+        return buffer
+
+    monkeypatch.setattr(session, '_av', SimpleNamespace(VideoFrame=allocate_frame))
+    monkeypatch.setattr(session, '_decode_into', decode)
+    try:
+        frame_0 = session.frame_rgb(0, size=(16, 8))
+        frame_1 = session.frame_yuv(1, size=(16, 8))
+        assert frame_1.y[0, 0] == 164
+        sought = session.frame_yuv(5, size=(16, 8))
+        snapshot = session.frame_rgb(5)
+        assert sought.y[0, 0] == 564
+        assert frame_1.y[0, 0] == 164
+        assert snapshot[0, 0, 0] > frame_0[0, 0, 0]
+        assert decoded[:2] == [(0, True), (1, True)]
+        assert decoded[-2:] == [(5, True), (5, False)]
+    finally:
+        session.close()
+
+
+def test_topos_close_releases_context_after_inflight_prefetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('TOPOS_DISABLE_PREFETCH', raising=False)
+    session = _session_with_movie(_FakeMovie(sample_count=2, ticks_per_frame=1, timescale=24),
+                                  prefetch=True)
+    started = threading.Event()
+    resume = threading.Event()
+    closed = threading.Event()
+
+    def decode(index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
+        if index == 1:
+            started.set()
+            assert resume.wait(timeout=5)
+        buffer.ensure(session._decoder, ((16, 8), (8, 8), (8, 8)))
+        return buffer
+
+    monkeypatch.setattr(session, '_decode_into', decode)
+    monkeypatch.setattr(session._decoder, 'close', closed.set)
+    try:
+        session.frame_yuv(0, size=(16, 8))
+        assert started.wait(timeout=5)
+        session.close()
+        assert not closed.is_set()
+        with pytest.raises(RuntimeError, match='已关闭'):
+            session.frame_yuv(1, size=(16, 8))
+    finally:
+        resume.set()
+        session.close()
+    assert closed.wait(timeout=5)
+
+
+def test_topos_v7b_preview_decodes_embedded_base_and_snapshot_reads_full() -> None:
+    from unittest.mock import Mock
+
+    movie = _FakeMovie(sample_count=2, ticks_per_frame=1, timescale=24, width=32, height=16)
+    movie.packet_base_into = Mock(return_value=(b'base', 4, True))
+    movie.packet_into = Mock(return_value=(b'full', 4))
+    session = _session_with_movie(movie)
+    session._try_base_layer = True
+    session._auto_request = object()
+    decoder = session._decoder
+    decoder.prepare_request = Mock(side_effect=AssertionError('base was already reduced'))
+    decoder.prepare = Mock(side_effect=[
+        SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3, width=16, height=8),
+        SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3, width=32, height=16),
+    ])
+    decoder.decode_views = Mock()
+    session._codec.plane_geometry = (
+        lambda info, plane: (info.width // (2 if plane else 1), info.height))
+    try:
+        preview = session.frame_yuv(0, size=(16, 8))
+        snapshot = session.frame_yuv(0)
+        assert (preview.width, preview.height) == (16, 8)
+        assert (snapshot.width, snapshot.height) == (32, 16)
+        assert [call.args[0] for call in decoder.decode_views.call_args_list] == [b'base', b'full']
+        movie.packet_base_into.assert_called_once_with(0)
+        movie.packet_into.assert_called_once_with(0)
+    finally:
+        session.close()
 
 
 # ---------------------------------------------------------------------------
@@ -321,22 +424,25 @@ def test_fr20_fit_size_pure_function_matrix():
 
 @pytest.mark.parametrize("box,expected", [
     ((320, 240), (320, 160)), ((240, 320), (240, 120)),
-    ((400, 400), (400, 200)), (None, (160, 80)),
+    ((400, 400), (400, 200)), (None, (156, 78)),
 ])
 def test_topos_rgb_fallback_keeps_source_aspect(box, expected):
     import numpy as np
     session = ToposMovieSession.__new__(ToposMovieSession)
     session._av = av
     session.width, session.height = 320, 160
-    session._out_w, session._out_h = 160, 80  # auto decode may use fewer pixels
-    session.vfmt = "yuv444p10le"
     session.info = SimpleNamespace(color_matrix=1, color_range=0)
-    session._y = np.zeros((80, 160), dtype="<u2")
-    session._u = np.full((80, 160), 512, dtype="<u2")
-    session._v = np.full((80, 160), 512, dtype="<u2")
-    session._decode_planes_locked = lambda index, size: None
+    session._rgb_input = None
+    # 4:2:2 的 78 像素色度平面会带行尾 padding。
+    session.vfmt = "yuv422p10le"
+    planes = (np.full((78, 156), 64, dtype="<u2"),
+              np.full((78, 78), 512, dtype="<u2"),
+              np.full((78, 78), 512, dtype="<u2"))
+    buffer = _DecodeBuffer(geometry=((156, 78), (78, 78), (78, 78)), planes=planes)
+    session._read_planes_locked = lambda index, preview: buffer
     rgb = session._frame_rgb_locked(0, box)
     assert (rgb.shape[1], rgb.shape[0]) == expected
+    assert not rgb.any()
 
 
 # ---------------------------------------------------------------------------
