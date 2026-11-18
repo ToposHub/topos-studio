@@ -82,6 +82,17 @@ def test_close_persists_project_even_without_batch_queue_failure() -> None:
     host.save_router.save.assert_called_once_with()
 
 
+def test_mixer_saves_through_the_edit_project_route() -> None:
+    from src.app.controllers.file_controller import FileOpsMixin
+
+    host = MagicMock(current_page="Mixer")
+    FileOpsMixin._setup_save_router_callbacks(host)
+    callbacks = host.save_router.set_callbacks.call_args.args[0]
+    assert callbacks["get_current_page"]() == "Edit"
+    host.current_page = "Color"
+    assert callbacks["get_current_page"]() == "Color"
+
+
 def test_main_window_close_event_runs_mixin_shutdown(monkeypatch) -> None:
     """MainWindow.closeEvent must not shadow FileOpsMixin.closeEvent.
 
@@ -109,6 +120,20 @@ def test_main_window_close_event_runs_mixin_shutdown(monkeypatch) -> None:
     assert invoked == ["pipeline", "mixin"]
 
 
+def test_canceling_window_close_keeps_the_mixer_recording_active() -> None:
+    from src.app.main_window import MainWindow
+
+    host = SimpleNamespace(
+        _mixer_timeline_recorders={"audio-track": object()},
+        _confirm_save_before_close=lambda: False,
+        _finish_mixer_timeline_recordings=MagicMock(),
+    )
+    event = SimpleNamespace(ignore=MagicMock())
+    MainWindow.closeEvent(host, event)
+    event.ignore.assert_called_once_with()
+    host._finish_mixer_timeline_recordings.assert_not_called()
+
+
 def test_closing_project_discards_its_recovery_file_and_detaches_autosave() -> None:
     """Discarding a project must not leave a recovery prompt for it behind."""
     from src.app.controllers.edit_controller import EditControllerMixin
@@ -127,6 +152,9 @@ def test_closing_project_discards_its_recovery_file_and_detaches_autosave() -> N
         save_router=MagicMock(),
         media_pool_panel=SimpleNamespace(clear_project=MagicMock()),
         timeline_panel=SimpleNamespace(clear=MagicMock()),
+        edit_page=SimpleNamespace(set_timeline=MagicMock()),
+        _clear_project_audio_clip_editor=MagicMock(),
+        _sync_audio_mixer_from_current_timeline=MagicMock(),
         setWindowTitle=MagicMock(),
         status_bar=SimpleNamespace(showMessage=MagicMock()),
     )
@@ -137,3 +165,6 @@ def test_closing_project_discards_its_recovery_file_and_detaches_autosave() -> N
     project_io.set_current_filepath.assert_called_once_with(None)
     assert host._current_edit_project is None
     assert host._current_edit_project_filepath is None
+    host.edit_page.set_timeline.assert_called_once_with(None)
+    host._clear_project_audio_clip_editor.assert_called_once_with()
+    host._sync_audio_mixer_from_current_timeline.assert_called_once_with()

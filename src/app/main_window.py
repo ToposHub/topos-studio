@@ -1163,7 +1163,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         Source Viewer controls the selected media asset.  Raising the matching
         dock first keeps tabified monitors in sync with the active transport.
         """
-        if getattr(self, "current_page", None) != "Edit":
+        page = getattr(self, "current_page", None)
+        if page not in ("Edit", "Mixer"):
             return False
 
         focus = QApplication.focusWidget()
@@ -1174,7 +1175,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             return False
 
         source_viewer = getattr(self, "source_viewer_widget", None)
-        if MainWindow._focus_is_within(focus, source_viewer):
+        if page == "Edit" and MainWindow._focus_is_within(focus, source_viewer):
             if getattr(source_viewer, "current_asset", None) is None:
                 return False
             toggle_source = getattr(source_viewer, "toggle_playback", None)
@@ -1185,6 +1186,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         timeline_panel = getattr(self, "timeline_panel", None)
         program_viewer = getattr(self, "program_viewer_widget", None)
+        if page == "Mixer":
+            program_viewer = getattr(self, "edit_viewport", None) or program_viewer
         if not (
             MainWindow._focus_is_within(focus, timeline_panel)
             or MainWindow._focus_is_within(focus, program_viewer)
@@ -1194,7 +1197,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         toggle_timeline = getattr(timeline_panel, "toggle_playback", None)
         if not callable(toggle_timeline):
             return False
-        MainWindow._raise_edit_viewer_dock(self, "dock_program_viewer")
+        if page == "Mixer":
+            dock = getattr(self, "dock_audio_viewer", None)
+            if dock is not None:
+                dock.show()
+                dock.raise_()
+        else:
+            MainWindow._raise_edit_viewer_dock(self, "dock_program_viewer")
         reset_jkl = getattr(getattr(timeline_panel, "_playback_controller", None), "jkl_reset", None)
         if callable(reset_jkl):
             reset_jkl()
@@ -1339,7 +1348,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         self.curves_panel = CurvesPanel(self.curves_widget, hsl_panel=self.hsl_curves_panel)
         self.warper_panel = WarperPanel()
         self.mixer_panel = MixerPanel()
-        self.audio_mixer_panel = AudioMixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()
         # D2（N03-e）：旧 LutPanel/PluginPanel 实例已删除——LUT/Effects 的
@@ -1425,10 +1433,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         if self._mixer_available and self.mixer_page is None:
             try:
                 from src.features.mixer.ui.mixer_page import MixerPage
-                descriptor = (self.feature_registry.get_page("mixer")
-                              if self.feature_registry is not None else None)
-                self.mixer_page = (descriptor.create_page(None)
-                                   if descriptor is not None else MixerPage(self))
+                self.mixer_page = MixerPage(self, project_backed=True)
                 self.mixer_page.setParent(self)
                 self.mixer_page.hide()
             except ImportError as exc:
@@ -1508,6 +1513,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             if (MulticamPanel is not None
                     and self.multicam_panel is None):
                 self.multicam_panel = MulticamPanel()
+
+        self._mixer_available = bool(
+            self._mixer_available and self.edit_page is not None and self.timeline_panel is not None
+            and self.program_viewer_widget is not None and self.edit_properties_panel is not None
+        )
+        if self._mixer_available and self.mixer_page is not None:
+            from src.features.mixer.ui.studio_console import StudioAudioMixerPanel
+            self.audio_mixer_panel = StudioAudioMixerPanel()
+        else:
+            self.audio_mixer_panel = AudioMixerPanel()
 
         # Deliver Page (P9.3) - Phase 9/R-001: Conditional creation with delayed import
         # Fallback: create directly if not created via registry
@@ -2198,6 +2213,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             mp.track_solo_toggled.connect(self._on_mixer_solo_toggled)
             mp.track_record_arm_toggled.connect(self._on_mixer_record_arm_toggled)
             mp.master_volume_changed.connect(self._on_mixer_master_volume)
+            mp.master_volume_preview.connect(self._on_mixer_master_volume_preview)
             mp.master_mute_toggled.connect(self._on_mixer_master_mute)
             mp.show_effects_for_track.connect(self._on_mixer_show_effects)
             # E17: purge_cache 信号已随 no-op 处理器一并删除
@@ -2210,6 +2226,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             mp.track_show_automation.connect(self._on_mixer_show_automation)
             mp.track_show_routing.connect(self._on_mixer_show_routing)
             mp.track_routing_committed.connect(self._on_mixer_routing_committed)
+            if hasattr(mp, "track_output_requested"):
+                mp.track_output_requested.connect(self._on_mixer_output_bus_requested)
+                mp.add_bus_requested.connect(self._on_mixer_add_bus_requested)
             mp.batch_solo_cleared.connect(self._on_mixer_batch_solo_cleared)
             mp.batch_mute_changed.connect(self._on_mixer_batch_mute_changed)
 
@@ -2320,8 +2339,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         # Sync timeline toolbar mixer button with dock_audio_mixer visibility
         if self._edit_available and self.timeline_panel is not None:
             dock = getattr(self, 'dock_audio_mixer', None)
-            if dock is not None and hasattr(self.timeline_panel, 'sync_mixer_button'):
-                dock.visibilityChanged.connect(self.timeline_panel.sync_mixer_button)
+            if dock is not None:
+                self.timeline_panel.set_audio_mixer_dock(dock)
         if self._edit_available:
             self._connect_audio_mixer_sync()
 
@@ -2537,18 +2556,27 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
         [AUD-3503] denoise/deblur 的 DenoiseWorker 线程经引擎 cancel()
         协作停止（中断请求 + 有界等待 + terminate 兜底）。
         """
+        recordings = getattr(self, "_mixer_timeline_recorders", None)
+        closing_after_recording = getattr(self, "_mixer_recording_close_pending", False)
+        if closing_after_recording and recordings:
+            event.ignore()
+            return
+        if closing_after_recording:
+            self._mixer_recording_close_pending = False
+
         confirm_bypassed = False
         try:
             # ---- [AUD-3500] 可取消的保存确认先行 ----
             confirm = getattr(self, "_confirm_save_before_close", None)
             if callable(confirm):
                 confirmed = True
-                try:
-                    confirmed = bool(confirm())
-                except Exception:
-                    # 确认流程自身异常不得吞掉关闭：mixin 内还会再问一次
-                    logger.exception(
-                        "MainWindow: save-before-close confirmation failed")
+                if not closing_after_recording:
+                    try:
+                        confirmed = bool(confirm())
+                    except Exception:
+                        # 确认流程自身异常不得吞掉关闭：mixin 内还会再问一次
+                        logger.exception(
+                            "MainWindow: save-before-close confirmation failed")
                 if not confirmed:
                     event.ignore()
                     return
@@ -2556,6 +2584,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 # 确认直接放行；"丢弃"后脏标记仍在，否则会被问两次。
                 self._confirm_save_before_close = lambda: True
                 confirm_bypassed = True
+
+            if getattr(self, "_mixer_timeline_recorders", None):
+                event.ignore()
+                self._mixer_recording_close_pending = True
+                self._finish_mixer_timeline_recordings()
+                return
 
             mixer_page = getattr(self, "mixer_page", None)
             if mixer_page is not None:

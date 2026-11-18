@@ -39,7 +39,7 @@ import uuid
 from fractions import Fraction
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
@@ -2700,11 +2700,6 @@ class EditControllerMixin:
         if panel is None or timeline is None:
             return
         audio_tracks = getattr(timeline, 'audio_tracks', ())
-        if not audio_tracks:
-            # 没有音频轨：清空（保留 Master 条）
-            if hasattr(panel, 'clear_all_tracks'):
-                panel.clear_all_tracks()
-            return
         tracks = []
         for idx, track in enumerate(audio_tracks, start=1):
             tracks.append({
@@ -2715,6 +2710,8 @@ class EditControllerMixin:
                 "pan": float(getattr(track, 'pan', 0.0)),
                 "is_muted": bool(getattr(track, 'is_muted', False)),
                 "is_solo": bool(getattr(track, 'is_solo', False)),
+                "is_bus": getattr(track, "is_bus", False),
+                "output_bus_id": getattr(track, "output_bus_id", None),
                 # W8: Strip EQ 参数（None=禁用）
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
@@ -2813,6 +2810,9 @@ class EditControllerMixin:
             panel = getattr(self, "audio_mixer_panel", None)
             if panel is not None:
                 panel.clear_all_tracks()
+                panel.set_master_volume_linear(1.0)
+                panel.set_master_muted(False)
+                panel.set_master_strip_state(None, None)
 
     def _get_mixer_audio_manager(self):
         """获取 EditPage 的 AudioPlaybackManager（懒加载），用于实时听感预览。"""
@@ -3178,6 +3178,16 @@ class EditControllerMixin:
         except Exception as e:  # noqa: BLE001
             logger.warning("batch macro execute failed (%s): %s", label, e)
 
+    def _on_mixer_master_volume_preview(self, db: float) -> None:
+        from src.shared.ui.audio_mixer.track_mixer_widget import db_to_linear
+
+        mgr = self._get_mixer_audio_manager()
+        if mgr is not None:
+            try:
+                mgr.set_master_volume(db_to_linear(db))
+            except (ValueError, RuntimeError) as exc:
+                logger.debug("mixer master volume preview failed: %s", exc)
+
     def _on_mixer_master_volume(self, db: float) -> None:
         """Master 推子松手：提交 SetMasterVolumeCommand（持久化）+ 实时听感。
 
@@ -3191,12 +3201,7 @@ class EditControllerMixin:
         linear = db_to_linear(float(db))
 
         # 实时听感
-        mgr = self._get_mixer_audio_manager()
-        if mgr is not None:
-            try:
-                mgr.set_master_volume(linear)
-            except Exception as e:
-                logger.debug("mixer master volume (audio) failed: %s", e)
+        self._on_mixer_master_volume_preview(db)
 
         # 持久化命令（W12）
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
@@ -3250,7 +3255,91 @@ class EditControllerMixin:
         else:
             self._stop_recording_and_import(track_id)
 
-    def _start_recording(self, track_id: str, *, voiceover: bool = False) -> None:
+    def _on_mixer_timeline_record_requested(self, track_id: str) -> None:
+        from src.features.edit.core.recording_manager import RecordingManager
+
+        if getattr(self, "current_page", None) != "Mixer":
+            return
+        active = getattr(self, "_mixer_timeline_recorders", {})
+        recorder = active.get(track_id)
+        if recorder is not None:
+            if recorder.state in {RecordingManager.STATE_PRE_ROLL, RecordingManager.STATE_RECORDING}:
+                self._stop_recording_and_import(track_id)
+            return
+        if active or any(
+            manager.is_recording for manager in getattr(self, "_recording_managers", {}).values()
+        ):
+            self.status_bar.showMessage(I18N.tr("mixer.record.busy", "Finish the current recording first"), 4000)
+            return
+        view = self._edit_timeline_view()
+        timeline = view.get_timeline() if view is not None else None
+        track = timeline.get_track_by_id(track_id) if timeline is not None else None
+        if (getattr(self, "_current_edit_project", None) is None or track is None
+                or track.track_type != "audio" or track.is_bus or track.is_locked):
+            return
+        self._start_recording(track_id, voiceover=True, from_mixer_timeline=True)
+
+    def _set_mixer_timeline_recording_state(
+        self, track_id: str, recorder: Any, state: str,
+    ) -> None:
+        recorders = self._mixer_timeline_recorders
+        if recorders.get(track_id) is not recorder:
+            return
+        if state == "idle":
+            recorders.pop(track_id)
+            takes = recorder.takes
+            if not takes or takes[-1].status in {"failed", "discarded"}:
+                self._voiceover_sessions.pop(track_id, None)
+            if takes and takes[-1].status == "failed":
+                self.status_bar.showMessage(I18N.tr("mixer.record.save_failed", "Could not save the recording"), 5000)
+        view = self._edit_timeline_view()
+        if view is not None:
+            view.set_track_recording_state(track_id, "idle" if state == "failed" else state)
+        panel = self._adr_panel()
+        if panel is not None:
+            panel.set_recording_state(state)
+            if state in {"idle", "failed"}:
+                panel.end_monitor()
+        if state == "failed":
+            self.status_bar.showMessage(I18N.tr("mixer.record.failed", "Could not record from the selected input"), 5000)
+            # The recorder may immediately flush a partial take after a device
+            # error. Retire it only if it stays failed after that callback.
+            QTimer.singleShot(0, lambda: self._retire_failed_mixer_recorder(track_id, recorder))
+        if not recorders and getattr(self, "_mixer_recording_close_pending", False):
+            QTimer.singleShot(0, self.close)
+
+    def _retire_failed_mixer_recorder(self, track_id: str, recorder: Any) -> None:
+        if (self._mixer_timeline_recorders.get(track_id) is recorder
+                and recorder.state in {"failed", "idle"}):
+            getattr(self, "_recording_managers", {}).pop(track_id, None)
+            self._voiceover_sessions.pop(track_id, None)
+            recorder.cancel_recording()
+
+    def _finish_mixer_timeline_recordings(self) -> None:
+        """Release the microphone when its project closes and let each take finish writing."""
+        for track_id, recorder in tuple(getattr(self, "_mixer_timeline_recorders", {}).items()):
+            self._stop_recording_and_import(track_id)
+            # A live recording can have moved to post-roll before the project
+            # closed. Finish the capture while preserving its recorded samples.
+            if recorder.state == "stopping":
+                recorder.stop_recording()
+
+    def _sync_mixer_timeline_recorders(self, timeline: Any) -> None:
+        """End a take if the sequence or its destination track was left."""
+        if not getattr(self, "_mixer_timeline_recorders", None):
+            return
+        for track_id in self._mixer_timeline_recorders:
+            session = self._voiceover_sessions.get(track_id)
+            if session is None:
+                continue
+            if (timeline is None or timeline.timeline_id != session["timeline_id"]
+                    or timeline.get_track_by_id(track_id) is None):
+                self._finish_mixer_timeline_recordings()
+                return
+
+    def _start_recording(
+        self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
+    ) -> None:
         """启动录音（§4.4 / P1-10：input patch、时间码对齐、监听、电平）。
 
         P1-10 增强：
@@ -3311,6 +3400,8 @@ class EditControllerMixin:
         if getattr(self, '_adr_calibration', None) is not None:
             mgr.set_calibration(self._adr_calibration)
         mgr.enable_live_post_roll = True  # 停止后采集 post-roll 尾巴再落盘
+        if from_mixer_timeline:
+            mgr.enable_background_flush = True
         # 状态回调（携带录音时的工程标识：post-roll 秒内切工程防错投）
         project_id = getattr(project, 'project_id', None)
         # B10②：voiceover 会话快照（capture 时的 project/timeline/track/
@@ -3341,8 +3432,17 @@ class EditControllerMixin:
             if settings.get('monitor') and panel.begin_monitor(
                     config.sample_rate, config.channels):
                 mgr.on_monitor_block = panel.monitor_write_block()
+        if from_mixer_timeline:
+            if not hasattr(self, "_mixer_timeline_recorders"):
+                self._mixer_timeline_recorders = {}
+            self._mixer_timeline_recorders[track_id] = mgr
+            mgr.on_state_changed = lambda state: self._set_mixer_timeline_recording_state(track_id, mgr, state)
         if not mgr.start_recording(in_point_frame=in_point_frame):
+            if from_mixer_timeline:
+                self._set_mixer_timeline_recording_state(track_id, mgr, "failed")
             logger.warning("Failed to start recording for track %s", track_id)
+            return
+        if from_mixer_timeline and mgr.state == "failed":
             return
         if not hasattr(self, '_recording_managers'):
             self._recording_managers = {}
@@ -3354,7 +3454,7 @@ class EditControllerMixin:
             self._adr_loop_tracks = set()
             self._adr_in_points = {}
         self._adr_in_points[track_id] = in_point_frame
-        if settings.get('loop', False):
+        if settings.get('loop', False) and not from_mixer_timeline:
             loop_seconds = self._adr_loop_window_seconds(fps)
             if loop_seconds and loop_seconds > 0:
                 self._adr_loop_tracks.add(track_id)
@@ -4456,23 +4556,7 @@ class EditControllerMixin:
         # AUD-37810 消费端提交门控（防御纵深）：发射侧 RoutingDialog 已按
         # 校验结果阻止发射，此处再以完整图复核，保证任何发射路径都无法
         # 把非法路由写入引擎或命令栈。
-        try:
-            from src.features.edit.core.audio_playback import validate_routing_graph
-            bus_ids, routing = self._build_routing_validation_graph(
-                sequence, track_id, output_bus_id, new_sends)
-            is_valid, graph_errors = validate_routing_graph(bus_ids, routing)
-        except (ImportError, AttributeError, TypeError) as e:
-            logger.warning("Routing validation unavailable, commit blocked: %s", e)
-            return
-        if not is_valid:
-            logger.warning(
-                "Routing commit blocked (AUD-37810): %s", "; ".join(graph_errors))
-            status_bar = getattr(self, 'status_bar', None)
-            if status_bar is not None:
-                status_bar.showMessage(I18N.tr(
-                    "warning.audio_routing_commit_blocked",
-                    "Routing change rejected: routing cycle or unknown bus target."
-                ), 5000)
+        if not EditControllerMixin._validate_mixer_routing(self, sequence, track_id, output_bus_id, new_sends):
             return
 
         # 实时听感（MX-14: 4 元组带 tap/muted）
@@ -4542,6 +4626,110 @@ class EditControllerMixin:
                         tview._execute_command(cmd)
         except Exception as e:
             logger.warning("Failed to commit routing: %s", e)
+
+    def _validate_mixer_routing(
+        self, sequence: Any, track_id: str, output_bus_id: str | None, sends: Iterable[Any],
+    ) -> bool:
+        try:
+            from src.features.edit.core.audio_playback import validate_routing_graph
+
+            bus_ids, routing = self._build_routing_validation_graph(sequence, track_id, output_bus_id, sends)
+            is_valid, errors = validate_routing_graph(bus_ids, routing)
+        except (ImportError, AttributeError, TypeError) as exc:
+            logger.warning("Routing validation unavailable, commit blocked: %s", exc)
+            return False
+        if not is_valid:
+            logger.warning("Routing commit blocked: %s", "; ".join(errors))
+            status_bar = getattr(self, "status_bar", None)
+            if status_bar is not None:
+                status_bar.showMessage(I18N.tr(
+                    "warning.audio_routing_commit_blocked",
+                    "Routing change rejected: routing cycle or unknown bus target.",
+                ), 5000)
+        return is_valid
+
+    def _on_mixer_output_bus_requested(self, track_id: str, output_bus_id: str | None) -> None:
+        from src.features.edit.core.commands import SetTrackOutputBusCommand
+
+        view = self._edit_timeline_view()
+        sequence = view.get_timeline() if view is not None else None
+        track = sequence.get_track_by_id(track_id) if sequence is not None else None
+        if track is not None and track.output_bus_id != output_bus_id:
+            if self._validate_mixer_routing(sequence, track_id, output_bus_id, track.sends):
+                view.execute_command(SetTrackOutputBusCommand.create(track_id, output_bus_id))
+        self._sync_audio_mixer_from_current_timeline()
+
+    def _on_mixer_add_bus_requested(self) -> None:
+        from src.features.edit.core.commands import AddBusCommand
+
+        view = self._edit_timeline_view()
+        sequence = view.get_timeline() if view is not None else None
+        if sequence is None or view.has_provisional_timeline():
+            return
+        names = {track.name for track in sequence.audio_tracks}
+        number = 1
+        while f"Bus {number}" in names:
+            number += 1
+        view.execute_command(AddBusCommand.create(f"Bus {number}"))
+        self._sync_audio_mixer_from_current_timeline()
+
+    def _commit_mixer_clip_gain(self, clip_id: str, gain_db: float) -> None:
+        from src.features.edit.core.commands import SetClipAudioGainCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id, lambda _clip: SetClipAudioGainCommand.create((clip_id,), gain_db),
+        )
+
+    def _commit_mixer_clip_fade(self, clip_id: str, fade_in: int, fade_out: int) -> None:
+        from src.features.edit.core.commands import ChangeClipFadeCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id,
+            lambda clip: ChangeClipFadeCommand.create(clip.track_id, clip_id, fade_in, fade_out),
+        )
+
+    def _commit_mixer_clip_sample_fade(self, clip_id: str, fade_in: int, fade_out: int) -> None:
+        from src.features.edit.core.commands import UpdateClipSampleFieldsCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id,
+            lambda clip: UpdateClipSampleFieldsCommand.create(
+                clip.track_id, clip,
+                fade_in_samples=fade_in if fade_in >= 0 else None,
+                fade_out_samples=fade_out if fade_out >= 0 else None,
+                label=I18N.tr("mixer.clip_editor.set_fades", "Change clip fades"),
+            ),
+        )
+
+    def _commit_mixer_clip_fade_curve(self, clip_id: str, curve: str) -> None:
+        from src.features.edit.core.commands import MacroCommand, SetFadeEndCurveCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id,
+            lambda clip: MacroCommand.create(
+                I18N.tr("mixer.clip_editor.set_fade_curve", "Change fade curves"),
+                [SetFadeEndCurveCommand.create(clip_id, clip.track_id, end, curve) for end in ("in", "out")],
+            ),
+        )
+
+    def _execute_mixer_clip_editor_command(
+        self, clip_id: str, build_command: Callable[[Any], Any],
+    ) -> None:
+        if getattr(self, "current_page", None) != "Mixer":
+            return
+        panel = self.dock_audio_clip_editor.widget()
+        view = self._edit_timeline_view()
+        timeline = view.get_timeline() if view is not None else None
+        clip = timeline.get_clip_by_id(clip_id) if timeline is not None else None
+        track = timeline.get_track_by_id(clip.track_id) if clip is not None else None
+        if panel.clip_id != clip_id or track is None or track.track_type != "audio" or track.is_locked:
+            panel.sync_clip(timeline)
+            return
+        try:
+            view.execute_command(build_command(clip))
+        except (ValueError, RuntimeError) as exc:
+            self.status_bar.showMessage(str(exc), 4000)
+        panel.sync_clip(view.get_timeline())
 
     def _on_mixer_effects_preview(self, track_id: str, chain) -> None:
         """W26: FX 机架拖动期：实时更新 AudioPlaybackManager 的效果器链（听感）。
@@ -7833,6 +8021,9 @@ class EditControllerMixin:
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
+        finish_recordings = getattr(self, "_finish_mixer_timeline_recordings", None)
+        if callable(finish_recordings):
+            finish_recordings()
         # M19.2b：工程关闭即清空进程级色彩覆盖层——上一工程的作者
         # 色彩设定不得泄漏到无工程/下一工程状态（回退用户全局偏好）。
         try:
@@ -7850,7 +8041,17 @@ class EditControllerMixin:
 
         # Clear panels
         self.media_pool_panel.clear_project()
-        self.timeline_panel.clear()
+        clear_timeline = getattr(self.timeline_panel, "clear_project", self.timeline_panel.clear)
+        clear_timeline()
+        edit_page = getattr(self, "edit_page", None)
+        if edit_page is not None:
+            edit_page.set_timeline(None)
+        clear_audio_editor = getattr(self, "_clear_project_audio_clip_editor", None)
+        if callable(clear_audio_editor):
+            clear_audio_editor()
+        sync_mixer = getattr(self, "_sync_audio_mixer_from_current_timeline", None)
+        if callable(sync_mixer):
+            sync_mixer()
 
         # Reset window title
         self.setWindowTitle(I18N.tr("app.brand", "Topos"))

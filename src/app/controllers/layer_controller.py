@@ -3484,7 +3484,7 @@ class LayerOpsMixin:
         """
         if not getattr(self, "_edit_available", False):
             return None
-        if getattr(self, "current_page", None) != "Edit":
+        if getattr(self, "current_page", None) not in ("Edit", "Mixer"):
             return None
 
         def _inside(widget, host) -> bool:

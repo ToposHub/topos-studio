@@ -49,6 +49,16 @@ def format_freq_short(hz: float) -> str:
     return f"{int(round(hz))}Hz"
 
 
+def _display_fade_factor(curve: str, progress: float) -> float:
+    if curve == "S-Curve":
+        return progress * progress * (3.0 - 2.0 * progress)
+    if curve == "Log":
+        return math.sqrt(progress)
+    if curve == "Equal Power":
+        return math.sin(math.pi * progress / 2.0)
+    return progress
+
+
 def freq_to_note_name(hz: float) -> str:
     if hz <= 16.0:
         return ""
@@ -117,8 +127,9 @@ class PowerToggleSwitch(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        bg = QColor("#12262E") if self._checked else QColor("#121215")
-        border = QColor(ACCENT_CYAN) if self._checked else QColor("#36363D")
+        active = self._checked and self.isEnabled()
+        bg = QColor("#12262E") if active else QColor("#121215")
+        border = QColor(ACCENT_CYAN) if active else QColor("#36363D")
         p.setPen(QPen(border, 1.0))
         p.setBrush(bg)
         p.drawRoundedRect(rect, 8.5, 8.5)
@@ -127,7 +138,7 @@ class PowerToggleSwitch(QWidget):
         cy = self.height() / 2.0
         cx = (self.width() - 8.8) if self._checked else 8.8
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(ACCENT_CYAN) if self._checked else QColor("#666670"))
+        p.setBrush(QColor(ACCENT_CYAN) if active else QColor("#666670"))
         p.drawEllipse(QPointF(cx, cy), r, r)
 
 
@@ -197,7 +208,7 @@ class EditableValuePill(QWidget):
         p.setBrush(QColor("#151518"))
         p.drawRoundedRect(rect, 3.0, 3.0)
 
-        p.setPen(QColor("#ECECF0"))
+        p.setPen(QColor("#ECECF0" if self.isEnabled() else "#90919B"))
         font = QFont(MONO_FONT_FAM, 9)
         font.setWeight(QFont.Weight.Bold)
         p.setFont(font)
@@ -311,7 +322,8 @@ class ProRotaryKnob(QWidget):
         p.drawArc(arc_rect, int(start_deg * 16), int(total_span * 16))
 
         # 2. 激活数值弧（克制单层，无外发光）
-        p.setPen(QPen(self._accent, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        accent = self._accent if self.isEnabled() else QColor("#666670")
+        p.setPen(QPen(accent, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         if self._mode == "bipolar":
             span_deg = curr_deg - 90.0
             if abs(span_deg) > 0.5:
@@ -632,6 +644,7 @@ class WaveformSpectralCanvas(QWidget):
         self._fade_out_sec = 0.0
         self._amp_zoom = 1.0               # 波形垂直显示放大倍率 (1.0 ~ 16.0, 仅视觉不改变实际音量)
         self._fade_curve_type = "S-Curve"  # "Linear" | "S-Curve" | "Log"
+        self._fade_out_curve_type = self._fade_curve_type
         self._tool_mode = "select"         # "select" (框选) | "brush" (污点修复画笔)
 
         # 交互状态机
@@ -754,8 +767,12 @@ class WaveformSpectralCanvas(QWidget):
             return self._preview_gain_db
         return 0.0
 
-    def setFadeCurveType(self, curve_type: str):
-        self._fade_curve_type = curve_type
+    def setFadeCurveType(self, curve_type: str) -> None:
+        self.setFadeCurves(curve_type, curve_type)
+
+    def setFadeCurves(self, fade_in_curve: str, fade_out_curve: str) -> None:
+        self._fade_curve_type = fade_in_curve
+        self._fade_out_curve_type = fade_out_curve
         self._invalidate_cache()
 
     def setToolMode(self, mode: str):
@@ -1821,7 +1838,7 @@ class WaveformSpectralCanvas(QWidget):
                 if self._fade_in_sec > 0.0 and t < self._fade_in_sec:
                     clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, t / self._fade_in_sec)))
                 if self._fade_out_sec > 0.0 and t > (self._duration - self._fade_out_sec):
-                    clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, (self._duration - t) / self._fade_out_sec)))
+                    clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, (self._duration - t) / self._fade_out_sec)), fade_out=True)
 
                 if not is_muted and abs(raw_v * clip_scale) > 0.995:
                     clip_xs.append(x)
@@ -1892,7 +1909,7 @@ class WaveformSpectralCanvas(QWidget):
             if self._fade_in_sec > 0.0 and t0 < self._fade_in_sec:
                 clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, t0 / self._fade_in_sec)))
             if self._fade_out_sec > 0.0 and t0 > (self._duration - self._fade_out_sec):
-                clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, (self._duration - t0) / self._fade_out_sec)))
+                clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, (self._duration - t0) / self._fade_out_sec)), fade_out=True)
 
             scale = clip_scale * self._amp_zoom
             if not is_muted and (clip_scale * hi > 0.995 or clip_scale * lo < -0.995):
@@ -2532,13 +2549,9 @@ class WaveformSpectralCanvas(QWidget):
         # 达芬奇风格：面板边界由 1px 黑线定义，去掉旧版内凹阴影与描边
         p.restore()
 
-    def _eval_fade_curve(self, u: float) -> float:
-        """非线性淡入淡出曲线求值：S-Curve 平滑过渡 / Log 快起慢落 / Linear 线性"""
-        if self._fade_curve_type == "S-Curve":
-            return u * u * (3.0 - 2.0 * u)
-        elif self._fade_curve_type == "Log":
-            return math.sqrt(u)
-        return u
+    def _eval_fade_curve(self, u: float, *, fade_out: bool = False) -> float:
+        curve = self._fade_out_curve_type if fade_out else self._fade_curve_type
+        return _display_fade_factor(curve, u)
 
     def _draw_fade_overlays(self, p: QPainter, wave_r: QRectF):
         fi_x = self._time_to_x(self._fade_in_sec, wave_r)
@@ -2569,7 +2582,7 @@ class WaveformSpectralCanvas(QWidget):
             for step in range(1, 25):
                 u = step / 24.0
                 px = fo_x + u * (x1 - fo_x)
-                py = wave_r.bottom() - self._eval_fade_curve(1.0 - u) * (wave_r.height() - 8.0)
+                py = wave_r.bottom() - self._eval_fade_curve(1.0 - u, fade_out=True) * (wave_r.height() - 8.0)
                 curve_path.lineTo(px, py)
 
             shade_path = QPainterPath(curve_path)
@@ -3117,21 +3130,16 @@ class FadeCurveMiniPreview(QWidget):
         super().__init__(parent)
         self.setFixedSize(64, 34)
         self._curve = "S-Curve"
+        self._out_curve = self._curve
         self._has_in = False
         self._has_out = False
 
-    def setState(self, curve: str, fade_in: float, fade_out: float):
+    def setState(self, curve: str, fade_in: float, fade_out: float, *, out_curve: str | None = None) -> None:
         self._curve = curve
+        self._out_curve = out_curve or curve
         self._has_in = fade_in > 0.001
         self._has_out = fade_out > 0.001
         self.update()
-
-    def _eval(self, u: float) -> float:
-        if self._curve == "S-Curve":
-            return u * u * (3.0 - 2.0 * u)
-        elif self._curve == "Log":
-            return math.sqrt(u)
-        return u
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -3152,9 +3160,9 @@ class FadeCurveMiniPreview(QWidget):
         for i in range(steps + 1):
             t = i / steps
             if t < 0.38:
-                gain = self._eval(t / 0.38)
+                gain = _display_fade_factor(self._curve, t / 0.38)
             elif t > 0.62:
-                gain = self._eval((1.0 - t) / 0.38)
+                gain = _display_fade_factor(self._out_curve, (1.0 - t) / 0.38)
             else:
                 gain = 1.0
             px = r.left() + pad_x + t * w

@@ -1,8 +1,8 @@
 # Topos Studio 混音页后端接线计划表
 
-混音页的三个主面板已经接入 Studio 视频工作区。混音台、视频监看、音频时间线可各自浮动并保存布局。单片段编辑器可独立浮动或与时间线共用标签组。目前的走带、推子、路由、效果器和撤销使用本地界面状态。内置的对白、音效、音乐只提供归一化概览波形。
+Studio 的剪辑页和混音页共用同一个 Audio Mixer 面板，推子、双声道电平表、插入效果器以及 Master / Bus 输出路由均在同一面板中操作。混音页借用剪辑页的 Viewport 与时间线。Viewport 显示 Program，时间线以音频轨和按轨着色的波形呈现同一剪辑序列。音频轨道头的 R 复用录音控制器，成功录制后按播放头打点放入该轨。时间线音频片段和素材池音频文件均可通过右键进入混音页的同一个专业编辑器。素材模式读取实际源波形，片段模式的增益和帧级淡入淡出进入同一撤销历史。面板停靠布局按页面保存，工程编辑共用走带与音频遥测。独立原型入口仍可展示本地示例。
 
-接线时按下表从工程状态和时钟开始。界面入口见 [MixerPage](../../src/features/mixer/ui/mixer_page.py)，当前交互状态见 [MixerUiSession](../../src/features/mixer/ui/session.py)。
+工作区借还入口见 [DockLayoutMixin](../../src/app/controllers/dock_layout_controller.py)，通道条外观见 [StudioAudioMixerPanel](../../src/features/mixer/ui/studio_console.py)。下表保留后端接线规划，其中原型专用的扩展参数与精调任务仍待实现。
 
 | 顺序 | 后端工作 | 接线位置与边界 | 可验收结果 |
 | --- | --- | --- | --- |

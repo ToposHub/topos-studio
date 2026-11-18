@@ -98,6 +98,7 @@ class WaveformData:
     duration_seconds: float
     channels: int = 1  # Number of audio channels (1=mono, 2=stereo, etc.)
     is_complete: bool = True
+    source_path: str | None = None  # Runtime provenance for relinked media.
 
     def __post_init__(self) -> None:
         if len(self.peaks_min) != len(self.peaks_max):
@@ -463,6 +464,7 @@ def load_waveform_from_disk(
                 duration_seconds=float(payload["dur"]),
                 channels=int(payload["ch"]),
                 is_complete=True,
+                source_path=file_path,
             )
     except Exception:
         return None
@@ -880,7 +882,8 @@ class WaveformExtractorWorker(QThread):
             samples_per_second=samples_per_second,
             duration_seconds=duration_seconds,
             channels=num_channels,
-            is_complete=True
+            is_complete=True,
+            source_path=self._file_path,
         )
 
         logger.debug(f"Extracted waveform for {self._asset_id}: {final_bucket_count} samples per channel, {num_channels} channels")

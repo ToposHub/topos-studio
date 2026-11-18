@@ -256,7 +256,7 @@ from src.features.edit.ui.timeline_layout import (
     MAX_SUBTITLE_TRACK_HEIGHT,
 )
 from src.shared.i18n.i18n import I18N
-from src.shared.track_colors import next_track_color
+from src.shared.track_colors import next_track_color, resolve_track_color
 from src.shared.ui.style_sheet import COMPACT_HORIZONTAL_SCROLLBAR_STYLE
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.format_registry import is_media
@@ -812,6 +812,8 @@ class TimelineView(QGraphicsView):
     effect_added = pyqtSignal(str, str)  # clip_id, effect_id (pre-generated so the panel can scroll to it)
     # E09: 双击片段 → 在 Source Viewer 打开（clip_id, 源帧号）
     clip_open_in_source_requested = pyqtSignal(str, int)
+    audio_clip_editor_requested = pyqtSignal(str)
+    track_record_requested = pyqtSignal(str)
     timeline_changed = pyqtSignal(object)  # TimelineSequence - emitted after command execution
     timeline_duration_extended = pyqtSignal(int)  # Runtime editable duration in frames
     project_changed = pyqtSignal(object)  # EditProject - emitted after external file import
@@ -937,6 +939,9 @@ class TimelineView(QGraphicsView):
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
         self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
+        self._audio_only = False
+        self._professional_audio_editor_available = False
+        self._recording_track_states: dict[str, str] = {}
         self._playhead_follow_enabled = PLAYHEAD_FOLLOW_ENABLED  # Playhead centering during playback
         self._target_track_id: Optional[str] = None  # UI-09: Target track for insert operations (video)
         self._target_audio_track_id: Optional[str] = None  # P2: Separate audio target track
@@ -1386,6 +1391,76 @@ class TimelineView(QGraphicsView):
         self._update_scene_rect()
         self.timeline_duration_extended.emit(duration)
 
+    def set_audio_only(self, enabled: bool) -> None:
+        """Show the sequence's audio lanes without replacing the timeline or history."""
+        if self._audio_only == enabled:
+            return
+        if not self._interaction.is_idle:
+            self._cancel_current_interaction()
+        self._audio_only = enabled
+        if self._timeline is not None:
+            if enabled:
+                self._set_selected_edit_edges({})
+                self.set_selection(self._selection)
+            else:
+                for header in self._track_headers.values():
+                    header.show()
+                for item in self._items_map.values():
+                    if isinstance(item, SubtitleClipItem):
+                        item.show()
+            self._update_gap_indicators()
+            self._update_scene_rect()
+            self._update_clip_visibility()
+        self.viewport().update()
+
+    @property
+    def audio_clip_editor_available(self) -> bool:
+        return self._professional_audio_editor_available
+
+    def set_professional_audio_editor_available(self, available: bool) -> None:
+        self._professional_audio_editor_available = available
+
+    def request_audio_clip_editor(self, clip_id: str) -> None:
+        if not self.audio_clip_editor_available or self._timeline is None:
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is not None and any(track.track_id == clip.track_id for track in self._timeline.audio_tracks):
+            self.audio_clip_editor_requested.emit(clip_id)
+
+    def selected_audio_clip_id(self) -> str | None:
+        """Prefer the primary selection, even when a linked video is selected too."""
+        if self._timeline is None:
+            return None
+        selected = self._selection.selected_clip_ids
+        primary = self._selection.primary_item
+        if primary is not None and primary.item_id in selected:
+            selected = (primary.item_id, *(clip_id for clip_id in selected if clip_id != primary.item_id))
+        for clip_id in selected:
+            clip = self._timeline.get_clip_by_id(clip_id)
+            track = self._timeline.get_track_by_id(clip.track_id) if clip is not None else None
+            if track is not None and track.track_type == "audio":
+                return clip_id
+        return None
+
+    def set_track_recording_state(self, track_id: str, state: str) -> None:
+        """Reflect the recorder's state in both existing and rebuilt headers."""
+        if state == "idle":
+            self._recording_track_states.pop(track_id, None)
+        else:
+            self._recording_track_states[track_id] = state
+        if self._timeline is None:
+            return
+        track = self._timeline.get_track_by_id(track_id)
+        header = self._track_headers.get(track_id)
+        if track is not None and header is not None:
+            self._sync_header_recording_control(header, track)
+
+    def _sync_header_recording_control(self, header: TrackHeaderItem, track: EditTrack) -> None:
+        header.set_recording_control(
+            self._audio_only and track.track_type == "audio" and not track.is_bus,
+            self._recording_track_states.get(track.track_id, "idle"),
+        )
+
     def _ordered_tracks(self) -> List[EditTrack]:
         """Return tracks in visual order (matching layout engine's all_ordered_tracks).
 
@@ -1395,6 +1470,8 @@ class TimelineView(QGraphicsView):
         """
         if self._timeline is None:
             return []
+        if self._audio_only:
+            return list(self._timeline.audio_tracks)
         return (
             list(self._timeline.subtitle_tracks)
             + list(reversed(self._timeline.video_tracks))
@@ -1407,8 +1484,11 @@ class TimelineView(QGraphicsView):
 
     def _configure_layout_engine(self) -> None:
         """Sync layout engine with current timeline data and viewport size."""
+        source_tracks = ()
+        if self._timeline is not None:
+            source_tracks = self._timeline.audio_tracks if self._audio_only else self._timeline.all_tracks
         tracks = []
-        for t in self._timeline.all_tracks if self._timeline is not None else ():
+        for t in source_tracks:
             tracks.append(TrackInfo(
                 track_id=t.track_id,
                 track_type=t.track_type,
@@ -1430,6 +1510,7 @@ class TimelineView(QGraphicsView):
         w = float(vp.width()) if vp else 800.0
         h = float(vp.height()) if vp else 400.0
         signature = (
+            self._audio_only,
             tuple((t.track_id, t.track_type, t.default_height) for t in tracks),
             round(w, 3),
             round(h, 3),
@@ -1450,6 +1531,7 @@ class TimelineView(QGraphicsView):
             viewport_width=w,
             viewport_height=h,
             pixels_per_frame=self._pixels_per_frame,
+            audio_only=self._audio_only,
         )
 
     def _default_track_height(self, track: EditTrack) -> int:
@@ -1531,8 +1613,18 @@ class TimelineView(QGraphicsView):
         all_ordered = engine.all_ordered_tracks()
         ordered_index = {ti.track_id: i for i, ti in enumerate(all_ordered)}
 
+        if self._audio_only:
+            for track_id, header in self._track_headers.items():
+                if track_id not in ordered_index:
+                    header.hide()
+            for item in self._items_map.values():
+                if item.track_id not in ordered_index:
+                    item.hide()
+
         for track in self._timeline.video_tracks + self._timeline.audio_tracks:
             track_id = track.track_id
+            if track_id not in ordered_index:
+                continue
             track_top = engine.track_top(track_id)
             track_h = engine.track_height(track_id)
 
@@ -1542,6 +1634,8 @@ class TimelineView(QGraphicsView):
             # Position header
             header = self._track_headers.get(track_id)
             if header is not None:
+                header.set_audio_workspace_style(self._audio_only)
+                self._sync_header_recording_control(header, track)
                 header.set_source_patch_enabled(self.source_patch_track_id(track.track_type) == track_id)
                 header.set_track_height(track_h)
                 header.set_track_index(track_index)
@@ -1561,6 +1655,7 @@ class TimelineView(QGraphicsView):
                 header._is_topmost = (track_id == topmost_video_id or track_id == topmost_audio_id)
 
             # Position clips (skip clips being actively dragged OR linked clips in active drag)
+            display_color = resolve_track_color(track_id, track.color) if self._audio_only else None
             expanded = any(c.clip_id in self._retime_control_clip_ids for c in track.clips)
             base_height = self._layout_state.track_heights.get(track_id, self._default_track_height(track))
             if expanded:
@@ -1575,6 +1670,7 @@ class TimelineView(QGraphicsView):
             for clip in track.clips:
                 clip_item = self._items_map.get(clip.clip_id)
                 if clip_item and isinstance(clip_item, ClipItem):
+                    clip_item.set_audio_display_color(display_color)
                     extra = expansion if clip.clip_id not in self._retime_control_clip_ids else 0
                     clip_item.set_track_height(track_h - extra)
                     clip_item.update_track_index(track_index)
@@ -1665,6 +1761,8 @@ class TimelineView(QGraphicsView):
         topmost_sub_id = self._timeline.subtitle_tracks[0].track_id if self._timeline.subtitle_tracks else None
         for track in self._timeline.subtitle_tracks:
             track_id = track.track_id
+            if track_id not in ordered_index:
+                continue
             track_top = engine.track_top(track_id)
             track_h = engine.track_height(track_id)
 
@@ -1723,6 +1821,8 @@ class TimelineView(QGraphicsView):
             marker_item = self._marker_items.get(marker.marker_id)
             if marker_item is not None:
                 marker_item.update_target_y(self._marker_target_y(marker))
+                if self._audio_only and marker.track_id and marker.track_id not in ordered_index:
+                    marker_item.hide()
 
         # Pin track headers to viewport left edge
         self._pin_track_headers()
@@ -2144,6 +2244,7 @@ class TimelineView(QGraphicsView):
                 self._configure_source_patch_header(header)
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.volume_changed.connect(self._on_track_volume_changed)
+                header.record_requested.connect(self.track_record_requested)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
@@ -2624,6 +2725,7 @@ class TimelineView(QGraphicsView):
         header.visibility_changed.connect(self._on_track_visibility_changed)
         if track.track_type == "audio":
             header.volume_changed.connect(self._on_track_volume_changed)
+            header.record_requested.connect(self.track_record_requested)
         header.rename_requested.connect(self._on_track_rename_requested)
         header.delete_requested.connect(self._on_track_delete_requested)
         header.add_track_requested.connect(self._on_add_track_requested)
@@ -3097,9 +3199,13 @@ class TimelineView(QGraphicsView):
             return
 
         visible_start, visible_end = self._calculate_visible_frame_range()
+        visible_track_ids = {track.track_id for track in self._ordered_tracks()} if self._audio_only else None
 
         # 更新所有片段和转场的可见性
         for item in self._items_map.values():
+            if visible_track_ids is not None and item.track_id not in visible_track_ids:
+                item.hide()
+                continue
             if isinstance(item, ClipItem):
                 # Output-disabled tracks stay editable on the timeline.
                 # Only viewport culling hides graphics; the model still
@@ -3119,7 +3225,11 @@ class TimelineView(QGraphicsView):
 
         # 更新 marker items 可见性 (Phase 5.1)
         for marker_item in self._marker_items.values():
-            marker_item.update_visibility(visible_start, visible_end)
+            track_id = marker_item._track_id
+            if visible_track_ids is not None and track_id and track_id not in visible_track_ids:
+                marker_item.hide()
+            else:
+                marker_item.update_visibility(visible_start, visible_end)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """Keep ruler width and layout engine in sync when the widget is resized."""
@@ -3352,7 +3462,7 @@ class TimelineView(QGraphicsView):
 
     def _compute_visible_clip_info(self) -> list[dict]:
         """Build clip info list for visible clips in the current viewport."""
-        if self._timeline is None:
+        if self._timeline is None or self._audio_only:
             return []
 
         visible_start, visible_end = self._calculate_visible_frame_range()
@@ -3487,6 +3597,11 @@ class TimelineView(QGraphicsView):
         """
         if self._updating:
             return
+        if self._audio_only and self._timeline is not None:
+            track_ids = {track.track_id for track in self._timeline.audio_tracks}
+            selection = replace(selection, items=tuple(
+                item for item in selection.items if item.track_id is None or item.track_id in track_ids
+            ))
 
         if not selection.items:
             self._set_selected_edit_edges({})
@@ -3571,18 +3686,18 @@ class TimelineView(QGraphicsView):
                         linked_clip_id=partner.clip_id if partner else None,
                         linked_track_id=partner.track_id if partner else None,
                         moves_together=(
-                            partner is not None and self._linked_selection_enabled
+                            partner is not None and self._effective_linked_selection()
                         ),
                     )
                 )
         return SelectionDiagnostics(
             entries=tuple(entries),
-            linked_selection_enabled=self._linked_selection_enabled,
+            linked_selection_enabled=self._linked_selection_enabled and not self._audio_only,
         )
 
     def _effective_linked_selection(self) -> bool:
         """Option-click selects/edits one side without altering the global toggle."""
-        return self._linked_selection_enabled and not self._independent_selection
+        return self._linked_selection_enabled and not self._independent_selection and not self._audio_only
 
     def _set_selected_edit_edges(self, edges: Mapping[str, str]) -> None:
         """Project selected edit points independently of whole-clip selection."""
@@ -5219,7 +5334,7 @@ class TimelineView(QGraphicsView):
                 try:
                     pairs = linked_roll_pairs(
                         self._timeline, clip.clip_id, right.clip_id,
-                        self._linked_selection_enabled)
+                        self._linked_selection_enabled and not self._audio_only)
                     return linked_roll_bounds(pairs, self._roll_clip_limit)
                 except ValueError:
                     return (0, 0)
@@ -5261,7 +5376,7 @@ class TimelineView(QGraphicsView):
             try:
                 command, clamped = build_linked_roll_command(
                     self._timeline, clip_id, right.clip_id,
-                    delta, self._roll_clip_limit, self._linked_selection_enabled)
+                    delta, self._roll_clip_limit, self._linked_selection_enabled and not self._audio_only)
             except ValueError as exc:
                 logger.warning("Numeric Roll rejected: %s", exc)
                 self.status_message_requested.emit(str(exc))
@@ -5276,7 +5391,7 @@ class TimelineView(QGraphicsView):
             return
         # 审计修复：linked 联动走 B19 域级共同边界计划（UI/service 同一
         # 语义）；linked 共同钳制失败整体拒绝
-        if getattr(self, "_linked_selection_enabled", False):
+        if self._linked_selection_enabled and not self._audio_only:
             linked = self._timeline.get_reciprocal_linked_clip(clip_id)
             if linked is not None and mode != "roll":
                 from src.features.edit.core.timeline_ops import (
@@ -6708,7 +6823,9 @@ class TimelineView(QGraphicsView):
         clips_to_split: list[tuple[str, str]] = []  # (track_id, clip_id)
 
         locked_ids = self._get_locked_track_ids()
-        all_tracks = self._timeline.video_tracks + self._timeline.audio_tracks
+        all_tracks = self._timeline.audio_tracks
+        if not self._audio_only:
+            all_tracks = self._timeline.video_tracks + all_tracks
         for track in all_tracks:
             if track.track_id in locked_ids:
                 continue
@@ -8402,7 +8519,7 @@ class TimelineView(QGraphicsView):
 
             # Collect linked clip (if linked selection is enabled)
             linked_clip_obj = self._get_reciprocal_linked_clip(clip)
-            if linked_clip_obj is not None and (
+            if linked_clip_obj is not None and not self._audio_only and (
                     self._linked_selection_enabled if item._copy_mode else self._effective_linked_selection()):
                 linked_ids.append(linked_clip_obj.clip_id)
                 linked_item = self._items_map.get(linked_clip_obj.clip_id)
@@ -11286,11 +11403,10 @@ class TimelineView(QGraphicsView):
         if self._timeline is None:
             return False
 
-        track_ids = [
-            t.track_id
-            for t in self._timeline.video_tracks + self._timeline.audio_tracks
-            if not t.is_locked
-        ]
+        tracks = self._timeline.audio_tracks
+        if not self._audio_only:
+            tracks = self._timeline.video_tracks + tracks
+        track_ids = [track.track_id for track in tracks if not track.is_locked]
 
         from src.features.edit.core.timeline_ops import build_range_delete_commands
         from src.features.edit.core.commands import MacroCommand
@@ -11605,7 +11721,8 @@ class TimelineView(QGraphicsView):
 
         # Collect all clips from all tracks
         items = []
-        for track in self._timeline.all_tracks:
+        tracks = self._timeline.audio_tracks if self._audio_only else self._timeline.all_tracks
+        for track in tracks:
             for clip in track.clips:
                 from src.features.edit.core.selection import SelectionItem, SelectionType
                 items.append(SelectionItem(
@@ -11730,6 +11847,8 @@ class TimelineView(QGraphicsView):
         import copy
 
         clips_data = self._clipboard.clips
+        if self._audio_only:
+            clips_data = tuple(entry for entry in clips_data if entry.get("track_type") == "audio")
 
         # Build old_id -> new_id mapping for linked clip remapping
         old_to_new_id = {}
@@ -13400,7 +13519,7 @@ class TimelineView(QGraphicsView):
             self.status_message_requested.emit(str(exc))
 
     def _on_clip_double_clicked(self, clip_id: str, track_id: str) -> None:
-        """E09/VP-B06: 双击片段 → 发出在 Source Viewer 打开的请求。
+        """在音频时间线打开片段编辑器，其他时间线保留匹配源帧操作。
 
         源帧走权威映射（``resolve_match_frame`` →
         ``clip.timeline_to_source_frame``，覆盖 source_start/trim/retime
@@ -13411,6 +13530,11 @@ class TimelineView(QGraphicsView):
         """
         if self._timeline is None:
             return
+        if self._audio_only and self.audio_clip_editor_available:
+            track = self._timeline.get_track_by_id(track_id)
+            if track is not None and track.track_type == "audio":
+                self.request_audio_clip_editor(clip_id)
+                return
         from src.features.edit.core.match_frame import (
             describe_match_frame_reason,
             resolve_match_frame,
@@ -14430,7 +14554,7 @@ class TimelineView(QGraphicsView):
         viewport_height = max(1, self.viewport().height())
         track_top = float(RULER_HEIGHT)
         track_bottom = max(float(rect.bottom()), float(viewport_height))
-        split_y = track_top + max(0.0, track_bottom - track_top) * 0.5
+        split_y = track_top if self._audio_only else track_top + max(0.0, track_bottom - track_top) * 0.5
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(TRACK_AREA_VIDEO_BG))
@@ -15305,7 +15429,8 @@ class TimelineView(QGraphicsView):
         boundaries: list = []
         if self._timeline is None:
             return boundaries
-        for track in self._timeline.all_tracks:
+        tracks = self._timeline.audio_tracks if self._audio_only else self._timeline.all_tracks
+        for track in tracks:
             for clip in track.clips:
                 boundaries.append(clip.timeline_start)
                 boundaries.append(clip.timeline_end)

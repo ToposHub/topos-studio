@@ -425,6 +425,8 @@ class PageManagementMixin:
             )
             if callable(restore_deliver_panels):
                 restore_deliver_panels()
+        if from_page == "Mixer" and page_name != "Mixer":
+            self._restore_edit_panels_from_mixer()
 
         # Composite owns its Node Properties dock (widget bound at creation),
         # so no panel swap is needed when entering Composite. Edit still uses
@@ -457,6 +459,8 @@ class PageManagementMixin:
             )
             if callable(attach_deliver_panels):
                 attach_deliver_panels()
+        if page_name == "Mixer":
+            self._attach_edit_panels_to_mixer()
 
         self.current_page = page_name
         self.status_bar.showMessage(f"Mode: {page_name}", 2000)
@@ -643,7 +647,10 @@ class PageManagementMixin:
         # Deliver temporarily hosts the same Program Viewer and TimelinePanel
         # as Edit, so keep their preview lifecycle explicit while those
         # widgets are visible in Deliver.
-        if page_name == "Deliver":
+        if page_name == "Deliver" or (
+            page_name == "Mixer"
+            and getattr(getattr(self, "mixer_page", None), "project_backed", False)
+        ):
             if self._edit_available and self.edit_page is not None:
                 self.edit_page.on_leave()
             coordinator = getattr(self, "_viewport_playback_coordinator", None)
@@ -725,6 +732,17 @@ class PageManagementMixin:
         page_id = page_name.lower()
         if self.feature_registry:
             self.feature_registry.on_page_enter(page_id)
+
+        if page_name == "Mixer" and getattr(self.mixer_page, "project_backed", False):
+            coordinator = getattr(self, "_viewport_playback_coordinator", None)
+            if coordinator is not None:
+                coordinator.enter_deliver_page()
+            if self._current_edit_project and self.timeline_preview_renderer is None:
+                self._init_timeline_preview_renderer()
+            self.edit_page.on_enter()
+            self._sync_audio_mixer_from_current_timeline()
+            self.update_undo_redo_actions()
+            return
 
         # Edit page enter hook (P1 placeholder)
         if page_name == "Edit":

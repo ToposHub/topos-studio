@@ -89,6 +89,21 @@ def test_four_independent_panel_entries_and_optional_editor():
     assert registry.get_panels_by_category({"mixer"}, work_mode="image") == {}
 
 
+def test_app_page_factory_leaves_mixer_widgets_to_the_shared_edit_host(qtbot) -> None:
+    module = MixerModule()
+    host = QWidget()
+    qtbot.addWidget(host)
+    context = SimpleNamespace(get_main_window=lambda: host)
+    page = module.register_pages(context)[0].create_page(context)
+    qtbot.addWidget(page)
+    assert page.project_backed
+    assert not hasattr(page, "session")
+    page.on_enter()
+    assert page.active
+    page.dispose_ui()
+    assert not page.active
+
+
 def test_registry_session_is_parented_to_main_window_without_second_editor(qtbot):
     from src.app.main_window import MainWindow
     from src.app.page_contract import PageDescriptor

@@ -3,9 +3,51 @@
     "mixer": "Mixer"
   },
   "panel": {
-    "audio_console": "Audio Console",
     "audio_viewer": "Video Monitor",
     "audio_timeline": "Audio Timeline",
     "audio_clip_editor": "Clip Editor"
+  },
+  "mixer": {
+    "clip_editor": {
+      "open": "Open Professional Audio Editor…",
+      "offline": "The source audio for this clip is unavailable",
+      "float": "Float",
+      "tab": "Dock with timeline",
+      "timeline": "Timeline",
+      "close": "Close",
+      "gain_range": "Clip gain (−48 to +12 dB)",
+      "apply_gain": "Apply clip gain",
+      "match_loudness": "Match target loudness",
+      "back": "Return to timeline",
+      "timeline_mode": "● Timeline clip",
+      "source_mode": "● Source audio",
+      "source_read_only": "Source waveform · Add the audio to a timeline to edit gain and fades.",
+      "waveform_tip": "Scroll to zoom · Alt+scroll to scale waveform",
+      "keys": "Ctrl+A selects all · E zooms to selection · Esc clears selection",
+      "empty": "Double-click an audio clip in the timeline to edit it.",
+      "equal_power": "Equal power",
+      "set_fades": "Change clip fades",
+      "set_fade_curve": "Change fade curves",
+      "loading_waveform": "Loading source waveform…",
+      "no_waveform": "Source waveform unavailable.",
+      "source_waveform": "Source waveform · Clip gain and fades are saved to the timeline.",
+      "source_peak": "Estimated peak from the source waveform",
+      "unavailable": "This tool requires an audio processing backend."
+    },
+    "record": {
+      "start": "Record to this track at the playhead",
+      "stop": "Stop recording",
+      "preroll": "Pre-roll · click to stop",
+      "finishing": "Finishing the recording…",
+      "locked": "Unlock this track to record",
+      "busy": "Finish the current recording first",
+      "failed": "Could not record from the selected input",
+      "save_failed": "Could not save the recording"
+    },
+    "routing": {
+      "output": "Output routing",
+      "missing_bus": "Missing bus",
+      "add_bus": "Add Bus"
+    }
   }
 }

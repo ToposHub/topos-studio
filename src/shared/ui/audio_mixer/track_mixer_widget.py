@@ -30,7 +30,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt6.QtGui import QColor, QAction, QIcon, QPainter, QPixmap, QResizeEvent
 
 from src.shared.ui.audio_mixer.audio_fader import AudioFader
-from src.shared.ui.audio_mixer.audio_level_meter import AudioLevelMeter, TickLabelsMode, iec_scale, iec_inverse
+from src.shared.ui.audio_mixer.audio_level_meter import AudioLevelMeter, MeterMode, TickLabelsMode, iec_scale, iec_inverse
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, MIXER_SPIN_STYLE
 from src.shared.track_colors import resolve_track_color
@@ -748,7 +748,9 @@ class TrackMixerWidget(QWidget):
 
         供 controller 在 timeline 变化后把 EditTrack.volume 同步到 UI。
         """
-        db = linear_to_db(vol)
+        self._set_volume_db(linear_to_db(vol))
+
+    def _set_volume_db(self, db: float) -> None:
         slider_val = self._db_to_slider(db)
         self._volume_db = db
         self._volume_fader.blockSignals(True)
@@ -1085,6 +1087,9 @@ class TrackMixerWidget(QWidget):
                     )
                     self._close_dialogs_for_instance(instance_id)
 
+    def _show_eq_insert_in_rack(self) -> bool:
+        return False
+
     def _refresh_effect_list(self) -> None:
         """根据 self._effect_chain 刷新内嵌效果器列表 UI。
 
@@ -1114,7 +1119,8 @@ class TrackMixerWidget(QWidget):
         for inst in effects:
             # EQ 胶囊管理的实例（panel="eq"）不在 FX 列表显示；
             # dynamics 三实例已聚合为上面的单一行。
-            if getattr(inst, "panel", "fx") != "fx":
+            panel = getattr(inst, "panel", "fx")
+            if panel != "fx" and not (panel == "eq" and self._show_eq_insert_in_rack()):
                 continue
             short = EFFECT_SHORT_NAMES.get(inst.effect_type, inst.effect_type)
             # 旁路状态读 params.enabled（与效果器对话框开关、右键 Bypass 三者统一的真相源）
@@ -2207,6 +2213,10 @@ class TrackMixerWidget(QWidget):
     def update_audio_level(self, levels: list[float]) -> None:
         """更新电平表"""
         self._meter.set_audio_values(levels)
+
+    @property
+    def display_meter_mode(self) -> MeterMode:
+        return self._meter.meter_mode
 
     def reset_meter(self) -> None:
         """重置电平表"""

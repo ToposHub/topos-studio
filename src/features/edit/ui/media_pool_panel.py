@@ -4798,6 +4798,7 @@ class MediaPoolPanel(QWidget):
     # F2.10：视频素材请求绑定外录音频（源级同步入口）
     bind_external_audio_requested = pyqtSignal(str)
     asset_double_clicked = pyqtSignal(str)     # asset_id (for Source Viewer)
+    professional_audio_editor_requested = pyqtSignal(str)
     # P9.1: Open asset grade in Color page
     open_asset_grade_requested = pyqtSignal(str)  # asset_id (open asset's default grade stack in Color)
     add_to_timeline_requested = pyqtSignal(str)   # asset_id (add asset clip to current timeline)
@@ -4883,6 +4884,7 @@ class MediaPoolPanel(QWidget):
         self._media_analysis_controller: Any = None
         self._analysis_status_cache: dict[str, str] = {}  # asset_id → status（badge 用）
         self._motion_graphic_creation_available: bool = False
+        self._professional_audio_editor_available = False
 
         # Command stack for undo/redo
         self._command_stack: ProjectCommandStack = ProjectCommandStack()
@@ -9067,6 +9069,7 @@ class MediaPoolPanel(QWidget):
             if item_type == "asset":
                 asset = self._project.assets.get(item_id) if self._project else None
                 if asset:
+                    self._append_professional_audio_editor_action(menu, asset)
                     # Relink (for all assets, emphasized for offline)
                     if asset.is_offline:
                         relink_act = menu.addAction(
@@ -9459,6 +9462,7 @@ class MediaPoolPanel(QWidget):
         if item_type == "asset":
             asset = self.asset_model.data(index, Qt.ItemDataRole.UserRole)
             if isinstance(asset, MediaAsset):
+                self._append_professional_audio_editor_action(menu, asset)
                 # Relink (for all assets, emphasized for offline)
                 if asset.is_offline:
                     relink_act = menu.addAction(
@@ -9686,6 +9690,19 @@ class MediaPoolPanel(QWidget):
     def set_motion_graphic_creation_available(self, available: bool) -> None:
         """Expose Motion Graphic creation only when its feature is attached."""
         self._motion_graphic_creation_available = bool(available)
+
+    def set_professional_audio_editor_available(self, available: bool) -> None:
+        self._professional_audio_editor_available = available
+
+    def _append_professional_audio_editor_action(self, menu: QMenu, asset: MediaAsset) -> None:
+        if not self._professional_audio_editor_available or not asset.is_audio:
+            return
+        action = menu.addAction(I18N.tr("mixer.clip_editor.open", "Open Professional Audio Editor…"))
+        action.setObjectName("openProfessionalAudioEditor")
+        action.triggered.connect(
+            lambda _checked=False, asset_id=asset.asset_id: self.professional_audio_editor_requested.emit(asset_id)
+        )
+        menu.addSeparator()
 
     # ==================== Actions ====================
 
