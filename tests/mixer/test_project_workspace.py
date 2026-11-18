@@ -294,7 +294,9 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     assert editor.clip_id == clip.clip_id
     assert editor._panel is not None
     qtbot.waitUntil(lambda: editor._panel.peak_val_lbl.text() != "—", timeout=10000)
-    assert not editor._panel.btn_denoise.isEnabled()
+    # P1-6：噪声采集/降噪随真实 PCM 启用（预览态）；频谱修复笔仍待后端。
+    assert editor._panel.btn_denoise.isEnabled()
+    assert not editor._panel.btn_tool_brush.isEnabled()
     editor.float_requested.emit()
     assert dock.isFloating() and dock.titleBarWidget().height() > 0
     dock.move(-20000, -20000)

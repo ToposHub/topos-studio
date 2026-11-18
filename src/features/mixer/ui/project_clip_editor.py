@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
@@ -107,6 +107,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._raw_pcm: np.ndarray | None = None      # 处理栈前的原始 PCM
         self._model_audio_edit: dict | None = None   # 工程模型驱动的处理栈
+        # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
+        self._noise_profile: Any = None
+        self._denoise_preview: tuple[tuple[int, int], tuple[int, int], float, int] | None = None
         self._audition = ClipAuditionSession(self)
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
@@ -151,7 +154,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_play.setChecked(False)
         self.btn_play.setText("▶ 播放")
         for widget in (self.btn_play, self.btn_loop, self.btn_snap_zero,
-                       self.btn_spectral, self.fft_combo):
+                       self.btn_spectral, self.fft_combo,
+                       self.btn_noise_print, self.btn_denoise, self.denoise_knob):
             widget.setEnabled(True)
             widget.setToolTip("")
         self.btn_play.setToolTip(I18N.tr("mixer.clip_editor.play_audition", "Audition this clip (Space)"))
@@ -173,6 +177,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             widget.setToolTip("" if editable else I18N.tr(
                 "mixer.clip_editor.timeline_only",
                 "Add the clip to a timeline to edit its processing stack"))
+        for widget in (self.btn_apply_lufs, self.target_lufs_pill,
+                       self.tp_ceil_pill, *self._lufs_preset_btns.values()):
+            widget.setEnabled(editable and self._pcm is not None)
         for button in getattr(self, "_selection_edit_buttons", ()):
             button.setEnabled(editable and self._pcm is not None)
 
@@ -244,12 +251,12 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         return self._model_audio_edit
 
     def _refresh_stack_preview(self) -> None:
-        """把处理栈应用到原始 PCM：波形/频谱/试听与播放同结果。"""
-        raw = self._raw_pcm
-        if raw is None:
+        """把处理栈（含降噪预览基底）应用到 PCM：波形/频谱/试听与播放同结果。"""
+        base = self._base_pcm()
+        if base is None:
             return
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
-        edited = apply_audio_edit_to_pcm(raw, self._effective_audio_edit(),
+        edited = apply_audio_edit_to_pcm(base, self._effective_audio_edit(),
                                          sample_rate=self._pcm_rate)
         self._pcm = edited
         self._audition.load(edited, self._pcm_rate)
@@ -272,6 +279,42 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _clear_process_stack(self) -> None:
         self.stack_clear_requested.emit()
+
+    def _push_process_step(self, step_type: str, label: str, detail: str,
+                           color: str, params: dict) -> None:
+        # 生产路径：机架只由工程模型驱动（demo 本地入栈不再参与）。
+        return
+
+    # ------------------------------------------------------------------
+    # P1-6：噪声采集与降噪预览（试听态）
+    # ------------------------------------------------------------------
+    def set_noise_profile(self, profile: Any) -> None:
+        self._noise_profile = profile
+
+    def set_denoise_preview(self, noise_range: tuple[int, int],
+                            target_range: tuple[int, int],
+                            reduction_db: float, nfft: int = 2048) -> None:
+        """降噪预览：原始 PCM → 谱减 → 处理栈 → 波形/频谱/试听。"""
+        self._denoise_preview = (noise_range, target_range, reduction_db, nfft)
+        self._refresh_stack_preview()
+
+    def clear_denoise_preview(self) -> None:
+        self._denoise_preview = None
+        self._refresh_stack_preview()
+
+    def _base_pcm(self) -> np.ndarray | None:
+        raw = self._raw_pcm
+        if raw is None or self._denoise_preview is None:
+            return raw
+        from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
+        noise_range, target_range, reduction_db, nfft = self._denoise_preview
+        try:
+            return denoise_spectral_subtraction(
+                raw, self._pcm_rate, noise_range, target_range,
+                reduction_db, nfft=nfft)
+        except Exception as exc:  # noqa: BLE001 - 预览失败保持原声并提示
+            self.info_label.setText(str(exc))
+            return raw
 
     def current_fft_size(self) -> int:
         try:
@@ -732,6 +775,10 @@ class ProjectClipEditor(QWidget):
             # P1-5：标记点与工程级反极性提交；声道静音/独奏保持监听态。
             self._panel.markersChanged.connect(self._on_markers_changed)
             self._panel.channelStateChanged.connect(self._on_channel_state_changed)
+            # P1-6：噪声采集/降噪预览与响度匹配提交。
+            self._panel.noisePrintCaptured.connect(self._on_noise_print_captured)
+            self._panel.denoiseRequested.connect(self._on_denoise_requested)
+            self._panel.lufsNormalizeRequested.connect(self._on_lufs_normalize_requested)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -1291,6 +1338,104 @@ class ProjectClipEditor(QWidget):
                 label=I18N.tr("mixer.clip_editor.polarity", "Invert polarity")))
         self._commit_audio_edit(
             edit, I18N.tr("mixer.clip_editor.polarity", "Invert polarity"))
+
+    def _pcm_range(self, t0: float, t1: float) -> tuple[int, int]:
+        """显示秒 → 原始 PCM 半开样本区间（PCM 与显示域同比例）。"""
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None or panel._duration <= 0.0:
+            return (0, 0)
+        total = panel._raw_pcm.shape[1]
+        lo = int(round(max(0.0, t0) / panel._duration * total))
+        hi = int(round(min(panel._duration, t1) / panel._duration * total))
+        return (lo, max(lo + 1, hi))
+
+    def _on_noise_print_captured(self, t0: float, t1: float) -> None:
+        """P1-6：锁定纯噪声区间的中位数功率谱（后续 DSP 用同一签名校验）。"""
+        from src.features.edit.core.audio_denoise import (
+            capture_noise_profile, pcm_signature, scipy_available,
+        )
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None:
+            return
+        if not scipy_available():
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.denoise_unavailable",
+                "Denoise requires the SciPy DSP backend"))
+            return
+        lo, hi = self._pcm_range(t0, t1)
+        try:
+            profile = capture_noise_profile(
+                panel._raw_pcm, panel._pcm_rate, lo, hi,
+                nfft=panel.current_fft_size() if panel.current_fft_size() in (512, 1024, 2048, 4096) else 2048,
+                reduction_db=float(panel.denoise_knob.value()),
+            )
+        except ValueError as exc:
+            panel.info_label.setText(str(exc))
+            return
+        panel.set_noise_profile(profile)
+        panel.noise_status_lbl.setText(I18N.tr(
+            "mixer.clip_editor.noise_captured", f"● Captured {(hi - lo) / panel._pcm_rate:.2f} s"))
+
+    def _on_denoise_requested(self, t0: float, t1: float, reduction_db: float) -> None:
+        """P1-6：谱减降噪——v1 为预览/试听态（入栈需预渲染缓存，后续批次）。"""
+        from src.features.edit.core.audio_denoise import pcm_signature
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None:
+            return
+        profile = panel._noise_profile
+        if profile is None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.capture_noise_first",
+                "Capture a noise print before denoising"))
+            return
+        if profile.source_signature != pcm_signature(panel._raw_pcm):
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.noise_stale",
+                "The audio changed — recapture the noise print"))
+            panel.set_noise_profile(None)
+            return
+        lo, hi = self._pcm_range(t0, t1)
+        panel.set_denoise_preview(
+            (profile.noise_start, profile.noise_end), (lo, hi),
+            float(reduction_db), nfft=profile.nfft)
+
+    def _on_lufs_normalize_requested(self, t0: float, t1: float,
+                                     target_lufs: float, tp_ceiling: float) -> None:
+        """P1-6：BS.1770 实测响度匹配 → 峰值受限的 range_gain 步骤提交。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._raw_pcm is None:
+            return
+        from src.features.edit.core.loudness_analyzer import analyze_loudness
+        lo, hi = self._pcm_range(t0, t1)
+        rate = panel._pcm_rate
+        if hi - lo < int(0.4 * rate):
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.selection_too_short",
+                "Select at least 400 ms for a loudness measurement"))
+            return
+        report = analyze_loudness(panel._raw_pcm[:, lo:hi], float(rate))
+        if not getattr(report, "backend_available", False):
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.loudness_unavailable",
+                "Loudness backend unavailable for this format"))
+            return
+        integrated = float(report.integrated_lufs)
+        true_peak = float(report.true_peak_dbtp)
+        gain = min(target_lufs - integrated, tp_ceiling - true_peak)
+        if gain <= 0.05:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.loudness_capped",
+                f"Already at {integrated:+.1f} LUFS / {true_peak:+.1f} dBTP — "
+                f"peak-limited, no gain applied"))
+            return
+        start, end = self._selection_output_range()
+        step = make_step(
+            "range_gain", start, end, self._target_channels(),
+            gain_db=round(gain, 2),
+            label=I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"))
+        self._commit_audio_edit(
+            append_step(clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:
