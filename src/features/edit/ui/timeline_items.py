@@ -743,6 +743,8 @@ class ClipItem(QGraphicsObject):
         # 等比缩放已有 QPainterPath，不重建路径、不重提取峰值——音量拖动
         # 的视觉反馈成本仅为一次 update()。
         self._waveform_gain: float = 1.0
+        # P1-4 余项：片段音量包络节点（[(x_fraction, gain_db)]；None=无）。
+        self._envelope_nodes: list[tuple[float, float]] = []
         # 效果器处理后的 per-clip 波形（覆盖 asset 原始波形显示）。
         # _effect_waveform_fp 是当前生效效果链的指纹；request_key 额外含
         # 源区间，修剪后自动重渲染。
@@ -942,6 +944,79 @@ class ClipItem(QGraphicsObject):
             return
         self._waveform_gain = clamped
         self.update()
+
+    def set_volume_envelope(self, nodes) -> None:
+        """P1-4 余项：装载片段音量包络（模型节点 → 视图折线）。
+
+        ``nodes``: ``[(x_fraction 0..1, gain_db), ...]`` 升序；None/空清除。
+        纯视觉状态——编辑提交走 Clip Editor 的命令，时间线随重建刷新。
+        """
+        normalized = []
+        for fraction, gain_db in nodes or ():
+            try:
+                normalized.append((max(0.0, min(1.0, float(fraction))),
+                                   max(-60.0, min(12.0, float(gain_db)))))
+            except (TypeError, ValueError):
+                continue
+        normalized.sort(key=lambda point: point[0])
+        if normalized == self._envelope_nodes:
+            return
+        self._envelope_nodes = normalized
+        self.update()
+
+    def _draw_volume_envelope(self, painter: QPainter, clip_rect: QRectF) -> None:
+        """在音频片段波形上画音量包络（0 dB 细线 + 节点圆点 + dB 标注）。"""
+        nodes = self._envelope_nodes
+        if not nodes:
+            return
+        painter.save()
+        top = clip_rect.top() + 6.0
+        bottom = clip_rect.bottom() - 4.0
+        height = max(8.0, bottom - top)
+        zero_y = top + height * 0.25  # 0 dB 基线（上方留出 headroom）
+        db_span = 36.0  # 可视范围：0 dB 线下方 −36 dB
+
+        def _y_for(db: float) -> float:
+            return zero_y + (max(0.0, -db) / db_span) * (bottom - zero_y)
+
+        # 0 dB 细线（计划 §4.2）。
+        painter.setPen(QPen(QColor(255, 255, 255, 46), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(clip_rect.left(), zero_y),
+                         QPointF(clip_rect.right(), zero_y))
+        # 折线（首尾节点外的区间沿用边界增益，与求值器语义一致）。
+        points = []
+        for fraction, gain_db in nodes:
+            x = clip_rect.left() + fraction * clip_rect.width()
+            points.append((QPointF(x, _y_for(gain_db)), gain_db))
+        if len(points) == 1:
+            first = points[0]
+            points = [(QPointF(clip_rect.left(), first[0].y()), first[1]),
+                      (QPointF(clip_rect.right(), first[0].y()), first[1])]
+        else:
+            points.insert(0, (QPointF(clip_rect.left(), points[0][0].y()),
+                              points[0][1]))
+            points.append((QPointF(clip_rect.right(), points[-1][0].y()),
+                           points[-1][1]))
+        polyline = QPolygonF([point for point, _db in points])
+        pen = QPen(QColor(126, 214, 165), 1.6)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPolyline(polyline)
+        # 节点圆点 + 选中片段时显示 dB 值（读数随选择，避免常态噪音）。
+        painter.setPen(QPen(QColor(22, 30, 27), 1))
+        painter.setBrush(QBrush(QColor(126, 214, 165)))
+        label_pen = QPen(QColor(215, 245, 230))
+        for point, gain_db in points[1:-1]:
+            painter.drawEllipse(point, 2.6, 2.6)
+            if self._is_selected and clip_rect.width() >= 140:
+                painter.setPen(label_pen)
+                painter.setFont(QFont("SF Mono", 7))
+                painter.drawText(
+                    QPointF(point.x() + 4.0, point.y() - 4.0),
+                    f"{gain_db:+.1f}")
+                painter.setPen(QPen(QColor(22, 30, 27), 1))
+        painter.restore()
 
     def set_drag_cache_mode(self, dragging: bool) -> None:
         """Disable the device cache while a clip is being repositioned.
@@ -1813,6 +1888,11 @@ class ClipItem(QGraphicsObject):
         # Phase 2.5: Draw drag frame label (if visible during dragging)
         if self._drag_frame_label_visible:
             self._draw_drag_frame_label(painter, clip_rect)
+
+        # P1-4 余项：片段音量包络叠加在音频波形上（模型驱动、只读可视化；
+        # 编辑入口在 Clip Editor 画布，提交命令后此处随重建刷新）。
+        if is_audio and self._envelope_nodes and not is_narrow:
+            self._draw_volume_envelope(painter, clip_rect)
 
         # Restore painter state (matches save() at start of paint())
         painter.restore()
