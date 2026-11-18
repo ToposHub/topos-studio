@@ -154,6 +154,54 @@ def _parse_blend_mode(value: Any) -> ClipBlendMode:
 
 
 @dataclass(frozen=True)
+class VcaGroup:
+    """P1 · VCA 组：增益/静音控制层（不改路由与 Send tap）。
+
+    - 成员轨的输出电平乘以组增益（dB，可正可负）；任一所属组静音即
+    静音（多组相乘语义）；
+    - 路由（output_bus_id/sends/pre-post tap）完全不变——VCA 只作用于
+    成员轨的推子级增益；
+    - 快照：``(gain_db, muted)`` 二元组按 vca_id 收集/重放（见
+    ``TimelineSequence.vca_snapshot``）。
+    """
+    vca_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    member_track_ids: tuple = ()
+    gain_db: float = 0.0
+    muted: bool = False
+
+    def with_gain_db(self, gain_db: float) -> "VcaGroup":
+        return replace(self, gain_db=float(gain_db))
+
+    def with_muted(self, muted: bool) -> "VcaGroup":
+        return replace(self, muted=bool(muted))
+
+    def linear_gain(self) -> float:
+        """组增益的线性倍率（静音=0）。"""
+        return 0.0 if self.muted else 10.0 ** (self.gain_db / 20.0)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "vca_id": self.vca_id,
+            "name": self.name,
+            "member_track_ids": list(self.member_track_ids),
+            "gain_db": self.gain_db,
+            "muted": self.muted,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VcaGroup":
+        return cls(
+            vca_id=str(data.get("vca_id") or uuid.uuid4()),
+            name=str(data.get("name", "") or ""),
+            member_track_ids=tuple(
+                str(tid) for tid in data.get("member_track_ids", ()) or ()),
+            gain_db=float(data.get("gain_db", 0.0) or 0.0),
+            muted=bool(data.get("muted", False)),
+        )
+
+
+@dataclass(frozen=True)
 class TimelineMarker:
     """时间线标记。"""
     marker_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -4858,6 +4906,8 @@ class TimelineSequence:
     caption_track_graphic_styles: tuple[CaptionTrackGraphicStyle, ...] = ()
     caption_graphics_extra: dict[str, Any] = field(default_factory=dict)
     markers: tuple[TimelineMarker, ...] = ()
+    # P1 · VCA 组（增益/静音控制层；路由与 Send tap 不变）
+    vcas: tuple[VcaGroup, ...] = ()
     # P4: In/Out range for range playback and export
     range_start: int | None = None
     range_end: int | None = None
@@ -5242,6 +5292,39 @@ class TimelineSequence:
         """
         return replace(self, revision=self.revision + 1)
 
+    # ── P1 · VCA 组（增益/静音控制层） ─────────────────────────────
+
+    def with_vca_group(self, group: VcaGroup) -> TimelineSequence:
+        """替换/追加一个 VCA 组（按 vca_id 去重；frozen 模型）。"""
+        updated = tuple(
+            group if existing.vca_id == group.vca_id else existing
+            for existing in self.vcas)
+        if all(existing.vca_id != group.vca_id for existing in updated):
+            updated = updated + (group,)
+        return replace(self, vcas=updated)
+
+    def vca_factor_for(self, track_id: str) -> float:
+        """成员轨的 VCA 倍率（非成员=1；多组相乘，任一静音=0）。"""
+        factor = 1.0
+        for group in self.vcas:
+            if track_id in group.member_track_ids:
+                factor *= group.linear_gain()
+        return factor
+
+    def vca_snapshot(self) -> dict:
+        """全部 VCA 组的 (gain_db, muted) 快照（按 vca_id）。"""
+        return {group.vca_id: (group.gain_db, group.muted)
+                for group in self.vcas}
+
+    def apply_vca_snapshot(self, snapshot: dict) -> TimelineSequence:
+        """按快照重放全部 VCA 组状态（缺项保持原值）。"""
+        updated = tuple(
+            group.with_gain_db(snapshot[group.vca_id][0]).with_muted(
+                snapshot[group.vca_id][1])
+            if group.vca_id in snapshot else group
+            for group in self.vcas)
+        return replace(self, vcas=updated)
+
     def with_track_updated(self, track: EditTrack) -> TimelineSequence:
         if track.track_type == "video":
             new_video = tuple(track if t.track_id == track.track_id else t for t in self.video_tracks)
@@ -5391,6 +5474,7 @@ class TimelineSequence:
                 **{k: v for k, v in self.caption_graphics_extra.items() if k != "composite_templates"},
             },
             "markers": [m.to_dict() for m in self.markers],
+            "vcas": [g.to_dict() for g in self.vcas],
             "range_start": self.range_start, "range_end": self.range_end,
             "master_volume": self.master_volume, "master_muted": self.master_muted,
             "master_automation": {k: v.to_dict() for k, v in self.master_automation.items()} if self.master_automation else {},
@@ -5493,6 +5577,7 @@ class TimelineSequence:
                    if orphaned_bindings else {}),
             },
             markers=tuple(TimelineMarker.from_dict(m) for m in data.get("markers", [])),
+            vcas=tuple(VcaGroup.from_dict(g) for g in data.get("vcas", [])),
             range_start=data.get("range_start"), range_end=data.get("range_end"),
             master_volume=float(data.get("master_volume", 1.0)),
             master_muted=bool(data.get("master_muted", False)),

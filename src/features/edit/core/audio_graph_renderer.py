@@ -305,6 +305,17 @@ class AudioGraphRenderer:
         # 节点输出延迟 max(同级链延迟) − 本链延迟，声学事件在 Master 汇合
         # 处落在同一绝对样本；延迟量计入尾音预算（延迟线需 flush）。
         self._recompute_pdc()
+        # P1 · VCA：成员轨推子级增益/静音（路由与 Send tap 不变）。
+        self._vca_factors = {
+            track.track_id: float(getattr(sequence, "vca_factor_for",
+                                           lambda _tid: 1.0)(track.track_id))
+            for track in audio_tracks
+            if not getattr(track, "is_bus", False)
+        }
+
+    def vca_factor_for(self, track_id: str) -> float:
+        """成员轨的 VCA 倍率（configure 后缓存；非成员=1）。"""
+        return self._vca_factors.get(track_id, 1.0)
 
     # ── P0 · PDC：延迟声明聚合与输出端延迟线 ─────────────────────────
 
@@ -585,11 +596,13 @@ class AudioGraphRenderer:
         if clip_fx_chain is not None and clip_fx_chain.is_active:
             samples = clip_fx_chain.process(samples)
 
-        # volume（§3.2: ramp 时逐样本）
+        # volume（§3.2: ramp 时逐样本）；P1 · VCA 推子级倍率一并应用
+        # （pre-fader send 的 tap 在轨链之前，不受 VCA 影响）。
+        vca_factor = self.vca_factor_for(track_id)
         if volume_ramp is not None:
-            samples = samples * volume_ramp[np.newaxis, :]
+            samples = samples * (volume_ramp * vca_factor)[np.newaxis, :]
         else:
-            samples = samples * volume
+            samples = samples * (volume * vca_factor)
 
         # pan（RMA-08: 按源声道数选算法——mono=equal-power，stereo=balance unity-center；
         # §3.2: ramp 时逐样本）
