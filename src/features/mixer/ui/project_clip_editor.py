@@ -1482,7 +1482,14 @@ class ProjectClipEditor(QWidget):
         panel._preview_spec_key = self._pcm_spec_key
         panel._pre_render_plan_for_preview = self._build_preview_plan
         panel.attach_pcm(pcm, rate)
-        panel._refresh_stack_preview()
+        # 源监视模式（无工程栈）：预览是恒等计算——同步发布（读数即时），
+        # 有栈时仍走 worker。
+        if panel._model_audio_edit is None:
+            panel._preview_offline = True
+            panel._refresh_stack_preview()
+            panel._preview_offline = False
+        else:
+            panel._refresh_stack_preview()
         panel.update_playhead(0.0)
         self._sync_gain_fade()
 
@@ -1503,6 +1510,11 @@ class ProjectClipEditor(QWidget):
                 self._panel._sample_rate, self._panel._duration,
                 self._panel.canvas._peaks_min, self._panel.canvas._peaks_max,
                 self._panel.canvas._rms, spectrogram)
+
+    @staticmethod
+    def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:
+        """兼容入口：委托面板实现（P0-5 起计量在预览 worker 内调用）。"""
+        return _TimelineClipPanel._measure_cleanliness(pcm, rate)
 
     def _path_cache_id(self, asset_id: str) -> str:
         path = os.path.abspath(self._waveform_path)
