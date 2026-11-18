@@ -183,11 +183,34 @@ def validate_audio_edit(
         gain_db = params.get("gain_db")
         if processor_id != "mute" and not isinstance(gain_db, (int, float)):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
+    envelope = audio_edit.get("envelope", [])
+    if envelope is not None:
+        if not isinstance(envelope, list):
+            diagnostics.append("audio_edit.envelope must be a list")
+        else:
+            seen_samples: set[int] = set()
+            for index, node in enumerate(envelope):
+                where = f"envelope[{index}]"
+                if not isinstance(node, dict):
+                    diagnostics.append(f"{where}: must be a dict")
+                    continue
+                sample = node.get("local_sample")
+                if not isinstance(sample, int) or sample < 0:
+                    diagnostics.append(f"{where}: local_sample must be a non-negative int")
+                elif sample in seen_samples:
+                    diagnostics.append(f"{where}: duplicate local_sample {sample}")
+                else:
+                    seen_samples.add(sample)
+                if not isinstance(node.get("gain_db"), (int, float)):
+                    diagnostics.append(f"{where}: gain_db must be numeric")
+                if node.get("interpolation", "linear") != "linear":
+                    diagnostics.append(
+                        f"{where}: unsupported interpolation {node.get('interpolation')!r}")
     return diagnostics
 
 
 def steps_signature(audio_edit: Any) -> tuple:
-    """供音频图快照/重建签名使用的稳定元组（enabled 步骤的有序指纹）。"""
+    """供音频图快照/重建签名使用的稳定元组（enabled 步骤 + 包络）。"""
     if not isinstance(audio_edit, dict):
         return ()
     signature: list[tuple] = []
@@ -202,7 +225,107 @@ def steps_signature(audio_edit: Any) -> tuple:
             tuple(params.get("channels", ())),
             params.get("gain_db"),
         ))
+    signature.extend(envelope_signature(audio_edit))
     return tuple(signature)
+
+
+# ----------------------------------------------------------------------
+# 片段音量包络（P1-4）：节点 {id, local_sample, gain_db, interpolation}
+# ----------------------------------------------------------------------
+def envelope_nodes(audio_edit: Any) -> list[dict]:
+    """读取包络节点（按 local_sample 升序；非法项剔除）。"""
+    if not isinstance(audio_edit, dict):
+        return []
+    nodes = []
+    for node in audio_edit.get("envelope", []) or []:
+        if (isinstance(node, dict) and isinstance(node.get("local_sample"), int)
+                and isinstance(node.get("gain_db"), (int, float))):
+            nodes.append(node)
+    nodes.sort(key=lambda n: n["local_sample"])
+    return nodes
+
+
+def envelope_signature(audio_edit: Any) -> list[tuple]:
+    return [
+        (n.get("id"), n.get("local_sample"), round(float(n.get("gain_db", 0.0)), 4),
+         n.get("interpolation", "linear"))
+        for n in envelope_nodes(audio_edit)
+    ]
+
+
+def set_envelope(audio_edit: Any, nodes: list[dict] | None) -> dict:
+    """写入包络节点（None/空 → 移除键；返回新 audio_edit，不改原对象）。"""
+    updated = copy_audio_edit(audio_edit) if isinstance(audio_edit, dict) else new_audio_edit()
+    if nodes:
+        updated["envelope"] = sorted(nodes, key=lambda n: n["local_sample"])
+    else:
+        updated.pop("envelope", None)
+    return updated
+
+
+def envelope_from_canvas_points(
+    points: list[dict], duration_seconds: float, output_total_samples: int,
+) -> list[dict]:
+    """画布包络点（{"t": 秒, "db": dB}）→ 模型节点（片段输出样本域）。"""
+    import uuid
+
+    if not points or duration_seconds <= 0.0 or output_total_samples <= 0:
+        return []
+    nodes = []
+    for point in points:
+        t = float(point.get("t", 0.0))
+        db = float(point.get("db", 0.0))
+        fraction = max(0.0, min(1.0, t / duration_seconds))
+        nodes.append({
+            "id": point.get("id") or str(uuid.uuid4()),
+            "local_sample": int(round(fraction * output_total_samples)),
+            "gain_db": round(db, 3),
+            "interpolation": "linear",
+        })
+    nodes.sort(key=lambda n: n["local_sample"])
+    # 同 sample 唯一：后写覆盖前写。
+    deduped: list[dict] = []
+    for node in nodes:
+        if deduped and deduped[-1]["local_sample"] == node["local_sample"]:
+            deduped[-1] = node
+        else:
+            deduped.append(node)
+    return deduped
+
+
+def canvas_points_from_envelope(
+    nodes: list[dict], duration_seconds: float, output_total_samples: int,
+) -> list[dict]:
+    """模型节点 → 画布点（供编辑器装载；域转换与写入方向互逆）。"""
+    if not nodes or duration_seconds <= 0.0 or output_total_samples <= 0:
+        return []
+    return [
+        {
+            "t": max(0.0, min(duration_seconds,
+                              node["local_sample"] / output_total_samples * duration_seconds)),
+            "db": float(node.get("gain_db", 0.0)),
+        }
+        for node in nodes
+    ]
+
+
+def evaluate_envelope_gain(
+    block_start_sample: int, count: int, nodes: list[dict],
+) -> Optional[np.ndarray]:
+    """包络节点的块求值：dB 分段线性 → 线性增益包络。
+
+    首节点前/末节点后沿用边界增益（计划 §4.3）。实时与离线共用本函数；
+    返回 None 表示无包络（恒等）。
+    """
+    if count <= 0 or not nodes:
+        return None
+    samples = np.arange(block_start_sample, block_start_sample + count,
+                        dtype=np.float64)
+    node_x = np.array([n["local_sample"] for n in nodes], dtype=np.float64)
+    node_db = np.array([float(n.get("gain_db", 0.0)) for n in nodes],
+                       dtype=np.float64)
+    db = np.interp(samples, node_x, node_db)
+    return (10.0 ** (db / 20.0)).astype(np.float32)
 
 
 def edge_fade_samples(sample_rate: int) -> int:
@@ -266,7 +389,8 @@ def apply_clip_audio_edit(
     if audio_edit is None or not isinstance(audio_edit, dict):
         return samples
     steps = audio_edit.get("steps") or []
-    if not steps:
+    envelope = envelope_nodes(audio_edit)
+    if not steps and not envelope:
         return samples
     fade = edge_fade_samples(sample_rate)
     out: np.ndarray | None = None
@@ -284,16 +408,24 @@ def apply_clip_audio_edit(
         if processor_id == "normalize":
             # normalize 的增益在提交时已按实测 peak 预计算并持久化。
             gain_linear = 10.0 ** (float(params.get("gain_db", 0.0)) / 20.0)
-        envelope = _range_gain_envelope(
+        range_env = _range_gain_envelope(
             samples.shape[1], block_start_sample, int(start), int(end), fade)
-        if envelope is None:
+        if range_env is None:
             continue
         if out is None:
             out = samples.copy()
         for channel in channels:
             if isinstance(channel, int) and 0 <= channel < out.shape[0]:
-                out[channel] = out[channel] * (envelope * gain_linear +
-                                               (1.0 - envelope))
+                out[channel] = out[channel] * (range_env * gain_linear +
+                                               (1.0 - range_env))
+    # P1-4：片段音量包络（与 clip gain / fade 相乘的顺序合同不变）。
+    if envelope:
+        gain_env = evaluate_envelope_gain(
+            block_start_sample, samples.shape[1], envelope)
+        if gain_env is not None:
+            if out is None:
+                out = samples.copy()
+            out = out * gain_env
     return out if out is not None else samples
 
 

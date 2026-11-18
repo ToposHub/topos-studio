@@ -22,7 +22,8 @@ from src.features.edit.core.clip_pcm import (
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
 from src.features.edit.core.audio_edit import (
-    append_step, make_step, remove_step, replace_step_enabled,
+    append_step, canvas_points_from_envelope, envelope_from_canvas_points,
+    envelope_nodes, make_step, remove_step, replace_step_enabled, set_envelope,
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
@@ -165,7 +166,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def set_stack_editable(self, editable: bool) -> None:
         """有可编辑时间线片段时启用处理栈相关控件（源监视模式禁用）。"""
-        for widget in (self.btn_bypass, self.btn_clear_stack):
+        for widget in (self.btn_bypass, self.btn_clear_stack, self.btn_tool_envelope):
             widget.setEnabled(editable and self._pcm is not None)
             widget.setToolTip("" if editable else I18N.tr(
                 "mixer.clip_editor.timeline_only",
@@ -173,11 +174,18 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         for button in getattr(self, "_selection_edit_buttons", ()):
             button.setEnabled(editable and self._pcm is not None)
 
-    def sync_audio_edit(self, audio_edit: dict | None) -> None:
+    def sync_audio_edit(self, audio_edit: dict | None,
+                        output_total_samples: int | None = None) -> None:
         """处理栈机架由工程模型驱动（命令提交后刷新；P0-3 §控件映射）。"""
         if audio_edit == self._model_audio_edit:
             return  # 任何时间线编辑都会走 sync_clip——栈没变不重绘/不打断选区
         self._model_audio_edit = audio_edit
+        # P1-4：包络节点装载到画布（模型 → 视图，域转换与提交互逆）。
+        nodes = envelope_nodes(audio_edit)
+        self.canvas._env_enabled = bool(nodes)
+        self.canvas._env_points = canvas_points_from_envelope(
+            nodes, self._duration,
+            output_total_samples or max(1, int(round(self._duration * self._pcm_rate))))
         view_steps = []
         for step in (audio_edit or {}).get("steps", []) or []:
             if not isinstance(step, dict):
@@ -704,6 +712,8 @@ class ProjectClipEditor(QWidget):
             self._panel.processStepToggled.connect(self._on_stack_step_toggled)
             self._panel.processStepRemoved.connect(self._on_stack_step_removed)
             self._panel.stack_clear_requested.connect(self._on_stack_cleared)
+            # P1-4：包络节点提交（画布拖拽结束/增删时各发一次）。
+            self._panel.envelopeChanged.connect(self._on_envelope_changed)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -838,7 +848,9 @@ class ProjectClipEditor(QWidget):
         self._sync_gain_fade()
         if self._panel is not None:
             self._panel.set_stack_editable_hint(not self._locked)
-            self._panel.sync_audio_edit(self._clip.audio_edit if self._clip is not None else None)
+            self._panel.sync_audio_edit(
+                self._clip.audio_edit if self._clip is not None else None,
+                output_total_samples=self._output_total_samples())
 
     def reset(self) -> None:
         self._clip = None
@@ -1113,18 +1125,23 @@ class ProjectClipEditor(QWidget):
     # ------------------------------------------------------------------
     # P0-3：处理栈提交（控件 → 命令）
     # ------------------------------------------------------------------
+    def _output_total_samples(self) -> int:
+        """片段输出域总样本数（processing_rate；速度 ≠ 1 时为时间线时长域）。"""
+        panel, clip = self._panel, self._clip
+        if panel is None or panel._duration <= 0.0:
+            return 1
+        if clip is not None and self._fps > 0:
+            return max(1, int(round(
+                clip.timeline_duration / self._fps * AUDIO_REFERENCE_SAMPLE_RATE)))
+        return max(1, int(round(panel._duration * AUDIO_REFERENCE_SAMPLE_RATE)))
+
     def _selection_output_range(self) -> tuple[int, int]:
         """画布选区（显示秒）→ 片段输出域半开样本区间（processing_rate）。"""
-        panel, clip = self._panel, self._clip
+        panel = self._panel
         if panel is None or panel._duration <= 0.0:
             return (0, 1)
         t0, t1, _, _ = panel.canvas.getSelection()
-        if clip is not None and self._fps > 0:
-            output_total = int(round(
-                clip.timeline_duration / self._fps * AUDIO_REFERENCE_SAMPLE_RATE))
-        else:
-            output_total = int(round(panel._duration * AUDIO_REFERENCE_SAMPLE_RATE))
-        output_total = max(1, output_total)
+        output_total = self._output_total_samples()
         frac0 = max(0.0, min(1.0, t0 / panel._duration))
         frac1 = max(0.0, min(1.0, t1 / panel._duration))
         start = int(round(frac0 * output_total))
@@ -1209,6 +1226,17 @@ class ProjectClipEditor(QWidget):
             return
         self._commit_audio_edit(
             None, I18N.tr("mixer.clip_editor.clear_stack", "Clear audio edit stack"))
+
+    def _on_envelope_changed(self, points: list) -> None:
+        """P1-4：画布包络（拖拽结束/增删节点时发一次）→ 模型节点提交命令。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._duration <= 0.0:
+            return
+        nodes = envelope_from_canvas_points(
+            points, panel._duration, self._output_total_samples())
+        self._commit_audio_edit(
+            set_envelope(clip.audio_edit, nodes),
+            I18N.tr("mixer.clip_editor.edit_envelope", "Edit clip volume envelope"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:
