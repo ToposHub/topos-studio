@@ -18,7 +18,9 @@ Topos Video Codec 原生播放器（应用级共享播放核心）。
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import logging
 logger = logging.getLogger(__name__)
@@ -47,6 +49,10 @@ from .base_player import (BasePlayer, DecoderBackend, _fmt_time,
 from .topos_media import topos_color_info  # noqa: F401  (topos_media 元数据面板沿用)
 
 if TYPE_CHECKING:
+    import numpy as np
+
+    from src.shared.codec.decode_worker_budget import DecodeWorkerLease
+    from src.shared.codec.topos_binding import ToposDecoder
     from .yuv_frame import YuvFrame
 
 # —— H.273 码值 → 显示名（元数据面板用；与 AVCodecContext 枚举同源） ——
@@ -66,22 +72,69 @@ def _load_binding():
     return ToposCodec, ToposMovieFile, ToposDecoder
 
 
+@dataclass
+class _DecodeBuffer:
+    """One plane slot, including the array owners backing its C views."""
+
+    geometry: tuple[tuple[int, int], ...] = ()
+    planes: tuple[np.ndarray, ...] = ()
+    views: Any = None
+
+    def ensure(self, decoder: ToposDecoder, geometry: tuple[tuple[int, int], ...]) -> None:
+        if self.geometry == geometry:
+            return
+        import numpy as np
+
+        planes = tuple(np.empty((height, width), dtype='<u2') for width, height in geometry)
+        self.views = decoder.make_views(planes)
+        self.planes = planes
+        self.geometry = geometry
+
+    @property
+    def nbytes(self) -> int:
+        return sum(plane.nbytes for plane in self.planes)
+
+
+@dataclass(frozen=True)
+class _PreviewRequest:
+    index: int
+    slot: int
+    result: Future[_DecodeBuffer]
+
+
 class ToposMovieSession(DecoderBackend):
     """一次打开的 Topos MOV：绑定层句柄 + 解码视图 + 帧→RGB 转换。
 
-    单实例不可重入（对齐绑定层契约）；解码与转换都发生在此对象的
-    持有线程内。像素格式当前支持 10/12-bit 4:2:2 / 4:4:4。
+    沿用独立播放器 ToposKit 的一帧预取和双平面缓冲设计。原生解码保持串行，
+    下一帧解码与当前帧出图重叠。像素格式支持 10/12-bit 4:2:2 / 4:4:4。
     """
 
-    def __init__(self, path: str, slice_workers: int = 8) -> None:
+    _PREVIEW_PLANES_BUDGET = 96 * 1024 * 1024
+
+    def __init__(self, path: str, slice_workers: int = 0, *, prefetch: bool = False) -> None:
         ToposCodec, ToposMovieFile, ToposDecoder = _load_binding()
         import av  # 延迟到真正播放时再加载（~200ms）
         self._av = av
 
+        self._lock = threading.Lock()
+        self._audio_lock = threading.Lock()
+        self._closed = False
+        self._pending: _PreviewRequest | None = None
+        self._preview_worker: ThreadPoolExecutor | None = None
+        self._preview_buffers = (_DecodeBuffer(), _DecodeBuffer())
+        self._full_buffer = _DecodeBuffer()
+        self._worker_lease: DecodeWorkerLease | None = None
+        self._rgb_input = None
+        self._prefetch = prefetch and 'TOPOS_DISABLE_PREFETCH' not in os.environ
+
         self.path = path
         self._codec = ToposCodec()
         self._movie = ToposMovieFile(self._codec, path)
-        info = self._movie.info()
+        try:
+            info = self._movie.info()
+        except BaseException:
+            self.close()
+            raise
         self.info = info
         self.width = info.width
         self.height = info.height
@@ -113,28 +166,28 @@ class ToposMovieSession(DecoderBackend):
                 f"暂不支持的几何: pixel_format={info.pixel_format} "
                 f"bit_depth={info.bit_depth} alpha={info.alpha_mode}")
 
-        import numpy as np
-        self._np = np
-        # [CRASH-4] 会话非重入：解码线程与 GUI（截图/封面）并发调用
-        # frame_rgb 会写同一共享缓冲——帧撕裂最坏原生崩溃。全访问串行化。
-        self._lock = threading.Lock()
-        self._audio_lock = threading.Lock()
-        self._y = np.empty((self.height, self.width), dtype='<u2')
-        chroma_w = self.width if int(info.pixel_format) == 1 else (self.width + 1) // 2
-        self._u = np.empty((self.height, chroma_w), dtype='<u2')
-        self._v = np.empty((self.height, chroma_w), dtype='<u2')
-        self._decoder = ToposDecoder(self._codec, max_slice_workers=slice_workers)
-        self._views = self._decoder.make_views([self._y, self._u, self._v])
-        self._out_w, self._out_h = self.width, self.height
-        self._auto_request = None
-        self._auto_shape = None
         try:
+            # 与独立播放器采用同一自动线程范围，并与剪辑/导出共享宿主预算。
+            requested = slice_workers or min(max(4, os.cpu_count() or 1), 16)
+            self._decoder = ToposDecoder(self._codec, max_slice_workers=requested)
+            if getattr(self._codec, '_has_decoder_worker_budget', False):
+                from src.shared.codec.decode_worker_budget import DECODE_WORKER_BUDGET
+
+                self._worker_lease = DECODE_WORKER_BUDGET.acquire(
+                    f'player:{id(self)}', role='playback', requested=requested,
+                    apply=self._decoder.set_max_slice_workers)
+
             from src.shared.codec.topos_binding import TC_DECODE_MODE_AUTO_2K
-            if getattr(self._codec, '_has_decoder_request', False):
-                self._auto_request = self._decoder.make_request(
-                    TC_DECODE_MODE_AUTO_2K)
-        except Exception:
-            self._auto_request = None
+
+            self._auto_request = (self._decoder.make_request(TC_DECODE_MODE_AUTO_2K)
+                                  if getattr(self._codec, '_has_decoder_request', False) else None)
+            self._try_base_layer = (
+                getattr(info, 'bitstream_major', 0) == 7
+                and getattr(self._codec, '_has_movie_packet_base', False)
+                and 'TOPOS_DISABLE_BASE' not in os.environ)
+        except BaseException:
+            self.close()
+            raise
 
         # 音频使用独立的 movie 句柄，避免视频帧解码的长锁阻塞音频读包。
         self.audio_info = None
@@ -157,33 +210,7 @@ class ToposMovieSession(DecoderBackend):
         except Exception:
             logger.warning('Topos 音轨不可用（视频继续播放）', exc_info=True)
 
-    def _alloc_planes(self, width: int, height: int, info=None):
-        """按帧/平面几何分配 uint16 平面，返回 (y, u, v, views, shape)。"""
-        if info is not None:
-            y = self._np.empty((int(info.visible_height),
-                                int(info.visible_width)), dtype='<u2')
-            planes = [y]
-            for plane in (1, 2):
-                pw, ph = self._codec.plane_geometry(info, plane)
-                planes.append(self._np.empty((ph, pw), dtype='<u2'))
-        else:
-            y = self._np.empty((height, width), dtype='<u2')
-            chroma_w = width if int(self.info.pixel_format) == 1 else (width + 1) // 2
-            planes = [y,
-                      self._np.empty((height, chroma_w), dtype='<u2'),
-                      self._np.empty((height, chroma_w), dtype='<u2')]
-        self._y, self._u, self._v = planes
-        self._views = self._decoder.make_views(planes)
-        self._out_w, self._out_h = width, height
-        return planes
-
-    def _ensure_full_planes(self) -> None:
-        if ((self._out_w, self._out_h) != (self.width, self.height)
-                or self._auto_shape is not None):
-            self._alloc_planes(self.width, self.height)
-            self._auto_shape = None
-
-    def frame_rgb(self, index: int, size=None):
+    def frame_rgb(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
         """解码第 index 帧 → (H, W, 3) uint8 RGB。
 
         size=(w, h) 时 swscale 一步完成转色+缩放到显示分辨率
@@ -192,7 +219,7 @@ class ToposMovieSession(DecoderBackend):
         with self._lock:
             return self._frame_rgb_locked(index, size)
 
-    def frame_yuv(self, index: int, size=None) -> YuvFrame:
+    def frame_yuv(self, index: int, size: tuple[int, int] | None = None) -> YuvFrame:
         """解码第 index 帧 → :class:`YuvFrame`（GPU 预览路径）。
 
         与 ``frame_rgb`` 共用同一条 decode/auto2k 路径，但不经过
@@ -202,12 +229,12 @@ class ToposMovieSession(DecoderBackend):
         from .yuv_frame import YuvFrame
 
         with self._lock:
-            self._decode_planes_locked(index, size)
+            y, u, v = self._read_planes_locked(index, preview=size is not None).planes[:3]
             pixel_format = '444' if int(self.info.pixel_format) == 1 else '422'
             return YuvFrame(
-                y=self._y.copy(),
-                u=self._u.copy(),
-                v=self._v.copy(),
+                y=y.copy(),
+                u=u.copy(),
+                v=v.copy(),
                 bit_depth=int(self.info.bit_depth),
                 subsampling=pixel_format,
                 matrix=int(self.info.color_matrix),
@@ -218,33 +245,78 @@ class ToposMovieSession(DecoderBackend):
                 source_height=self.height,
             )
 
-    def _decode_planes_locked(self, index: int, size=None) -> None:
-        """解码到当前 Y/U/V 平面（调用方必须持有 ``_lock``）。"""
-        buf, size_n = self._movie.packet_into(index)
-        req = self._auto_request if size is not None else None
-        if req is not None:
-            try:
-                prep = self._decoder.prepare_request(buf, req, size_n)
-                shape = (int(prep.visible_width), int(prep.visible_height))
-                if shape != self._auto_shape:
-                    self._alloc_planes(shape[0], shape[1], prep)
-                    self._auto_shape = shape
-                self._decoder.decode_views_request(buf, self._views, req, size_n)
-            except Exception:
-                # 旧 dylib 没有 request 接口时退回全尺寸解码，不影响播放。
-                logger.warning('Topos auto2k 解码不可用，回退全尺寸', exc_info=True)
-                self._auto_request = None
-                req = None
-        if req is None:
-            self._ensure_full_planes()
-            self._decoder.decode_views(buf, self._views, 3, size=size_n)
+    def _decode_into(self, index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
+        """读包和解码串行。V7-B 预览只读 base 层，并直接按 base 尺寸解码。"""
+        request = self._auto_request if preview else None
+        if preview and self._try_base_layer:
+            packet, size, is_base = self._movie.packet_base_into(index)
+            # 对首个预览包探测基础层。V7-A 的接口返回完整包，之后走常规读取。
+            self._try_base_layer = is_base
+            if is_base:
+                request = None
+        else:
+            packet, size = self._movie.packet_into(index)
 
-    def _frame_rgb_locked(self, index: int, size=None):
-        self._decode_planes_locked(index, size)
-        frame = self._av.VideoFrame(self._out_w, self._out_h, format=self.vfmt)
-        frame.planes[0].update(self._y.data)
-        frame.planes[1].update(self._u.data)
-        frame.planes[2].update(self._v.data)
+        decoder = self._decoder
+        geometry = (decoder.prepare_request(packet, request, size) if request is not None
+                    else decoder.prepare(packet, size))
+        if (int(geometry.pixel_format), int(geometry.bit_depth)) != (
+                int(self.info.pixel_format), int(self.info.bit_depth)):
+            raise ValueError('Topos 帧像素格式或位深与容器声明不一致')
+        buffer.ensure(decoder, tuple(self._codec.plane_geometry(geometry, plane)
+                                     for plane in range(int(geometry.plane_count))))
+        if request is None:
+            decoder.decode_views(packet, buffer.views, len(buffer.planes), size)
+        else:
+            decoder.decode_views_request(packet, buffer.views, request, size)
+        return buffer
+
+    def _read_planes_locked(self, index: int, *, preview: bool) -> _DecodeBuffer:
+        if self._closed:
+            raise RuntimeError('Topos 解码会话已关闭')
+
+        pending, self._pending = self._pending, None
+        slot = 0
+        if pending is not None and preview and pending.index == index:
+            slot = pending.slot
+            buffer = pending.result.result()
+        else:
+            if pending is not None and not pending.result.cancel():
+                try:
+                    pending.result.result()
+                except (RuntimeError, ValueError):
+                    # 定位作废的帧不会交给调用方。同一原生 context 要等它退出。
+                    logger.debug('Discarding failed Topos prefetch', exc_info=True)
+            buffer = self._decode_into(index, preview,
+                                       self._preview_buffers[slot] if preview else self._full_buffer)
+
+        if (preview and self._prefetch and index + 1 < self.frame_count
+                and buffer.nbytes * 2 <= self._PREVIEW_PLANES_BUDGET):
+            next_slot = 1 - slot
+            if self._preview_worker is None:
+                self._preview_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='topos-prefetch')
+            future = self._preview_worker.submit(
+                self._decode_into, index + 1, True, self._preview_buffers[next_slot])
+            self._pending = _PreviewRequest(index + 1, next_slot, future)
+        return buffer
+
+    def _frame_rgb_locked(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
+        buffer = self._read_planes_locked(index, preview=size is not None)
+        width, height = buffer.geometry[0]
+        frame = self._rgb_input
+        if frame is None or (frame.width, frame.height) != (width, height):
+            frame = self._av.VideoFrame(width, height, format=self.vfmt)
+            self._rgb_input = frame
+        for destination, source in zip(frame.planes, buffer.planes):
+            if destination.buffer_size == source.nbytes:
+                destination.update(source.data)
+            else:
+                # FFmpeg 会在行尾对齐 stride，尤其是非标准宽度和缩小后的色度平面。
+                import numpy as np
+
+                view = np.ndarray(source.shape, dtype=source.dtype, buffer=destination,
+                                  strides=(destination.line_size, source.itemsize))
+                view[:] = source
         # H.273 码值与 AVColorSpace 同源直传；topos range: 0=limited(tv), 1=full
         frame.colorspace = int(self.info.color_matrix)
         frame.color_range = 2 if self.info.color_range == 1 else 1
@@ -271,19 +343,39 @@ class ToposMovieSession(DecoderBackend):
 
     def close(self) -> None:
         with self._lock:
-            dec = getattr(self, '_decoder', None)
-            if dec is not None:
-                dec.close()
-                self._decoder = None
+            if self._closed:
+                return
+            self._closed = True
+            pending, self._pending = self._pending, None
+            worker, self._preview_worker = self._preview_worker, None
+            if worker is not None:
+                worker.shutdown(wait=False, cancel_futures=True)
             with self._audio_lock:
                 audio_movie = getattr(self, '_audio_movie', None)
                 if audio_movie is not None:
                     audio_movie.close()
                     self._audio_movie = None
-            movie = getattr(self, '_movie', None)
-            if movie is not None:
-                movie.close()
-                self._movie = None
+            if pending is not None and not pending.result.done():
+                pending.result.add_done_callback(self._release_video)
+            else:
+                self._release_video()
+
+    def _release_video(self, _result: Future[_DecodeBuffer] | None = None) -> None:
+        """原生工作结束后才销毁 context，关闭窗口不等待预取。"""
+        if self._worker_lease is not None:
+            self._worker_lease.release()
+            self._worker_lease = None
+        decoder = getattr(self, '_decoder', None)
+        if decoder is not None:
+            decoder.close()
+            self._decoder = None
+        movie = getattr(self, '_movie', None)
+        if movie is not None:
+            movie.close()
+            self._movie = None
+        self._preview_buffers = (_DecodeBuffer(), _DecodeBuffer())
+        self._full_buffer = _DecodeBuffer()
+        self._rgb_input = None
 
     @property
     def duration_sec(self) -> float:
@@ -308,7 +400,7 @@ class ToposPlayer(BasePlayer):
         super().__init__(parent)
 
     def _open_session(self, path: str):
-        return ToposMovieSession(path)
+        return ToposMovieSession(path, prefetch=True)
 
     def _open_failed_prefix(self) -> str:
         # 不回退系统播放器——QuickTime 无法解码 TPIC，静默转交只会
