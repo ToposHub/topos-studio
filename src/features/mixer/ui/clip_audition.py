@@ -46,6 +46,10 @@ class ClipAuditionSession(QObject):
         self._loop_end = 0
         self._origin_sample = 0   # 本轮 sink 启动时的片段局部样本
         self._return_sample = 0   # 停止后返回的位置（开始试听的游标）
+        # P1 · 监听态（L/R Mute/Solo）：只作用于送入设备 buffer 的字节，
+        # 不改 PCM 源、不入工程——导出/成片零副作用。
+        self._monitor_muted: frozenset = frozenset()
+        self._monitor_solo: frozenset = frozenset()
         self._timer = QTimer(self)
         self._timer.setInterval(30)
         self._timer.timeout.connect(self._tick)
@@ -217,6 +221,32 @@ class ClipAuditionSession(QObject):
             self._timer.start()
         return self._playing
 
+    def set_monitor(self, muted=None, solo=None) -> None:
+        """P1 · 监听态（设备 buffer 域）：Mute/Solo 只影响试听输出。
+
+        - ``muted``: 静音声道下标集合（送设备前置零）；
+        - ``solo``: 独奏声道下标集合（非 solo 声道置零）；
+        纯监听状态——不改 ``_pcm``、不触工程命令；导出/成片无副作用。
+        """
+        self._monitor_muted = frozenset(int(ch) for ch in (muted or ()))
+        self._monitor_solo = frozenset(int(ch) for ch in (solo or ()))
+
+    def _monitor_block(self, block: np.ndarray) -> np.ndarray:
+        """对将要送设备的 (n, channels) 交错块应用监听矩阵。"""
+        if not self._monitor_muted and not self._monitor_solo:
+            return block
+        muted = set(self._monitor_muted)
+        if self._monitor_solo:
+            muted.update(ch for ch in range(block.shape[1])
+                         if ch not in self._monitor_solo)
+        if not muted:
+            return block
+        audible = block.copy()
+        for ch in muted:
+            if 0 <= ch < audible.shape[1]:
+                audible[:, ch] = 0.0
+        return audible
+
     def _interleaved_bytes(self, from_sample: int) -> bytes:
         pcm = self._pcm
         total = pcm.shape[1]
@@ -225,6 +255,7 @@ class ClipAuditionSession(QObject):
         if self._loop and self._loop_end > from_sample:
             end = max(from_sample, self._loop_end)
         block = np.ascontiguousarray(pcm[:, from_sample:end].T, dtype=np.float32)
+        block = self._monitor_block(block)
         return block.tobytes()
 
     def _release_sink(self) -> None:
