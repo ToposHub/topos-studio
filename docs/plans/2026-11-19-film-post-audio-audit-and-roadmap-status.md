@@ -92,7 +92,7 @@ Normalize/LUFS 对实际插入阶段（处理后预览）与目标声道测量�
 2. **Stem 选区预卷**：成片选区预卷既有；Stem 的 frame_range+预卷待复用同一预算逻辑接线。
 3. **真机项**（计划明示现场补测）：真机监听（macOS/Windows 双设备）、多声道路由监看、第三方 AAF 实文件往返。
 4. **效果器 UI 面板**：8 款新效果器已入 EffectChain/注册表（轨道/Bus/Master 插槽可加载）；专属面板按批次接 UI。
-5. **全量 Edit 套件既有失败**：~35 项 UI 测试在基线 `51dbe7a1` 即失败（timeline 手势/快捷键、n03 调色门、media pool、export_outcome 预检假 clip 等），与本轮改动无关（抽查项经 stash 对比确认）；本轮定向回归 620 项全过。
+5. **全量 Edit 套件既有失败**：~32 项 UI 测试在基线 `51dbe7a1` 即失败（timeline 手势/快捷键、n03 调色门、media pool、export_outcome 预检假 clip、channel_layout_import mock 等，抽查项经 stash 对比确认），与本轮改动无关；本轮引入的 5 项回归（clip_pcm×2、automation_timebase×3）均已修复（`97160162`、`b8dacaea`），相关文件单独运行全过。定向回归 620 项全过。
 
 ## 回归基线
 
