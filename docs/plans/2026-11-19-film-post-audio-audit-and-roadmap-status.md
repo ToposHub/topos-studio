@@ -59,10 +59,10 @@ Normalize/LUFS 对实际插入阶段（处理后预览）与目标声道测量�
 `unmap_audio_edit_for_removed_length_steps`（旁路/删除/替换/清空的坐标逆映射，塌缩项点名）；`plan_clip_length_change` 增 `removed_length_steps` + `base_output_samples`（raw 域步进）+ ripple 重算后续自动化/序列标记/Sync Lock 轨（含视频轨）下游片段；Clip Editor 长度失配栈变更不再阻断（统一走事务，单条历史）。6 项验收 + workspace 语义更新。
 
 ### P1-4 对白剪辑工具核心（`c2bfac5d`）
-`dialogue_tools`：Room Tone 填补（循环铺满 + 接缝淡化 + 边缘交叉淡化 + 能量归一）；J/L cut 分割计划；批量交叉淡化容差配对；ADR 互相关对齐（FFT + 抛物线子帧）。11 项验收。take 轮换/场次镜次复用既有 `take_sheet`/`audition`。
+`dialogue_tools`：Room Tone 填补（循环铺满 + 接缝淡化 + 边缘交叉淡化 + 能量归一）；J/L cut 分割计划；批量交叉淡化容差配对；ADR 互相关对齐（FFT + 抛物线子帧）。11 项验收。take 轮换/场次镜次复用既有 `take_sheet`/`audition`；麦克风 source patch 在 P0-4 落地。实施方法列的"切空不动同步"与"同场对话编辑组"未实现（见已知边界 6）。
 
 ### P1-5 VCA（`167b9578`）
-`VcaGroup`（成员/增益/静音/快照，序列化）+ 序列 `vca_factor_for`（多组相乘、任一静音=0）；渲染器音量级应用（automation ramp 相乘、pre-fader tap 不受影响）；`AudioMixer.set_vca_overrides` 实时同源。9 项验收。
+`VcaGroup`（成员/增益/静音/快照，序列化）+ 序列 `vca_factor_for`（多组相乘、任一静音=0）；渲染器音量级应用（automation ramp 相乘、pre-fader tap 不受影响）；`AudioMixer.set_vca_overrides` 实时同源。9 项验收。Track/Bus/Master 的 Read/Touch/Latch/Write/Off 为既有能力（`automation_recorder`）；实施方法列的"时间线参数 lane、Trim Automation、写保护、自动化预览捕获"未实现（见已知边界 6）。
 
 ### P1-6 监控与录音分离（`784456f5`）
 `MonitorSection`（音量/Mono/DIM −20/Mute/PFL/AFL/solo-safe/参考校准，状态往返）；只作用于监听转发（take 录监听前信号）；`RecordingManager` Arm/InputMonitor/Record 三态分离（录音中禁撤备录；`require_arm_to_record` 兼容开关）。6 项 + 既有 45 项回归。
@@ -93,6 +93,8 @@ Normalize/LUFS 对实际插入阶段（处理后预览）与目标声道测量�
 3. **真机项**（计划明示现场补测）：真机监听（macOS/Windows 双设备）、多声道路由监看、第三方 AAF 实文件往返。
 4. **效果器 UI 面板**：8 款新效果器已入 EffectChain/注册表（轨道/Bus/Master 插槽可加载）；专属面板按批次接 UI。
 5. **全量 Edit 套件既有失败**：~32 项 UI 测试在基线 `51dbe7a1` 即失败（timeline 手势/快捷键、n03 调色门、media pool、export_outcome 预检假 clip、channel_layout_import mock 等，抽查项经 stash 对比确认），与本轮改动无关；本轮引入的 5 项回归（clip_pcm×2、automation_timebase×3）均已修复（`97160162`、`b8dacaea`），相关文件单独运行全过。定向回归 620 项全过。
+6. **P1 实施方法列未落地的 UI 级子项**（两行验收列要求已由核心工具/既有能力满足）：P1-4 的"切空不动同步"、"同场对话编辑组"；P1-5 的"时间线参数 lane、Trim Automation、自动化写保护、自动化预览捕获"。均属 UI/命令层扩展，按后续批次独立排期。
+7. **环绕 Bus 路由**：源解码/交付矩阵（stereo/5.1/7.1）已通（`layout_capability` 能力查询为单一真相）；混音图内 per-bus 环绕布局与路由仍在"多声道路由监看"真机项范围内（见 3）。
 
 ## 回归基线
 
