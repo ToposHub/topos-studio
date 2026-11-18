@@ -22,13 +22,16 @@ Coordinate contract (roadmap §3):
   samples at ``processing_rate``** — the same domain the render path sees when
   it processes a timeline block (mix_samples / export / stems all position
   blocks by clip-local samples).
-- V1 processors are all length-preserving; a step that would change length
-  must additionally persist an input/output mapping and is rejected by this
-  registry with an explicit diagnostic until those land (P2).
-- ``pre_render`` processors (``spectral_denoise``) apply as a group over the
-  whole clip before the inline steps — their STFT semantics cannot survive
-  block splitting, so they are baked into a cached base PCM
-  (``pcm_render_cache``) that the three render paths slice per block.
+- Length-changing processors (``time_stretch`` / ``delete_range``) additionally
+  persist an explicit input/output mapping (``output_length`` etc.); their
+  downstream coordinates belong to the previous step's output domain, which
+  ``output_length_after_steps`` walks step by step.  A pre-render step may not
+  follow a length-changing step (diagnosed) — inline steps are always
+  expressed in the FINAL output domain.
+- ``pre_render`` processors apply as a group over the whole clip before the
+  inline steps — their STFT/stretch semantics cannot survive block splitting,
+  so they are baked into a cached base PCM (``pcm_render_cache``) that the
+  three render paths slice per block.
 
 Render order guarantee: source decode → trim/binding/retime → **this stack**
 → native clip gain / envelope / fades → Clip FX → Track FX → Master.
@@ -81,12 +84,34 @@ PROCESSORS: dict[str, dict[str, Any]] = {
             "noise print (pre-rendered)."
         ),
     },
+    "time_stretch": {
+        "algorithm_version": 1,
+        "length_preserving": False,
+        "pre_render": True,
+        "description": (
+            "Speed (and optional pitch) change over a range; records the "
+            "input/output mapping (pre-rendered)."
+        ),
+    },
+    "delete_range": {
+        "algorithm_version": 1,
+        "length_preserving": False,
+        "pre_render": True,
+        "description": (
+            "Remove a half-open sample span and splice the sides with a short "
+            "crossfade (pre-rendered)."
+        ),
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 # 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
 # 其有序签名索引（pcm_render_cache）。
 PRE_RENDER_PROCESSORS = frozenset(
     pid for pid, meta in PROCESSORS.items() if meta.get("pre_render"))
+# 改长度处理器（§3/§6）：必须记录输入/输出映射；下游坐标域属于上一步输出。
+LENGTH_CHANGING_PROCESSORS = frozenset(
+    pid for pid, meta in PROCESSORS.items()
+    if meta.get("pre_render") and not meta.get("length_preserving", True))
 
 
 def new_audio_edit(steps: Optional[list[dict]] = None, **extra: Any) -> dict:
@@ -164,6 +189,11 @@ def validate_audio_edit(
         diagnostics.append("audio_edit.steps must be a list")
         return diagnostics
     seen_ids: set[str] = set()
+    # §3/§6：逐 step 推进坐标域长度——改长度步骤之后的步骤属于上一步输出域；
+    # inline 步骤（非预渲染）一律在最终输出域校验（最后一轮通过）。
+    domain_length = clip_output_samples
+    final_length: int | None = clip_output_samples
+    seen_length_step = False
     for index, step in enumerate(steps):
         where = f"step[{index}]"
         if not isinstance(step, dict):
@@ -186,15 +216,32 @@ def validate_audio_edit(
         if not isinstance(params, dict):
             diagnostics.append(f"{where}: params must be a dict")
             continue
+        is_length_step = processor_id in LENGTH_CHANGING_PROCESSORS
+        if is_length_step:
+            if not step.get("enabled", True):
+                continue  # 旁路的改长度步骤不推进域（等价不存在）
+            if seen_length_step and processor_id == "time_stretch":
+                diagnostics.append(
+                    f"{where}: only one enabled time_stretch step is supported")
+            seen_length_step = True
+        else:
+            # 预渲染步骤不得跟在改长度步骤之后（其坐标域属于上一步输出，
+            # 与“inline 在最终域”的规则交织无法稳定表达；v1 明确拒绝）。
+            if processor_id in PRE_RENDER_PROCESSORS and seen_length_step:
+                diagnostics.append(
+                    f"{where}: pre-render step {processor_id!r} cannot follow "
+                    "a length-changing step — clear or reorder the stack")
         start, end = params.get("start"), params.get("end")
         if not isinstance(start, int) or not isinstance(end, int):
             diagnostics.append(f"{where}: start/end must be ints")
             continue
         if not 0 <= start < end:
             diagnostics.append(f"{where}: range [{start}, {end}) is not half-open valid")
-        if clip_output_samples is not None and end > clip_output_samples:
+        # inline 步骤在最终域校验（延迟到 final_length 已知后再补查）。
+        bound = domain_length if is_length_step or seen_length_step else None
+        if bound is not None and end > bound:
             diagnostics.append(
-                f"{where}: range end {end} exceeds clip output samples {clip_output_samples}")
+                f"{where}: range end {end} exceeds current output samples {bound}")
         channels = params.get("channels")
         if (not isinstance(channels, list) or not channels
                 or not all(isinstance(c, int) and c >= 0 for c in channels)):
@@ -203,14 +250,34 @@ def validate_audio_edit(
             diagnostics.append(
                 f"{where}: channel index out of range for {channel_count}-channel clip")
         gain_db = params.get("gain_db")
-        if (processor_id not in ("mute", "channel_polarity", "spectral_denoise")
+        if (processor_id not in ("mute", "channel_polarity", "spectral_denoise",
+                                 "time_stretch", "delete_range")
                 and not isinstance(gain_db, (int, float))):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
         if processor_id in PRE_RENDER_PROCESSORS:
+            # 预渲染步骤（含改长度步骤）按“当前坐标域长度”校验区间与映射。
             diagnostics.extend(_validate_pre_render_step(
                 where, processor_id, params,
                 rate=audio_edit.get("processing_rate", PROCESSING_RATE),
-                clip_output_samples=clip_output_samples))
+                clip_output_samples=domain_length))
+        if is_length_step:
+            domain_length = _advance_domain_length(processor_id, params, domain_length)
+            if domain_length is not None:
+                if domain_length <= 0:
+                    diagnostics.append(
+                        f"{where}: step would empty the clip (output {domain_length})")
+                    domain_length = 1
+                final_length = domain_length
+    if final_length is not None:
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict) or step.get("processor_id", "") in (
+                    LENGTH_CHANGING_PROCESSORS) or not step.get("enabled", True):
+                continue
+            end = (step.get("params", {}) or {}).get("end")
+            if isinstance(end, int) and end > final_length:
+                diagnostics.append(
+                    f"step[{index}]: inline range end {end} exceeds final "
+                    f"output samples {final_length}")
     envelope = audio_edit.get("envelope", [])
     if envelope is not None:
         if not isinstance(envelope, list):
@@ -225,6 +292,10 @@ def validate_audio_edit(
                 sample = node.get("local_sample")
                 if not isinstance(sample, int) or sample < 0:
                     diagnostics.append(f"{where}: local_sample must be a non-negative int")
+                elif final_length is not None and sample > final_length:
+                    diagnostics.append(
+                        f"{where}: local_sample {sample} exceeds final output "
+                        f"samples {final_length}")
                 elif sample in seen_samples:
                     diagnostics.append(f"{where}: duplicate local_sample {sample}")
                 else:
@@ -265,11 +336,56 @@ def _validate_pre_render_step(
     rate: int,
     clip_output_samples: int | None,
 ) -> list[str]:
-    """预渲染处理器的逐条诊断（值域/区间/依赖 SciPy）。"""
-    if processor_id != "spectral_denoise":
-        return []
-    from src.features.edit.core.audio_denoise import MIN_NOISE_SECONDS, SUPPORTED_NFFT
+    """预渲染处理器的逐条诊断（值域/区间/映射一致性/依赖 SciPy）。"""
     diagnostics: list[str] = []
+    if processor_id == "time_stretch":
+        ratio_pct = params.get("ratio_pct")
+        if (not isinstance(ratio_pct, (int, float))
+                or not 25.0 <= float(ratio_pct) <= 400.0):
+            diagnostics.append(
+                f"{where}: ratio_pct {ratio_pct!r} must be within [25, 400]")
+            return diagnostics
+        semitones = params.get("pitch_semitones", 0.0)
+        if (not isinstance(semitones, (int, float))
+                or not -24.0 <= float(semitones) <= 24.0):
+            diagnostics.append(
+                f"{where}: pitch_semitones {semitones!r} must be within [±24]")
+            return diagnostics
+        output_length = params.get("output_length")
+        if not isinstance(output_length, int) or output_length <= 0:
+            diagnostics.append(
+                f"{where}: time_stretch requires a positive int output_length")
+            return diagnostics
+        if clip_output_samples is not None:
+            start, end = params.get("start"), params.get("end")
+            if isinstance(start, int) and isinstance(end, int) and end > start:
+                # output_length 是“本步骤后的定义域长度”（域级映射）。
+                segment = _time_stretch_output_length(
+                    end - start, float(ratio_pct))
+                expected = clip_output_samples - (end - start) + segment
+                if abs(output_length - expected) > 1:
+                    diagnostics.append(
+                        f"{where}: output_length {output_length} does not match "
+                        f"ratio mapping (expected ≈{expected})")
+        return diagnostics
+    if processor_id == "delete_range":
+        output_length = params.get("output_length")
+        if not isinstance(output_length, int) or output_length < 0:
+            diagnostics.append(
+                f"{where}: delete_range requires a non-negative int output_length")
+            return diagnostics
+        if clip_output_samples is not None:
+            start, end = params.get("start"), params.get("end")
+            if isinstance(start, int) and isinstance(end, int) and end > start:
+                expected = clip_output_samples - (end - start)
+                if output_length != expected:
+                    diagnostics.append(
+                        f"{where}: output_length {output_length} does not match "
+                        f"splice mapping (expected {expected})")
+        return diagnostics
+    if processor_id != "spectral_denoise":
+        return diagnostics
+    from src.features.edit.core.audio_denoise import MIN_NOISE_SECONDS, SUPPORTED_NFFT
     nfft = params.get("nfft", 2048)
     if nfft not in SUPPORTED_NFFT:
         diagnostics.append(f"{where}: nfft {nfft!r} must be one of {SUPPORTED_NFFT}")
@@ -295,6 +411,151 @@ def _validate_pre_render_step(
             f"{where}: noise print needs ≥ {minimum} samples "
             f"(≥ {MIN_NOISE_SECONDS:.2f} s) at {rate} Hz")
     return diagnostics
+
+
+def _time_stretch_output_length(segment_samples: int, ratio_pct: float) -> int:
+    """§6 长度合同：``output = round(N / (ratio_pct / 100))``。"""
+    return max(1, int(round(segment_samples / (float(ratio_pct) / 100.0))))
+
+
+# 公共别名（编辑器提交侧与 DSP 共用同一合同）。
+time_stretch_output_length = _time_stretch_output_length
+
+
+def _advance_domain_length(
+    processor_id: str, params: dict, domain_length: int | None,
+) -> int | None:
+    """改长度步骤后的输出域长度（映射推进；无法判定时保持原值）。"""
+    if domain_length is None:
+        return None
+    start, end = params.get("start"), params.get("end")
+    if not isinstance(start, int) or not isinstance(end, int) or end <= start:
+        return domain_length
+    if processor_id == "time_stretch":
+        return (domain_length - (end - start)
+                + _time_stretch_output_length(
+                    end - start, float(params.get("ratio_pct", 100.0))))
+    if processor_id == "delete_range":
+        return max(0, domain_length - (end - start))
+    return domain_length
+
+
+def output_length_after_steps(audio_edit: Any, total_samples: int) -> int:
+    """整栈后的片段输出长度（inline 步骤保长；逐 pre-render 步骤推进）。"""
+    length = int(total_samples)
+    if not isinstance(audio_edit, dict):
+        return length
+    for step in audio_edit.get("steps", []) or []:
+        if not isinstance(step, dict) or not step.get("enabled", True):
+            continue
+        if step.get("processor_id") not in LENGTH_CHANGING_PROCESSORS:
+            continue
+        params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+        start, end = params.get("start"), params.get("end")
+        if not isinstance(start, int) or not isinstance(end, int) or end <= start:
+            continue
+        if end > length:
+            end = length  # 防御：越界步骤按钳制后的映射推进
+        if step.get("processor_id") == "time_stretch":
+            length = (length - (end - start)
+                      + _time_stretch_output_length(
+                          end - start, float(params.get("ratio_pct", 100.0))))
+        else:  # delete_range
+            length = max(0, length - (end - start))
+    return length
+
+
+def remap_position_through_step(
+    position: int, start: int, end: int, segment_output: int,
+) -> int:
+    """把输入域位置映射到改长度步骤的输出域（A/B 试听与重定位共用）。
+
+    ``[start, end)`` 变为 ``[start, start + segment_output)``；区间前不动、
+    区间内线性、区间后平移 ``segment_output - (end - start)``。
+    """
+    if position <= start:
+        return position
+    if position >= end:
+        return position - (end - start) + segment_output
+    span = max(1, end - start)
+    return start + int(round((position - start) * segment_output / span))
+
+
+def _step_segment_output(processor_id: str, params: dict) -> int:
+    """改长度步骤作用段的输出长度（delete=0；stretch=合同长度）。"""
+    start, end = params.get("start"), params.get("end")
+    if not isinstance(start, int) or not isinstance(end, int) or end <= start:
+        return max(0, end - start) if isinstance(end, int) and isinstance(start, int) else 0
+    if processor_id == "time_stretch":
+        return _time_stretch_output_length(
+            end - start, float(params.get("ratio_pct", 100.0)))
+    return 0  # delete_range
+
+
+def remap_audio_edit_for_length_steps(
+    audio_edit: Any, length_steps: list[dict],
+) -> tuple[Any, list[str]]:
+    """把 inline 步骤/包络/标记重定位到新增改长度步骤后的输出域。
+
+    返回 ``(新 audio_edit, warnings)``；塌缩（end ≤ start）的 inline 步骤
+    被移除并在 warnings 里点名——「不可重映射时显示冲突」的 v1 语义。
+    """
+    if not length_steps or not isinstance(audio_edit, dict):
+        return audio_edit, []
+    warnings: list[str] = []
+    updated = copy.deepcopy(audio_edit)
+
+    def _shift(position: int) -> int:
+        for step in length_steps:
+            if not isinstance(step, dict):
+                continue
+            params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+            start, end = params.get("start"), params.get("end")
+            if isinstance(start, int) and isinstance(end, int) and end > start:
+                position = remap_position_through_step(
+                    position, start, end,
+                    _step_segment_output(step.get("processor_id", ""), params))
+        return position
+
+    kept_steps = []
+    for step in updated.get("steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        processor_id = step.get("processor_id", "")
+        if processor_id in LENGTH_CHANGING_PROCESSORS:
+            kept_steps.append(step)
+            continue
+        params = step.get("params", {})
+        start, end = params.get("start"), params.get("end")
+        if isinstance(start, int) and isinstance(end, int):
+            new_start, new_end = _shift(start), _shift(end)
+            if new_end <= new_start:
+                warnings.append(
+                    f"step {step.get('step_id')} collapsed inside an edit and "
+                    "was removed")
+                continue
+            params["start"], params["end"] = new_start, new_end
+        kept_steps.append(step)
+    updated["steps"] = kept_steps
+    if updated.get("envelope"):
+        for node in updated["envelope"]:
+            if isinstance(node, dict) and isinstance(node.get("local_sample"), int):
+                node["local_sample"] = _shift(node["local_sample"])
+        updated["envelope"].sort(key=lambda n: n.get("local_sample", 0))
+        # 重定位后同 sample 唯一：后写覆盖前写。
+        deduped: list[dict] = []
+        for node in updated["envelope"]:
+            if deduped and deduped[-1].get("local_sample") == node.get("local_sample"):
+                deduped[-1] = node
+            else:
+                deduped.append(node)
+        updated["envelope"] = deduped
+    if updated.get("markers"):
+        for marker in updated["markers"]:
+            if isinstance(marker, dict) and isinstance(marker.get("local_sample"), int):
+                marker["local_sample"] = _shift(marker["local_sample"])
+        updated["markers"].sort(key=lambda m: m.get("local_sample", 0))
+    return updated, warnings
 
 
 def requires_pre_render(audio_edit: Any) -> bool:
@@ -393,10 +654,84 @@ def render_pre_render_steps(
                 link_stereo=bool(params.get("link_stereo", True)),
                 progress=_progress,
             )
+        elif processor_id == "time_stretch":
+            out = _render_time_stretch_step(
+                out, params, sample_rate,
+                progress=progress, cancel_check=cancel_check)
+        elif processor_id == "delete_range":
+            out = _render_delete_range_step(out, params, sample_rate)
         else:  # 注册表扩张时漏接的实现——显式失败而非静默跳过
             raise RuntimeError(
                 f"pre-render processor {processor_id!r} has no renderer")
     return out
+
+
+def _render_time_stretch_step(
+    pcm: np.ndarray, params: dict, sample_rate: int, *,
+    progress: Any = None, cancel_check: Any = None,
+) -> np.ndarray:
+    """选区变速/音高：两侧上下文原样拼接（§6：映射计入最终长度）。"""
+    from src.features.edit.core.audio_timepitch import (
+        pitch_shift, retime_nopreserve, retime_preserve,
+    )
+    start = max(0, int(params.get("start", 0)))
+    end = min(pcm.shape[1], int(params.get("end", pcm.shape[1])))
+    if end <= start:
+        return pcm
+    ratio_pct = float(params.get("ratio_pct", 100.0))
+    semitones = float(params.get("pitch_semitones", 0.0))
+    preserve = bool(params.get("preserve_pitch", True))
+    segment = pcm[:, start:end]
+    if abs(semitones) > 1e-6:
+        segment = pitch_shift(segment, sample_rate, semitones)
+    if abs(ratio_pct - 100.0) > 1e-6:
+        segment = (retime_preserve if preserve else retime_nopreserve)(
+            segment, sample_rate, ratio_pct)
+    if cancel_check is not None and cancel_check():
+        return pcm
+    if progress is not None:
+        progress(1.0)
+    # 契约长度为准（§6）：实际 DSP 输出与 round(N/ratio) 允许 ≤2 样本差，
+    # 超出的部分补零/截断——缓存基底长度与 output_length 映射保持精确一致。
+    contract = _time_stretch_output_length(end - start, ratio_pct)
+    if abs(segment.shape[1] - contract) > 2:
+        raise RuntimeError(
+            f"time_stretch produced {segment.shape[1]} samples, contract is "
+            f"{contract}")
+    if segment.shape[1] < contract:
+        segment = np.concatenate([
+            segment,
+            np.zeros((segment.shape[0], contract - segment.shape[1]),
+                     dtype=np.float32)], axis=1)
+    elif segment.shape[1] > contract:
+        segment = segment[:, :contract]
+    return np.ascontiguousarray(np.concatenate(
+        [pcm[:, :start], segment, pcm[:, end:]], axis=1), dtype=np.float32)
+
+
+def _render_delete_range_step(
+    pcm: np.ndarray, params: dict, sample_rate: int,
+) -> np.ndarray:
+    """内部删除：两侧拼接 + 接缝 3 ms 淡出/淡入（长度恰为 N − (end−start)）。
+
+    保长优先于重叠交叉淡化（重叠会把映射长度缩短一个 fade 段）；接缝
+    两侧同时做短斜坡，消除拼接点阶跃（§3「防爆音」的硬要求）。
+    """
+    start = max(0, int(params.get("start", 0)))
+    end = min(pcm.shape[1], int(params.get("end", 0)))
+    if end <= start:
+        return pcm
+    prefix = np.array(pcm[:, :start], dtype=np.float32, copy=True)
+    suffix = np.array(pcm[:, end:], dtype=np.float32, copy=True)
+    fade = min(edge_fade_samples(sample_rate),
+               prefix.shape[1], suffix.shape[1])
+    if fade > 0:
+        fall = np.linspace(1.0, 0.0, fade, dtype=np.float32)
+        rise = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+        prefix[:, prefix.shape[1] - fade:] *= fall
+        suffix[:, :fade] *= rise
+    return np.ascontiguousarray(
+        np.concatenate([prefix, suffix], axis=1), dtype=np.float32)
 
 
 def _slice_pre_render_base(
@@ -465,6 +800,10 @@ def steps_signature(audio_edit: Any) -> tuple:
             params.get("start"), params.get("end"),
             tuple(params.get("channels", ())),
             params.get("gain_db"),
+            # §3.3/§6：任何参数变化（reduction_db / ratio_pct / output_length…）
+            # 都必须扰动签名——否则引擎不重建、缓存 key 不变。
+            tuple(sorted((key, repr(value))
+                         for key, value in params.items())),
         ))
     signature.extend(envelope_signature(audio_edit))
     return tuple(signature)

@@ -4722,6 +4722,29 @@ class EditControllerMixin:
                 clip.track_id, clip, audio_edit, label=label),
         )
 
+    def _commit_mixer_clip_length_change(self, clip_id: str, plan, label: str) -> None:
+        """§6.2：改长度事务（时间线 + 工程一次提交、一次撤销）。"""
+        from src.features.edit.core.timeline_project_transaction import (
+            TimelineProjectTransactionCommand,
+        )
+
+        project = getattr(self, "_current_edit_project", None)
+        view = self._edit_timeline_view()
+        # 视图执行项目事务需要工程引用；宿主未接线（如测试替身）时补挂，
+        # 已有引用时不动（避免 set_project 的路由清理副作用）。
+        if (view is not None and project is not None
+                and getattr(view, "_project", None) is None):
+            view.set_project(project)
+
+        def _build(_clip):
+            if project is None:
+                raise RuntimeError("length change needs the current project")
+            return TimelineProjectTransactionCommand.create(
+                plan.before_sequence, plan.after_sequence,
+                before_project=project, after_project=project, label=label)
+
+        self._execute_mixer_clip_editor_command(clip_id, _build)
+
     def _execute_mixer_clip_editor_command(
         self, clip_id: str, build_command: Callable[[Any], Any],
     ) -> None:
