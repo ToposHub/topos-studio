@@ -1,4 +1,4 @@
-# Clip Editor 与混音工作区实施进度（2026-11-18）
+# Clip Editor 与混音工作区实施进度（2026-11-19）
 
 对照 [2026-11-18-clip-editor-and-mixer-roadmap.md](2026-11-18-clip-editor-and-mixer-roadmap.md)
 的实施状态。每完成一批均独立提交；回归基线为本文件末尾的命令。
@@ -35,15 +35,17 @@
   边缘过渡按绝对样本位置计算（任意分块 == 整段）。
 - `UpdateClipAudioEditCommand`（整片段 before/after 事务 + 构造期校验 +
   undo/redo/宏序列化）；`edit_page` 时间线签名与音频图快照哈希均纳入
-  enabled 步骤签名（旁路不触发重建）。
+  enabled 步骤签名（旁路不触发重建；任意参数变化均扰动签名）。
 - Clip Editor：静音/标准化选区入栈（标准化实测 PCM peak，零信号明示）；
   机架由模型驱动，旁路/删除/清空走命令；A/B 全局旁路为监听态。
 
-### P1-4 片段音量包络（58da5b86）
+### P1-4 片段音量包络（58da5b86 + ceca5538）
 - `audio_edit["envelope"]`：`{id, local_sample, gain_db, interpolation}` 节点，
   dB 分段线性 + 端点延续的共用块求值器，与 clip gain/淡化相乘顺序不变；
-  三条渲染路径与编辑器预览逐样本一致；画布包络工具随可编辑片段启用，
-  拖拽结束/增删各提交一条命令。验收：0→−12 dB@4 s 中点 −6 dB、分块一致。
+  三条渲染路径与编辑器预览逐样本一致。验收：0→−12 dB@4 s 中点 −6 dB。
+- 余项（ceca5538）：时间线音频片段叠加包络折线（0 dB 细线 + 节点 +
+  选中读数），模型驱动、随布局刷新；节点编辑入口保持在 Clip Editor 画布
+  （命令提交 → 时间线下一次布局更新折线）。
 
 ### P1-5 标记点与声道（71e28750）
 - `audio_edit["markers"]`（稳定 ID/局部样本/名称/颜色）+ 画布装载与提交；
@@ -51,45 +53,87 @@
 - `channel_polarity` 步骤承载工程级反极性（右键 Ø 提交命令）；
   静音/独奏保持监听态。
 
-### P1-6 降噪与响度匹配（00999e66）
+### P1-6 降噪与响度匹配（00999e66 + 7960a51b）
 - `audio_denoise.py`：参考实现忠实移植（中位数噪声功率、软谱减掩码、
   频/时平滑、输入相位重建、5 ms 干湿边缘、可取消、SciPy 缺席显式降级）。
 - `NoiseProfile` 携带输入图签名（调参/重连/换源即失效要求重采）。
-- Clip Editor：采集噪声 → 降噪预览（基底：原始 → 降噪 → 处理栈）；
-  响度匹配走 BS.1770 实测（g = min(ΔLUFS, ΔdBTP)）以 range_gain 提交，
-  峰值受限/过短选区给出可达响度诊断。降噪入栈待预渲染缓存（见下）。
+- Clip Editor：采集噪声 → 降噪预览；响度匹配走 BS.1770 实测
+  （g = min(ΔLUFS, ΔdBTP)）以 range_gain 提交，峰值受限/过短选区给诊断。
+- 降噪入栈（7960a51b）：`spectral_denoise` 预渲染步骤；可编辑片段上
+  降噪按钮直接提交（幂等替换、可撤销），机架显示、预览与缓存基底同语义。
 
-### P2-7 变速与音高（81f5078c）
+### P2-7 变速与音高（81f5078c + 5f1d8faf）
 - `audio_timepitch.py`：`output = round(N / (ratio_pct/100))` 长度合同；
-  抗混叠有理重采样（不保调）、WSOLA 保调、纯音高（重采样 ×2^(st/12) 后
-  以 1/p 保调拉回时长）与组合路径。Clip Editor 以预览态应用（选区上下文
-  原样拼接），提交待长度事务。验收：150% 保调主频 440 Hz、长度误差 ≤1 样本；
-  ±12 半音落在 880/440 Hz 且时长保持。
+  抗混叠有理重采样（不保调）、WSOLA 保调、纯音高与组合路径。
+  验收：150% 保调主频 440 Hz、长度误差 ≤1 样本；±12 半音 880/440 Hz。
+- 改长度事务（5f1d8faf）：`time_stretch` / `delete_range` 步骤携带
+  输入/输出映射（域级 output_length），逐步骤推进坐标域校验；裁剪/
+  删除选区入栈；gap/ripple 确认对话框（链接视频需显式独立编辑、转场
+  阻断、扩长覆盖邻块检测、淡化钳制、inline 步骤/包络/标记重定位 +
+  塌缩冲突可见）；`TimelineProjectTransactionCommand` 一次提交一次撤销。
 
-### P2-8（P0 项）采样尺
+### §3.3 预渲染 PCM 缓存（7960a51b）
+- `pcm_render_cache.py`：规格哈希（指纹/速率/声道/精确范围/有序步骤
+  签名/输出长度）索引的内存 LRU + 磁盘 npz；临时文件 + 回读校验 +
+  原子替换；取消/失败清理临时件；同进程同 key 去重（同步 + 守护线程）；
+  构建监听；protect 防回收；损坏条目按未命中清除。
+- 三条渲染路径（mix_samples / 成片 / Stem）共用基底切块 + inline
+  步骤；引擎签名含缓存就绪态（pending→ready 触发重建接入降噪基底）；
+  交付预检阻断不可构建的预渲染栈（缺 SciPy/超长/倒放/原生变速）。
+
+### §5 频谱修复笔（6c3b8853）
+- `audio_repair.py`：时间×log-Hz 椭圆距离掩码（余弦软化、笔迹填隙、
+  DC 行排除）；attenuate 软增益（0 dB 逐样本旁路）；heal 前后帧对数
+  幅值插值 + 相邻帧相位推进（双侧置信度门控）；5 ms 干湿边缘。
+- `spectral_repair` 预渲染步骤持久化笔迹 `{sample, hz, time_radius,
+  bandwidth_oct}`；画布像素→数据域在提交前换算（重开/缩放可重现）。
+- 验收：2 kHz×80 ms 干扰 −23.6 dB、440 Hz/1 kHz ≤0.06 dB、选区外
+  逐样本相同；heal 为能量级恢复（无相位展开的保守下限，见下）。
+
+### P2-8（P0 项）采样尺（f3472162）
 - 音频工作区进入时时间尺切采样域（子帧位置显式）、返回 Edit 恢复帧域。
 
-## 待办（下一批次的入口）
-- **预渲染 PCM 缓存（§3 第 3 条）**：按规格哈希的可重建缓存目录 + 原子替换 +
-  取消清理；这是降噪/频谱修复入栈并保持播放/导出一致性的前提。
-- **改长度事务**：处理栈 step 的输入/输出映射、ripple 确认、链接视频约束
-  （§3/§6 的裁剪、删除区间、变速提交）。
-- **频谱修复笔/瞬态修复（§5 画笔）**：可编辑频谱 + attenuate/heal DSP。
-- **时间线包络 lane 可视化**（P1-4 余项）与轨道自动化 Read/Touch 接线扩展、
-  通道条 Bus/Send 声明的 UI 补全、Meter 聚合与交付预检（P2-8 表）。
-- **录音准备/监听**（P1）与工作区可访问性（P2）。
+### §7 P1/P2 混音页余项（57e6d675 + f3a688be）
+- `SetTrackAutomationModeCommand`：Automation Lane 模式按轨道入时间线
+  历史（此前只改控制器全局态，Read 实际不回放）；引擎 per-track 模式
+  即时下发；推子录制循环按轨道模型模式取值；Lane 打开时按模型回填。
+- 通道条 Send 徽标（活跃/总数，点击开路由对话框）；录音准备弹窗
+  （输入设备/声道/预卷/监听）入设置链（ADR 面板缺席时兜底、在场时
+  回填同步）；修复 AutomationLane 一个潜在构造顺序缺陷。
+- 交付预检补深度：逐 clip 处理栈诊断阻断、离线素材阻断（有工程时）、
+  轨道推子 >0 dB 的增益结构降级提示；Meter 聚合（Peak/RMS/GR/hold/
+  削波灯）已由既有 telemetry 链路覆盖。
+- 可访问性：新增控件 accessibleName（sends/录音准备/输出路由/提交
+  按钮）并有回归测试锁定。
+
+## 已知边界（诚实声明）
+- **原生变速/倒放片段**不支持预渲染步骤（域错位明确阻断）；时间线侧
+  包络节点编辑（Alt+click/拖动/Delete）留给后续批次——当前编辑入口在
+  Clip Editor 画布，时间线为只读叠加。
+- **heal** 的相位推进不做展开（能量级恢复 ≥35% RMS；音色相干衰减兜底）。
+- **改长度重提交**：同栈已含改长度步骤时再次提交被阻断（提示先撤销/
+  清空）——重定位既有映射的重写事务未做。
+- 录音的**监听**在 take 进行中生效（管理器 on_monitor_block → 输入监听
+  sink）；弹窗勾选是下一次 take 的偏好。真实设备验收（48 kHz/预卷/掉线/
+  连续 take）需带硬件实测。
+- 全量 tests/edit 套件仍有 5 个与本路线图无关的既有失败（见下），
+  未在本轮处理。
 
 ## 回归基线
 
 ```sh
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q \
   tests/mixer tests/edit/test_audio_graph_parity.py \
-  tests/edit/test_audio_export_parity.py tests/edit/test_sample_time_audio.py \
+  tests/edit/test_audio_export_parity.py tests/edit/test_audio_export_preflight.py \
+  tests/edit/test_sample_time_audio.py \
   tests/edit/test_fade_curve.py tests/edit/test_audio_automation.py \
   tests/edit/test_edit_effects_panel_drag_inject.py tests/edit/test_loudness_analyzer.py \
   tests/edit/test_clip_pcm.py tests/edit/test_audio_edit.py \
-  tests/edit/test_audio_denoise.py tests/edit/test_audio_timepitch.py
-# 2026-11-18：271 passed
+  tests/edit/test_audio_denoise.py tests/edit/test_audio_timepitch.py \
+  tests/edit/test_pcm_render_cache.py tests/edit/test_audio_length_edit.py \
+  tests/edit/test_audio_repair.py tests/edit/test_timeline_view_layout.py \
+  tests/edit/test_clip_item_trim_preview.py tests/project
+# 2026-11-19：968 passed
 ```
 
 tests/edit 全量另有 5 个与本路线图无关的既有失败
