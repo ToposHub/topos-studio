@@ -789,6 +789,7 @@ class ExportOutcome:
 def preflight_audio_export(
     config: "TimelineExportConfig",
     sequence: Optional["TimelineSequence"] = None,
+    project: Optional[Any] = None,
 ) -> ExportPreflightResult:
     """导出前检查音频后端能力（RMA-01）。
 
@@ -813,6 +814,41 @@ def preflight_audio_export(
             preflight_pre_render_steps,
         )
         blocking.extend(preflight_pre_render_steps(sequence))
+        # §7 P2 交付预检：逐 clip 的处理栈诊断（未知/非法步骤阻断交付）
+        # 与离线素材（有 project 时）；增益结构风险降级提示。
+        import os as _os
+        from src.features.edit.core.audio_edit import validate_audio_edit
+        try:
+            fps_value = float(getattr(sequence, "fps", 24.0) or 24.0)
+        except (TypeError, ValueError):
+            fps_value = 24.0
+        assets_map = getattr(project, "assets", None) if project is not None else None
+        hot_gain_tracks: list[str] = []
+        for _track in getattr(sequence, "audio_tracks", ()) or ():
+            if float(getattr(_track, "volume", 1.0) or 1.0) > 1.0:
+                hot_gain_tracks.append(str(getattr(_track, "name", _track.track_id)))
+            for _clip in getattr(_track, "clips", ()) or ():
+                _edit = getattr(_clip, "audio_edit", None)
+                if _edit is not None:
+                    _total = max(1, int(round(
+                        float(getattr(_clip, "timeline_duration", 0) or 0)
+                        / fps_value * 48000)))
+                    for _diag in validate_audio_edit(
+                            _edit, clip_output_samples=_total)[:3]:
+                        blocking.append(
+                            "clip %s: 处理栈校验失败（%s）— 交付被阻断"
+                            % (str(getattr(_clip, "clip_id", "?"))[:8], _diag))
+                if assets_map is not None:
+                    _asset = assets_map.get(getattr(_clip, "asset_id", ""))
+                    _path = str(getattr(_asset, "path", "") or "")
+                    if _asset is None or not _path or not _os.path.exists(_path):
+                        blocking.append(
+                            "clip %s: 音频素材离线（缺失或不可读）— 交付被阻断"
+                            % str(getattr(_clip, "clip_id", "?"))[:8])
+        if hot_gain_tracks:
+            degraded.append(
+                "轨道推子 > 0 dB（%s）：增益结构可能过载，交付前请检查 "
+                "Master True Peak" % "、".join(hot_gain_tracks[:6]))
 
     # H01：FX 链逐实例能力（future 版本 / 后端缺失 / 未知类型）。
     # 预览与导出共用 collect_chain_diagnostics 同一判断。Bus 与普通轨
@@ -2890,7 +2926,9 @@ class TimelineExporter:
         preflight = (
             ExportPreflightResult(ok=True)
             if config.codec == ExportCodec.GIF
-            else preflight_audio_export(config, self._audio_render_sequence)
+            else preflight_audio_export(
+                config, self._audio_render_sequence,
+                project=getattr(self, "_project", None))
         )
         if not preflight.ok:
             msg = "; ".join(preflight.blocking_messages)

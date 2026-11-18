@@ -712,7 +712,7 @@ def _check_edit_feature_preflights(
     # an audio-only dependency when a legacy job still has include_audio=true.
     if job.video_config.codec != "gif":
         try:
-            r = preflight_audio_export(cfg, ctx.sequence)
+            r = preflight_audio_export(cfg, ctx.sequence, project=ctx.project)
             for msg in r.blocking_messages:
                 result.add_blocking("edit.audio_backend", msg, field="audio")
             for msg in r.degraded_messages:

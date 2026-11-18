@@ -3830,15 +3830,99 @@ class EditControllerMixin:
             logger.warning("ADR panel wiring failed: %s", e)
 
     def _adr_settings_dict(self) -> dict:
-        """读取面板 input patch / 录音设置（面板缺失返回空 → 用默认值）。"""
+        """读取面板 input patch / 录音设置（面板缺失 → 混音侧准备值兜底）。
+
+        §7 P1：设置真相链 = 混音侧录音准备默认值 ← ADR 面板（打开时以
+        面板为准）。时间线 R 的录音没有 ADR 面板也能拿到准备好的
+        设备/声道/监听选择。
+        """
+        settings = dict(getattr(self, '_recording_prep_defaults', {}) or {})
         panel = self._adr_panel()
         getter = getattr(panel, 'adr_settings', None)
         if callable(getter):
             try:
-                return dict(getter())
+                settings.update(dict(getter()))
             except Exception as e:
                 logger.warning("ADR settings read failed: %s", e)
-        return {}
+        return settings
+
+    def _on_mixer_record_prep(self, track_id: str) -> None:
+        """§7 P1：混音侧录音准备弹窗（输入设备/声道/预卷/监听）。
+
+        与 ADR 面板共用同一设置链（提交后 ``apply_settings`` 回填面板），
+        时间线 R 的下一次录音立即生效。
+        """
+        from PyQt6.QtWidgets import (
+            QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+            QFormLayout, QLabel,
+        )
+
+        from src.features.edit.core.recording_manager import RecordingManager
+        from src.shared.i18n.i18n import I18N
+
+        settings = self._adr_settings_dict()
+        dialog = QDialog(self._main_window_ref() or None)
+        dialog.setWindowTitle(I18N.tr(
+            "mixer.recording.prep_title", "Recording prep"))
+        form = QFormLayout(dialog)
+        device_combo = QComboBox()
+        device_combo.addItem(
+            I18N.tr("edit.adr.default_device", "System default"), None)
+        try:
+            for device_id, description in RecordingManager.list_input_devices():
+                device_combo.addItem(description, device_id)
+        except Exception:  # noqa: BLE001 - 设备枚举失败保留默认项
+            logger.debug("input device enumeration failed", exc_info=True)
+        current_device = settings.get('device_id') or None
+        index = device_combo.findData(current_device)
+        if index >= 0:
+            device_combo.setCurrentIndex(index)
+        form.addRow(QLabel(I18N.tr("edit.adr.device", "Input device")), device_combo)
+        channels_combo = QComboBox()
+        channels_combo.addItem(I18N.tr("mixer.recording.mono", "Mono"), 1)
+        channels_combo.addItem(I18N.tr("mixer.recording.stereo", "Stereo"), 2)
+        channels_combo.setCurrentIndex(
+            0 if int(settings.get('channels', 1) or 1) == 1 else 1)
+        form.addRow(QLabel(I18N.tr("edit.adr.channels", "Channels")), channels_combo)
+        pre_roll = QDoubleSpinBox()
+        pre_roll.setRange(0.0, 10.0)
+        pre_roll.setSingleStep(0.5)
+        pre_roll.setSuffix(" s")
+        pre_roll.setValue(float(settings.get('pre_roll_seconds', 1.0) or 0.0))
+        form.addRow(QLabel(I18N.tr("edit.adr.pre_roll", "Pre-roll")), pre_roll)
+        monitor = QCheckBox(I18N.tr("edit.adr.monitor", "Input monitor"))
+        monitor.setToolTip(I18N.tr(
+            "mixer.recording.monitor_tip",
+            "Hear the input while recording (takes effect on the next take)"))
+        monitor.setChecked(bool(settings.get('monitor', False)))
+        form.addRow(monitor)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = {
+            'device_id': device_combo.currentData(),
+            'channels': int(channels_combo.currentData() or 1),
+            'pre_roll_seconds': float(pre_roll.value()),
+            'monitor': monitor.isChecked(),
+        }
+        self._recording_prep_defaults = {
+            **(getattr(self, '_recording_prep_defaults', {}) or {}), **values}
+        panel = self._adr_panel()
+        applier = getattr(panel, 'apply_settings', None)
+        if callable(applier):
+            try:
+                applier(values)
+            except Exception:  # noqa: BLE001 - 面板回填失败不影响设置链
+                logger.debug("ADR panel settings backfill failed", exc_info=True)
+        if getattr(self, 'status_bar', None) is not None:
+            self.status_bar.showMessage(I18N.tr(
+                "mixer.recording.prep_saved",
+                "Recording prep saved — arm R on the track to record"), 4000)
 
     def _adr_timeline_context(self):
         """(fps, in_point_frame)：录音打点 = 当前播放头帧（P1-10 时间码对齐）。"""

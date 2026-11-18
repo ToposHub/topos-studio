@@ -200,3 +200,68 @@ class TestExportTimelineBlockedByPreflight:
         # preflight 结果可追溯
         assert exporter.last_preflight_result is not None
         assert exporter.last_preflight_result.ok is False
+
+
+class TestPreflightDeliveryDiagnostics:
+    """§7 P2 交付预检：处理栈诊断 / 离线素材 / 增益结构提示。"""
+
+    def _sequence_with_clip(self, **clip_overrides):
+        from src.features.edit.core.timeline_v2 import (
+            ClipInstance, EditTrack, TimelineSequence,
+        )
+        params = dict(
+            asset_id="asset-1", track_id="t1", timeline_start=0,
+            timeline_duration=48, source_duration=48,
+        )
+        params.update(clip_overrides)
+        track = EditTrack(
+            track_id="t1", track_type="audio", index=0,
+            clips=(ClipInstance(**params),),
+        )
+        return TimelineSequence(audio_tracks=(track,))
+
+    def test_invalid_audio_edit_blocks(self):
+        from src.features.edit.core.audio_edit import new_audio_edit
+        from src.features.edit.core.timeline_export import (
+            TimelineExportConfig, preflight_audio_export,
+        )
+        bad = new_audio_edit([{
+            "step_id": "x", "processor_id": "unknown_fx_2099",
+            "algorithm_version": 9, "enabled": True,
+            "params": {"start": 0, "end": 10, "channels": [0]},
+        }])
+        seq = self._sequence_with_clip(audio_edit=bad)
+        result = preflight_audio_export(TimelineExportConfig(), sequence=seq)
+        assert result.ok is False
+        assert any("处理栈校验失败" in m for m in result.blocking_messages)
+
+    def test_offline_asset_blocks_with_project(self, tmp_path):
+        from types import SimpleNamespace
+
+        from src.features.edit.core.timeline_export import (
+            TimelineExportConfig, preflight_audio_export,
+        )
+        seq = self._sequence_with_clip()
+        project = SimpleNamespace(assets={
+            "asset-1": SimpleNamespace(path=str(tmp_path / "missing.wav"))})
+        result = preflight_audio_export(
+            TimelineExportConfig(), sequence=seq, project=project)
+        assert result.ok is False
+        assert any("离线" in m for m in result.blocking_messages)
+        # 无 project 时跳过离线检查（旧调用方语义不变）。
+        no_project = preflight_audio_export(
+            TimelineExportConfig(), sequence=seq)
+        assert no_project.ok is True
+
+    def test_hot_gain_structure_degrades(self):
+        from dataclasses import replace as _replace
+
+        from src.features.edit.core.timeline_export import (
+            TimelineExportConfig, preflight_audio_export,
+        )
+        from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+        track = EditTrack(track_id="t1", track_type="audio", index=0, volume=1.4)
+        seq = TimelineSequence(audio_tracks=(track,))
+        result = preflight_audio_export(TimelineExportConfig(), sequence=seq)
+        assert result.ok is True
+        assert any("True Peak" in m for m in result.degraded_messages)

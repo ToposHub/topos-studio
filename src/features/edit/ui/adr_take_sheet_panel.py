@@ -461,6 +461,36 @@ class AdrTakeSheetPanel(QWidget):
             "monitor": self._monitor_check.isChecked(),
         }
 
+    def apply_settings(self, values: Dict[str, Any]) -> None:
+        """§7 P1：外部（混音侧录音准备弹窗）回填设置——不发信号。
+
+        面板是录音设置的展示面；混音通道条的录音准备弹窗提交后经此
+        同步，两个表面读同一组值。
+        """
+        device_id = values.get("device_id")
+        if device_id:
+            index = self._device_combo.findData(str(device_id))
+            if index >= 0:
+                self._device_combo.setCurrentIndex(index)
+        channels = values.get("channels")
+        if channels in (1, 2):
+            index = self._channels_combo.findData(int(channels))
+            if index >= 0:
+                self._channels_combo.setCurrentIndex(index)
+        for attr, key, cast in (
+                ("_pre_roll_spin", "pre_roll_seconds", float),
+                ("_post_roll_spin", "post_roll_seconds", float)):
+            value = values.get(key)
+            if isinstance(value, (int, float)):
+                spinner = getattr(self, attr, None)
+                if spinner is not None:
+                    spinner.setValue(cast(value))
+        for attr, key in (("_loop_check", "loop"), ("_monitor_check", "monitor")):
+            if isinstance(values.get(key), bool):
+                checkbox = getattr(self, attr, None)
+                if checkbox is not None:
+                    checkbox.setChecked(values[key])
+
     def reload_devices(self) -> None:
         """枚举输入设备（默认项 = 系统默认设备）。
 

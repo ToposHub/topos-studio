@@ -2229,6 +2229,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             if hasattr(mp, "track_output_requested"):
                 mp.track_output_requested.connect(self._on_mixer_output_bus_requested)
                 mp.add_bus_requested.connect(self._on_mixer_add_bus_requested)
+            if hasattr(mp, "record_prep_requested"):
+                mp.record_prep_requested.connect(self._on_mixer_record_prep)
             mp.batch_solo_cleared.connect(self._on_mixer_batch_solo_cleared)
             mp.batch_mute_changed.connect(self._on_mixer_batch_mute_changed)
 
