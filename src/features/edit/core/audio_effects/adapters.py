@@ -127,6 +127,18 @@ class MultibandCompAdapter(_CompositeAdapterBase):
         return MultibandCompressorEffect(sr)
 
 
+class ConvolutionReverbAdapter(_CompositeAdapterBase):
+    """P1 · 卷积混响（Room Match / ADR / 环境 / FX Bus）。"""
+
+    effect_type = "convolution_reverb"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.convolution_reverb import (
+            ConvolutionReverbEffect,
+        )
+        return ConvolutionReverbEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 
