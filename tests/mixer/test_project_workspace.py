@@ -838,13 +838,24 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     assert step["params"]["output_length"] == 192000
     assert panel._pending_timepitch is None
     qtbot.waitUntil(lambda: panel._raw_pcm is not None, timeout=10000)
-    for change in (lambda: panel.processStepToggled.emit(step["step_id"], False),
-                   lambda: panel.processStepRemoved.emit(step["step_id"]),
-                   panel.stack_clear_requested.emit):
-        change()
-        assert view.get_timeline().get_clip_by_id(clip_id) == edited
-
-    # 一次撤销还原长度与处理栈。
+    # P1-3 · 反向编辑事务：旁路改长度步骤不再被阻断——统一走长度事务
+    # （gap 模式），片段时长恢复 5 s、步骤保留（disabled），单步可撤销。
+    panel.processStepToggled.emit(step["step_id"], False)
+    qtbot.waitUntil(lambda: view.get_timeline().get_clip_by_id(
+        clip_id).timeline_duration == old_duration, timeout=10000)
+    bypassed = view.get_timeline().get_clip_by_id(clip_id)
+    assert bypassed.audio_edit["steps"][0]["enabled"] is False
+    view.undo()
+    qtbot.waitUntil(lambda: view.get_timeline().get_clip_by_id(
+        clip_id).timeline_duration == pytest.approx(
+            old_duration * 4 / 5, abs=1), timeout=10000)
+    # 删除已旁路的步骤（长度不变）→ 普通 audio_edit 提交，单步可撤销。
+    step = view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"][0]
+    panel.processStepRemoved.emit(step["step_id"])
+    qtbot.waitUntil(lambda: view.get_timeline().get_clip_by_id(
+        clip_id).audio_edit is None, timeout=10000)
+    view.undo()
+    # 每一步操作一条历史：最终一次撤销回到原始（无栈、原时长）。
     view.undo()
     restored = view.get_timeline().get_clip_by_id(clip_id)
     assert restored.timeline_duration == old_duration
