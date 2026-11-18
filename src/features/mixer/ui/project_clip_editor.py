@@ -6,6 +6,7 @@ import math
 import os
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QResizeEvent, QShortcut, QWheelEvent
 from PyQt6.QtWidgets import (
@@ -16,10 +17,15 @@ from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_fra
 from src.features.edit.core.audio_waveform import (
     WaveformData, WaveformExtractor, get_cached_waveform, is_waveform_pending,
 )
+from src.features.edit.core.clip_pcm import (
+    ClipPcmProvider, ClipPcmResult, compute_spectrogram, compute_waveform_stats,
+    find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
+)
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
 from src.shared.i18n.i18n import I18N
 
+from .clip_audition import ClipAuditionSession
 from .workspace_style import PANEL_QSS
 
 if TYPE_CHECKING:
@@ -87,6 +93,21 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.gain_knob.valueCommitted.connect(self._request_gain)
         self._disable_prototype_controls()
         self._fade_curve_btns["Log"].setText(I18N.tr("mixer.clip_editor.equal_power", "Equal power"))
+        # P0-2 §2.3：PCM 试听会话——播放、循环、跳选区、电平表共用一个
+        # 设备会话；设备失效/离开时自动停止并释放。
+        self._pcm: np.ndarray | None = None
+        self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
+        self._audition = ClipAuditionSession(self)
+        self._audition.position_changed.connect(self._on_audition_position)
+        self._audition.playing_changed.connect(self._on_audition_playing_changed)
+        self._zero_snap_armed = False
+        self._suppress_zero_snap = False
+        self.canvas.selectionChanged.connect(self._on_pcm_selection_zero_snap)
+        # 原型的磁性吸附（播放头/标记）与 PCM 过零吸附互补，两者都随开关。
+        self.btn_snap_zero.toggled.connect(self._on_zero_snap_toggled)
+
+    def _on_zero_snap_toggled(self, enabled: bool) -> None:
+        self._zero_snap_armed = enabled
 
     def _init_demo_audio(self) -> None:
         pass
@@ -96,10 +117,175 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             (QKeySequence.StandardKey.SelectAll, self.canvas.selectAll),
             (Qt.Key.Key_Escape, self.canvas.clearSelection),
             (Qt.Key.Key_E, self._zoom_to_selection),
+            (Qt.Key.Key_Space, self._toggle_play),
+            (QKeySequence("Ctrl+Space"), self._toggle_skip_play),
         ):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
+
+    # ------------------------------------------------------------------
+    # PCM 试听（P0-2 §2.3）
+    # ------------------------------------------------------------------
+    def attach_pcm(self, pcm: np.ndarray, sample_rate: int) -> None:
+        """装载真实 PCM：启用播放/循环/频谱/过零吸附并复位播放状态。"""
+        self._pcm = pcm
+        self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
+        self._audition.load(pcm, sample_rate)
+        self._is_playing = False
+        self._skip_selection_mode = False
+        self.btn_play.setChecked(False)
+        self.btn_play.setText("▶ 播放")
+        for widget in (self.btn_play, self.btn_loop, self.btn_snap_zero,
+                       self.btn_spectral, self.fft_combo):
+            widget.setEnabled(True)
+            widget.setToolTip("")
+        self.btn_play.setToolTip(I18N.tr("mixer.clip_editor.play_audition", "Audition this clip (Space)"))
+        self.btn_loop.setToolTip(I18N.tr("mixer.clip_editor.loop_audition", "Loop the selection, or the whole clip"))
+
+    def detach_pcm(self) -> None:
+        """释放试听（重开/重连/隐藏时调用）；播放控件回到禁用态。"""
+        self._audition.stop()
+        self._pcm = None
+        self._is_playing = False
+        self._skip_selection_mode = False
+
+    def current_fft_size(self) -> int:
+        try:
+            return int(str(self.fft_combo.currentText()).split()[0])
+        except (ValueError, IndexError):
+            return 2048
+
+    def _audition_start_sample(self) -> int:
+        rate = self._pcm_rate
+        head = max(0.0, min(self._duration, self._playhead))
+        return int(round(head * rate))
+
+    def _toggle_play(self) -> None:
+        if self._pcm is None:
+            return
+        if self._audition.is_playing:
+            self._audition.stop()
+            return
+        t0, t1, _, _ = self.canvas.getSelection()
+        start = self._audition_start_sample()
+        rate = self._pcm_rate
+        if t1 - t0 > 0.01:
+            sel0, sel1 = int(round(t0 * rate)), int(round(t1 * rate))
+            self._audition.set_loop(self._is_looping, sel0, sel1)
+            if not sel0 <= start < sel1:
+                start = sel0
+        else:
+            self._audition.set_loop(self._is_looping, 0, self._pcm.shape[1])
+        if not self._audition.play(start):
+            self.info_label.setText(I18N.tr(
+                "mixer.clip_editor.no_audio_device", "No audio device available for audition"))
+
+    def _stop_playback(self) -> None:
+        # 停止回到开始试听的游标（会话负责回到 return_sample）。
+        self._skip_selection_mode = False
+        self._audition.stop()
+        self._is_playing = False
+
+    def _toggle_skip_play(self) -> None:
+        """跳过选区试听 (Ctrl+Space)：从选区前 1.2 s 起播，越过 [t0, t1)。"""
+        if self._pcm is None:
+            return
+        t0, t1, _, _ = self.canvas.getSelection()
+        if t1 - t0 <= 0.01:
+            self._toggle_play()
+            return
+        rate = self._pcm_rate
+        self._skip_selection_mode = True
+        start = max(0, int(round((t0 - 1.2) * rate)))
+        self._audition.set_loop(False)
+        if not self._audition.play(start):
+            self._skip_selection_mode = False
+
+    def _on_audition_playing_changed(self, playing: bool) -> None:
+        self._is_playing = playing
+        self.btn_play.setChecked(playing)
+        self.btn_play.setText("❚❚ 暂停" if playing else "▶ 播放")
+        self.playStateChanged.emit(playing)
+        if not playing:
+            self._skip_selection_mode = False
+            if self._pcm is not None:
+                self.update_playhead(self._audition.return_sample() / self._pcm_rate)
+            self.update_output_meter(-60.0, -60.0)
+
+    def _on_audition_position(self, sample: int) -> None:
+        if not self._audition.is_playing or self._pcm is None:
+            return
+        rate = self._pcm_rate
+        sec = sample / rate
+        if self._skip_selection_mode:
+            t0, t1, _, _ = self.canvas.getSelection()
+            if t1 - t0 > 0.01:
+                s0, s1 = int(round(t0 * rate)), int(round(t1 * rate))
+                if s0 <= sample < s1:
+                    self._audition.seek(s1)
+                    return
+                if sample >= min(self._pcm.shape[1], int(round((t1 + 1.2) * rate))):
+                    self._audition.stop()
+                    return
+        # 播放头超出右视口时平滑翻页跟随（与原型一致）。
+        span = self.canvas._view_end - self.canvas._view_start
+        if span < self._duration and sec > self.canvas._view_end:
+            new_start = min(self._duration - span, sec - span * 0.15)
+            self._sync_viewport(max(0.0, new_start), max(0.0, new_start) + span)
+        self.update_playhead(sec)
+        self._update_pcm_meters(sample)
+
+    def _update_pcm_meters(self, sample: int) -> None:
+        if self._pcm is None or self._pcm.shape[1] == 0:
+            return
+        half = max(1, int(round(0.012 * self._pcm_rate)))
+        lo = max(0, sample - half)
+        hi = min(self._pcm.shape[1], sample + half)
+        window = self._pcm[:, lo:hi]
+        levels = []
+        for ch in (0, min(1, window.shape[0] - 1)):
+            if ch >= window.shape[0] or self.canvas._ch_muted[min(ch, len(self.canvas._ch_muted) - 1)]:
+                levels.append(-60.0)
+                continue
+            peak = float(np.max(np.abs(window[ch]))) if window.shape[1] else 0.0
+            levels.append(20.0 * math.log10(max(1e-5, peak)))
+        left = levels[0]
+        right = levels[1] if len(levels) > 1 else left
+        self.update_output_meter(left, right)
+
+    def _on_canvas_playhead_moved(self, sec: float) -> None:
+        super()._on_canvas_playhead_moved(sec)
+        if self._audition.is_playing:
+            self._audition.seek(int(round(sec * self._pcm_rate)))
+
+    def _on_minimap_playhead_moved(self, sec: float) -> None:
+        super()._on_minimap_playhead_moved(sec)
+        if self._audition.is_playing:
+            self._audition.seek(int(round(sec * self._pcm_rate)))
+
+    # ------------------------------------------------------------------
+    # 过零吸附（P0-2 §2.4）
+    # ------------------------------------------------------------------
+    def _on_pcm_selection_zero_snap(self, t0: float, t1: float, _fl: float, _fh: float) -> None:
+        if (not self._zero_snap_armed or self._pcm is None
+                or self._suppress_zero_snap or t1 - t0 <= 0.0):
+            return
+        rate = self._pcm_rate
+        total = self._pcm.shape[1]
+        tol = max(1, int(round(0.003 * rate)))
+        s0 = max(0, min(total - 1, int(round(t0 * rate))))
+        s1 = max(s0 + 1, min(total, int(round(t1 * rate))))
+        n0 = find_zero_crossing(self._pcm, s0, tolerance_samples=tol, bounds=(0, total))
+        n1 = find_zero_crossing(self._pcm, s1 - 1, tolerance_samples=tol, bounds=(0, total))
+        snapped0 = n0 / rate if n0 is not None else t0
+        snapped1 = n1 / rate if n1 is not None else t1
+        if (abs(snapped0 - t0) > 1e-9 or abs(snapped1 - t1) > 1e-9) and snapped1 - snapped0 > 1e-9:
+            self._suppress_zero_snap = True
+            try:
+                self.canvas.setSelection(snapped0, snapped1)
+            finally:
+                self._suppress_zero_snap = False
 
     def _disable_prototype_controls(self) -> None:
         unavailable = I18N.tr("mixer.clip_editor.unavailable", "This tool requires an audio processing backend.")
@@ -290,6 +476,8 @@ class ProjectClipEditor(QWidget):
     fade_committed = pyqtSignal(str, int, int)
     sample_fade_committed = pyqtSignal(str, int, int)
     fade_curve_committed = pyqtSignal(str, str)
+    # P0-2：试听占用输出设备时通知宿主暂停时间线播放。
+    audition_active_changed = pyqtSignal(bool)
     close_requested = pyqtSignal()
     float_requested = pyqtSignal()
     tab_requested = pyqtSignal()
@@ -313,10 +501,17 @@ class ProjectClipEditor(QWidget):
             #ClipEditorHeader QToolButton:hover { background: #3A3B43; color: #F2F2F5; }
         """)
         self._clip: ClipInstance | None = None
+        self._timeline: TimelineSequence | None = None
         self._timeline_id: str | None = None
+        self._project: EditProject | None = None
         self._project_id: str | None = None
         self._panel: _TimelineClipPanel | None = None
         self._extractor: WaveformExtractor | None = None
+        # P0-2：PCM 取样的代际标识与最近一次结果（频谱重算复用）。
+        self._pcm_provider: ClipPcmProvider | None = None
+        self._pcm_spec_key: tuple | None = None
+        self._last_pcm: ClipPcmResult | None = None
+        self._pcm_applied = False
         self._asset: MediaAsset | None = None
         self._waveform_asset: MediaAsset | None = None
         self._waveform_asset_id: str | None = None
@@ -393,6 +588,8 @@ class ProjectClipEditor(QWidget):
             self._panel.undoRequested.connect(self._on_undo_requested)
             self._panel.redoRequested.connect(self._on_redo_requested)
             self._panel.commitAndCloseRequested.connect(self._return_to_timeline)
+            self._panel.fftSizeChanged.connect(self._on_fft_size_changed)
+            self._panel._audition.playing_changed.connect(self.audition_active_changed.emit)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -409,6 +606,7 @@ class ProjectClipEditor(QWidget):
             self.sync_clip(timeline)
             return
         self._clip = clip
+        self._timeline = timeline
         self._timeline_id = timeline.timeline_id
         self._prepare_source(asset, project, waveform_asset_id)
         self._source_changed = True
@@ -419,6 +617,7 @@ class ProjectClipEditor(QWidget):
         if not asset.is_audio:
             raise ValueError("The source must be an audio asset")
         self._clip = None
+        self._timeline = None
         self._timeline_id = None
         self._sample_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._prepare_source(asset, project)
@@ -437,6 +636,9 @@ class ProjectClipEditor(QWidget):
             self._extractor = WaveformExtractor.instance()
             self._extractor.waveform_ready.connect(self._waveform_ready)
             self._extractor.extraction_failed.connect(self._waveform_failed)
+        if self._pcm_provider is None:
+            self._pcm_provider = ClipPcmProvider.instance()
+        self._project = project
         self._project_id = project.project_id if project is not None else None
         self._waveform_asset_id = None
         self._set_source(asset, project, waveform_asset_id)
@@ -481,6 +683,7 @@ class ProjectClipEditor(QWidget):
         if asset is None or (self._clip is None and not asset.is_audio):
             self.reset()
             return
+        self._project = project
         source_changed = self._set_source(asset, project)
         self._title.setText(asset.display_name)
         if source_changed:
@@ -499,6 +702,8 @@ class ProjectClipEditor(QWidget):
                 or clip.asset_id != self._asset.asset_id):
             self.reset()
             return
+        if timeline is not None:
+            self._timeline = timeline
         previous = self._clip
         old_fps, self._fps = self._fps, float(timeline.fps)
         self._sample_rate = timeline.sample_rate
@@ -520,16 +725,22 @@ class ProjectClipEditor(QWidget):
 
     def reset(self) -> None:
         self._clip = None
+        self._timeline = None
         self._timeline_id = None
+        self._project = None
         self._project_id = None
         self._asset = None
         self._waveform_asset = None
         self._waveform_asset_id = None
         self._source_changed = False
+        self._pcm_spec_key = None
+        self._last_pcm = None
+        self._pcm_applied = False
         if self._panel is not None:
             self._panel._pending_fade = None
             self._panel.canvas._drag_mode = ""
             self._panel.canvas._physics_timer.stop()
+            self._panel.detach_pcm()
         self._scroll.hide()
         self._title.setText("")
         self._title.hide()
@@ -554,6 +765,7 @@ class ProjectClipEditor(QWidget):
         if self._panel is not None:
             self._panel._pending_fade = None
             self._panel.canvas._physics_timer.stop()
+            self._panel._audition.stop()
             self._sync_gain_fade()
         super().hideEvent(event)
 
@@ -561,6 +773,7 @@ class ProjectClipEditor(QWidget):
         asset = self._asset
         if asset is None or self._panel is None:
             return
+        self._pcm_applied = False
         duration = self._clip.timeline_duration / self._fps if self._clip is not None else asset.duration_seconds
         if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0.0:
             duration = 0.01
@@ -578,6 +791,101 @@ class ProjectClipEditor(QWidget):
             self._status.setText(I18N.tr("mixer.clip_editor.loading_waveform", "Loading source waveform…"))
             if self._extractor is not None:
                 self._extractor.request_waveform(self._waveform_asset_id, self._waveform_path)
+        # P0-2：真实 PCM（波形/RMS/频谱/试听共用同一数据源）。
+        self._request_pcm()
+
+    def _request_pcm(self) -> None:
+        asset, panel = self._asset, self._panel
+        if asset is None or panel is None or self._pcm_provider is None:
+            return
+        clip = self._clip
+        if clip is not None and self._timeline is not None:
+            source_asset = self._project.assets.get(clip.asset_id) if self._project is not None else None
+            spec = resolve_clip_audio_spec(
+                self._project, self._timeline, clip, source_asset or asset)
+        else:
+            spec = resolve_asset_audio_spec(self._project, asset)
+        if spec is None:
+            return
+        self._pcm_spec_key = spec.cache_key()
+
+        def on_pcm(result: ClipPcmResult) -> None:
+            # 结果返回前校验代际：切片段/重连/撤销后旧结果不得覆盖新窗口。
+            if result.spec_key == self._pcm_spec_key:
+                self._apply_pcm(result)
+
+        self._pcm_provider.request(spec, on_pcm)
+
+    def _apply_pcm(self, result: ClipPcmResult) -> None:
+        asset, panel = self._asset, self._panel
+        if asset is None or panel is None:
+            return
+        self._last_pcm = result
+        self._pcm_applied = True
+        pcm, rate = result.pcm, result.sample_rate
+        duration = (
+            self._clip.timeline_duration / self._fps
+            if self._clip is not None and self._fps > 0
+            else pcm.shape[1] / rate
+        )
+        duration = max(0.01, duration)
+        bins = min(8192, max(64, pcm.shape[1] // 64))
+        mins, maxs, rmss = compute_waveform_stats(pcm, bins)
+        spectrogram = compute_spectrogram(
+            pcm, rate, nfft=panel.current_fft_size(), time_bins=320, freq_bins=96)
+        report = self._measure_cleanliness(pcm, rate)
+        panel.attach_pcm(pcm, rate)
+        panel.load_audio_data(
+            rate, duration, mins, maxs, rmss, spectrogram,
+            clip_name=asset.display_name, cleanliness_report=report,
+        )
+        panel.update_playhead(0.0)
+        peak_db = report.get("peak_db")
+        panel.peak_val_lbl.setText(
+            f"{peak_db:+.1f} dBFS" if isinstance(peak_db, (int, float)) else "—")
+        self._sync_gain_fade()
+
+    def _on_fft_size_changed(self, _size: int) -> None:
+        if self._last_pcm is not None and self._panel is not None and self._pcm_applied:
+            # 只重算频谱矩阵，波形包络与读数保持不变。
+            spectrogram = compute_spectrogram(
+                self._last_pcm.pcm, self._last_pcm.sample_rate,
+                nfft=self._panel.current_fft_size(), time_bins=320, freq_bins=96)
+            self._panel.canvas.loadAudioData(
+                self._panel._sample_rate, self._panel._duration,
+                self._panel.canvas._peaks_min, self._panel.canvas._peaks_max,
+                self._panel.canvas._rms, spectrogram)
+
+    @staticmethod
+    def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:
+        """从有效 PCM 实测峰值/RMS/噪声底；长素材跳过 BS.1770 离线分析。"""
+        data = pcm.astype(np.float64, copy=False)
+        peak = float(np.max(np.abs(data))) if data.size else 0.0
+        rms = float(np.sqrt(np.mean(data ** 2))) if data.size else 0.0
+        report: dict = {
+            "peak_db": 20.0 * math.log10(peak) if peak > 0 else -120.0,
+            "rms_db": 20.0 * math.log10(rms) if rms > 0 else -120.0,
+        }
+        # 噪声底：50 ms 窗 RMS 的第 10 百分位（cheap、单调、可复现）。
+        window = max(1, int(round(0.05 * rate)))
+        if data.shape[1] >= window * 2:
+            mono = data if data.shape[0] == 1 else data.mean(axis=0)
+            blocks = mono[: (mono.size // window) * window].reshape(-1, window)
+            block_rms = np.sqrt(np.mean(blocks ** 2, axis=1))
+            floor = float(np.percentile(block_rms, 10))
+            report["noise_floor_db"] = 20.0 * math.log10(floor) if floor > 0 else -120.0
+        else:
+            report["noise_floor_db"] = report["rms_db"]
+        if 0 < data.shape[1] <= rate * 60:
+            try:
+                from src.features.edit.core.loudness_analyzer import analyze_loudness
+                loudness = analyze_loudness(pcm, float(rate))
+                if getattr(loudness, "backend_available", False):
+                    report["integrated_lufs"] = float(loudness.integrated_lufs)
+                report["true_peak_dbtp"] = float(loudness.true_peak_dbtp)
+            except Exception:  # noqa: BLE001 - 响度分析失败不影响波形
+                pass
+        return report
 
     def _path_cache_id(self, asset_id: str) -> str:
         path = os.path.abspath(self._waveform_path)
@@ -618,6 +926,10 @@ class ProjectClipEditor(QWidget):
     def _apply_waveform(self, waveform: WaveformData) -> None:
         clip, asset, panel = self._clip, self._asset, self._panel
         if asset is None or panel is None:
+            return
+        if self._pcm_applied:
+            # 真实 PCM 已提供波形/RMS/频谱；源包络只是更快的首帧绘制，
+            # 不能在 PCM 之后回头覆盖成零 RMS 的包络数据。
             return
         if clip is None:
             start, end = 0.0, waveform.duration_seconds

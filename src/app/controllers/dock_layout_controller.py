@@ -1378,6 +1378,8 @@ class DockLayoutMixin:
         panel.fade_committed.connect(self._commit_mixer_clip_fade)
         panel.sample_fade_committed.connect(self._commit_mixer_clip_sample_fade)
         panel.fade_curve_committed.connect(self._commit_mixer_clip_fade_curve)
+        # P0-2：试听开始时暂停时间线播放，两套输出不叠音。
+        panel.audition_active_changed.connect(self._pause_timeline_for_clip_audition)
         panel.undo_requested.connect(view.undo)
         panel.redo_requested.connect(view.redo)
         panel.float_requested.connect(self._float_project_audio_clip_editor)
@@ -1389,6 +1391,18 @@ class DockLayoutMixin:
         self.tabifiedDockWidgetActivated.connect(self._on_mixer_audio_dock_activated)
         dock.topLevelChanged.connect(self._sync_mixer_clip_editor_title_bar)
         dock.visibilityChanged.connect(self._on_project_audio_clip_editor_visibility_changed)
+
+    def _pause_timeline_for_clip_audition(self, active: bool) -> None:
+        """Clip Editor 试听开始时暂停时间线播放（P0-2 §2.3）。"""
+        if not active:
+            return
+        manager = getattr(getattr(self, "edit_page", None), "_audio_manager", None)
+        pause = getattr(manager, "pause", None)
+        if callable(pause):
+            try:
+                pause()
+            except RuntimeError:
+                pass
 
     def _load_project_audio_clip_editor(self, clip_id: str, *, activate_workspace: bool = False) -> bool:
         view = self.timeline_panel.get_timeline_view()
