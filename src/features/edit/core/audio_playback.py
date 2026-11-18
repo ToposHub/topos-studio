@@ -104,7 +104,7 @@ from src.features.edit.core.audio_dsp import (
     pan_gains_for_channels,
     balance_gains,
 )
-from src.features.edit.core.audio_edit import apply_clip_audio_edit
+from src.features.edit.core.audio_edit import apply_clip_audio_edit, apply_clip_audio_edit_block
 from src.features.edit.core.channel_layout import adapt_channels
 from src.features.edit.core.source_patch import SourcePatchSpec
 from src.features.edit.core.timeline_v2 import StripEQParams, EffectChainParams
@@ -978,6 +978,8 @@ class AudioDecoder:
         self._gain_db: float = 0.0
         # P0-3: Clip Editor 非破坏性处理栈（clip 增益/淡化之前应用）。
         self._audio_edit: Optional[dict] = None
+        # §3.3：预渲染处理栈的缓存基底（整段 planar float32；None=无/未就绪）。
+        self._pre_render_base: Optional[np.ndarray] = None
 
         # 小数采样累积器（消除 int() 截断导致的累积漂移）
         self._fractional_offset: float = 0.0
@@ -1093,6 +1095,20 @@ class AudioDecoder:
         的载荷已在命令构造时阻断，这里只做消费。
         """
         self._audio_edit = audio_edit if isinstance(audio_edit, dict) else None
+
+    def set_pre_render_plan(self, plan: Any) -> None:
+        """§3.3：预渲染处理栈的构建计划（plan 携带缓存基底或 None）。
+
+        命中缓存时把整段基底挂在 decoder 上，mix_samples 按块切片使用；
+        未命中时走 inline-only 回退，缓存就绪后引擎签名变化触发重建。
+        """
+        self._pre_render_base = None
+        if plan is None:
+            return
+        try:
+            self._pre_render_base = plan.lookup_cached()
+        except Exception:  # noqa: BLE001 - 基底取回失败按回退处理
+            self._pre_render_base = None
 
     def set_fade(self, timeline_start: int, timeline_duration: int,
                  fade_in_frames: int = 0, fade_out_frames: int = 0,
@@ -2923,9 +2939,11 @@ class AudioMixer:
                         block_start_sample = int(round(
                             (current_frame - clip_start_frame)
                             * self._sample_rate / fps))
-                        samples = apply_clip_audio_edit(
+                        samples = apply_clip_audio_edit_block(
                             samples, block_start_sample, audio_edit,
-                            sample_rate=int(self._sample_rate))
+                            sample_rate=int(self._sample_rate),
+                            pre_render_base=getattr(
+                                decoder, "_pre_render_base", None))
 
                     # RMA-03: clip 淡入/淡出（实时路径此前完全不处理，与离线导出漂移）。
                     # 在声道扩展后、clip-FX/track 处理前应用，作用于该 clip 原始信号。
@@ -5225,6 +5243,7 @@ class AudioPlaybackManager(QObject):
         fade_curve_in: Optional[str] = None,
         fade_curve_out: Optional[str] = None,
         audio_edit: Optional[dict] = None,
+        pre_render_plan: Optional[Any] = None,
     ) -> bool:
         """
         添加音频轨道。
@@ -5309,6 +5328,10 @@ class AudioPlaybackManager(QObject):
         # P0-3: Clip Editor 处理栈（clip 增益/淡化之前应用；None = 无编辑）
         if audio_edit:
             decoder.set_audio_edit(audio_edit)
+        # §3.3: 预渲染处理栈（STFT 类步骤）的缓存基底；未命中缓存时
+        # decoder 走 inline-only 回退，构建完成后由签名变化重建接入。
+        if pre_render_plan is not None:
+            decoder.set_pre_render_plan(pre_render_plan)
 
         # 创建状态
         state = initial_state or AudioTrackState(track_id=track_id)

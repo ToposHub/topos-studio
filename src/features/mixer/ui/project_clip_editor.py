@@ -23,8 +23,9 @@ from src.features.edit.core.clip_pcm import (
 )
 from src.features.edit.core.audio_edit import (
     append_step, canvas_markers_from, canvas_points_from_envelope,
-    envelope_from_canvas_points, envelope_nodes, make_step, marker_list,
-    markers_from_canvas, remove_step, replace_step_enabled, set_envelope,
+    envelope_from_canvas_points, envelope_nodes, inline_audio_edit, make_step,
+    marker_list, markers_from_canvas, remove_step, replace_processor_step,
+    replace_step_enabled, requires_pre_render, set_envelope,
     set_markers,
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
@@ -33,6 +34,19 @@ from src.shared.i18n.i18n import I18N
 
 from .clip_audition import ClipAuditionSession
 from .workspace_style import PANEL_QSS
+
+
+class _PanelStatusForwarder:
+    """处理器状态消息的最小 setText 代理（转发到包装层状态行）。"""
+
+    def __init__(self, panel: "_TimelineClipPanel") -> None:
+        self._panel = panel
+
+    def setText(self, text: str) -> None:
+        self._panel.set_status_message(text)
+
+    def setToolTip(self, text: str) -> None:
+        self._panel.noise_status_lbl.setToolTip(text)
 
 if TYPE_CHECKING:
     from src.features.edit.core.project import EditProject, MediaAsset
@@ -123,6 +137,16 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_snap_zero.toggled.connect(self._on_zero_snap_toggled)
         # A/B 全局旁路是临时监听状态：立即按原始 PCM 重建预览与试听。
         self.btn_bypass.toggled.connect(lambda _on: self._refresh_stack_preview())
+        # 处理器状态消息转发到包装层状态行（无包装层时退噪声标签）。
+        self._status_hook: Any = None
+        self.info_label = _PanelStatusForwarder(self)
+
+    def set_status_message(self, text: str) -> None:
+        hook = self._status_hook
+        if hook is not None:
+            hook(text)
+        else:
+            self.noise_status_lbl.setText(text)
 
     def _on_zero_snap_toggled(self, enabled: bool) -> None:
         self._zero_snap_armed = enabled
@@ -232,20 +256,34 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 "range_gain": I18N.tr("mixer.clip_editor.step_gain", "Gain"),
                 "mute": I18N.tr("mixer.clip_editor.step_mute", "Silence"),
                 "normalize": I18N.tr("mixer.clip_editor.step_normalize", "Normalize"),
+                "spectral_denoise": I18N.tr(
+                    "mixer.clip_editor.step_denoise", "Denoise"),
+                "channel_polarity": I18N.tr(
+                    "mixer.clip_editor.polarity", "Invert polarity"),
             }.get(processor, processor)
             gain_db = params.get("gain_db")
-            detail = (
-                f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
-                f"{','.join('LR'[c] if c in (0, 1) else str(c) for c in params.get('channels', ()))}"
-                + (f" · {gain_db:+.1f} dB" if isinstance(gain_db, (int, float)) else "")
-            )
+            if processor == "spectral_denoise":
+                reduction = params.get("reduction_db")
+                detail = (
+                    f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                    + (f"−{float(reduction):.1f} dB"
+                       if isinstance(reduction, (int, float)) else "spectral")
+                    + " · " + I18N.tr(
+                        "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            else:
+                detail = (
+                    f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                    f"{','.join('LR'[c] if c in (0, 1) else str(c) for c in params.get('channels', ()))}"
+                    + (f" · {gain_db:+.1f} dB" if isinstance(gain_db, (int, float)) else "")
+                )
             view_steps.append({
                 "id": step.get("step_id"),
                 "type": processor,
                 "label": label,
                 "detail": detail,
                 "color": "#4BA6DD" if processor == "range_gain" else (
-                    "#F26D6D" if processor == "mute" else "#7BC96F"),
+                    "#F26D6D" if processor == "mute" else (
+                        "#B58BD8" if processor == "spectral_denoise" else "#7BC96F")),
                 "enabled": bool(step.get("enabled", True)),
                 "params": params,
             })
@@ -265,13 +303,19 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         return self._model_audio_edit
 
     def _refresh_stack_preview(self) -> None:
-        """把处理栈（含降噪预览基底）应用到 PCM：波形/频谱/试听与播放同结果。"""
+        """把处理栈（含降噪预览基底）应用到 PCM：波形/频谱/试听与播放同结果。
+
+        预渲染步骤（spectral_denoise）在 ``_base_pcm`` 中整段烘焙（与缓存
+        基底同一语义），这里只应用 inline 步骤 + 包络——编辑器预览与三条
+        渲染路径（播放/成片/Stem）共用同一分派（§3.3）。
+        """
         base = self._base_pcm()
         if base is None:
             return
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
-        edited = apply_audio_edit_to_pcm(base, self._effective_audio_edit(),
-                                         sample_rate=self._pcm_rate)
+        edited = apply_audio_edit_to_pcm(
+            base, inline_audio_edit(self._effective_audio_edit()),
+            sample_rate=self._pcm_rate)
         self._pcm = edited
         self._audition.load(edited, self._pcm_rate)
         bins = min(8192, max(64, edited.shape[1] // 64))
@@ -322,17 +366,29 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             return None
         if self._timepitch_pcm is not None:
             return self._timepitch_pcm
+        # §3.3：已提交的预渲染步骤（spectral_denoise）先整段烘焙——与
+        # 播放/导出消费的缓存基底同一语义，A/B 旁路时一并跳过。
+        base = raw
+        edit = self._effective_audio_edit()
+        if edit is not None and requires_pre_render(edit):
+            from src.features.edit.core.audio_edit import render_pre_render_steps
+            try:
+                base = render_pre_render_steps(
+                    base, edit, sample_rate=self._pcm_rate)
+            except Exception as exc:  # noqa: BLE001 - 烘焙失败保持原声并提示
+                self.info_label.setText(str(exc))
+                return raw
         if self._denoise_preview is None:
-            return raw
+            return base
         from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
         noise_range, target_range, reduction_db, nfft = self._denoise_preview
         try:
             return denoise_spectral_subtraction(
-                raw, self._pcm_rate, noise_range, target_range,
+                base, self._pcm_rate, noise_range, target_range,
                 reduction_db, nfft=nfft)
         except Exception as exc:  # noqa: BLE001 - 预览失败保持原声并提示
             self.info_label.setText(str(exc))
-            return raw
+            return base
 
     def set_timepitch_preview(self, pcm: np.ndarray) -> None:
         """P2-7：变速/音高后的 PCM 作为预览基底（时长随之变化）。"""
@@ -793,6 +849,7 @@ class ProjectClipEditor(QWidget):
     def _ensure_panel(self) -> _TimelineClipPanel:
         if self._panel is None:
             self._panel = _TimelineClipPanel()
+            self._panel._status_hook = self._status.setText
             self._panel.gain_requested.connect(self._on_gain_requested)
             self._panel.fadeApplied.connect(self._on_fade_requested)
             self._panel.fadeCurveChanged.connect(self._on_fade_curve_requested)
@@ -1416,7 +1473,12 @@ class ProjectClipEditor(QWidget):
             "mixer.clip_editor.noise_captured", f"● Captured {(hi - lo) / panel._pcm_rate:.2f} s"))
 
     def _on_denoise_requested(self, t0: float, t1: float, reduction_db: float) -> None:
-        """P1-6：谱减降噪——v1 为预览/试听态（入栈需预渲染缓存，后续批次）。"""
+        """P1-6 + §3.3：谱减降噪——可编辑片段直接入栈（预渲染缓存承载）。
+
+        源监视模式（无时间线片段）保持预览/试听态。入栈用
+        ``replace_processor_step``：重复点击/调参重提交是幂等的（同一
+        处理器只保留最新一步），撤销走同一条时间线历史。
+        """
         from src.features.edit.core.audio_denoise import pcm_signature
         panel = self._panel
         if panel is None or panel._raw_pcm is None:
@@ -1434,9 +1496,61 @@ class ProjectClipEditor(QWidget):
             panel.set_noise_profile(None)
             return
         lo, hi = self._pcm_range(t0, t1)
-        panel.set_denoise_preview(
-            (profile.noise_start, profile.noise_end), (lo, hi),
-            float(reduction_db), nfft=profile.nfft)
+        clip = self._clip
+        if clip is None or self._locked:
+            panel.set_denoise_preview(
+                (profile.noise_start, profile.noise_end), (lo, hi),
+                float(reduction_db), nfft=profile.nfft)
+            return
+        from src.features.edit.core.audio_denoise import scipy_available
+        if not scipy_available():
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.denoise_unavailable",
+                "Denoise requires the SciPy DSP backend"))
+            return
+        # 与 build_pre_render_plan 同一阻断清单：变速片段的缓存基底与
+        # 播放块域错位，入栈会永不生效——保持预览态并说明原因。
+        speed = getattr(clip, "effective_speed", None)
+        speed = float(speed() if callable(speed)
+                      else (speed if speed is not None else 1.0))
+        if abs(speed - 1.0) > 1e-9:
+            panel.set_denoise_preview(
+                (profile.noise_start, profile.noise_end), (lo, hi),
+                float(reduction_db), nfft=profile.nfft)
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.denoise_preview_only",
+                "Retime/pitch commit lands with the length transaction — "
+                "denoise stays preview-only on this clip"))
+            return
+        start, end = self._selection_output_range()
+        # 噪声采集区间与选区同在片段输出样本域（raw PCM 与输出域同比例）。
+        noise_start, noise_end = self._raw_to_output_range(
+            profile.noise_start, profile.noise_end)
+        step = make_step(
+            "spectral_denoise", start=start, end=end,
+            channels=self._target_channels(),
+            reduction_db=round(float(reduction_db), 2),
+            noise_start=noise_start, noise_end=noise_end,
+            nfft=int(profile.nfft), link_stereo=True,
+            label=I18N.tr("mixer.clip_editor.step_denoise", "Denoise"))
+        panel.clear_denoise_preview()
+        self._commit_audio_edit(
+            replace_processor_step(clip.audio_edit, "spectral_denoise", step),
+            I18N.tr("mixer.clip_editor.denoise_selection", "Denoise selection"))
+        panel.info_label.setText(I18N.tr(
+            "mixer.clip_editor.denoise_committed",
+            "Denoise added to the stack — pre-rendering in the background"))
+
+    def _raw_to_output_range(self, raw_lo: int, raw_hi: int) -> tuple[int, int]:
+        """raw PCM 样本区间 → 片段输出域样本区间（速度 ≠ 1 时按比例映射）。"""
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None or panel._raw_pcm.shape[1] <= 0:
+            return (max(0, raw_lo), max(raw_lo + 1, raw_hi))
+        output_total = self._output_total_samples()
+        scale = output_total / panel._raw_pcm.shape[1]
+        lo = int(round(raw_lo * scale))
+        hi = int(round(raw_hi * scale))
+        return (lo, max(lo + 1, hi))
 
     def _on_lufs_normalize_requested(self, t0: float, t1: float,
                                      target_lufs: float, tp_ceiling: float) -> None:

@@ -100,18 +100,24 @@ class StemExportWorker(QThread):
 
     def run(self) -> None:
         try:
-            from src.features.edit.core.stem_export import create_clip_decode_fn
+            from src.features.edit.core.stem_export import (
+                create_clip_decode_fn, create_pre_render_base_fn,
+            )
 
             decode_fn, close_fn = create_clip_decode_fn(
                 self._project,
                 float(getattr(self._sequence, "fps", 24.0) or 24.0),
                 STEM_SAMPLE_RATE,
             )
+            # §3.3：预渲染处理栈（STFT 类步骤）的缓存基底。
+            pre_render_base_fn = create_pre_render_base_fn(
+                self._project, self._sequence)
             try:
                 result = export_all_stems(
                     self._sequence,
                     self._output_dir,
                     decode_clip_fn=decode_fn,
+                    pre_render_base_fn=pre_render_base_fn,
                     sample_rate=STEM_SAMPLE_RATE,
                     channels=STEM_CHANNELS,
                     bit_depth=STEM_BIT_DEPTH,
