@@ -988,3 +988,54 @@ def test_timeline_shows_clip_volume_envelope_overlay(
     view.undo()
     qtbot.waitUntil(
         lambda: not bool(view._items_map[clip_id]._envelope_nodes), timeout=5000)
+
+
+def test_automation_lane_mode_commits_per_track(project_host, qtbot) -> None:
+    """§7 P1：Automation Lane 模式按轨道入时间线历史（Read 实际回放）。"""
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    track_id = view.get_timeline().audio_tracks[0].track_id
+    host._on_mixer_show_automation(track_id)
+    lane = host._automation_lanes[track_id]
+    try:
+        assert lane._mode_combo.currentText() == "Off"  # 模型回填
+        lane._mode_combo.setCurrentText("Read")
+        track = view.get_timeline().get_track_by_id(track_id)
+        assert track.automation_mode == "read"
+        # 引擎 per-track 模式即时下发（Read 曲线回放的开关）。
+        mgr = host._get_mixer_audio_manager()
+        assert mgr is None or mgr._automation_modes.get(track_id) == "read"
+        view.undo()
+        assert view.get_timeline().get_track_by_id(
+            track_id).automation_mode == "off"
+    finally:
+        lane.close()
+        lane.deleteLater()
+        host._automation_lanes.pop(track_id, None)
+
+
+def test_channel_strip_shows_send_count(project_host, qtbot) -> None:
+    """§7 P1 通道条：Send 徽标计数 + 点击入口（路由对话框信号）。"""
+    from src.features.edit.core.timeline_v2 import Send
+
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    track = timeline.audio_tracks[0]
+    host._sync_audio_mixer_from_timeline(timeline)
+    strip = host.audio_mixer_panel._track_mixers[track.track_id]
+    assert strip.sends_button.text() == "S"
+
+    # 加一条活跃 send（目标占位 Bus ID；徽标显示活跃计数）。
+    updated_timeline = timeline.with_track_updated(replace(
+        track, sends=(Send(target_bus_id="bus-x", level=0.5),)))
+    host._sync_audio_mixer_from_timeline(updated_timeline)
+    strip = host.audio_mixer_panel._track_mixers[track.track_id]
+    assert strip.sends_button.text().startswith("S1")
+    # 点击入口走 show_routing（与右键路由同一命令路径）。
+    requested: list[str] = []
+    strip.show_routing.connect(requested.append)
+    strip.sends_button.click()
+    assert requested == [track.track_id]

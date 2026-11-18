@@ -6,7 +6,7 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer import AudioMixerPanel
@@ -80,10 +80,23 @@ class StudioChannelStrip(TrackMixerWidget):
         self.output_bus_combo.setAccessibleName(I18N.tr("mixer.routing.output", "Output routing"))
         self.output_bus_combo.activated.connect(self._request_output_bus)
         self.output_bus_combo.setVisible(not is_master)
-        footer_layout.addWidget(self.output_bus_combo)
+        footer_layout.addWidget(self.output_bus_combo, 1)
+        # §7 P1 通道条：并行 Send 的显式入口（计数徽标 → 路由对话框）。
+        self.sends_button = QPushButton("S")
+        self.sends_button.setObjectName("MiniCellBtn")
+        self.sends_button.setFixedSize(22, 20)
+        self.sends_button.setAccessibleName(I18N.tr(
+            "mixer.routing.sends", "Sends"))
+        self.sends_button.setToolTip(I18N.tr(
+            "mixer.routing.sends_tip", "Parallel sends — click to edit"))
+        self.sends_button.setVisible(not is_master)
+        self.sends_button.clicked.connect(
+            lambda: self.show_routing.emit(self._track_id))
+        footer_layout.addWidget(self.sends_button)
         self.layout().addWidget(footer)
         self._output_choices: tuple[tuple[str | None, str], ...] = ()
         self._output_bus_id: str | None = None
+        self._send_count = 0
         if not is_master:
             self.set_output_routing(None, ())
 
@@ -102,6 +115,21 @@ class StudioChannelStrip(TrackMixerWidget):
         self._output_bus_id = output_bus_id
         combo.setCurrentIndex(next(i for i, (bus_id, _) in enumerate(choices) if bus_id == output_bus_id))
         combo.setToolTip(I18N.tr("mixer.routing.output", "Output routing") + " · " + combo.currentText())
+
+    def set_send_count(self, count: int, enabled_count: int | None = None) -> None:
+        """§7 P1：Send 徽标计数（活跃 send 高亮，点击打开路由编辑）。"""
+        total = max(0, int(count))
+        active = total if enabled_count is None else max(0, int(enabled_count))
+        if total == self._send_count and active == getattr(self, "_send_active", 0):
+            return
+        self._send_count = total
+        self._send_active = active
+        label = (f"S{active}" if active else "S") if total else "S"
+        self.sends_button.setText(label)
+        self.sends_button.setToolTip(I18N.tr(
+            "mixer.routing.sends_tip",
+            "Parallel sends — click to edit")
+            + (f" · {active}/{total}" if total else ""))
 
     def _request_output_bus(self, index: int) -> None:
         bus_id = self.output_bus_combo.itemData(index)
@@ -215,6 +243,11 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         for track in tracks:
             strip = self._track_mixers[track["track_id"]]
             strip.set_output_routing(track.get("output_bus_id"), buses)
+            sends = tuple(track.get("sends") or ())
+            strip.set_send_count(
+                len(sends),
+                sum(1 for send in sends
+                    if bool(getattr(send, "enabled", True))))
 
     def _populate_mixer_menu(self, menu: QMenu) -> None:
         super()._populate_mixer_menu(menu)

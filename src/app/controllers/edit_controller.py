@@ -2712,6 +2712,8 @@ class EditControllerMixin:
                 "is_solo": bool(getattr(track, 'is_solo', False)),
                 "is_bus": getattr(track, "is_bus", False),
                 "output_bus_id": getattr(track, "output_bus_id", None),
+                # §7 P1 通道条：Send 计数徽标（活跃/总数）。
+                "sends": tuple(getattr(track, "sends", ()) or ()),
                 # W8: Strip EQ 参数（None=禁用）
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
@@ -2892,13 +2894,21 @@ class EditControllerMixin:
         except (RuntimeError, ValueError, TypeError):
             return False, 0
 
+    def _automation_mode_for_track(self, track_id: str) -> str:
+        """§7 P1：录制模式按轨道模型优先（AM-07 同一真相源），全局态兜底。"""
+        timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
+        track = timeline.get_track_by_id(track_id) if timeline is not None else None
+        if track is not None:
+            return str(getattr(track, 'automation_mode', 'off') or 'off').lower()
+        return str(getattr(self, '_automation_mode', 'Off')).lower()
+
     def _record_fader_sample(self, track_id: str, param: str, value: float,
                              fader_down: bool = True) -> None:
         """在 Write/Touch/Latch 模式下采集 fader 样本。
 
         录制器按 (track_id, param) 缓存；模式切换/播放停止时停止录制并提交命令。
         """
-        mode = str(getattr(self, '_automation_mode', 'Off')).lower()
+        mode = self._automation_mode_for_track(track_id)
         if mode not in ("write", "touch", "latch"):
             return
         # E05: 需在播放中才录制（权威状态见 _edit_playback_state）
@@ -4114,6 +4124,7 @@ class EditControllerMixin:
             track = timeline.get_track_by_id(track_id)
             if track is not None:
                 dlg.update_track_data(dict(track.automation))
+                dlg.set_automation_mode(getattr(track, "automation_mode", "off"))
         # 存储 + 显示
         if not hasattr(self, '_automation_lanes'):
             self._automation_lanes = {}
@@ -4240,26 +4251,45 @@ class EditControllerMixin:
         except Exception as e:
             logger.warning("Failed to execute automation clear: %s", e)
 
-    def _on_mixer_automation_mode_changed(self, mode: str) -> None:
-        """W23: 全局 automation 模式切换（Off/Read/Write/Touch/Latch）。
+    def _on_mixer_automation_mode_changed(self, track_id: str, mode: str) -> None:
+        """§7 P1：轨道级 automation 模式（Off/Read/Write/Touch/Latch）。
 
-        本次实现 Read（回放时按曲线驱动）和 Write（录制推子移动）的核心；
-        Touch/Latch 是 Write 的变体（停止写入的时机不同）。
+        W23 语义升级：模式按轨道提交 ``SetTrackAutomationModeCommand``
+        （可撤销、重开还原），并立即同步引擎 per-track 模式——此前只改
+        控制器全局态，Read 打开后曲线实际不回放（AM-07 同步只读模型）。
         """
         mgr = self._get_mixer_audio_manager()
-        # 同步 automation 数据到引擎（Read 模式必须）
         timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
-        if timeline is not None and mgr is not None and hasattr(mgr, 'set_track_automation'):
-            for track in timeline.audio_tracks:
-                try:
-                    mgr.set_track_automation(track.track_id, dict(track.automation))
-                except Exception as e:
-                    logger.debug("automation sync failed: %s", e)
-        # 记录当前模式（Write/Touch/Latch 时由播放循环写入关键帧）
-        if not hasattr(self, '_automation_mode'):
-            self._automation_mode = "Off"
-        self._automation_mode = mode
-        logger.info("automation mode changed to: %s", mode)
+        track = timeline.get_track_by_id(track_id) if timeline is not None else None
+        if track is None:
+            logger.debug("automation mode change for unknown track %s", track_id)
+            return
+        # 同步 automation 数据到引擎（Read 模式必须）
+        if mgr is not None and hasattr(mgr, 'set_track_automation'):
+            try:
+                mgr.set_track_automation(track_id, dict(track.automation))
+            except Exception as e:  # noqa: BLE001
+                logger.debug("automation sync failed: %s", e)
+        # 命令入栈（模型 → AM-07 签名 → 引擎重建；此处再即时下发听感）。
+        from src.features.edit.core.commands import SetTrackAutomationModeCommand
+        tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
+        if tview is not None:
+            try:
+                tview._execute_command(
+                    SetTrackAutomationModeCommand.create(track_id, mode))
+            except (ValueError, RuntimeError) as e:  # noqa: BLE001
+                logger.warning("automation mode command failed: %s", e)
+                return
+        normalized = str(mode or "off").lower()
+        if mgr is not None and hasattr(mgr, 'set_track_automation_mode'):
+            try:
+                mgr.set_track_automation_mode(track_id, normalized)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_track_automation_mode failed: %s", e)
+        # 兼容 W23 的录制循环全局态（无 per-track 语义的旧路径仍可用；
+        # _record_fader_sample 优先读轨道模型模式）。
+        self._automation_mode = str(mode or "Off").capitalize()
+        logger.info("automation mode for track %s changed to: %s", track_id, mode)
 
     def _on_mixer_strip_eq_preview(self, track_id: str, params) -> None:
         """Strip EQ 对话框拖动期：实时更新 AudioPlaybackManager 的 EQ 滤波器（听感）。

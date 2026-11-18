@@ -310,7 +310,8 @@ class AutomationLane(QDialog):
     remove_keyframe = pyqtSignal(str, str, int)      # track_id, param, frame
     clear_param = pyqtSignal(str, str)               # track_id, param
     set_keyframe_interp = pyqtSignal(str, str, int, str)  # track_id, param, frame, interp_name
-    automation_mode_changed = pyqtSignal(str)        # mode: Off/Read/Write/Touch/Latch
+    # §7 P1：模式按轨道提交（track_id, mode: Off/Read/Write/Touch/Latch）。
+    automation_mode_changed = pyqtSignal(str, str)
 
     # 参数配置（name → (min, max, default)）
     PARAM_CONFIG = {
@@ -381,7 +382,7 @@ class AutomationLane(QDialog):
         self._mode_combo = QComboBox()
         self._mode_combo.addItems(AUTOMATION_MODES)
         self._mode_combo.setCurrentText("Off")
-        self._mode_combo.currentTextChanged.connect(self.automation_mode_changed.emit)
+        self._mode_combo.currentTextChanged.connect(self._emit_mode_changed)
         top.addWidget(self._mode_combo)
 
         top.addStretch()
@@ -445,6 +446,18 @@ class AutomationLane(QDialog):
 
     def _on_kf_interp(self, frame: int, interp: str) -> None:
         self.set_keyframe_interp.emit(self._track_id, self._current_param, frame, interp)
+
+    def _emit_mode_changed(self, mode: str) -> None:
+        self.automation_mode_changed.emit(self._track_id, mode)
+
+    def set_automation_mode(self, mode: str) -> None:
+        """按模型回填模式选择器（打开/外部变更时；不发信号）。"""
+        display = str(mode or "off").capitalize()
+        if display not in AUTOMATION_MODES:
+            display = "Off"
+        self._mode_combo.blockSignals(True)
+        self._mode_combo.setCurrentText(display)
+        self._mode_combo.blockSignals(False)
 
     # ── 外部同步（controller 调用）──
 

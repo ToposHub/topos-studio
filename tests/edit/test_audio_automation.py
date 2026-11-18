@@ -360,3 +360,45 @@ class TestAutomationModePersistence:
         seq2 = TimelineSequence.from_dict(seq.to_dict())
         t2 = seq2.audio_tracks[0]
         assert t2.automation_mode == "write"
+
+
+class TestAutomationModeCommand:
+    """§7 P1：轨道自动化模式入时间线历史（Read 回放开关可撤销）。"""
+
+    def test_apply_undo_and_serialization(self) -> None:
+        from src.features.edit.core.commands import (
+            _MACRO_SUBCOMMAND_TYPES, SetTrackAutomationModeCommand,
+        )
+        from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+
+        timeline = TimelineSequence(
+            audio_tracks=(EditTrack(track_id="a1", track_type="audio", name="A"),),
+            video_tracks=(),
+        )
+        assert timeline.get_track_by_id("a1").automation_mode == "off"
+        cmd = SetTrackAutomationModeCommand.create("a1", "Read")
+        applied, updated = cmd.apply(timeline)
+        assert applied.get_track_by_id("a1").automation_mode == "read"
+        assert applied.get_track_by_id("a1").volume == 1.0  # 其余字段不动
+        undone = updated.undo(applied)
+        assert undone.get_track_by_id("a1").automation_mode == "off"
+        # 序列化注册（重开还原走同一注册表）。
+        assert "SetTrackAutomationModeCommand" in _MACRO_SUBCOMMAND_TYPES
+        restored = SetTrackAutomationModeCommand.from_dict(cmd.to_dict())
+        assert restored.mode == "read"
+
+    def test_invalid_mode_rejected(self) -> None:
+        from src.features.edit.core.commands import SetTrackAutomationModeCommand
+        from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+
+        timeline = TimelineSequence(
+            audio_tracks=(EditTrack(track_id="a1", track_type="audio"),),
+            video_tracks=(),
+        )
+        cmd = SetTrackAutomationModeCommand.create("a1", "disco")
+        try:
+            cmd.apply(timeline)
+            raised = False
+        except ValueError:
+            raised = True
+        assert raised

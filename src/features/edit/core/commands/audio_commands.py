@@ -115,6 +115,80 @@ class SetTrackVolumeCommand:
 
 
 @dataclass(frozen=True)
+class SetTrackAutomationModeCommand:
+    """§7 P1：轨道自动化模式（off/read/write/touch/latch）入时间线历史。
+
+    引擎按轨道模式读取曲线/写入关键帧（AM-07 签名含 automation_mode）；
+    模式切换此前只改控制器全局态，模型与引擎不随动——Read 打开后曲线
+    实际不回放。命令化后切换可撤销、重开可还原。
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    mode: str
+    _old_mode: str | None = None
+
+    _VALID = ("off", "read", "write", "touch", "latch")
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        normalized = str(self.mode or "off").lower()
+        if normalized not in self._VALID:
+            raise ValueError(f"Unsupported automation mode: {self.mode!r}")
+        old_mode = track.automation_mode
+        new_timeline = timeline.with_track_updated(
+            track.with_automation_mode(normalized))
+        updated_cmd = SetTrackAutomationModeCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, mode=self.mode, _old_mode=old_mode)
+        logger.debug(
+            "SetTrackAutomationModeCommand applied: track %s mode=%s",
+            self.track_id, normalized)
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._old_mode is None:
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        return timeline.with_track_updated(
+            track.with_automation_mode(self._old_mode))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackAutomationModeCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "mode": self.mode,
+            "old_mode": self._old_mode,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> SetTrackAutomationModeCommand:
+        return SetTrackAutomationModeCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Automation Mode"),
+            track_id=data.get("track_id", ""),
+            mode=data.get("mode", "off"),
+            _old_mode=data.get("old_mode"),
+        )
+
+    @staticmethod
+    def create(track_id: str, mode: str) -> SetTrackAutomationModeCommand:
+        normalized = str(mode or "off").lower()
+        display = normalized.capitalize()
+        return SetTrackAutomationModeCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Set Automation Mode: {display}",
+            track_id=track_id, mode=normalized)
+
+
+@dataclass(frozen=True)
 class SetTrackPanCommand:
     """
     Command to set track pan (stereo balance / 声相).
