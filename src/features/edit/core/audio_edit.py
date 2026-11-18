@@ -40,11 +40,15 @@ from __future__ import annotations
 
 import copy
 import math
+from fractions import Fraction
 from typing import Any, Optional
 
 import numpy as np
 
-from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+from src.features.edit.core.sample_time import (
+    AUDIO_REFERENCE_SAMPLE_RATE,
+    reference_position_to_rate,
+)
 
 AUDIO_EDIT_SCHEMA_VERSION = 1
 PROCESSING_RATE = AUDIO_REFERENCE_SAMPLE_RATE
@@ -819,6 +823,67 @@ def _slice_pre_render_base(
     return block
 
 
+def _edit_processing_rate(audio_edit: Any) -> int:
+    """栈声明的持久化坐标率（validate 强制 48000；防御缺省）。"""
+    if isinstance(audio_edit, dict):
+        try:
+            return int(audio_edit.get("processing_rate", PROCESSING_RATE))
+        except (TypeError, ValueError):
+            return PROCESSING_RATE
+    return PROCESSING_RATE
+
+
+def _envelope_nodes_at_rate(
+    nodes: list[dict], processing_rate: int, consumption_rate: int,
+) -> list[dict]:
+    """包络节点 48k 参考域 → 消费率域（仅换算 local_sample，dB 不动）。"""
+    if processing_rate == consumption_rate:
+        return nodes
+    converted: list[dict] = []
+    for node in nodes:
+        scaled = dict(node)
+        scaled["local_sample"] = reference_position_to_rate(
+            int(node["local_sample"]), consumption_rate)
+        converted.append(scaled)
+    return converted
+
+
+def _slice_pre_render_base_rated(
+    base: np.ndarray, block_start: int, count: int,
+    processing_rate: int, consumption_rate: int,
+) -> np.ndarray:
+    """跨率基底切块：块位置/长度在消费率域，基底在 48k 参考域。
+
+    同率直接整数切片；跨率按精确有理数边界切出覆盖段后线性重采样
+    到块长（绝对位置对齐——任意分块与整段一致）。基底域内的"参考
+    端点 + 1 样本"钳制保证与同率路径相同的边界归属（≤1 输出样本）。
+    """
+    if processing_rate == consumption_rate or count <= 0:
+        return _slice_pre_render_base(base, block_start, count)
+    # 块 [block_start, block_start+count) 消费率样本 → 基底参考率域窗口
+    lo_f = Fraction(int(block_start)) * processing_rate / int(consumption_rate)
+    hi_f = Fraction(int(block_start) + int(count)) * processing_rate / int(consumption_rate)
+    lo = max(0, math.floor(lo_f))
+    hi = min(base.shape[1], math.ceil(hi_f) + 1)  # +1：interp 右端闭钳制
+    if hi <= lo:
+        return np.zeros((base.shape[0], max(0, count)), dtype=np.float32)
+    segment = base[:, lo:hi]
+    seg_positions = np.arange(lo, lo + segment.shape[1], dtype=np.float64)
+    # 输出样本在基底域的绝对有理位置（浮点承载，53 位尾数足够）。
+    out_positions = (
+        np.arange(int(block_start), int(block_start) + int(count), dtype=np.float64)
+        * (float(processing_rate) / float(consumption_rate))
+    )
+    out = np.empty((base.shape[0], int(count)), dtype=np.float32)
+    beyond = out_positions > (base.shape[1] - 1)
+    for ch in range(base.shape[0]):
+        out[ch] = np.interp(out_positions, seg_positions, segment[ch])
+    # 基底末尾之后补零（EOF 外静音），不钳制末样本值。
+    if beyond.any():
+        out[:, beyond] = 0.0
+    return out
+
+
 def apply_clip_audio_edit_block(
     samples: np.ndarray,
     block_start_sample: int,
@@ -839,8 +904,10 @@ def apply_clip_audio_edit_block(
     if requires_pre_render(audio_edit):
         audio_edit = inline_audio_edit(audio_edit)
         if pre_render_base is not None and samples.shape[-1] > 0:
-            block = _slice_pre_render_base(
-                pre_render_base, block_start_sample, samples.shape[-1])
+            processing_rate = _edit_processing_rate(audio_edit)
+            block = _slice_pre_render_base_rated(
+                pre_render_base, block_start_sample, samples.shape[-1],
+                processing_rate, int(sample_rate))
             if block.shape[0] != samples.shape[0]:
                 # 解码层 >2ch 已混到 stereo；基底与输出声道数不一致时按
                 # 导出/播放的同一保守策略（首声道广播/截断）对齐。
@@ -1022,7 +1089,10 @@ def apply_clip_audio_edit(
     """对片段输出域的一个块应用处理栈（纯函数；原地不修改输入）。
 
     ``samples``: planar float [channels, n]，块首对应片段输出样本
-    ``block_start_sample``（processing_rate 域）。调用点位于 clip gain 之后、
+    ``block_start_sample``（``sample_rate`` 消费率域）。栈内持久化坐标
+    （step 区间 / envelope 节点）以 48000 参考率存储，本函数内部经
+    有理数换算映射到消费率域——48/44.1/96 kHz 图同一编辑在时间轴上
+    落点一致（边界偏差 ≤1 输出样本）。调用点位于 clip gain 之后、
     Clip FX 之前（播放/成片/Stem 三处共用本函数保证一致）。
     未知处理器存在时直接原样返回（调用方应先经 validate 阻断）。
     """
@@ -1032,6 +1102,11 @@ def apply_clip_audio_edit(
     envelope = envelope_nodes(audio_edit)
     if not steps and not envelope:
         return samples
+    consumption_rate = int(sample_rate)
+    processing_rate = _edit_processing_rate(audio_edit)
+    rate_mismatch = processing_rate != consumption_rate
+    envelope = _envelope_nodes_at_rate(
+        envelope, processing_rate, consumption_rate)
     fade = edge_fade_samples(sample_rate)
     out: np.ndarray | None = None
     for step in steps:
@@ -1046,6 +1121,10 @@ def apply_clip_audio_edit(
             continue
         params = step.get("params", {})
         start, end = params.get("start", 0), params.get("end", 0)
+        if rate_mismatch:
+            # 48k 参考域区间 → 消费率域（有理换算，round 半偶）。
+            start = reference_position_to_rate(int(start), consumption_rate)
+            end = reference_position_to_rate(int(end), consumption_rate)
         channels = params.get("channels") or []
         gain_linear = 0.0 if processor_id == "mute" else 10.0 ** (
             float(params.get("gain_db", 0.0)) / 20.0)

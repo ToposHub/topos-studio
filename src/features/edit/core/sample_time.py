@@ -210,6 +210,49 @@ def offset_to_reference_rate(
     return whole, converted - whole
 
 
+# ── P0 · audio_edit 48 kHz 参考坐标 ↔ 消费采样率坐标（有理换算） ─────
+#
+# audio_edit 的 step 区间 / envelope 节点 / marker 一律以 48000 参考率
+# 持久化（validate_audio_edit 强制 processing_rate==48000）；实时播放
+# 与导出图可能运行在 44100/96000 等消费率。换算必须走本层的有理数
+# 乘除（Fraction），不允许浮点中间量——边界偏差合同 ≤1 输出样本。
+
+
+def reference_position_to_rate(position: "int | Fraction", rate: int) -> int:
+    """48 kHz 参考率样本位置 → 消费率样本位置（round-half-even，确定性）。
+
+    任何消费率（含非整数倍率如 44100）下同一参考位置映射唯一；
+    取整残差由半开区间语义吸收（端点样本归属与 ``split_sample_partition``
+    的"边界归左"约定一致：round 而非 floor，保证斜坡/fade 中心不偏）。
+    """
+    target = int(rate)
+    if target == AUDIO_REFERENCE_SAMPLE_RATE:
+        return int(position)
+    converted = Fraction(position) * target / AUDIO_REFERENCE_SAMPLE_RATE
+    return round(converted)
+
+
+def rate_position_to_reference(position: "int | Fraction", rate: int) -> int:
+    """消费率样本位置 → 48 kHz 参考率样本位置（round-half-even）。"""
+    target = int(rate)
+    if target == AUDIO_REFERENCE_SAMPLE_RATE:
+        return int(position)
+    converted = Fraction(position) * AUDIO_REFERENCE_SAMPLE_RATE / target
+    return round(converted)
+
+
+def reference_fraction_at_rate(position: "int | Fraction", rate: int) -> Fraction:
+    """48 kHz 参考位置在消费率域的精确有理数位置（不取整）。
+
+    预渲染基底切片等需要亚样本边界时使用；与上面两个取整函数共享
+    同一比值，保证任意路径下边界一致。
+    """
+    target = int(rate)
+    if target == AUDIO_REFERENCE_SAMPLE_RATE:
+        return Fraction(int(position))
+    return Fraction(position) * target / AUDIO_REFERENCE_SAMPLE_RATE
+
+
 __all__ = [
     "AUDIO_REFERENCE_SAMPLE_RATE",
     "TimelineSampleClock",
@@ -218,4 +261,7 @@ __all__ = [
     "subframe_decompose",
     "compose_timeline_seconds",
     "offset_to_reference_rate",
+    "reference_position_to_rate",
+    "rate_position_to_reference",
+    "reference_fraction_at_rate",
 ]
