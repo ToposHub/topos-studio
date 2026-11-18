@@ -802,6 +802,21 @@ class WaveformSpectralCanvas(QWidget):
         self.selectionChanged.emit(self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high)
         self._invalidate_cache()
 
+    def setSelection(self, start_sec: float, end_sec: float,
+                     f_low: float = 20.0, f_high: float | None = None):
+        """程序化设置选区（过零吸附、外部命令等）；保持时间顺序并通知监听者。"""
+        start = max(0.0, min(self._duration, float(start_sec)))
+        end = max(0.0, min(self._duration, float(end_sec)))
+        if end < start:
+            start, end = end, start
+        self._sel_t0 = start
+        self._sel_t1 = end
+        self._sel_f_low = f_low if f_low > 0 else 20.0
+        self._sel_f_high = f_high if f_high and f_high > 0 else self._nyquist()
+        self._is_2d_spectral_sel = False
+        self.selectionChanged.emit(self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high)
+        self._invalidate_cache()
+
     def getSelection(self) -> tuple[float, float, float, float]:
         if self._sel_t1 > self._sel_t0 >= 0.0:
             return (self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high)
