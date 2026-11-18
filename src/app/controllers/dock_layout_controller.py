@@ -77,6 +77,11 @@ _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 2
 _COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
+# Mixer 页新增 Media Pool / Effects dock 的一次性补齐：旧 saveState 不含
+# 这两个 objectName，恢复后它们保持隐藏；进入 Mixer 时补一次可见并
+# 重新持久化，之后完全交还用户控制。
+_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY = "mixer_media_docks_layout_version"
+_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION = 1
 
 # 浮动 dock 标题栏高度（与原生窗口标题栏接近）
 _FLOATING_TITLEBAR_HEIGHT = 28
@@ -1301,13 +1306,16 @@ class DockLayoutMixin:
     ) -> None:
         """Create independent hosts for the Mixer workspace."""
         for dock_attr in ("dock_audio_console", "dock_audio_viewer",
-                          "dock_audio_timeline", "dock_audio_clip_editor"):
+                          "dock_audio_timeline", "dock_audio_clip_editor",
+                          "dock_audio_media_pool", "dock_audio_effects"):
             setattr(self, dock_attr, None)
         page = getattr(self, "mixer_page", None)
         if not getattr(self, "_mixer_available", False) or page is None:
             return
         # The feature directory can be physically absent from other products.
-        from src.features.mixer.module import MIXER_PANEL_SPECS
+        from src.features.mixer.module import (
+            MIXER_PANEL_SPECS, MIXER_PANEL_TITLE_KEYS, MIXER_PROJECT_ONLY_KEYS,
+        )
         page.project_backed = bool(
             getattr(self, "_edit_available", False)
             and self.edit_page is not None and self.timeline_panel is not None
@@ -1316,8 +1324,12 @@ class DockLayoutMixin:
         object_names = {
             "console": "dockAudioConsole", "viewer": "dockAudioViewer",
             "timeline": "dockAudioTimeline", "clip_editor": "dockAudioClipEditor",
+            "media_pool": "dockAudioMediaPool", "effects": "dockAudioEffects",
         }
         for key, dock_attr, panel_attr, title in MIXER_PANEL_SPECS:
+            if not page.project_backed and key in MIXER_PROJECT_ONLY_KEYS:
+                # The prototype Mixer page has no shared media/effects panels.
+                continue
             if page.project_backed and key == "clip_editor":
                 from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 
@@ -1328,9 +1340,7 @@ class DockLayoutMixin:
                 layout.setContentsMargins(0, 0, 0, 0)
             else:
                 panel = getattr(page, panel_attr)
-            title_key = {
-                "console": "panel.audio_mixer", "viewer": "panel.edit_viewport",
-            }.get(key, f"panel.audio_{key}")
+            title_key = MIXER_PANEL_TITLE_KEYS.get(key, f"panel.audio_{key}")
             dock = factory(I18N.tr(title_key, title),
                            panel, object_names[key])
             dock.setProperty("mixer_workspace_panel", True)
@@ -1338,7 +1348,8 @@ class DockLayoutMixin:
             # unlike tabbed legacy docks these must not have a 1px titlebar.
             dock.setTitleBarWidget(FloatingDockTitleBar(dock))
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea
-                               if key in ("console", "viewer") else
+                               if key in ("console", "viewer",
+                                          "media_pool", "effects") else
                                Qt.DockWidgetArea.BottomDockWidgetArea, dock)
             dock.hide()
             setattr(self, dock_attr, dock)
@@ -1518,11 +1529,22 @@ class DockLayoutMixin:
             self.edit_viewport.set_program_only(True)
         self.timeline_panel.get_timeline_view().set_audio_only(True)
         self.audio_mixer_panel.close_effect_editors()
-        for dock, widget in (
+        borrowed: list[tuple[QDockWidget, QWidget]] = [
             (self.dock_audio_console, self.audio_mixer_panel),
             (self.dock_audio_viewer, self.edit_viewport or self.program_viewer_widget),
             (self.dock_audio_timeline, self.timeline_panel),
-        ):
+        ]
+        media_pool_dock = getattr(self, "dock_audio_media_pool", None)
+        effects_dock = getattr(self, "dock_audio_effects", None)
+        media_pool_panel = getattr(self, "media_pool_panel", None)
+        effects_panel = getattr(self, "edit_effects_panel", None)
+        if media_pool_dock is not None and media_pool_panel is not None:
+            media_pool_panel.enter_audio_workspace()
+            borrowed.append((media_pool_dock, media_pool_panel))
+        if effects_dock is not None and effects_panel is not None:
+            effects_panel.enter_audio_workspace()
+            borrowed.append((effects_dock, effects_panel))
+        for dock, widget in borrowed:
             dock.widget().layout().addWidget(widget)
             widget.show()
         self.timeline_panel.set_audio_mixer_dock(self.dock_audio_console)
@@ -1541,6 +1563,20 @@ class DockLayoutMixin:
         ):
             dock.setWidget(widget)
             widget.show()
+        media_pool_dock = getattr(self, "dock_audio_media_pool", None)
+        media_pool_panel = getattr(self, "media_pool_panel", None)
+        if (media_pool_dock is not None and media_pool_panel is not None
+                and getattr(self, "dock_edit_media_pool", None) is not None):
+            media_pool_panel.leave_audio_workspace()
+            self.dock_edit_media_pool.setWidget(media_pool_panel)
+            media_pool_panel.show()
+        effects_dock = getattr(self, "dock_audio_effects", None)
+        effects_panel = getattr(self, "edit_effects_panel", None)
+        if (effects_dock is not None and effects_panel is not None
+                and getattr(self, "dock_edit_effects", None) is not None):
+            effects_panel.leave_audio_workspace()
+            self.dock_edit_effects.setWidget(effects_panel)
+            effects_panel.show()
         viewport = self.edit_viewport or self.program_viewer_widget
         self.dock_program_viewer.setWidget(viewport)
         if self.edit_viewport is not None:
@@ -1549,10 +1585,10 @@ class DockLayoutMixin:
         self.timeline_panel.set_audio_mixer_dock(self.dock_audio_mixer)
 
     def _audio_workspace_docks(self) -> tuple[QDockWidget, ...]:
-        """Include the optional Clip Editor for visibility and layout persistence."""
+        """Include optional docks for visibility and layout persistence."""
         return tuple(dock for attr in (
             "dock_audio_console", "dock_audio_viewer", "dock_audio_timeline",
-            "dock_audio_clip_editor",
+            "dock_audio_clip_editor", "dock_audio_media_pool", "dock_audio_effects",
         ) if isinstance((dock := getattr(self, attr, None)), QDockWidget))
 
     def _seed_audio_workspace_layout(self) -> bool:
@@ -1563,26 +1599,47 @@ class DockLayoutMixin:
         if getattr(self, "_mixer_default_layout", None) is not None:
             self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
             return True
+        console = getattr(self, "dock_audio_console", None)
+        viewer = getattr(self, "dock_audio_viewer", None)
+        timeline = getattr(self, "dock_audio_timeline", None)
+        if not all(isinstance(d, QDockWidget) for d in (console, viewer, timeline)):
+            return False
         previous = self.saveState()
         try:
             for dock in getattr(self, "all_docks", ()):
                 dock.hide()
             for dock in docks:
                 dock.setFloating(False)
-            console, viewer, timeline = docks[:3]
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, console)
             self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
             self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
             for dock in (console, viewer, timeline):
                 dock.show()
-            for dock in docks[3:]:
-                if getattr(getattr(self, "mixer_page", None), "project_backed", False):
-                    self.tabifyDockWidget(timeline, dock)
-                    dock.show()
+            # Media Pool 与 Effects 共用一个标签组，放在 Viewport 一侧；
+            # 原型形态没有这两个 dock。
+            media_pool = getattr(self, "dock_audio_media_pool", None)
+            effects = getattr(self, "dock_audio_effects", None)
+            if isinstance(media_pool, QDockWidget):
+                self.splitDockWidget(viewer, media_pool, Qt.Orientation.Horizontal)
+                media_pool.show()
+                if isinstance(effects, QDockWidget):
+                    self.tabifyDockWidget(media_pool, effects)
+                    effects.show()
+                    media_pool.raise_()
+            project_backed = getattr(
+                getattr(self, "mixer_page", None), "project_backed", False)
+            clip_editor = getattr(self, "dock_audio_clip_editor", None)
+            if isinstance(clip_editor, QDockWidget):
+                if project_backed:
+                    self.tabifyDockWidget(timeline, clip_editor)
+                    clip_editor.show()
                     timeline.raise_()
                 else:
-                    dock.hide()
-            self.resizeDocks([console, viewer], [760, 420], Qt.Orientation.Horizontal)
+                    clip_editor.hide()
+            top_row = [d for d in (console, viewer, media_pool)
+                       if isinstance(d, QDockWidget)]
+            self.resizeDocks(top_row, [620, 440, 300][:len(top_row)],
+                             Qt.Orientation.Horizontal)
             self.resizeDocks([console, timeline], [370, 330], Qt.Orientation.Vertical)
             self._mixer_default_layout = self.saveState()
             self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
@@ -2297,6 +2354,83 @@ class DockLayoutMixin:
         self._save_current_layout_to_store("Composite")
         self.config_manager.save_config()
         logger.info("Added Composite Scopes dock to legacy layout")
+
+    def _migrate_mixer_media_docks_layout(self) -> None:
+        """Add the Mixer Media Pool / Effects docks to existing layouts once.
+
+        Qt states saved before these docks existed omit their object names,
+        so restoring them leaves both hidden in the top area.  Place them
+        beside the Viewport as one tab group once, persist the repaired
+        state, and leave later visibility/placement to the user.
+        """
+        migration_version = self.config_manager.get(
+            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY
+        )
+        if (
+            isinstance(migration_version, int)
+            and migration_version >= _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION
+        ):
+            return
+
+        media_pool = getattr(self, "dock_audio_media_pool", None)
+        effects = getattr(self, "dock_audio_effects", None)
+        if (
+            self.current_page != "Mixer"
+            or not getattr(getattr(self, "mixer_page", None), "project_backed", False)
+            or not isinstance(media_pool, QDockWidget)
+            or not isinstance(effects, QDockWidget)
+        ):
+            return
+
+        viewer = getattr(self, "dock_audio_viewer", None)
+        if (
+            isinstance(viewer, QDockWidget)
+            and not viewer.isFloating()
+            and not media_pool.isFloating()
+            and not effects.isFloating()
+        ):
+            # 与出厂种子一致的默认位置：Viewport 一侧的同组标签。
+            self.splitDockWidget(viewer, media_pool, Qt.Orientation.Horizontal)
+            self.tabifyDockWidget(media_pool, effects)
+        media_pool.setVisible(True)
+        effects.setVisible(True)
+        media_pool.raise_()
+
+        mixer_state = self.saveState()
+        self.page_layouts["Mixer"] = mixer_state
+
+        # Keep the legacy page_layouts mirror valid for both its historical
+        # flat shape and the newer mode-scoped shape.
+        saved_layouts = self.config_manager.get("page_layouts")
+        if isinstance(saved_layouts, dict):
+            saved_layouts = dict(saved_layouts)
+            state_hex = mixer_state.toHex().data().decode()
+            if all(isinstance(value, str) for value in saved_layouts.values()):
+                saved_layouts["Mixer"] = state_hex
+            else:
+                try:
+                    from src.shared.feature_flags import get_effective_layout_mode
+                    mode_key = get_effective_layout_mode(self.config_manager)
+                except Exception:
+                    mode_key = "all"
+                bucket = saved_layouts.get(mode_key)
+                if not isinstance(bucket, dict):
+                    mode_key = "all"
+                    bucket = saved_layouts.get(mode_key)
+                if isinstance(bucket, dict):
+                    bucket = dict(bucket)
+                    bucket["Mixer"] = state_hex
+                    saved_layouts[mode_key] = bucket
+            self.config_manager.set("page_layouts", saved_layouts, auto_save=False)
+
+        self.config_manager.set(
+            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY,
+            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION,
+            auto_save=False,
+        )
+        self._save_current_layout_to_store("Mixer")
+        self.config_manager.save_config()
+        logger.info("Added Mixer Media Pool / Effects docks to legacy layout")
 
     def _migrate_ai_assistant_dock_layout(self) -> None:
         """Merge the AI assistant into the Edit right-side tab group once.

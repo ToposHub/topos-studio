@@ -166,6 +166,17 @@ def balance_to_pan(bal: int) -> float:
 class TrackMixerWidget(QWidget):
     """单个音频轨道混音器"""
 
+    # Effects 面板拖出的效果 MIME（与 EditEffectsPanel/TimelineView 同名；
+    # shared 层不 import features，用字面量保持解耦）。
+    _EFFECT_DROP_MIME = "application/x-topos-effect"
+    # 插入链可接受的 effect_id（与「添加效果器」菜单及对话框能力一致；
+    # 视频效果/转场在此给出 no-drop 反馈）。
+    _INSERT_EFFECT_TYPES = frozenset({
+        "dynamics", "strip_eq", "reverb", "delay", "saturation", "imager",
+        "limiter", "compressor", "expander", "voice_changer",
+        "spectral_mangler",
+    })
+
     # 信号（track_id 统一为 str，与 EditTrack.track_id UUID 一致）
     mute_toggled = pyqtSignal(str, bool)      # track_id, muted
     solo_toggled = pyqtSignal(str, bool)      # track_id, solo
@@ -208,6 +219,8 @@ class TrackMixerWidget(QWidget):
         is_master: bool = False
     ) -> None:
         super().__init__(parent)
+        # 接受 Effects 面板拖来的音频效果（dragEnter 按 MIME+类型过滤）。
+        self.setAcceptDrops(True)
         # MX-09: 引擎采样率缓存（set_engine_sample_rate 更新；对话框构造注入）
         self._engine_sample_rate: float = 48000.0
         self._track_id = track_id
@@ -1516,6 +1529,36 @@ class TrackMixerWidget(QWidget):
         self._effect_chain = EffectChainParams(effects=effects)
         self._refresh_effect_list()
         self.track_effects_committed.emit(self._track_id, self._effect_chain)
+
+    # ─── 效果拖放（Effects 面板 → 插入链插槽）───
+
+    def _dropped_effect_id(self, event: Any) -> Optional[str]:
+        """读取拖放载荷里的 effect_id；不支持的作用域返回 None。"""
+        mime = event.mimeData()
+        if mime is None or not mime.hasFormat(self._EFFECT_DROP_MIME):
+            return None
+        effect_id = str(mime.data(self._EFFECT_DROP_MIME).data(), "utf-8").strip()
+        return effect_id if effect_id in self._INSERT_EFFECT_TYPES else None
+
+    def dragEnterEvent(self, event: Any) -> None:  # noqa: N802
+        if self._dropped_effect_id(event) is not None:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: Any) -> None:  # noqa: N802
+        if self._dropped_effect_id(event) is not None:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event: Any) -> None:  # noqa: N802
+        effect_id = self._dropped_effect_id(event)
+        if effect_id is None:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._effect_add(effect_id)
 
     def _effect_remove(self, inst: Any) -> None:
         """删除一个效果器。"""

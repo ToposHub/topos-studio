@@ -112,6 +112,9 @@ _CAPTION_EFFECT_ROLE = _TITLE_PRESET_ROLE + 1
 # AUD-19809: 标签页索引具名常量（addTab 顺序：0=Video、1=Transitions），
 # 上下文菜单不再用魔法数字判断当前是否转场页。
 _TAB_INDEX_TRANSITIONS = 1
+# addTab 顺序：0=Video、1=Transitions、2=Titles、3=Audio、4=Favorites。
+# Mixer 工作区默认展示 Audio 页，回 Edit 恢复用户选择。
+_TAB_INDEX_AUDIO = 3
 
 _EFFECT_TREE_STYLE = f"""
 QTreeWidget {{
@@ -657,6 +660,8 @@ class EditEffectsPanel(QWidget):
 
         # Current selected clip (for double-click apply)
         self._selected_clip_id: Optional[str] = None
+        # Mixer 工作区借用本面板时保存的标签页索引；None 表示不在音频作用域。
+        self._audio_workspace_tab_saved: Optional[int] = None
         self._selected_subtitle_clip_id: Optional[str] = None
         self._search_visible = False
         # AUD-19804: 防递归状态锁 —— 程序化更新控件（search_input.clear() 等）
@@ -2226,6 +2231,23 @@ class EditEffectsPanel(QWidget):
         drag.exec(Qt.DropAction.CopyAction)
 
         logger.debug(f"Started drag for effect: {effect_type}")
+
+    def enter_audio_workspace(self) -> None:
+        """Mixer 借用本面板时切到 Audio 标签（视图状态，可还原）。"""
+        if self._audio_workspace_tab_saved is not None:
+            return  # 已在音频作用域，避免重复保存中途状态
+        self._audio_workspace_tab_saved = self.tabs.currentIndex()
+        if 0 <= _TAB_INDEX_AUDIO < self.tabs.count():
+            self.tabs.setCurrentIndex(_TAB_INDEX_AUDIO)
+
+    def leave_audio_workspace(self) -> None:
+        """返回 Edit 时恢复进 Mixer 前选中的标签页。"""
+        saved = self._audio_workspace_tab_saved
+        if saved is None:
+            return
+        self._audio_workspace_tab_saved = None
+        if 0 <= saved < self.tabs.count():
+            self.tabs.setCurrentIndex(saved)
 
     def set_selected_clip(self, clip_id: Optional[str]) -> None:
         """

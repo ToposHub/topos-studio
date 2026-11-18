@@ -17,11 +17,14 @@ from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel, ViewMode
 from src.features.edit.ui.program_viewer import ProgramViewerWidget
 from src.features.edit.ui.source_viewer import SourceViewerWidget
+from src.features.edit.ui.timeline_layout import TimelineDropTarget
 from src.features.edit.ui.timeline_panel import TimelinePanel
+from src.features.edit.ui.timeline_view import MIME_TYPE_MEDIA_POOL_ASSETS
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
 from src.features.mixer.ui.studio_console import StudioAudioMixerPanel
 from src.shared.ui.audio_mixer.track_mixer_widget import db_to_linear
@@ -41,13 +44,24 @@ class ProjectHost(QMainWindow, DockLayoutMixin, EditControllerMixin, LayerOpsMix
         self.edit_properties_panel = QWidget()
         self.media_pool_panel = MediaPoolPanel(self)
         self.media_pool_panel.hide()
+        self.edit_effects_panel = EditEffectsPanel()
         self.status_bar = self.statusBar()
         self.edit_page = SimpleNamespace(_current_timeline=None, _audio_manager=None)
         self.dock_audio_mixer = self.make_dock("Audio Mixer", self.audio_mixer_panel, "editMixer")
         self.dock_program_viewer = self.make_dock("Viewport", self.edit_viewport, "programViewer")
         self.dock_edit_timeline = self.make_dock("Timeline", self.timeline_panel, "editTimeline")
         self.dock_properties = self.make_dock("Properties", self.edit_properties_panel, "editProperties")
+        self.dock_edit_media_pool = self.make_dock("Media Pool", self.media_pool_panel, "editMediaPool")
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_media_pool)
+        self.dock_edit_effects = self.make_dock("Effects", self.edit_effects_panel, "editEffects")
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_effects)
         self._create_audio_workspace_docks(self.make_dock)
+        # 生产代码创建 Mixer dock 后默认隐藏（进入 Mixer 才显示）；不隐藏时
+        # 顶部 dock 会挤压时间线视口，audio_only 场景重建被推迟。
+        for dock_attr in ("dock_audio_viewer", "dock_audio_clip_editor",
+                          "dock_audio_media_pool", "dock_audio_effects",
+                          "dock_audio_console", "dock_audio_timeline"):
+            getattr(self, dock_attr).hide()
         self.timeline_panel.set_audio_mixer_dock(self.dock_audio_mixer)
 
         panel = self.audio_mixer_panel
@@ -468,3 +482,139 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     assert recorder.state == recorder.STATE_STOPPING
     recorder._set_state(recorder.STATE_IDLE)
     assert not host._mixer_timeline_recorders
+
+
+def test_media_pool_and_effects_borrow_across_workspaces(project_host, qtbot, tmp_path) -> None:
+    """P0-1：Media Pool / Effects 面板跨页借用 + 音频作用域可还原。"""
+    host = project_host
+    audio_path = tmp_path / "vo.wav"
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(48000)
+        wav.writeframes(b"\x10\x00" * 4800)
+    asset = MediaAsset(
+        asset_id="vo", path=str(audio_path), media_type="audio",
+        display_name="VO", metadata={"audio_info": {"sample_rate": 48000, "channels": 1}},
+    )
+    project = EditProject("project", "Workspace", assets={asset.asset_id: asset})
+    host._current_edit_project = project
+    pool = host.media_pool_panel
+    pool.set_project(project)
+    effects = host.edit_effects_panel
+    effects.tabs.setCurrentIndex(0)  # Video tab
+    assert host.dock_audio_media_pool is not None and host.dock_audio_effects is not None
+
+    host.show_mixer()
+    assert pool.parentWidget() is host.dock_audio_media_pool.widget()
+    assert effects.parentWidget() is host.dock_audio_effects.widget()
+    # 音频作用域：默认 All Audio 智能箱 + Audio 标签页。
+    assert pool._current_bin_id == "all_audio" and pool._current_bin_is_smart
+    assert effects.tabs.currentIndex() == 3
+
+    # 两次借还是同一实例，不重复连接/嵌套。
+    host.show_mixer()
+    assert pool.parentWidget() is host.dock_audio_media_pool.widget()
+    assert effects.parentWidget() is host.dock_audio_effects.widget()
+    assert effects.tabs.currentIndex() == 3
+
+    host._restore_edit_panels_from_mixer()
+    host.current_page = "Edit"
+    assert host.dock_edit_media_pool.widget() is pool
+    assert host.dock_edit_effects.widget() is effects
+    # 作用域还原：回根 bin（非智能箱）与原标签页。
+    assert pool._current_bin_id == "" and not pool._current_bin_is_smart
+    assert effects.tabs.currentIndex() == 0
+    # 再次借还后作用域不残留（保存状态被消费）。
+    host.show_mixer()
+    host._restore_edit_panels_from_mixer()
+    assert pool._audio_workspace_saved is None
+    assert effects._audio_workspace_tab_saved is None
+
+
+def test_audio_workspace_media_drop_semantics(project_host, qtbot, monkeypatch) -> None:
+    """P0-1：音频时间线拖放——纯音频/含音频视频落音轨，无音频拒绝，Bus 拒绝。"""
+    import json
+
+    from PyQt6.QtCore import QMimeData
+    from PyQt6.QtGui import QDropEvent
+
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    assert view._audio_only
+
+    def make_asset(asset_id: str, media_type: str, audio: bool) -> MediaAsset:
+        metadata: dict = {"fps": 24.0, "duration_seconds": 2.0}
+        if audio:
+            metadata["audio_info"] = {"sample_rate": 48000, "channels": 2}
+        return MediaAsset(
+            asset_id=asset_id, path=f"/tmp/{asset_id}.bin",
+            media_type=media_type, display_name=asset_id, metadata=metadata,
+        )
+
+    sound_video = make_asset("sound-video", "video", True)
+    silent_video = make_asset("silent-video", "video", False)
+    plain_audio = make_asset("plain-audio", "audio", True)
+
+    assert view._audio_workspace_drag_media_type() is None  # 无拖放状态
+    for assets, expected in (
+        ([sound_video], "audio"),
+        ([plain_audio], "audio"),
+        ([plain_audio, sound_video], "audio"),
+        ([silent_video], None),
+        ([plain_audio, silent_video], None),
+    ):
+        view._drag_assets = list(assets)
+        assert view._audio_workspace_drag_media_type() == expected
+    view._drag_assets = []
+
+    # 含音频流的视频按仅音频落显式音轨：不建视频轨、不建链接。
+    timeline = view.get_timeline()
+    audio_track = timeline.get_track_by_id("audio-track")
+    video_clips_before = len(timeline.video_tracks[0].clips)
+    assert view._add_asset_as_clip(sound_video, audio_track, 200, stream_intent="audio")
+    updated = view.get_timeline()
+    new_clips = [c for c in updated.get_track_by_id("audio-track").clips
+                 if c.asset_id == "sound-video"]
+    assert len(new_clips) == 1 and new_clips[0].timeline_start == 200
+    assert len(updated.video_tracks) == 1
+    assert len(updated.video_tracks[0].clips) == video_clips_before
+    view.undo()
+    assert all(c.asset_id != "sound-video"
+               for c in view.get_timeline().get_track_by_id("audio-track").clips)
+
+    # 无音频流的素材在提交前被拒并给出反馈（零写入）。
+    messages: list[str] = []
+    view.status_message_requested.connect(messages.append)
+    view._drag_assets = [silent_video]
+    view._drag_asset_ids = ["silent-video"]
+    mime = QMimeData()
+    mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS, json.dumps(["silent-video"]).encode())
+    event = QDropEvent(QPointF(300.0, 60.0), Qt.DropAction.CopyAction, mime,
+                       Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    clips_before = len(view.get_timeline().get_track_by_id("audio-track").clips)
+    view.dropEvent(event)
+    assert any("no audio stream" in message for message in messages)
+    assert len(view.get_timeline().get_track_by_id("audio-track").clips) == clips_before
+    view._drag_assets = []
+    view._drag_asset_ids = []
+
+    # Bus 轨不是片段落点：hover 与提交共用同一拒绝。
+    bus_target = TimelineDropTarget(
+        frame=10, track_id="audio-track", track_type="audio", is_valid=True)
+    monkeypatch.setattr(
+        view._layout_engine, "resolve_drop_target",
+        lambda *_args, **_kwargs: bus_target)
+    bus_track = replace(audio_track, is_bus=True)
+    real_get_track = TimelineSequence.get_track_by_id
+    monkeypatch.setattr(
+        TimelineSequence, "get_track_by_id",
+        lambda self, tid: bus_track if tid == "audio-track" else real_get_track(self, tid))
+    try:
+        drop = view._resolve_media_drop_target(QPointF(300.0, 60.0), "audio", False)
+        assert not drop.is_valid and "Bus" in drop.reason
+    finally:
+        monkeypatch.setattr(TimelineSequence, "get_track_by_id", real_get_track)
+    drop = view._resolve_media_drop_target(QPointF(300.0, 60.0), "audio", False)
+    assert drop.is_valid and drop.track_id == "audio-track"

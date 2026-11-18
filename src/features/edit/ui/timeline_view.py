@@ -16225,10 +16225,24 @@ class TimelineView(QGraphicsView):
         fps = None
         if self._timeline is None or self._timeline_is_empty(self._timeline):
             fps = float(self._timeline_fps_for_first_asset(first))
+        # 音频工作区：纯音频直接落音轨，含音频流的视频按仅音频预览；
+        # 无音频流的素材在此处即拒绝（预览与提交共用同一判定）。
+        audio_media_type = self._audio_workspace_drag_media_type()
+        if self._audio_only and audio_media_type is None:
+            self._hide_drag_preview()
+            self.status_message_requested.emit(
+                "Audio workspace drops need audio: the asset has no audio stream")
+            event.ignore()
+            return
+        media_types = (
+            [audio_media_type] * len(self._drag_assets)
+            if self._audio_only else
+            [asset.media_type for asset in self._drag_assets]
+        )
         self._show_media_drop_preview(
             event,
             [asset.display_name for asset in self._drag_assets],
-            [asset.media_type for asset in self._drag_assets],
+            media_types,
             [self._get_asset_duration_frames(asset, fps=fps) for asset in self._drag_assets],
             thumbnail_path=first.path if not first.is_virtual else None,
             allow_overlap=self._edit_mode == "insert",
@@ -16264,7 +16278,40 @@ class TimelineView(QGraphicsView):
         drop = self._layout_engine.resolve_drop_target(
             scene_pos.x(), scene_pos.y(), media_type, self._get_locked_track_ids()
         )
+        if drop.is_valid and drop.track_id and self._timeline is not None:
+            # Bus 轨只接收 Send 路由，不接受片段落轨（hover 与提交一致拒绝）。
+            track = self._timeline.get_track_by_id(drop.track_id)
+            if track is not None and getattr(track, "is_bus", False):
+                return TimelineDropTarget(
+                    drop.frame, is_valid=False,
+                    reason="Bus lanes receive sends, not clips",
+                )
         return self._prefer_lazy_default_track(drop, media_type, timeline_was_missing)
+
+    @staticmethod
+    def _asset_has_audio_stream(asset: MediaAsset) -> bool:
+        """纯音频或含音频流的视频素材（音频工作区落轨的最低条件）。"""
+        if asset.media_type == "audio":
+            return True
+        return (
+            asset.media_type == "video"
+            and getattr(asset, "audio_channels", None) is not None
+            and asset.audio_channels > 0
+        )
+
+    def _audio_workspace_drag_media_type(self) -> Optional[str]:
+        """音频工作区（audio_only）拖放的等效落轨类型。
+
+        - 纯音频/含音频流的视频 → "audio"（视频源按仅插入音频处理，
+          不创建隐藏视频轨，也不产生 A/V 链接）；
+        - 无音频流的素材 → None（拖放拒绝并给出反馈）。
+        """
+        if not self._audio_only or not self._drag_assets:
+            return None
+        for asset in self._drag_assets:
+            if not self._asset_has_audio_stream(asset):
+                return None
+        return "audio"
 
     def _show_media_drop_preview(
         self,
@@ -16769,10 +16816,25 @@ class TimelineView(QGraphicsView):
             return
 
         media_type = self._drag_assets[0].media_type
+        stream_intent = "av"
+        if self._audio_only:
+            # 音频工作区：一切落轨都按音频处理——纯音频直接落音轨，
+            # 含音频流的视频按仅插入音频（不建隐藏视频轨、不建链接），
+            # 无音频流的素材拒绝并反馈。
+            if self._audio_workspace_drag_media_type() is None:
+                self.status_message_requested.emit(
+                    "Audio workspace drops need audio: the asset has no audio stream")
+                self._hide_drag_preview()
+                event.ignore()
+                return
+            stream_intent = "audio"
+            media_type = "audio"
         drop = self._resolve_media_drop_target(event.position(), media_type, timeline_was_missing)
 
         if not drop.is_valid and not drop.create_track:
             logger.debug(f"DropEvent: invalid drop target, reason={drop.reason}")
+            if "Bus" in drop.reason or "locked" in drop.reason:
+                self.status_message_requested.emit(f"Drop rejected: {drop.reason}")
             self._hide_drag_preview()
             event.ignore()
             return
@@ -16832,10 +16894,13 @@ class TimelineView(QGraphicsView):
                     # executed individually (not batched): each ripple shifts
                     # downstream clips before the next asset lands.
                     success = self._insert_asset_as_clip(
-                        asset, target_track, current_frame
+                        asset, target_track, current_frame,
+                        stream_intent=stream_intent,
                     )
                 else:
-                    success = self._add_asset_as_clip(asset, target_track, current_frame)
+                    success = self._add_asset_as_clip(
+                        asset, target_track, current_frame,
+                        stream_intent=stream_intent)
                 if success:
                     added_count += 1
                     # Advance frame position for next clip
@@ -18639,7 +18704,15 @@ class TimelineView(QGraphicsView):
         # F2.1：video patch 关闭的有声源按 audio-only 落音频目标轨
         # （与源监视器插入/覆盖的 audio-only 语义一致）。
         if has_audio and not audio_off and video_off:
-            audio_track_id = audio_destination
+            # VP-B08 后续：显式拖放目标（音频工作区/源监视器的 audio-only
+            # 拖放）优先于源目的轨解析——鼠标落点就是用户选择的目标轨。
+            explicit_audio = (
+                track.track_id
+                if track is not None and track.track_type == "audio"
+                and not getattr(track, "is_bus", False)
+                else None
+            )
+            audio_track_id = explicit_audio or audio_destination
             if not audio_track_id:
                 logger.warning(
                     "_add_asset_as_clip: audio-only patch but no audio "
@@ -19010,7 +19083,8 @@ class TimelineView(QGraphicsView):
         return clicked.property("fit_policy")
 
     def _insert_asset_as_clip(
-        self, asset: MediaAsset, track: EditTrack, frame: int
+        self, asset: MediaAsset, track: EditTrack, frame: int,
+        *, stream_intent: str = "av",
     ) -> bool:
         """Ripple-insert one dropped asset at *frame* (B8 insert mode).
 
@@ -19045,6 +19119,7 @@ class TimelineView(QGraphicsView):
             out_frame=in_frame + source_duration - 1,
             playhead=frame,
             track_id=track.track_id,
+            stream_intent=stream_intent,
         )
 
     def insert_clip(
