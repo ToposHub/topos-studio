@@ -139,6 +139,56 @@ class ConvolutionReverbAdapter(_CompositeAdapterBase):
         return ConvolutionReverbEffect(sr)
 
 
+class ModulationAdapterBase(_CompositeAdapterBase):
+    """调制类共用适配（#7 批次）。"""
+
+    effect_type = ""
+    _factory = None
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        return self._factory(sr)
+
+
+class TransientDesignerAdapter(_CompositeAdapterBase):
+    effect_type = "transient_designer"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.modulation_tools import (
+            TransientDesignerEffect,
+        )
+        return TransientDesignerEffect(sr)
+
+
+class TremoloAutoPanAdapter(_CompositeAdapterBase):
+    effect_type = "tremolo_auto_pan"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.modulation_tools import (
+            TremoloAutoPanEffect,
+        )
+        return TremoloAutoPanEffect(sr)
+
+
+class ChorusFlangerAdapter(_CompositeAdapterBase):
+    effect_type = "chorus_flanger"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.modulation_tools import (
+            ChorusFlangerEffect,
+        )
+        return ChorusFlangerEffect(sr)
+
+
+class PhaserAdapter(_CompositeAdapterBase):
+    effect_type = "phaser"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.modulation_tools import (
+            PhaserEffect,
+        )
+        return PhaserEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 
