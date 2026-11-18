@@ -301,6 +301,7 @@ class NativeFilesPanel(QWidget):
     collection_delete_requested = pyqtSignal(int)
     trash_requested = pyqtSignal()
     jobs_requested = pyqtSignal()  # D5：文件任务列表
+    maintenance_requested = pyqtSignal()
     libraries_requested = pyqtSignal()
     library_pin_requested = pyqtSignal(str)
     library_unpin_requested = pyqtSignal(str)
@@ -907,7 +908,7 @@ class NativeFilesPanel(QWidget):
             action.triggered.connect(lambda checked=False, i=index: self.sort_combo.setCurrentIndex(i))
         menu.addSeparator()
         menu.addAction(_tr("plugin_center", "素材插件中心…"), self.plugin_center_requested.emit)
-        menu.addAction(_tr("full_tools", "更多素材工具（旧版）…"), self.legacy_requested.emit)
+        menu.addAction(_tr("maintenance", "素材库备份与恢复…"), self.maintenance_requested.emit)
         menu.exec(self.more_button.mapToGlobal(self.more_button.rect().bottomLeft()))
 
     def _edit_path(self) -> None:
@@ -1155,7 +1156,7 @@ class NativeFilesPanel(QWidget):
         if not path or not path.strip():
             return
         if "://" in path:
-            self.message.setText(_tr("virtual", "此位置请在完整 Files 中打开。"))
+            self.message.setText(_tr("virtual", "此位置不能作为普通目录打开，请使用集合或搜索入口。"))
             self.message.show()
             return
         if not self.is_browsable_path(path):
@@ -1644,14 +1645,17 @@ class NativeFilesPanel(QWidget):
         self.preview_requested.emit(entry.path)
 
     def open_path_native(self, path: str) -> bool:
-        """Open image/video in the native overlay; False means legacy fallback."""
+        """Open supported media through the registered native preview host."""
         entry = self._entry_for_path(path)
         if entry is None:
-            for candidate in self.model.entries:
-                if candidate.path == path:
-                    entry = candidate
-                    break
-        if entry is None or entry.availability == Availability.OFFLINE:
+            # Vault results can be outside the current page. The reader still
+            # validates the path and reports missing or unsupported media.
+            from src.features.files.services.query import classify
+            name = os.path.basename(path)
+            if not os.path.isabs(path) or not name:
+                return False
+            entry = Entry(path=path, name=name, kind=classify(name))
+        if entry.availability == Availability.OFFLINE:
             return False
         if entry.kind == "image":
             self._start_preview(entry)
@@ -2368,7 +2372,7 @@ class NativeFilesPanel(QWidget):
             menu.addAction(_tr("paste", "粘贴"), self.paste_files)
         menu.addAction(_tr("new_folder", "新建文件夹…"), self.request_new_folder)
         menu.addAction(_tr("plugin_tools", "使用插件处理…"), self.plugins_requested.emit)
-        menu.addAction(_tr("full", "完整 Files…"), self.legacy_requested.emit)
+        menu.addAction(_tr("native_tools", "素材工具…"), self.legacy_requested.emit)
         return menu
 
     def shutdown(self) -> None:

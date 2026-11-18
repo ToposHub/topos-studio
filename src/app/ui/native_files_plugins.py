@@ -82,6 +82,8 @@ class PluginCenterDialog(QDialog):
     enabled_requested = pyqtSignal(str, bool)
     shortcut_requested = pyqtSignal(str, str)
     legacy_requested = pyqtSignal()
+    install_requested = pyqtSignal()
+    uninstall_requested = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -153,14 +155,17 @@ class PluginCenterDialog(QDialog):
         self.pin.clicked.connect(lambda: self.pin_requested.emit(self._selected))
         actions.addWidget(self.launch)
         actions.addWidget(self.pin)
+        self.uninstall = QPushButton("卸载插件")
+        self.uninstall.clicked.connect(lambda: self.uninstall_requested.emit(self._selected))
+        actions.addWidget(self.uninstall)
         actions.addStretch()
         details.addLayout(actions)
         self.reason = _label("")
         details.addWidget(self.reason)
-        self.legacy = QPushButton(_tr("legacy_open", "前往兼容界面"))
+        self.legacy = QPushButton(_tr("capability_details", "查看素材工具"))
         self.legacy.clicked.connect(self.legacy_requested)
         details.addWidget(self.legacy)
-        self.enabled = QCheckBox(_tr("enabled", "下次启动时启用"))
+        self.enabled = QCheckBox(_tr("enabled", "启用插件"))
         self.enabled.toggled.connect(lambda checked: self.enabled_requested.emit(self._selected, checked))
         details.addWidget(self.enabled)
         form = QFormLayout()
@@ -190,7 +195,7 @@ class PluginCenterDialog(QDialog):
         shortcut_actions.addStretch()
         details.addLayout(shortcut_actions)
         self.diagnostics = _label("")
-        details.addWidget(_label(_tr("legacy_permissions", "本地扩展 · 旧版插件随宿主运行，尚未提供独立权限开关。")))
+        details.addWidget(_label("内建工具由应用托管；第三方插件执行需要经过已验证的隔离管线。"))
         details.addWidget(self.diagnostics)
         self.copy = QPushButton(_tr("copy_diagnostics", "复制诊断信息"))
         self.copy.clicked.connect(lambda: QApplication.clipboard().setText(
@@ -206,6 +211,9 @@ class PluginCenterDialog(QDialog):
         self.count = _label("")
         footer.addWidget(self.count)
         footer.addStretch()
+        self.install = QPushButton("安装本地插件包…")
+        self.install.clicked.connect(self.install_requested)
+        footer.addWidget(self.install)
         for text, signal in (("打开插件目录", self.directory_requested), ("刷新清单", self.refresh_requested)):
             button = QPushButton(_tr("directory" if text.startswith("打开") else "refresh", text))
             button.clicked.connect(signal)
@@ -284,7 +292,7 @@ class PluginCenterDialog(QDialog):
         self.pin.setText(_tr("unpin", "取消固定") if info.plugin_id in self.pins else _tr("pin", "固定到启动器"))
         self.reason.setText(info.launch_unavailable_reason if not info.can_launch else "")
         self.reason.setVisible(bool(self.reason.text()))
-        self.legacy.setVisible(not info.launch_path)
+        self.legacy.setVisible(False)
         # [F1] 声明/运行版本分槽：宿主上报的运行版本与声明不一致时并列展示
         version_text = f"{info.version} · API {info.api_version}"
         runtime_version = getattr(info, "runtime_version", "")
@@ -296,6 +304,8 @@ class PluginCenterDialog(QDialog):
         self.runtime.setText(_tr("session_loaded", "已加载；停用需要重启") if info.runtime_loaded else _tr("session_unloaded", "未加载"))
         # [F1] 来源政策 + 安装事实直达 UI（未验证开发源显式标注）
         source = getattr(info, "source", "builtin")
+        self.uninstall.setVisible(source == "installed")
+        self.uninstall.setEnabled(info.plugin_id not in self.busy)
         install_state = getattr(info, "install_state", "installed")
         state_labels = {"installed": _tr("state_installed", "已安装"),
                         "discovered": _tr("state_discovered", "已发现"),

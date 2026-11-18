@@ -1,0 +1,44 @@
+{
+  "plugin_id": "files.video_pro",
+  "display_name": "Video Pro",
+  "version": "2.0.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [],
+  "author": "AssetDeck Team",
+  "description": "视频播放引擎：Qt Multimedia 常规格式 + Topos 原生解码（含缩略图/元数据）",
+  "category": "视频",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "video_preview",
+      "kind": "format_provider",
+      "title": "视频预览",
+      "selection_mode": "single",
+      "applies_to_kinds": [
+        "video"
+      ]
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration"
+  },
+  "format_providers": [
+    {
+      "provider_id": "video_pro.topos",
+      "formats": [
+        "topos"
+      ],
+      "provides": [
+        "probe",
+        "metadata",
+        "thumbnail"
+      ],
+      "priority": 100,
+      "version": "1"
+    }
+  ]
+}

@@ -7,13 +7,18 @@
 from __future__ import annotations
 
 import os
+import stat
 import time
+import secrets
+import threading
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from src.features.files.contracts import split_tags
-from src.features.files.repository.catalog import FilesCatalog, nfc
+from src.features.files.repository.catalog import CatalogError, FilesCatalog, nfc
+from src.features.files.transactions.ops import OpError
 from src.features.files.transactions import (
     CancelToken,
     FileOperationService,
@@ -67,6 +72,12 @@ class FilesMetadataService:
         if tags_op not in ("replace", "add", "remove", "clear"):
             return rejected("files.metadata.patch", error_code="INVALID_PATCH",
                             message=f"未知 tags_op: {tags_op}")
+        for name, low, high in (("rating", 0, 5), ("color", 0, 9), ("flag", -1, 1)):
+            if name in patch and (isinstance(patch[name], bool) or not isinstance(patch[name], int)
+                                  or not low <= patch[name] <= high):
+                return rejected("files.metadata.patch", error_code="INVALID_PATCH", message=f"{name} 超出合法范围")
+        if "comments" in patch and not isinstance(patch["comments"], str):
+            return rejected("files.metadata.patch",error_code="INVALID_PATCH",message="comments 必须是文本")
         items: list[ItemResult] = []
         for raw in paths:
             path = nfc(raw)
@@ -74,11 +85,12 @@ class FilesMetadataService:
             if row is None:
                 items.append(ItemResult(path, ok=False, error_code="NOT_FOUND"))
                 continue
-            field_patch = {k: v for k, v in patch.items() if k != "tags"}
-            if "tags" in patch:
-                self._apply_tags(library_id, path, patch["tags"], tags_op)
-            if field_patch:
-                self._catalog.patch_user_fields(library_id, path, **field_patch)
+            field_patch = {("comment" if k == "comments" else k): v for k, v in patch.items() if k != "tags"}
+            with self._catalog._write():
+                if "tags" in patch:
+                    self._apply_tags(library_id, path, patch["tags"], tags_op)
+                if field_patch:
+                    self._catalog.patch_user_fields(library_id, path, **field_patch)
             final = self._catalog.asset(library_id, path) or {}
             items.append(ItemResult(path, ok=True, result={
                 "rating": final.get("rating", 0),
@@ -182,7 +194,7 @@ class FilesCollectionsService:
             except Exception as exc:
                 items.append(ItemResult(nfc(raw), ok=False,
                                         error_code="CONFLICT", message=str(exc)))
-        return ServiceResult(command_id="files.collections.add", ok=True,
+        return ServiceResult(command_id="files.collections.add", ok=all(item.ok for item in items),
                              accepted=True, stage="completed", items=tuple(items),
                              revision=self._catalog.revision)
 
@@ -213,7 +225,7 @@ class FilesCollectionsService:
             removed = self._catalog.remove_from_collection(collection_id, raw)
             items.append(ItemResult(nfc(raw), ok=removed,
                                     error_code="" if removed else "NOT_FOUND"))
-        return ServiceResult(command_id="files.collections.remove", ok=True,
+        return ServiceResult(command_id="files.collections.remove", ok=all(item.ok for item in items),
                              accepted=True, stage="completed", items=tuple(items),
                              revision=self._catalog.revision)
 
@@ -247,25 +259,34 @@ class FilesScanService:
         seen: set[str] = set()
         scanned = 0
         cancelled = False
-        for current, _dirs, files in os.walk(root):
+        for current, dirs, files in os.walk(root):
+            dirs[:] = [name for name in dirs if not name.startswith(".")]
             if cancel is not None and cancel.requested:
                 cancelled = True
                 break
             for file_name in files:
+                if cancel is not None and cancel.requested:
+                    cancelled = True
+                    break
                 if file_name.startswith("."):
                     continue
-                path = nfc(os.path.join(current, file_name))
-                seen.add(path)
+                raw_path = os.path.join(current, file_name)
                 try:
-                    stat = os.lstat(path)
+                    info = os.lstat(raw_path)
                 except OSError:
                     continue
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                path = nfc(raw_path)
+                seen.add(path)
                 self._catalog.upsert_asset(
-                    library_id, path, size=stat.st_size, mtime=stat.st_mtime,
+                    library_id, path, size=info.st_size, mtime=info.st_mtime,
                     indexed_at=time.time())
                 scanned += 1
                 if progress is not None and scanned % chunk == 0:
                     progress(scanned, -1)
+            if cancelled:
+                break
         missing_marked = 0
         if not cancelled:
             missing_marked = self._mark_missing(library_id, seen)
@@ -318,12 +339,15 @@ class FilesTaskService:
         self._operations = operations or FileOperationService(
             catalog, journal=journal)
         self._running: dict[str, _RunningTask] = {}
+        self._lock = threading.RLock()
+        self._closed = False
 
     def start_task(self, library_id: str, operation: str,
                    targets: Iterable[str], *,
                    options: dict[str, Any] | None = None,
                    policy: str = "error",
                    job_id: str | None = None,
+                   cancel: CancelToken | None = None,
                    progress: Callable[[int, int], None] | None = None) -> ServiceResult:
         if operation not in self.OPERATIONS:
             return rejected("files.task.start", error_code="INVALID_OPERATION",
@@ -333,22 +357,30 @@ class FilesTaskService:
             return rejected("files.task.start", error_code="EMPTY_TARGETS",
                             message="没有目标")
         options = dict(options or {})
-        cancel = CancelToken()
-        job_id = job_id or f"task-{operation}-{int(time.time() * 1000):x}-{len(targets)}"
-        self._running[job_id] = _RunningTask(job_id=job_id, cancel=cancel,
-                                             outcomes=[])
+        cancel = cancel if cancel is not None else CancelToken()
+        job_id = job_id or f"task-{secrets.token_hex(12)}"
+        with self._lock:
+            if self._closed or job_id in self._running:
+                return rejected("files.task.start", error_code="TASK_REJECTED",
+                                message="任务服务已关闭或任务 id 已在运行")
+            self._running[job_id] = _RunningTask(job_id=job_id, cancel=cancel, outcomes=[])
         outcomes: list[ItemOutcome] = []
-        for target in targets:
-            if cancel.requested:
-                outcomes.append(ItemOutcome(target, status="cancelled",
-                                            code="CANCELLED"))
-                continue
-            outcomes.append(self._run_one(
-                library_id, operation, target, options, policy, cancel))
-            if progress is not None:
-                progress(len(outcomes), len(targets))
-        record = self._running.pop(job_id)
-        record.outcomes.extend(outcomes)
+        try:
+            for target in targets:
+                if cancel.requested:
+                    outcomes.append(ItemOutcome(target, status="cancelled", code="CANCELLED"))
+                else:
+                    try:
+                        outcomes.append(self._run_one(
+                            library_id, operation, target, options, policy, cancel))
+                    except (OSError, ValueError, sqlite3.Error, CatalogError, OpError) as exc:
+                        outcomes.append(ItemOutcome(target, status="failed",
+                                                    code=getattr(exc, "code", "IO_ERROR"), message=str(exc)))
+                if progress is not None:
+                    progress(len(outcomes), len(targets))
+        finally:
+            with self._lock:
+                self._running.pop(job_id, None)
         ok_all = all(o.ok for o in outcomes)
         cancelled_any = any(o.status == "cancelled" for o in outcomes)
         return ServiceResult(
@@ -395,17 +427,24 @@ class FilesTaskService:
         if record_id < 0:
             return ItemOutcome(target, status="failed", code="BAD_TARGET",
                                    message="purge 需要回收站记录 id")
-        outcome = self._operations.trash_service.purge(record_id)
+        outcome = self._operations.trash_service.purge(record_id, library_id=library_id)
         return ItemOutcome(outcome.requested, "", outcome.status, outcome.code,
                            outcome.message)
 
     def cancel_task(self, job_id: str) -> ServiceResult:
-        record = self._running.get(job_id)
+        with self._lock:
+            record = self._running.get(job_id)
         if record is None:
             return rejected("files.task.cancel", error_code="JOB_UNKNOWN",
                             message="任务不在运行中（同步任务通常已完成）")
         record.cancel.request()
         return accepted("files.task.cancel", stage="accepted")
+
+    def cancel_all(self) -> None:
+        with self._lock:
+            self._closed = True
+            for task in self._running.values():
+                task.cancel.request()
 
     def list_trash(self, library_id: str = "") -> list:
         """回收站清单（B4 manifest 一等公民；UI 列表入口用）。"""

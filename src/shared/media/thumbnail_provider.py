@@ -831,7 +831,7 @@ class ThumbnailRequest(QRunnable):
         走 linear→sRGB 显示编码）；失败返回 None（面板显示占位符）。
         """
         try:
-            from external.file_explorer.plugins.topos_image.topos_image_media import (
+            from src.shared.media.topos_image import (
                 _decode_rgb,
             )
 

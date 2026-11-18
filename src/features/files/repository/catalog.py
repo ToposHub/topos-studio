@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,26 @@ from typing import Any, Iterator
 from src.features.files.repository.locator import FilesDataLocator
 
 CATALOG_SCHEMA_VERSION = 1
+
+
+@dataclass
+class _CatalogAuthority:
+    lock: Any
+    revision: int = 0
+
+
+_AUTHORITIES_LOCK = threading.Lock()
+_AUTHORITIES: weakref.WeakValueDictionary[str, _CatalogAuthority] = weakref.WeakValueDictionary()
+
+
+def _catalog_authority(path: Path) -> _CatalogAuthority:
+    key = os.path.normcase(os.path.realpath(path))
+    with _AUTHORITIES_LOCK:
+        authority = _AUTHORITIES.get(key)
+        if authority is None:
+            authority = _CatalogAuthority(threading.RLock())
+            _AUTHORITIES[key] = authority
+        return authority
 
 
 class CatalogError(Exception):
@@ -180,14 +201,12 @@ _SCHEMA_V1 = (
     # update 走删除+重插，避免漏列漂移
     """CREATE TRIGGER IF NOT EXISTS assets_fts_au AFTER UPDATE OF
         name, comment ON assets BEGIN
-        DELETE FROM assets_fts WHERE path = old.path AND library_id = old.library_id;
-        INSERT INTO assets_fts(library_id, path, name, comment, tag_names, ocr)
-        VALUES (new.library_id, new.path, new.name, new.comment,
+        UPDATE assets_fts SET path = new.path, name = new.name, comment = new.comment,
+        tag_names =
             COALESCE((SELECT group_concat(t.name, ' ') FROM asset_tags at
               JOIN tags t ON t.id = at.tag_id
-              WHERE at.library_id = new.library_id AND at.path = new.path), ''),
-            COALESCE((SELECT ocr FROM assets_fts
-              WHERE library_id = new.library_id AND path = old.path), ''));
+              WHERE at.library_id = new.library_id AND at.path = new.path), '')
+        WHERE library_id = old.library_id AND path = old.path;
     END""",
 )
 
@@ -197,16 +216,16 @@ class FilesCatalog:
 
     def __init__(self, locator: FilesDataLocator) -> None:
         self.locator = locator
-        self._lock = threading.RLock()
+        self._authority = _catalog_authority(locator.catalog_db)
+        self._lock = self._authority.lock
         self._conn: sqlite3.Connection | None = None
-        self._revision = 0
         self.open()
 
     @property
     def revision(self) -> int:
         """库修订号：每次成功写事务 +1（查询结果身份/迟到丢弃依据）。"""
         with self._lock:
-            return self._revision
+            return self._authority.revision
 
     # ------------------------------------------------------------ 打开/初始化
 
@@ -267,17 +286,24 @@ class FilesCatalog:
     def _write(self) -> Iterator[sqlite3.Cursor]:
         with self._lock:
             conn = self._connection()
-            conn.execute("BEGIN IMMEDIATE")
+            nested = conn.in_transaction
+            savepoint = "files_" + secrets.token_hex(8)
+            conn.execute(f"SAVEPOINT {savepoint}" if nested else "BEGIN IMMEDIATE")
             cursor = conn.cursor()
             try:
                 yield cursor
                 cursor.close()
-                conn.execute("COMMIT")
-                self._revision += 1
+                conn.execute(f"RELEASE SAVEPOINT {savepoint}" if nested else "COMMIT")
+                if not nested:
+                    self._authority.revision += 1
             except BaseException:
                 cursor.close()
                 try:
-                    conn.execute("ROLLBACK")
+                    if nested:
+                        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                    else:
+                        conn.execute("ROLLBACK")
                 except sqlite3.Error:
                     pass
                 raise
@@ -315,6 +341,10 @@ class FilesCatalog:
         return tuple(records)
 
     def register_library(self, root: str | Path, name: str = "") -> LibraryRecord:
+        with self._lock:
+            return self._register_library(root, name)
+
+    def _register_library(self, root: str | Path, name: str) -> LibraryRecord:
         """固定目录为库；同一根重复注册幂等返回既有记录。"""
         abs_root = nfc(Path(root).resolve())
         existing = [lib for lib in self.libraries() if lib.root == abs_root]
@@ -331,11 +361,12 @@ class FilesCatalog:
         return record
 
     def unregister_library(self, library_id: str) -> bool:
-        remaining = tuple(lib for lib in self.libraries() if lib.library_id != library_id)
-        if len(remaining) == len(self.libraries()):
-            return False
-        self._save_libraries(remaining)
-        return True
+        with self._lock:
+            remaining = tuple(lib for lib in self.libraries() if lib.library_id != library_id)
+            if len(remaining) == len(self.libraries()):
+                return False
+            self._save_libraries(remaining)
+            return True
 
     def _save_libraries(self, records: tuple[LibraryRecord, ...]) -> None:
         """temp + os.replace 原子写（沿旧 save_config P2-12 模式）。"""
@@ -608,30 +639,38 @@ class FilesCatalog:
         key = nfc(path)
         with self._read() as cursor:
             tags = [
-                {"id": row["id"], "name": row["name"], "color": row["color"]}
+                dict(row)
                 for row in cursor.execute(
-                    "SELECT t.id, t.name, t.color FROM asset_tags at"
+                    "SELECT t.id, t.name, t.color, t.parent_id FROM asset_tags at"
                     " JOIN tags t ON t.id = at.tag_id"
                     " WHERE at.library_id = ? AND at.path = ? ORDER BY t.name",
                     (library_id, key),
                 ).fetchall()
             ]
             collections = [
-                {"id": row["id"], "name": row["name"]}
+                dict(row)
                 for row in cursor.execute(
-                    "SELECT c.id, c.name FROM collection_items ci"
+                    "SELECT c.id, c.name, ci.sort_order, ci.added_at FROM collection_items ci"
                     " JOIN collections c ON c.id = ci.collection_id"
-                    " WHERE ci.path = ? ORDER BY c.name",
-                    (key,),
+                    " WHERE ci.path = ? AND c.library_id = ? ORDER BY c.name",
+                    (key, library_id),
                 ).fetchall()
             ]
             stacks = [
                 row["stack_id"]
                 for row in cursor.execute(
-                    "SELECT stack_id FROM stack_members WHERE path = ?", (key,)
+                    "SELECT sm.stack_id FROM stack_members sm JOIN stacks s ON s.id = sm.stack_id"
+                    " WHERE sm.path = ? AND s.library_id = ?", (key, library_id)
                 ).fetchall()
             ]
-        return {"tags": tags, "collections": collections, "stacks": stacks}
+            stack_details = [dict(row) for row in cursor.execute(
+                "SELECT s.id, s.cover_path, s.created_at FROM stacks s JOIN stack_members sm"
+                " ON s.id = sm.stack_id WHERE sm.path = ? AND s.library_id = ?",
+                (key, library_id)).fetchall()]
+            fts = cursor.execute("SELECT ocr FROM assets_fts WHERE library_id = ? AND path = ?",
+                                 (library_id, key)).fetchone()
+        return {"tags": tags, "collections": collections, "stacks": stacks,
+                "stack_details": stack_details, "ocr": fts["ocr"] if fts else ""}
 
     def delete_asset_tree(self, library_id: str, path: str | Path) -> int:
         """删除主表行及其全部关系行（assets FTS 由触发器清理）。"""
@@ -641,8 +680,10 @@ class FilesCatalog:
                 "DELETE FROM asset_tags WHERE library_id = ? AND path = ?",
                 (library_id, key),
             )
-            cursor.execute("DELETE FROM collection_items WHERE path = ?", (key,))
-            cursor.execute("DELETE FROM stack_members WHERE path = ?", (key,))
+            cursor.execute("DELETE FROM collection_items WHERE path = ? AND collection_id IN"
+                           " (SELECT id FROM collections WHERE library_id = ?)", (key, library_id))
+            cursor.execute("DELETE FROM stack_members WHERE path = ? AND stack_id IN"
+                           " (SELECT id FROM stacks WHERE library_id = ?)", (key, library_id))
             cursor.execute(
                 "DELETE FROM assets WHERE library_id = ? AND path = ?", (library_id, key)
             )
@@ -659,7 +700,8 @@ class FilesCatalog:
             "gps_lat", "gps_lon", "dom_color", "missing", "indexed_at",
         ]
         values: list[Any] = [key, asset_row.get("name") or os.path.basename(key)]
-        values.extend(asset_row.get(column) for column in columns[2:])
+        defaults = {"is_dir": 0, "rating": 0, "color": 0, "flag": 0, "comment": "", "missing": 0}
+        values.extend(asset_row.get(column, defaults.get(column)) for column in columns[2:])
         placeholders = ",".join("?" for _ in columns)
         with self._write() as cursor:
             cursor.execute(
@@ -685,12 +727,12 @@ class FilesCatalog:
                 row["path"]
                 for row in cursor.execute(
                     "SELECT path FROM assets WHERE library_id = ?"
-                    " AND substr(path, 1, ?) = ?",
-                    (library_id, len(old_prefix), old_prefix),
+                    " AND (path = ? OR substr(path, 1, ?) = ?)",
+                    (library_id, nfc(old_dir), len(old_prefix), old_prefix),
                 ).fetchall()
             ]
             for path in paths:
-                target = new_prefix + path[len(old_prefix):]
+                target = nfc(new_dir) if path == nfc(old_dir) else new_prefix + path[len(old_prefix):]
                 cursor.execute(
                     "UPDATE assets SET path = ?, name = ? WHERE library_id = ?"
                     " AND path = ?",
@@ -709,9 +751,12 @@ class FilesCatalog:
                     )
                     counts[table] += cursor.rowcount
                 for table in ("collection_items", "stack_members"):
+                    owner_table, owner_key = (("collections", "collection_id")
+                                              if table == "collection_items" else ("stacks", "stack_id"))
                     cursor.execute(
-                        f"UPDATE {table} SET path = ? WHERE path = ?",
-                        (target, path),
+                        f"UPDATE {table} SET path = ? WHERE path = ? AND {owner_key} IN"
+                        f" (SELECT id FROM {owner_table} WHERE library_id = ?)",
+                        (target, path, library_id),
                     )
                     counts[table] += cursor.rowcount
                 cursor.execute(
@@ -720,6 +765,7 @@ class FilesCatalog:
                     (target, library_id, path),
                 )
                 counts["stacks_cover"] += cursor.rowcount
+                self._refresh_fts_tags(cursor, library_id, target)
         return counts
 
     def restore_relations(self, library_id: str, path: str | Path, *,
@@ -744,13 +790,17 @@ class FilesCatalog:
                     (key, library_id, source_key),
                 )
                 cursor.execute(
-                    "UPDATE OR REPLACE collection_items SET path = ? WHERE path = ?",
-                    (key, source_key),
+                    "UPDATE collection_items SET path = ? WHERE path = ? AND collection_id IN"
+                    " (SELECT id FROM collections WHERE library_id = ?)",
+                    (key, source_key, library_id),
                 )
                 cursor.execute(
-                    "UPDATE OR REPLACE stack_members SET path = ? WHERE path = ?",
-                    (key, source_key),
+                    "UPDATE stack_members SET path = ? WHERE path = ? AND stack_id IN"
+                    " (SELECT id FROM stacks WHERE library_id = ?)",
+                    (key, source_key, library_id),
                 )
+                cursor.execute("UPDATE stacks SET cover_path = ? WHERE library_id = ? AND cover_path = ?",
+                               (key, library_id, source_key))
                 self._refresh_fts_tags(cursor, library_id, key)
                 return counts
             for name in tag_names or []:

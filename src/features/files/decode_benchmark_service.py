@@ -16,50 +16,13 @@ G 节行验收：**来源/时间线上下文、预算、取消、零素材写入
 """
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
-import sys
-from pathlib import Path
+from importlib import import_module
 from typing import Any
-
-_PLUGIN_DIR = (Path(__file__).resolve().parents[3]
-               / "external" / "file_explorer" / "plugins" / "decode_benchmark")
 
 
 def load_benchmark_module() -> Any:
-    """加载既有跑分模块（受管插件目录；不复制实现、不走旧 HTTP bridge）。
-
-    模块内有相对导入（``.benchmark``）——必须作为**包成员**加载：把插件
-    目录注册为合成包 ``files_host_plugins.decode_benchmark`` 再导入其
-    ``benchmark_gui``，避免与旧宿主的全局包名冲突。
-    """
-    gui_name = "files_host_plugins.decode_benchmark.benchmark_gui"
-    if gui_name in sys.modules:
-        return sys.modules[gui_name]
-    package_name = "files_host_plugins.decode_benchmark"
-    if package_name not in sys.modules:
-        package_spec = importlib.machinery.ModuleSpec(package_name, None,
-                                                      is_package=True)
-        package_spec.submodule_search_locations = [str(_PLUGIN_DIR)]
-        package = importlib.util.module_from_spec(package_spec)
-        package.__path__ = [str(_PLUGIN_DIR)]
-        sys.modules[package_name] = package
-        parent_name = "files_host_plugins"
-        if parent_name not in sys.modules:
-            parent_spec = importlib.machinery.ModuleSpec(parent_name, None,
-                                                         is_package=True)
-            parent_spec.submodule_search_locations = [str(_PLUGIN_DIR.parent)]
-            parent = importlib.util.module_from_spec(parent_spec)
-            parent.__path__ = [str(_PLUGIN_DIR.parent)]
-            sys.modules[parent_name] = parent
-    spec = importlib.util.spec_from_file_location(
-        gui_name, _PLUGIN_DIR / "benchmark_gui.py")
-    if spec is None or spec.loader is None:
-        raise ImportError(f"无法加载既有跑分实现：{_PLUGIN_DIR}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[gui_name] = module
-    spec.loader.exec_module(module)
-    return module
+    """Load the single native benchmark implementation from its feature package."""
+    return import_module("src.features.files.benchmark.benchmark_gui")
 
 
 class DecodeBenchmarkHostService:
@@ -81,7 +44,12 @@ class DecodeBenchmarkHostService:
         选择的输出文件（CSV/JSON），绝不写素材目录。
         """
         window_type = self.module.DecodeBenchmarkWindow
-        return window_type(paths=paths)
+        service = getattr(parent, "_edit_benchmark_host_service", None)
+        window = window_type(paths=paths, host_service=service)
+        if parent is not None:
+            from PyQt6.QtCore import Qt
+            window.setParent(parent, Qt.WindowType.Window)
+        return window
 
     def request_cancel(self, window: Any) -> None:
         """请求取消（帧边界协作）——关闭路径调用，无遗留解码。"""

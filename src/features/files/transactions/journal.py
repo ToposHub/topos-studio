@@ -49,12 +49,16 @@ class OperationJournal:
 
     def begin(self, library_id: str, op: str, args: dict[str, Any],
               *, idempotency_key: str = "") -> JobHandle:
+        with self._catalog._lock:
+            return self._begin_locked(library_id, op, args, idempotency_key=idempotency_key)
+
+    def _begin_locked(self, library_id: str, op: str, args: dict[str, Any],
+                      *, idempotency_key: str) -> JobHandle:
         """开任务；同 (library_id, idempotency_key) 已存在则重放既有任务。"""
         if idempotency_key:
             existing = self._find_by_key(library_id, idempotency_key)
             if existing is not None:
                 handle = JobHandle(existing["id"], replayed=True)
-                self._active[self._thread_key()] = existing["id"]
                 return handle
         job_id = f"job-{secrets.token_hex(8)}"
         now = time.time()
@@ -98,6 +102,11 @@ class OperationJournal:
         job_id = self._active.get(thread_key)
         if job_id is None:
             return  # 无活动任务（纯内存用法）：静默不记，不阻塞 FS 操作
+        if state in ("done", "fs_published") and detail.get("destination"):
+            destination = Path(detail["destination"])
+            identity = destination.lstat()
+            detail = {**detail, "identity": [identity.st_dev, identity.st_ino,
+                                              identity.st_size, identity.st_mtime_ns]}
         items_update = json.dumps(
             self._append_event(job_id, op, state, detail), ensure_ascii=False
         )
@@ -137,7 +146,7 @@ class OperationJournal:
     def pending(self) -> list[dict[str, Any]]:
         with self._catalog._read() as cursor:
             rows = cursor.execute(
-                "SELECT * FROM job_log WHERE state IN ('running','staged','renaming')"
+                "SELECT * FROM job_log WHERE state IN ('running','staged','renaming','pending_recovery')"
                 " ORDER BY created_at"
             ).fetchall()
         return [dict(row) for row in rows]
@@ -162,34 +171,37 @@ class OperationJournal:
         job = self.get(job_id)
         if job is None:
             raise JournalError("JOB_MISSING", f"任务 {job_id} 不存在")
-        if job["state"] in TERMINAL_STATES:
+        if job["state"] in ("completed", "failed", "cancelled"):
             return {"job_id": job_id, "classification": job["state"], "action": "none"}
         items = json.loads(job["items"] or "[]")
         args = json.loads(job["args"] or "{}")
-        source = Path(args.get("source") or "")
-        destination = Path(args.get("destination") or "")
+        published = next((item for item in reversed(items)
+                          if item.get("state") in ("done", "fs_published") and item.get("identity")), None)
+        source_text = published.get("source") if published else args.get("source")
+        destination_text = published.get("destination") if published else args.get("destination")
+        source = Path(source_text) if source_text else None
+        destination = Path(destination_text) if destination_text else None
         last_staged = next(
             (item for item in reversed(items) if item.get("state") == "staged"), None
         )
         tmp = Path(last_staged["tmp"]) if last_staged and last_staged.get("tmp") else None
 
-        src_exists = source.exists() if str(source) else False
-        dst_exists = destination.exists() if str(destination) else False
+        src_exists = source is not None and (source.exists() or source.is_symlink())
+        dst_exists = destination is not None and (destination.exists() or destination.is_symlink())
         action = "none"
-        if tmp is not None and tmp.exists():
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            action = "swept_tmp"
-        if dst_exists and not src_exists:
+        verified_publication = False
+        if dst_exists and published:
+            current = destination.lstat()
+            verified_publication = [current.st_dev,current.st_ino,current.st_size,current.st_mtime_ns] == published["identity"]
+        if verified_publication and (not src_exists or job["op"] == "copy"):
+            if job["op"] in ("move", "rename"):
+                from src.features.files.transactions.service import IdentityPropagation
+                with self._catalog._write():
+                    IdentityPropagation(self._catalog).on_moved(job["library_id"],str(source),str(destination))
             state, classification = "completed", "completed"
-        elif dst_exists and src_exists and job["op"] == "copy":
-            state, classification = "completed", "completed_copy_both_present"
+            action = "reconciled_catalog"
         elif dst_exists and src_exists:
             state, classification = "pending_recovery", "ambiguous"
-        elif tmp is not None and action == "swept_tmp":
-            state, classification = "failed", "interrupted_retriable"
         else:
             state, classification = "pending_recovery", "no_evidence"
         self._set_state(job_id, state,

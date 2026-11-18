@@ -76,15 +76,7 @@ if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
     from src.features.edit.core.project import EditProject
     from src.features.edit.core.timeline_preview_renderer import TimelinePreviewRenderer
 
-# 导入内置视频播放器（可选组件；Qt Multimedia 缺失时提示不可用，绝不回退系统播放器）
-external_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'external', 'file_explorer')
-# [R2-1] append 而非 insert(0)：该目录含 main.py/const.py/utils.py 等通用名
-# 模块，置于 sys.path 头部会让任何裸 `import main/const/utils` 命中
-# file_explorer 的——低频但极难排查的隐形地雷。FE 的 `plugins/` 是正规包
-# （有 __init__.py），根目录 plugins/ 是命名空间包，正规包优先级与
-# sys.path 顺序无关，append 不影响播放器导入。
-sys.path.append(external_path)
-
+# Shared playback is independent of the Files host.
 try:
     # 播放核心已从 file_explorer 插件迁到 src/shared/playback，原生面板
     # 不再依赖旧 Web UI；预导入仍用于探测 QtMultimedia 组件是否存在。
@@ -1293,28 +1285,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
 
         self.files_panel = FilesPanel(self)  # 传入 self 作为 parent
 
-        # Register the explicit Qt-side host bridge used by the decode
-        # benchmark plugin.  The service is intentionally created after the
-        # file-explorer module has been imported, but before the user can
-        # launch its window, so Flask routes never need to reach into the
-        # Edit renderer themselves.
-        try:
-            from src.app.integrations.file_explorer.edit_benchmark_service import (
-                EditBenchmarkHostService,
-            )
-            from file_explorer.main import bridge as file_explorer_bridge
-
-            self._edit_benchmark_host_service = EditBenchmarkHostService(self)
-            register_service = getattr(
-                file_explorer_bridge, "register_edit_benchmark_service", None
-            )
-            if callable(register_service):
-                register_service(self._edit_benchmark_host_service)
-        except Exception as exc:
-            # File explorer is an optional integration.  A missing bridge must
-            # not prevent the main editor from starting.
-            self._edit_benchmark_host_service = None
-            logger.warning("Edit benchmark host bridge unavailable: %s", exc)
+        from src.app.services.edit_benchmark_service import EditBenchmarkHostService
+        self._edit_benchmark_host_service = EditBenchmarkHostService(self)
 
         self.info_panel = InfoPanel()
         self.layer_panel = LayerPanel(self)
@@ -2654,14 +2626,15 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
                 except Exception:
                     logger.exception(
                         "MainWindow: %s worker shutdown failed", panel_attr)
-            # [CRASH-2] file_explorer 停靠面板装在 QDockWidget 内，其 closeEvent
-            # 在窗口关闭时不会触发——Flask 服务必须在此显式停止
-            try:
-                files_panel = getattr(self, "files_panel", None)
-                if files_panel is not None:
-                    files_panel.shutdown()
-            except Exception:
-                logger.exception("MainWindow: files panel shutdown failed")
+            # Dock-contained native browsers do not receive closeEvent when
+            # only their main window closes; stop both resource owners here.
+            for panel_name in ("files_panel", "library_panel"):
+                try:
+                    panel = getattr(self, panel_name, None)
+                    if panel is not None:
+                        panel.shutdown()
+                except (OSError, RuntimeError):
+                    logger.exception("MainWindow: %s shutdown failed", panel_name)
             try:
                 self._shutdown_playback_pipeline()
             except Exception:

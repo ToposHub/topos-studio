@@ -60,10 +60,10 @@ def endpoint():
     thread.join(timeout=2)
 
 
-def _legacy_http_mode(host):
-    """[G1-G4] 四个可启动 builtin 已全部原生接管——需验证仍存在的
-    legacy HTTP 通道行为的测试，显式禁用原生命令表。"""
-    host._native_commands = {}
+def _native_test_openers(host):
+    """Exercise the real native command boundary without starting media tools."""
+    host._test_opened = []
+    host._native_opener = lambda key: lambda paths: host._test_opened.append((key, tuple(paths)))
     return host
 
 
@@ -110,7 +110,7 @@ def test_center_keeps_disabled_failed_plaintext_and_filters(qtbot, catalog):
     assert center._selected == ""
 
 
-def test_center_function_category_pin_and_legacy_intents(qtbot, catalog):
+def test_center_function_category_pin_and_unavailable_tools(qtbot, catalog):
     center = PluginCenterDialog()
     qtbot.addWidget(center)
     center.set_snapshot(catalog.snapshot(), ["image_factory"], [], {}, set())
@@ -125,9 +125,7 @@ def test_center_function_category_pin_and_legacy_intents(qtbot, catalog):
     assert center._selected == "format_factory"
     center.select_plugin("code_editor")
     assert not center.launch.isEnabled()
-    assert not center.legacy.isHidden()
-    with qtbot.waitSignal(center.legacy_requested):
-        center.legacy.click()
+    assert center.legacy.isHidden()
 
 
 def test_launcher_only_available_tools_pin_order_search_keyboard(qtbot, catalog):
@@ -193,42 +191,38 @@ def test_disable_visible_persistent_and_no_runtime_reload(controller, qtbot):
 
 def test_launch_auth_selection_snapshot_duplicate_suppression_and_recent(controller, endpoint, qtbot):
     host, selected, _, _ = controller
-    _legacy_http_mode(host)
+    _native_test_openers(host)
     host.launch("decode_benchmark")
     host.launch("decode_benchmark")
     selected[:] = ["/other.mov"]
     qtbot.waitUntil(lambda: bool(host.preferences.plugin_recent))
-    assert endpoint[1] == [("/api/plugin/decode_benchmark/launch", "private-test-token", {"paths": ["/media/A #100% 中文.mov"]})]
+    assert endpoint[1] == []
+    assert host._test_opened == [("decode_benchmark", ("/media/A #100% 中文.mov",))]
     assert host.preferences.plugin_recent == ["decode_benchmark"]
-    assert "已提交" in host.center.notice.text()
+    assert "已打开" in host.center.notice.text()
 
 
 def test_multiselection_is_rejected_without_losing_files(controller, endpoint, qtbot):
     host, selected, _, _ = controller
-    _legacy_http_mode(host)
+    _native_test_openers(host)
     selected.append("/second.mov")
-    # [G1] format_factory 已原生接管（多选在原生计划层处理）——单选政策
-    # 的 HTTP 拒绝口径改用仍走 legacy 的 decode_benchmark（kind=paths
-    # 接受多选，此处用 format_factory 旧单选语义的替代断言：legacy 通道
-    # 对多选 decode_benchmark 照常提交）
     host.launch("decode_benchmark")
-    qtbot.waitUntil(lambda: not host._busy, timeout=8000)
-    # decode_benchmark 的 payload 携带全部选择（多选不丢失）
-    assert endpoint[1] and endpoint[1][0][2] == {"paths": [
-        "/media/A #100% 中文.mov", "/second.mov"]}
+    qtbot.waitUntil(lambda: bool(host._test_opened), timeout=8000)
+    assert endpoint[1] == []
+    assert host._test_opened[0][1] == ("/media/A #100% 中文.mov", "/second.mov")
 
 
-@pytest.mark.parametrize("status,payload", [(500, {"status": "ok"}), (200, []), (200, {"status": "error"}), (302, {"status": "ok"})])
-def test_server_failure_never_records_usage(controller, endpoint, qtbot, status, payload):
+@pytest.mark.parametrize("reason", ["取消", "服务关闭", "权限拒绝", "源文件丢失"])
+def test_native_open_failure_never_records_usage(controller, endpoint, qtbot, reason):
     host, _, _, _ = controller
-    _legacy_http_mode(host)
-    endpoint[2].update(status=status, payload=payload)
-    # [G2] image_factory 已原生接管——服务失败语义改用 legacy 通道的
-    # decode_benchmark 验证（native 无 HTTP，不存在此路径）
+    def refuse(paths):
+        raise ValueError(reason)
+    host._native_opener = lambda key: refuse
     host.launch("decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
-    assert "未接受" in host.center.notice.text()
+    assert endpoint[1] == []
+    assert reason in host.center.notice.text()
 
 
 def test_pin_roundtrip_and_legacy_navigation(controller):
@@ -241,14 +235,16 @@ def test_pin_roundtrip_and_legacy_navigation(controller):
     assert legacy == [True]
 
 
-def test_transport_rejects_foreign_host_and_non_launcher(qtbot):
-    transport = NativeFilesTransport(lambda: "https://example.com", "secret")
+def test_transport_never_consults_the_retired_http_host(qtbot):
+    def retired_url():
+        raise AssertionError("旧 Files 服务不应被访问")
+
+    transport = NativeFilesTransport(retired_url, None)
     results = []
     transport.plugin_launch_finished.connect(lambda *args: results.append(args))
     transport.launch_plugin("image_factory", "/api/plugin/image_factory/launch", {})
     transport.launch_plugin("code_editor", "/api/plugin/code_editor/launch", {})
     assert len(results) == 2 and all(not row[1] for row in results)
-    assert not transport._plugin_replies
     transport.shutdown()
 
 
@@ -262,9 +258,8 @@ def test_shutdown_discards_late_launch_completion(controller):
 def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controller, endpoint, qtbot):
     from src.shared.plugins.services import rejected
     host, _, _, _ = controller
-    _legacy_http_mode(host)
-    host._commands.dispatch = lambda prepared: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
-    # [G2] image_factory 已原生接管——dispatch 拒绝语义改用 legacy 通道
+    service = host._native_commands["decode_benchmark"]
+    service.dispatch = lambda prepared, opener: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
     host.launch("decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
@@ -272,19 +267,13 @@ def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controlle
     assert host.center.notice.text() == "调用已取消"
 
 
-def test_shutdown_aborts_inflight_reply_and_discards_its_result(qtbot):
+def test_retired_http_launch_never_creates_network_requests(qtbot):
     from tests.ui.test_files_session_regressions import _FakeNetwork
     transport = NativeFilesTransport(lambda: "http://127.0.0.1:8000", "token")
     transport._network = _FakeNetwork()
-    results = []
-    transport.plugin_launch_finished.connect(lambda *args: results.append(args))
-    transport.launch_plugin("image_factory", "/api/plugin/image_factory/launch", {})
-    reply = transport._network.pending[0]
+    assert not transport.launch_plugin("image_factory", "/api/plugin/image_factory/launch", {})
+    assert transport._network.pending == []
     transport.shutdown()
-    assert reply.aborted and not transport._plugin_replies
-    reply._payload = {"status": "ok"}
-    reply.finished.emit()
-    assert results == []
 
 
 def test_native_panel_plugin_toolbar_and_context_actions(qtbot):
@@ -435,17 +424,13 @@ def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
     host = FilesPluginsController(catalog, transport, prefs, panel,
                                   lambda: ["/media/a.mov"], lambda: None, panel,
                                   sources_factory=lambda: f1_sources)
-    _legacy_http_mode(host)   # [G4] 四 builtin 已全原生——显式验 legacy 通道
+    _native_test_openers(host)   # [G4] 四 builtin 已全原生——显式验 legacy 通道
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        # [G1/G2] format_factory/image_factory 已由原生窗口接管（零 HTTP）
-        # ——本测试改用仍走 legacy 路由的 decode_benchmark 验证线上命令键口径
-        host.launch("files.decode_benchmark")   # UI 新 id
-        qtbot.waitUntil(lambda: bool(endpoint[1]), timeout=8000)
-        # 线上：命令键寻址（legacy 路由不变）
-        path, token, payload = endpoint[1][0]
-        assert path == "/api/plugin/decode_benchmark/launch"
-        assert token == "token" and payload == {"paths": ["/media/a.mov"]}
+        host.launch("files.decode_benchmark")
+        qtbot.waitUntil(lambda: bool(host._test_opened), timeout=8000)
+        assert host._test_opened == [("decode_benchmark", ("/media/a.mov",))]
+        assert endpoint[1] == []
         qtbot.waitUntil(lambda: bool(prefs.plugin_recent), timeout=8000)
         # 偏好：最近使用按新 id 建档
         assert prefs.plugin_recent[0] == "files.decode_benchmark"
@@ -574,38 +559,36 @@ def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
     transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
     host = FilesPluginsController(catalog, transport, prefs, panel,
                                   lambda: ["/m/a.mov"], lambda: None, panel)
-    _legacy_http_mode(host)   # [G4] 显式验证仍存在的 legacy 通道生命周期
+    _native_test_openers(host)   # [G4] 显式验证仍存在的 legacy 通道生命周期
 
-    # 应答不自动到达：拦截 transport 提交（任务保持 running，不 emit 完成信号）
-    submitted: list[tuple] = []
-    host._commands.transport.launch_plugin = (
-        lambda plugin_id, ep, payload:
-        (submitted.append((plugin_id, ep, payload)), True)[1])
+    started, release = threading.Event(), threading.Event()
+    command = host._native_commands["decode_benchmark"]
+    real_revalidate = command.revalidate
+
+    def held_revalidate(prepared):
+        started.set()
+        assert release.wait(5)
+        return real_revalidate(prepared)
+
+    command.revalidate = held_revalidate
     try:
         qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
         host.launch("decode_benchmark")
-        qtbot.waitUntil(lambda: bool(submitted), timeout=8000)
-        qtbot.waitUntil(lambda: "decode_benchmark" in host._launch_jobs,
-                        timeout=8000)
+        qtbot.waitUntil(started.is_set)
         jobs = host.host_session.lifecycle.jobs
-        job_id = host._launch_jobs["decode_benchmark"]
-        assert jobs.owner(job_id) == "decode_benchmark"
-        assert jobs.state(job_id) == "running"
-        # 在途时停用：停新 → 按 owner 取消 → 未确认 → 停用不完成
-        report = host.host_session.retire_plugin("decode_benchmark")
+        job_id = host._launch_jobs["files.decode_benchmark"]
+        assert jobs.owner(job_id) == "files.decode_benchmark"
+        report = host.host_session.retire_plugin("files.decode_benchmark")
         assert not report["fully_stopped"]
         assert job_id in report["jobs_still_terminating"]
         assert jobs.state(job_id) == "cancel_requested"
-        assert not host.host_session.lifecycle.accepting_calls("decode_benchmark")
-        # 停新：停用中拒绝新调用（不再产生第二个提交）
         host.launch("decode_benchmark")
-        assert len(submitted) == 1
-        # 应答到达 = 终态确认 → 停用可完成
-        host._launch_finished("decode_benchmark", True, "完成")
-        qtbot.waitUntil(lambda: jobs.state(job_id) == "cancelled", timeout=8000)
-        report2 = host.host_session.retire_plugin("decode_benchmark")
-        assert report2["fully_stopped"]
+        release.set()
+        qtbot.waitUntil(lambda: jobs.state(job_id) == "cancelled")
+        assert host._test_opened == []
+        assert host.host_session.retire_plugin("files.decode_benchmark")["fully_stopped"]
     finally:
+        release.set()
         host.shutdown()
 
 
@@ -770,5 +753,52 @@ def test_g5_code_editor_native_launch_and_availability(
         info2 = next(item for item in host._infos
                      if item.plugin_id == "code_editor")
         assert not info2.desired_enabled and not info2.can_launch
+    finally:
+        host.shutdown()
+
+
+def test_g6_image_editor_native_zero_http(qtbot, catalog, tmp_path, endpoint):
+    """[G6] 原生接管：携带选中图片打开编辑器；无选择如实提示；零 HTTP。"""
+    from PIL import Image
+
+    media = tmp_path / "photo.png"
+    Image.new("RGB", (48, 32), (200, 40, 40)).save(media, format="PNG")
+    # 主 fixture 无 image_editor——本测试用专属最小 catalog
+    editor_root = tmp_path / "plugins-editor"
+    (editor_root / "image_editor").mkdir(parents=True)
+    (editor_root / "image_editor" / "__init__.py").write_text(
+        "NAME = 'image_editor'\n", encoding="utf-8")
+    editor_catalog = FileExplorerPluginCatalog(
+        editor_root,
+        SimpleNamespace(plugins=[{"name": "image_editor"}], failed_plugins=[]),
+        lambda: {"disabled_plugins": []}, lambda value: None)
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g6.ini"), QSettings.Format.IniFormat))
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    panel.meta_status = QLabel()
+    layout.addWidget(QLineEdit())
+    layout.addWidget(panel.meta_status)
+    qtbot.addWidget(panel)
+    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
+    host = FilesPluginsController(editor_catalog, transport, prefs, panel,
+                                  lambda: [str(media)], lambda: None, panel)
+    try:
+        qtbot.waitUntil(lambda: len(host._infos) == 1, timeout=8000)
+        host.launch("image_editor")
+        qtbot.waitUntil(lambda: "files.image_editor" not in host._busy,
+                        timeout=8000)
+        assert host._image_editor_window is not None
+        window = host._image_editor_window
+        assert window.isVisible()
+        assert window._service.source_path == str(media)
+        qtbot.waitUntil(lambda: "files.image_editor" not in host._busy,
+                        timeout=8000)
+        assert endpoint[1] == []                # 零 HTTP
+        host._image_editor_window = None
+        host.host_session.windows.close_window("files.image_editor", "main")
+        host.selected_paths = lambda: []
+        host.launch("image_editor")
+        qtbot.waitUntil(lambda: "选择一张图片" in panel.meta_status.text(),
+                        timeout=8000)
     finally:
         host.shutdown()

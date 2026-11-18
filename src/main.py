@@ -42,6 +42,11 @@ def _isolate_macos_native_extension_symbols() -> None:
 # module that may import them transitively.
 _isolate_macos_native_extension_symbols()
 
+# Packaged worker entry must exit before Qt/application assembly and argument rewriting.
+if len(sys.argv) > 1 and sys.argv[1] == "--files-media-worker":
+    from src.features.files.services.media import worker_main
+    raise SystemExit(worker_main(sys.argv[2:]))
+
 # ============================================================================
 # ⚠️ OpenEXR Support - Must be set BEFORE importing cv2
 # ============================================================================
@@ -160,18 +165,21 @@ def _orderly_shutdown(app: QCoreApplication | None, exit_code: int) -> None:
     except Exception as exc:  # pragma: no cover
         logger.debug(f"image decode runtime shutdown: {exc}")
     try:
-        # file_explorer 的缩略图线程持有 ffmpeg 子进程，显式停止。
-        from file_explorer.main import shutdown_thumbnail_worker
-
-        shutdown_thumbnail_worker()
-    except Exception as exc:  # pragma: no cover
-        logger.debug(f"thumbnail worker shutdown: {exc}")
-    try:
         sys.stdout.flush()
         sys.stderr.flush()
     except Exception:
         pass
     os._exit(exit_code)
+
+
+def _drain_files_workers(window: object) -> None:
+    panels = [getattr(window, name, None) for name in ("files_panel", "library_panel")]
+    for panel in panels:
+        if panel is not None:
+            panel.shutdown()
+    for panel in panels:
+        if panel is not None and not panel.wait_for_shutdown(2.0):
+            logger.warning("Files 工作未在退出前确认结束，未终态记录将保留供下次恢复。")
 
 
 def main() -> int:
@@ -330,6 +338,7 @@ def main() -> int:
             # AUD-31203: _orderly_shutdown 内 os._exit 永不返回，其后的
             # `return 0` 为不可达死代码，已删除；main() 标注 -> int 以匹配
             # 退出码语义（实际所有路径均经 _orderly_shutdown 终止）。
+            _drain_files_workers(window)
             _orderly_shutdown(app, 0)
 
         window.show()
@@ -350,6 +359,7 @@ def main() -> int:
         QApplication.processEvents()
 
         rc = app.exec()
+        _drain_files_workers(window)
         _orderly_shutdown(app, rc if isinstance(rc, int) else 0)
         return 0  # 不可达：_orderly_shutdown 经 os._exit 不返回（类型闭合）
     except Exception:

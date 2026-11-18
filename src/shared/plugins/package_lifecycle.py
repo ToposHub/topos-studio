@@ -29,7 +29,7 @@ from src.shared.plugins.installer import (
     InstallerError,
     LocalPackageInstaller,
 )
-from src.shared.plugins.manifest import PluginManifest, parse_manifest_file
+from src.shared.plugins.manifest import PluginManifest, parse_manifest_file, parse_manifest_mapping
 
 
 class LifecycleInstallError(RuntimeError):
@@ -49,17 +49,34 @@ class PermissionDelta:
     removed: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class PackageReview:
+    plugin_id: str
+    version: str
+    permissions: tuple[str, ...]
+    added_permissions: tuple[str, ...]
+
+
 def _package_manifest_raw(package: Path) -> dict[str, Any] | None:
     """读包内 ``topos.plugin.json`` 原始 dict（zip 或目录）。"""
     package = Path(package)
     candidate = package / "topos.plugin.json"
     try:
+        if package.is_symlink() or candidate.is_symlink():
+            return None
         if candidate.is_file():
-            return json.loads(candidate.read_text(encoding="utf-8"))
+            if candidate.stat().st_size > 1024 * 1024:
+                return None
+            with candidate.open("rb") as handle:
+                raw = json.loads(handle.read(1024 * 1024 + 1))
+            return raw if isinstance(raw, dict) else None
         if package.is_file() and package.suffix.lower() == ".zip":
             with zipfile.ZipFile(package) as archive:
-                return json.loads(
-                    archive.read("topos.plugin.json").decode("utf-8"))
+                if archive.getinfo("topos.plugin.json").file_size > 1024 * 1024:
+                    return None
+                with archive.open("topos.plugin.json") as handle:
+                    raw = json.loads(handle.read(1024 * 1024 + 1))
+                return raw if isinstance(raw, dict) else None
     except (OSError, ValueError, KeyError, zipfile.BadZipFile):
         return None
     return None
@@ -104,6 +121,16 @@ class PackageLifecycle:
         self._refresh = refresh_inventory
 
     # ------------------------------------------------------------ 权限对比
+    def review(self, package: Path) -> PackageReview:
+        """Bounded declarative preview; no plugin execution or activation."""
+        raw = _package_manifest_raw(package)
+        manifest, diagnostics = parse_manifest_mapping(raw)
+        if manifest is None or any(item.severity == "error" for item in diagnostics):
+            raise LifecycleInstallError("MANIFEST_INVALID", "包声明不可读取或校验失败")
+        permissions = _permissions_of(raw) | _permissions_of(dict(manifest.metadata))
+        delta = self.permission_delta(package, expected_plugin_id=manifest.plugin_id)
+        return PackageReview(manifest.plugin_id, manifest.version, tuple(sorted(permissions)), delta.added)
+
     def permission_delta(self, package: Path,
                          *, expected_plugin_id: str | None = None) -> PermissionDelta:
         raw = _package_manifest_raw(package)
@@ -121,7 +148,7 @@ class PackageLifecycle:
             # "新增"（重确认只针对更新场景的新增项）
             return PermissionDelta()
         old = _installed_permissions(self.installer, plugin_id)
-        new = _permissions_of(raw)
+        new = _permissions_of(raw) | _permissions_of((raw or {}).get("metadata"))
         return PermissionDelta(
             added=tuple(sorted(new - old)),
             removed=tuple(sorted(old - new)))

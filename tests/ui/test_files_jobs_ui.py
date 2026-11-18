@@ -162,7 +162,7 @@ def test_transport_recovery_flow(qtbot, tmp_path):
     transport = NativeFilesTransport(
         lambda: "", None, facade=FilesFacade(catalog, max_workers=1))
     try:
-        # 模拟上个进程中断：目标已就位、源已不在（=已完成证据）
+        # 未记录发布身份时，仅有同名文件不能确认提交成功。
         journal = transport._facade.journal
         journal.begin(library.library_id, "move",
                       {"source": str(moved), "destination": str(moved) + ".moved"},
@@ -180,7 +180,7 @@ def test_transport_recovery_flow(qtbot, tmp_path):
         with qtbot.waitSignal(transport.recovery_applied, timeout=8000) as applied:
             transport.recover_job(records[0]["job_id"])
         verdict = applied.args[0]
-        assert verdict["state"] == "completed"
+        assert verdict["state"] == "pending_recovery"
     finally:
         transport.shutdown()
         catalog.close()

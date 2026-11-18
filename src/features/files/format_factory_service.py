@@ -192,10 +192,12 @@ class NativeToolCommandService:
 
     def __init__(self, *, command_id: str, plugin_id: str,
                  revision_provider: Callable[[], int | None] | None = None,
-                 authority: DispatchAuthority | None = None) -> None:
+                 authority: DispatchAuthority | None = None,
+                 enabled_provider: Callable[[], bool] | None = None) -> None:
         self.command_id = command_id
         self.plugin_id = plugin_id
         self._revision_provider = revision_provider
+        self._enabled_provider = enabled_provider
         self.authority = authority or DispatchAuthority()
 
     def prepare(self, entry_paths: Iterable[str]) -> PreparedInvocation:
@@ -214,6 +216,8 @@ class NativeToolCommandService:
                                   payload={"paths": list(raw)})
 
     def revalidate(self, prepared: PreparedInvocation) -> PreparedInvocation:
+        if self._enabled_provider is not None and not self._enabled_provider():
+            raise CommandRejected("PLUGIN_DISABLED", "插件已停用，请重新启用后发起。")
         if (prepared.command_id != self.command_id
                 or prepared.plugin_id != self.plugin_id
                 or prepared.context.plugin_id != prepared.plugin_id):

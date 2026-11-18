@@ -136,6 +136,8 @@ class TrashDialog(QDialog):
 
     def show_task_result(self, job: dict[str, Any]) -> None:
         """restore/purge 的逐项结果：冲突显式指出可用改名恢复。"""
+        if job.get("operation") not in ("restore", "purge"):
+            return
         successes = job.get("successes") or []
         failures = job.get("failures") or []
         label = "恢复" if job.get("operation") == "restore" else "彻底删除"
@@ -146,3 +148,5 @@ class TrashDialog(QDialog):
                 reason += "（可改用「改名恢复」）"
             parts.append(reason)
         self.summary.setText("；".join(parts))
+        if successes:
+            self.refresh_requested.emit()

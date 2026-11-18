@@ -1,0 +1,34 @@
+{
+  "plugin_id": "files.code_editor",
+  "display_name": "Code Editor",
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "legacy_ids": [],
+  "author": "AssetDeck Team",
+  "description": "基于 Monaco Editor 的代码编辑器（旧 Web 界面，经兼容入口打开）",
+  "category": "编辑工具",
+  "source": "builtin",
+  "capabilities": [
+    {
+      "capability_id": "open",
+      "kind": "command",
+      "title": "Code Editor",
+      "selection_mode": "many",
+      "run_location": "host"
+    }
+  ],
+  "metadata": {
+    "origin": "builtin-legacy-migration",
+    "compatibility": "无原生 /launch 路由；保留旧 Web 容器入口"
+  },
+  "windows": [
+    {
+      "window_id": "main",
+      "command_id": "open"
+    }
+  ]
+}

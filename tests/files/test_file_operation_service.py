@@ -130,7 +130,7 @@ def test_directory_move_remaps_whole_subtree(env):
 # ---------------------------------------------------------------- 幂等提交
 
 
-def test_duplicate_submission_is_idempotent(env):
+def test_same_path_new_file_is_a_new_request_not_a_replayed_success(env):
     tmp, catalog, library, lib, svc, journal = env
     asset = _seed(env)
     elsewhere = tmp / "elsewhere"
@@ -139,7 +139,7 @@ def test_duplicate_submission_is_idempotent(env):
     assert first.ok
     asset.write_bytes(b"second round")  # 同名新文件再提交同键任务
     second = svc.move(library.library_id, asset, elsewhere)
-    assert second.code == "IDEMPOTENT_REPLAY" and second.status == "done"
+    assert second.code == "DEST_EXISTS" and second.status == "conflict"
     assert (elsewhere / asset.name).read_bytes() == b"payload", "未重复执行"
 
 

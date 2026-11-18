@@ -163,8 +163,8 @@ class NativeFilesPreview(QWidget):
         self.next_button.clicked.connect(self.next_requested)
         header.addWidget(self.next_button)
 
-        self.legacy_button = QPushButton("在完整 Files 中打开", self)
-        self.legacy_button.setToolTip("交给既有播放器/查看器；不可预览时显示")
+        self.legacy_button = QPushButton("使用素材查看器打开", self)
+        self.legacy_button.setToolTip("交给原生素材查看器；不可预览时显示")
         self.legacy_button.clicked.connect(
             lambda: self.open_in_legacy_requested.emit(self._path))
         header.addWidget(self.legacy_button)

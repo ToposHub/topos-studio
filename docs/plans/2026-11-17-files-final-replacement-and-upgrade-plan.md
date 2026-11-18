@@ -9,6 +9,8 @@
 
 本计划统一承接 [Files 复核 FUP-01～09](2026-11-17-files-replacement-followup-plan.md)、[原始 NR-00～10](2026-11-16-files-full-replacement-review-plan.md)、[插件重构](2026-11-17-files-plugin-system-rebuild-plan.md)及[插件复核 PR-01～07](2026-11-17-files-plugin-completion-review-plan.md)。旧表保留历史证据；后续实施以本表的生产闭环和退出条件为准。
 
+**2026-11-18 验收更新。** Files 和 Library 已使用新库与原生宿主。移除了生产启动链里的旧浏览器、HTTP 服务、插件配置桥和旧退出钩子。本地媒体读路径、内建工具和新库维护服务已接入。隔离源码及 macOS 冻结包都通过无旧目录启动。下面各阶段括注保留当时的实施记录，当前证据及未完成范围见[本轮记录](../validation/files_native_cutover_20261118/README.md)。仓库仍保留旧源码及历史测试，第三方执行和其它平台仍按实际验收状态报告。
+
 ## 1. 本次复核后的基线
 
 已有：原生四布局、插件中心与启动器、四个旧启动接口、共享 manifest/Inventory/Installer/Lifecycle/服务契约及较完整的隔离回归。
@@ -122,7 +124,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：B/C；媒体部分依赖 E。范围：接真实 facade，移除旧页面作为功能兜底。
 
-- [ ] 独立 FilesPanel 默认只组装原生组件和 runtime；不导入旧 adapter，不建隐藏 browser，不启动旧 server/health/port。（**部分**：D1 `48108e08` transport 数据面换轨完成——浏览/搜索/集合/元数据/任务/扫描/批改名/预览取字节对旧服务启停无感（网络哨兵测试自证）；面板仍默认启动旧 server+隐藏 browser 供缩略图/胶片条桥与模式切换，待 E 媒体 provider 后摘除，见 [D1 验证记录](../validation/files_replacement_phase_d1_20261117/README.md)）
+- [x] 独立 FilesPanel 只组装原生组件和 runtime。主窗、Library 和偏好页已切换到新服务，缩略图与胶片条走本地解码。无旧目录源码和 macOS 冻结包均启动成功。
 - [x] 目录、树、搜索、集合、清空、返回/刷新共用不可变 location/request/generation；发出新意图即作废旧上下文。（FR-08 统一 Location + D1 facade 代际/同键作废为既有主干；本批补三块：树请求独立于内容导航（导航 cancel 不作废已展开树）、连续切换集合旧响应丢弃（同 key 作废实证）、清空/收起搜索=放弃全库检索（退出虚拟视图回目录并重放，不留旧结果冒充当前视图）；45+327 项回归全绿）
 - [ ] 201/2001/10000 项真实分页或虚拟列表，排序/total/cursor/选择/缩略图身份一致；输入防抖不保留旧结果写权。（**部分**：D3 已交付目录+全库搜索真实分页（offset 续页、total/truncated 一致、模型增量插入保选择/滚动、排序同 proxy、防抖三层作废）；虚拟列表未做（或关系已满足）；offset 页间漂移如实存在，1 万项实机验收留待第 9 项，见 [D3 验证记录](../validation/files_replacement_phase_d3_20261117/README.md)）
 - [x] 四布局切换保持选择、滚动锚点、缩放偏好和多选命令语义，横竖混合素材无错位/裁切政策混淆。（选择/身份/多选与 fit/fill 像素政策为既有覆盖；本批补布局切换滚动锚点与缩放偏好持久化验证，14+29 项布局测试全绿，见 [D4 验证记录](../validation/files_replacement_phase_d4_20261117/README.md)；实机键鼠验收归第 9 项）
@@ -222,7 +224,7 @@ PR-01～05 第二轮修复改善了共享契约；这些类存在不等于 Files
 
 依赖：A～H退出条件全部满足。范围：验证独立性，随后删除旧运行时代码。
 
-- [ ] 独立checkout中真正不含 `external/file_explorer/`，干净子进程从任意CWD导入/启动真实Files与主应用；不移动用户正在使用的目录做实验。
+- [x] 独立源码副本不含 `external/file_explorer/` 和旧 app 集成目录，从副本之外的工作目录启动真实主应用并运行原生 Files 回归。
 - [ ] 禁止旧包导入并监控实际调用：浏览/搜索/metadata/任务/恢复/插件/播放/退出全流程无旧目录资源、server/port/bridge/sys.path依赖。
 - [ ] 重写旧“扩展路径/Flask必须存在”和旧协议测试为新架构门禁；保留有效行为断言，删除失效兼容断言，不维护旧测试运行时。
 - [ ] 清理主窗旧path注入、benchmark桥、preferences旧config、退出worker调用、library_adapter重导出及UI回旧页代码。

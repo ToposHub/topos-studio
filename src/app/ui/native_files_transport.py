@@ -2,25 +2,22 @@
 
 D1 换轨：目录/树/搜索/集合/元数据/任务/库/扫描/批改名走 **C2 FilesFacade**
 （同进程、有界 worker、代际作废），预览/比较为本地直读；这些路由不再依赖
-旧 HTTP 服务。缩略图/胶片条（等 E 阶段媒体 provider）与插件四窗口拉起
-（等 F/G 接管）暂保留旧 HTTP 桥。
+旧 HTTP 服务。缩略图/胶片条走共享解码器与有界本地任务；工具由原生命令宿主启动。
 
 信号契约与本类的公共方法签名保持不变；面板/控制器零改动。回调在 facade
 worker 线程触发信号，Qt 按接收者亲和自动队列到 GUI 线程。
 """
 from __future__ import annotations
 
-import json
 import os
+import threading
 import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, urlencode
 
-from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
 from src.features.files.contracts import (
     FilesErrorCode,
@@ -50,8 +47,6 @@ class _ThumbnailRead:
     path: str
     version: int
     generation: int
-    data: bytearray = field(default_factory=bytearray)
-    oversized: bool = False
 
 
 def _dir_error_message(error) -> str:
@@ -116,11 +111,14 @@ class NativeFilesTransport(QObject):
     strip_loaded = pyqtSignal(str, bytes)
     strip_failed = pyqtSignal(str)
     plugin_launch_finished = pyqtSignal(str, bool, str)
+    _thumbnail_done = pyqtSignal(str, object)
+    _strip_done = pyqtSignal(str, object)
+    _tree_done = pyqtSignal(object, str)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
     MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
-    MAX_TREE_QUEUE = 128
+    MAX_TREE_QUEUE = 64
     MAX_PREVIEW_BYTES = 64 * 1024 * 1024
 
     def __init__(
@@ -128,22 +126,25 @@ class NativeFilesTransport(QObject):
         parent: QObject | None = None, *, facade: FilesFacade | None = None,
     ) -> None:
         super().__init__(parent)
-        self._server_url = server_url
-        self._token = token
         # 数据面 runtime（懒构造：首用时建库/开连接，构造失败可诊断）
         self._facade: FilesFacade | None = facade
+        self._owned_catalog: FilesCatalog | None = None
         self._facade_error: str | None = None
-        self._network = QNetworkAccessManager(self)  # 仅剩媒体桥/插件桥使用
+        self._media_cancel = threading.Event()
+        self._drained = threading.Event()
+        self._thumbnail_done.connect(self._finish_local_thumbnail, Qt.ConnectionType.QueuedConnection)
+        self._strip_done.connect(self._finish_local_strip, Qt.ConnectionType.QueuedConnection)
+        self._tree_done.connect(self._finish_tree, Qt.ConnectionType.QueuedConnection)
         self._generation = 0        # HTTP 缩略图代际（沿用原语义）
         self._nav_generation = 0    # 数据面导航代际：cancel() 后迟到结果作废
         self._preview_seq = 0       # 预览请求身份：同路径重开/取消都作废旧读取
         self._closed = False
-        self._running_jobs: set[str] = set()
+        self._running_jobs: dict[str, CancelToken] = {}
         self._scan_cancel: CancelToken | None = None
         self._scan_state: dict[str, Any] = {"running": False, "phase": "空闲"}
         self._thumbnail_queue: deque[tuple[str, int]] = deque()
         self._thumbnail_attempted: set[tuple[str, int]] = set()
-        self._thumbnail_replies: dict[QNetworkReply, _ThumbnailRead] = {}
+        self._thumbnail_replies: dict[str, _ThumbnailRead] = {}
         self._thumbnail_versions: dict[str, int] = {}
         self._tree_pending_paths: set[str] = set()
         # [FR-15/17] 比较会话化：session_id → 剩余队列 / 在途标记
@@ -151,8 +152,7 @@ class NativeFilesTransport(QObject):
         self._compare_busy: set[str] = set()
         self._compare_seq = 0
         self._rename_plan_ids: dict[str, str] = {}  # [FR-13] 会话 → 已确认计划
-        self._strip_replies: dict[QNetworkReply, str] = {}
-        self._plugin_replies: dict[QNetworkReply, str] = {}
+        self._strip_replies: dict[str, str] = {}
 
     # ------------------------------------------------------------ runtime
     def _runtime(self) -> FilesFacade | None:
@@ -165,8 +165,8 @@ class NativeFilesTransport(QObject):
             locator = FilesDataLocator.default()
             locator.ensure_layout()
             catalog = FilesCatalog(locator)
-            catalog.open()
             self._facade = FilesFacade(catalog)
+            self._owned_catalog = catalog
         except Exception as exc:  # CatalogSchemaMismatch 等：如实上报
             self._facade_error = f"{exc.__class__.__name__}: {exc}"
         return self._facade
@@ -184,82 +184,11 @@ class NativeFilesTransport(QObject):
     def _runtime_error_message(self) -> str:
         return f"素材数据不可用：{self._facade_error or '未知错误'}"
 
-    # ------------------------------------------------------------ 插件桥（F/G 前保留）
     def launch_plugin(self, plugin_id: str, endpoint: str, payload: dict[str, Any]) -> bool:
-        """Open an existing tool; HTTP acknowledgement is not window-ready proof.
-
-        [PR-05] 返回提交事实：True = HTTP 请求已发出；False = 同步拒绝
-        （通道关闭/插件不受支持/服务未就绪/同插件在途）。同步拒绝仍发
-        plugin_launch_finished 信号（在途去重除外），受理与否不撒谎。
-        """
-        if self._closed:
-            return False
-        if plugin_id not in ("format_factory", "image_factory", "shutdown_timer", "decode_benchmark") or endpoint != f"/api/plugin/{plugin_id}/launch":
-            self.plugin_launch_finished.emit(plugin_id, False, "此插件没有受支持的原生启动接口。")
-            return False
-        if plugin_id in self._plugin_replies.values():
-            return False
-        request = self._make_post(endpoint)
-        if request is None:
-            self.plugin_launch_finished.emit(plugin_id, False, "素材服务尚未就绪，无法打开插件。")
-            return False
-        reply = self._network.post(request, json.dumps(payload).encode("utf-8"))
-        self._plugin_replies[reply] = plugin_id
-        reply.finished.connect(lambda r=reply: self._finish_plugin_launch(r))
-        return True
-
-    def _finish_plugin_launch(self, reply: QNetworkReply) -> None:
-        plugin_id = self._plugin_replies.pop(reply, None)
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        error = reply.error()
-        try:
-            data = json.loads(bytes(reply.readAll()))
-        except (ValueError, UnicodeError):
-            data = None
-        reply.deleteLater()
-        if self._closed or plugin_id is None:
-            return
-        success = status == 200 and error == QNetworkReply.NetworkError.NoError and isinstance(data, dict) and data.get("status") == "ok"
-        message = "已提交打开请求；工具窗口由插件创建。" if success else "插件未接受打开请求，请检查插件状态或重试。"
-        self.plugin_launch_finished.emit(plugin_id, success, message)
-
-    def _make_request(self, endpoint: str, query: dict[str, str | int]) -> QNetworkRequest | None:
-        base = self._server_url()
-        if self._closed or not base or not self._token:
-            return None
-        url = QUrl(base)
-        if url.scheme() != "http" or url.host() not in ("127.0.0.1", "localhost", "::1"):
-            return None
-        url.setPath(endpoint)
-        url.setQuery(urlencode(query, quote_via=quote))
-        url.setFragment("")
-        request = QNetworkRequest(url)
-        request.setRawHeader(b"X-Auth-Token", self._token.encode("utf-8"))
-        request.setAttribute(
-            QNetworkRequest.Attribute.RedirectPolicyAttribute,
-            QNetworkRequest.RedirectPolicy.ManualRedirectPolicy,
-        )
-        request.setTransferTimeout(15000)
-        return request
-
-    def _make_post(self, endpoint: str) -> QNetworkRequest | None:
-        base = self._server_url()
-        if self._closed or not base or not self._token:
-            return None
-        url = QUrl(base)
-        if url.scheme() != "http" or url.host() not in ("127.0.0.1", "localhost", "::1"):
-            return None
-        url.setPath(endpoint)
-        url.setQuery("")
-        request = QNetworkRequest(url)
-        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
-        request.setRawHeader(b"X-Auth-Token", self._token.encode("utf-8"))
-        request.setAttribute(
-            QNetworkRequest.Attribute.RedirectPolicyAttribute,
-            QNetworkRequest.RedirectPolicy.ManualRedirectPolicy,
-        )
-        request.setTransferTimeout(15000)
-        return request
+        """Retired HTTP entry: tools must use the registered native command."""
+        if not self._closed:
+            self.plugin_launch_finished.emit(plugin_id, False, "请通过原生插件命令打开工具。")
+        return False
 
     # ------------------------------------------------------------ 目录树（facade）
     def load_tree(self, path: str) -> None:
@@ -280,7 +209,8 @@ class NativeFilesTransport(QObject):
             return
         self._tree_pending_paths.add(path)
         facade.tree(path, request_id=uuid.uuid4().hex,
-                    listener=lambda outcome, p=path: self._finish_tree(outcome, p))
+                    listener=lambda outcome, p=path: self._tree_done.emit(outcome, p)
+                    if not self._closed else None)
 
     def _finish_tree(self, outcome, path: str) -> None:
         self._tree_pending_paths.discard(path)
@@ -300,7 +230,7 @@ class NativeFilesTransport(QObject):
             return
         self.tree_loaded.emit(path, entries)
 
-    # ------------------------------------------------------------ 缩略图桥（E 前保留 HTTP）
+    # ------------------------------------------------------------ 本地缩略图
     def request_thumbnail(self, path: str, version: int = 0) -> None:
         """Request only painted items; one attempt per path/version/directory.
 
@@ -335,63 +265,37 @@ class NativeFilesTransport(QObject):
         )
 
     def _pump_thumbnails(self) -> None:
-        while self._thumbnail_queue and len(self._thumbnail_replies) < self.MAX_THUMBNAIL_CONCURRENCY:
+        from src.features.files.services.media import thumbnail_bytes
+        while (not self._closed and self._thumbnail_queue
+               and len(self._thumbnail_replies) < self.MAX_THUMBNAIL_CONCURRENCY):
             path, version = self._thumbnail_queue.popleft()
             if self._thumbnail_versions.get(path) != version:
                 continue
-            request = self._make_request("/api/thumb", {"path": path, "size": "small", "v": version})
-            if request is None:
+            facade = self._runtime()
+            if facade is None:
                 self.thumbnail_failed.emit(path)
                 continue
-            reply = self._network.get(request)
-            reply.setReadBufferSize(self.MAX_THUMBNAIL_BYTES + 1)
+            request_id = uuid.uuid4().hex
             state = _ThumbnailRead(path, version, self._generation)
-            self._thumbnail_replies[reply] = state
-            reply.metaDataChanged.connect(lambda r=reply, s=state: self._check_thumbnail_size(r, s))
-            reply.readyRead.connect(lambda r=reply, s=state: self._read_thumbnail(r, s))
-            reply.finished.connect(lambda r=reply, s=state: self._finish_thumbnail(r, s))
+            self._thumbnail_replies[request_id] = state
+            cancel = self._media_cancel
 
-    def _check_thumbnail_size(self, reply: QNetworkReply, state: _ThumbnailRead) -> None:
-        if state.generation != self._generation:
-            return
-        size = reply.header(QNetworkRequest.KnownHeaders.ContentLengthHeader)
-        if isinstance(size, int) and size > self.MAX_THUMBNAIL_BYTES:
-            state.oversized = True
-            reply.abort()
+            def deliver(outcome: Any, key: str = request_id) -> None:
+                if not self._closed:
+                    self._thumbnail_done.emit(key, outcome)
 
-    def _read_thumbnail(self, reply: QNetworkReply, state: _ThumbnailRead) -> None:
-        if state.generation != self._generation or state.oversized:
-            return
-        chunk = reply.read(self.MAX_THUMBNAIL_BYTES + 1 - len(state.data))
-        if chunk:
-            state.data.extend(bytes(chunk))
-        if len(state.data) > self.MAX_THUMBNAIL_BYTES:
-            state.oversized = True
-            reply.abort()
+            facade.run(key=f"thumbnail:{request_id}", request_id=request_id,
+                       work=lambda p=path, token=cancel: thumbnail_bytes(p, cancel=token),
+                       listener=deliver)
 
-    def _finish_thumbnail(self, reply: QNetworkReply, state: _ThumbnailRead) -> None:
-        if state.generation != self._generation:
-            reply.deleteLater()
+    def _finish_local_thumbnail(self, request_id: str, outcome: Any) -> None:
+        state = self._thumbnail_replies.pop(request_id, None)
+        if self._closed or state is None or state.generation != self._generation:
             return
-        self._read_thumbnail(reply, state)
-        self._thumbnail_replies.pop(reply, None)
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        content_type = str(reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader) or "").lower()
-        disposition = bytes(reply.rawHeader(b"Content-Disposition")).decode("latin-1").lower()
-        placeholder = "logo.webp" in disposition and state.path.replace("\\", "/").rsplit("/", 1)[-1].lower() != "logo.webp"
-        success = (not state.oversized and status == 200
-                   and reply.error() == QNetworkReply.NetworkError.NoError
-                   and content_type.startswith("image/") and bool(state.data)
-                   and not placeholder)
-        pending = (not state.oversized
-                   and reply.error() == QNetworkReply.NetworkError.NoError
-                   and (status == 202 or (status == 200 and placeholder)))
-        reply.deleteLater()
         if self._thumbnail_versions.get(state.path) == state.version:
-            if success:
-                self.thumbnail_loaded.emit(state.path, bytes(state.data))
-            elif pending:
-                self.thumbnail_pending.emit(state.path)
+            raw = outcome.result
+            if outcome.error is None and isinstance(raw, bytes) and 0 < len(raw) <= self.MAX_THUMBNAIL_BYTES:
+                self.thumbnail_loaded.emit(state.path, raw)
             else:
                 self.thumbnail_failed.emit(state.path)
         self._pump_thumbnails()
@@ -469,7 +373,11 @@ class NativeFilesTransport(QObject):
                     continue
                 result = facade.metadata.patch_metadata(
                     group, dict(patch), library_id=library_id, tags_op=tags_op)
-                items.extend(result.items)
+                if result.accepted:
+                    items.extend(result.items)
+                else:
+                    items.extend(ItemResult(path, ok=False, error_code=result.error_code,
+                                            message=result.message) for path in group)
             return items
 
         def _deliver(outcome) -> None:
@@ -489,13 +397,13 @@ class NativeFilesTransport(QObject):
                    work=_work, listener=_deliver)
 
     def _publish_metadata(self, job: _MetadataJob) -> None:
+        if job.snapshots:
+            self.metadata_snapshot.emit(dict(job.snapshots))
         if job.failures:
             self.metadata_failed.emit(list(job.paths), dict(job.patch),
                                       "；".join(sorted(set(job.failures))))
         else:
             self.metadata_applied.emit(list(job.paths), dict(job.patch), "已保存")
-            if job.snapshots:
-                self.metadata_snapshot.emit(dict(job.snapshots))
 
     # ------------------------------------------------------------ 文件任务（facade）
     def run_task(
@@ -518,9 +426,14 @@ class NativeFilesTransport(QObject):
         targets = list(targets)
         if operation == "mkdir" and options.get("name"):
             # UI 语义：目标目录 + 新名字 → 服务接收完整路径
-            targets = [os.path.join(targets[0], str(options.pop("name")))]
+            name = str(options.pop("name"))
+            if name in {".", ".."} or any(char in name for char in "/\\:\0"):
+                self.task_failed.emit("新文件夹名称不能包含路径。")
+                return
+            targets = [os.path.join(targets[0], name)]
         job_id = f"task-{operation}-{uuid.uuid4().hex[:10]}"
-        self._running_jobs.add(job_id)
+        cancel = CancelToken()
+        self._running_jobs[job_id] = cancel
         # 首发（completed=0）附完整调用参数：任务列表据此提供"重试失败项"
         self.task_started.emit({
             "job_id": job_id, "operation": operation,
@@ -528,26 +441,34 @@ class NativeFilesTransport(QObject):
             "targets": list(targets), "policy": str(policy),
             "options": dict(options or {})})
 
-        def _progress(done: int, total: int) -> None:
+        def _progress(done: int) -> None:
             if not self._closed:
                 self.task_started.emit({"job_id": job_id, "operation": operation,
-                                        "total": total, "completed": done})
+                                        "total": len(targets), "completed": done})
 
         def _work() -> list[ItemResult]:
             groups: dict[str, list[str]] = {}
+            trash_owners = {str(record.id): record.library_id for record in facade.tasks.list_trash()} if operation in {"restore", "purge"} else {}
             for raw in targets:
                 record = facade.libraries.library_for_path(raw)
-                groups.setdefault(record.library_id if record else "", []).append(nfc(raw))
+                library_id = trash_owners.get(str(raw), "") if operation in {"restore", "purge"} else record.library_id if record else ""
+                groups.setdefault(library_id, []).append(nfc(raw))
             items: list[ItemResult] = []
             for library_id, group in groups.items():
+                offset = len(items)
                 result = facade.tasks.start_task(
                     library_id, operation, group, options=options, policy=policy,
-                    job_id=job_id, progress=_progress)
-                items.extend(result.items)
+                    job_id=job_id, cancel=cancel,
+                    progress=lambda done, _total, base=offset: _progress(base + done))
+                if result.accepted:
+                    items.extend(result.items)
+                else:
+                    items.extend(ItemResult(path, ok=False, error_code=result.error_code,
+                                            message=result.message) for path in group)
             return items
 
         def _deliver(outcome) -> None:
-            self._running_jobs.discard(job_id)
+            self._running_jobs.pop(job_id, None)
             if self._closed:
                 return
             if outcome.error is not None:
@@ -563,7 +484,7 @@ class NativeFilesTransport(QObject):
             cancelled = any(item.error_code == "CANCELLED" for item in items)
             self.task_finished.emit({
                 "job_id": job_id, "operation": operation,
-                "total": len(items), "completed": len(successes),
+                "total": len(items), "completed": len(items),
                 "successes": successes, "failures": failures,
                 "cancelled": cancelled})
 
@@ -574,9 +495,9 @@ class NativeFilesTransport(QObject):
         """请求取消：协作式（条目/块边界生效）；终态仍由 task_finished 报告。"""
         if self._closed or not job_id:
             return
-        facade = self._runtime()
-        if facade is not None:
-            facade.tasks.cancel_task(job_id)  # 结果不广播：进度/终态自然反映取消
+        token = self._running_jobs.get(job_id)
+        if token is not None:
+            token.request()
 
     def active_task_jobs(self) -> list[str]:
         """[FR-16] 当前仍在执行的任务 id（任务列表/取消入口用）。"""
@@ -695,22 +616,16 @@ class NativeFilesTransport(QObject):
     def cancel_scan(self) -> None:
         if self._scan_cancel is not None:
             self._scan_cancel.request()
+        for token in tuple(self._running_jobs.values()):
+            token.request()
+        self._running_jobs.clear()
 
     def retry_thumbnail(self, path: str, version: int = 0) -> None:
-        request = self._make_post("/api/thumb/retry")
-        if request is None:
-            self.thumbnail_retry_done.emit(path, False)
-            return
-        reply = self._network.post(request, json.dumps({"path": path}).encode("utf-8"))
-        reply.finished.connect(lambda r=reply, p=path: self._finish_thumbnail_retry(r, p))
-
-    def _finish_thumbnail_retry(self, reply: QNetworkReply, path: str) -> None:
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        error = reply.error()
-        reply.deleteLater()
         if self._closed:
             return
-        self.thumbnail_retry_done.emit(path, status == 200 and error == QNetworkReply.NetworkError.NoError)
+        self.release_thumbnail(path)
+        self.thumbnail_retry_done.emit(path, True)
+        self.request_thumbnail(path, version)
 
     # ------------------------------------------------------------ 批量重命名（facade）
     def preview_batch_rename(self, files: list[str], mode: str, params: dict[str, Any],
@@ -840,28 +755,36 @@ class NativeFilesTransport(QObject):
                    work=lambda: read_file_bytes(path, self.MAX_PREVIEW_BYTES),
                    listener=_deliver)
 
-    # ------------------------------------------------------------ 悬停胶片条桥（E 前保留 HTTP）
+    # ------------------------------------------------------------ 本地悬停胶片条
     def request_strip(self, path: str, duration: float = 0.0) -> None:
-        if self._closed:
+        from src.features.files.services.media import thumbnail_bytes
+        if self._closed or path in self._strip_replies.values():
             return
-        request = self._make_request("/api/thumb/strip", {"path": path, "duration": max(0.0, float(duration or 0.0))})
-        if request is None:
+        if len(self._strip_replies) >= 2:
             self.strip_failed.emit(path)
             return
-        reply = self._network.get(request)
-        self._strip_replies[reply] = path
-        reply.finished.connect(lambda r=reply: self._finish_strip(r))
+        facade = self._runtime()
+        if facade is None:
+            self.strip_failed.emit(path)
+            return
+        request_id = uuid.uuid4().hex
+        self._strip_replies[request_id] = path
+        cancel = self._media_cancel
 
-    def _finish_strip(self, reply: QNetworkReply) -> None:
-        path = self._strip_replies.pop(reply, "")
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        raw = bytes(reply.readAll())
-        error = reply.error()
-        reply.deleteLater()
+        def deliver(outcome: Any) -> None:
+            if not self._closed:
+                self._strip_done.emit(request_id, outcome)
+
+        facade.run(key=f"strip:{request_id}", request_id=request_id,
+                   work=lambda: thumbnail_bytes(path, strip=True, cancel=cancel),
+                   listener=deliver)
+
+    def _finish_local_strip(self, request_id: str, outcome: Any) -> None:
+        path = self._strip_replies.pop(request_id, "")
         if self._closed or not path:
             return
-        if status == 200 and error == QNetworkReply.NetworkError.NoError and raw:
-            self.strip_loaded.emit(path, raw)
+        if outcome.error is None and isinstance(outcome.result, bytes) and outcome.result:
+            self.strip_loaded.emit(path, outcome.result)
         else:
             self.strip_failed.emit(path)
 
@@ -1141,8 +1064,14 @@ class NativeFilesTransport(QObject):
                 return
             self.preview_loaded.emit(path, bytes(outcome.result))
 
-        facade.read_file(path, request_id=uuid.uuid4().hex, listener=_deliver,
-                         max_bytes=self.MAX_PREVIEW_BYTES)
+        request_id = uuid.uuid4().hex
+        if path.lower().endswith(".toos"):
+            from src.features.files.services.media import thumbnail_bytes
+            facade.run(key="preview:" + identity_key(path), request_id=request_id,
+                       work=lambda: thumbnail_bytes(path), listener=_deliver)
+        else:
+            facade.read_file(path, request_id=request_id, listener=_deliver,
+                             max_bytes=self.MAX_PREVIEW_BYTES)
 
     def cancel_preview(self) -> None:
         self._preview_seq += 1
@@ -1151,39 +1080,45 @@ class NativeFilesTransport(QObject):
     def cancel(self) -> None:
         self._generation += 1
         self._nav_generation += 1
-        thumbnails = list(self._thumbnail_replies)
+        self._media_cancel.set()
+        self._media_cancel = threading.Event()
         self._thumbnail_replies.clear()
+        self._strip_replies.clear()
         self._thumbnail_queue.clear()
         self._thumbnail_attempted.clear()
         self._thumbnail_versions.clear()
-        for thumbnail in thumbnails:
-            thumbnail.abort()
 
     def shutdown(self) -> None:
-        # [FR-17] 先标记关闭，再取消全部在途工作：关闭后的完成回调
-        # 一律静默丢弃（比较/元数据/任务的迟到结果不再发信号）
+        if self._closed:
+            return
         self._closed = True
-        for reply in list(self._plugin_replies):
-            reply.abort()
-            reply.deleteLater()
-        self._plugin_replies.clear()
         for session_id in list(self._compare_sessions):
             self.cancel_compare(session_id)
         self._compare_sessions.clear()
         self._compare_busy.clear()
-        for reply in list(self._strip_replies):
-            reply.abort()
-        self._strip_replies.clear()
         if self._scan_cancel is not None:
             self._scan_cancel.request()
-        facade, self._facade = self._facade, None
-        if facade is not None:
-            try:
-                facade.shutdown()  # 取消未开始的工作并回收 worker
-            except Exception:
-                pass
         self.cancel()
+        self._media_cancel.set()
         self.cancel_preview()
         self._tree_pending_paths.clear()
-        for reply in list(self._thumbnail_replies):
-            reply.abort()
+        facade, self._facade = self._facade, None
+        if facade is not None:
+            facade.shutdown()
+            catalog, self._owned_catalog = self._owned_catalog, None
+            drained = self._drained
+
+            def close_catalog() -> None:
+                try:
+                    if catalog is not None:
+                        catalog.close()
+                finally:
+                    drained.set()
+
+            facade.when_idle(close_catalog)
+        else:
+            self._drained.set()
+
+    def wait_for_shutdown(self, timeout: float) -> bool:
+        """Allow process exit to wait after the GUI event loop has stopped."""
+        return self._drained.wait(timeout)

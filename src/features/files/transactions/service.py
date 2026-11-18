@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+import sqlite3
 
-from src.features.files.repository.catalog import FilesCatalog, nfc
+from src.features.files.repository.catalog import CatalogError, FilesCatalog, nfc
 from src.features.files.transactions.journal import OperationJournal
 from src.features.files.transactions.ops import (
     CancelToken,
@@ -93,7 +94,16 @@ class FileOperationService:
                               intended_destination=Path(destination_dir) / Path(source).name)
 
     def _transfer(self, op: str, library_id: str, source: str | Path,
-                  executor, *, intended_destination: Path | None = None) -> ItemOutcome:
+                  executor: Callable[[], Any], *, intended_destination: Path | None = None) -> ItemOutcome:
+        # Shared with maintenance: no backup can observe a published filesystem
+        # rename without its catalog propagation (or explicit recovery record).
+        with self._catalog._lock:
+            return self._transfer_locked(op, library_id, source, executor,
+                                         intended_destination=intended_destination)
+
+    def _transfer_locked(self, op: str, library_id: str, source: str | Path,
+                         executor: Callable[[], Any], *,
+                         intended_destination: Path | None) -> ItemOutcome:
         handle = None
         if self._journal is not None:
             args = {"source": str(source)}
@@ -103,7 +113,9 @@ class FileOperationService:
                 args["destination"] = str(intended_destination)
             handle = self._journal.begin(
                 library_id, op, args,
-                idempotency_key=f"{op}:{nfc(source)}",
+                # A pathname is not a request identity. A later file at the same
+                # name, or a different destination, must not replay this result.
+                idempotency_key="",
             )
             if handle.replayed:
                 existing = self._journal.get(handle.job_id) or {}
@@ -119,14 +131,24 @@ class FileOperationService:
             result = executor()
             relations = 0
             if result.ok and op != "copy":
-                relations = self._propagation.on_moved(
-                    library_id, result.source, result.destination)
+                if self._journal is not None:
+                    self._journal.record(op, "fs_published", {
+                        "source": result.source, "destination": result.destination})
+                try:
+                    with self._catalog._write():
+                        relations = self._propagation.on_moved(
+                            library_id, result.source, result.destination)
+                except (sqlite3.Error, CatalogError, OSError) as exc:
+                    outcome = ItemOutcome(result.source, result.destination, "failed",
+                                          "METADATA_PENDING_RECOVERY", str(exc))
+                    return outcome
             outcome = ItemOutcome(result.source, result.destination, result.status,
                                   result.code, result.message, relations)
             return outcome
         finally:
             if self._journal is not None and outcome is not None:
-                state = ("completed" if outcome.ok else
+                state = ("pending_recovery" if outcome.code == "METADATA_PENDING_RECOVERY" else
+                         "completed" if outcome.ok else
                          "cancelled" if outcome.status == "cancelled" else "failed")
                 self._journal.finish(state, outcome.code)
 
@@ -134,7 +156,8 @@ class FileOperationService:
 
     def mkdir(self, target: str | Path) -> ItemOutcome:
         """新建目录（无身份迁移）；冲突/类型错误走统一词表。"""
-        result = self._ops.mkdir(target)
+        with self._catalog._lock:
+            result = self._ops.mkdir(target)
         return ItemOutcome(result.source, result.destination, result.status,
                            result.code, result.message)
 
@@ -143,4 +166,7 @@ class FileOperationService:
 
     def restore(self, library_id: str, record_id: int, *,
                 policy: str = "error") -> TrashOutcome:
+        record = self.trash_service.record_for(record_id)
+        if record is not None and record.library_id != library_id:
+            return TrashOutcome(str(record_id), "failed", "LIBRARY_MISMATCH", "回收站记录属于另一素材库")
         return self.trash_service.restore(record_id, policy=policy)

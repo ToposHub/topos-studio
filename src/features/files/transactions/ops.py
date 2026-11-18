@@ -21,8 +21,11 @@
 from __future__ import annotations
 
 import errno
+import ctypes
 import os
+import shutil
 import stat
+import sys
 import threading
 import time
 import unicodedata
@@ -134,6 +137,43 @@ def same_volume(a: Path, b: Path) -> bool:
         return False
 
 
+def _identity(value: os.stat_result) -> tuple[int, int]:
+    return value.st_dev, value.st_ino
+
+
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    """Ask the kernel to publish files or directories without replacing names."""
+    if sys.platform == "win32":
+        os.rename(source, destination)  # Windows MoveFile rejects existing names.
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        call = libc.renamex_np
+        flags = 0x00000004  # RENAME_EXCL
+        call.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        result = call(os.fsencode(source), os.fsencode(destination), flags)
+    else:
+        call = getattr(libc, "renameat2", None)
+        if call is None:
+            raise OpError("ATOMIC_RENAME_UNAVAILABLE", "平台缺少原子 no-replace rename")
+        call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        result = call(-100, os.fsencode(source), -100, os.fsencode(destination), 1)
+    if result != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def _reject_link_ancestors(path: Path) -> bool:
+    """Reject lexical symlink ancestors rather than resolving away evidence."""
+    absolute = Path(os.path.abspath(path))
+    return any(parent.is_symlink() for parent in (absolute, *absolute.parents))
+
+
+def rename_no_replace(source: Path, destination: Path) -> None:
+    """Public atomic no-replace publication used by maintenance transactions."""
+    _rename_noreplace(Path(source), Path(destination))
+
+
 class FileTransactionService:
     """统一安全文件操作入口；线程内串行由目标 claim 锁保证。"""
 
@@ -165,7 +205,7 @@ class FileTransactionService:
                on_identity_moved: Callable[[str, str], None] | None = None) -> OpResult:
         """同目录改名。new_name 只允许末级名字（不含路径分隔符）。"""
         src = Path(source)
-        if os.sep in new_name or (os.altsep and os.altsep in new_name):
+        if not new_name or new_name in (".", "..") or "\0" in new_name or "/" in new_name or "\\" in new_name:
             return OpResult(str(src), status="failed", code="BAD_NAME",
                             message="new_name 必须是末级名字")
         destination = src.parent / new_name
@@ -221,6 +261,16 @@ class FileTransactionService:
         if stat.S_ISLNK(source_stat.st_mode):
             return OpResult(str(src), status="failed", code="SOURCE_SYMLINK",
                             message="拒绝操作符号链接源（不解引用）")
+        if _reject_link_ancestors(src.parent) or _reject_link_ancestors(destination.parent):
+            return OpResult(str(src), str(destination), status="failed", code="PARENT_SYMLINK",
+                            message="拒绝穿过符号链接父目录")
+        if not (stat.S_ISREG(source_stat.st_mode) or stat.S_ISDIR(source_stat.st_mode)):
+            return OpResult(str(src), str(destination), status="failed", code="SOURCE_SPECIAL",
+                            message="只允许普通文件或目录")
+        target_stat = _lstat(destination)
+        if target_stat is not None and _identity(target_stat) == _identity(source_stat):
+            return OpResult(str(src), str(destination), status="failed", code="SAME_FILE",
+                            message="源与目标是同一文件")
         is_dir = stat.S_ISDIR(source_stat.st_mode)
         if is_dir:
             # 目录重叠：目标在源子树内（含源自身）会造成自引用/数据丢失
@@ -273,7 +323,7 @@ class FileTransactionService:
         try:
             if is_dir:
                 self._transfer_dir(src, final, remove_source=remove_source, cancel=cancel)
-            elif same_volume(src, final):
+            elif remove_source and same_volume(src, final):
                 self._transfer_file_same_volume(
                     src, final, source_stat, remove_source=remove_source,
                     overwrite=(policy == "overwrite"))
@@ -289,6 +339,8 @@ class FileTransactionService:
                             message=str(exc))
         if remove_source and on_identity_moved is not None:
             on_identity_moved(_nfc(src), _nfc(final))
+        self._record("move" if remove_source else "copy", "fs_published",
+                     {"source": str(src), "destination": str(final)})
         return OpResult(str(src), str(final))
 
     # ------------------------------------------------------------ 文件：可证明 no-replace
@@ -302,6 +354,9 @@ class FileTransactionService:
         overwrite 策略才允许 os.replace（原子替换，仅文件）。
         """
         try:
+            current = os.lstat(src)
+            if _identity(current) != _identity(source_stat):
+                raise OpError("SOURCE_CHANGED", "源在提交前被替换", source=str(src))
             if overwrite:
                 # replace 自身原子且已消费源；无法回退，发布前不再做
                 # 可逆校验（旧目标内容按策略让位）
@@ -309,26 +364,21 @@ class FileTransactionService:
                 self._record("move" if remove_source else "copy", "done",
                              {"source": str(src), "destination": str(dst), "policy": "overwrite"})
                 return
-            os.link(src, dst)
+            _rename_noreplace(src, dst)
         except FileExistsError as exc:
             raise OpError("DEST_EXISTS", "目标已存在",
                           source=str(src), destination=str(dst)) from exc
         except OSError as exc:
             raise _map_oserror(exc, str(src), str(dst)) from exc
-        # link 后核验 inode 一致，防御 link 与 unlink 之间源被替换
-        if os.stat(dst).st_ino != source_stat.st_ino:  # pragma: no cover
-            os.unlink(dst)
-            raise OpError("IO_ERROR", "发布后 inode 不一致，已回退",
+        if _identity(os.lstat(dst)) != _identity(source_stat):
+            # Preserve the raced object; never unlink a name we do not own.
+            try:
+                _rename_noreplace(dst, src)
+            except OSError:
+                pass
+            raise OpError("SOURCE_CHANGED", "源在提交时被替换，保留实体供恢复",
                           source=str(src), destination=str(dst))
         if remove_source:
-            try:
-                os.unlink(src)
-            except OSError as exc:  # 极小窗口：unlink 失败则回滚发布的链接
-                try:
-                    os.unlink(dst)
-                except OSError:
-                    pass
-                raise _map_oserror(exc, str(src), str(dst)) from exc
             self._record("move", "done", {"source": str(src), "destination": str(dst)})
         else:
             self._record("copy", "done", {"source": str(src), "destination": str(dst)})
@@ -341,6 +391,7 @@ class FileTransactionService:
         中断/失败清理 staging；取消发生在块边界，不留半成品目标。
         """
         token = f"{os.getpid()}-{threading.get_ident()}-{time.monotonic_ns():x}"
+        source_identity = os.lstat(src)
         tmp = dst.parent / f".{dst.name}.{token}{TMP_SUFFIX}"
         self._record("copy", "staged", {"source": str(src), "tmp": str(tmp)})
         try:
@@ -350,7 +401,7 @@ class FileTransactionService:
                 if overwrite:
                     os.replace(tmp, dst)
                 else:
-                    os.link(tmp, dst)  # 同目录：link 可用且内核级 no-replace
+                    _rename_noreplace(tmp, dst)
             except FileExistsError as exc:
                 raise OpError("DEST_EXISTS", "目标已存在",
                               source=str(src), destination=str(dst)) from exc
@@ -367,6 +418,9 @@ class FileTransactionService:
                 pass  # 清理失败不掩盖主错误
         if remove_source:
             try:
+                if _identity(os.lstat(src)) != _identity(source_identity):
+                    raise OpError("SOURCE_CHANGED", "复制完成但源身份已变化，保留源与目标供恢复",
+                                  source=str(src), destination=str(dst))
                 os.unlink(src)
             except OSError as exc:
                 raise _map_oserror(exc, str(src), str(dst)) from exc
@@ -378,9 +432,10 @@ class FileTransactionService:
         if stat.S_ISLNK(source_stat.st_mode):  # 拷贝期间源被换成链接：拒绝
             raise OpError("SOURCE_SYMLINK", "拷贝期间源被替换为符号链接",
                           source=str(src))
-        with open(src, "rb") as fin, open(tmp, "xb") as fout:
+        descriptor = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as fin, open(tmp, "xb") as fout:
             opened_stat = os.fstat(fin.fileno())
-            if opened_stat.st_ino != source_stat.st_ino:  # 检查与使用之间被换
+            if _identity(opened_stat) != _identity(source_stat) or not stat.S_ISREG(opened_stat.st_mode):
                 raise OpError("IO_ERROR", "源在打开时被替换",
                               source=str(src), destination=str(tmp))
             while True:
@@ -393,6 +448,9 @@ class FileTransactionService:
                 fout.write(chunk)
             fout.flush()
             os.fsync(fout.fileno())
+            finished_stat = os.fstat(fin.fileno())
+            if (finished_stat.st_size, finished_stat.st_mtime_ns) != (opened_stat.st_size, opened_stat.st_mtime_ns):
+                raise OpError("SOURCE_CHANGED", "复制期间源内容变化", source=str(src))
         os.utime(tmp, (source_stat.st_atime, source_stat.st_mtime))
 
     # ------------------------------------------------------------ 目录：检查+rename+核验
@@ -410,13 +468,23 @@ class FileTransactionService:
                           source=str(src), destination=str(dst))
         if cancel is not None and cancel.requested:
             raise OpError("CANCELLED", "取消请求", source=str(src))
-        if not remove_source:  # 目录 copy
-            self._record("copy_dir", "staged", {"source": str(src), "tmp": str(dst)})
-            self._copy_dir_payload(src, dst, cancel=cancel)
+        if not remove_source or not same_volume(src, dst):
+            tmp = dst.parent / f".{dst.name}.{time.monotonic_ns():x}{TMP_SUFFIX}"
+            self._record("copy_dir", "staged", {"source": str(src), "tmp": str(tmp)})
+            try:
+                self._copy_dir_payload(src, tmp, cancel=cancel)
+                _rename_noreplace(tmp, dst)
+            except OSError as exc:
+                raise _map_oserror(exc, str(src), str(dst)) from exc
+            finally:
+                if tmp.exists():
+                    _remove_tree_best_effort(tmp)
+            if remove_source:
+                shutil.rmtree(src)
             return
         self._record("move_dir", "renaming", {"source": str(src), "destination": str(dst)})
         try:
-            os.rename(src, dst)
+            _rename_noreplace(src, dst)
         except OSError as exc:
             raise _map_oserror(exc, str(src), str(dst)) from exc
         if _lstat(src) is not None or _lstat(dst) is None:  # pragma: no cover
@@ -434,7 +502,7 @@ class FileTransactionService:
                     child_src = src / entry.name
                     child_dst = dst / entry.name
                     if entry.is_symlink():
-                        continue  # 不复制链接（与源链接拒绝政策一致）
+                        raise OpError("SOURCE_SYMLINK", "目录含符号链接，拒绝部分复制", source=str(child_src))
                     if entry.is_dir(follow_symlinks=False):
                         self._copy_dir_payload(child_src, child_dst, cancel=cancel)
                     else:

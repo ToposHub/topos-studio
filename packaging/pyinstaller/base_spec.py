@@ -163,7 +163,9 @@ def generate_analysis(
     extra_hidden_imports = extra_hidden_imports or []
 
     # Build the list of excluded modules
-    excludes = get_exclude_modules(exclude_feature_dirs) + extra_excludes
+    excludes = get_exclude_modules(exclude_feature_dirs) + extra_excludes + [
+        "file_explorer", "external.file_explorer", "src.app.integrations.file_explorer",
+    ]
 
     # Common hidden imports that PyInstaller may miss
     hidden_imports = [
@@ -178,6 +180,10 @@ def generate_analysis(
         "src.app.app_context",
         "src.app.main_window",
         "src.main",
+        "src.features.files.services.media",
+        "src.features.files.services.maintenance",
+        "src.features.files.builtin_plugins",
+        "src.features.files.media_providers",
     ] + extra_hidden_imports
 
     # Set the product mode env var so the built app knows which product it is.
@@ -188,6 +194,8 @@ def generate_analysis(
     entry_path = os.path.join(PROJECT_ROOT, entry_module.replace(".", os.sep) + ".py")
 
     datas = [
+        (os.path.join(PROJECT_ROOT, "src", "features", "files", "builtin_manifests"),
+         "src/features/files/builtin_manifests"),
         # Include shared i18n locale files
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "i18n", "locales"),

@@ -10,6 +10,11 @@
 from __future__ import annotations
 
 import hashlib
+import copy
+import os
+import secrets
+import stat
+import threading
 import re
 import time
 from dataclasses import dataclass, field
@@ -34,11 +39,15 @@ class SourceIdentity:
     path: str
     size: int
     mtime_ns: int
+    device: int
+    inode: int
+    mode: int
 
     @classmethod
     def capture(cls, path: Path) -> "SourceIdentity":
         stat = path.lstat()
-        return cls(path=nfc(path), size=stat.st_size, mtime_ns=stat.st_mtime_ns)
+        return cls(path=nfc(path), size=stat.st_size, mtime_ns=stat.st_mtime_ns,
+                   device=stat.st_dev, inode=stat.st_ino, mode=stat.st_mode)
 
     def matches_disk(self) -> bool:
         try:
@@ -46,7 +55,9 @@ class SourceIdentity:
         except OSError:
             return False
         return (current.st_size == self.size
-                and current.st_mtime_ns == self.mtime_ns)
+                and current.st_mtime_ns == self.mtime_ns
+                and current.st_dev == self.device and current.st_ino == self.inode
+                and current.st_mode == self.mode)
 
 
 @dataclass
@@ -66,6 +77,7 @@ class BatchPlan:
     items: list[PlanItem] = field(default_factory=list)
     identities: dict[str, SourceIdentity] = field(default_factory=dict)
     consumed: bool = False
+    library_id: str = ""
 
     @property
     def has_conflicts(self) -> bool:
@@ -102,6 +114,7 @@ class BatchRenamePlanner:
         self._catalog = catalog
         self._service = service or FileOperationService(catalog)
         self._plans: dict[str, BatchPlan] = {}
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------ preview
 
@@ -114,15 +127,17 @@ class BatchRenamePlanner:
         if len(sources) > _MAX_ITEMS:
             raise PlanError("TOO_MANY", f"单批上限 {_MAX_ITEMS}")
 
-        paths = [Path(s) for s in sources]
+        paths = [Path(os.path.abspath(s)) for s in sources]
         for path in paths:
             if not path.exists():
                 raise PlanError("SOURCE_MISSING", f"源不存在: {path.name}")
+            if path.is_symlink():
+                raise PlanError("SOURCE_SYMLINK", "批改名不接受符号链接")
         if len({nfc(p) for p in paths}) != len(paths):
             raise PlanError("DUPLICATE_SOURCE", "源列表存在重复项")
 
-        plan = BatchPlan(plan_id=self._fingerprint(paths, mode, options),
-                         version=PLAN_VERSION, mode=mode)
+        plan = BatchPlan(plan_id=secrets.token_hex(16),
+                         version=PLAN_VERSION, mode=mode, library_id=library_id)
         proposed_names = self._propose(library_id, paths, mode, options)
 
         taken = {p.name for p in paths}  # 批内现状名参与冲突判断
@@ -131,16 +146,19 @@ class BatchRenamePlanner:
                             proposed_name=proposed)
             if proposed in taken and proposed != path.name:
                 item.conflict, item.reason = True, "批内目标重名"
-            elif (path.parent / proposed).exists() and proposed != path.name:
+            elif ((path.parent / proposed).exists() or (path.parent / proposed).is_symlink()) and proposed != path.name:
                 item.conflict, item.reason = True, "目标已存在于磁盘"
-            elif "/" in proposed or proposed in ("", ".", ".."):
+            elif "/" in proposed or "\\" in proposed or "\0" in proposed or proposed in ("", ".", ".."):
                 item.conflict, item.reason = True, "非法名字"
             else:
                 taken.add(proposed)
             plan.items.append(item)
             plan.identities[item.source] = SourceIdentity.capture(path)
-        self._plans[plan.plan_id] = plan
-        return plan
+        with self._lock:
+            if len(self._plans) >= 128:
+                self._plans.pop(next(iter(self._plans)))
+            self._plans[plan.plan_id] = plan
+        return copy.deepcopy(plan)
 
     def _propose(self, library_id: str, paths: list[Path], mode: str,
                  options: dict[str, Any]) -> list[str]:
@@ -186,11 +204,17 @@ class BatchRenamePlanner:
     # ------------------------------------------------------------ execute
 
     def execute(self, plan_id: str, library_id: str) -> list[ItemOutcome]:
+        with self._catalog._lock, self._lock:
+            return self._execute_locked(plan_id, library_id)
+
+    def _execute_locked(self, plan_id: str, library_id: str) -> list[ItemOutcome]:
         plan = self._plans.get(plan_id)
         if plan is None:
             raise PlanError("PLAN_UNKNOWN", "计划不存在（会话内有效，请重新预览）")
         if plan.consumed:
             raise PlanError("PLAN_CONSUMED", "计划已执行，不得重复执行")
+        if plan.library_id != library_id:
+            raise PlanError("LIBRARY_MISMATCH", "计划不属于当前素材库")
         if plan.version != PLAN_VERSION:
             raise PlanError("PLAN_VERSION", "计划版本不被支持")
         if plan.has_conflicts:
@@ -203,6 +227,11 @@ class BatchRenamePlanner:
                 "STALE_PLAN",
                 f"{len(stale)} 个源在预览后发生变化（如 {Path(stale[0]).name}），"
                 "请重新预览生成新计划")
+
+        for item in plan.items:
+            target = Path(item.source).parent / item.proposed_name
+            if item.proposed_name != item.current_name and (target.exists() or target.is_symlink()):
+                raise PlanError("STALE_PLAN", "预览后目标被占用，请重新预览")
 
         plan.consumed = True  # 先占位：执行中途失败也不允许原样重放
         outcomes: list[ItemOutcome] = []
@@ -218,4 +247,5 @@ class BatchRenamePlanner:
     # ------------------------------------------------------------ 查询
 
     def get(self, plan_id: str) -> BatchPlan | None:
-        return self._plans.get(plan_id)
+        with self._lock:
+            return copy.deepcopy(self._plans.get(plan_id))
