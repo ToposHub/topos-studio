@@ -200,8 +200,15 @@ def decode_audio_range(
     sample_rate: int,
     *,
     cancel_check: Optional[Callable[[], bool]] = None,
+    channel_map: Optional[tuple] = None,
 ) -> Optional[np.ndarray]:
     """解码源域 ``[start, end)`` 为工作采样率平面 float32。
+
+    P0 · 声道域合同（2026-11-19 计划）：解码保留源布局与通道名——
+    >2ch 不再由 PyAV 重采样器 naive 混成立体声，Nch 解出后先做可选的
+    源 patch 选道（``channel_map``，Nch 域——poly WAV 逐声道选择），
+    再经标准 BS.775 矩阵折到 ≤2ch 工作域（LFE 默认排除）。Clip Editor
+    取样、预渲染缓存与波形共用本路径（同一通道域）。
 
     与 WaveformExtractorWorker 相同的 PyAV 管线：seek 到入点，重采样到
     目标速率（fltp），按精确采样数裁剪 preroll/尾部。协作式取消——取消
@@ -229,6 +236,8 @@ def decode_audio_range(
         # 会引入样本漂移；片段取样受 300 s 上限约束，从头解码并精确跳过
         # preroll 更可靠（脉冲位置容差 1 sample 的验收依赖这一点）。
         resampler = None
+        mono_resampler = None
+        source_channels = 0
         blocks: list[np.ndarray] = []
         collected = 0
         # 先丢到入点前的 preroll，再收满所需采样。
@@ -236,27 +245,66 @@ def decode_audio_range(
         for frame in container.decode(stream):
             if cancel_check is not None and cancel_check():
                 return None
-            if resampler is None:
+            if resampler is None and mono_resampler is None:
                 source_channels = len(frame.layout.channels)
-                resampler = av.AudioResampler(
-                    # 平面 float32：to_ndarray() 每声道一行；>2ch 由
-                    # resampler 按布局混到 stereo。
-                    format="fltp",
-                    layout="mono" if source_channels == 1 else "stereo",
-                    rate=sample_rate,
-                )
-            try:
-                resampled = resampler.resample(frame)
-            except Exception:  # noqa: BLE001 - 个别帧重采样失败时跳过
-                continue
-            if resampled is None:
-                continue
-            if not isinstance(resampled, (list, tuple)):
-                resampled = [resampled]
-            for out in resampled:
+                # P0：保留源布局解码（>2ch 不在重采样阶段 naive 混声）；
+                # 工作域折叠在解码完成后走我们的 BS.775 矩阵。无名多声道
+                # 布局（无 channel mask 的 WAV）会让 PyAV 重采样器崩溃——
+                # >2ch 一律逐声道以 mono 重采样（声道数无关、率精确）。
+                if source_channels <= 2:
+                    resampler = av.AudioResampler(
+                        format="fltp",
+                        layout="mono" if source_channels == 1 else "stereo",
+                        rate=sample_rate)
+                else:
+                    mono_resampler = av.AudioResampler(
+                        format="fltp", layout="mono", rate=sample_rate)
+            if resampler is not None:
+                try:
+                    resampled = resampler.resample(frame)
+                except Exception:  # noqa: BLE001 - 个别帧重采样失败时跳过
+                    continue
+                if resampled is None:
+                    continue
+                if not isinstance(resampled, (list, tuple)):
+                    resampled = [resampled]
+                chunks = [
+                    out.to_ndarray() for out in resampled
+                ]
+            else:
+                # >2ch：packed → (chs, n) float32，逐声道 mono 重采样。
+                try:
+                    raw = frame.to_ndarray()
+                except Exception:  # noqa: BLE001
+                    continue
+                if raw.ndim == 1:
+                    raw = raw.reshape(1, -1)
+                if raw.dtype != np.float32:
+                    raw = raw.astype(np.float32) / 32768.0
+                if raw.shape[0] == 1:
+                    raw = raw.reshape(-1, source_channels).T
+                try:
+                    per_channel = []
+                    for ch in range(source_channels):
+                        mono_row = np.ascontiguousarray(
+                            raw[ch], dtype=np.float32).reshape(1, -1)
+                        mono_frame = av.AudioFrame.from_ndarray(
+                            mono_row, format="fltp", layout="mono")
+                        mono_frame.sample_rate = frame.sample_rate or sample_rate
+                        res_ch = mono_resampler.resample(mono_frame)
+                        if res_ch is None:
+                            continue
+                        if isinstance(res_ch, (list, tuple)):
+                            res_ch = res_ch[0]
+                        per_channel.append(res_ch.to_ndarray()[0])
+                    if not per_channel:
+                        continue
+                    chunks = [np.stack(per_channel)]
+                except Exception:  # noqa: BLE001
+                    continue
+            for data in chunks:
                 if cancel_check is not None and cancel_check():
                     return None
-                data = out.to_ndarray()
                 if data.ndim == 1:
                     data = data.reshape(1, -1)
                 if skip > 0:
@@ -276,6 +324,15 @@ def decode_audio_range(
         pcm = np.concatenate(blocks, axis=1)[:, :wanted]
         if pcm.shape[1] == 0:
             return None
+        # P0 · 声道域：Nch 域源 patch 选道（选不出=直通）→ BS.775 矩阵
+        # 折到 ≤2ch 工作域（LFE 默认排除）。
+        if channel_map:
+            from src.features.edit.core.source_patch import SourcePatchSpec
+            pcm = SourcePatchSpec(
+                audio_channel_map=tuple(channel_map)).select_channels(pcm)
+        if pcm.shape[0] > 2:
+            from src.features.edit.core.channel_layout import adapt_channels
+            pcm = adapt_channels(pcm, 2)
         return np.ascontiguousarray(pcm, dtype=np.float32)
     except Exception as exc:  # noqa: BLE001 - 解码失败按“无 PCM”上报
         logger.warning("clip pcm decode failed for %s: %s", path, exc)

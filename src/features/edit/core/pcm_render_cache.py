@@ -112,6 +112,11 @@ class PreRenderSpec:
 
     ``total_samples`` 是源解码区间长度；``output_samples`` 是整栈烘焙后的
     长度（改长度步骤生效后的新长度；无改长度步骤时与 total 相同）。
+
+    P0 · 声道域（2026-11-19 计划）：``channel_layout``（源布局名）、
+    ``source_channel_map``（构建时生效的源 patch 选道）与处理前后域标签
+    参与缓存键——布局/patch 任何变化生成新 key；``domain_before/after``
+    供交付标识（如 "2.0 upmix of 5.1"）与诊断使用。
     """
 
     source_fingerprint: str
@@ -122,6 +127,10 @@ class PreRenderSpec:
     output_samples: int = -1  # -1 = 无改长度步骤（与 total_samples 一致）
     start_sample: int = 0
     reverse: bool = False
+    channel_layout: str = ""
+    source_channel_map: tuple = ()
+    domain_before: str = ""
+    domain_after: str = ""
 
     @property
     def expected_output_samples(self) -> int:
@@ -135,6 +144,8 @@ class PreRenderSpec:
             self.channel_count, self.start_sample, self.total_samples, self.reverse,
             self.steps_signature,
             self.expected_output_samples,
+            self.channel_layout, self.source_channel_map,
+            self.domain_before, self.domain_after,
         ))
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
@@ -566,7 +577,10 @@ class PreRenderBuildPlan:
     reverse: bool = False
     expected_channels: int = 2
     blocked_reason: Optional[str] = None
-    diagnostics: tuple = field(default=())
+    diagnostics: tuple = field(default_factory=tuple)
+    channel_layout: str = ""      # P0：源布局名（交付标识/键）
+    source_channel_map: tuple = ()  # P0：构建时生效的源 patch 选道（键）
+    source_channel_count: int = 0   # P0：解码侧源声道数（域标签）
 
     @property
     def total_samples(self) -> int:
@@ -576,6 +590,7 @@ class PreRenderBuildPlan:
         from src.features.edit.core.audio_edit import (
             output_length_after_steps, steps_signature,
         )
+        source_count = self.source_channel_count or self.expected_channels
         return PreRenderSpec(
             source_fingerprint=self.source_fingerprint,
             sample_rate=int(self.sample_rate),
@@ -587,6 +602,10 @@ class PreRenderBuildPlan:
             # 改长度步骤后的基底长度（消费方按新输出域切块）。
             output_samples=output_length_after_steps(
                 {"steps": list(self.steps)}, self.total_samples),
+            channel_layout=self.channel_layout,
+            source_channel_map=tuple(self.source_channel_map),
+            domain_before=f"source:{source_count}ch:{self.channel_layout or '?'}",
+            domain_after=f"process:{int(self.expected_channels)}ch",
         )
 
     def builder(self) -> Callable[[], np.ndarray]:
@@ -595,7 +614,8 @@ class PreRenderBuildPlan:
         def _build() -> np.ndarray:
             pcm = decode_audio_range(
                 plan.source_path, plan.start_sample, plan.end_sample,
-                plan.sample_rate)
+                plan.sample_rate,
+                channel_map=plan.source_channel_map or None)
             if pcm is None:
                 raise RuntimeError(
                     f"pre-render decode failed for {plan.source_path}")
@@ -657,6 +677,17 @@ def build_pre_render_plan(
         reason = "retimed clips cannot use pre-rendered processors yet"
         blocked = blocked or reason
         diagnostics.append(reason)
+    # P0 · 源 patch 先后顺序：构建时生效的选道进入计划与缓存键——
+    # 基底内容与实时路径（patch → 栈）一致；patch 变化强制重建。
+    patch_map: tuple = ()
+    try:
+        from src.features.edit.core.source_patch import patch_for_asset
+        overrides = getattr(project, "source_patch_overrides", None) or {}
+        patch = patch_for_asset(overrides, str(getattr(clip, "asset_id", "")))
+        if patch.audio_enabled and patch.audio_channel_map:
+            patch_map = tuple(tuple(pair) for pair in patch.audio_channel_map)
+    except Exception:  # noqa: BLE001 - patch 解析失败按直通（键仍稳定）
+        patch_map = ()
     return PreRenderBuildPlan(
         source_path=spec.source_path,
         start_sample=spec.start_sample,
@@ -665,10 +696,14 @@ def build_pre_render_plan(
         source_fingerprint=spec.source_fingerprint,
         steps=tuple(steps),
         reverse=spec.reverse,
-        # decode_audio_range 的容器布局：mono / >2ch 混到 stereo。
+        # decode_audio_range 的容器布局：mono / >2ch 经 BS.775 矩阵折到
+        # stereo（P0 起 LFE 策略显式、系数与交付 downmix 同源）。
         expected_channels=1 if spec.channel_count == 1 else 2,
         blocked_reason=blocked,
         diagnostics=tuple(diagnostics),
+        channel_layout=str(getattr(spec, "channel_layout", "") or ""),
+        source_channel_map=patch_map,
+        source_channel_count=int(getattr(spec, "channel_count", 0) or 0),
     )
 
 
