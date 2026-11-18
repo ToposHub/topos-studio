@@ -2888,6 +2888,32 @@ class AudioMixer:
                         current_frame, fps, num_samples
                     )
 
+                    synthesized_from_base = False
+                    if samples is None:
+                        # P0：预渲染成品是独立源——源解码只负责输入，烘焙
+                        # 输出范围由缓存成品定义。源 EOF（time_stretch 拉长
+                        # 后时间线仍在播）时由成品直接供块，块存在性不再
+                        # 由源解码决定。片段跨度外的 None 保持跳过语义。
+                        _pre_base = getattr(decoder, "_pre_render_base", None)
+                        if _pre_base is not None:
+                            _clip_start = int(
+                                getattr(decoder, "_timeline_start", 0) or 0)
+                            _clip_dur = int(
+                                getattr(decoder, "_timeline_duration", 0) or 0)
+                            _local = current_frame - _clip_start
+                            if 0 <= _local < max(_clip_dur, 1):
+                                from src.features.edit.core.audio_edit import (
+                                    clip_block_from_pre_render,
+                                )
+                                samples = clip_block_from_pre_render(
+                                    getattr(decoder, "_audio_edit", None),
+                                    _pre_base,
+                                    int(round(_local * self._sample_rate / fps)),
+                                    num_samples,
+                                    sample_rate=int(self._sample_rate),
+                                    channels=output_channels,
+                                )
+                                synthesized_from_base = samples is not None
                     if samples is None:
                         continue
                     any_clip_samples = True
@@ -2895,45 +2921,52 @@ class AudioMixer:
                     # F2.1 · Source Patching：素材级源声道映射先于 downmix 选道
                     # （5.1 只送 L/R、单选 C 做 ADR 对轨等）。select_channels
                     # 返回同一对象 = 无映射或解码布局与映射基线不符（退直通）。
-                    _src_layout = getattr(decoder, "source_layout", None)
-                    _patch_map = getattr(decoder, "_source_channel_map", None)
-                    if _patch_map is not None:
-                        _selected = SourcePatchSpec(
-                            audio_channel_map=_patch_map,
-                        ).select_channels(samples)
-                        if _selected is not samples:
-                            samples = _selected
-                            # 选道后的布局是自定义的，不能再声明容器布局
-                            _src_layout = None
+                    # P0：成品合成块已是输出声道宽度的最终内容，跳过源域
+                    # 步骤（源 patch / downmix），与成片导出同策略。
+                    _src_layout = None
+                    if not synthesized_from_base:
+                        _src_layout = getattr(decoder, "source_layout", None)
+                        _patch_map = getattr(decoder, "_source_channel_map", None)
+                        if _patch_map is not None:
+                            _selected = SourcePatchSpec(
+                                audio_channel_map=_patch_map,
+                            ).select_channels(samples)
+                            if _selected is not samples:
+                                samples = _selected
+                                # 选道后的布局是自定义的，不能再声明容器布局
+                                _src_layout = None
 
-                    # AM-08 阶段 4.1 / RMA-09: 声道映射用标准 downmix（替代 naive 截断）。
-                    # RMA-09: 用 decoder 的真实容器布局（如 5.1(side)），而非按声道数猜测。
-                    if samples.shape[0] != output_channels:
-                        try:
-                            # AUD-15506: adapt_channels 已提升为模块级导入
-                            samples = adapt_channels(
-                                samples, output_channels,
-                                src_layout=_src_layout,
-                            )
-                        except ValueError:
-                            # 非标准声道数（如 4 声道）：回退安全截断避免阻断播放
-                            if samples.shape[0] == 1:
-                                samples = np.repeat(samples, output_channels, axis=0)
-                            elif samples.shape[0] > output_channels:
-                                samples = samples[:output_channels]
-                            elif samples.shape[0] < output_channels:
-                                # 审计修复：1<src<out（如 4ch 源→6ch 输出）
-                                # 旧代码两分支都不命中，样本宽度保持错误。
-                                # 与导出侧回退一致：首声道广播到目标声道。
-                                samples = np.repeat(
-                                    samples[:1], output_channels, axis=0)
+                        # AM-08 阶段 4.1 / RMA-09: 声道映射用标准 downmix（替代 naive 截断）。
+                        # RMA-09: 用 decoder 的真实容器布局（如 5.1(side)），而非按声道数猜测。
+                        if samples.shape[0] != output_channels:
+                            try:
+                                # AUD-15506: adapt_channels 已提升为模块级导入
+                                samples = adapt_channels(
+                                    samples, output_channels,
+                                    src_layout=_src_layout,
+                                )
+                            except ValueError:
+                                # 非标准声道数（如 4 声道）：回退安全截断避免阻断播放
+                                if samples.shape[0] == 1:
+                                    samples = np.repeat(samples, output_channels, axis=0)
+                                elif samples.shape[0] > output_channels:
+                                    samples = samples[:output_channels]
+                                elif samples.shape[0] < output_channels:
+                                    # 审计修复：1<src<out（如 4ch 源→6ch 输出）
+                                    # 旧代码两分支都不命中，样本宽度保持错误。
+                                    # 与导出侧回退一致：首声道广播到目标声道。
+                                    samples = np.repeat(
+                                        samples[:1], output_channels, axis=0)
 
                     # P0-3: Clip Editor 处理栈（非破坏性 audio_edit 步骤）。
                     # 固定顺序：源解码/裁剪/retime → 处理栈 → clip 增益/淡化
                     # → Clip FX → 轨链。块首样本 = (当前帧 - 片段起始帧) 折算
                     # 的片段局部输出样本（processing_rate 域）。
+                    # P0：成品供出的合成块已在 provider 内应用完整栈，
+                    # 不再二次应用（range_gain 会叠加）。
                     audio_edit = getattr(decoder, "_audio_edit", None)
-                    if audio_edit is not None and samples.shape[-1] > 0:
+                    if (audio_edit is not None and samples.shape[-1] > 0
+                            and not synthesized_from_base):
                         clip_start_frame = int(
                             getattr(decoder, "_timeline_start", 0) or 0)
                         block_start_sample = int(round(

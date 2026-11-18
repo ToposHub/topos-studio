@@ -587,24 +587,54 @@ def _iter_stem_pcm_chunks(
                 else:
                     samples = np.zeros((channels, block_len), dtype=np.float32)
 
+                synthesized_from_base = False
                 if samples is None:
-                    continue
+                    # P0：预渲染成品是独立源——源 EOF（改长度步骤烘焙出的
+                    # 成品比源长）时由成品直接供块，块存在性不再由源解码
+                    # 决定。无成品保持原跳过语义。
+                    _pre_edit = getattr(clip, "audio_edit", None)
+                    if _pre_edit and pre_render_base_fn is not None:
+                        from src.features.edit.core.audio_edit import (
+                            clip_block_from_pre_render,
+                            requires_pre_render as _requires_pre_render,
+                        )
+                        if _requires_pre_render(_pre_edit):
+                            _base = pre_render_base_fn(clip)
+                            if _base is not None:
+                                samples = clip_block_from_pre_render(
+                                    _pre_edit, _base,
+                                    int(round(
+                                        (frame_idx - int(getattr(clip, "timeline_start", 0)))
+                                        * sample_rate / fps)),
+                                    block_len,
+                                    sample_rate=int(sample_rate),
+                                    channels=channels,
+                                )
+                                synthesized_from_base = samples is not None
+                    if samples is None:
+                        continue
 
                 actual = min(samples.shape[-1], total_samples - out_start)
                 if actual <= 0:
                     continue
 
-                # P1-09：与时间线导出同源的声道适配。
-                samples = adapt_samples_for_delivery(
-                    samples[:, :actual] if samples.ndim == 2 else samples,
-                    channels,
-                    context=f"stem {getattr(track, 'stem_group', '')} clip {getattr(clip, 'clip_id', '')}",
-                )
+                if synthesized_from_base:
+                    # 成品块已应用完整处理栈且为交付声道宽度：跳过源域
+                    # 步骤（交付 downmix / 二次栈应用），直接进入 clip 增益。
+                    samples = samples[:, :actual]
+                else:
+                    # P1-09：与时间线导出同源的声道适配。
+                    samples = adapt_samples_for_delivery(
+                        samples[:, :actual] if samples.ndim == 2 else samples,
+                        channels,
+                        context=f"stem {getattr(track, 'stem_group', '')} clip {getattr(clip, 'clip_id', '')}",
+                    )
 
                 # P0-3: Clip Editor 处理栈（clip 增益/淡化之前；与实时
                 # mix_samples、成片导出同一调用序列，parity 锁定）。
                 _audio_edit = getattr(clip, "audio_edit", None)
-                if _audio_edit and samples.shape[-1] > 0:
+                if (_audio_edit and samples.shape[-1] > 0
+                        and not synthesized_from_base):
                     from src.features.edit.core.audio_edit import (
                         apply_clip_audio_edit_block as _apply_audio_edit,
                         requires_pre_render,
