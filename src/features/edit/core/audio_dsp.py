@@ -3673,9 +3673,18 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["bus_comp"] = BusCompAdapter
         _EFFECT_CLASS_REGISTRY["multiband_comp"] = MultibandCompAdapter
         from src.features.edit.core.audio_effects.adapters import (
+            ChorusFlangerAdapter,
             ConvolutionReverbAdapter,
+            PhaserAdapter,
+            TransientDesignerAdapter,
+            TremoloAutoPanAdapter,
         )
         _EFFECT_CLASS_REGISTRY["convolution_reverb"] = ConvolutionReverbAdapter
+        # P1（2026-11-19 计划第三阶段 #7）：瞬态塑形与调制类
+        _EFFECT_CLASS_REGISTRY["transient_designer"] = TransientDesignerAdapter
+        _EFFECT_CLASS_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanAdapter
+        _EFFECT_CLASS_REGISTRY["chorus_flanger"] = ChorusFlangerAdapter
+        _EFFECT_CLASS_REGISTRY["phaser"] = PhaserAdapter
     return _EFFECT_CLASS_REGISTRY
 
 
