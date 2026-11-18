@@ -263,7 +263,7 @@ class StudioAudioMixerPanel(AudioMixerPanel):
             strip.set_send_count(
                 len(sends),
                 sum(1 for send in sends
-                    if bool(getattr(send, "enabled", True))))
+                    if send.enabled and not send.muted and send.level > 0.0))
 
     def _populate_mixer_menu(self, menu: QMenu) -> None:
         super()._populate_mixer_menu(menu)

@@ -280,6 +280,8 @@
       "pick_asset": "Pick a real asset:"
     },
     "effects": {
+      "incompatible_target": "This effect cannot be applied to the selected clip.",
+      "adjust_track_panner": "Adjust Spatial Panner in the Audio Mixer track strip.",
       "titles": "Titles",
       "titles_hint": "Double-click a template to create a styled subtitle at the playhead",
       "titles_cat_title": "Titles",

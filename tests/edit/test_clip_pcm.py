@@ -296,9 +296,62 @@ class TestProjectClipEditorPcm:
             session.stop()
             assert not session.is_playing
             # 停止回到开始试听的游标。
-            assert session.return_sample() == 2400
+            assert session.return_sample() == 1200
         else:
             # 无音频设备：优雅拒绝而不是崩溃。
             assert not session.is_playing
         session.stop()
         assert not session.is_playing
+
+    def test_audition_retries_short_writes_and_drains_before_stopping(self, qtbot, monkeypatch) -> None:
+        from PyQt6 import QtMultimedia
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        pcm = np.arange(20, dtype=np.float32).reshape(2, 10) / 20.0
+        expected = np.ascontiguousarray(pcm[:, 2:].T).tobytes()
+        received = bytearray()
+
+        class Sink:
+            def __init__(self, _format: QtMultimedia.QAudioFormat) -> None:
+                pass
+
+            def start(self) -> Sink:
+                return self
+
+            def stop(self) -> None:
+                pass
+
+            def bytesFree(self) -> int:
+                return 16
+
+            def processedUSecs(self) -> int:
+                return 0
+
+            def write(self, chunk: bytes) -> int:
+                written = min(len(chunk), 4)
+                received.extend(chunk[:written])
+                return written
+
+            def state(self) -> QtMultimedia.QAudio.State:
+                return (QtMultimedia.QAudio.State.IdleState if len(received) == len(expected)
+                        else QtMultimedia.QAudio.State.ActiveState)
+
+        monkeypatch.setattr(QtMultimedia, "QAudioSink", Sink)
+        session = ClipAuditionSession()
+        session.load(pcm, 48000)
+        assert session.play(2)
+        for _ in range(20):
+            session._tick()
+        assert bytes(received) == expected
+        assert not session.is_playing
+        assert session.position() == 2
+        session.clear()
+        assert not session.has_audio()
+
+    def test_cleanliness_measures_power_for_inverted_stereo(self) -> None:
+        from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
+
+        pcm = np.stack((np.full(4800, 0.1, dtype=np.float32),
+                        np.full(4800, -0.1, dtype=np.float32)))
+        report = ProjectClipEditor._measure_cleanliness(pcm, 48000)
+        assert report["noise_floor_db"] == pytest.approx(-20.0, abs=0.01)

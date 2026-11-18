@@ -37,10 +37,9 @@ class ClipAuditionSession(QObject):
         self._pcm: Optional[np.ndarray] = None
         self._sample_rate = 48000
         self._channels = 1
-        self._interleaved = b""
-        self._sink: any = None
-        self._io: any = None
-        self._pending = b""
+        self._sink = None
+        self._io = None
+        self._pending = memoryview(b"")
         self._playing = False
         self._loop = False
         self._loop_start = 0
@@ -93,8 +92,14 @@ class ClipAuditionSession(QObject):
         self._channels = max(1, pcm.shape[0])
         self._return_sample = 0
 
+    def clear(self) -> None:
+        self.stop()
+        self._pcm = None
+        self._return_sample = 0
+
     def set_loop(self, enabled: bool, start: int = -1, end: int = -1) -> None:
         """循环窗口为半开 [start, end)；无选区时用整段。"""
+        previous = (self._loop, self._loop_start, self._loop_end)
         self._loop = bool(enabled)
         if self._pcm is not None:
             total = self._pcm.shape[1]
@@ -102,7 +107,7 @@ class ClipAuditionSession(QObject):
             self._loop_end = min(total, end if end > 0 else total)
             if self._loop_end <= self._loop_start:
                 self._loop = False
-        if self._playing:
+        if self._playing and previous != (self._loop, self._loop_start, self._loop_end):
             # 更新窗口立即生效：重建后续缓冲
             self._play_from(self.position())
 
@@ -112,7 +117,12 @@ class ClipAuditionSession(QObject):
             return False
         if start_sample is None:
             start_sample = self._return_sample
-        self._return_sample = int(start_sample)
+        start_sample = max(0, int(start_sample))
+        if self._loop and not self._loop_start <= start_sample < self._loop_end:
+            start_sample = self._loop_start
+        elif start_sample >= self._pcm.shape[1]:
+            start_sample = 0
+        self._return_sample = start_sample
         return self._play_from(start_sample)
 
     def seek(self, sample: int) -> None:
@@ -120,10 +130,10 @@ class ClipAuditionSession(QObject):
         if self._pcm is None:
             return
         sample = max(0, min(self._pcm.shape[1], int(sample)))
-        self._return_sample = sample
         if self._playing:
             self._play_from(sample)
         else:
+            self._return_sample = sample
             self.position_changed.emit(sample)
 
     def pause(self) -> None:
@@ -151,7 +161,7 @@ class ClipAuditionSession(QObject):
         was_playing = self._playing
         self._timer.stop()
         self._playing = False
-        self._pending = b""
+        self._pending = memoryview(b"")
         if self._sink is not None:
             try:
                 self._sink.stop()
@@ -171,9 +181,15 @@ class ClipAuditionSession(QObject):
         self._release_sink()
         pcm = self._pcm
         if pcm is None or pcm.shape[1] == 0:
+            self.stop()
             return False
         total = pcm.shape[1]
         sample = max(0, min(total, int(sample)))
+        if self._loop and not self._loop_start <= sample < self._loop_end:
+            sample = self._loop_start
+        elif sample == total:
+            self.stop()
+            return False
         try:
             from PyQt6.QtMultimedia import QAudioFormat, QAudioSink
             fmt = QAudioFormat()
@@ -183,21 +199,23 @@ class ClipAuditionSession(QObject):
             sink = QAudioSink(fmt)
             io = sink.start()
             if io is None:
+                self.stop()
                 return False
             self._sink = sink
             self._io = io
         except Exception as exc:  # noqa: BLE001
             logger.warning("clip audition start failed: %s", exc)
+            self.stop()
             return False
-        window = self._interleaved_bytes(sample)
-        self._pending = window
+        self._pending = memoryview(self._interleaved_bytes(sample))
         self._origin_sample = sample
-        self._playing = True
-        self._return_sample = sample
-        self.playing_changed.emit(True)
+        if not self._playing:
+            self._playing = True
+            self.playing_changed.emit(True)
         self._feed()
-        self._timer.start()
-        return True
+        if self._playing:
+            self._timer.start()
+        return self._playing
 
     def _interleaved_bytes(self, from_sample: int) -> bytes:
         pcm = self._pcm
@@ -223,8 +241,23 @@ class ClipAuditionSession(QObject):
             self._timer.stop()
             return
         self._feed()
-        position = self.position()
-        self.position_changed.emit(position)
+        if not self._playing or self._sink is None:
+            return
+        from PyQt6.QtMultimedia import QAudio
+        try:
+            state = self._sink.state()
+        except RuntimeError:
+            self.stop()
+            return
+        if state == QAudio.State.StoppedState:
+            self.stop()
+        elif not self._pending and state == QAudio.State.IdleState:
+            if self._loop:
+                self._play_from(self._loop_start)
+            else:
+                self.stop()
+        else:
+            self.position_changed.emit(self.position())
 
     def _feed(self) -> None:
         if self._io is None or self._sink is None:
@@ -234,28 +267,14 @@ class ClipAuditionSession(QObject):
         except Exception:  # noqa: BLE001
             self.stop()
             return
-        if free > 0 and self._pending:
-            chunk, self._pending = self._pending[:free], self._pending[free:]
-            if chunk:
-                try:
-                    self._io.write(chunk)
-                except Exception:  # noqa: BLE001 - 设备失效
-                    self.stop()
-                return
-        if not self._pending:
-            # 已把窗口数据全部交给设备：循环则等窗口尾到位后回卷。
-            position = self.position()
-            if self._loop and position >= self._loop_end - 1:
-                self._play_from(self._loop_start)
-                return
-            from PyQt6.QtMultimedia import QAudio
-            try:
-                if self._sink.state() == QAudio.State.IdleState:
-                    # 缓冲排空：循环或自然结束
-                    if self._loop:
-                        self._play_from(self._loop_start)
-                    else:
-                        self._return_sample = 0
-                        self.stop()
-            except Exception:  # noqa: BLE001
-                self.stop()
+        if free <= 0 or not self._pending:
+            return
+        try:
+            written = self._io.write(self._pending[:free].tobytes())
+        except (OSError, RuntimeError):
+            self.stop()
+            return
+        if written < 0:
+            self.stop()
+        else:
+            self._pending = self._pending[written:]

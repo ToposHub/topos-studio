@@ -24,6 +24,7 @@ from src.features.edit.core.audio_edit import (
     make_step,
     new_audio_edit,
     remove_step,
+    clear_steps,
     replace_step_enabled,
     set_envelope,
     set_markers,
@@ -372,3 +373,17 @@ class TestRoutingSignatures:
         assert remove_step(edit, "only") is None
         untouched = remove_step(edit, "missing")
         assert untouched == edit and untouched is not None
+
+    def test_remove_last_step_and_clear_keep_clip_metadata(self) -> None:
+        extra = {
+            "markers": [{"id": "cue", "local_sample": 5, "name": "Cue"}],
+            "envelope": [{"id": "gain", "local_sample": 0, "gain_db": -6.0}],
+            "future_fields": {"mode": "original"},
+        }
+        edit = new_audio_edit([make_step("mute", 0, 10, (0,), step_id="only")], **extra)
+        assert remove_step(edit, "only") == new_audio_edit(**extra)
+        cleared = clear_steps(edit)
+        assert cleared == new_audio_edit(**extra)
+        cleared["future_fields"]["mode"] = "changed"
+        assert edit["future_fields"]["mode"] == "original"
+        assert edit["steps"][0]["step_id"] == "only"

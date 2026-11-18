@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QMenu, QTabBar, QWidget
+from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QMenu, QMessageBox, QTabBar, QWidget
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.edit_controller import EditControllerMixin
@@ -26,6 +26,7 @@ from src.features.edit.ui.timeline_layout import TimelineDropTarget
 from src.features.edit.ui.timeline_panel import TimelinePanel
 from src.features.edit.ui.timeline_view import MIME_TYPE_MEDIA_POOL_ASSETS
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
+from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 from src.features.mixer.ui.studio_console import StudioAudioMixerPanel
 from src.shared.ui.audio_mixer.track_mixer_widget import db_to_linear
 
@@ -296,7 +297,7 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     qtbot.waitUntil(lambda: editor._panel.peak_val_lbl.text() != "—", timeout=10000)
     # P1-6：噪声采集/降噪随真实 PCM 启用（预览态）；频谱修复笔仍待后端。
     assert editor._panel.btn_denoise.isEnabled()
-    assert not editor._panel.btn_tool_brush.isEnabled()
+    qtbot.waitUntil(lambda: editor._panel.btn_tool_brush.isEnabled(), timeout=10000)
     editor.float_requested.emit()
     assert dock.isFloating() and dock.titleBarWidget().height() > 0
     dock.move(-20000, -20000)
@@ -661,7 +662,10 @@ def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tm
 
     # 选区中段静音（信号路径与「静音」按钮一致）。
     panel.canvas.setSelection(1.0, 4.0)
-    panel.silenceRequested.emit(1.0, 4.0)
+    assert panel._stop_button.isEnabled()
+    silence_button = next(button for button in panel._selection_edit_buttons if button.text() == "静音")
+    assert silence_button.isEnabled()
+    silence_button.click()
     edited = view.get_timeline().get_clip_by_id(clip_id)
     assert edited.audio_edit is not None
     steps = edited.audio_edit["steps"]
@@ -810,7 +814,8 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     # 预览：150% 作用于 [1, 4) s → 待提交参数记录在面板上。
     panel.canvas.setSelection(1.0, 4.0)
     panel.stretch_knob.setValue(150.0, emit=False)
-    panel._commit_time_pitch()  # “应用时间与音高”按钮的信号路径
+    assert panel._timepitch_button.isEnabled()
+    panel._timepitch_button.click()
     qtbot.waitUntil(lambda: panel._timepitch_pcm is not None, timeout=10000)
     assert panel._pending_timepitch is not None
     assert panel._timepitch_commit_button.isEnabled()
@@ -828,6 +833,12 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     # 域级映射：240000 − 144000 + 96000。
     assert step["params"]["output_length"] == 192000
     assert panel._pending_timepitch is None
+    qtbot.waitUntil(lambda: panel._raw_pcm is not None, timeout=10000)
+    for change in (lambda: panel.processStepToggled.emit(step["step_id"], False),
+                   lambda: panel.processStepRemoved.emit(step["step_id"]),
+                   panel.stack_clear_requested.emit):
+        change()
+        assert view.get_timeline().get_clip_by_id(clip_id) == edited
 
     # 一次撤销还原长度与处理栈。
     view.undo()
@@ -926,8 +937,12 @@ def test_clip_editor_spectral_repair_commits_and_undoes(
     panel = editor._panel
 
     # 频谱选区修复（时间 × 频带）→ 修复按钮提交。
+    panel.btn_tool_brush.click()
+    assert panel.btn_spectral.isChecked() and panel.canvas._tool_mode == "brush"
     panel.canvas.setSelection(0.45, 0.62, 1200.0, 3200.0)
-    panel._trigger_quick_heal()
+    repair_button = next(button for button in panel._selection_edit_buttons if button.text() == "修复")
+    assert repair_button.isEnabled() and panel.btn_tool_brush.isEnabled()
+    repair_button.click()
     edited = view.get_timeline().get_clip_by_id(clip_id)
     assert edited.audio_edit is not None
     step = edited.audio_edit["steps"][0]
@@ -1029,16 +1044,71 @@ def test_channel_strip_shows_send_count(project_host, qtbot) -> None:
     assert strip.sends_button.text() == "S"
 
     # 加一条活跃 send（目标占位 Bus ID；徽标显示活跃计数）。
-    updated_timeline = timeline.with_track_updated(replace(
-        track, sends=(Send(target_bus_id="bus-x", level=0.5),)))
+    updated_timeline = timeline.with_track_updated(replace(track, sends=(
+        Send(target_bus_id="bus-x", level=0.5),
+        Send(target_bus_id="bus-mute", level=0.5, muted=True),
+        Send(target_bus_id="bus-zero", level=0.0),
+        Send(target_bus_id="bus-disabled", level=0.5, enabled=False),
+    )))
     host._sync_audio_mixer_from_timeline(updated_timeline)
     strip = host.audio_mixer_panel._track_mixers[track.track_id]
     assert strip.sends_button.text().startswith("S1")
+    assert strip.sends_button.toolTip().endswith("1/4")
     # 点击入口走 show_routing（与右键路由同一命令路径）。
     requested: list[str] = []
     strip.show_routing.connect(requested.append)
     strip.sends_button.click()
     assert requested == [track.track_id]
+
+
+def test_linked_length_change_shows_independent_audio_option(qtbot, monkeypatch) -> None:
+    editor = ProjectClipEditor()
+    qtbot.addWidget(editor)
+
+    def accept_gap(box: QMessageBox) -> int:
+        assert box.checkBox() is not None and not box.checkBox().isChecked()
+        box.checkBox().setChecked(True)
+        button = next(button for button in box.buttons()
+                      if box.buttonRole(button) == QMessageBox.ButtonRole.AcceptRole)
+        button.click()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", accept_gap)
+    assert editor._ask_length_change_options(-12, linked=True) == (False, True)
+
+
+def test_effect_panel_applies_spatial_panner_to_audio_track_only(project_host) -> None:
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    before = view.get_timeline()
+    audio = before.audio_tracks[0]
+    audio_clip = audio.clips[0]
+    video_clip = before.video_tracks[0].clips[0]
+
+    host._on_edit_effect_add_requested("spatial_panner", video_clip.clip_id)
+    assert view.get_timeline() is before
+    host._on_edit_effect_add_requested("gaussian_blur", audio_clip.clip_id)
+    assert view.get_timeline() is before
+    host._on_edit_effect_add_requested("spatial_panner", audio_clip.clip_id)
+    with_panner = view.get_timeline()
+    assert with_panner.audio_tracks[0].panner["enabled"] is True
+    assert with_panner.get_clip_by_id(audio_clip.clip_id).effects == audio_clip.effects
+    host._on_edit_effect_add_requested("spatial_panner", audio_clip.clip_id)
+    assert view.get_timeline() is with_panner
+    view.undo()
+    assert not view.get_timeline().audio_tracks[0].panner
+
+
+def test_insert_menu_exposes_existing_sound_design_effects(project_host) -> None:
+    strip = project_host.audio_mixer_panel._track_mixers["audio-track"]
+    menu = QMenu(strip)
+    strip._populate_add_effect_menu(menu)
+    by_id = {action.data(): action for action in menu.actions()}
+    for effect_id in ("voice_changer", "spectral_mangler"):
+        by_id[effect_id].trigger()
+    track = project_host.timeline_panel.timeline_view.get_timeline().audio_tracks[0]
+    assert [effect.effect_type for effect in track.effect_chain.effects] == ["voice_changer", "spectral_mangler"]
 
 
 def test_recording_prep_popover_updates_settings_chain(project_host, qtbot, monkeypatch) -> None:

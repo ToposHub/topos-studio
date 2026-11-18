@@ -41,7 +41,7 @@ from src.features.edit.core.clip_pcm import decode_audio_range, source_fingerpri
 
 logger = logging.getLogger(__name__)
 
-PCM_RENDER_CACHE_SCHEMA_VERSION = 1
+PCM_RENDER_CACHE_SCHEMA_VERSION = 2
 # 与 ClipPcmProvider 同一护栏：单次预渲染的时长上限（内存 + 构建时间）。
 MAX_PRE_RENDER_SECONDS = 300.0
 # 内存 LRU 条目数（4 份立体声 5 分钟 ≈ 460 MB，与 PCM 取样层一致）。
@@ -69,6 +69,8 @@ class PreRenderSpec:
     total_samples: int
     steps_signature: tuple
     output_samples: int = -1  # -1 = 无改长度步骤（与 total_samples 一致）
+    start_sample: int = 0
+    reverse: bool = False
 
     @property
     def expected_output_samples(self) -> int:
@@ -79,7 +81,8 @@ class PreRenderSpec:
         identity = repr((
             PCM_RENDER_CACHE_SCHEMA_VERSION,
             self.source_fingerprint, self.sample_rate,
-            self.channel_count, self.total_samples, self.steps_signature,
+            self.channel_count, self.start_sample, self.total_samples, self.reverse,
+            self.steps_signature,
             self.expected_output_samples,
         ))
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
@@ -527,6 +530,8 @@ class PreRenderBuildPlan:
             sample_rate=int(self.sample_rate),
             channel_count=int(self.expected_channels),
             total_samples=self.total_samples,
+            start_sample=self.start_sample,
+            reverse=self.reverse,
             steps_signature=steps_signature({"steps": list(self.steps)}),
             # 改长度步骤后的基底长度（消费方按新输出域切块）。
             output_samples=output_length_after_steps(

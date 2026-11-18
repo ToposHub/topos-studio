@@ -32,7 +32,11 @@
       "no_waveform": "Source waveform unavailable.",
       "source_waveform": "Source waveform · Clip gain and fades are saved to the timeline.",
       "source_peak": "Estimated peak from the source waveform",
-      "unavailable": "This tool requires an audio processing backend."
+      "unavailable": "This tool requires an audio processing backend.",
+      "pcm_required": "Wait for the audio samples to load.",
+      "length_stack_change": "This step changes the clip length. Use timeline Undo to restore the previous edit.",
+      "independent_audio": "Independent audio edit (linked video stays put)",
+      "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length."
     },
     "record": {
       "start": "Record to this track at the playhead",
