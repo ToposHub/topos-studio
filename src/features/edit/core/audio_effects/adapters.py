@@ -79,6 +79,18 @@ class DeEsserAdapter(_CompositeAdapterBase):
         return DeEsserEffect(sr)
 
 
+class TruePeakLimiterAdapter(_CompositeAdapterBase):
+    """P1 · True Peak Limiter（Master/交付；旧 Limiter 语义不变）。"""
+
+    effect_type = "true_peak_limiter"
+
+    def _impl_factory(self, sr):  # noqa: N802（基类约定）
+        from src.features.edit.core.audio_effects.true_peak_limiter import (
+            TruePeakLimiterEffect,
+        )
+        return TruePeakLimiterEffect(sr)
+
+
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
 
