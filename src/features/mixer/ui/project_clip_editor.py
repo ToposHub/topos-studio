@@ -241,6 +241,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         button = QPushButton(I18N.tr(
             "mixer.clip_editor.timepitch_commit", "Commit to stack"))
         button.setObjectName("MiniCellBtn")
+        button.setAccessibleName(I18N.tr(
+            "mixer.clip_editor.timepitch_commit", "Commit to stack"))
         button.setEnabled(False)
         button.clicked.connect(
             lambda _checked=False: self.time_pitch_commit_requested.emit())

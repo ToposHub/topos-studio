@@ -30,6 +30,7 @@ class StudioChannelStrip(TrackMixerWidget):
     """Use the real insert rack and retain the Studio fader and peak meter."""
 
     output_bus_requested = pyqtSignal(str, object)
+    record_prep_requested = pyqtSignal(str)
 
     def __init__(
         self, track_id: str, track_name: str, track_tag: str, parent: QWidget,
@@ -93,6 +94,18 @@ class StudioChannelStrip(TrackMixerWidget):
         self.sends_button.clicked.connect(
             lambda: self.show_routing.emit(self._track_id))
         footer_layout.addWidget(self.sends_button)
+        # §7 P1 录音准备：设备/声道/预卷/监听（时间线 R 用同一设置链）。
+        self.record_prep_button = QPushButton("●")
+        self.record_prep_button.setObjectName("MiniCellBtn")
+        self.record_prep_button.setFixedSize(22, 20)
+        self.record_prep_button.setAccessibleName(I18N.tr(
+            "mixer.recording.prep", "Recording prep"))
+        self.record_prep_button.setToolTip(I18N.tr(
+            "mixer.recording.prep_tip",
+            "Recording prep — input device, channels, pre-roll, monitoring"))
+        self.record_prep_button.clicked.connect(
+            lambda: self.record_prep_requested.emit(self._track_id))
+        footer_layout.addWidget(self.record_prep_button)
         self.layout().addWidget(footer)
         self._output_choices: tuple[tuple[str | None, str], ...] = ()
         self._output_bus_id: str | None = None
@@ -229,12 +242,15 @@ class StudioAudioMixerPanel(AudioMixerPanel):
 
     track_output_requested = pyqtSignal(str, object)
     add_bus_requested = pyqtSignal()
+    # §7 P1：录音准备弹窗入口（输入设备/声道/预卷/监听）。
+    record_prep_requested = pyqtSignal(str)
 
     def _create_strip(
         self, track_id: str, track_name: str, track_tag: str, *, is_master: bool = False,
     ) -> StudioChannelStrip:
         strip = StudioChannelStrip(track_id, track_name, track_tag, self, is_master=is_master)
         strip.output_bus_requested.connect(self.track_output_requested)
+        strip.record_prep_requested.connect(self.record_prep_requested)
         return strip
 
     def sync_tracks(self, tracks: list[dict[str, Any]]) -> None:

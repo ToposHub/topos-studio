@@ -1039,3 +1039,80 @@ def test_channel_strip_shows_send_count(project_host, qtbot) -> None:
     strip.show_routing.connect(requested.append)
     strip.sends_button.click()
     assert requested == [track.track_id]
+
+
+def test_recording_prep_popover_updates_settings_chain(project_host, qtbot, monkeypatch) -> None:
+    """§7 P1：混音侧录音准备弹窗 → 设置链（ADR 面板缺席时兜底生效）。"""
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    track_id = view.get_timeline().audio_tracks[0].track_id
+    strip = host.audio_mixer_panel._track_mixers[track_id]
+    assert strip.record_prep_button.isVisible() or not strip.record_prep_button.isHidden()
+
+    # 设备枚举固定（离屏环境无真实设备）。
+    from src.features.edit.core import recording_manager
+    monkeypatch.setattr(
+        recording_manager.RecordingManager, "list_input_devices",
+        classmethod(lambda cls: [("dev-1", "USB Mic"), ("dev-2", "Interface 2ch")]))
+
+    # 弹窗自动接受并选择第二台设备 + 立体声 + 监听。
+    from PyQt6.QtWidgets import QDialog
+    accepted = {}
+
+    def _auto_accept(dialog) -> int:
+        from PyQt6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox
+        for box in dialog.findChildren(QComboBox):
+            if box.count() >= 3 and box.itemData(1) == "dev-1":
+                box.setCurrentIndex(2)  # dev-2
+            elif box.count() == 2 and box.itemData(1) == 2:
+                box.setCurrentIndex(1)  # stereo（index 1 的 data 是 2）
+        for spin in dialog.findChildren(QDoubleSpinBox):
+            spin.setValue(3.0)
+        for check in dialog.findChildren(QCheckBox):
+            check.setChecked(True)
+        accepted["ran"] = True
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", lambda dialog: _auto_accept(dialog))
+    host._on_mixer_record_prep(track_id)
+    assert accepted.get("ran") is True
+    settings = host._adr_settings_dict()
+    assert settings["device_id"] == "dev-2"
+    assert settings["channels"] == 2
+    assert settings["pre_roll_seconds"] == 3.0
+    assert settings["monitor"] is True
+
+
+def test_mixer_workspace_controls_expose_accessible_names(project_host, qtbot, tmp_path) -> None:
+    """§7 P2 可访问性：新增控件的屏幕阅读器名称与状态反馈非空。"""
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    track_id = view.get_timeline().audio_tracks[0].track_id
+    strip = host.audio_mixer_panel._track_mixers[track_id]
+    for name, widget in (
+        ("sends", strip.sends_button),
+        ("record prep", strip.record_prep_button),
+        ("output routing", strip.output_bus_combo),
+    ):
+        assert widget.accessibleName(), f"{name} button lacks accessible name"
+    # Clip Editor 的提交按钮同样可被读屏识别。
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    audio_path = tmp_path / "a11y.wav"
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(48000)
+        wav.writeframes(b"\x10\x01\x10\x01" * 48000)
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="A11y",
+        metadata={"audio_info": {"sample_rate": 48000, "channels": 2},
+                  "duration_seconds": 1.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "A11y", assets={"audio": asset})
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    commit_button = editor._panel._timepitch_commit_button
+    assert commit_button is not None and commit_button.accessibleName()
