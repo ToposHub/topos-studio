@@ -6224,6 +6224,29 @@ class EditControllerMixin:
             return
 
         track_id = clip.track_id
+        track = timeline.get_track_by_id(track_id)
+        if track is None or track.is_locked:
+            return
+        from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES, get_effect_definition
+
+        definition = get_effect_definition(effect_type)
+        is_audio = effect_type in AUDIO_MIXER_EFFECT_TYPES or (
+            definition is not None and definition.category == "audio")
+        if track.track_type != ("audio" if is_audio else "video"):
+            self.status_bar.showMessage(I18N.tr(
+                "edit.effects.incompatible_target", "This effect cannot be applied to the selected clip."), 4000)
+            return
+        if effect_type == "spatial_panner":
+            from src.features.edit.core.commands import SetTrackPannerCommand
+            from src.features.edit.core.timeline_v2 import SpatialPannerParams
+
+            if not track.panner or not track.panner.get("enabled", True):
+                panner = {**(track.panner or SpatialPannerParams.default().to_dict()), "enabled": True}
+                self._execute_timeline_edit_command(
+                    SetTrackPannerCommand.create(track_id, panner), timeline)
+            self.status_bar.showMessage(I18N.tr(
+                "edit.effects.adjust_track_panner", "Adjust Spatial Panner in the Audio Mixer track strip."), 4000)
+            return
 
         # Import command via facade
         _cmds = get_command_classes()

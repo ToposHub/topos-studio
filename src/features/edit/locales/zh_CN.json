@@ -280,6 +280,8 @@
       "pick_asset": "选择真实素材："
     },
     "effects": {
+      "incompatible_target": "此效果无法应用到所选片段。",
+      "adjust_track_panner": "请在 Audio Mixer 的对应通道条调整空间声像。",
       "titles": "标题",
       "titles_hint": "双击模板在播放头处创建标题字幕（可再编辑文字与样式）",
       "titles_cat_title": "标题",

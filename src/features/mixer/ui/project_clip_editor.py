@@ -10,7 +10,7 @@ import numpy as np
 from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QResizeEvent, QShortcut, QWheelEvent
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -24,8 +24,8 @@ from src.features.edit.core.clip_pcm import (
 )
 from src.features.edit.core.audio_edit import (
     LENGTH_CHANGING_PROCESSORS, append_step, canvas_markers_from,
-    canvas_points_from_envelope, envelope_from_canvas_points, envelope_nodes,
-    inline_audio_edit, make_step, marker_list, markers_from_canvas, remove_step,
+    canvas_points_from_envelope, clear_steps, envelope_from_canvas_points, envelope_nodes,
+    inline_audio_edit, make_step, marker_list, markers_from_canvas, output_length_after_steps, remove_step,
     replace_processor_step, replace_step_enabled, requires_pre_render,
     set_envelope, set_markers,
 )
@@ -204,6 +204,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             return
         self._pending_repair = payload
 
+    def _set_tool_mode(self, mode: str) -> None:
+        super()._set_tool_mode(mode)
+        if mode == "brush":
+            self.btn_spectral.setChecked(True)
+
     def _trigger_quick_heal(self) -> None:
         """修复按钮/H 键：优先消费挂起笔迹；否则用频谱选区合成修复载荷。"""
         payload = self._pending_repair
@@ -284,46 +289,45 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._skip_selection_mode = False
         self.btn_play.setChecked(False)
         self.btn_play.setText("▶ 播放")
-        for widget in (self.btn_play, self.btn_loop, self.btn_snap_zero,
-                       self.btn_spectral, self.fft_combo,
-                       self.btn_noise_print, self.btn_denoise, self.denoise_knob,
-                       self.stretch_knob, self.pitch_knob, self.pitch_pill,
-                       self.stretch_ratio_pill, self.target_dur_pill,
-                       self.stretch_algo_combo, self.preserve_pitch_sw):
-            widget.setEnabled(True)
-            widget.setToolTip("")
-        timepitch_button = getattr(self, "_timepitch_button", None)
-        if timepitch_button is not None:
-            timepitch_button.setEnabled(True)
-            timepitch_button.setToolTip(I18N.tr(
-                "mixer.clip_editor.timepitch_preview",
-                "Preview speed & pitch — committing length changes comes with "
-                "the ripple transaction"))
+        self._set_pcm_tools_enabled(True)
+        self.set_stack_editable(self._stack_editable_hint)
         self.btn_play.setToolTip(I18N.tr("mixer.clip_editor.play_audition", "Audition this clip (Space)"))
         self.btn_loop.setToolTip(I18N.tr("mixer.clip_editor.loop_audition", "Loop the selection, or the whole clip"))
 
+    def _set_pcm_tools_enabled(self, available: bool) -> None:
+        unavailable = I18N.tr("mixer.clip_editor.pcm_required", "Wait for the audio samples to load.")
+        for widget in (self.btn_play, self._stop_button, self.btn_loop, self.btn_snap_zero,
+                       self.btn_spectral, self.fft_combo, self.btn_noise_print, self.btn_denoise,
+                       self.denoise_knob, self.denoise_pill, self.stretch_knob, self.pitch_knob,
+                       self.pitch_pill, self.stretch_ratio_pill, self.target_dur_pill,
+                       self.stretch_algo_combo, self.preserve_pitch_sw, self._timepitch_button):
+            widget.setEnabled(available)
+            widget.setToolTip("" if available else unavailable)
+
     def detach_pcm(self) -> None:
-        """释放试听（重开/重连/隐藏时调用）；播放控件回到禁用态。"""
-        self._audition.stop()
+        """Release samples and audition controls before loading a new audio range."""
+        self._audition.clear()
         self._pcm = None
         self._raw_pcm = None
-        self._model_audio_edit = None
-        self._pending_timepitch = None
+        self._timepitch_pcm = None
+        self._denoise_preview = None
+        self._pending_repair = None
+        self._set_pcm_tools_enabled(False)
+        self.set_pending_timepitch(None)
+        self.set_stack_editable(self._stack_editable_hint)
         self._is_playing = False
         self._skip_selection_mode = False
 
     def set_stack_editable(self, editable: bool) -> None:
         """有可编辑时间线片段时启用处理栈相关控件（源监视模式禁用）。"""
-        for widget in (self.btn_bypass, self.btn_clear_stack, self.btn_tool_envelope):
-            widget.setEnabled(editable and self._pcm is not None)
-            widget.setToolTip("" if editable else I18N.tr(
-                "mixer.clip_editor.timeline_only",
-                "Add the clip to a timeline to edit its processing stack"))
-        for widget in (self.btn_apply_lufs, self.target_lufs_pill,
-                       self.tp_ceil_pill, *self._lufs_preset_btns.values()):
-            widget.setEnabled(editable and self._pcm is not None)
-        for button in getattr(self, "_selection_edit_buttons", ()):
-            button.setEnabled(editable and self._pcm is not None)
+        active = editable and self._pcm is not None
+        if not active and self.canvas._tool_mode in {"envelope", "brush"}:
+            self._set_tool_mode("select")
+        for widget in (self.btn_bypass, self.btn_tool_envelope, self.btn_tool_brush,
+                       self.btn_apply_lufs, self.target_lufs_pill, self.tp_ceil_pill,
+                       *self._lufs_preset_btns.values(), *self._selection_edit_buttons):
+            widget.setEnabled(active)
+        self.btn_clear_stack.setEnabled(active and bool(self._process_steps))
         # 变速/音高的提交按钮跟随同一可用性（§6.2 改长度提交）。
         self.set_pending_timepitch(self._pending_timepitch)
 
@@ -562,14 +566,26 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         rate = self._pcm_rate
         if t1 - t0 > 0.01:
             sel0, sel1 = int(round(t0 * rate)), int(round(t1 * rate))
-            self._audition.set_loop(self._is_looping, sel0, sel1)
             if not sel0 <= start < sel1:
                 start = sel0
-        else:
-            self._audition.set_loop(self._is_looping, 0, self._pcm.shape[1])
+        self._update_audition_loop()
         if not self._audition.play(start):
             self.info_label.setText(I18N.tr(
                 "mixer.clip_editor.no_audio_device", "No audio device available for audition"))
+
+    def _toggle_loop(self, checked: bool) -> None:
+        super()._toggle_loop(checked)
+        self._update_audition_loop()
+
+    def _update_audition_loop(self) -> None:
+        if self._pcm is None or self._skip_selection_mode:
+            return
+        t0, t1, _, _ = self.canvas.getSelection()
+        if t1 > t0:
+            start, end = round(t0 * self._pcm_rate), round(t1 * self._pcm_rate)
+            self._audition.set_loop(self._is_looping, start, end)
+        else:
+            self._audition.set_loop(self._is_looping)
 
     def _stop_playback(self) -> None:
         # 停止回到开始试听的游标（会话负责回到 return_sample）。
@@ -683,8 +699,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_snap_zero.setChecked(False)
         self.btn_apply_lufs.setText(I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
         buttons_by_text = {
-            "■", "静音", "裁剪", "删除", "标准化", "修复", "防爆20m", "应用时间与音高",
-            "应用至选区", "重置", "人声", "流媒体", "广播", "电影",
+            "防爆20m", "应用至选区", "重置", "人声", "流媒体", "广播", "电影",
         }
         widgets = (
             self.btn_play, self.btn_loop, self.btn_tool_brush, self.btn_tool_envelope,
@@ -706,10 +721,13 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # P0-3：选区处理（静音/标准化）随 PCM 与时间线片段可用性启用。
         self._selection_edit_buttons: list[QPushButton] = []
         for button in self.findChildren(QPushButton):
-            if button.text() in buttons_by_text:
+            if button.text() == "■":
+                self._stop_button = button
+                button.setEnabled(False)
+            elif button.text() in buttons_by_text:
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
-            elif button.text() in ("静音", "标准化", "裁剪", "删除"):
+            elif button.text() in ("静音", "标准化", "裁剪", "删除", "修复"):
                 self._selection_edit_buttons.append(button)
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
@@ -729,7 +747,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             elif button.objectName() == "PrimaryBtn":
                 self._return_button = button
             if not button.isEnabled():
-                button.setStyleSheet("color: #797981; background-color: #29292D; border-color: #323237;")
+                button.setStyleSheet(
+                    "QPushButton:disabled { color: #797981; background-color: #29292D; border-color: #323237; }")
 
         self._mode_label: QLabel | None = None
         for label in self.findChildren(QLabel):
@@ -1210,7 +1229,10 @@ class ProjectClipEditor(QWidget):
         asset = self._asset
         if asset is None or self._panel is None:
             return
+        self._pcm_spec_key = None
+        self._last_pcm = None
         self._pcm_applied = False
+        self._panel.detach_pcm()
         duration = self._clip.timeline_duration / self._fps if self._clip is not None else asset.duration_seconds
         if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0.0:
             duration = 0.01
@@ -1306,9 +1328,10 @@ class ProjectClipEditor(QWidget):
         # 噪声底：50 ms 窗 RMS 的第 10 百分位（cheap、单调、可复现）。
         window = max(1, int(round(0.05 * rate)))
         if data.shape[1] >= window * 2:
-            mono = data if data.shape[0] == 1 else data.mean(axis=0)
-            blocks = mono[: (mono.size // window) * window].reshape(-1, window)
-            block_rms = np.sqrt(np.mean(blocks ** 2, axis=1))
+            block_count = data.shape[1] // window
+            blocks = data[:, :block_count * window].reshape(data.shape[0], block_count, window)
+            # Average channel powers so inverted stereo does not read as silence.
+            block_rms = np.sqrt(np.einsum("cbn,cbn->b", blocks, blocks) / (data.shape[0] * window))
             floor = float(np.percentile(block_rms, 10))
             report["noise_floor_db"] = 20.0 * math.log10(floor) if floor > 0 else -120.0
         else:
@@ -1518,22 +1541,37 @@ class ProjectClipEditor(QWidget):
     def _on_stack_step_toggled(self, step_id: str, enabled: bool) -> None:
         if self._clip is None or self._clip.audio_edit is None:
             return
-        self._commit_audio_edit(
+        self._commit_stack_change(
             replace_step_enabled(self._clip.audio_edit, step_id, enabled),
             I18N.tr("mixer.clip_editor.toggle_step", "Toggle audio edit step"))
 
     def _on_stack_step_removed(self, step_id: str) -> None:
         if self._clip is None or self._clip.audio_edit is None:
             return
-        self._commit_audio_edit(
+        self._commit_stack_change(
             remove_step(self._clip.audio_edit, step_id),
             I18N.tr("mixer.clip_editor.remove_step", "Remove audio edit step"))
 
     def _on_stack_cleared(self) -> None:
         if self._clip is None or self._clip.audio_edit is None:
             return
-        self._commit_audio_edit(
-            None, I18N.tr("mixer.clip_editor.clear_stack", "Clear audio edit stack"))
+        self._commit_stack_change(
+            clear_steps(self._clip.audio_edit), I18N.tr("mixer.clip_editor.clear_stack", "Clear audio edit stack"))
+
+    def _commit_stack_change(self, edit: dict | None, label: str) -> None:
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._raw_pcm is None:
+            return
+        input_samples = panel._raw_pcm.shape[1]
+        if (output_length_after_steps(clip.audio_edit, input_samples)
+                != output_length_after_steps(edit, input_samples)):
+            panel._rebuild_process_stack_ui()
+            panel.set_stack_editable(True)
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.length_stack_change",
+                "This step changes the clip length. Use timeline Undo to restore the previous edit."))
+            return
+        self._commit_audio_edit(edit, label)
 
     def _on_envelope_changed(self, points: list) -> None:
         """P1-4：画布包络（拖拽结束/增删节点时发一次）→ 模型节点提交命令。"""
@@ -1734,7 +1772,6 @@ class ProjectClipEditor(QWidget):
     def _ask_length_change_options(self, delta_frames: int, linked: bool,
                                    ) -> tuple[bool | None, bool]:
         """ripple/留空选择 + 独立音频编辑确认；取消返回 ``(None, _)``。"""
-        clip = self._clip
         message = I18N.tr(
             "mixer.clip_editor.length_change_prompt",
             "Commit changes the clip length by {delta} frames.\n"
@@ -1754,16 +1791,15 @@ class ProjectClipEditor(QWidget):
         box.addButton(QMessageBox.StandardButton.Cancel)
         independent = None
         if linked:
-            independent = box.checkBox()
-        if independent is not None:
-            independent.setText(I18N.tr(
+            independent = QCheckBox(I18N.tr(
                 "mixer.clip_editor.independent_audio",
-                "Independent audio edit (linked video stays put)"))
+                "Independent audio edit (linked video stays put)"), box)
             independent.setToolTip(I18N.tr(
                 "mixer.clip_editor.independent_audio_tip",
                 "By default the linked video clip keeps its sync — length "
                 "changes that would break A/V alignment need this explicit "
                 "choice"))
+            box.setCheckBox(independent)
         box.exec()
         clicked = box.clickedButton()
         if clicked is gap_button:

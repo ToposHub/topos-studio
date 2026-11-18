@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -466,6 +467,21 @@ def test_build_pre_render_plan_range_and_spec(tmp_path):
         project, timeline, clip, asset,
     )
     assert other.spec().key == spec.key
+
+
+def test_same_source_different_in_points_use_different_pcm_cache_entries(tmp_path) -> None:
+    project, timeline, clip, asset = _plan_fixture(
+        tmp_path, audio_edit=_denoise_edit((0, RATE), (0, RATE // 2)))
+    original = prc.build_pre_render_plan(project, timeline, clip, asset)
+    first = replace(original, end_sample=RATE)
+    second = replace(first, start_sample=1, end_sample=RATE + 1)
+    cache = PcmRenderCache(tmp_path / "renders")
+    cached_first = cache.build(first.spec(), first.builder())
+    cached_second = cache.build(second.spec(), second.builder())
+    assert first.spec().key != second.spec().key
+    assert first.spec().key != replace(first, reverse=True).spec().key
+    assert not np.array_equal(cached_first, cached_second)
+    np.testing.assert_array_equal(cached_second, second.builder()())
 
 
 def test_build_pre_render_plan_blocks_retimed(tmp_path):

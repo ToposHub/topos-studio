@@ -1345,7 +1345,7 @@ class TrackMixerWidget(QWidget):
                 del_action.triggered.connect(lambda checked=False, i=inst: self._effect_remove(i))
                 menu.addSeparator()
 
-        # 永远显示：添加效果器子菜单（8 种效果器，含 Graphic EQ，均支持多实例）
+        # 始终提供插入效果菜单，与通道条下方的添加按钮共用。
         add_menu = menu.addMenu("+ " + I18N.tr("audio.fx.add", "Add Effect"))
         self._populate_add_effect_menu(add_menu)
 
@@ -1371,9 +1371,11 @@ class TrackMixerWidget(QWidget):
             lambda checked=False: self._add_spatial_panner())
         for effect_type in (
             "strip_eq", "reverb", "delay", "saturation", "imager",
+            "voice_changer", "spectral_mangler",
         ):
             display = _effect_display_name(effect_type)
             action = menu.addAction(display)
+            action.setData(effect_type)
             action.triggered.connect(lambda checked=False, et=effect_type: self._effect_add(et))
 
     def _show_add_effect_menu(self) -> None:

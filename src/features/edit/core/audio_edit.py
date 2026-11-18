@@ -1099,13 +1099,20 @@ def replace_step_enabled(audio_edit: Any, step_id: str, enabled: bool) -> Any:
 
 
 def remove_step(audio_edit: Any, step_id: str) -> Any:
-    """返回移除某 step 后的新 audio_edit；steps 清空时返回 None。"""
+    """Remove a step while preserving other clip audio edit data."""
     if not isinstance(audio_edit, dict):
         return audio_edit
-    updated = copy.deepcopy(audio_edit)
-    updated["steps"] = [step for step in updated.get("steps", [])
-                        if not (isinstance(step, dict) and step.get("step_id") == step_id)]
-    return updated if updated["steps"] else None
+    remaining = [step for step in audio_edit.get("steps", [])
+                 if not (isinstance(step, dict) and step.get("step_id") == step_id)]
+    return copy_audio_edit({**audio_edit, "steps": remaining}) if remaining else clear_steps(audio_edit)
+
+
+def clear_steps(audio_edit: Any) -> Any:
+    """Clear the processor rack, keeping envelopes, markers and extra fields."""
+    if not isinstance(audio_edit, dict):
+        return audio_edit
+    updated = {**audio_edit, "steps": []}
+    return None if updated == new_audio_edit() else copy_audio_edit(updated)
 
 
 def append_step(audio_edit: Any, step: dict) -> dict:
