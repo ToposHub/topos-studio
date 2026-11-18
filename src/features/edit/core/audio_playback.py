@@ -1759,6 +1759,8 @@ class AudioMixer:
         self._lufs_meters: Dict[str, Any] = {}
         # W21: 每轨 automation（{track_id: {param: KeyframeTrack}}）
         self._automation: Dict[str, Dict[str, Any]] = {}
+        # P1 · VCA：成员轨推子级倍率（序列同步时刷新；缺省恒等）。
+        self._vca_factors: Dict[str, float] = {}
         # AM-07: 每轨自动化模式（"off"/"read"/"write"/"touch"/"latch"）。
         # 引擎据此判断是否读取 automation 曲线。Off 模式用静态值（不读曲线）。
         # 默认 "off"（向后兼容：无模式时存在关键帧不读取，由调用方显式设为 read）。
@@ -2694,6 +2696,15 @@ class AudioMixer:
                 logger.debug(f"audio crossfade apply failed: {e}")
         return out
 
+    def set_vca_overrides(self, factors) -> None:
+        """P1 · VCA：按轨设置推子级倍率（{track_id: 线性倍率}）。
+
+        序列同步时由引擎从 ``TimelineSequence.vca_factor_for`` 计算并
+        刷新；只作用于成员轨的音量级——路由/Send tap/自动化曲线不变。
+        """
+        self._vca_factors = {str(tid): float(factor)
+                             for tid, factor in (factors or {}).items()}
+
     def set_track_routing(self, track_id: str, output_bus_id: Optional[str],
                           sends: list, is_bus: bool = False) -> None:
         """设置某轨的路由信息（W24/W25）。线程安全。
@@ -2813,7 +2824,7 @@ class AudioMixer:
                 if has_solo and track_id not in audible_solo:
                     continue
 
-                volume = state.volume
+                volume = state.volume * self._vca_factors.get(track_id, 1.0)
                 pan = state.pan
                 # AM-07/§3.2: automation 模式判断 + 逐样本 ramp（替代每帧单标量）。
                 # Off 模式不读取曲线（用静态值）。Read/Write/Touch/Latch 读取曲线。
