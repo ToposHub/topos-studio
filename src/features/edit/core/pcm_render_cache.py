@@ -57,13 +57,22 @@ class PreRenderCancelled(RuntimeError):
 
 @dataclass(frozen=True)
 class PreRenderSpec:
-    """一个预渲染结果的全部身份输入（纯数据、可哈希）。"""
+    """一个预渲染结果的全部身份输入（纯数据、可哈希）。
+
+    ``total_samples`` 是源解码区间长度；``output_samples`` 是整栈烘焙后的
+    长度（改长度步骤生效后的新长度；无改长度步骤时与 total 相同）。
+    """
 
     source_fingerprint: str
     sample_rate: int
     channel_count: int
     total_samples: int
     steps_signature: tuple
+    output_samples: int = -1  # -1 = 无改长度步骤（与 total_samples 一致）
+
+    @property
+    def expected_output_samples(self) -> int:
+        return self.total_samples if self.output_samples < 0 else self.output_samples
 
     @property
     def key(self) -> str:
@@ -71,6 +80,7 @@ class PreRenderSpec:
             PCM_RENDER_CACHE_SCHEMA_VERSION,
             self.source_fingerprint, self.sample_rate,
             self.channel_count, self.total_samples, self.steps_signature,
+            self.expected_output_samples,
         ))
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
@@ -297,6 +307,7 @@ class PcmRenderCache:
                     "sample_rate": spec.sample_rate,
                     "channel_count": spec.channel_count,
                     "total_samples": spec.total_samples,
+                    "output_samples": spec.expected_output_samples,
                 }, handle)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -413,13 +424,15 @@ class PcmRenderCache:
             if (int(meta.get("schema", -1)) != PCM_RENDER_CACHE_SCHEMA_VERSION
                     or meta.get("key") != spec.key
                     or int(meta.get("channel_count", -1)) != spec.channel_count
-                    or int(meta.get("total_samples", -1)) != spec.total_samples):
+                    or int(meta.get("total_samples", -1)) != spec.total_samples
+                    or int(meta.get("output_samples", -1))
+                    != spec.expected_output_samples):
                 raise ValueError("meta mismatch")
             with np.load(data_path) as payload:
                 pcm = payload["pcm"]
                 if (pcm.dtype != np.float32 or pcm.ndim != 2
                         or pcm.shape[0] != spec.channel_count
-                        or pcm.shape[1] != spec.total_samples):
+                        or pcm.shape[1] != spec.expected_output_samples):
                     raise ValueError("payload mismatch")
                 result = np.ascontiguousarray(pcm, dtype=np.float32)
             os.utime(data_path)  # LRU 触碰
@@ -439,10 +452,11 @@ class PcmRenderCache:
         if (not isinstance(pcm, np.ndarray) or pcm.ndim != 2
                 or pcm.dtype != np.float32
                 or pcm.shape[0] != spec.channel_count
-                or pcm.shape[1] != spec.total_samples):
+                or pcm.shape[1] != spec.expected_output_samples):
             raise ValueError(
                 f"pre-render payload {pcm.shape if isinstance(pcm, np.ndarray) else pcm!r}"
-                f" does not match spec {spec.channel_count}x{spec.total_samples} float32")
+                f" does not match spec {spec.channel_count}x"
+                f"{spec.expected_output_samples} float32")
 
 
 # ----------------------------------------------------------------------
@@ -505,13 +519,18 @@ class PreRenderBuildPlan:
         return max(0, self.end_sample - self.start_sample)
 
     def spec(self) -> PreRenderSpec:
-        from src.features.edit.core.audio_edit import steps_signature
+        from src.features.edit.core.audio_edit import (
+            output_length_after_steps, steps_signature,
+        )
         return PreRenderSpec(
             source_fingerprint=self.source_fingerprint,
             sample_rate=int(self.sample_rate),
             channel_count=int(self.expected_channels),
             total_samples=self.total_samples,
             steps_signature=steps_signature({"steps": list(self.steps)}),
+            # 改长度步骤后的基底长度（消费方按新输出域切块）。
+            output_samples=output_length_after_steps(
+                {"steps": list(self.steps)}, self.total_samples),
         )
 
     def builder(self) -> Callable[[], np.ndarray]:

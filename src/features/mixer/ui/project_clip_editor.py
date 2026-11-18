@@ -10,7 +10,8 @@ import numpy as np
 from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QResizeEvent, QShortcut, QWheelEvent
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame, resolve_audio_source
@@ -22,11 +23,11 @@ from src.features.edit.core.clip_pcm import (
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
 from src.features.edit.core.audio_edit import (
-    append_step, canvas_markers_from, canvas_points_from_envelope,
-    envelope_from_canvas_points, envelope_nodes, inline_audio_edit, make_step,
-    marker_list, markers_from_canvas, remove_step, replace_processor_step,
-    replace_step_enabled, requires_pre_render, set_envelope,
-    set_markers,
+    LENGTH_CHANGING_PROCESSORS, append_step, canvas_markers_from,
+    canvas_points_from_envelope, envelope_from_canvas_points, envelope_nodes,
+    inline_audio_edit, make_step, marker_list, markers_from_canvas, remove_step,
+    replace_processor_step, replace_step_enabled, requires_pre_render,
+    set_envelope, set_markers,
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
@@ -93,6 +94,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     gain_requested = pyqtSignal(float)
     # P0-3：清空处理栈走工程命令（原型本地清空在生产行程外）。
     stack_clear_requested = pyqtSignal()
+    # §6.2：变速/音高/删除区间/裁剪的改长度提交（走项目/序列事务）。
+    time_pitch_commit_requested = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -140,6 +143,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # 处理器状态消息转发到包装层状态行（无包装层时退噪声标签）。
         self._status_hook: Any = None
         self.info_label = _PanelStatusForwarder(self)
+        # §6.2：待提交的变速/音高参数（预览时记录；提交按钮消费）。
+        self._pending_timepitch: tuple | None = None
+        self._timepitch_commit_button: QPushButton | None = None
 
     def set_status_message(self, text: str) -> None:
         hook = self._status_hook
@@ -147,6 +153,55 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             hook(text)
         else:
             self.noise_status_lbl.setText(text)
+
+    def _commit_time_pitch(self) -> None:
+        """生产路径：按钮 = 预览（记录待提交参数；demo 波形重采样不参与）。
+
+        提交（改长度事务）由 ``_timepitch_commit_button`` 触发
+        ``time_pitch_commit_requested``，参数取 ``_pending_timepitch``。
+        """
+        ratio_pct = round(self.stretch_knob.value(), 1)
+        pitch_st = round(self.pitch_knob.value(), 1)
+        if abs(ratio_pct - 100.0) < 0.05 and abs(pitch_st) < 0.05:
+            return
+        t0, t1, _, _ = self.canvas.getSelection()
+        if t1 <= t0 or t0 < 0.0:
+            t0, t1 = 0.0, self._duration
+        preserve = self.preserve_pitch_sw.isChecked()
+        self.timePitchApplied.emit(t0, t1, ratio_pct, pitch_st, preserve, "wsola")
+        self._reset_time_pitch()
+
+    def set_pending_timepitch(self, pending: tuple | None) -> None:
+        """记录/清除待提交的变速参数并同步提交按钮可用性。"""
+        self._pending_timepitch = pending
+        button = self._timepitch_commit_button
+        if button is not None:
+            button.setEnabled(pending is not None and self._pcm is not None
+                              and self._stack_editable_hint)
+            button.setToolTip("" if pending is not None else I18N.tr(
+                "mixer.clip_editor.timepitch_commit_hint",
+                "Preview speed & pitch first, then commit the length change"))
+
+    def ensure_timepitch_commit_button(self) -> None:
+        """在时间/音高卡内补一个“提交入栈”按钮（只创建一次）。"""
+        if self._timepitch_commit_button is not None:
+            return
+        apply_button = next(
+            (button for button in self.findChildren(QPushButton)
+             if button.text() == "应用时间与音高"), None)
+        layout = (apply_button.parentWidget().layout()
+                  if apply_button is not None else None)
+        if layout is None:
+            return
+        button = QPushButton(I18N.tr(
+            "mixer.clip_editor.timepitch_commit", "Commit to stack"))
+        button.setObjectName("MiniCellBtn")
+        button.setEnabled(False)
+        button.clicked.connect(
+            lambda _checked=False: self.time_pitch_commit_requested.emit())
+        self._timepitch_commit_button = button
+        self.set_pending_timepitch(self._pending_timepitch)
+        layout.addWidget(button)
 
     def _on_zero_snap_toggled(self, enabled: bool) -> None:
         self._zero_snap_armed = enabled
@@ -176,6 +231,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
         self._timepitch_pcm = None
         self._denoise_preview = None
+        self.set_pending_timepitch(None)
         self._audition.load(pcm, sample_rate)
         self._is_playing = False
         self._skip_selection_mode = False
@@ -205,6 +261,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm = None
         self._raw_pcm = None
         self._model_audio_edit = None
+        self._pending_timepitch = None
         self._is_playing = False
         self._skip_selection_mode = False
 
@@ -220,6 +277,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             widget.setEnabled(editable and self._pcm is not None)
         for button in getattr(self, "_selection_edit_buttons", ()):
             button.setEnabled(editable and self._pcm is not None)
+        # 变速/音高的提交按钮跟随同一可用性（§6.2 改长度提交）。
+        self.set_pending_timepitch(self._pending_timepitch)
 
     def sync_audio_edit(self, audio_edit: dict | None,
                         output_total_samples: int | None = None) -> None:
@@ -260,6 +319,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     "mixer.clip_editor.step_denoise", "Denoise"),
                 "channel_polarity": I18N.tr(
                     "mixer.clip_editor.polarity", "Invert polarity"),
+                "time_stretch": I18N.tr(
+                    "mixer.clip_editor.step_timepitch", "Speed / pitch"),
+                "delete_range": I18N.tr(
+                    "mixer.clip_editor.step_delete_range", "Delete range"),
             }.get(processor, processor)
             gain_db = params.get("gain_db")
             if processor == "spectral_denoise":
@@ -268,6 +331,20 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
                     + (f"−{float(reduction):.1f} dB"
                        if isinstance(reduction, (int, float)) else "spectral")
+                    + " · " + I18N.tr(
+                        "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            elif processor == "time_stretch":
+                detail = (
+                    f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                    f"{float(params.get('ratio_pct', 100.0)):.1f}%"
+                    + (f" · {float(params.get('pitch_semitones', 0.0)):+.1f} st"
+                       if abs(float(params.get("pitch_semitones", 0.0))) > 1e-6 else "")
+                    + " · " + I18N.tr(
+                        "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            elif processor == "delete_range":
+                detail = (
+                    f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                    + I18N.tr("mixer.clip_editor.step_splice", "spliced")
                     + " · " + I18N.tr(
                         "mixer.clip_editor.step_pre_render", "pre-rendered"))
             else:
@@ -283,7 +360,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 "detail": detail,
                 "color": "#4BA6DD" if processor == "range_gain" else (
                     "#F26D6D" if processor == "mute" else (
-                        "#B58BD8" if processor == "spectral_denoise" else "#7BC96F")),
+                        "#B58BD8" if processor == "spectral_denoise" else (
+                            "#5BC8C8" if processor == "time_stretch" else (
+                                "#E0A458" if processor == "delete_range"
+                                else "#7BC96F")))),
                 "enabled": bool(step.get("enabled", True)),
                 "params": params,
             })
@@ -573,12 +653,12 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             if button.text() in buttons_by_text:
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
-            elif button.text() in ("静音", "标准化"):
+            elif button.text() in ("静音", "标准化", "裁剪", "删除"):
                 self._selection_edit_buttons.append(button)
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
             elif button.text() == "应用时间与音高":
-                # P2-7：预览态（提交需输出长度映射事务，后续批次）。
+                # P2-7 + §6.2：预览按钮（提交按钮在包装层补建）。
                 self._timepitch_button = button
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
@@ -745,6 +825,8 @@ class ProjectClipEditor(QWidget):
     audition_active_changed = pyqtSignal(bool)
     # P0-3：处理栈提交（clip_id, audio_edit, label）——由宿主执行工程命令。
     audio_edit_committed = pyqtSignal(str, object, str)
+    # §6.2：改长度事务（计划已通过冲突检查；控制器构建项目/序列命令）。
+    length_change_committed = pyqtSignal(str, object, str)
     close_requested = pyqtSignal()
     float_requested = pyqtSignal()
     tab_requested = pyqtSignal()
@@ -863,6 +945,12 @@ class ProjectClipEditor(QWidget):
             self._panel.normalizeRequested.connect(self._on_normalize_requested)
             self._panel.processStepToggled.connect(self._on_stack_step_toggled)
             self._panel.processStepRemoved.connect(self._on_stack_step_removed)
+            # §6.2：改长度提交（变速/音高、删除区间、裁剪）走项目/序列事务。
+            self._panel.ensure_timepitch_commit_button()
+            self._panel.time_pitch_commit_requested.connect(
+                self._on_time_pitch_commit_requested)
+            self._panel.trimRequested.connect(self._on_trim_requested)
+            self._panel.deleteRangeRequested.connect(self._on_delete_requested)
             self._panel.stack_clear_requested.connect(self._on_stack_cleared)
             # P1-4：包络节点提交（画布拖拽结束/增删时各发一次）。
             self._panel.envelopeChanged.connect(self._on_envelope_changed)
@@ -1552,6 +1640,211 @@ class ProjectClipEditor(QWidget):
         hi = int(round(raw_hi * scale))
         return (lo, max(lo + 1, hi))
 
+    # ------------------------------------------------------------------
+    # §6.2：改长度事务（变速/音高、删除区间、裁剪）
+    # ------------------------------------------------------------------
+    def _has_length_step(self) -> bool:
+        edit = self._clip.audio_edit if self._clip is not None else None
+        return any(
+            isinstance(step, dict)
+            and step.get("processor_id") in LENGTH_CHANGING_PROCESSORS
+            for step in (edit or {}).get("steps", []) or [])
+
+    def _guard_length_commit(self) -> bool:
+        """改长度提交的公共前置（片段/锁定/域兼容/既有改长度步骤）。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._raw_pcm is None:
+            return False
+        speed = getattr(clip, "effective_speed", None)
+        speed = float(speed() if callable(speed)
+                      else (speed if speed is not None else 1.0))
+        if abs(speed - 1.0) > 1e-9:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.length_native_retime",
+                "This clip already uses native retiming — clear its speed "
+                "before committing stack length changes"))
+            return False
+        if self._has_length_step():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.length_step_exists",
+                "A length-changing step already exists — undo or clear the "
+                "stack before committing another one"))
+            return False
+        return True
+
+    def _ask_length_change_options(self, delta_frames: int, linked: bool,
+                                   ) -> tuple[bool | None, bool]:
+        """ripple/留空选择 + 独立音频编辑确认；取消返回 ``(None, _)``。"""
+        clip = self._clip
+        message = I18N.tr(
+            "mixer.clip_editor.length_change_prompt",
+            "Commit changes the clip length by {delta} frames.\n"
+            "Keep the gap, or ripple the following clips?").format(
+                delta=delta_frames)
+        box = QMessageBox(self)
+        box.setWindowTitle(I18N.tr(
+            "mixer.clip_editor.length_change_title", "Commit length change"))
+        box.setText(message)
+        box.setIcon(QMessageBox.Icon.Question)
+        gap_button = box.addButton(
+            I18N.tr("mixer.clip_editor.keep_gap", "Keep gap"),
+            QMessageBox.ButtonRole.AcceptRole)
+        ripple_button = box.addButton(
+            I18N.tr("mixer.clip_editor.ripple_follow", "Ripple following clips"),
+            QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        independent = None
+        if linked:
+            independent = box.checkBox()
+        if independent is not None:
+            independent.setText(I18N.tr(
+                "mixer.clip_editor.independent_audio",
+                "Independent audio edit (linked video stays put)"))
+            independent.setToolTip(I18N.tr(
+                "mixer.clip_editor.independent_audio_tip",
+                "By default the linked video clip keeps its sync — length "
+                "changes that would break A/V alignment need this explicit "
+                "choice"))
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is gap_button:
+            return False, bool(independent is not None and independent.isChecked())
+        if clicked is ripple_button:
+            return True, bool(independent is not None and independent.isChecked())
+        return None, False
+
+    def _commit_length_change(self, new_edit: dict, label: str,
+                              *, old_output_samples: int | None = None) -> None:
+        """统一改长度提交：ripple 选择 → 冲突计划 → 项目/序列事务。"""
+        from src.features.edit.core.audio_length_transaction import (
+            plan_clip_length_change,
+        )
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None:
+            return
+        old_total = old_output_samples or self._output_total_samples()
+        from src.features.edit.core.audio_edit import output_length_after_steps
+        new_total = output_length_after_steps(new_edit, old_total)
+        fps = self._fps if self._fps > 0 else 24.0
+        delta_frames = int(round(
+            (new_total - old_total) * fps / AUDIO_REFERENCE_SAMPLE_RATE))
+        ripple, independent = self._ask_length_change_options(
+            delta_frames, linked=bool(getattr(clip, "linked_clip_id", None)))
+        if ripple is None:
+            return  # 用户取消：零写入
+        plan = plan_clip_length_change(
+            self._timeline, clip.track_id, clip.clip_id,
+            new_audio_edit=new_edit, old_output_samples=old_total,
+            ripple=ripple, fps=fps, label=label,
+            allow_independent_audio=independent)
+        if plan.blocked:
+            panel.set_status_message(" · ".join(plan.blocked))
+            return
+        panel.clear_timepitch_preview()
+        panel.set_pending_timepitch(None)
+        notes = list(plan.warnings) + list(plan.remap_warnings)
+        if notes:
+            panel.set_status_message(" · ".join(notes))
+        self.length_change_committed.emit(clip.clip_id, plan, label)
+
+    def _on_time_pitch_commit_requested(self) -> None:
+        """§6.2：把预览的变速/音高作为 time_stretch 步骤提交。"""
+        from src.features.edit.core.audio_denoise import scipy_available
+        from src.features.edit.core.audio_edit import time_stretch_output_length
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None:
+            return
+        pending = panel._pending_timepitch
+        if pending is None:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.timepitch_commit_hint",
+                "Preview speed & pitch first, then commit the length change"))
+            return
+        if not self._guard_length_commit():
+            return
+        if not scipy_available():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.denoise_unavailable",
+                "Denoise requires the SciPy DSP backend"))
+            return
+        lo, hi, ratio_pct, semitones, preserve = pending
+        old_total = self._output_total_samples()
+        # output_length 是“本步骤后的定义域长度”（§3 映射合同）。
+        segment_out = time_stretch_output_length(hi - lo, ratio_pct)
+        output_length = old_total - (hi - lo) + segment_out
+        step = make_step(
+            "time_stretch", start=lo, end=hi, channels=self._target_channels(),
+            ratio_pct=round(float(ratio_pct), 2),
+            pitch_semitones=round(float(semitones), 2),
+            preserve_pitch=bool(preserve),
+            output_length=int(output_length),
+            label=I18N.tr("mixer.clip_editor.step_timepitch",
+                          "Speed / pitch"))
+        self._commit_length_change(
+            append_step(clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.commit_timepitch",
+                    "Commit speed & pitch"))
+
+    def _on_delete_requested(self, t0: float, t1: float) -> None:
+        """§3 控件映射：删除选区 —— delete_range 步骤 + 改长度事务。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None:
+            return
+        if not self._guard_length_commit():
+            return
+        start, end = self._selection_output_range()
+        total = self._output_total_samples()
+        if start <= 0 and end >= total:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.delete_whole_clip",
+                "Deleting the whole clip is a timeline edit — use clip delete"))
+            return
+        step = make_step(
+            "delete_range", start=start, end=end, channels=self._target_channels(),
+            output_length=int(total - (end - start)),
+            label=I18N.tr("mixer.clip_editor.step_delete", "Delete range"))
+        self._commit_length_change(
+            append_step(clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.delete_selection", "Delete selection"))
+
+    def _on_trim_requested(self, t0: float, t1: float) -> None:
+        """§3 控件映射：裁剪保留选区 —— 头/尾两个 delete_range 步骤。
+
+        v1 统一走处理栈（保持命令/撤销/渲染一条路径）；选区贴齐片段头尾
+        时其中一段为空，退化为单段删除。native TrimClipCommand 复用留给
+        后续批次（需与栈坐标域联动）。
+        """
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None:
+            return
+        if not self._guard_length_commit():
+            return
+        start, end = self._selection_output_range()
+        total = self._output_total_samples()
+        if start <= 0 and end >= total:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.trim_whole_clip",
+                "Selection already covers the whole clip"))
+            return
+        edit = clip.audio_edit
+        if start > 0:
+            edit = append_step(edit, make_step(
+                "delete_range", 0, start, self._target_channels(),
+                output_length=int(total - start),
+                label=I18N.tr("mixer.clip_editor.step_trim_head", "Trim head")))
+            total -= start
+            end = max(1, end - start)
+        if end < total:
+            edit = append_step(edit, make_step(
+                "delete_range", end, total, self._target_channels(),
+                output_length=int(end),
+                label=I18N.tr("mixer.clip_editor.step_trim_tail", "Trim tail")))
+        if edit is clip.audio_edit:
+            return
+        self._commit_length_change(
+            edit, I18N.tr("mixer.clip_editor.trim_selection", "Trim to selection"),
+            old_output_samples=self._output_total_samples())
+
     def _on_lufs_normalize_requested(self, t0: float, t1: float,
                                      target_lufs: float, tp_ceiling: float) -> None:
         """P1-6：BS.1770 实测响度匹配 → 峰值受限的 range_gain 步骤提交。"""
@@ -1618,10 +1911,13 @@ class ProjectClipEditor(QWidget):
             return
         preview = np.concatenate([raw[:, :lo], segment, raw[:, hi:]], axis=1)
         panel.set_timepitch_preview(np.ascontiguousarray(preview, dtype=np.float32))
+        # §6.2：预览参数即待提交参数（选区/速率/音高在 raw 域）。
+        panel.set_pending_timepitch(
+            (lo, hi, float(ratio_pct), float(pitch_semitones), bool(preserve)))
         panel.info_label.setText(I18N.tr(
             "mixer.clip_editor.timepitch_preview_applied",
             f"Preview: {preview.shape[1] / rate:.3f} s "
-            f"(was {duration:.3f} s) — commit needs the length transaction"))
+            f"(was {duration:.3f} s) — commit with the length transaction"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:

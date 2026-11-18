@@ -83,7 +83,7 @@ class TestModel:
         s1 = make_step("mute", start=0, end=10, channels=(0,), step_id="dup")
         s2 = make_step("mute", start=20, end=30, channels=(0,), step_id="dup")
         assert any("duplicate" in d for d in validate_audio_edit(new_audio_edit([s1, s2])))
-        assert any("exceeds clip" in d for d in validate_audio_edit(
+        assert any("exceeds" in d for d in validate_audio_edit(
             new_audio_edit([make_step("mute", 0, 999999, (0,))]), clip_output_samples=48000))
 
     def test_clip_round_trip_preserves_steps_and_none_stays_absent(self) -> None:

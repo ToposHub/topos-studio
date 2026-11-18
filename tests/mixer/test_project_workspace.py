@@ -767,3 +767,123 @@ def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_pa
     view.undo()  # 撤销 6 dB 替换提交
     view.undo()  # 撤销首次入栈
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
+
+
+def test_clip_editor_timepitch_commit_changes_length_and_undoes(
+        project_host, qtbot, tmp_path, monkeypatch) -> None:
+    """§6.2：变速预览 → 提交（gap 模式）→ 片段变短 + 步骤入栈 → 一次撤销。"""
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    rate = 48000
+    audio_path = tmp_path / "stretch.wav"
+    t = np.arange(5 * rate) / rate
+    tone = (0.2 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    interleaved = np.empty((tone.size, 2), dtype="<i2")
+    interleaved[:, 0] = (tone * 32000).astype("<i2")
+    interleaved[:, 1] = (tone * 32000).astype("<i2")
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(interleaved.tobytes())
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Stretch",
+        metadata={"audio_info": {"sample_rate": rate, "channels": 2},
+                  "duration_seconds": 5.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Stretch", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+    old_duration = view.get_timeline().get_clip_by_id(clip_id).timeline_duration
+
+    # 对话框固定为“留空 + 独立音频编辑”（无链接视频时勾选不生效）。
+    monkeypatch.setattr(
+        type(editor), "_ask_length_change_options",
+        lambda self, delta_frames, linked: (False, True))
+
+    # 预览：150% 作用于 [1, 4) s → 待提交参数记录在面板上。
+    panel.canvas.setSelection(1.0, 4.0)
+    panel.stretch_knob.setValue(150.0, emit=False)
+    panel._commit_time_pitch()  # “应用时间与音高”按钮的信号路径
+    qtbot.waitUntil(lambda: panel._timepitch_pcm is not None, timeout=10000)
+    assert panel._pending_timepitch is not None
+    assert panel._timepitch_commit_button.isEnabled()
+
+    # 提交：改长度事务一次落库（片段时长 + audio_edit time_stretch）。
+    panel._timepitch_commit_button.click()
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert edited.audio_edit is not None
+    step = edited.audio_edit["steps"][0]
+    assert step["processor_id"] == "time_stretch"
+    assert step["params"]["ratio_pct"] == 150.0
+    # 3 s 选区 → 2 s：片段时长按比例缩短（5 s → 4 s）。
+    assert edited.timeline_duration < old_duration
+    assert edited.timeline_duration == pytest.approx(old_duration * 4 / 5, abs=1)
+    # 域级映射：240000 − 144000 + 96000。
+    assert step["params"]["output_length"] == 192000
+    assert panel._pending_timepitch is None
+
+    # 一次撤销还原长度与处理栈。
+    view.undo()
+    restored = view.get_timeline().get_clip_by_id(clip_id)
+    assert restored.timeline_duration == old_duration
+    assert restored.audio_edit is None
+
+
+def test_clip_editor_delete_range_commits_and_undoes(
+        project_host, qtbot, tmp_path, monkeypatch) -> None:
+    """§3 控件映射：删除选区 → delete_range 步骤 + 长度事务。"""
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    rate = 48000
+    audio_path = tmp_path / "delete.wav"
+    t = np.arange(3 * rate) / rate
+    tone = (0.2 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    interleaved = np.empty((tone.size, 2), dtype="<i2")
+    interleaved[:, 0] = (tone * 32000).astype("<i2")
+    interleaved[:, 1] = (tone * 32000).astype("<i2")
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(interleaved.tobytes())
+    asset = MediaAsset(
+        asset_id="audio", path=str(audio_path), media_type="audio", display_name="Del",
+        metadata={"audio_info": {"sample_rate": rate, "channels": 2},
+                  "duration_seconds": 3.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Del", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    assert host._load_project_audio_clip_editor(clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
+    panel = editor._panel
+    old_duration = view.get_timeline().get_clip_by_id(clip_id).timeline_duration
+
+    monkeypatch.setattr(
+        type(editor), "_ask_length_change_options",
+        lambda self, delta_frames, linked: (False, True))
+    panel.canvas.setSelection(1.0, 2.0)  # 删除中段 1 s
+    panel.deleteRangeRequested.emit(1.0, 2.0)
+
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert edited.audio_edit is not None
+    step = edited.audio_edit["steps"][0]
+    assert step["processor_id"] == "delete_range"
+    # 域级映射：240000（5 s 输出域）− 48000 = 192000。
+    assert step["params"]["output_length"] == 192000
+    # 显示域中段 1 s 被删：片段时长 −24 帧。
+    assert edited.timeline_duration == old_duration - 24
+    view.undo()
+    restored = view.get_timeline().get_clip_by_id(clip_id)
+    assert restored.timeline_duration == old_duration
+    assert restored.audio_edit is None

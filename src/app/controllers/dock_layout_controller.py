@@ -1382,6 +1382,8 @@ class DockLayoutMixin:
         panel.audition_active_changed.connect(self._pause_timeline_for_clip_audition)
         # P0-3：处理栈提交走时间线命令（旁路/删除/清空可撤销）。
         panel.audio_edit_committed.connect(self._commit_mixer_clip_audio_edit)
+        # §6.2：改长度提交走项目/序列事务（一次撤销还原长度与后移）。
+        panel.length_change_committed.connect(self._commit_mixer_clip_length_change)
         panel.undo_requested.connect(view.undo)
         panel.redo_requested.connect(view.redo)
         panel.float_requested.connect(self._float_project_audio_clip_editor)
