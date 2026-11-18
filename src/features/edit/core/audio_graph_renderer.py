@@ -211,6 +211,12 @@ class AudioGraphRenderer:
         # MX-03: Master 条带（EQ/FX；音量后、限幅器前，与 mix_samples 同构）
         self._master_eq: Optional[StripEQFilter] = None
         self._master_chain: Optional[EffectChain] = None
+        # P0 · PDC 状态（configure_from_sequence 重算；render 前为空恒等）
+        self._pdc_track_max = 0
+        self._pdc_bus_max = 0
+        self._pdc_master_lat = 0
+        self._pdc_delay: dict[str, int] = {}
+        self._pdc_lines: dict[str, np.ndarray] = {}
         # R05: Master fx 参数自动化采样器（configure_from_sequence 构建）
         self._master_fx_sampler = None
         # AM-09: 连续状态 Master 限幅器（与 mix_samples 一致）
@@ -294,6 +300,75 @@ class AudioGraphRenderer:
             self._master_automation,
             master_chain_params,
         )
+        # P0 · PDC（插件延迟补偿）：两级"最迟路径对齐"——轨链一级、Bus 链
+        # 一级（Master 链作用于汇合后的共同信号，不产生相对错位）。每个
+        # 节点输出延迟 max(同级链延迟) − 本链延迟，声学事件在 Master 汇合
+        # 处落在同一绝对样本；延迟量计入尾音预算（延迟线需 flush）。
+        self._recompute_pdc()
+
+    # ── P0 · PDC：延迟声明聚合与输出端延迟线 ─────────────────────────
+
+    def _recompute_pdc(self) -> None:
+        track_lat: dict[str, int] = {}
+        bus_lat: dict[str, int] = {}
+        for nid, node in self._nodes.items():
+            chain = getattr(node, "effect_chain", None)
+            lat = 0
+            if chain is not None:
+                try:
+                    lat = int(chain.latency_samples())
+                except Exception:  # noqa: BLE001 — 声明异常按 0
+                    lat = 0
+            (bus_lat if node.is_bus else track_lat)[nid] = max(0, lat)
+        master_lat = 0
+        if self._master_chain is not None:
+            try:
+                master_lat = int(self._master_chain.latency_samples())
+            except Exception:  # noqa: BLE001
+                master_lat = 0
+        self._pdc_track_max = max(track_lat.values(), default=0)
+        self._pdc_bus_max = max(bus_lat.values(), default=0)
+        self._pdc_master_lat = max(0, master_lat)
+        self._pdc_delay: dict[str, int] = {}
+        for nid, lat in track_lat.items():
+            delay = self._pdc_track_max - lat
+            if delay > 0:
+                self._pdc_delay[nid] = delay
+        for nid, lat in bus_lat.items():
+            delay = self._pdc_bus_max - lat
+            if delay > 0:
+                self._pdc_delay[nid] = delay
+        # 延迟线缓冲（feed 后保留尾部，输出为"缓冲 + 新块"的前段）。
+        self._pdc_lines: dict[str, np.ndarray] = {}
+
+    def pdc_total_samples(self) -> int:
+        """最迟路径的总补偿延迟（轨级 + Bus 级 + Master 链声明）。
+
+        尾音/输出长度预算必须计入本值——延迟线把内容推迟这么多样本，
+        drain 不延长会截掉尾部内容。
+        """
+        return self._pdc_track_max + self._pdc_bus_max + self._pdc_master_lat
+
+    def reset_pdc_state(self) -> None:
+        """seek/重开：清空延迟线（避免残留内容错位）。"""
+        self._pdc_lines = {}
+
+    def _apply_pdc(self, node_id: str, samples: np.ndarray) -> np.ndarray:
+        """节点输出端延迟线：把该路径对齐到同级最迟链。
+
+        首块前视为已有 ``delay`` 个零样本的历史——输出从第一块起就对齐
+        绝对时间（被推迟的内容由尾音预算延长的 drain 区释放）。
+        """
+        delay = self._pdc_delay.get(node_id, 0)
+        if delay <= 0 or samples.shape[-1] == 0:
+            return samples
+        buffered = self._pdc_lines.get(node_id)
+        pending = (buffered if buffered is not None and buffered.shape[-1] > 0
+                   else np.zeros((samples.shape[0], delay), dtype=np.float32))
+        combined = np.concatenate([pending, samples], axis=1)
+        out = combined[:, :samples.shape[-1]]
+        self._pdc_lines[node_id] = combined[:, samples.shape[-1]:]
+        return np.ascontiguousarray(out, dtype=np.float32)
 
     def master_sidechain_sources(self) -> set:
         """MX-03: Master 链引用的外部侧链检源 track_id 集合（导出拼 tap 用）。"""
@@ -484,6 +559,8 @@ class AudioGraphRenderer:
                 mute_gate = (mute_ramp <= 0.5).astype(samples.dtype)
                 mute_gate = self._apply_declick_edges(mute_gate, self._sample_rate)
                 if not np.any(mute_gate):
+                    # P0 · PDC：整块静音也要喂零推进延迟线（时间对齐）。
+                    self._apply_pdc(track_id, np.zeros_like(samples))
                     return None
             vol_track = auto.get("volume")
             if vol_track is not None and getattr(vol_track, "keyframes", None):
@@ -579,7 +656,8 @@ class AudioGraphRenderer:
         if mute_gate is not None:
             samples = samples * mute_gate[np.newaxis, :samples.shape[-1]]
 
-        return samples
+        # P0 · PDC：输出端延迟线对齐同级最迟链（sends/侧链 tap 同步延迟）。
+        return self._apply_pdc(track_id, samples)
 
     # ── 路由：把处理后样本累积到 bus_inputs 或 master ──
 
@@ -815,6 +893,9 @@ class AudioGraphRenderer:
                                       for iid, buf in raw_map.items()}
                     bus_samples = node.effect_chain.process(
                         bus_samples, sidechain_by_id=sc_map)
+                # P0 · PDC：Bus 输出端延迟线对齐同级最迟 Bus 链
+                # （sends/下游路由同步延迟；跨块状态保存在延迟线里）。
+                bus_samples = self._apply_pdc(bus_id, bus_samples)
                 # 路由：Bus→Bus 或 →Master（output_bus_id）
                 target = node.output_bus_id
                 if target is not None and target in bus_inputs:

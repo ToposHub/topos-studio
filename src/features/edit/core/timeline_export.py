@@ -4291,7 +4291,9 @@ class TimelineExporter:
 
         render_tail_frames = 0
         if getattr(config, "include_fx_tail", False):
-            _tail_samples = _full_path_tail_samples
+            # P0 · PDC：延迟线把内容推迟 pdc_total_samples()——预算必须
+            # 计入，否则对齐延迟会截掉尾部内容。
+            _tail_samples = _full_path_tail_samples + renderer.pdc_total_samples()
             if _tail_samples > 0 and samples_per_frame > 0:
                 render_tail_frames = int(math.ceil(
                     _tail_samples / float(samples_per_frame)))
