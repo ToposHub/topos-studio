@@ -671,9 +671,11 @@ def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tm
     steps = edited.audio_edit["steps"]
     assert len(steps) == 1 and steps[0]["processor_id"] == "mute"
     assert steps[0]["params"]["start"] == 48000 and steps[0]["params"]["end"] == 192000
-    # 命令落地后机架与预览刷新：中段被静音，边缘保持 3 ms 过渡。
+    # 命令落地后机架与预览刷新（预览经 worker 异步发布）：
+    # 中段被静音，边缘保持 3 ms 过渡。
     assert len(panel._process_steps) == 1 and panel._process_steps[0]["type"] == "mute"
     raw_mid = float(panel._raw_pcm[0][96000])
+    qtbot.waitUntil(lambda: abs(float(panel._pcm[0][96000])) < 1e-6, timeout=15000)
     edited_mid = float(panel._pcm[0][96000])
     assert raw_mid > 0.005 and abs(edited_mid) < 1e-6
     assert abs(float(panel._pcm[0][48144])) < float(panel._raw_pcm[0][48144])
@@ -683,15 +685,15 @@ def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tm
     step_id = steps[0]["step_id"]
     panel.processStepToggled.emit(step_id, False)
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"][0]["enabled"] is False
-    qtbot.wait(10)
+    qtbot.waitUntil(
+        lambda: abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6, timeout=15000)
     # 步骤在模型中已旁路 → 预览回原始；A/B 开关在此基础上只是监听态。
-    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
     panel.btn_bypass.setChecked(True)
-    qtbot.wait(10)
-    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
+    qtbot.waitUntil(
+        lambda: abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6, timeout=15000)
     panel.btn_bypass.setChecked(False)
-    qtbot.wait(10)
-    assert abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6
+    qtbot.waitUntil(
+        lambda: abs(float(panel._pcm[0][96000]) - raw_mid) < 1e-6, timeout=15000)
 
     view.undo()
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit["steps"][0]["enabled"] is True
@@ -759,6 +761,8 @@ def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_pa
         return float(np.sqrt(np.mean(np.square(data[0, 60000:180000].astype(np.float64)))))
 
     raw_rms = _rms(panel._raw_pcm)
+    qtbot.waitUntil(
+        lambda: _rms(panel._pcm) < raw_rms * 10 ** (-4.0 / 20.0), timeout=15000)
     edited_rms = _rms(panel._pcm)
     assert raw_rms > 0.005
     assert edited_rms < raw_rms * 10 ** (-4.0 / 20.0)
