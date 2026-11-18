@@ -4907,6 +4907,9 @@ class MediaPoolPanel(QWidget):
         self._sort_order: str = "asc"  # asc or desc
         self._current_bin_id: str = ""  # Currently selected bin
         self._current_bin_is_smart: bool = False  # Currently selected bin type
+        # Mixer 工作区借用本面板时保存的视图状态（bin/搜索词），
+        # 离开 Mixer 时恢复；None 表示当前不在音频作用域。
+        self._audio_workspace_saved: Optional[tuple[str, bool, str]] = None
         # Navigation stack for the right-side "enter bin / go up" flow.
         # Holds the bin_id chain that leads to the current view; empty means
         # we're at the project root level.
@@ -5669,6 +5672,46 @@ class MediaPoolPanel(QWidget):
     def get_project(self) -> Optional[EditProject]:
         """Get the current project reference."""
         return self._project
+
+    def enter_audio_workspace(self) -> None:
+        """Mixer 借用本面板时聚焦音频素材（纯视图状态，可还原）。
+
+        切到 All Audio 智能素材箱并清空搜索词；原 bin 与搜索词保存到
+        ``_audio_workspace_saved``，由 :meth:`leave_audio_workspace` 恢复。
+        含音频流的视频素材留在 All Video 等其他箱中，用户仍可自行切换。
+        """
+        if self._audio_workspace_saved is not None:
+            return  # 已在音频作用域，避免重复保存中途状态
+        self._audio_workspace_saved = (
+            self._current_bin_id,
+            self._current_bin_is_smart,
+            self._search_text,
+        )
+        if self._project is not None and self.smart_bin_tree.select_bin(
+                SMART_BIN_ALL_AUDIO, True):
+            self._on_bin_selected(SMART_BIN_ALL_AUDIO, True)
+        if self._search_text and self.search_box is not None:
+            self.search_box.line_edit.setText("")
+
+    def leave_audio_workspace(self) -> None:
+        """返回 Edit 时恢复进 Mixer 前的 bin 与搜索词。"""
+        saved = self._audio_workspace_saved
+        if saved is None:
+            return
+        self._audio_workspace_saved = None
+        bin_id, is_smart, search_text = saved
+        if self._project is not None:
+            if bin_id:
+                tree = self.smart_bin_tree if is_smart else self.bin_tree
+                selected = tree.select_bin(bin_id, is_smart)
+            else:
+                selected = self.bin_tree.select_bin(
+                    self._project.root_bin_id, False)
+                bin_id = self._project.root_bin_id
+            if selected:
+                self._on_bin_selected(bin_id, is_smart)
+        if search_text and self.search_box is not None:
+            self.search_box.line_edit.setText(search_text)
 
     def set_comp_clip_preview(self, asset_id: str, pixmap: QPixmap) -> None:
         """Publish a rendered Composite preview to its Media Pool card."""

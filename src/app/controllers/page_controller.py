@@ -494,6 +494,10 @@ class PageManagementMixin:
             # Scopes was available before it entered the panel registry. Add
             # it to existing Composite layouts once, after restoreState().
             schedule(0, self._migrate_composite_scopes_dock_visibility)
+        if page_name == "Mixer" and hasattr(self, "_migrate_mixer_media_docks_layout"):
+            # Old Mixer states predate the Media Pool / Effects docks; add
+            # them once after restoreState() so they are not stuck hidden.
+            schedule(0, self._migrate_mixer_media_docks_layout)
         if page_name == "Deliver" and hasattr(self, "_migrate_deliver_layout"):
             # Old Deliver layouts had a separate queue dock and could restore
             # the settings dock at a collapsed width.  The queue now lives
