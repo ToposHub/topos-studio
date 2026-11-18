@@ -540,6 +540,27 @@ def remap_position_through_step(
     return start + int(round((position - start) * segment_output / span))
 
 
+def invert_position_through_step(
+    position: "int | Fraction", start: int, end: int, segment_output: int,
+) -> Fraction:
+    """改长度步骤输出域位置 → 输入域位置（精确有理数，不取整）。
+
+    与 ``remap_position_through_step`` 互逆（delete 的输出侧无缝，输入侧
+    被删区间不产生输出位置——逆映射天然无塌缩歧义）。前缀烘焙时把
+    最终域存储的 inline 步骤区间折回其机架位置所在的域。
+    """
+    pos = Fraction(int(position))
+    if pos <= start:
+        return pos
+    if segment_output <= 0:  # delete_range：输出 ≥ start 一律来自输入 ≥ end
+        return pos + (end - start)
+    new_end = start + segment_output
+    if pos >= new_end:
+        return pos - segment_output + (end - start)
+    span = max(1, end - start)
+    return start + (pos - start) * span / segment_output
+
+
 def _step_segment_output(processor_id: str, params: dict) -> int:
     """改长度步骤作用段的输出长度（delete=0；stretch=合同长度）。"""
     start, end = params.get("start"), params.get("end")
@@ -639,6 +660,53 @@ def pre_render_steps(audio_edit: Any) -> list[dict]:
     ]
 
 
+def last_pre_render_step_index(audio_edit: Any) -> int:
+    """最后一个 **enabled** 预渲染步骤的下标（无则 −1）。"""
+    if not isinstance(audio_edit, dict):
+        return -1
+    last = -1
+    for index, step in enumerate(audio_edit.get("steps", []) or []):
+        if (isinstance(step, dict) and step.get("enabled", True)
+                and step.get("processor_id") in PRE_RENDER_PROCESSORS):
+            last = index
+    return last
+
+
+def render_prefix_steps(audio_edit: Any) -> list[dict]:
+    """P0 · 缓存前缀：截至最后一个 enabled 预渲染步骤的全部 enabled 步骤。
+
+    用户机架顺序即处理顺序——前缀里混排的 inline 步骤（Gain→Denoise 与
+    Denoise→Gain 非通勤）必须一并烘焙进缓存基底，不能在实时块上重放
+    （那等于把机架顺序重排为"全部预渲染在前"）。后缀（最后一个预渲染
+    步骤之后的步骤）才走实时块。
+    """
+    if not isinstance(audio_edit, dict):
+        return []
+    last = last_pre_render_step_index(audio_edit)
+    if last < 0:
+        return []
+    return [
+        step for step in (audio_edit.get("steps", []) or [])[:last + 1]
+        if isinstance(step, dict) and step.get("enabled", True)
+    ]
+
+
+def suffix_audio_edit(audio_edit: Any) -> Any:
+    """P0 · 缓存后缀：最后一个 enabled 预渲染步骤**之后**的步骤 + 包络/标记。
+
+    基底在场时实时块只应用后缀（前缀已烘焙）；预渲染缺席的回退仍走
+    ``inline_audio_edit``（能放的 inline 都放，降噪缺席但可听）。
+    """
+    if not isinstance(audio_edit, dict):
+        return audio_edit
+    last = last_pre_render_step_index(audio_edit)
+    if last < 0:
+        return audio_edit
+    updated = copy.deepcopy(audio_edit)
+    updated["steps"] = list(updated.get("steps", []))[last + 1:]
+    return updated
+
+
 def inline_audio_edit(audio_edit: Any) -> Any:
     """去掉预渲染步骤的 audio_edit 副本（块路径在缓存基底上应用的部分）。
 
@@ -680,12 +748,16 @@ def render_pre_render_steps(
     progress: Any = None,
     cancel_check: Any = None,
 ) -> np.ndarray:
-    """整段应用预渲染步骤（缓存构建/编辑器预览共用；不修改输入）。
+    """整段应用缓存前缀（缓存构建/编辑器预览共用；不修改输入）。
 
-    SciPy 缺席时显式抛错——静默旁路会破坏「试听 == 播放 == 导出」合同。
-    ``progress``: Callable[[float], None]；``cancel_check``: Callable[[], bool]。
+    P0 · 机架顺序即处理顺序：前缀 = 截至最后一个 enabled 预渲染步骤的
+    全部 enabled 步骤（``render_prefix_steps``）。inline 步骤的持久化区间
+    在最终输出域——若其后还有改长度步骤，先经 ``invert_position_through_step``
+    逐个折回当前域再整段应用。SciPy 缺席时显式抛错——静默旁路会破坏
+    「试听 == 播放 == 导出」合同。``progress``: Callable[[float], None]；
+    ``cancel_check``: Callable[[], bool]。
     """
-    steps = pre_render_steps(audio_edit)
+    steps = render_prefix_steps(audio_edit)
     if not steps:
         return pcm
     from src.features.edit.core.audio_denoise import (
@@ -693,10 +765,53 @@ def render_pre_render_steps(
     )
     if not scipy_available():
         raise RuntimeError("SciPy DSP backend unavailable for pre-render steps")
+
+    def _later_length_maps(index: int) -> list[tuple[int, int, int]]:
+        """index 之后（含跨步骤）的改长度 forward map，按机架序。"""
+        maps: list[tuple[int, int, int]] = []
+        for later in steps[index + 1:]:
+            p = later.get("params", {}) if isinstance(
+                later.get("params"), dict) else {}
+            pid = later.get("processor_id")
+            if pid == "time_stretch":
+                s, e = int(p.get("start", 0)), int(p.get("end", 0))
+                maps.append((s, e, _time_stretch_output_length(
+                    max(0, e - s), float(p.get("ratio_pct", 100.0)))))
+            elif pid == "delete_range":
+                maps.append((int(p.get("start", 0)), int(p.get("end", 0)), 0))
+        return maps
+
+    def _invert_range(start: int, end: int,
+                      maps: list[tuple[int, int, int]]) -> tuple[int, int]:
+        """最终域区间 → 当前域区间（经后续改长度步骤逆映射，反向逐个）。"""
+        lo, hi = Fraction(int(start)), Fraction(int(end))
+        for s, e, seg in reversed(maps):
+            lo = invert_position_through_step(lo, s, e, seg)
+            hi = invert_position_through_step(hi, s, e, seg)
+        return max(0, math.floor(lo)), math.ceil(hi)
+
     out = pcm
-    for step in steps:
+    for index, step in enumerate(steps):
         processor_id = step.get("processor_id")
         params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+        if processor_id in LENGTH_CHANGING_PROCESSORS or processor_id in (
+                "spectral_denoise", "spectral_repair"):
+            pass  # 预渲染处理器：下方分支处理
+        else:
+            # P0 · 前缀里的 inline 步骤：按机架序整段应用（域折算后）。
+            mapped = dict(step)
+            m_params = dict(params)
+            start, end = params.get("start", 0), params.get("end", 0)
+            if isinstance(start, int) and isinstance(end, int):
+                m_params["start"], m_params["end"] = _invert_range(
+                    start, end, _later_length_maps(index))
+            mapped["params"] = m_params
+            temp = {"version": AUDIO_EDIT_SCHEMA_VERSION,
+                    "processing_rate": PROCESSING_RATE, "steps": [mapped]}
+            out = apply_clip_audio_edit(out, 0, temp, sample_rate=sample_rate)
+            if cancel_check is not None and cancel_check():
+                return pcm
+            continue
         if processor_id == "spectral_denoise":
             def _progress(fraction: float, _params=params) -> bool:
                 if progress is not None:
@@ -902,8 +1017,10 @@ def apply_clip_audio_edit_block(
     if audio_edit is None or not isinstance(audio_edit, dict):
         return samples
     if requires_pre_render(audio_edit):
-        audio_edit = inline_audio_edit(audio_edit)
         if pre_render_base is not None and samples.shape[-1] > 0:
+            # P0：基底在场——前缀（含混排的 inline 步骤）已烘焙，实时块
+            # 只应用后缀。
+            audio_edit = suffix_audio_edit(audio_edit)
             processing_rate = _edit_processing_rate(audio_edit)
             block = _slice_pre_render_base_rated(
                 pre_render_base, block_start_sample, samples.shape[-1],

@@ -1250,8 +1250,9 @@ def create_pre_render_base_fn(
 ) -> Callable[[Any], Optional[np.ndarray]]:
     """§3.3：Stem 导出的预渲染基底工厂（按 clip_id 记忆化 + 同步构建）。
 
-    只有含预渲染步骤的 clip 才触发解析；诊断降级留痕（SciPy 缺席/
-    超长/倒放时该 clip 走 inline-only，与成片导出的回退一致）。
+    P0：只有含预渲染步骤的 clip 才触发解析；非 READY（阻断/失败/取消）
+    经 ``ensure_exportable`` 中止导出并上报片段、步骤和原因——Stem 不得
+    以成功结果静默丢掉前缀里烘焙的效果。
     """
     memo: Dict[str, Optional[np.ndarray]] = {}
 
@@ -1269,13 +1270,11 @@ def create_pre_render_base_fn(
         )
         asset = getattr(project, "assets", {}).get(
             getattr(clip, "asset_id", "")) if project is not None else None
-        base, diagnostics = resolve_export_pre_render_base(
+        resolution = resolve_export_pre_render_base(
             project, sequence, clip, asset)
-        for message in diagnostics:
-            logger.warning("stem pre-render degraded for clip %s: %s",
-                           clip_id, message)
-        memo[clip_id] = base
-        return base
+        resolution.ensure_exportable()
+        memo[clip_id] = resolution.base
+        return resolution.base
 
     return _base_for
 

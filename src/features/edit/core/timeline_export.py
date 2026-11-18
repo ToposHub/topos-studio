@@ -92,6 +92,7 @@ from src.shared.export.export_stage_telemetry import ExportTelemetryRecorder
 from src.features.edit.core.timeline_render_plan import (
     build_direct_topos_delivery_plan,
 )
+from src.features.edit.core.pcm_render_cache import PreRenderUntrustedError
 
 if TYPE_CHECKING:
     import numpy as np
@@ -4773,7 +4774,8 @@ class TimelineExporter:
 
                         # P0：预渲染成品基底按 clip 解析一次（原逐帧解析）。
                         # 成品即独立源——time_stretch 拉长后源 EOF 的帧由
-                        # clip_block_from_pre_render 直接供块。
+                        # clip_block_from_pre_render 直接供块。非 READY 时
+                        # ensure_exportable 中止导出（不静默丢前缀效果）。
                         _audio_edit = getattr(clip, "audio_edit", None)
                         _pre_base = None
                         if _audio_edit:
@@ -4784,14 +4786,12 @@ class TimelineExporter:
                                 from src.features.edit.core.pcm_render_cache import (
                                     resolve_export_pre_render_base,
                                 )
-                                _pre_base, _pre_diag = (
-                                    resolve_export_pre_render_base(
-                                        self._project, self._sequence,
-                                        clip, asset))
-                                for _msg in _pre_diag:
-                                    logger.warning(
-                                        "clip %s pre-render degraded: %s",
-                                        clip.clip_id, _msg)
+                                _resolution = resolve_export_pre_render_base(
+                                    self._project, self._sequence, clip, asset)
+                                # requires_pre_render 已成立：非 READY 即中止
+                                # 并上报片段、步骤和原因。
+                                _resolution.ensure_exportable()
+                                _pre_base = _resolution.base
 
                         # 逐帧解码
                         for frame_idx in range(overlap_start, overlap_end):
@@ -5103,6 +5103,10 @@ class TimelineExporter:
 
 
                     except Exception as e:
+                        if isinstance(e, PreRenderUntrustedError):
+                            # P0 · 交付保真：预渲染前缀读不到可信 PCM——
+                            # 中止导出（报告片段/步骤/原因），不得静默丢效果。
+                            raise
                         logger.warning(f"Failed to decode audio for clip {clip.clip_id}: {e}")
                         continue
 
