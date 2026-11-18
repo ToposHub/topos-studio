@@ -217,6 +217,8 @@ class AudioGraphRenderer:
         self._pdc_master_lat = 0
         self._pdc_delay: dict[str, int] = {}
         self._pdc_lines: dict[str, np.ndarray] = {}
+        # P1 · VCA 倍率缓存（未 configure 的渲染器恒等）。
+        self._vca_factors: dict = {}
         # R05: Master fx 参数自动化采样器（configure_from_sequence 构建）
         self._master_fx_sampler = None
         # AM-09: 连续状态 Master 限幅器（与 mix_samples 一致）
