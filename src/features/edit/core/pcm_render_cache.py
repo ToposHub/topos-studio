@@ -41,7 +41,7 @@ from src.features.edit.core.clip_pcm import decode_audio_range, source_fingerpri
 
 logger = logging.getLogger(__name__)
 
-PCM_RENDER_CACHE_SCHEMA_VERSION = 2
+PCM_RENDER_CACHE_SCHEMA_VERSION = 3
 # 与 ClipPcmProvider 同一护栏：单次预渲染的时长上限（内存 + 构建时间）。
 MAX_PRE_RENDER_SECONDS = 300.0
 # 内存 LRU 条目数（4 份立体声 5 分钟 ≈ 460 MB，与 PCM 取样层一致）。
@@ -53,6 +53,57 @@ DISK_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024
 
 class PreRenderCancelled(RuntimeError):
     """构建在完成前被协作取消（不落任何缓存文件）。"""
+
+
+class PreRenderUntrustedError(RuntimeError):
+    """P0 · 导出读不到可信预渲染 PCM——中止交付并报告片段、步骤和原因。
+
+    成片/Stem 不得以"成功"结果静默丢掉前缀里烘焙的效果（降噪/修复/
+    机架序 inline 步骤）。预检（preflight）、导出 worker 与 UI 共用本
+    异常携带的三元组做归因展示。
+    """
+
+    def __init__(self, clip_id: str, step_ids: "tuple[str, ...]",
+                 reason: str, state: "str | PreRenderState | None" = None):
+        self.clip_id = str(clip_id)
+        self.step_ids = tuple(step_ids)
+        self.reason = str(reason)
+        self.state = state
+        super().__init__(
+            f"clip {self.clip_id}: pre-render steps "
+            f"{list(self.step_ids)} unusable for delivery "
+            f"({self.reason})")
+
+
+import enum  # noqa: E402 - 状态机紧邻异常定义
+
+
+class PreRenderState(enum.Enum):
+    """P0 · 预渲染成品的状态机（预检/导出 worker/UI 三方共用）。"""
+
+    PENDING = "pending"    # 构建排队/进行中（同 key 去纤绳在途）
+    READY = "ready"        # 成品可读（基底在场）
+    FAILED = "failed"      # 构建失败或计划被阻断（SciPy 缺席/超长/倒放…）
+    CANCELLED = "cancelled"  # 协作取消（不落缓存）
+
+
+@dataclass(frozen=True)
+class PreRenderResolution:
+    """一次导出侧预渲染解析的结果（状态 + 基底 + 归因）。"""
+
+    status: PreRenderState
+    base: Optional[np.ndarray] = None
+    step_ids: "tuple[str, ...]" = ()
+    reason: str = ""
+    clip_id: str = "?"
+
+    def ensure_exportable(self) -> "PreRenderResolution":
+        """非 READY（或无基底）→ 抛 PreRenderUntrustedError（交付中止）。"""
+        if self.status is not PreRenderState.READY or self.base is None:
+            raise PreRenderUntrustedError(
+                self.clip_id, self.step_ids,
+                self.reason or self.status.value, self.status)
+        return self
 
 
 @dataclass(frozen=True)
@@ -573,9 +624,9 @@ def build_pre_render_plan(
     复用 ``resolve_clip_audio_spec`` 的绑定/帧域换算（与 Clip Editor 取样
     同一条数学路径）；超长片段/倒放给出明确 blocked 诊断而不是静默失败。
     """
-    from src.features.edit.core.audio_edit import pre_render_steps
+    from src.features.edit.core.audio_edit import render_prefix_steps
     audio_edit = getattr(clip, "audio_edit", None)
-    steps = pre_render_steps(audio_edit)
+    steps = render_prefix_steps(audio_edit)
     if not steps:
         return None
     from src.features.edit.core.clip_pcm import resolve_clip_audio_spec
@@ -623,28 +674,49 @@ def build_pre_render_plan(
 
 def resolve_export_pre_render_base(
     project, timeline, clip, asset,
-) -> tuple[Optional[np.ndarray], tuple]:
-    """导出路径的预渲染基底：同步 get_or_build（离线等待构建完成）。
+) -> PreRenderResolution:
+    """P0 · 导出路径的预渲染解析：状态机 + 同步 get_or_build。
 
-    返回 ``(base, diagnostics)``；base 为 None 时调用方回退 inline-only
-    并应把 diagnostics 上报（SciPy 缺席/超长片段/倒放）。构建期间用
-    ``protect`` 钉住条目，避免并发回收删掉刚落盘的结果。
+    返回 ``PreRenderResolution``（status/base/step_ids/reason）。交付语义：
+    非 READY（阻断/失败/取消）**不得静默回退 inline-only**——调用方经
+    ``ensure_exportable()`` 中止并上报片段、步骤和原因；实时路径仍可用
+    状态自行降级。构建期间用 ``protect`` 钉住条目，避免并发回收删掉刚
+    落盘的结果。
     """
+    clip_id = str(getattr(clip, "clip_id", "?"))
     plan = build_pre_render_plan(project, timeline, clip, asset)
     if plan is None:
-        return None, ()
+        # 无预渲染步骤：栈不需要基底，READY 且 base=None（合法恒等）。
+        return PreRenderResolution(PreRenderState.READY, None, (),
+                                   clip_id=clip_id)
+    step_ids = tuple(str(step.get("step_id", ""))
+                     for step in plan.steps)
     if plan.blocked_reason:
-        return None, plan.diagnostics or (plan.blocked_reason,)
+        return PreRenderResolution(
+            PreRenderState.FAILED, None, step_ids,
+            "; ".join(plan.diagnostics) or plan.blocked_reason,
+            clip_id=clip_id)
     cache = get_pcm_render_cache()
     spec = plan.spec()
     with cache.protect(spec):
         try:
-            return cache.get_or_build(spec, plan.builder()), ()
-        except Exception as exc:  # noqa: BLE001 - 交付路径降级必须留痕
+            base = cache.get_or_build(spec, plan.builder())
+        except PreRenderCancelled as exc:
+            return PreRenderResolution(
+                PreRenderState.CANCELLED, None, step_ids, str(exc),
+                clip_id=clip_id)
+        except Exception as exc:  # noqa: BLE001 - 交付路径失败必须留痕归因
             logger.warning(
-                "export pre-render failed for clip %s: %s",
-                getattr(clip, "clip_id", "?"), exc)
-            return None, (str(exc),)
+                "export pre-render failed for clip %s: %s", clip_id, exc)
+            return PreRenderResolution(
+                PreRenderState.FAILED, None, step_ids, str(exc),
+                clip_id=clip_id)
+        if base is None:
+            return PreRenderResolution(
+                PreRenderState.FAILED, None, step_ids,
+                "cache returned no PCM", clip_id=clip_id)
+        return PreRenderResolution(
+            PreRenderState.READY, base, step_ids, clip_id=clip_id)
 
 
 def preflight_pre_render_steps(sequence) -> tuple:
