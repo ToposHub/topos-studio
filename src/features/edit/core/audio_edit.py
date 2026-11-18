@@ -638,6 +638,79 @@ def remap_audio_edit_for_length_steps(
     return updated, warnings
 
 
+def unmap_audio_edit_for_removed_length_steps(
+    audio_edit: Any, removed_steps: list[dict],
+) -> tuple[Any, list[str]]:
+    """P1-3 · 反向编辑：被移除改长度步骤的坐标逆映射。
+
+    旁路/删除/替换/清空改长度步骤时，inline 步骤/包络/标记的持久化
+    坐标在**旧最终输出域**——经被移除步骤的逆映射（按机架逆序逐个，
+    ``invert_position_through_step``）折回新输出域。区间端点落入
+    delete_range 删除区间的节点/步骤不可映射（塌缩）→ 移除并点名
+    （「不可重映射时显示冲突」的语义）。
+    """
+    if not removed_steps or not isinstance(audio_edit, dict):
+        return audio_edit, []
+    warnings: list[str] = []
+    updated = copy.deepcopy(audio_edit)
+
+    def _unmap_position(position: int, step: dict) -> "int | None":
+        params = step.get("params", {}) if isinstance(
+            step.get("params"), dict) else {}
+        start, end = int(params.get("start", 0)), int(params.get("end", 0))
+        seg = _step_segment_output(step.get("processor_id", ""), params)
+        # delete_range 的输出域无孔：落入删除区间的输入位置不存在——
+        # 逆映射天然无歧义（见 invert_position_through_step 契约）。
+        return int(invert_position_through_step(position, start, end, seg))
+
+    for step in reversed(removed_steps):
+        params = step.get("params", {}) if isinstance(
+            step.get("params"), dict) else {}
+        start, end = int(params.get("start", 0)), int(params.get("end", 0))
+        processor = step.get("processor_id", "")
+        kept_steps = []
+        for existing in updated.get("steps", []) or []:
+            if not isinstance(existing, dict):
+                continue
+            if existing.get("processor_id") in LENGTH_CHANGING_PROCESSORS:
+                kept_steps.append(existing)  # 其余改长度步骤保留原坐标
+                continue
+            e_params = (existing.get("params", {})
+                        if isinstance(existing.get("params"), dict) else {})
+            s2, e2 = e_params.get("start"), e_params.get("end")
+            if isinstance(s2, int) and isinstance(e2, int) and e2 > s2:
+                new_s, new_e = _unmap_position(s2, step), _unmap_position(e2, step)
+                if new_e <= new_s:
+                    warnings.append(
+                        f"step {existing.get('step_id')} collapsed when the "
+                        f"{processor} step was removed and was dropped")
+                    continue
+                e_params["start"], e_params["end"] = new_s, new_e
+            kept_steps.append(existing)
+        updated["steps"] = kept_steps
+        if updated.get("envelope"):
+            kept_nodes = []
+            for node in updated["envelope"]:
+                if not isinstance(node, dict):
+                    continue
+                mapped = _unmap_position(int(node.get("local_sample", 0)), step)
+                if kept_nodes and mapped <= kept_nodes[-1].get("local_sample", -1):
+                    warnings.append(
+                        f"envelope node {node.get('id')} collapsed when the "
+                        f"{processor} step was removed and was dropped")
+                    continue
+                node["local_sample"] = mapped
+                kept_nodes.append(node)
+            updated["envelope"] = kept_nodes
+        if updated.get("markers"):
+            for marker in updated["markers"]:
+                if isinstance(marker, dict):
+                    marker["local_sample"] = _unmap_position(
+                        int(marker.get("local_sample", 0)), step)
+            updated["markers"].sort(key=lambda m: m.get("local_sample", 0))
+    return updated, warnings
+
+
 def requires_pre_render(audio_edit: Any) -> bool:
     """enabled 步骤里是否含预渲染处理器（决定渲染路径走缓存基底）。"""
     if not isinstance(audio_edit, dict):

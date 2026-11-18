@@ -58,8 +58,17 @@ def plan_clip_length_change(
     fps: float = 24.0,
     label: str = "Change clip length",
     allow_independent_audio: bool = False,
+    removed_length_steps: tuple = (),
+    base_output_samples: "int | None" = None,
 ) -> LengthChangePlan:
-    """构造改长度事务（冲突可见；blocked 非空时 after_sequence 原样返回）。"""
+    """构造改长度事务（冲突可见；blocked 非空时 after_sequence 原样返回）。
+
+    P1-3 · 反向编辑：``removed_length_steps`` 携带被旁路/删除/替换/清空
+    的改长度步骤——新 ``new_audio_edit`` 的 inline/包络/标记坐标仍在旧
+    最终输出域，先经逆映射折回新域（不可映射项移除并点名）。
+    Ripple 语义扩展：后续自动化关键帧、序列标记与 Sync Lock 轨的下游
+    片段一并随 delta 平移（P1-3：改时长事务统一重算）。
+    """
     blocked: list[str] = []
     warnings: list[str] = []
 
@@ -91,8 +100,12 @@ def plan_clip_length_change(
             f"{len(touching)} audio transition(s) anchor this clip's edge — "
             "remove or retime them first")
 
-    new_output_samples = output_length_after_steps(
-        new_audio_edit, int(old_output_samples))
+    # P1-3 · 反向编辑：长度步进以**原始输出长度**为基底（raw 域）——
+    # 旁路/移除改长度步骤时旧输出≠基底；缺省沿用旧行为（追加场景旧
+    # 输出即基底）。
+    walk_base = int(base_output_samples
+                    if base_output_samples is not None else old_output_samples)
+    new_output_samples = output_length_after_steps(new_audio_edit, walk_base)
     new_frames = _frames_for_samples(new_output_samples, fps)
     old_frames = int(getattr(clip, "timeline_duration", 0) or 0)
     delta = new_frames - old_frames
@@ -121,13 +134,25 @@ def plan_clip_length_change(
             "sequence end (sequence grows)")
 
     # inline 步骤/包络/标记重定位到新输出域（塌缩步骤被移除并点名）。
+    # P1-3 · 反向编辑：先逆映射被移除的改长度步骤（坐标从旧最终域折回），
+    # 再正向重映射留下的改长度步骤。
+    working_edit = new_audio_edit
+    remap_warnings: list[str] = []
+    if removed_length_steps:
+        from src.features.edit.core.audio_edit import (
+            unmap_audio_edit_for_removed_length_steps,
+        )
+        working_edit, unmap_warnings = unmap_audio_edit_for_removed_length_steps(
+            working_edit, list(removed_length_steps))
+        remap_warnings.extend(unmap_warnings)
     length_steps = [
-        step for step in (new_audio_edit or {}).get("steps", []) or []
-        if isinstance(step, dict)
+        step for step in (working_edit or {}).get("steps", []) or []
+        if isinstance(step, dict) and step.get("enabled", True)
         and step.get("processor_id") in LENGTH_CHANGING_PROCESSORS
     ]
-    remapped_stack, remap_warnings = remap_audio_edit_for_length_steps(
-        new_audio_edit, length_steps)
+    remapped_stack, forward_warnings = remap_audio_edit_for_length_steps(
+        working_edit, length_steps)
+    remap_warnings.extend(forward_warnings)
     new_clip = replace(clip, audio_edit=remapped_stack)
     # 淡化钳制到新时长（命令构造期的保守处理；写入 warning 供状态行展示）。
     new_fade_in = min(int(new_clip.fade_in_duration or 0), new_frames)
@@ -157,8 +182,55 @@ def plan_clip_length_change(
             other = replace(other, timeline_start=other_start + delta)
         new_clips.append(other)
     new_clips.sort(key=lambda c: int(c.timeline_start or 0))
+    # P1-3 · ripple 重算后续自动化：clip_end 之后的关键帧随 delta 平移
+    # （轨自动化按绝对帧号锚定，片段后移不平移会错位）。
+    if ripple and delta != 0 and getattr(track, "automation", None):
+        shifted_automation = {}
+        for param, param_track in track.automation.items():
+            keyframes = getattr(param_track, "keyframes", None)
+            if not keyframes:
+                shifted_automation[param] = param_track
+                continue
+            from dataclasses import replace as _kf_replace
+            moved = [
+                _kf_replace(key, frame=int(key.frame) + delta)
+                if int(key.frame) >= clip_end else key
+                for key in keyframes
+            ]
+            moved.sort(key=lambda key: int(key.frame))
+            shifted_automation[param] = _kf_replace(
+                param_track, keyframes=moved)
+        track = replace(track, automation=shifted_automation)
     new_track = replace(track, clips=tuple(new_clips))
     after = sequence.with_track_updated(new_track)
+    # P1-3 · ripple 重算序列标记（时间线域标记随内容平移；片段域标记
+    # 跟随其所属片段，不在此平移）。
+    if ripple and delta != 0 and getattr(sequence, "markers", None):
+        from dataclasses import replace as _mk_replace
+        shifted_markers = tuple(
+            _mk_replace(marker, frame=int(marker.frame) + delta)
+            if int(marker.frame) >= clip_end and marker.clip_id is None
+            else marker
+            for marker in sequence.markers)
+        after = replace(after, markers=shifted_markers)
+    # P1-3 · Sync Lock：开启了同步锁的其他轨，clip_end 之后的下游片段
+    # 一并随 ripple 平移（保持跨轨对齐；未开锁的轨不动 = gap 语义）。
+    if ripple and delta != 0:
+        for other_track in after.all_tracks:
+            if other_track.track_id == track_id:
+                continue
+            if not getattr(other_track, "is_sync_locked", False):
+                continue
+            if any(
+                int(clip.timeline_start or 0) >= clip_end
+                for clip in other_track.clips
+            ):
+                shifted = tuple(
+                    replace(clip, timeline_start=int(clip.timeline_start or 0) + delta)
+                    if int(clip.timeline_start or 0) >= clip_end else clip
+                    for clip in other_track.clips)
+                after = after.with_track_updated(
+                    replace(other_track, clips=shifted))
     return LengthChangePlan(
         before_sequence=sequence, after_sequence=after, label=label,
         new_output_samples=new_output_samples, new_duration_frames=new_frames,

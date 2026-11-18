@@ -1733,17 +1733,38 @@ class ProjectClipEditor(QWidget):
             clear_steps(self._clip.audio_edit), I18N.tr("mixer.clip_editor.clear_stack", "Clear audio edit stack"))
 
     def _commit_stack_change(self, edit: dict | None, label: str) -> None:
+        """P1-3 · 栈变更统一提交：长度失配走反向编辑事务（不再阻断）。
+
+        旁路/删除/替换/清空改长度步骤时，old→new 的输出长度差经
+        ``plan_clip_length_change`` 统一重算本轨（gap/ripple）、链接 A/V、
+        Sync Lock 轨下游片段、后续自动化与序列标记；被移除步骤的坐标
+        逆映射由计划完成（不可映射项点名提示），单条历史可撤销。
+        """
         clip, panel = self._clip, self._panel
         if clip is None or self._locked or panel is None or panel._raw_pcm is None:
             return
         input_samples = panel._raw_pcm.shape[1]
-        if (output_length_after_steps(clip.audio_edit, input_samples)
-                != output_length_after_steps(edit, input_samples)):
-            panel._rebuild_process_stack_ui()
-            panel.set_stack_editable(True)
-            panel.set_status_message(I18N.tr(
-                "mixer.clip_editor.length_stack_change",
-                "This step changes the clip length. Use timeline Undo to restore the previous edit."))
+        old_total = output_length_after_steps(clip.audio_edit, input_samples)
+        new_total = output_length_after_steps(edit, input_samples)
+        if old_total != new_total:
+            # 被移除（旁路/删除/替换/清空）的改长度步骤集合。
+            def _enabled_length_steps(source: Any) -> list[dict]:
+                return [
+                    step for step in ((source or {}).get("steps", []) or [])
+                    if isinstance(step, dict) and step.get("enabled", True)
+                    and step.get("processor_id") in LENGTH_CHANGING_PROCESSORS]
+
+            old_ids = {step.get("step_id")
+                       for step in _enabled_length_steps(clip.audio_edit)}
+            new_map = {step.get("step_id"): step
+                       for step in _enabled_length_steps(edit)}
+            removed = [step for step in _enabled_length_steps(clip.audio_edit)
+                       if step.get("step_id") not in new_map]
+            del old_ids
+            self._commit_length_change(
+                edit, label, old_output_samples=old_total,
+                removed_length_steps=tuple(removed),
+                base_output_samples=input_samples)
             return
         self._commit_audio_edit(edit, label)
 
@@ -1995,8 +2016,15 @@ class ProjectClipEditor(QWidget):
         return None, False
 
     def _commit_length_change(self, new_edit: dict, label: str,
-                              *, old_output_samples: int | None = None) -> None:
-        """统一改长度提交：ripple 选择 → 冲突计划 → 项目/序列事务。"""
+                              *, old_output_samples: int | None = None,
+                              removed_length_steps: tuple = (),
+                              base_output_samples: int | None = None) -> None:
+        """统一改长度提交：ripple 选择 → 冲突计划 → 项目/序列事务。
+
+        P1-3 · ``removed_length_steps``：反向编辑（旁路/删除/替换/清空
+        改长度步骤）时携带被移除步骤——计划内做坐标逆映射；
+        ``base_output_samples``：长度步进基底（raw 域；缺省=旧输出）。
+        """
         from src.features.edit.core.audio_length_transaction import (
             plan_clip_length_change,
         )
@@ -2017,7 +2045,9 @@ class ProjectClipEditor(QWidget):
             self._timeline, clip.track_id, clip.clip_id,
             new_audio_edit=new_edit, old_output_samples=old_total,
             ripple=ripple, fps=fps, label=label,
-            allow_independent_audio=independent)
+            allow_independent_audio=independent,
+            removed_length_steps=removed_length_steps,
+            base_output_samples=base_output_samples)
         if plan.blocked:
             panel.set_status_message(" · ".join(plan.blocked))
             return
