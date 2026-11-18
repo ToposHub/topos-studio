@@ -1105,6 +1105,29 @@ class WaveformSpectralCanvas(QWidget):
         norm = max(0.0, min(1.0, (spec_r.bottom() - y) / max(1.0, spec_r.height())))
         return f_min * ((f_max / f_min) ** norm)
 
+    def brush_stroke_payload(self, stroke, radius_px: float) -> dict:
+        """§5 画笔：像素域笔迹 → 数据域载荷（提交前转换，缩放/重开可重现）。
+
+        返回 ``{"strokes": [(t 秒, hz), ...], "time_radius_s": …,
+        "bandwidth_oct": …}``；频谱面板不可见时按当前几何近似换算。
+        """
+        import math as _math
+        _, spec_r, _ = self._wave_and_spec_rects()
+        width = max(1.0, spec_r.width() if not spec_r.isNull()
+                    else max(1.0, self.width() - self._ml - self._mr))
+        height = max(1.0, spec_r.height() if not spec_r.isNull() else 100.0)
+        span = max(1e-6, self._view_end - self._view_start)
+        time_radius_s = max(0.002, float(radius_px) / max(1.0, width / span))
+        f_min, f_max = 20.0, max(1000.0, self._nyquist())
+        decades_per_px = _math.log10(f_max / f_min) / height
+        bandwidth_oct = max(0.02, float(radius_px) * decades_per_px
+                            * _math.log2(10.0))
+        return {
+            "strokes": [(float(t), float(f)) for t, f in stroke],
+            "time_radius_s": time_radius_s,
+            "bandwidth_oct": bandwidth_oct,
+        }
+
     # -----------------------------------------------------------------
     # 鼠标与滚轮交互
     # -----------------------------------------------------------------
