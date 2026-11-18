@@ -25,15 +25,16 @@ from src.features.edit.core.clip_pcm import (
 from src.features.edit.core.audio_edit import (
     LENGTH_CHANGING_PROCESSORS, append_step, canvas_markers_from,
     canvas_points_from_envelope, clear_steps, envelope_from_canvas_points, envelope_nodes,
-    inline_audio_edit, make_step, marker_list, markers_from_canvas, output_length_after_steps, remove_step,
+    make_step, marker_list, markers_from_canvas, output_length_after_steps, remove_step,
     replace_processor_step, replace_step_enabled, requires_pre_render,
-    set_envelope, set_markers,
+    set_envelope, set_markers, steps_signature, suffix_audio_edit,
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
 from src.shared.i18n.i18n import I18N
 
 from .clip_audition import ClipAuditionSession
+from .clip_preview_worker import ClipPreviewResult, ClipPreviewWorker
 from .workspace_style import PANEL_QSS
 
 
@@ -126,6 +127,14 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._raw_pcm: np.ndarray | None = None      # 处理栈前的原始 PCM
         self._model_audio_edit: dict | None = None   # 工程模型驱动的处理栈
+        # P0 · 预览 worker 状态：代际（旧发布丢弃）、spec 键、缓存计划
+        # 钩子（外层注入）、失败留痕、离线模式（测试同步计算）。
+        self._preview_generation = 0
+        self._preview_worker: ClipPreviewWorker | None = None
+        self._preview_spec_key: tuple | str = ""
+        self._pre_render_plan_for_preview: Any = lambda: None
+        self._preview_failure_note = ""
+        self._preview_offline = False
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
         self._noise_profile: Any = None
         self._denoise_preview: tuple[tuple[int, int], tuple[int, int], float, int] | None = None
@@ -277,14 +286,22 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     # PCM 试听（P0-2 §2.3）
     # ------------------------------------------------------------------
     def attach_pcm(self, pcm: np.ndarray, sample_rate: int) -> None:
-        """装载真实 PCM：启用播放/循环/频谱/过零吸附并复位播放状态。"""
+        """装载真实 PCM：启用播放/循环/频谱/过零吸附并复位播放状态。
+
+        P0：有工程处理栈时试听装载**处理后**数据（由预览发布驱动），
+        不再用源 PCM 当栈处理结果——重开静音/降噪栈首次试听即正确。
+        """
         self._pcm = pcm
         self._raw_pcm = pcm
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
         self._timepitch_pcm = None
         self._denoise_preview = None
         self.set_pending_timepitch(None)
-        self._audition.load(pcm, sample_rate)
+        self._preview_generation += 1  # 旧片段在途预览全部作废
+        if self._model_audio_edit is None:
+            self._audition.load(pcm, sample_rate)
+        else:
+            self._audition.clear()
         self._is_playing = False
         self._skip_selection_mode = False
         self.btn_play.setChecked(False)
@@ -312,6 +329,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._timepitch_pcm = None
         self._denoise_preview = None
         self._pending_repair = None
+        self._preview_generation += 1  # 在途预览作废，旧回调不误写
         self._set_pcm_tools_enabled(False)
         self.set_pending_timepitch(None)
         self.set_stack_editable(self._stack_editable_hint)
@@ -443,29 +461,201 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         return self._model_audio_edit
 
     def _refresh_stack_preview(self) -> None:
-        """把处理栈（含降噪预览基底）应用到 PCM：波形/频谱/试听与播放同结果。
+        """P0 · 预览走后台 worker：与播放同一份已处理数据。
 
-        预渲染步骤（spectral_denoise）在 ``_base_pcm`` 中整段烘焙（与缓存
-        基底同一语义），这里只应用 inline 步骤 + 包络——编辑器预览与三条
-        渲染路径（播放/成片/Stem）共用同一分派（§3.3）。
+        请求键 = (spec, steps, 视图态, fft, generation)。job 在后台线程
+        计算 基底（沿用预渲染缓存）→ 后缀栈 → 波形/频谱/计量，结果经
+        信号回主线程差分投影；同 key 合并、新请求取消旧发布。
+        ``_preview_offline`` 为真（测试/无事件循环）时同步计算直接投影。
         """
-        base = self._base_pcm()
-        if base is None:
+        inputs = self._collect_preview_inputs()
+        if inputs is None:
             return
+        if getattr(self, "_preview_offline", False):
+            self._publish_preview(self._compute_preview(inputs))
+            return
+        worker = self._ensure_preview_worker()
+        if worker is None:
+            self._publish_preview(self._compute_preview(inputs))
+            return
+        key = inputs["key"]
+        worker.submit(key, lambda: self._compute_preview(inputs))
+
+    def _ensure_preview_worker(self) -> ClipPreviewWorker | None:
+        worker = getattr(self, "_preview_worker", None)
+        if worker is None:
+            try:
+                worker = ClipPreviewWorker()
+                worker.preview_ready.connect(self._on_preview_ready)
+                worker.preview_failed.connect(self._on_preview_failed)
+                self._preview_worker = worker
+            except Exception:  # noqa: BLE001 - 无线程环境回退同步
+                return None
+        return worker
+
+    def shutdown_preview(self) -> None:
+        """编辑器关闭：停止预览 worker（可结束）。"""
+        worker = getattr(self, "_preview_worker", None)
+        if worker is not None:
+            worker.finish()
+            self._preview_worker = None
+
+    def _collect_preview_inputs(self) -> dict | None:
+        raw = self._raw_pcm
+        if raw is None:
+            return None
+        edit = self._effective_audio_edit()
+        duration = self._duration
+        fft = self.current_fft_size()
+        generation = self._preview_generation
+        key = (
+            self._preview_spec_key, steps_signature(edit) if edit else (),
+            self._denoise_preview, fft, generation,
+            self._timepitch_pcm is not None,
+        )
+        # 深拷贝编辑字典：后台计算期间工程命令可能替换模型对象。
+        import copy as _copy
+        return {
+            "key": key,
+            "raw": raw,
+            "rate": self._pcm_rate,
+            "duration": duration,
+            "edit": _copy.deepcopy(edit) if edit is not None else None,
+            "denoise_preview": self._denoise_preview,
+            "timepitch_pcm": self._timepitch_pcm,
+            "fft": fft,
+            "bypass": self.btn_bypass.isChecked(),
+        }
+
+    def _compute_preview(self, inputs: dict) -> ClipPreviewResult:
+        """纯计算（后台线程安全）：基底 → 后缀栈 → 波形/频谱/计量。"""
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
-        edited = apply_audio_edit_to_pcm(
-            base, inline_audio_edit(self._effective_audio_edit()),
-            sample_rate=self._pcm_rate)
-        self._pcm = edited
-        self._audition.load(edited, self._pcm_rate)
+
+        base = self._compute_base_pcm(inputs)
+        if base is None:
+            base = inputs["raw"]
+        edit = inputs["edit"]
+        if edit is not None and not inputs["bypass"]:
+            # P0-3 前缀语义：基底已含截至最后预渲染步骤的全部前缀（含
+            # 混排 inline），这里只应用后缀——inline 不再双重应用。
+            edited = apply_audio_edit_to_pcm(
+                base, suffix_audio_edit(edit), sample_rate=inputs["rate"])
+        else:
+            edited = base
         bins = min(8192, max(64, edited.shape[1] // 64))
         mins, maxs, rmss = compute_waveform_stats(edited, bins)
         spectrogram = compute_spectrogram(
-            edited, self._pcm_rate, nfft=self.current_fft_size(),
+            edited, inputs["rate"], nfft=inputs["fft"],
             time_bins=320, freq_bins=96)
+        report = self._measure_cleanliness(edited, inputs["rate"])
+        return ClipPreviewResult(
+            key=inputs["key"], edited=edited, sample_rate=inputs["rate"],
+            duration=inputs["duration"], mins=mins, maxs=maxs, rmss=rmss,
+            spectrogram=spectrogram, report=report)
+
+    def _compute_base_pcm(self, inputs: dict) -> np.ndarray | None:
+        """基底（后台线程）：优先沿用预渲染缓存，缺席再本地烘焙。"""
+        raw = inputs["raw"]
+        if inputs["timepitch_pcm"] is not None:
+            return inputs["timepitch_pcm"]
+        edit = inputs["edit"]
+        if edit is None or inputs["bypass"] or not requires_pre_render(edit):
+            base = raw
+        else:
+            base = None
+            plan = getattr(self, "_pre_render_plan_for_preview", lambda: None)()
+            if plan is not None:
+                try:
+                    base = plan.lookup_cached()
+                except Exception:  # noqa: BLE001 - 缓存读失败走本地烘焙
+                    base = None
+            if base is None:
+                from src.features.edit.core.audio_edit import render_pre_render_steps
+                try:
+                    base = render_pre_render_steps(
+                        raw, edit, sample_rate=inputs["rate"])
+                except Exception as exc:  # noqa: BLE001 - 烘焙失败保持原声
+                    base = raw
+                    self._note_preview_failure(str(exc))
+            if base is None:
+                base = raw
+        if inputs["denoise_preview"] is None:
+            return base
+        from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
+        noise_range, target_range, reduction_db, nfft = inputs["denoise_preview"]
+        try:
+            return denoise_spectral_subtraction(
+                base, inputs["rate"], noise_range, target_range,
+                reduction_db, nfft=nfft)
+        except Exception as exc:  # noqa: BLE001 - 预览失败保持原声
+            self._note_preview_failure(str(exc))
+            return base
+
+    @staticmethod
+    def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:
+        """从有效 PCM 实测峰值/RMS/噪声底；长素材跳过 BS.1770 离线分析。
+
+        P0：计量基于**处理后**结果（预览 worker 内调用，非 UI 回调）。
+        """
+        data = pcm.astype(np.float64, copy=False)
+        peak = float(np.max(np.abs(data))) if data.size else 0.0
+        rms = float(np.sqrt(np.mean(data ** 2))) if data.size else 0.0
+        report: dict = {
+            "peak_db": 20.0 * math.log10(peak) if peak > 0 else -120.0,
+            "rms_db": 20.0 * math.log10(rms) if rms > 0 else -120.0,
+        }
+        # 噪声底：50 ms 窗 RMS 的第 10 百分位（cheap、单调、可复现）。
+        window = max(1, int(round(0.05 * rate)))
+        if data.shape[1] >= window * 2:
+            block_count = data.shape[1] // window
+            blocks = data[:, :block_count * window].reshape(data.shape[0], block_count, window)
+            # Average channel powers so inverted stereo does not read as silence.
+            block_rms = np.sqrt(np.einsum("cbn,cbn->b", blocks, blocks) / (data.shape[0] * window))
+            floor = float(np.percentile(block_rms, 10))
+            report["noise_floor_db"] = 20.0 * math.log10(floor) if floor > 0 else -120.0
+        else:
+            report["noise_floor_db"] = report["rms_db"]
+        if 0 < data.shape[1] <= rate * 60:
+            try:
+                from src.features.edit.core.loudness_analyzer import analyze_loudness
+                loudness = analyze_loudness(pcm, float(rate))
+                if getattr(loudness, "backend_available", False):
+                    report["integrated_lufs"] = float(loudness.integrated_lufs)
+                report["true_peak_dbtp"] = float(loudness.true_peak_dbtp)
+            except Exception:  # noqa: BLE001 - 响度分析失败不影响波形
+                pass
+        return report
+
+    def _note_preview_failure(self, message: str) -> None:
+        """失败留痕（线程安全：文本只做提示，不触控件）。"""
+        self._preview_failure_note = str(message)
+
+    def _on_preview_ready(self, result: ClipPreviewResult) -> None:
+        # 代际校验：切片段/重连/退出后旧结果不得覆盖新窗口。
+        if result.key[4] != self._preview_generation:
+            return
+        if self._raw_pcm is None:
+            return
+        self._publish_preview(result)
+
+    def _on_preview_failed(self, key: tuple, error: str) -> None:
+        self._note_preview_failure(error)
+
+    def _publish_preview(self, result: ClipPreviewResult | None) -> None:
+        if result is None:
+            return
+        self._pcm = result.edited
+        self._audition.load(result.edited, result.sample_rate)
         self.load_audio_data(
-            self._pcm_rate, self._duration, mins, maxs, rmss, spectrogram,
-            clip_name=self._clip_name)
+            result.sample_rate, result.duration, result.mins, result.maxs,
+            result.rmss, result.spectrogram, clip_name=self._clip_name,
+            cleanliness_report=result.report or {})
+        peak_db = (result.report or {}).get("peak_db")
+        self.peak_val_lbl.setText(
+            f"{peak_db:+.1f} dBFS" if isinstance(peak_db, (int, float)) else "—")
+        note = getattr(self, "_preview_failure_note", "")
+        if note:
+            self.info_label.setText(note)
 
     def _on_process_step_toggled(self, step_id: str, enabled: bool) -> None:
         # 生产路径：旁路走工程命令（原型的本地快照栈不参与）；命令落地后
@@ -499,36 +689,6 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def clear_denoise_preview(self) -> None:
         self._denoise_preview = None
         self._refresh_stack_preview()
-
-    def _base_pcm(self) -> np.ndarray | None:
-        raw = self._raw_pcm
-        if raw is None:
-            return None
-        if self._timepitch_pcm is not None:
-            return self._timepitch_pcm
-        # §3.3：已提交的预渲染步骤（spectral_denoise）先整段烘焙——与
-        # 播放/导出消费的缓存基底同一语义，A/B 旁路时一并跳过。
-        base = raw
-        edit = self._effective_audio_edit()
-        if edit is not None and requires_pre_render(edit):
-            from src.features.edit.core.audio_edit import render_pre_render_steps
-            try:
-                base = render_pre_render_steps(
-                    base, edit, sample_rate=self._pcm_rate)
-            except Exception as exc:  # noqa: BLE001 - 烘焙失败保持原声并提示
-                self.info_label.setText(str(exc))
-                return raw
-        if self._denoise_preview is None:
-            return base
-        from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
-        noise_range, target_range, reduction_db, nfft = self._denoise_preview
-        try:
-            return denoise_spectral_subtraction(
-                base, self._pcm_rate, noise_range, target_range,
-                reduction_db, nfft=nfft)
-        except Exception as exc:  # noqa: BLE001 - 预览失败保持原声并提示
-            self.info_label.setText(str(exc))
-            return base
 
     def set_timepitch_preview(self, pcm: np.ndarray) -> None:
         """P2-7：变速/音高后的 PCM 作为预览基底（时长随之变化）。"""
@@ -1225,6 +1385,12 @@ class ProjectClipEditor(QWidget):
             self._sync_gain_fade()
         super().hideEvent(event)
 
+    def closeEvent(self, event) -> None:
+        """P0 · 关闭编辑器：结束预览 worker（可结束，在途结果不发布）。"""
+        if self._panel is not None:
+            self._panel.shutdown_preview()
+        super().closeEvent(event)
+
     def _request_waveform(self) -> None:
         asset = self._asset
         if asset is None or self._panel is None:
@@ -1267,6 +1433,9 @@ class ProjectClipEditor(QWidget):
         if spec is None:
             return
         self._pcm_spec_key = spec.cache_key()
+        if self._panel is not None:
+            self._panel._preview_spec_key = self._pcm_spec_key
+            self._panel._pre_render_plan_for_preview = self._build_preview_plan
 
         def on_pcm(result: ClipPcmResult) -> None:
             # 结果返回前校验代际：切片段/重连/撤销后旧结果不得覆盖新窗口。
@@ -1275,7 +1444,29 @@ class ProjectClipEditor(QWidget):
 
         self._pcm_provider.request(spec, on_pcm)
 
+    def _build_preview_plan(self):
+        """预览基底沿用预渲染缓存（与播放/导出同一成品）。"""
+        try:
+            from src.features.edit.core.pcm_render_cache import (
+                build_pre_render_plan,
+            )
+            if (self._clip is None or self._timeline is None
+                    or self._project is None):
+                return None
+            source_asset = self._project.assets.get(self._clip.asset_id)
+            return build_pre_render_plan(
+                self._project, self._timeline, self._clip,
+                source_asset or self._asset)
+        except Exception:  # noqa: BLE001 - 计划缺席走本地烘焙
+            return None
+
     def _apply_pcm(self, result: ClipPcmResult) -> None:
+        """P0 · 源 PCM 到达：装载原始数据并触发**处理后**预览。
+
+        源 PCM 不再被当作栈处理结果——波形/频谱/计量/试听统一由预览
+        worker 以 (spec, steps, view, fft, generation) 键计算发布，重开
+        已有静音/降噪栈首次试听即正确版本。
+        """
         asset, panel = self._asset, self._panel
         if asset is None or panel is None:
             return
@@ -1287,65 +1478,31 @@ class ProjectClipEditor(QWidget):
             if self._clip is not None and self._fps > 0
             else pcm.shape[1] / rate
         )
-        duration = max(0.01, duration)
-        bins = min(8192, max(64, pcm.shape[1] // 64))
-        mins, maxs, rmss = compute_waveform_stats(pcm, bins)
-        spectrogram = compute_spectrogram(
-            pcm, rate, nfft=panel.current_fft_size(), time_bins=320, freq_bins=96)
-        report = self._measure_cleanliness(pcm, rate)
+        panel._duration = max(0.01, duration)
+        panel._preview_spec_key = self._pcm_spec_key
+        panel._pre_render_plan_for_preview = self._build_preview_plan
         panel.attach_pcm(pcm, rate)
-        panel.load_audio_data(
-            rate, duration, mins, maxs, rmss, spectrogram,
-            clip_name=asset.display_name, cleanliness_report=report,
-        )
+        panel._refresh_stack_preview()
         panel.update_playhead(0.0)
-        peak_db = report.get("peak_db")
-        panel.peak_val_lbl.setText(
-            f"{peak_db:+.1f} dBFS" if isinstance(peak_db, (int, float)) else "—")
         self._sync_gain_fade()
 
     def _on_fft_size_changed(self, _size: int) -> None:
-        if self._last_pcm is not None and self._panel is not None and self._pcm_applied:
-            # 只重算频谱矩阵，波形包络与读数保持不变。
+        if self._panel is not None and self._pcm_applied:
+            # 只重算频谱矩阵，波形包络与读数保持不变。P0：频谱基于
+            # 处理后数据（panel._pcm），不再回到源 PCM。
+            source = self._panel._pcm
+            rate = self._panel._pcm_rate
+            if source is None and self._last_pcm is not None:
+                source, rate = self._last_pcm.pcm, self._last_pcm.sample_rate
+            if source is None:
+                return
             spectrogram = compute_spectrogram(
-                self._last_pcm.pcm, self._last_pcm.sample_rate,
+                source, rate,
                 nfft=self._panel.current_fft_size(), time_bins=320, freq_bins=96)
             self._panel.canvas.loadAudioData(
                 self._panel._sample_rate, self._panel._duration,
                 self._panel.canvas._peaks_min, self._panel.canvas._peaks_max,
                 self._panel.canvas._rms, spectrogram)
-
-    @staticmethod
-    def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:
-        """从有效 PCM 实测峰值/RMS/噪声底；长素材跳过 BS.1770 离线分析。"""
-        data = pcm.astype(np.float64, copy=False)
-        peak = float(np.max(np.abs(data))) if data.size else 0.0
-        rms = float(np.sqrt(np.mean(data ** 2))) if data.size else 0.0
-        report: dict = {
-            "peak_db": 20.0 * math.log10(peak) if peak > 0 else -120.0,
-            "rms_db": 20.0 * math.log10(rms) if rms > 0 else -120.0,
-        }
-        # 噪声底：50 ms 窗 RMS 的第 10 百分位（cheap、单调、可复现）。
-        window = max(1, int(round(0.05 * rate)))
-        if data.shape[1] >= window * 2:
-            block_count = data.shape[1] // window
-            blocks = data[:, :block_count * window].reshape(data.shape[0], block_count, window)
-            # Average channel powers so inverted stereo does not read as silence.
-            block_rms = np.sqrt(np.einsum("cbn,cbn->b", blocks, blocks) / (data.shape[0] * window))
-            floor = float(np.percentile(block_rms, 10))
-            report["noise_floor_db"] = 20.0 * math.log10(floor) if floor > 0 else -120.0
-        else:
-            report["noise_floor_db"] = report["rms_db"]
-        if 0 < data.shape[1] <= rate * 60:
-            try:
-                from src.features.edit.core.loudness_analyzer import analyze_loudness
-                loudness = analyze_loudness(pcm, float(rate))
-                if getattr(loudness, "backend_available", False):
-                    report["integrated_lufs"] = float(loudness.integrated_lufs)
-                report["true_peak_dbtp"] = float(loudness.true_peak_dbtp)
-            except Exception:  # noqa: BLE001 - 响度分析失败不影响波形
-                pass
-        return report
 
     def _path_cache_id(self, asset_id: str) -> str:
         path = os.path.abspath(self._waveform_path)
