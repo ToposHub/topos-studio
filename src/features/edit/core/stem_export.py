@@ -368,6 +368,8 @@ def _iter_stem_pcm_chunks(
             _cfx = _cfe(getattr(_c, "effects", ()) or (), None)
             if _cfx:
                 _tail_max = max(_tail_max, _chain_tail_from_entries(_cfx))
+    # P0 · PDC：图级补偿延迟线的总延迟计入预算（延迟内容需 drain 释放）。
+    _tail_max += int(renderer.pdc_total_samples())
     if _tail_max > 0:
         _spf = max(1.0, float(sample_rate) / max(1e-6, fps))
         _tail_frames = int(math.ceil(_tail_max / _spf))

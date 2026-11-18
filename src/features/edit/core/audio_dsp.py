@@ -3986,6 +3986,26 @@ class EffectChain:
                 est += int(np.ceil(tail))
         return est
 
+    def latency_samples(self) -> int:
+        """P0 · 链内算法延迟合计（串联求和；PDC 图级补偿的输入）。
+
+        各启用实例的 ``latency_samples()`` 相加（WOLA/FIR 等块式算法的
+        群延迟）。经典 DSP（delay/reverb/compressor…）无声明按 0 计。
+        图级补偿由 ``AudioGraphRenderer`` 以"最迟路径对齐"消费——不同
+        轨的脉冲在 Master 汇合处落在同一绝对样本。无效声明按 0 忽略。
+        """
+        total = 0
+        for inst, enabled in zip(self._effects, self._enabled_flags):
+            if not enabled:
+                continue
+            try:
+                lat = int(inst.latency_samples())
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue
+            if lat > 0:
+                total += lat
+        return total
+
     @property
     def is_active(self) -> bool:
         """链中是否至少有一个启用的效果器。"""
