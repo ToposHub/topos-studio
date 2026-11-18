@@ -49,6 +49,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, QObject, QTimer
 
 from src.features.edit.core.playback_debug import playback_trace
+from src.features.edit.core.audio_edit import steps_signature
 from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.source_patch import patch_for_asset
 
@@ -1668,6 +1669,8 @@ class EditPage(QWidget):
                         clip, "effective_fade_curve_in", None),
                     fade_curve_out=getattr(
                         clip, "effective_fade_curve_out", None),
+                    # P0-3：Clip Editor 处理栈（混音顺序在 clip 增益/淡化前）
+                    audio_edit=getattr(clip, "audio_edit", None),
                 ):
                     registered_any = True
                     # P-clip-FX: 把该 clip 的 audio 效果同步到引擎
@@ -1987,6 +1990,8 @@ class EditPage(QWidget):
                     int(getattr(clip, "fade_out_duration", 0) or 0),
                     getattr(clip, "fade_curve", None),
                     tuple(fx_sig),
+                    # P0-3：处理栈变更必须重建引擎（旁路/删除/新增步骤）。
+                    steps_signature(getattr(clip, "audio_edit", None)),
                 ))
             # AM-02: Bus 轨即使无 clips 也生成 entry（否则 Bus 变更不扰动签名）。
             # 普通轨无 clips 且非 Bus 仍可跳过（无声音贡献）。

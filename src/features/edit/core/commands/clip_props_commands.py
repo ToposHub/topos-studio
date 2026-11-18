@@ -3396,3 +3396,90 @@ class UpdateClipSampleFieldsCommand:
         return UpdateClipSampleFieldsCommand(
             command_id=str(uuid.uuid4()), label=label,
             track_id=track_id, clip_id=clip.clip_id, _after=updated)
+
+
+@dataclass(frozen=True)
+class UpdateClipAudioEditCommand:
+    """P0-3：片段非破坏性音频处理栈事务（整 clip before/after 快照）。
+
+    audio_edit（版本化步骤列表）经 Clip Editor 的 Apply 提交：旁路、删除、
+    清空与新增步骤共用同一命令类型，undo 一次恢复整个栈。结构校验在
+    构造时执行（audio_edit.validate 的诊断非空即拒绝构造），未知
+    processor 的载荷无法进入时间线历史。
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    clip_id: str
+    _before: Any = None   # ClipInstance 快照（apply 时填充）
+    _after: Any = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        clip = track.get_clip_by_id(self.clip_id)
+        if clip is None:
+            raise ValueError(f"Clip not found: {self.clip_id}")
+        if self._after is None:
+            raise ValueError("audio-edit command not prepared")
+        updated_cmd = UpdateClipAudioEditCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, clip_id=self.clip_id,
+            _before=clip, _after=self._after)
+        new_track = track.with_clip_updated(self._after)
+        return timeline.with_track_updated(new_track), updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._before is None:
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            return timeline
+        return timeline.with_track_updated(
+            track.with_clip_updated(self._before))
+
+    def to_dict(self) -> dict:
+        return {
+            "command_id": self.command_id,
+            "command_type": "UpdateClipAudioEditCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "clip_id": self.clip_id,
+            "before": self._before.to_dict() if self._before else None,
+            "after": self._after.to_dict() if self._after else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "UpdateClipAudioEditCommand":
+        return UpdateClipAudioEditCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Audio edit stack"),
+            track_id=data.get("track_id", ""),
+            clip_id=data.get("clip_id", ""),
+            _before=ClipInstance.from_dict(data["before"])
+            if data.get("before") else None,
+            _after=ClipInstance.from_dict(data["after"])
+            if data.get("after") else None,
+        )
+
+    @staticmethod
+    def create(
+        track_id: str,
+        clip: ClipInstance,
+        audio_edit: Any,
+        *,
+        label: str = "Audio edit",
+    ) -> "UpdateClipAudioEditCommand":
+        """用新的 audio_edit 构造命令；诊断非空时拒绝（零写入）。"""
+        from src.features.edit.core.audio_edit import validate_audio_edit
+
+        diagnostics = validate_audio_edit(audio_edit)
+        if diagnostics:
+            raise ValueError(
+                "Invalid audio edit stack: " + "; ".join(diagnostics))
+        updated = replace(clip, audio_edit=audio_edit)
+        return UpdateClipAudioEditCommand(
+            command_id=str(uuid.uuid4()), label=label,
+            track_id=track_id, clip_id=clip.clip_id, _after=updated)

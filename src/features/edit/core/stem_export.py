@@ -600,6 +600,22 @@ def _iter_stem_pcm_chunks(
                     context=f"stem {getattr(track, 'stem_group', '')} clip {getattr(clip, 'clip_id', '')}",
                 )
 
+                # P0-3: Clip Editor 处理栈（clip 增益/淡化之前；与实时
+                # mix_samples、成片导出同一调用序列，parity 锁定）。
+                _audio_edit = getattr(clip, "audio_edit", None)
+                if _audio_edit and samples.shape[-1] > 0:
+                    from src.features.edit.core.audio_edit import (
+                        apply_clip_audio_edit as _apply_audio_edit,
+                    )
+                    samples = _apply_audio_edit(
+                        samples,
+                        int(round(
+                            (frame_idx - int(getattr(clip, "timeline_start", 0)))
+                            * sample_rate / fps)),
+                        _audio_edit,
+                        sample_rate=int(sample_rate),
+                    )
+
                 # C3: 片段级增益（renderer 节点链之前）。
                 _clip_gain_db = float(getattr(clip, "audio_gain_db", 0.0) or 0.0)
                 if abs(_clip_gain_db) > 1e-9:

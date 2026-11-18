@@ -4842,6 +4842,23 @@ class TimelineExporter:
                                 context=f"clip {clip.clip_id}",
                             )
 
+                            # P0-3: Clip Editor 处理栈——固定顺序：栈在 clip
+                            # 增益/淡化之前（与实时 mix_samples、Stem 同一
+                            # 调用序列，parity 测试锁定）。
+                            _audio_edit = getattr(clip, "audio_edit", None)
+                            if _audio_edit and samples.shape[-1] > 0:
+                                from src.features.edit.core.audio_edit import (
+                                    apply_clip_audio_edit as _apply_audio_edit,
+                                )
+                                samples = _apply_audio_edit(
+                                    samples,
+                                    int(round(
+                                        (frame_idx - clip.timeline_start)
+                                        * sample_rate / fps)),
+                                    _audio_edit,
+                                    sample_rate=int(sample_rate),
+                                )
+
                             # C3: 片段级增益（clip gain → renderer 节点链之前）
                             _clip_gain_db = float(
                                 getattr(clip, "audio_gain_db", 0.0) or 0.0)

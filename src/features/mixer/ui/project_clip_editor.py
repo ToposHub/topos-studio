@@ -21,6 +21,9 @@ from src.features.edit.core.clip_pcm import (
     ClipPcmProvider, ClipPcmResult, compute_spectrogram, compute_waveform_stats,
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
+from src.features.edit.core.audio_edit import (
+    append_step, make_step, remove_step, replace_step_enabled,
+)
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
 from src.shared.i18n.i18n import I18N
@@ -71,6 +74,8 @@ class _HeaderLabel(QLabel):
 
 class _TimelineClipPanel(StudioAudioClipEditor):
     gain_requested = pyqtSignal(float)
+    # P0-3：清空处理栈走工程命令（原型本地清空在生产行程外）。
+    stack_clear_requested = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -97,14 +102,19 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # 设备会话；设备失效/离开时自动停止并释放。
         self._pcm: np.ndarray | None = None
         self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
+        self._raw_pcm: np.ndarray | None = None      # 处理栈前的原始 PCM
+        self._model_audio_edit: dict | None = None   # 工程模型驱动的处理栈
         self._audition = ClipAuditionSession(self)
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
         self._zero_snap_armed = False
         self._suppress_zero_snap = False
+        self._stack_editable_hint = False
         self.canvas.selectionChanged.connect(self._on_pcm_selection_zero_snap)
         # 原型的磁性吸附（播放头/标记）与 PCM 过零吸附互补，两者都随开关。
         self.btn_snap_zero.toggled.connect(self._on_zero_snap_toggled)
+        # A/B 全局旁路是临时监听状态：立即按原始 PCM 重建预览与试听。
+        self.btn_bypass.toggled.connect(lambda _on: self._refresh_stack_preview())
 
     def _on_zero_snap_toggled(self, enabled: bool) -> None:
         self._zero_snap_armed = enabled
@@ -130,6 +140,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def attach_pcm(self, pcm: np.ndarray, sample_rate: int) -> None:
         """装载真实 PCM：启用播放/循环/频谱/过零吸附并复位播放状态。"""
         self._pcm = pcm
+        self._raw_pcm = pcm
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
         self._audition.load(pcm, sample_rate)
         self._is_playing = False
@@ -147,8 +158,97 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         """释放试听（重开/重连/隐藏时调用）；播放控件回到禁用态。"""
         self._audition.stop()
         self._pcm = None
+        self._raw_pcm = None
+        self._model_audio_edit = None
         self._is_playing = False
         self._skip_selection_mode = False
+
+    def set_stack_editable(self, editable: bool) -> None:
+        """有可编辑时间线片段时启用处理栈相关控件（源监视模式禁用）。"""
+        for widget in (self.btn_bypass, self.btn_clear_stack):
+            widget.setEnabled(editable and self._pcm is not None)
+            widget.setToolTip("" if editable else I18N.tr(
+                "mixer.clip_editor.timeline_only",
+                "Add the clip to a timeline to edit its processing stack"))
+        for button in getattr(self, "_selection_edit_buttons", ()):
+            button.setEnabled(editable and self._pcm is not None)
+
+    def sync_audio_edit(self, audio_edit: dict | None) -> None:
+        """处理栈机架由工程模型驱动（命令提交后刷新；P0-3 §控件映射）。"""
+        if audio_edit == self._model_audio_edit:
+            return  # 任何时间线编辑都会走 sync_clip——栈没变不重绘/不打断选区
+        self._model_audio_edit = audio_edit
+        view_steps = []
+        for step in (audio_edit or {}).get("steps", []) or []:
+            if not isinstance(step, dict):
+                continue
+            params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+            processor = str(step.get("processor_id", ""))
+            label = params.get("label") or {
+                "range_gain": I18N.tr("mixer.clip_editor.step_gain", "Gain"),
+                "mute": I18N.tr("mixer.clip_editor.step_mute", "Silence"),
+                "normalize": I18N.tr("mixer.clip_editor.step_normalize", "Normalize"),
+            }.get(processor, processor)
+            gain_db = params.get("gain_db")
+            detail = (
+                f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                f"{','.join('LR'[c] if c in (0, 1) else str(c) for c in params.get('channels', ()))}"
+                + (f" · {gain_db:+.1f} dB" if isinstance(gain_db, (int, float)) else "")
+            )
+            view_steps.append({
+                "id": step.get("step_id"),
+                "type": processor,
+                "label": label,
+                "detail": detail,
+                "color": "#4BA6DD" if processor == "range_gain" else (
+                    "#F26D6D" if processor == "mute" else "#7BC96F"),
+                "enabled": bool(step.get("enabled", True)),
+                "params": params,
+            })
+        self._process_steps = view_steps
+        self._rebuild_process_stack_ui()
+        self.set_stack_editable(getattr(self, "_stack_editable_hint", False))
+        self._refresh_stack_preview()
+
+    def set_stack_editable_hint(self, editable: bool) -> None:
+        self._stack_editable_hint = editable
+        self.set_stack_editable(editable)
+
+    def _effective_audio_edit(self) -> dict | None:
+        """A/B 全局旁路是临时监听状态，不改工程。"""
+        if self._model_audio_edit is None or self.btn_bypass.isChecked():
+            return None
+        return self._model_audio_edit
+
+    def _refresh_stack_preview(self) -> None:
+        """把处理栈应用到原始 PCM：波形/频谱/试听与播放同结果。"""
+        raw = self._raw_pcm
+        if raw is None:
+            return
+        from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
+        edited = apply_audio_edit_to_pcm(raw, self._effective_audio_edit(),
+                                         sample_rate=self._pcm_rate)
+        self._pcm = edited
+        self._audition.load(edited, self._pcm_rate)
+        bins = min(8192, max(64, edited.shape[1] // 64))
+        mins, maxs, rmss = compute_waveform_stats(edited, bins)
+        spectrogram = compute_spectrogram(
+            edited, self._pcm_rate, nfft=self.current_fft_size(),
+            time_bins=320, freq_bins=96)
+        self.load_audio_data(
+            self._pcm_rate, self._duration, mins, maxs, rmss, spectrogram,
+            clip_name=self._clip_name)
+
+    def _on_process_step_toggled(self, step_id: str, enabled: bool) -> None:
+        # 生产路径：旁路走工程命令（原型的本地快照栈不参与）；命令落地后
+        # sync_audio_edit 全量刷新机架。
+        self.processStepToggled.emit(step_id, enabled)
+
+    def _on_process_step_removed(self, step_id: str) -> None:
+        self.processStepRemoved.emit(step_id)
+
+    def _clear_process_stack(self) -> None:
+        self.stack_clear_requested.emit()
 
     def current_fft_size(self) -> int:
         try:
@@ -313,8 +413,14 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._apply_gain_button: QPushButton | None = None
         self._history_buttons: list[QPushButton] = []
         self._return_button: QPushButton | None = None
+        # P0-3：选区处理（静音/标准化）随 PCM 与时间线片段可用性启用。
+        self._selection_edit_buttons: list[QPushButton] = []
         for button in self.findChildren(QPushButton):
             if button.text() in buttons_by_text:
+                button.setEnabled(False)
+                button.setToolTip(unavailable)
+            elif button.text() in ("静音", "标准化"):
+                self._selection_edit_buttons.append(button)
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
             elif button.text() == "应用增益到选区":
@@ -478,6 +584,8 @@ class ProjectClipEditor(QWidget):
     fade_curve_committed = pyqtSignal(str, str)
     # P0-2：试听占用输出设备时通知宿主暂停时间线播放。
     audition_active_changed = pyqtSignal(bool)
+    # P0-3：处理栈提交（clip_id, audio_edit, label）——由宿主执行工程命令。
+    audio_edit_committed = pyqtSignal(str, object, str)
     close_requested = pyqtSignal()
     float_requested = pyqtSignal()
     tab_requested = pyqtSignal()
@@ -590,6 +698,12 @@ class ProjectClipEditor(QWidget):
             self._panel.commitAndCloseRequested.connect(self._return_to_timeline)
             self._panel.fftSizeChanged.connect(self._on_fft_size_changed)
             self._panel._audition.playing_changed.connect(self.audition_active_changed.emit)
+            # P0-3 控件映射：静音/标准化生成步骤；机架旁路/删除/清空走命令。
+            self._panel.silenceRequested.connect(self._on_silence_requested)
+            self._panel.normalizeRequested.connect(self._on_normalize_requested)
+            self._panel.processStepToggled.connect(self._on_stack_step_toggled)
+            self._panel.processStepRemoved.connect(self._on_stack_step_removed)
+            self._panel.stack_clear_requested.connect(self._on_stack_cleared)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -722,6 +836,9 @@ class ProjectClipEditor(QWidget):
             self._source_changed = False
             self._request_waveform()
         self._sync_gain_fade()
+        if self._panel is not None:
+            self._panel.set_stack_editable_hint(not self._locked)
+            self._panel.sync_audio_edit(self._clip.audio_edit if self._clip is not None else None)
 
     def reset(self) -> None:
         self._clip = None
@@ -981,6 +1098,8 @@ class ProjectClipEditor(QWidget):
             return
         if clip is None:
             panel.sync_gain_fade(0.0, 0.0, 0.0, "equal_power", "equal_power", locked=True)
+            panel.set_stack_editable_hint(False)
+            panel.sync_audio_edit(None)
             return
         fade_in = (clip.fade_in_samples / AUDIO_REFERENCE_SAMPLE_RATE if clip.fade_in_samples is not None
                    else clip.fade_in_duration / self._fps)
@@ -990,6 +1109,106 @@ class ProjectClipEditor(QWidget):
                              clip.effective_fade_curve_in or "equal_power",
                              clip.effective_fade_curve_out or "equal_power",
                              locked=self._locked)
+
+    # ------------------------------------------------------------------
+    # P0-3：处理栈提交（控件 → 命令）
+    # ------------------------------------------------------------------
+    def _selection_output_range(self) -> tuple[int, int]:
+        """画布选区（显示秒）→ 片段输出域半开样本区间（processing_rate）。"""
+        panel, clip = self._panel, self._clip
+        if panel is None or panel._duration <= 0.0:
+            return (0, 1)
+        t0, t1, _, _ = panel.canvas.getSelection()
+        if clip is not None and self._fps > 0:
+            output_total = int(round(
+                clip.timeline_duration / self._fps * AUDIO_REFERENCE_SAMPLE_RATE))
+        else:
+            output_total = int(round(panel._duration * AUDIO_REFERENCE_SAMPLE_RATE))
+        output_total = max(1, output_total)
+        frac0 = max(0.0, min(1.0, t0 / panel._duration))
+        frac1 = max(0.0, min(1.0, t1 / panel._duration))
+        start = int(round(frac0 * output_total))
+        end = int(round(frac1 * output_total))
+        return (start, max(start + 1, end))
+
+    def _target_channels(self) -> tuple[int, ...]:
+        panel = self._panel
+        channels = (-1,) if panel is None else (panel.canvas._edit_channel,)
+        if channels[0] < 0:
+            count = self._pcm_channel_count()
+            return tuple(range(min(2, max(1, count))))
+        return (min(1, channels[0]),)
+
+    def _pcm_channel_count(self) -> int:
+        if self._panel is not None and self._panel._raw_pcm is not None:
+            return int(self._panel._raw_pcm.shape[0])
+        return 2
+
+    def _commit_audio_edit(self, audio_edit: dict | None, label: str) -> None:
+        clip = self._clip
+        if clip is None or self._locked or self._panel is None:
+            return
+        self.audio_edit_committed.emit(clip.clip_id, audio_edit, label)
+
+    def _on_silence_requested(self, t0: float, t1: float) -> None:
+        start, end = self._selection_output_range()
+        step = make_step(
+            "mute", start=start, end=end, channels=self._target_channels(),
+            label=I18N.tr("mixer.clip_editor.step_mute", "Silence"))
+        self._commit_audio_edit(
+            append_step(self._clip.audio_edit if self._clip else None, step),
+            I18N.tr("mixer.clip_editor.mute_selection", "Silence selection"))
+
+    def _on_normalize_requested(self, t0: float, t1: float, target_db: float) -> None:
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None or self._clip is None:
+            return
+        # 显示域与输出域同长时按下标直接取样；速度 ≠ 1 时按比例映射。
+        raw = panel._raw_pcm
+        duration = max(1e-9, panel._duration)
+        src_total = raw.shape[1]
+        lo = int(round(max(0.0, t0) / duration * src_total))
+        hi = int(round(min(duration, t1) / duration * src_total))
+        channels = self._target_channels()
+        usable = [c for c in channels if c < raw.shape[0]]
+        if hi <= lo or not usable:
+            return
+        window = np.abs(raw[usable, lo:hi])
+        peak = float(window.max()) if window.size else 0.0
+        if peak <= 1e-6:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.no_signal", "No signal to normalize"))
+            return
+        import math as _math
+        gain_db = target_db - 20.0 * _math.log10(peak)
+        start, end = self._selection_output_range()
+        step = make_step(
+            "normalize", start=start, end=end, channels=self._target_channels(),
+            gain_db=round(gain_db, 2),
+            label=I18N.tr("mixer.clip_editor.step_normalize", "Normalize"))
+        self._commit_audio_edit(
+            append_step(self._clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.normalize_selection", "Normalize selection"))
+
+    def _on_stack_step_toggled(self, step_id: str, enabled: bool) -> None:
+        if self._clip is None or self._clip.audio_edit is None:
+            return
+        self._commit_audio_edit(
+            replace_step_enabled(self._clip.audio_edit, step_id, enabled),
+            I18N.tr("mixer.clip_editor.toggle_step", "Toggle audio edit step"))
+
+    def _on_stack_step_removed(self, step_id: str) -> None:
+        if self._clip is None or self._clip.audio_edit is None:
+            return
+        self._commit_audio_edit(
+            remove_step(self._clip.audio_edit, step_id),
+            I18N.tr("mixer.clip_editor.remove_step", "Remove audio edit step"))
+
+    def _on_stack_cleared(self) -> None:
+        if self._clip is None or self._clip.audio_edit is None:
+            return
+        self._commit_audio_edit(
+            None, I18N.tr("mixer.clip_editor.clear_stack", "Clear audio edit stack"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:

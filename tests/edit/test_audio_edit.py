@@ -1,0 +1,235 @@
+"""P0-3 非破坏性处理栈：模型、命令、DSP 与渲染路由签名。
+
+验收来自 docs/plans/2026-11-18-clip-editor-and-mixer-roadmap.md §3：
+- 只改左声道样本且保持右声道；选区外信号逐样本不变；撤销还原；
+- 未知 processor 阻断应用与交付并给出逐条诊断；
+- 步骤/旁路进入音频图快照哈希（改栈必须重建引擎）。
+"""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pytest
+
+from src.features.edit.core.audio_edit import (
+    AUDIO_EDIT_SCHEMA_VERSION,
+    append_step,
+    apply_audio_edit_to_pcm,
+    apply_clip_audio_edit,
+    make_step,
+    new_audio_edit,
+    remove_step,
+    replace_step_enabled,
+    steps_signature,
+    validate_audio_edit,
+)
+from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
+from src.features.edit.core.commands import (
+    CommandStack,
+    UpdateClipAudioEditCommand,
+)
+from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+
+
+def make_timeline() -> TimelineSequence:
+    track = EditTrack(
+        track_id="a1", name="Dialogue", track_type="audio",
+        clips=(ClipInstance(
+            asset_id="asset", track_id="a1", timeline_start=0,
+            timeline_duration=240, source_duration=240),),
+    )
+    video = EditTrack(track_id="v1", name="Picture", track_type="video")
+    return TimelineSequence(audio_tracks=(track,), video_tracks=(video,))
+
+
+def make_clip(**overrides) -> ClipInstance:
+    params = dict(
+        asset_id="asset", track_id="a1", timeline_start=0,
+        timeline_duration=240, source_duration=240,
+    )
+    params.update(overrides)
+    return ClipInstance(**params)
+
+
+class TestModel:
+    def test_make_step_structure_and_validation(self) -> None:
+        step = make_step("range_gain", start=4800, end=9600, channels=(0,), gain_db=-6.0)
+        assert step["processor_id"] == "range_gain"
+        assert step["algorithm_version"] == 1
+        edit = new_audio_edit([step])
+        assert validate_audio_edit(edit, clip_output_samples=48000, channel_count=2) == []
+
+    def test_unknown_processor_blocks_with_diagnostics(self) -> None:
+        edit = new_audio_edit([make_step("range_gain", 0, 10, (0,), gain_db=0.0)])
+        edit["steps"].append({
+            "step_id": "x", "processor_id": "spectral_heal_2099",
+            "algorithm_version": 9, "enabled": True, "params": {"start": 0, "end": 10, "channels": [0]},
+        })
+        diagnostics = validate_audio_edit(edit)
+        assert any("unknown processor" in d for d in diagnostics)
+
+    def test_out_of_range_and_duplicate_ids_flagged(self) -> None:
+        edit = new_audio_edit([
+            make_step("mute", start=100, end=50, channels=(0,)),
+        ])
+        assert any("half-open" in d for d in validate_audio_edit(edit))
+        s1 = make_step("mute", start=0, end=10, channels=(0,), step_id="dup")
+        s2 = make_step("mute", start=20, end=30, channels=(0,), step_id="dup")
+        assert any("duplicate" in d for d in validate_audio_edit(new_audio_edit([s1, s2])))
+        assert any("exceeds clip" in d for d in validate_audio_edit(
+            new_audio_edit([make_step("mute", 0, 999999, (0,))]), clip_output_samples=48000))
+
+    def test_clip_round_trip_preserves_steps_and_none_stays_absent(self) -> None:
+        clip = make_clip(audio_edit=new_audio_edit(
+            [make_step("normalize", 0, 48000, (0, 1), gain_db=3.2, label="norm")]))
+        data = clip.to_dict()
+        restored = ClipInstance.from_dict(data)
+        assert restored.audio_edit is not None
+        assert restored.audio_edit["steps"][0]["params"]["gain_db"] == pytest.approx(3.2)
+        assert ClipInstance.from_dict(make_clip().to_dict()).audio_edit is None
+        # 旧工程（无 audio_edit 键）载入不抛、保存不写。
+        legacy = make_clip().to_dict()
+        assert "audio_edit" not in legacy or legacy["audio_edit"] is None
+
+    def test_unknown_top_level_fields_round_trip(self) -> None:
+        edit = new_audio_edit([make_step("mute", 0, 10, (0,))])
+        edit["future_field"] = {"keep": True}
+        clip = make_clip(audio_edit=edit)
+        restored = ClipInstance.from_dict(clip.to_dict())
+        assert restored.audio_edit["future_field"] == {"keep": True}
+        assert restored.audio_edit["version"] == AUDIO_EDIT_SCHEMA_VERSION
+
+
+class TestCommand:
+    def test_apply_undo_redo(self) -> None:
+        timeline = make_timeline()
+        stack = CommandStack()
+        edit = new_audio_edit([make_step("mute", 0, 4800, (0, 1))])
+        cmd = UpdateClipAudioEditCommand.create(
+            "a1", timeline.get_track_by_id("a1").clips[0], edit)
+        current = stack.execute(cmd, timeline)
+        assert current.get_track_by_id("a1").clips[0].audio_edit == edit
+        current = stack.undo(current)
+        assert current.get_track_by_id("a1").clips[0].audio_edit is None
+        current = stack.redo(current)
+        assert current.get_track_by_id("a1").clips[0].audio_edit == edit
+
+    def test_invalid_stack_rejected_at_construction(self) -> None:
+        timeline = make_timeline()
+        clip = timeline.audio_tracks[0].clips[0]
+        bad = new_audio_edit([{
+            "step_id": "z", "processor_id": "mystery", "algorithm_version": 1,
+            "enabled": True, "params": {"start": 0, "end": 5, "channels": [0]},
+        }])
+        with pytest.raises(ValueError, match="unknown processor"):
+            UpdateClipAudioEditCommand.create("a1", clip, bad)
+
+    def test_serialization_round_trip(self) -> None:
+        edit = new_audio_edit([make_step("range_gain", 10, 20, (1,), gain_db=-3.0)])
+        clip = make_clip(audio_edit=edit)
+        cmd = UpdateClipAudioEditCommand.create("a1", clip, edit)
+        restored = UpdateClipAudioEditCommand.from_dict(cmd.to_dict())
+        assert restored._after.audio_edit == edit
+
+
+class TestDsp:
+    def test_left_channel_only_gain_keeps_right(self) -> None:
+        rate = 48000
+        t = np.arange(rate, dtype=np.float32) / rate
+        pcm = np.stack([
+            0.4 * np.sin(2 * np.pi * 440.0 * t),
+            0.4 * np.sin(2 * np.pi * 880.0 * t),
+        ])
+        edit = new_audio_edit([make_step(
+            "range_gain", start=12000, end=36000, channels=(0,), gain_db=-6.0)])
+        out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)
+        # 选区内：左声道 -6 dB（边缘 3 ms 过渡带内放宽），右声道不变。
+        mid = slice(16000, 32000)
+        assert 20 * math.log10(np.max(np.abs(out[0][mid])) / 0.4) == pytest.approx(-6.0, abs=0.05)
+        assert np.array_equal(out[1][mid], pcm[1][mid])
+        # 选区外逐样本不变。
+        assert np.array_equal(out[0][:12000 - 200], pcm[0][:12000 - 200])
+        assert np.array_equal(out[0][36000 + 200:], pcm[0][36000 + 200:])
+        assert np.array_equal(out[1], pcm[1])
+
+    def test_mute_zeros_middle_with_short_edges(self) -> None:
+        rate = 48000
+        pcm = np.full((1, rate), 0.5, dtype=np.float32)
+        edit = new_audio_edit([make_step("mute", start=4800, end=9600, channels=(0,))])
+        out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)[0]
+        assert np.all(out[6000:8400] == 0.0)               # 中段静音
+        assert abs(out[4800 - 1] - 0.5) < 1e-6             # 选区外不变
+        assert out[7200] == 0.0
+        # 3 ms 边缘过渡（2–5 ms 合同）。
+        assert 0.0 < out[4800 + 24] < 0.5
+        assert 0.0 < out[9600 - 24] < 0.5
+
+    def test_disabled_step_is_identity(self) -> None:
+        pcm = np.ones((1, 100), dtype=np.float32) * 0.25
+        step = make_step("mute", 0, 100, (0,))
+        step["enabled"] = False
+        out = apply_audio_edit_to_pcm(pcm, new_audio_edit([step]))
+        assert np.array_equal(out, pcm)
+
+    def test_block_split_matches_whole_array(self) -> None:
+        rate = 48000
+        rng = np.random.default_rng(20261118)
+        pcm = rng.standard_normal((2, 4000)).astype(np.float32) * 0.2
+        edit = new_audio_edit([
+            make_step("range_gain", 500, 2500, (0,), gain_db=-4.0),
+            make_step("mute", 2000, 3500, (1,)),
+        ])
+        whole = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)
+        chunks = []
+        for start in range(0, 4000, 700):
+            block = pcm[:, start:start + 700]
+            chunks.append(apply_clip_audio_edit(
+                block, start, edit, sample_rate=rate))
+        split = np.concatenate(chunks, axis=1)
+        # 分块渲染与整段渲染逐样本一致（实时/离线一致的基础）。
+        np.testing.assert_allclose(whole, split, atol=1e-6)
+
+    def test_normalize_gain_math(self) -> None:
+        rate = 48000
+        t = np.arange(rate, dtype=np.float32) / rate
+        sine = 0.2512 * np.sin(2 * np.pi * 1000.0 * t)   # ≈ -12 dBFS peak
+        pcm = sine.reshape(1, -1)
+        measured_peak = float(np.max(np.abs(pcm)))
+        gain_db = -3.0 - 20 * math.log10(measured_peak)
+        edit = new_audio_edit([make_step(
+            "normalize", 0, rate, (0,), gain_db=round(gain_db, 4))])
+        out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)
+        assert 20 * math.log10(float(np.max(np.abs(out)))) == pytest.approx(-3.0, abs=0.1)
+
+
+class TestRoutingSignatures:
+    def test_snapshot_hash_changes_with_stack_and_ignores_bypassed(self) -> None:
+        timeline = make_timeline()
+        base = build_audio_graph_snapshot(timeline, revision=1)
+        clip = timeline.audio_tracks[0].clips[0]
+        edited = timeline.with_track_updated(
+            timeline.audio_tracks[0].with_clip_updated(
+                make_clip(clip_id=clip.clip_id, audio_edit=new_audio_edit(
+                    [make_step("mute", 0, 4800, (0,))]))))
+        with_edit = build_audio_graph_snapshot(edited, revision=1)
+        assert with_edit.stable_hash != base.stable_hash
+        # 旁路的步骤不影响声音 → 哈希回到无编辑基线（与 enabled 签名一致）。
+        step = make_step("mute", 0, 4800, (0,))
+        step["enabled"] = False
+        bypassed = timeline.with_track_updated(
+            timeline.audio_tracks[0].with_clip_updated(
+                make_clip(clip_id=clip.clip_id, audio_edit=new_audio_edit([step]))))
+        assert build_audio_graph_snapshot(bypassed, revision=1).stable_hash == base.stable_hash
+
+    def test_steps_signature_orders_matter(self) -> None:
+        s1 = make_step("mute", 0, 10, (0,), step_id="a")
+        s2 = make_step("range_gain", 20, 30, (1,), gain_db=-3.0, step_id="b")
+        assert steps_signature(new_audio_edit([s1, s2])) != \
+            steps_signature(new_audio_edit([s2, s1]))
+
+    def test_remove_step_returns_none_when_empty(self) -> None:
+        edit = new_audio_edit([make_step("mute", 0, 10, (0,), step_id="only")])
+        assert remove_step(edit, "only") is None
+        untouched = remove_step(edit, "missing")
+        assert untouched == edit and untouched is not None

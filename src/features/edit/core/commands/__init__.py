@@ -1116,6 +1116,7 @@ from .clip_props_commands import (
     SetClipFlagCommand,
     SetClipAudioGainCommand,
     UpdateClipSampleFieldsCommand,
+    UpdateClipAudioEditCommand,
 )
 from .ripple_commands import (
     InsertLinkedAssetCommand,
@@ -1194,6 +1195,7 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "InsertLinkedAssetCommand": InsertLinkedAssetCommand.from_dict,
     "InsertLinkedAssetRippleCommand": InsertLinkedAssetRippleCommand.from_dict,
     "UpdateClipSampleFieldsCommand": UpdateClipSampleFieldsCommand.from_dict,
+    "UpdateClipAudioEditCommand": UpdateClipAudioEditCommand.from_dict,
     "MacroCommand": MacroCommand.from_dict,
     "RippleDeleteCommand": RippleDeleteCommand.from_dict,
     "SlideClipCommand": SlideClipCommand.from_dict,

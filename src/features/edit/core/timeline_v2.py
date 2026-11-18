@@ -336,6 +336,11 @@ class ClipInstance:
     source_sample_offset: int = 0
     fade_in_samples: int | None = None
     fade_out_samples: int | None = None
+    # P0-3：Clip Editor 非破坏性处理栈（版本化 dict；None = 无编辑）。
+    # 结构/校验/渲染见 core/audio_edit.py；未知 processor 由该模块的
+    # validate 阻断应用与交付（模型层只做类型校验，载入不抛）。
+    # to_dict 非默认才写出（旧工程序列化字节不变）。
+    audio_edit: dict | None = None
     # P9.1: Color page linkage
     color_stack_id: str | None = None  # 调色栈引用 ID
     color_shared: bool = False  # 是否共享素材调色
@@ -1565,6 +1570,8 @@ class ClipInstance:
             "source_sample_offset": self.source_sample_offset or None,
             "fade_in_samples": self.fade_in_samples,
             "fade_out_samples": self.fade_out_samples,
+            # P0-3：非破坏性处理栈——非默认才写出（旧工程字节不变）。
+            "audio_edit": self.audio_edit,
             # F4.1: 片段微调栈（非默认才写 = 旧工程字节不变）
             "color_trim_stack_id": self.color_trim_stack_id,
             # P9.1: Color page linkage
@@ -1690,6 +1697,12 @@ class ClipInstance:
                 data.get("fade_in_samples"), None),
             fade_out_samples=_int_or_default(
                 data.get("fade_out_samples"), None),
+            # P0-3：处理栈（缺失/非 dict → None；未知 processor 不在载入时
+            # 拒绝，由 audio_edit.validate 在应用/交付处逐条阻断诊断）。
+            audio_edit=(
+                dict(_raw_audio_edit)
+                if isinstance((_raw_audio_edit := data.get("audio_edit")), dict)
+                else None),
             color_trim_stack_id=data.get("color_trim_stack_id") or None,
             # P9.1: Color page linkage
             color_stack_id=data.get("color_stack_id"),
@@ -1752,7 +1765,7 @@ class ClipInstance:
         "render_cache_id", "freeze_source_frame", "blend_mode",
         "audio_gain_db", "raw", "source_fps_num", "source_fps_den",
         "timeline_fps_num", "timeline_fps_den", "source_pts_index",
-        "source_frame_phase_num", "source_frame_phase_den",
+        "source_frame_phase_num", "source_frame_phase_den", "audio_edit",
         # R05 注意：fade_curve 有意**不**列入——未支持原值经
         # _extra_fields 保留才能在打开→保存往返中不丢（from_dict 会
         # 把已知值/None 从 extras 剔除，维持不变式）。
