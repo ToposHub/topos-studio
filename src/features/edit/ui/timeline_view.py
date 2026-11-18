@@ -2454,6 +2454,9 @@ class TimelineView(QGraphicsView):
                     item.retime_point_dragged.connect(self._on_retime_point_dragged)
                     item.retime_point_move_finished.connect(self._on_retime_point_move_finished)
                     item.fade_end_curve_requested.connect(self._on_fade_end_curve_requested)
+                    # P1-1：时间线包络编辑（松手单命令提交）
+                    item.envelope_edit_finished.connect(
+                        self._on_envelope_edit_finished)
 
                     # Slip signals (P4.4)
                     item.clip_slip.connect(self._on_clip_slip)
@@ -8072,6 +8075,8 @@ class TimelineView(QGraphicsView):
         item.clip_double_clicked.connect(self._on_clip_double_clicked)
         item.retime_speed_points_clear_requested.connect(self._on_retime_speed_points_clear_requested)
         item.retime_segment_speed_requested.connect(self._on_retime_segment_speed_requested)
+        # P1-1：增量添加的片段同样接包络编辑提交（与整建路径一致）
+        item.envelope_edit_finished.connect(self._on_envelope_edit_finished)
 
     def _apply_subtitle_drag_clamp(
         self,
@@ -13035,6 +13040,79 @@ class TimelineView(QGraphicsView):
             "edit.retime.point_drag",
             "Speed point: {origin} → {preview} (source frames)"
         ).format(origin=origin_offset, preview=preview_offset))
+
+    def _on_envelope_edit_finished(
+        self, clip_id: str, track_id: str, view_nodes: list,
+    ) -> None:
+        """P1-1：时间线包络编辑提交——视图分数 → 模型节点，单命令。
+
+        ``view_nodes``: ``[(x_fraction, gain_db), ...]``（升序）。局部采样
+        时间 = fraction × timeline_duration/fps × 48 kHz（最终输出域——
+        slip/split/倒放/变速均按时间线域折算，与渲染求值同域）。节点 id
+        尽量沿用既有（按邻近匹配），新节点生成 uuid；一条节点操作只占
+        一步撤销（UpdateClipAudioEditCommand 快照整个 audio_edit）。
+        """
+        if self._timeline is None:
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        if self._is_track_locked(track_id):
+            return
+        from src.features.edit.core.audio_edit import (
+            envelope_nodes, set_envelope,
+        )
+        from src.features.edit.core.commands.clip_props_commands import (
+            UpdateClipAudioEditCommand,
+        )
+        from src.features.edit.core.sample_time import (
+            AUDIO_REFERENCE_SAMPLE_RATE,
+        )
+        fps = float(self._timeline.fps) or 24.0
+        total = max(1, int(round(
+            clip.timeline_duration / fps * AUDIO_REFERENCE_SAMPLE_RATE)))
+        existing = envelope_nodes(getattr(clip, "audio_edit", None))
+        used_ids: set[str] = set()
+        model_nodes = []
+        for fraction, gain_db in sorted(view_nodes or [],
+                                        key=lambda point: point[0]):
+            local_sample = int(round(
+                max(0.0, min(1.0, float(fraction))) * total))
+            # 邻近沿用既有 id（同一节点拖动后保持稳定身份）。
+            node_id = None
+            best_dist = None
+            for node in existing:
+                if node.get("id") in used_ids:
+                    continue
+                dist = abs(int(node.get("local_sample", 0)) - local_sample)
+                if best_dist is None or dist < best_dist:
+                    node_id, best_dist = str(node.get("id")), dist
+            if node_id is None:
+                import uuid as _uuid
+                node_id = str(_uuid.uuid4())
+            used_ids.add(node_id)
+            model_nodes.append({
+                "id": node_id,
+                "local_sample": local_sample,
+                "gain_db": round(max(-60.0, min(12.0, float(gain_db))), 3),
+                "interpolation": "linear",
+            })
+        # 同 sample 唯一：后写覆盖前写（与 envelope_from_canvas_points 一致）。
+        deduped: list[dict] = []
+        for node in model_nodes:
+            if deduped and deduped[-1]["local_sample"] == node["local_sample"]:
+                deduped[-1] = node
+            else:
+                deduped.append(node)
+        try:
+            new_edit = set_envelope(getattr(clip, "audio_edit", None),
+                                    deduped or None)
+            self._execute_command(UpdateClipAudioEditCommand.create(
+                track_id, clip, new_edit,
+                label=I18N.tr("mixer.clip_editor.edit_envelope",
+                              "Edit clip volume envelope")))
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
 
     def _on_retime_point_move_finished(
         self, clip_id: str, track_id: str,

@@ -629,6 +629,9 @@ class ClipItem(QGraphicsObject):
     retime_controls_toggled = pyqtSignal(str, str, bool)
     # R09：两端独立淡化曲线菜单（clip, track, end∈{in,out}, curve|None）
     fade_end_curve_requested = pyqtSignal(str, str, str, object)
+    # P1-1：时间线包络编辑（clip_id, track_id, [(fraction, gain_db), ...]）
+    # ——拖动期间只更新临时 overlay，松手发一次本信号提交单命令。
+    envelope_edit_finished = pyqtSignal(str, str, list)
     # R08：速度点把手拖动（源窗口坐标；origin=按下时边界，preview/final=拖动）
     retime_point_dragged = pyqtSignal(str, str, int, int)
     retime_point_move_finished = pyqtSignal(str, str, int, int)
@@ -745,6 +748,10 @@ class ClipItem(QGraphicsObject):
         self._waveform_gain: float = 1.0
         # P1-4 余项：片段音量包络节点（[(x_fraction, gain_db)]；None=无）。
         self._envelope_nodes: list[tuple[float, float]] = []
+        # P1-1：时间线包络编辑态（独立编辑模式：节点选择/拖动/Alt 增删）。
+        self._envelope_selected: int | None = None      # 选中节点下标
+        self._envelope_drag_nodes: list[tuple[float, float]] | None = None
+        self._envelope_hovered: int | None = None
         # 效果器处理后的 per-clip 波形（覆盖 asset 原始波形显示）。
         # _effect_waveform_fp 是当前生效效果链的指纹；request_key 额外含
         # 源区间，修剪后自动重渲染。
@@ -965,8 +972,11 @@ class ClipItem(QGraphicsObject):
         self.update()
 
     def _draw_volume_envelope(self, painter: QPainter, clip_rect: QRectF) -> None:
-        """在音频片段波形上画音量包络（0 dB 细线 + 节点圆点 + dB 标注）。"""
-        nodes = self._envelope_nodes
+        """在音频片段波形上画音量包络（0 dB 细线 + 节点圆点 + dB 标注）。
+
+        P1-1：拖动期间画临时 overlay（``_envelope_live_nodes``）。
+        """
+        nodes = self._envelope_live_nodes()
         if not nodes:
             return
         painter.save()
@@ -1017,6 +1027,167 @@ class ClipItem(QGraphicsObject):
                     f"{gain_db:+.1f}")
                 painter.setPen(QPen(QColor(22, 30, 27), 1))
         painter.restore()
+
+    # ── P1-1：时间线包络编辑（节点命中/Alt 增删/拖动/选择） ──────────
+
+    #: 包络节点命中半径（px；与 Clip Editor canvas 的 7.5 对齐取整）。
+    ENVELOPE_NODE_HIT_RADIUS = 7.0
+    #: 0 dB 磁吸容差（dB；与 Clip Editor 的 ±0.45 一致）。
+    ENVELOPE_ZERO_SNAP_DB = 0.45
+
+    def _envelope_geometry(self) -> dict | None:
+        """包络绘制几何（与 ``_draw_volume_envelope`` 同一坐标系）。
+
+        ClipItem 本地坐标：``clip_rect = QRectF(0, 0, _width, _track_height)``。
+        """
+        if self._width < 36.0 or self._track_height <= 12.0:
+            return None
+        top, bottom = 6.0, self._track_height - 4.0
+        height = max(8.0, bottom - top)
+        zero_y = top + height * 0.25
+        return {"top": top, "bottom": bottom, "zero_y": zero_y,
+                "db_span": 36.0, "width": self._width}
+
+    def _envelope_db_to_y(self, db: float, geo: dict) -> float:
+        return geo["zero_y"] + (max(0.0, -db) / geo["db_span"]) * (
+            geo["bottom"] - geo["zero_y"])
+
+    def _envelope_y_to_db(self, y: float, geo: dict) -> float:
+        span = max(1.0, geo["bottom"] - geo["zero_y"])
+        below = max(0.0, (y - geo["zero_y"]) / span)
+        db = -below * geo["db_span"]
+        # 上方 headroom（0 dB 线以上）按同斜率外推（上限 +12 dB）。
+        if y < geo["zero_y"]:
+            above = min(1.0, (geo["zero_y"] - y) / span)
+            db = min(12.0, above * geo["db_span"] * 0.5)
+        return max(-60.0, min(12.0, db))
+
+    def _envelope_node_at(self, pos) -> int | None:
+        """命中最近的包络节点（欧氏距离 ≤ 半径）；无则 None。"""
+        nodes = self._envelope_nodes
+        if not nodes:
+            return None
+        geo = self._envelope_geometry()
+        if geo is None:
+            return None
+        best, best_dist = None, self.ENVELOPE_NODE_HIT_RADIUS
+        for index, (fraction, gain_db) in enumerate(nodes):
+            x = fraction * geo["width"]
+            y = self._envelope_db_to_y(gain_db, geo)
+            dist = ((pos.x() - x) ** 2 + (pos.y() - y) ** 2) ** 0.5
+            if dist <= best_dist:
+                best, best_dist = index, dist
+        return best
+
+    def _envelope_editable(self) -> bool:
+        return (self._is_audio_track() and bool(self._envelope_nodes)
+                and not self._is_track_locked)
+
+    def _handle_envelope_press(self, event) -> bool:
+        """P1-1 · 包络按下路由（mousePressEvent 调用；返回 True=已处理）。
+
+        Alt+节点=删除（单命令）；命中节点=选择并拖动；Alt+空白=插入
+        节点并立即拖动（临时 overlay）。锁轨/非音频/无节点返回 False
+        落回常规交互。
+        """
+        if not self._envelope_editable():
+            return False
+        pos = event.pos()
+        node_index = self._envelope_node_at(pos)
+        alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        if node_index is not None and alt:
+            remaining = [point for index, point
+                         in enumerate(self._envelope_nodes)
+                         if index != node_index]
+            self._envelope_selected = None
+            self.envelope_edit_finished.emit(
+                self._clip_id, self._track_id, remaining)
+            event.accept()
+            return True
+        if node_index is not None:
+            self._begin_envelope_node_drag(node_index, event)
+            event.accept()
+            return True
+        geo = self._envelope_geometry()
+        if alt and geo is not None:
+            fraction = max(0.0, min(1.0, pos.x() / geo["width"]))
+            db = round(self._envelope_y_to_db(pos.y(), geo), 3)
+            inserted = sorted(
+                self._envelope_nodes + [(fraction, db)],
+                key=lambda point: point[0])
+            self._envelope_nodes = inserted  # 临时 overlay
+            self._begin_envelope_node_drag(
+                inserted.index((fraction, db)), event)
+            event.accept()
+            return True
+        return False
+
+    def _begin_envelope_node_drag(self, index: int, event) -> None:
+        """进入包络节点拖动（临时 overlay；松手一次提交）。"""
+        self._drag_mode = "envelope_node"
+        self._drag_pending = True
+        self._is_dragging = False
+        self._drag_start_pos = event.scenePos()
+        self._envelope_selected = index
+        self._envelope_drag_backup = list(self._envelope_nodes)
+        self._envelope_drag_nodes = list(self._envelope_nodes)
+        self.interaction_started.emit(
+            self._clip_id, self._track_id, "envelope_node")
+        self.setFocus()
+        self.update()
+
+    def _update_envelope_node_drag(self, pos, fine: bool) -> None:
+        """拖动中：时间+电平双维（相邻节点钳制 + 0 dB 磁吸）。"""
+        if (self._envelope_drag_nodes is None
+                or self._envelope_selected is None):
+            return
+        geo = self._envelope_geometry()
+        if geo is None:
+            return
+        nodes = self._envelope_drag_nodes
+        index = self._envelope_selected
+        fraction = max(0.0, min(1.0, pos.x() / geo["width"]))
+        db = self._envelope_y_to_db(pos.y(), geo)
+        if not fine and abs(db) <= self.ENVELOPE_ZERO_SNAP_DB:
+            db = 0.0  # 0 dB 磁吸（零点准确）
+        # 时间被相邻节点钳制（保持折线有序；端点不越界）。
+        lo = nodes[index - 1][0] if index > 0 else 0.0
+        hi = nodes[index + 1][0] if index + 1 < len(nodes) else 1.0
+        fraction = max(lo, min(hi, fraction))
+        nodes[index] = (fraction, round(max(-60.0, min(12.0, db)), 3))
+        self.update()
+
+    def _finish_envelope_node_drag(self) -> None:
+        """松手：一次提交（envelope_edit_finished → view 单命令）。"""
+        nodes = self._envelope_drag_nodes or self._envelope_nodes
+        self._envelope_drag_nodes = None
+        self._envelope_drag_backup = None
+        self._drag_mode = None
+        self._drag_pending = False
+        self._is_dragging = False
+        self.envelope_edit_finished.emit(
+            self._clip_id, self._track_id, list(nodes))
+        self.interaction_finished.emit(self._clip_id)
+        self.update()
+
+    def _cancel_envelope_drag(self) -> None:
+        """Esc/失焦：恢复拖动前折线（无命令）。"""
+        if self._envelope_drag_nodes is not None:
+            self._envelope_nodes = list(
+                getattr(self, "_envelope_drag_backup", None)
+                or self._envelope_nodes)
+            self._envelope_drag_nodes = None
+            self._envelope_drag_backup = None
+        self._drag_mode = None
+        self._drag_pending = False
+        self._is_dragging = False
+        self.update()
+
+    def _envelope_live_nodes(self) -> list[tuple[float, float]]:
+        """绘制/提交用的当前折线（拖动中为临时表）。"""
+        return (self._envelope_drag_nodes
+                if self._envelope_drag_nodes is not None
+                else self._envelope_nodes)
 
     def set_drag_cache_mode(self, dragging: bool) -> None:
         """Disable the device cache while a clip is being repositioned.
@@ -4705,6 +4876,10 @@ class ClipItem(QGraphicsObject):
                     event.accept()
                     return
 
+            # P1-1：包络节点独立编辑模式——命中优先于片段移动/修剪。
+            if self._handle_envelope_press(event):
+                return
+
             # In Resolve the percentage label is itself the segment editor.
             # Keep this before clip drag handling so a click never turns into
             # an accidental move of the clip.
@@ -5677,6 +5852,13 @@ class ClipItem(QGraphicsObject):
                 # R08：把手拖动按像素 x 反解源偏移（本地预览 + 钳制）
                 self._update_retime_point_drag(event.pos().x())
 
+            elif self._drag_mode == "envelope_node":
+                # P1-1：包络节点拖动——只更新临时 overlay（Alt=细调）。
+                self._update_envelope_node_drag(
+                    event.pos(),
+                    fine=bool(event.modifiers()
+                              & Qt.KeyboardModifier.AltModifier))
+
             elif self._drag_mode == "move":
                 new_start = self._drag_start_frame + delta_frames
                 # Don't update geometry here - let the view handler apply snap
@@ -5817,6 +5999,13 @@ class ClipItem(QGraphicsObject):
                     self._finish_retime_point_drag()
                 else:
                     self._cancel_retime_point_drag()
+
+            # P1-1：包络节点松手——一次提交（拖动过）/ 取消（仅点击）
+            elif self._drag_mode == "envelope_node":
+                if was_dragging:
+                    self._finish_envelope_node_drag()
+                else:
+                    self._cancel_envelope_drag()
 
             # Send finished signals for command execution
             elif self._drag_mode == "move":
@@ -6017,6 +6206,9 @@ class ClipItem(QGraphicsObject):
         self._last_move_emit = None
         self._slip_delta = 0
         self._copy_mode = False
+        if self._drag_mode == "envelope_node":
+            # P1-1：恢复拖动前的包络折线（临时 overlay 回滚，无命令）。
+            self._cancel_envelope_drag()
         if self._drag_mode == "retime_stretch":
             self._speed = self._original_retime_speed
         self._start_frame = self._original_start
@@ -6057,6 +6249,25 @@ class ClipItem(QGraphicsObject):
             self._is_dragging = False
             self._drag_pending = False
             self._cancel_retime_point_drag()
+            event.accept()
+            return
+        # P1-1：包络独立编辑模式——Esc 取消拖动/清选择，Delete 删节点
+        # （有选中节点时不落入 clip 删除）。
+        if self._drag_mode == "envelope_node" and \
+                event.key() == Qt.Key.Key_Escape:
+            self._cancel_envelope_drag()
+            self._envelope_selected = None
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and \
+                self._envelope_selected is not None and \
+                self._envelope_editable():
+            remaining = [
+                point for index, point in enumerate(self._envelope_nodes)
+                if index != self._envelope_selected]
+            self._envelope_selected = None
+            self.envelope_edit_finished.emit(
+                self._clip_id, self._track_id, remaining)
             event.accept()
             return
         if event.key() == Qt.Key.Key_Delete:
