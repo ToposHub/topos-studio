@@ -22,8 +22,10 @@ from src.features.edit.core.clip_pcm import (
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
 from src.features.edit.core.audio_edit import (
-    append_step, canvas_points_from_envelope, envelope_from_canvas_points,
-    envelope_nodes, make_step, remove_step, replace_step_enabled, set_envelope,
+    append_step, canvas_markers_from, canvas_points_from_envelope,
+    envelope_from_canvas_points, envelope_nodes, make_step, marker_list,
+    markers_from_canvas, remove_step, replace_step_enabled, set_envelope,
+    set_markers,
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
@@ -186,6 +188,19 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.canvas._env_points = canvas_points_from_envelope(
             nodes, self._duration,
             output_total_samples or max(1, int(round(self._duration * self._pcm_rate))))
+        # P1-5：标记点装载（局部样本 → 显示秒）；随片段几何变化重映射。
+        self.canvas._markers = canvas_markers_from(
+            marker_list(audio_edit), self._duration,
+            output_total_samples or max(1, int(round(self._duration * self._pcm_rate))))
+        self.canvas.update()
+        # P1-5：工程级反极性按 channel mask 步骤驱动画布的 Ø 状态。
+        polarity_channels = set()
+        for step in (audio_edit or {}).get("steps", []) or []:
+            if (isinstance(step, dict) and step.get("enabled", True)
+                    and step.get("processor_id") == "channel_polarity"):
+                polarity_channels.update(step.get("params", {}).get("channels", ()))
+        for ch in range(len(self.canvas._ch_phase_inv)):
+            self.canvas._ch_phase_inv[ch] = ch in polarity_channels
         view_steps = []
         for step in (audio_edit or {}).get("steps", []) or []:
             if not isinstance(step, dict):
@@ -714,6 +729,9 @@ class ProjectClipEditor(QWidget):
             self._panel.stack_clear_requested.connect(self._on_stack_cleared)
             # P1-4：包络节点提交（画布拖拽结束/增删时各发一次）。
             self._panel.envelopeChanged.connect(self._on_envelope_changed)
+            # P1-5：标记点与工程级反极性提交；声道静音/独奏保持监听态。
+            self._panel.markersChanged.connect(self._on_markers_changed)
+            self._panel.channelStateChanged.connect(self._on_channel_state_changed)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -1237,6 +1255,42 @@ class ProjectClipEditor(QWidget):
         self._commit_audio_edit(
             set_envelope(clip.audio_edit, nodes),
             I18N.tr("mixer.clip_editor.edit_envelope", "Edit clip volume envelope"))
+
+    def _on_markers_changed(self, points: list) -> None:
+        """P1-5：标记点（稳定 ID、局部样本）持久化到片段处理栈结构。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or panel._duration <= 0.0:
+            return
+        markers = markers_from_canvas(
+            points, panel._duration, self._output_total_samples())
+        self._commit_audio_edit(
+            set_markers(clip.audio_edit, markers),
+            I18N.tr("mixer.clip_editor.edit_markers", "Edit clip markers"))
+
+    def _on_channel_state_changed(self, channel: int, _muted: bool, phase_inverted: bool) -> None:
+        """P1-5：反极性是工程状态（channel mask 步骤）；静音/独奏是监听态。"""
+        clip, panel = self._clip, self._panel
+        if clip is None or self._locked or panel is None or not 0 <= channel < 2:
+            return
+        edit = clip.audio_edit
+        steps = (edit or {}).get("steps", []) or []
+        has_polarity = any(
+            isinstance(step, dict) and step.get("enabled", True)
+            and step.get("processor_id") == "channel_polarity"
+            and channel in ((step.get("params", {}) or {}).get("channels", ()))
+            for step in steps)
+        if has_polarity == bool(phase_inverted):
+            return  # 已处于目标状态（sync 回填不重入）
+        for step in list(steps):
+            if (isinstance(step, dict) and step.get("processor_id") == "channel_polarity"
+                    and channel in ((step.get("params", {}) or {}).get("channels", ()))):
+                edit = remove_step(edit, step["step_id"])
+        if phase_inverted:
+            edit = append_step(edit, make_step(
+                "channel_polarity", 0, self._output_total_samples(), (channel,),
+                label=I18N.tr("mixer.clip_editor.polarity", "Invert polarity")))
+        self._commit_audio_edit(
+            edit, I18N.tr("mixer.clip_editor.polarity", "Invert polarity"))
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:

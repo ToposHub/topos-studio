@@ -9668,6 +9668,10 @@ class TimelineView(QGraphicsView):
             new_clip_id = old_to_new[cid]
             clip_dict["clip_id"] = new_clip_id
             clip_dict["timeline_start"] = resolved_start
+            # P1-5：复制片段重新分配 marker ID（audio_edit 内的稳定标记标识）。
+            if isinstance(clip_dict.get("audio_edit"), dict):
+                from src.features.edit.core.audio_edit import regenerate_marker_ids
+                clip_dict["audio_edit"] = regenerate_marker_ids(clip_dict["audio_edit"])
 
             # Remap linked_clip_id within the copy batch
             old_linked = clip_dict.get("linked_clip_id")
@@ -11982,6 +11986,10 @@ class TimelineView(QGraphicsView):
                 clip_dict["clip_id"] = new_clip_id
                 clip_dict["track_id"] = target_track.track_id
                 clip_dict["timeline_start"] = new_start
+                # P1-5：粘贴得到的片段重新分配 marker ID。
+                if isinstance(clip_dict.get("audio_edit"), dict):
+                    from src.features.edit.core.audio_edit import regenerate_marker_ids
+                    clip_dict["audio_edit"] = regenerate_marker_ids(clip_dict["audio_edit"])
 
                 # Remap linked_clip_id to the new pair if both were copied
                 old_linked = clip_dict.get("linked_clip_id")
