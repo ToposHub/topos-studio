@@ -1,5 +1,7 @@
 # Topos Studio 影视声音后期复核与下一阶段计划
 
+> 执行状态见 [完成报告](2026-11-19-film-post-audio-audit-and-roadmap-status.md)（2026-11-19：P0×6、P1×7 核心层、P2 Reconform 核心、效果器批次 1-7 全部落地）。
+
 ## 复核结论
 
 复核基线为 `fix-ui` 的 `7ec98f4c`。复跑上一份计划的 968 项定向测试，全数通过。新加的检查覆盖真实控件入口、不同源入点的预渲染、处理栈数据保留和试听设备短写。原计划已形成可用的立体声工作区骨架，交付一致性仍有可复现的阻塞项。建议先打通一个真实片段从剪辑、混音到 Master 和 Stem 的全流程，再扩大效果器和环绕格式。 [原计划](2026-11-18-clip-editor-and-mixer-roadmap.md) · [原完成报告](2026-11-18-clip-editor-and-mixer-roadmap-status.md)
