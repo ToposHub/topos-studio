@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
@@ -387,14 +386,6 @@ def _range_gain_envelope(
             env[overlap_lo - block_start:overlap_hi - block_start] = np.minimum(
                 env[overlap_lo - block_start:overlap_hi - block_start], values)
     return env
-
-
-@dataclass(frozen=True)
-class AudioEditBlockContext:
-    """渲染块上下文：块在片段输出域的起始样本与块长（processing_rate）。"""
-
-    block_start_sample: int
-    sample_rate: int = PROCESSING_RATE
 
 
 def apply_clip_audio_edit(
