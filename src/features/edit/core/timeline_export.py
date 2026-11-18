@@ -4771,6 +4771,28 @@ class TimelineExporter:
                         # 退化用序列 fps，行为与旧版一致）。
                         source_fps_for_clip = _clip_source_fps(clip, float(fps))
 
+                        # P0：预渲染成品基底按 clip 解析一次（原逐帧解析）。
+                        # 成品即独立源——time_stretch 拉长后源 EOF 的帧由
+                        # clip_block_from_pre_render 直接供块。
+                        _audio_edit = getattr(clip, "audio_edit", None)
+                        _pre_base = None
+                        if _audio_edit:
+                            from src.features.edit.core.audio_edit import (
+                                requires_pre_render as _requires_pre_render,
+                            )
+                            if _requires_pre_render(_audio_edit):
+                                from src.features.edit.core.pcm_render_cache import (
+                                    resolve_export_pre_render_base,
+                                )
+                                _pre_base, _pre_diag = (
+                                    resolve_export_pre_render_base(
+                                        self._project, self._sequence,
+                                        clip, asset))
+                                for _msg in _pre_diag:
+                                    logger.warning(
+                                        "clip %s pre-render degraded: %s",
+                                        clip.clip_id, _msg)
+
                         # 逐帧解码
                         for frame_idx in range(overlap_start, overlap_end):
                             # 取消语义（P1-01）：导出取消后不再为音频解码/混音
@@ -4809,13 +4831,40 @@ class TimelineExporter:
                                 )
 
                             if samples is None:
-                                continue
-                            if samples.ndim == 1:
-                                samples = samples.reshape(1, -1)
-                            samples = _clip_skip_gate.feed(samples)
-                            if samples.shape[-1] == 0:
-                                continue
-                            if samples.shape[-1] < out_end - out_start:
+                                # P0：源 EOF（改长度步骤烘焙出的成品比源长）
+                                # 时由预渲染成品直接供块——块存在性不再由源
+                                # 解码决定。返回 None（无成品）保持跳过语义。
+                                if _pre_base is not None:
+                                    from src.features.edit.core.audio_edit import (
+                                        clip_block_from_pre_render,
+                                    )
+                                    samples = clip_block_from_pre_render(
+                                        _audio_edit, _pre_base,
+                                        int(round(
+                                            (frame_idx - clip.timeline_start)
+                                            * sample_rate / fps)),
+                                        block_len,
+                                        sample_rate=int(sample_rate),
+                                        channels=channels,
+                                    )
+                                    synthesized_from_base = samples is not None
+                                if samples is None:
+                                    continue
+                            else:
+                                synthesized_from_base = False
+                            if synthesized_from_base:
+                                # 成品块已应用完整处理栈且为交付声道宽度：
+                                # 跳过源域步骤（skip gate/源 patch/交付
+                                # downmix/二次栈应用），直接进入 clip 增益。
+                                actual = min(samples.shape[-1],
+                                             out_end - out_start)
+                                samples = samples[:, :actual]
+                            else:
+                                if samples.ndim == 1:
+                                    samples = samples.reshape(1, -1)
+                                samples = _clip_skip_gate.feed(samples)
+                                if samples.shape[-1] == 0:
+                                    continue
                                 # R04（第七轮审计）：解码器返回短块（AAC 帧
                                 # 粒度/音频流先于视频结束）时补零到精确块长。
                                 # 旧的 += 广播异常会被外层 except 捕获后跳过
@@ -4847,81 +4896,66 @@ class TimelineExporter:
                             # 现用 ChannelLayout.downmix 保留全部声道贡献（ITUR BS.775）。
                             # P1-09：传入 decoder 的容器布局（素材真相），5.1(side)
                             # 等素材不再被按声道数误判；未知布局回退必留警告日志。
-                            from src.features.edit.core.channel_layout import (
-                                adapt_samples_for_delivery,
-                            )
-                            from src.features.edit.core.source_patch import (
-                                patch_for_asset,
-                            )
-                            if samples.ndim == 1:
-                                samples = np.broadcast_to(
-                                    samples.reshape(1, -1),
-                                    (1, samples.shape[0]),
+                            # P0：成品合成块跳过源域步骤（已是交付声道宽度的
+                            # 最终内容）。
+                            if not synthesized_from_base:
+                                from src.features.edit.core.channel_layout import (
+                                    adapt_samples_for_delivery,
                                 )
-                            # F2.1 · Source Patching：素材级源声道映射先于交付
-                            # downmix 选道（与预览/Stem 同语义）。映射存在但未
-                            # 生效（解码声道数与映射基线不符）时留警告并直通。
-                            _src_layout = getattr(decoder, "source_layout", None)
-                            _payload = samples[:, :actual]
-                            # F3.4 修复：getattr 防御——duck-typed 工程
-                            # （测试替身/旧版工程对象）无 source_patch_overrides
-                            # 时此前直接 AttributeError，外层 except 吞掉后
-                            # 整 clip 静音（stems 全静且彼此相等）。
-                            _patch = patch_for_asset(
-                                getattr(self._project,
-                                        "source_patch_overrides", None) or {},
-                                clip.asset_id)
-                            _selected = _patch.select_channels(_payload)
-                            if _selected is not _payload:
-                                _payload = _selected
-                                # 选道后的布局是自定义的，不能再声明容器布局
-                                _src_layout = None
-                            elif _patch.audio_channel_map:
-                                logger.warning(
-                                    "clip %s source patch map %s skipped: "
-                                    "decoded %d channels",
-                                    clip.clip_id, _patch.audio_channel_map,
-                                    _payload.shape[0])
-                            samples = adapt_samples_for_delivery(
-                                _payload, channels,
-                                src_layout=_src_layout,
-                                context=f"clip {clip.clip_id}",
-                            )
-
-                            # P0-3: Clip Editor 处理栈——固定顺序：栈在 clip
-                            # 增益/淡化之前（与实时 mix_samples、Stem 同一
-                            # 调用序列，parity 测试锁定）。
-                            _audio_edit = getattr(clip, "audio_edit", None)
-                            if _audio_edit and samples.shape[-1] > 0:
-                                from src.features.edit.core.audio_edit import (
-                                    apply_clip_audio_edit_block as _apply_audio_edit,
+                                from src.features.edit.core.source_patch import (
+                                    patch_for_asset,
                                 )
-                                # §3.3：预渲染步骤走缓存基底（离线同步构建）。
-                                _pre_base = None
-                                from src.features.edit.core.audio_edit import (
-                                    requires_pre_render,
-                                )
-                                if requires_pre_render(_audio_edit):
-                                    from src.features.edit.core.pcm_render_cache import (
-                                        resolve_export_pre_render_base,
+                                if samples.ndim == 1:
+                                    samples = np.broadcast_to(
+                                        samples.reshape(1, -1),
+                                        (1, samples.shape[0]),
                                     )
-                                    _pre_base, _pre_diag = (
-                                        resolve_export_pre_render_base(
-                                            self._project, self._sequence,
-                                            clip, asset))
-                                    for _msg in _pre_diag:
-                                        logger.warning(
-                                            "clip %s pre-render degraded: %s",
-                                            clip.clip_id, _msg)
-                                samples = _apply_audio_edit(
-                                    samples,
-                                    int(round(
-                                        (frame_idx - clip.timeline_start)
-                                        * sample_rate / fps)),
-                                    _audio_edit,
-                                    sample_rate=int(sample_rate),
-                                    pre_render_base=_pre_base,
+                                # F2.1 · Source Patching：素材级源声道映射先于交付
+                                # downmix 选道（与预览/Stem 同语义）。映射存在但未
+                                # 生效（解码声道数与映射基线不符）时留警告并直通。
+                                _src_layout = getattr(decoder, "source_layout", None)
+                                _payload = samples[:, :actual]
+                                # F3.4 修复：getattr 防御——duck-typed 工程
+                                # （测试替身/旧版工程对象）无 source_patch_overrides
+                                # 时此前直接 AttributeError，外层 except 吞掉后
+                                # 整 clip 静音（stems 全静且彼此相等）。
+                                _patch = patch_for_asset(
+                                    getattr(self._project,
+                                            "source_patch_overrides", None) or {},
+                                    clip.asset_id)
+                                _selected = _patch.select_channels(_payload)
+                                if _selected is not _payload:
+                                    _payload = _selected
+                                    # 选道后的布局是自定义的，不能再声明容器布局
+                                    _src_layout = None
+                                elif _patch.audio_channel_map:
+                                    logger.warning(
+                                        "clip %s source patch map %s skipped: "
+                                        "decoded %d channels",
+                                        clip.clip_id, _patch.audio_channel_map,
+                                        _payload.shape[0])
+                                samples = adapt_samples_for_delivery(
+                                    _payload, channels,
+                                    src_layout=_src_layout,
+                                    context=f"clip {clip.clip_id}",
                                 )
+
+                                # P0-3: Clip Editor 处理栈——固定顺序：栈在 clip
+                                # 增益/淡化之前（与实时 mix_samples、Stem 同一
+                                # 调用序列，parity 测试锁定）。
+                                if _audio_edit and samples.shape[-1] > 0:
+                                    from src.features.edit.core.audio_edit import (
+                                        apply_clip_audio_edit_block as _apply_audio_edit,
+                                    )
+                                    samples = _apply_audio_edit(
+                                        samples,
+                                        int(round(
+                                            (frame_idx - clip.timeline_start)
+                                            * sample_rate / fps)),
+                                        _audio_edit,
+                                        sample_rate=int(sample_rate),
+                                        pre_render_base=_pre_base,
+                                    )
 
                             # C3: 片段级增益（clip gain → renderer 节点链之前）
                             _clip_gain_db = float(

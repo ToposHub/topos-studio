@@ -113,8 +113,25 @@ def wsola_time_stretch(
     # 相似度参考：声道混合单声道（多声道共用同一对齐，保立体声像）
     reference = x.mean(axis=0) if x.shape[0] > 1 else x[0]
 
+    # P0（2026-11-19 计划）：输入尾部补静音余量，让 OLA 推进到真实
+    # 内容末尾——否则循环在 `nominal + frame_len + hop >= n` 处提前停机，
+    # 输出尾部 ~1.5 帧无内容（50% 拉伸 1 s 时合同 96000 样本只有前
+    # ~93000 有能量，成片最后一帧静音）。补零只影响输出末段（≤ 帧长
+    # 对应的拉伸时长），输出长度不变（target_len 按原始 n 的合同精确）。
+    n_orig = n
+    tail_margin = frame_len + hop + delta
+    x = np.concatenate([
+        x,
+        np.zeros((x.shape[0], tail_margin), dtype=np.float32),
+    ], axis=1)
+    reference = np.concatenate([
+        reference,
+        np.zeros(tail_margin, dtype=np.float32),
+    ])
+    n = x.shape[1]
+
     stretch = 1.0 / speed
-    out_len = int(round(n * stretch)) + frame_len
+    out_len = int(round(n_orig * stretch)) + frame_len
     out = np.zeros((x.shape[0], out_len), dtype=np.float32)
     norm = np.zeros(out_len, dtype=np.float32)
     window = np.hanning(frame_len).astype(np.float32)
@@ -147,7 +164,7 @@ def wsola_time_stretch(
 
     norm[norm < 1e-6] = 1.0
     result = out / norm[np.newaxis, :]
-    target_len = max(1, int(round(n * stretch)))
+    target_len = max(1, int(round(n_orig * stretch)))
     result = result[:, :target_len]
     if mono_input:
         result = result[0]

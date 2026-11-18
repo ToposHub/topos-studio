@@ -920,6 +920,35 @@ def apply_clip_audio_edit_block(
         samples, block_start_sample, audio_edit, sample_rate=sample_rate)
 
 
+def clip_block_from_pre_render(
+    audio_edit: Any,
+    pre_render_base: np.ndarray | None,
+    block_start_sample: int,
+    count: int,
+    *,
+    sample_rate: int,
+    channels: int,
+) -> Optional[np.ndarray]:
+    """P0 · 预渲染成品作为独立源的统一块供给（实时/成片/Stem 共用）。
+
+    源解码负责输入；缓存成品负责**有效输出范围**——time_stretch 等
+    改长度步骤烘焙出的成品比源长时，源 EOF 后的块由本函数直接供出，
+    块存在性不再由源解码决定（修复「50% 播放生成 2 s 缓存、实时第二
+    秒仍全静音」）。先查渲染状态（栈是否需要预渲染 + 基底是否就绪），
+    再按当前 revision 成品切块；返回 None 表示无成品可用（调用方保持
+    原 continue 语义）。返回块已应用 inline 步骤/包络，与
+    ``apply_clip_audio_edit_block`` 对已解码块的处理完全一致。
+    """
+    if (pre_render_base is None or count <= 0
+            or not isinstance(audio_edit, dict)
+            or not requires_pre_render(audio_edit)):
+        return None
+    zeros = np.zeros((max(1, int(channels)), int(count)), dtype=np.float32)
+    return apply_clip_audio_edit_block(
+        zeros, block_start_sample, audio_edit,
+        sample_rate=int(sample_rate), pre_render_base=pre_render_base)
+
+
 def steps_signature(audio_edit: Any) -> tuple:
     """供音频图快照/重建签名使用的稳定元组（enabled 步骤 + 包络）。"""
     if not isinstance(audio_edit, dict):
