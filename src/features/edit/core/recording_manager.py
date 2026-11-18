@@ -858,6 +858,17 @@ class RecordingManager:
         # P1-10：输入监听 —— 实时采集块转发（planar (channels, n)），
         # 由 UI 层接 QAudioSink 做输入监听，核心保持无输出设备依赖。
         self.on_monitor_block: Optional[Callable[[np.ndarray], None]] = None
+        # P1 · 监控与录音分离：Arm / Input Monitor / Record 三态独立。
+        # armed 备录（设备保持采集但不起 take）；input_monitor 开监听
+        # （与录音互不依赖）；require_arm_to_record 兼容开关（默认 False
+        # ——既有注入/测试路径不经 arm 直接 start_recording）。
+        self._armed: bool = False
+        self.require_arm_to_record: bool = False
+        self._input_monitor: bool = False
+        # 监听通道条：监听块经此转发（音量/Mono/DIM/Mute 只影响监听，
+        # take 录监听前信号）。
+        from src.features.edit.core.monitor_section import MonitorSection
+        self._monitor_section = MonitorSection()
 
         # P1-10 post-roll：真实设备 + Qt 事件循环可用时由控制器置 True。
         # 离线/注入路径保持 stop_recording 同步落盘语义（测试与批处理依赖）。
@@ -902,6 +913,36 @@ class RecordingManager:
     def set_calibration(self, calibration: LatencyCalibration) -> None:
         """设置延迟校准结果。"""
         self._calibration = calibration
+
+    # ── P1 · Arm / Input Monitor / Record 三态分离 ──────────────────
+
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
+    @property
+    def input_monitor(self) -> bool:
+        return self._input_monitor
+
+    def arm_input(self, enabled: bool) -> None:
+        """备录开关（与录音、监听互不依赖；录音中不允许撤销备录）。"""
+        if not enabled and self.is_recording:
+            if self.on_error is not None:
+                self.on_error("cannot disarm while recording")
+            return
+        self._armed = bool(enabled)
+
+    def set_input_monitor(self, enabled: bool) -> None:
+        """输入监听开关（独立于备录/录音——监听不触发 take）。"""
+        self._input_monitor = bool(enabled)
+
+    def set_monitor_section(self, section) -> None:
+        """替换监听通道条（音量/Mono/DIM/Mute；录音数据不受影响）。"""
+        self._monitor_section = section
+
+    @property
+    def monitor_section(self):
+        return self._monitor_section
 
     # ── 设备枚举 ──
 
@@ -1155,10 +1196,12 @@ class RecordingManager:
                 raw = raw.reshape(1, -1)
             raw = _np.ascontiguousarray(raw, dtype=_np.float32)
 
-            # P1-10 输入监听：实时块转发（pre-roll 期间演员就要听到输入）
+            # P1-10 输入监听：实时块转发（pre-roll 期间演员就要听到输入）。
+            # P1 · 监听通道条：音量/Mono/DIM/Mute 只作用于监听转发——
+            # take 记录的是监听前信号（监听状态对录音零副作用）。
             if self.on_monitor_block is not None and raw.size > 0:
                 try:
-                    self.on_monitor_block(raw)
+                    self.on_monitor_block(self._monitor_section.process(raw))
                 except Exception as e:
                     logger.warning(f"monitor block forward failed: {e}")
 
