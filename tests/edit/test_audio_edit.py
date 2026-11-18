@@ -17,10 +17,15 @@ from src.features.edit.core.audio_edit import (
     append_step,
     apply_audio_edit_to_pcm,
     apply_clip_audio_edit,
+    canvas_points_from_envelope,
+    envelope_from_canvas_points,
+    envelope_nodes,
+    evaluate_envelope_gain,
     make_step,
     new_audio_edit,
     remove_step,
     replace_step_enabled,
+    set_envelope,
     steps_signature,
     validate_audio_edit,
 )
@@ -201,6 +206,82 @@ class TestDsp:
             "normalize", 0, rate, (0,), gain_db=round(gain_db, 4))])
         out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)
         assert 20 * math.log10(float(np.max(np.abs(out)))) == pytest.approx(-3.0, abs=0.1)
+
+
+class TestEnvelope:
+    def test_linear_db_interpolation_midpoint(self) -> None:
+        rate = 48000
+        nodes = [
+            {"id": "a", "local_sample": 0, "gain_db": 0.0, "interpolation": "linear"},
+            {"id": "b", "local_sample": 4 * rate, "gain_db": -12.0, "interpolation": "linear"},
+        ]
+        gain = evaluate_envelope_gain(0, 4 * rate, nodes)
+        assert gain is not None
+        # 验收：4 s 从 0 dB 线性降到 −12 dB，2 s 处应为 −6 dB。
+        assert 20 * math.log10(float(gain[2 * rate])) == pytest.approx(-6.0, abs=0.01)
+        assert float(gain[0]) == pytest.approx(1.0)
+        assert 20 * math.log10(float(gain[-1])) == pytest.approx(-12.0, abs=0.01)
+
+    def test_endpoint_extension_outside_nodes(self) -> None:
+        rate = 48000
+        nodes = [{"id": "a", "local_sample": rate, "gain_db": -6.0, "interpolation": "linear"}]
+        gain = evaluate_envelope_gain(0, 2 * rate, nodes)
+        assert float(gain[0]) == pytest.approx(10 ** (-6 / 20))
+        assert float(gain[-1]) == pytest.approx(10 ** (-6 / 20))
+
+    def test_block_split_matches_whole_array(self) -> None:
+        rate = 48000
+        nodes = [
+            {"id": "a", "local_sample": 0, "gain_db": 0.0, "interpolation": "linear"},
+            {"id": "b", "local_sample": rate, "gain_db": -9.0, "interpolation": "linear"},
+            {"id": "c", "local_sample": 2 * rate, "gain_db": 3.0, "interpolation": "linear"},
+        ]
+        whole = evaluate_envelope_gain(0, 3 * rate, nodes)
+        chunks = np.concatenate([
+            evaluate_envelope_gain(s, 700, nodes)
+            for s in range(0, 3 * rate, 700)
+        ])[: len(whole)]
+        np.testing.assert_allclose(whole, chunks, atol=1e-6)
+
+    def test_canvas_round_trip_and_unique_samples(self) -> None:
+        points = [{"t": 0.0, "db": 0.0}, {"t": 1.0, "db": -6.0}, {"t": 2.0, "db": -6.0}]
+        nodes = envelope_from_canvas_points(points, 2.0, 96000)
+        assert [n["local_sample"] for n in nodes] == [0, 48000, 96000]
+        back = canvas_points_from_envelope(nodes, 2.0, 96000)
+        assert [p["t"] for p in back] == [0.0, 1.0, 2.0]
+        assert [p["db"] for p in back] == [0.0, -6.0, -6.0]
+        # 同一 sample 的重复点去重（后写覆盖）。
+        dupes = envelope_from_canvas_points(
+            [{"t": 0.5, "db": -1.0}, {"t": 0.5, "db": -2.0}], 1.0, 48000)
+        assert len(dupes) == 1 and dupes[0]["gain_db"] == -2.0
+
+    def test_envelope_applies_with_steps(self) -> None:
+        rate = 48000
+        pcm = np.full((1, rate), 0.5, dtype=np.float32)
+        edit = new_audio_edit([make_step("mute", 0, 4800, (0,))])
+        edit["envelope"] = [
+            {"id": "a", "local_sample": 0, "gain_db": 0.0, "interpolation": "linear"},
+            {"id": "b", "local_sample": rate, "gain_db": -20.0, "interpolation": "linear"},
+        ]
+        out = apply_audio_edit_to_pcm(pcm, edit, sample_rate=rate)[0]
+        # 末节点附近插值接近 −20 dB：0.5 × 10^(−20/20) ≈ 0.05。
+        assert float(out[47990]) == pytest.approx(0.05, rel=0.02)
+
+    def test_set_envelope_and_signature(self) -> None:
+        edit = new_audio_edit([])
+        nodes = [{"id": "a", "local_sample": 0, "gain_db": -3.0, "interpolation": "linear"}]
+        with_env = set_envelope(edit, nodes)
+        assert envelope_nodes(with_env) == nodes
+        assert set_envelope(with_env, None).get("envelope") is None
+        assert steps_signature(with_env) != steps_signature(edit)
+        # 校验：重复 sample / 非法插值被逐条诊断。
+        bad = set_envelope(edit, [
+            {"id": "x", "local_sample": 5, "gain_db": 0.0, "interpolation": "spline"},
+            {"id": "y", "local_sample": 5, "gain_db": 1.0, "interpolation": "linear"},
+        ])
+        diagnostics = validate_audio_edit(bad)
+        assert any("duplicate local_sample" in d for d in diagnostics)
+        assert any("unsupported interpolation" in d for d in diagnostics)
 
 
 class TestRoutingSignatures:
