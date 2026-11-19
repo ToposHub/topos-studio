@@ -35,6 +35,9 @@ def _stub_exporter(allow_degraded: bool, qualifier_params: dict) -> NS:
         _get_decomposed_grade_fastpath=(
             lambda *a, **k: None),
         _color_grade_lut_cache={},
+        # N03 测试桩（SimpleNamespace）补上后加的权威图查询——返回 None
+        # 走扁平 primary 路径（与这些门测试的目标路径一致）。
+        _clip_color_graph=lambda layer, **_kw: None,
     )
     # bd8b15f 起 _apply_color_grade = unstabilized + 稳定化包裹（无
     # _project/clip 状态 → clip_stabilization_state 空 → 直通）

@@ -98,6 +98,10 @@ def test_plain_d_dispatches_the_selected_clip_enable_toggle() -> None:
         Qt.KeyboardModifier.NoModifier,
     )
 
+    # keyPressEvent 委托到 _handle_timeline_key_press——MagicMock 会把
+    # 委托吞掉，绑回真实实现保持入口覆盖。
+    view._handle_timeline_key_press = (
+        lambda ev: TimelineView._handle_timeline_key_press(view, ev))
     TimelineView.keyPressEvent(view, event)
 
     view._toggle_selected_clips_enabled.assert_called_once_with()

@@ -4526,7 +4526,9 @@ def _probe_audio_track_info(stream: Any) -> dict[str, Any]:
     codec_name = 'unknown'
     try:
         if getattr(stream, 'codec', None):
-            codec_name = stream.codec.name or 'unknown'
+            # str() 防御：异常/损坏流可能给出非字符串对象（位深正则
+            # match() 对非 str 会抛 TypeError，整个探测失败）。
+            codec_name = str(stream.codec.name or 'unknown')
     except Exception:  # noqa: BLE001 — 损坏流的 codec 访问可能抛错
         codec_name = 'unknown'
     channels = None

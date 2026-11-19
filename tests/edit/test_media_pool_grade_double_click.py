@@ -111,6 +111,9 @@ class TestClipDoubleClickWiring:
         view._timeline = TimelineSequence(
             timeline_id="tl", name="T", fps=25.0,
         ).with_track_added(track).with_clip_added("v1", clip)
+        # 未初始化 sip 对象上访问缺失实例属性会抛 RuntimeError——
+        # 显式声明音频分支开关（测试目标是视频 Match Frame 路径）。
+        view._audio_only = False
         view._playhead_frame = 500  # 远超片段末端
         emitted: list[tuple[str, int]] = []
 

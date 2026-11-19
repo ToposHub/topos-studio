@@ -106,7 +106,8 @@ class TestAud19720AdapterDegradationLogged:
                 effect_type="reverb",
                 clip_id="clip_1",
                 effect_id="fx_1",
-                params_dict={"decay": 99.0},  # 超出 [0.1, 10] → ValueError
+                # __post_init__ 范围校验会抛 ValueError（decay 键本身无校验）
+            params_dict={"reverb_time": 99999.0},
             )
             assert dialog is not None
             dialog.close()

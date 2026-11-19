@@ -314,7 +314,7 @@ class TestConsolidateUi:
         finally:
             panel.deleteLater()
 
-    def test_handler_full_flow_remux(self, qapp, monkeypatch, tmp_path) -> None:
+    def test_handler_full_flow_remux(self, qapp, monkeypatch, tmp_path, qtbot) -> None:
         import shutil as _shutil
 
         if _shutil.which("ffmpeg") is None:
@@ -389,6 +389,8 @@ class TestConsolidateUi:
                 lambda ids, update: update({"t1": seq})
             )
             panel._on_consolidate_project()
+            # P2-2 后台化：完成回调经任务队列回主线程——泵事件循环等待
+            qtbot.waitUntil(lambda: bool(shown), timeout=10000)
 
             assert shown, "完成后应弹出整理报告"
             topos = out_dir / "ConsolidateUi.topos"
