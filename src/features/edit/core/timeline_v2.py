@@ -3387,6 +3387,18 @@ def _ensure_effect_param_registry() -> dict:
         # NF-01（2026-11-15 计划 §6）：两款新复合 FX
         _EFFECT_PARAM_REGISTRY["voice_changer"] = VoiceChangerParams
         _EFFECT_PARAM_REGISTRY["spectral_mangler"] = SpectralManglerParams
+        # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX 参数载体
+        # （注册后 fx_versioning 判 supported；validate_effect_params 可归一）
+        _EFFECT_PARAM_REGISTRY["de_esser"] = DeEsserParams
+        _EFFECT_PARAM_REGISTRY["true_peak_limiter"] = TruePeakLimiterParams
+        _EFFECT_PARAM_REGISTRY["dynamic_eq"] = DynamicEqParams
+        _EFFECT_PARAM_REGISTRY["bus_comp"] = BusCompParams
+        _EFFECT_PARAM_REGISTRY["multiband_comp"] = MultibandCompParams
+        _EFFECT_PARAM_REGISTRY["convolution_reverb"] = ConvolutionReverbParams
+        _EFFECT_PARAM_REGISTRY["transient_designer"] = TransientDesignerParams
+        _EFFECT_PARAM_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanParams
+        _EFFECT_PARAM_REGISTRY["chorus_flanger"] = ChorusFlangerParams
+        _EFFECT_PARAM_REGISTRY["phaser"] = PhaserParams
     return _EFFECT_PARAM_REGISTRY
 
 
@@ -3744,6 +3756,417 @@ class SpectralManglerParams:
             dist_mix_pct=_f("dist_mix_pct", 80.0),
             random_seed=_seed_of(d),
             freeze_capture_id=str(d.get("freeze_capture_id", "") or ""),
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P1（2026-11-19 计划第三阶段 #1-#7）新 FX 参数载体（默认值 = DSP DEFAULTS）。
+# 注册进 _EFFECT_PARAM_REGISTRY 后 fx_versioning 判 supported、
+# validate_effect_params 可归一化、机架默认参数工厂可实例化。
+# 范围守卫从宽（DSP 侧 set_params 有硬 clamp）；from_dict 对坏类型回默认。
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _params_f(key: str, data: dict, default: float) -> float:
+    try:
+        return float(data.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass(frozen=True)
+class DeEsserParams:
+    """De-Esser（齿音消除）：band-pass 检测 + 流式 RMS 包络。"""
+    threshold_dbfs: float = -32.0
+    ratio: float = 4.0
+    frequency: float = 6500.0
+    q: float = 2.0
+    attack_ms: float = 5.0
+    release_ms: float = 60.0
+    max_reduction_db: float = 12.0
+    mode: str = "split"  # "wide" | "split"（减法互补）
+    listen: bool = False
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "DeEsserParams":
+        return DeEsserParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "threshold_dbfs": self.threshold_dbfs, "ratio": self.ratio,
+            "frequency": self.frequency, "q": self.q,
+            "attack_ms": self.attack_ms, "release_ms": self.release_ms,
+            "max_reduction_db": self.max_reduction_db, "mode": self.mode,
+            "listen": self.listen, "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "DeEsserParams":
+        mode = str(data.get("mode", "split") or "split")
+        if mode not in ("wide", "split"):
+            mode = "split"
+        return DeEsserParams(
+            threshold_dbfs=_params_f("threshold_dbfs", data, -32.0),
+            ratio=_params_f("ratio", data, 4.0),
+            frequency=_params_f("frequency", data, 6500.0),
+            q=_params_f("q", data, 2.0),
+            attack_ms=_params_f("attack_ms", data, 5.0),
+            release_ms=_params_f("release_ms", data, 60.0),
+            max_reduction_db=_params_f("max_reduction_db", data, 12.0),
+            mode=mode,
+            listen=bool(data.get("listen", False)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class TruePeakLimiterParams:
+    """True Peak Limiter：4× 过采样 + lookahead + 平滑 release（dBTP）。"""
+    ceiling_dbtp: float = -1.0
+    lookahead_ms: float = 5.0
+    release_ms: float = 80.0
+    linked: bool = True
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "TruePeakLimiterParams":
+        return TruePeakLimiterParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ceiling_dbtp": self.ceiling_dbtp,
+            "lookahead_ms": self.lookahead_ms,
+            "release_ms": self.release_ms,
+            "linked": self.linked, "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "TruePeakLimiterParams":
+        return TruePeakLimiterParams(
+            ceiling_dbtp=_params_f("ceiling_dbtp", data, -1.0),
+            lookahead_ms=_params_f("lookahead_ms", data, 5.0),
+            release_ms=_params_f("release_ms", data, 80.0),
+            linked=bool(data.get("linked", True)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class DynamicEqParams:
+    """Dynamic EQ：StripEQ Bell × 阈值驱动的动态增益（关闭动态==EQ）。"""
+    frequency: float = 3000.0
+    q: float = 1.4
+    gain_db: float = 0.0
+    threshold_dbfs: float = -30.0
+    max_cut_db: float = 9.0
+    max_boost_db: float = 0.0
+    attack_ms: float = 8.0
+    release_ms: float = 120.0
+    dynamic_enabled: bool = True
+    slope: float = 0.5
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "DynamicEqParams":
+        return DynamicEqParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frequency": self.frequency, "q": self.q, "gain_db": self.gain_db,
+            "threshold_dbfs": self.threshold_dbfs,
+            "max_cut_db": self.max_cut_db, "max_boost_db": self.max_boost_db,
+            "attack_ms": self.attack_ms, "release_ms": self.release_ms,
+            "dynamic_enabled": self.dynamic_enabled, "slope": self.slope,
+            "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "DynamicEqParams":
+        return DynamicEqParams(
+            frequency=_params_f("frequency", data, 3000.0),
+            q=_params_f("q", data, 1.4),
+            gain_db=_params_f("gain_db", data, 0.0),
+            threshold_dbfs=_params_f("threshold_dbfs", data, -30.0),
+            max_cut_db=_params_f("max_cut_db", data, 9.0),
+            max_boost_db=_params_f("max_boost_db", data, 0.0),
+            attack_ms=_params_f("attack_ms", data, 8.0),
+            release_ms=_params_f("release_ms", data, 120.0),
+            dynamic_enabled=bool(data.get("dynamic_enabled", True)),
+            slope=_params_f("slope", data, 0.5),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class BusCompParams:
+    """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。"""
+    template: str = "dx_glue"  # BUS_COMP_TEMPLATES: dx_glue | mx_glue
+    sc_hpf_hz: float = 120.0
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "BusCompParams":
+        return BusCompParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "template": self.template, "sc_hpf_hz": self.sc_hpf_hz,
+            "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "BusCompParams":
+        template = str(data.get("template", "dx_glue") or "dx_glue")
+        if template not in ("dx_glue", "mx_glue"):
+            template = "dx_glue"
+        return BusCompParams(
+            template=template,
+            sc_hpf_hz=_params_f("sc_hpf_hz", data, 120.0),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+def _default_multiband_bands() -> tuple[dict[str, float], ...]:
+    return (
+        {"threshold_db": -20.0, "ratio": 2.0, "release_ms": 220.0, "makeup_db": 0.0},
+        {"threshold_db": -24.0, "ratio": 2.5, "release_ms": 150.0, "makeup_db": 0.0},
+        {"threshold_db": -22.0, "ratio": 2.0, "release_ms": 180.0, "makeup_db": 0.0},
+    )
+
+
+@dataclass(frozen=True)
+class MultibandCompParams:
+    """三段 Multiband 压缩：减法互补分频 + 每段独立包络。"""
+    crossover_low: float = 180.0
+    crossover_high: float = 4200.0
+    band_low: dict[str, float] | None = None
+    band_mid: dict[str, float] | None = None
+    band_high: dict[str, float] | None = None
+    attack_ms: float = 10.0
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "MultibandCompParams":
+        return MultibandCompParams()
+
+    def _bands(self) -> tuple[dict[str, float], ...]:
+        defaults = _default_multiband_bands()
+        return tuple(
+            dict(band) if isinstance(band, dict) else dict(default)
+            for band, default in zip(
+                (self.band_low, self.band_mid, self.band_high), defaults))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "crossovers": [self.crossover_low, self.crossover_high],
+            "bands": [dict(b) for b in self._bands()],
+            "attack_ms": self.attack_ms, "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "MultibandCompParams":
+        crossovers = data.get("crossovers")
+        if (not isinstance(crossovers, (list, tuple)) or len(crossovers) != 2):
+            crossovers = (180.0, 4200.0)
+        bands = data.get("bands")
+        if not isinstance(bands, (list, tuple)) or len(bands) != 3:
+            bands = _default_multiband_bands()
+        band_fields = []
+        for band in bands:
+            band_fields.append(dict(band) if isinstance(band, dict) else {})
+        while len(band_fields) < 3:
+            band_fields.append({})
+        return MultibandCompParams(
+            crossover_low=_params_f("crossover_low", dict(data),
+                                    float(crossovers[0])),
+            crossover_high=_params_f("crossover_high", dict(data),
+                                     float(crossovers[1])),
+            band_low=band_fields[0], band_mid=band_fields[1],
+            band_high=band_fields[2],
+            attack_ms=_params_f("attack_ms", data, 10.0),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class ConvolutionReverbParams:
+    """卷积混响：分区 FFT 卷积；IR 经 ir_path 装载（UI 文件选择/序列化）。"""
+    ir_path: str = ""
+    wet: float = 0.35
+    dry: float = 1.0
+    true_stereo: bool = False
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "ConvolutionReverbParams":
+        return ConvolutionReverbParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ir_path": self.ir_path, "wet": self.wet, "dry": self.dry,
+            "true_stereo": self.true_stereo, "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ConvolutionReverbParams":
+        return ConvolutionReverbParams(
+            ir_path=str(data.get("ir_path", "") or ""),
+            wet=_params_f("wet", data, 0.35),
+            dry=_params_f("dry", data, 1.0),
+            true_stereo=bool(data.get("true_stereo", False)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class TransientDesignerParams:
+    """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。"""
+    attack_db: float = 6.0
+    sustain_db: float = 0.0
+    attack_ms: float = 8.0
+    sustain_ms: float = 80.0
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "TransientDesignerParams":
+        return TransientDesignerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attack_db": self.attack_db, "sustain_db": self.sustain_db,
+            "attack_ms": self.attack_ms, "sustain_ms": self.sustain_ms,
+            "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "TransientDesignerParams":
+        return TransientDesignerParams(
+            attack_db=_params_f("attack_db", data, 6.0),
+            sustain_db=_params_f("sustain_db", data, 0.0),
+            attack_ms=_params_f("attack_ms", data, 8.0),
+            sustain_ms=_params_f("sustain_ms", data, 80.0),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class TremoloAutoPanParams:
+    """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。"""
+    mode: str = "tremolo"  # "tremolo" | "auto_pan"
+    rate_hz: float = 4.0
+    depth: float = 0.7
+    shape: str = "sine"
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "TremoloAutoPanParams":
+        return TremoloAutoPanParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode, "rate_hz": self.rate_hz,
+            "depth": self.depth, "shape": self.shape,
+            "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "TremoloAutoPanParams":
+        mode = str(data.get("mode", "tremolo") or "tremolo")
+        if mode not in ("tremolo", "auto_pan"):
+            mode = "tremolo"
+        return TremoloAutoPanParams(
+            mode=mode,
+            rate_hz=_params_f("rate_hz", data, 4.0),
+            depth=_params_f("depth", data, 0.7),
+            shape=str(data.get("shape", "sine") or "sine"),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class ChorusFlangerParams:
+    """Chorus / Flanger：相位连续调制延迟线 + 反馈尾音预算。"""
+    mode: str = "chorus"  # "chorus" | "flanger"
+    rate_hz: float = 0.6
+    depth_ms: float = 3.0
+    base_ms: float = 18.0
+    feedback: float = 0.0
+    voices: int = 2
+    mix: float = 0.5
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "ChorusFlangerParams":
+        return ChorusFlangerParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode, "rate_hz": self.rate_hz,
+            "depth_ms": self.depth_ms, "base_ms": self.base_ms,
+            "feedback": self.feedback, "voices": self.voices,
+            "mix": self.mix, "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ChorusFlangerParams":
+        mode = str(data.get("mode", "chorus") or "chorus")
+        if mode not in ("chorus", "flanger"):
+            mode = "chorus"
+        try:
+            voices = int(data.get("voices", 2))
+        except (TypeError, ValueError):
+            voices = 2
+        voices = max(1, min(4, voices))
+        return ChorusFlangerParams(
+            mode=mode,
+            rate_hz=_params_f("rate_hz", data, 0.6),
+            depth_ms=_params_f("depth_ms", data, 3.0),
+            base_ms=_params_f("base_ms", data, 18.0),
+            feedback=_params_f("feedback", data, 0.0),
+            voices=voices,
+            mix=_params_f("mix", data, 0.5),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass(frozen=True)
+class PhaserParams:
+    """Phaser：全通级联 + 相位连续 LFO 扫频。"""
+    rate_hz: float = 0.5
+    stages: int = 4
+    base_hz: float = 600.0
+    sweep_octaves: float = 2.5
+    mix: float = 0.5
+    feedback: float = 0.3
+    enabled: bool = True
+
+    @staticmethod
+    def default() -> "PhaserParams":
+        return PhaserParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rate_hz": self.rate_hz, "stages": self.stages,
+            "base_hz": self.base_hz, "sweep_octaves": self.sweep_octaves,
+            "mix": self.mix, "feedback": self.feedback,
+            "enabled": self.enabled,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "PhaserParams":
+        try:
+            stages = int(data.get("stages", 4))
+        except (TypeError, ValueError):
+            stages = 4
+        stages = max(1, min(12, stages))
+        return PhaserParams(
+            rate_hz=_params_f("rate_hz", data, 0.5),
+            stages=stages,
+            base_hz=_params_f("base_hz", data, 600.0),
+            sweep_octaves=_params_f("sweep_octaves", data, 2.5),
+            mix=_params_f("mix", data, 0.5),
+            feedback=_params_f("feedback", data, 0.3),
+            enabled=bool(data.get("enabled", True)),
         )
 
 

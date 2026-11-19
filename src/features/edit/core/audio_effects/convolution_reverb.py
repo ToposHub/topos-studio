@@ -17,6 +17,10 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from src.features.edit.core.audio_dsp import AudioEffect
 
 try:  # pragma: no cover - 环境探测
@@ -232,6 +236,8 @@ class ConvolutionReverbEffect(AudioEffect):
         self._matrix_convs: Dict[str, PartitionedConvolver] = {}
         self._conv: Optional[PartitionedConvolver] = None
         self._latency = 0
+        # ir_path 装载去重（set_params 每块都会调用；同路径不重复读盘）
+        self._loaded_ir_key: Optional[tuple] = None
 
     def set_ir(self, ir: np.ndarray, *, true_stereo: bool = False,
                matrix: Optional[Dict[str, np.ndarray]] = None) -> None:
@@ -281,6 +287,26 @@ class ConvolutionReverbEffect(AudioEffect):
         if isinstance(params, dict):
             merged.update(params)
         self._params = merged
+        # UI 文件选择/序列化往返：params 携带 ir_path 时按需装载 IR。
+        # 同 (path, sample_rate, true_stereo) 只读盘一次（set_params 在
+        # 自动化路径逐块触发，必须保持廉价）。
+        ir_path = str(merged.get("ir_path", "") or "")
+        if ir_path:
+            key = (ir_path, self._sample_rate,
+                   bool(merged.get("true_stereo", False)))
+            if key != self._loaded_ir_key:
+                try:
+                    ir, _resource = load_ir(ir_path, int(self._sample_rate))
+                    self.set_ir(ir, true_stereo=bool(
+                        merged.get("true_stereo", False)))
+                    self._loaded_ir_key = key
+                except Exception as exc:  # noqa: BLE001 — 坏 IR 不阻断混音
+                    logger.warning("convolution reverb: IR load failed for %s: %s",
+                                   ir_path, exc)
+                    self._loaded_ir_key = None
+        elif self._loaded_ir_key is not None:
+            # ir_path 被清空 → 卸载 IR（is_active 回落到 False）
+            self._loaded_ir_key = None
 
     def reset_state(self) -> None:
         if self._conv is not None:

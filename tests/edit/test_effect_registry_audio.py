@@ -49,6 +49,18 @@ _EXPECTED_BASIC_PARAMS = {
     # NF-01：两款新复合 FX——基础区暴露核心身份参数（细项在完整面板）
     "voice_changer": {"pitch_semitones", "formant_shift_st", "vocoder_carrier"},
     "spectral_mangler": {"routing", "global_mix_pct", "dist_curve"},
+    # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX 基础参数键（≤5 个，
+    # 完整参数集在 mixer 通用参数对话框）
+    "de_esser": {"threshold_dbfs", "ratio", "frequency", "max_reduction_db"},
+    "true_peak_limiter": {"ceiling_dbtp", "lookahead_ms", "release_ms"},
+    "dynamic_eq": {"frequency", "q", "gain_db", "threshold_dbfs", "max_cut_db"},
+    "bus_comp": {"template", "sc_hpf_hz"},
+    "multiband_comp": {"crossover_low", "crossover_high", "attack_ms"},
+    "convolution_reverb": {"wet", "dry"},
+    "transient_designer": {"attack_db", "sustain_db", "attack_ms", "sustain_ms"},
+    "tremolo_auto_pan": {"rate_hz", "depth"},
+    "chorus_flanger": {"rate_hz", "depth_ms", "feedback", "mix"},
+    "phaser": {"rate_hz", "stages", "base_hz", "sweep_octaves", "mix"},
 }
 
 _ALL_DEFINITIONS = {
