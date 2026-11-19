@@ -102,20 +102,36 @@ Normalize/LUFS 对实际插入阶段（处理后预览）与目标声道测量�
 
 延后项不变：#8 效果器批次（"剧情性设计需求明确时再做"）、真机项（边界 3：真机监听/多声道路由监看/第三方 AAF 实文件往返，计划明示现场补测）。十款新 FX 的 Clip FX 插槽适配（clip 级对话框）与 ADR/混音录音的整段实机联调留待后续需求。
 
+## 后续批次 · 第二轮（2026-11-20 · Clip FX 插槽收口）
+
+按用户指示"尤其是片段编辑，新添加的效果器后端实现必须完美完成"，原"留待后续需求"的十款新 FX Clip FX 插槽适配全部落地并独立提交：
+
+| 批次 | 内容 | 提交 |
+| --- | --- | --- |
+| Clip FX 对话框 | 十款新 rack FX（de_esser/true_peak_limiter/dynamic_eq/bus_comp/multiband_comp/convolution_reverb/transient_designer/tremolo_auto_pan/chorus_flanger/phaser）接入 `ClipAudioEffectDialogManager`：`FxParamDialog` 通用分支（ParamsClass `from_dict→to_dict` 归一化、损坏降级 AUD-19720 同语义、multiband crossovers ↔ 扁平键往返、committed/preview dict 双兼容）；控制器预览直送引擎（不落模型/不入撤销栈）+ 关窗回滚；修复「打开面板」悬空入口；连带修复 `35a4451d` 引入的 `_TelemetryStrip` 陈旧桩 | `303650e2` |
+| Clip FX PDC | 片段级效果器链延迟声明接入最迟路径对齐（轨/Bus 两级在 clip 级的延伸）：实时 recompute 轨节点延迟 = 轨链 + clip 最大、同轨相对延迟线（无链/旁路按 0 须补满）、五条跳过路径喂零推进、H03 drain 预算 = max(尾音,链延迟)+持留量；离线 `note_clip_chain_latency` + `render_track_block` 相对线；成片/Stem 导出块前预构建 clip 链（最大延迟先知）；**true_peak_limiter 声明修正**——`resample_poly` 零相位对齐无净 FIR 群延迟（单位脉冲实测），修前多声明 3 样本 | `1d024567` |
+| 注册表清理 | `effect_registry.py` 整段重复定义清零（WIP 恢复遗留 ×2 块约 450 行死代码；死副本的惰性 import 缺十款新 Params 类——单独调用会 NameError），唯一注释归位，行为逐项复核不变 | `5ae1e546` |
+| 目录与套件修复 | **effect catalog 重生成**：十款新 FX 注册后未重生成入库目录（目录/注册表分叉，契约 3 项失败）——`effect_catalog_v1.json` 重生成 + digest 重冻结（214ca242…→86cab967…）；mx01 遥测 `_Strip` 陈旧桩修复；**H03/R04 drain 汇入修复**——批次 2 编辑把 drain 汇入块嵌进 `if _crel > 0:` 分支，零延迟链尾音回声全丢（stem 0.344→0.0），两处回归循环体层级；ef17 扫描正例更新到 G01 gallery 查询契约（库内 User 分区 + 合法 topos bundle，库根密闭替换） | `75c20d24`、`bdc1a23d` |
+
+新增验收 **32 项**（`test_clip_fx_new_effects` 21：注册表互斥全覆盖/十款逐一弹窗/归一化/缓存/信号回路/控制器预览·回滚·MacroCommand/引擎后端十款真实块处理 + dBTP 上限；`test_clip_fx_pdc` 11：跨轨/同轨脉冲重合、零延迟零回归、mute 推进、结束 clip 持留 flush、离线 note/相对线/跨轨对齐、Stem 真实 limiter 对齐 + 干轨对照）；既有 clip 适配器排除契约翻转为联合覆盖。
+
 ## 已知边界（收口后余项）
 
 1. ~~实时监听 PDC~~ → 已落地（批次"边界 1"）。
 2. ~~Stem 选区预卷~~ → 已落地（批次"边界 2"）。
 3. **真机项**（计划明示现场补测）：真机监听（macOS/Windows 双设备）、多声道路由监看、第三方 AAF 实文件往返。
-4. ~~效果器 UI 面板~~ → 已落地（批次"边界 4"；十款 FX 的 clip 级插槽适配留待后续）。
-5. **全量套件余项**：timeline 手势/指针 chrome 8 项为 Qt 离屏加载序波动（单独运行全过）；本轮修复后已无既有持久失败。
+4. ~~效果器 UI 面板~~ → 已落地（批次"边界 4"；~~十款新 FX 的 clip 级插槽适配~~ → 已落地（第二轮批次"Clip FX 对话框"+“Clip FX PDC"））。
+5. **全量套件余项**：timeline 手势/指针 chrome 8 项为 Qt 离屏加载序波动（单独运行全过）；本轮修复后已无既有持久失败（`_TelemetryStrip` 陈旧桩已随第二轮修复）。
 6. ~~P1-4/P1-5 方法列子项~~ → 已全部落地（批次"边界 6"）。
 7. ~~环绕 Bus 路由（核心）~~ → 已落地（批次"边界 7"；"多声道路由监看"真机验收仍属边界 3）。
+8. **#8 效果器批次**（exciter/subharmonic/doubler_harmonizer/pitch_correction）：按计划明示"剧情性设计需求明确时再做"延后——设计输入（分频/带限谐波映射、音高校正的音符/调性追踪范围）未明确前不接生产 schema；原型 UI 面板已在仓库（`src/features/mixer/effects/panels/`）。
 
 ## 回归基线
 
 - 上一轮（2026-11-19）：新增 185 项；定向回归 620 项。
 - 本轮（2026-11-20 后续批次）新增验收：**66 项**（ADR 工作流 6、PDC 对齐 10、Stem 预卷 5、FX UI 19、对白剪辑/编辑组 16、自动化 P1-5 12、环绕路由 14）；ADR 录音工作流域另有 59 项（recording/arm/adr 全域）。
-- 全量 Edit+Mixer 套件终态：**14145 通过 / 9 失败 / 65 skipped**——9 项失败全部为 timeline 手势/指针 chrome 的 Qt 离屏加载序波动（`test_timeline_clip_affordance_gestures.py`×7 + `test_timeline_pointer_and_chrome.py`×1，单独运行 77/77 全过），既有持久失败清零。
-- 修复的连带回归：本轮引入并当批修复——Bus→Master 单声道 stem 宽度、嵌套展开顺序依赖、注册表契约测试、表头 arm 状态 busy 重算与工作流退出复位。
+- 第二轮（2026-11-20 Clip FX 插槽收口）新增验收：**32 项**（Clip FX 对话框 21 + Clip FX PDC 11）；连带回归：playback/mixer/graph 970、导出 parity 74、stem 98、录音/自动化 288、registry/effect 域 995、H03/R04 尾音 60 全过。
+- 全量套件终态（本轮扩大范围至 `tests/edit + tests/shared` 全量，29:21）：**16925 通过 / 25 失败 / 79 skipped / 92 errors**。25 项失败中 15 项 + 92 errors 全部为 `tests/shared/tracking` 域——**环境编码器缺口**（OpenCV 5.0 headless 的 VideoWriter 无法打开 mp4v，fixture 视频无法按需生成；属调色/追踪域既有问题，不在影视声音计划范围，历史音频基线亦未收录该目录）。余 10 项 = 9 项既有 Qt 离屏加载序波动（`test_timeline_clip_affordance_gestures`×8 + `test_timeline_pointer_and_chrome`×1，单独运行 103/103 全过）+ 1 项同类的加载序波动（`test_fix_core_aud4::test_descriptor_from_config_with_real_manager`，单独运行全过）。**音频域持久失败清零**；历史上的 Edit+Mixer 口径（14145/9/65）中 9 项 flaky 与本轮完全重合。
+- 修复的连带回归（第一轮）：本轮引入并当批修复——Bus→Master 单声道 stem 宽度、嵌套展开顺序依赖、注册表契约测试、表头 arm 状态 busy 重算与工作流退出复位。
+- 修复的连带回归（第二轮）：本轮引入并当批修复——Clip FX PDC 编辑把 H03/R04 尾音 drain 汇入块嵌进 `if _crel > 0:` 分支（零延迟链尾音回声丢失，stem 0.344→0.0）→ 两处回归循环体层级；effect catalog 与注册表分叉（十款新 FX 未入库）→ 目录重生成 + digest 重冻结；true_peak_limiter 延迟多声明 3 样本 → 声明 = lookahead（实测对齐）；effect_registry 整段重复定义 → 清零；`_TelemetryStrip`/mx01 `_Strip` 陈旧桩 ×2 → 补 `display_meter_mode`；ef17 扫描正例陈旧 → G01 查询契约更新。
 
