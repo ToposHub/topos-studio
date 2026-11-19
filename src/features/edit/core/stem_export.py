@@ -314,9 +314,11 @@ def _iter_stem_pcm_chunks(
     if asset_lookup is not None:
         from src.features.edit.core.nested_sequence import flatten_nested_audio_tracks
 
+        # 不带 range 全量展开：选区预卷（feed_start < start_frame）的
+        # 收敛内容也在嵌套展开覆盖范围内（预卷预算依赖 renderer，展开
+        # 必须先于 renderer 构建完成——全量展开是两阶段依赖的唯一解）。
         expanded = flatten_nested_audio_tracks(
             sequence, sequence_resolver, asset_lookup, strict=True,
-            frame_range=(feed_start, end_frame),
         )
         if expanded != tuple(getattr(sequence, "audio_tracks", ()) or ()):
             sequence = replace(sequence, audio_tracks=expanded)

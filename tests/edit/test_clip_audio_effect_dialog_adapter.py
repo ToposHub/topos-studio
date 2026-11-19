@@ -26,10 +26,20 @@ class TestDialogRegistry:
     """The lazy dialog registry covers all 8 mixer effect_types."""
 
     def test_registry_covers_all_types(self):
-        """CW-A1: 注册表覆盖全部 mixer 类型（expander 新增，noise_gate 别名）。"""
+        """CW-A1: 注册表覆盖全部 clip 级 mixer 类型（expander 新增，noise_gate 别名）。
+
+        P1（2026-11-19 第三阶段）的十款 rack FX（de_esser 等）为
+        Track/Bus/Master 机架效果器，走 mixer 通用参数对话框，不是
+        clip 级适配器——显式排除。
+        """
         reg = _ensure_dialog_registry()
-        assert set(reg.keys()) == set(AUDIO_MIXER_EFFECT_TYPES)
-        assert len(reg) == len(AUDIO_MIXER_EFFECT_TYPES)
+        rack_only = {
+            "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+            "multiband_comp", "convolution_reverb", "transient_designer",
+            "tremolo_auto_pan", "chorus_flanger", "phaser",
+        }
+        assert set(reg.keys()) == set(AUDIO_MIXER_EFFECT_TYPES) - rack_only
+        assert len(reg) == len(AUDIO_MIXER_EFFECT_TYPES) - len(rack_only)
 
     def test_registry_metadata_shape(self):
         reg = _ensure_dialog_registry()

@@ -489,12 +489,16 @@ class TestAud16807RegistrySingletonLock:
         first = er._get_audio_default_params()
         second = er._get_audio_default_params()
         assert first is second, "lazy cache must be reused"
-        # Include the compound dynamics and NF-01 effects while retaining
-        # the legacy noise_gate alias in the shared defaults cache.
+        # Include the compound dynamics, NF-01 effects and the ten
+        # third-stage rack FX (P1 2026-11-19) while retaining the legacy
+        # noise_gate alias in the shared defaults cache.
         assert set(first) == {
             "strip_eq", "limiter", "compressor", "reverb", "delay",
             "saturation", "imager", "expander", "noise_gate", "dynamics",
             "voice_changer", "spectral_mangler",
+            "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+            "multiband_comp", "convolution_reverb", "transient_designer",
+            "tremolo_auto_pan", "chorus_flanger", "phaser",
         }
 
 
