@@ -185,6 +185,7 @@ from src.features.edit.core.commands import (
     RetimeMotionGraphicClipCommand,
     SplitClipCommand,
     BatchDeleteCommand,
+    SetDialogueGroupCommand,
     # Track commands
     SetTrackMuteCommand,
     SetTrackSoloCommand,
@@ -2455,6 +2456,11 @@ class TimelineView(QGraphicsView):
                     item.clip_delete.connect(self._on_clip_delete)
                     item.clip_split.connect(self._on_clip_split_requested)
                     item.clip_duplicate.connect(self._on_clip_duplicate_requested)
+                    # P1-4 对白剪辑工具：切空不动同步 / 同场对话编辑组
+                    item.clip_split_at_silence_requested.connect(
+                        self._on_clip_split_at_silence_requested)
+                    item.dialogue_group_requested.connect(
+                        self._on_clip_dialogue_group_requested)
 
                     # Connect command signals (sent on mouseRelease)
                     item.drag_finished.connect(self._on_drag_finished)
@@ -8019,6 +8025,11 @@ class TimelineView(QGraphicsView):
         item.clip_delete.connect(self._on_clip_delete)
         item.clip_split.connect(self._on_clip_split_requested)
         item.clip_duplicate.connect(self._on_clip_duplicate_requested)
+        # P1-4 对白剪辑工具：切空不动同步 / 同场对话编辑组
+        item.clip_split_at_silence_requested.connect(
+            self._on_clip_split_at_silence_requested)
+        item.dialogue_group_requested.connect(
+            self._on_clip_dialogue_group_requested)
         item.drag_finished.connect(self._on_drag_finished)
         item.trim_left_finished.connect(self._on_trim_left_finished)
         item.trim_right_finished.connect(self._on_trim_right_finished)
@@ -11403,6 +11414,83 @@ class TimelineView(QGraphicsView):
             )
             return
         self._execute_command(SplitClipCommand.create(track_id, clip_id, frame))
+
+    def _on_clip_split_at_silence_requested(self, clip_id: str, track_id: str) -> None:
+        """P1-4 切空不动同步：静音间隙多点切分（宏单步撤销，无 ripple）。
+
+        静音检测在 48 kHz 参考域的源 PCM 上进行（与波形/Clip Editor
+        同一解码路径）；切点取间隙中点。宏按切点**降序**应用——先切
+        后面的间隙，原 clip_id 始终覆盖剩余左段，全部切分单步撤销。
+        """
+        if self._timeline is None or self._is_track_locked(track_id):
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is None or self._project is None:
+            return
+        speed = getattr(clip, "effective_speed", None)
+        speed = speed() if callable(speed) else (speed if speed is not None else 1.0)
+        if abs(float(speed or 1.0) - 1.0) > 1e-6:
+            logger.info(
+                "Gap split skipped for retimed clip %s (silence mapping "
+                "needs constant speed)", clip_id)
+            return
+        from src.features.edit.core.clip_pcm import decode_audio_range
+        from src.features.edit.core.dialogue_tools import plan_gap_splits
+        from src.features.edit.core.sample_time import (
+            AUDIO_REFERENCE_SAMPLE_RATE,
+        )
+        asset = (getattr(self._project, "assets", {}) or {}).get(clip.asset_id)
+        path = getattr(asset, "path", None) if asset is not None else None
+        if not path:
+            logger.info("Gap split skipped: asset %s has no resolvable path",
+                        clip.asset_id)
+            return
+        sample_rate = int(AUDIO_REFERENCE_SAMPLE_RATE)
+        src_in = int(getattr(clip, "source_in", 0) or 0)
+        src_out = int(getattr(clip, "source_out", 0) or src_in)
+        pcm = decode_audio_range(str(path), src_in, max(src_out, src_in),
+                                 sample_rate)
+        if pcm is None or pcm.shape[-1] <= 0:
+            logger.info("Gap split skipped: could not decode clip %s", clip_id)
+            return
+        plan = plan_gap_splits(clip, pcm, sample_rate,
+                               float(self._timeline.fps))
+        if not plan.valid:
+            logger.info("Gap split: %s", plan.reason)
+            return
+        commands = [SplitClipCommand.create(track_id, clip_id, frame)
+                    for frame in sorted(plan.cuts, reverse=True)]
+        self._execute_command(MacroCommand.create(
+            f"Split silence gaps on {clip_id}", commands))
+
+    def _on_clip_dialogue_group_requested(
+            self, clip_id: str, track_id: str, payload: object) -> None:
+        """P1-4 同场对话编辑组：按素材场次归组 / 退出组（批量一步撤销）。"""
+        if self._timeline is None or self._is_track_locked(track_id):
+            return
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        action = payload.get("kind") if isinstance(payload, dict) else None
+        if action not in ("assign", "clear"):
+            return
+        target_ids = {clip_id}
+        selection_ids = tuple(getattr(self._selection, "selected_clip_ids", ()) or ())
+        if selection_ids:
+            target_ids.update(selection_ids)
+        group_id = None
+        if action == "assign":
+            assets = getattr(self._project, "assets", {}) or {}
+            asset = assets.get(clip.asset_id) if self._project is not None else None
+            scene = str(getattr(asset, "scene", "") or "")
+            if not scene:
+                logger.info(
+                    "Dialogue group skipped: asset %s has no scene metadata",
+                    clip.asset_id)
+                return
+            group_id = f"scene:{scene}"
+        self._execute_command(
+            SetDialogueGroupCommand.create(sorted(target_ids), group_id))
 
     def _on_clip_duplicate_requested(self, clip_id: str, track_id: str) -> None:
         """Duplicate the clip under the context-menu pointer."""

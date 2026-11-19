@@ -11,6 +11,10 @@
 - ``estimate_alignment_offset``：对白/ADR 匹配——归一化互相关估计
   take 相对参考的偏移，抛物线插值给出子帧建议（确认后写子帧偏移）。
 
+- ``plan_gap_splits``：切空不动同步——对白 clip 内的静音间隙检测，
+  给出间隙中点的切分帧计划（命令层据此多点切分，单步撤销；切分
+  不产生 ripple，下游同步不动）。
+
 take 轮换/audition lanes 与场次镜次元数据复用既有
 ``take_sheet``/``audition`` 模块。
 """
@@ -23,6 +27,110 @@ import numpy as np
 
 #: Room Tone 填补与批量交叉淡化的默认边缘过渡（ms；防爆音合同 2–5ms）。
 DEFAULT_CROSSFADE_MS = 4.0
+
+#: 切空的默认静音阈值（dBFS）与最短间隙（ms）。
+DEFAULT_SILENCE_THRESHOLD_DBFS = -45.0
+DEFAULT_MIN_GAP_MS = 120.0
+
+
+@dataclass(frozen=True)
+class GapSplitPlan:
+    """切空不动同步的分割计划（纯数据；命令层据此提交宏命令）。
+
+    Attributes:
+        cuts: 建议切分的绝对时间线帧（每个静音间隙的中点，升序）。
+        skipped_gaps: 因过短被跳过的间隙帧数（诊断用）。
+        valid: 是否找到了至少一个可切间隙。
+        reason: valid=False 时的人类可读原因。
+    """
+    cuts: tuple[int, ...] = ()
+    skipped_gaps: int = 0
+    valid: bool = False
+    reason: str = ""
+
+
+def _block_rms_dbfs(pcm: np.ndarray, block: int) -> np.ndarray:
+    """按 block 宽度切块的每块 RMS dBFS（声道取最大）。"""
+    channels, total = pcm.shape
+    usable = (total // block) * block
+    if usable <= 0:
+        return np.zeros(0, dtype=np.float32)
+    blocks = pcm[:, :usable].reshape(channels, -1, block)
+    rms = np.sqrt(np.max(np.mean(blocks.astype(np.float64) ** 2, axis=2), axis=0))
+    with np.errstate(divide="ignore"):
+        dbfs = 20.0 * np.log10(np.maximum(rms, 1e-9))
+    return dbfs.astype(np.float32)
+
+
+def plan_gap_splits(
+    clip: Any,
+    pcm: np.ndarray,
+    sample_rate: int,
+    fps: float,
+    *,
+    silence_threshold_dbfs: float = DEFAULT_SILENCE_THRESHOLD_DBFS,
+    min_gap_ms: float = DEFAULT_MIN_GAP_MS,
+    analysis_block_ms: float = 5.0,
+) -> GapSplitPlan:
+    """切空不动同步：检测 clip 内静音间隙，给出中点切分帧计划。
+
+    只做计划（无 timeline 变更）。间隙判定：连续
+    ``analysis_block_ms`` 块 RMS ≤ ``silence_threshold_dbfs`` 且时长
+    ≥ ``min_gap_ms``；切点落在间隙中点（离内容最远，天然防爆音）。
+    紧贴 clip 首尾的间隙不算（没有可分离的内容）。
+
+    Args:
+        clip: 有 ``timeline_start``/``timeline_duration`` 的片段（鸭子类型）。
+        pcm: 该 clip 的平面 PCM（channels, samples），工作采样率域。
+        sample_rate: PCM 采样率。
+        fps: 时间线帧率（帧 = 整数样本换算）。
+        silence_threshold_dbfs: 静音阈值（dBFS）。
+        min_gap_ms: 可切间隙的最短时长。
+        analysis_block_ms: RMS 分析块宽。
+
+    Returns:
+        GapSplitPlan（cuts 升序；valid=False 时 reason 说明）。
+    """
+    if pcm is None or pcm.ndim != 2 or pcm.shape[-1] <= 0:
+        return GapSplitPlan(reason="no pcm")
+    clip_start = int(getattr(clip, "timeline_start", 0) or 0)
+    block = max(1, int(round(analysis_block_ms * sample_rate / 1000.0)))
+    dbfs = _block_rms_dbfs(np.asarray(pcm, dtype=np.float32), block)
+    if dbfs.size < 2:
+        return GapSplitPlan(reason="clip too short")
+    silent = dbfs <= float(silence_threshold_dbfs)
+    min_gap_blocks = max(1, int(round(min_gap_ms / analysis_block_ms)))
+
+    cuts: list[int] = []
+    skipped = 0
+    index = 0
+    total = silent.size
+    while index < total:
+        if not silent[index]:
+            index += 1
+            continue
+        run_start = index
+        while index < total and silent[index]:
+            index += 1
+        run_end = index  # [run_start, run_end) 静音
+        run_blocks = run_end - run_start
+        # 紧贴 clip 首尾的间隙不切（没有可分离的内容）
+        if run_start == 0 or run_end >= total:
+            skipped += 1
+            continue
+        if run_blocks < min_gap_blocks:
+            skipped += 1
+            continue
+        mid_block = run_start + run_blocks // 2
+        mid_sample = mid_block * block
+        frame = clip_start + int(round(mid_sample * fps / max(1, sample_rate)))
+        if cuts and frame <= cuts[-1]:
+            frame = cuts[-1] + 1
+        cuts.append(frame)
+    if not cuts:
+        return GapSplitPlan(skipped_gaps=skipped,
+                            reason="no silence gaps at or above the minimum length")
+    return GapSplitPlan(cuts=tuple(cuts), skipped_gaps=skipped, valid=True)
 
 
 def fill_room_tone(

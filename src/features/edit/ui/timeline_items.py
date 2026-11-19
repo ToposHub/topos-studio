@@ -648,6 +648,9 @@ class ClipItem(QGraphicsObject):
     replace_placeholder_requested = pyqtSignal(str, str)
     # C3: 片段级音频增益对话框请求（clip_id, track_id）
     audio_gain_dialog_requested = pyqtSignal(str, str)
+    # P1-4 对白剪辑工具：切空不动同步 / 同场对话编辑组（clip_id, track_id, payload）
+    clip_split_at_silence_requested = pyqtSignal(str, str)
+    dialogue_group_requested = pyqtSignal(str, str, object)
 
     def __init__(
         self,
@@ -5091,6 +5094,9 @@ class ClipItem(QGraphicsObject):
         audio_gain_action = None
         waveform_mono_action = None
         waveform_stereo_action = None
+        silence_split_action = None
+        group_assign_action = None
+        group_clear_action = None
         create_nested_action = None
 
         # Determine if near an edge (for transition options)
@@ -5503,6 +5509,22 @@ class ClipItem(QGraphicsObject):
                 I18N.tr("edit.clip.audio_gain", "Audio Gain…"))
             audio_gain_action.setEnabled(not self._is_track_locked)
 
+            # P1-4 对白剪辑工具：
+            # - 切空不动同步：静音间隙多点切分（宏单步撤销，无 ripple）
+            # - 同场对话编辑组：按素材场次归组 / 退出组
+            silence_split_action = menu.addAction(
+                I18N.tr("edit.clip.split_at_silence", "Split at Silence Gaps"))
+            silence_split_action.setEnabled(not self._is_track_locked)
+            group_menu = menu.addMenu(
+                I18N.tr("edit.clip.dialogue_group_menu", "Dialogue Group"))
+            group_assign_action = group_menu.addAction(
+                I18N.tr("edit.clip.dialogue_group_assign",
+                        "Assign to Scene Group"))
+            group_assign_action.setEnabled(not self._is_track_locked)
+            group_clear_action = group_menu.addAction(
+                I18N.tr("edit.clip.dialogue_group_clear", "Remove from Group"))
+            group_clear_action.setEnabled(not self._is_track_locked)
+
         menu.addSeparator()
 
         # Delete action
@@ -5657,6 +5679,18 @@ class ClipItem(QGraphicsObject):
             return
         if audio_gain_action is not None and selected(audio_gain_action):
             self.audio_gain_dialog_requested.emit(self._clip_id, self._track_id)
+            return
+        if silence_split_action is not None and selected(silence_split_action):
+            self.clip_split_at_silence_requested.emit(
+                self._clip_id, self._track_id)
+            return
+        if group_assign_action is not None and selected(group_assign_action):
+            self.dialogue_group_requested.emit(
+                self._clip_id, self._track_id, {"kind": "assign"})
+            return
+        if group_clear_action is not None and selected(group_clear_action):
+            self.dialogue_group_requested.emit(
+                self._clip_id, self._track_id, {"kind": "clear"})
             return
         if replace_placeholder_action is not None and selected(replace_placeholder_action):
             self.replace_placeholder_requested.emit(self._clip_id, self._track_id)

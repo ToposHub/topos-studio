@@ -3298,6 +3298,97 @@ class SetClipAudioGainCommand:
         )
 
 
+@dataclass(frozen=True)
+class SetDialogueGroupCommand:
+    """P1-4：把多个片段划入/退出同场对话编辑组（一步撤销）。
+
+    ``group_id=None`` 表示退出组。组员选择来自时间线右键「Dialogue
+    Group」子菜单（按素材场次归组 / 清除）；组操作（统一增益等）由
+    命令层按组员列表包宏命令。
+    """
+
+    command_id: str
+    label: str
+    clip_ids: tuple
+    group_id: str | None
+    _previous_groups: tuple | None = None
+
+    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+        group_id = str(self.group_id) if self.group_id else None
+        previous: list[tuple[str, str | None]] = []
+        new_timeline = timeline
+        for clip_id in self.clip_ids:
+            track = None
+            clip = None
+            for t in new_timeline.all_tracks:
+                c = t.get_clip_by_id(clip_id)
+                if c is not None:
+                    track, clip = t, c
+                    break
+            if clip is None:
+                continue
+            previous.append((clip_id, clip.dialogue_group_id))
+            updated = clip.with_dialogue_group(group_id)
+            new_clips = tuple(updated if c.clip_id == clip_id else c for c in track.clips)
+            new_timeline = new_timeline.with_track_updated(track._rebuild(clips=new_clips))
+        object.__setattr__(self, "_previous_groups", tuple(previous))
+        return new_timeline
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._previous_groups is None:
+            raise ValueError("Cannot undo: command was never applied")
+        new_timeline = timeline
+        for clip_id, old_group in self._previous_groups:
+            track = None
+            clip = None
+            for t in new_timeline.all_tracks:
+                c = t.get_clip_by_id(clip_id)
+                if c is not None:
+                    track, clip = t, c
+                    break
+            if clip is None:
+                continue
+            updated = clip.with_dialogue_group(old_group)
+            new_clips = tuple(updated if c.clip_id == clip_id else c for c in track.clips)
+            new_timeline = new_timeline.with_track_updated(track._rebuild(clips=new_clips))
+        return new_timeline
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetDialogueGroupCommand",
+            "label": self.label,
+            "clip_ids": list(self.clip_ids),
+            "group_id": self.group_id,
+            "_previous_groups": [list(item) for item in (self._previous_groups or ())],
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetDialogueGroupCommand":
+        return SetDialogueGroupCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Dialogue Group"),
+            clip_ids=tuple(data.get("clip_ids", ())),
+            group_id=(str(data["group_id"]) if data.get("group_id") else None),
+            _previous_groups=tuple(
+                (cid, (str(g) if g else None))
+                for cid, g in (data.get("_previous_groups") or ())
+            ),
+        )
+
+    @staticmethod
+    def create(clip_ids, group_id: str | None) -> "SetDialogueGroupCommand":
+        ids = tuple(clip_ids)
+        return SetDialogueGroupCommand(
+            command_id=str(uuid.uuid4()),
+            label=(f"Assign {len(ids)} clip(s) to dialogue group {group_id}"
+                   if group_id else
+                   f"Remove {len(ids)} clip(s) from dialogue groups"),
+            clip_ids=ids,
+            group_id=(str(group_id) if group_id else None),
+        )
+
+
 # ================================================================
 # F3.3 · 采样级音频编辑（子帧位置/源侧子帧修剪/采样域淡化）
 # ================================================================
