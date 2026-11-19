@@ -5163,12 +5163,12 @@ class TimelineExporter:
                                     _tblock = apply_pdc_delay_line(
                                         clip_pdc_lines, clip.clip_id,
                                         _crel, _tblock)
-                                    _tfbuf = pending_frames.get(_tf)
-                                    if _tfbuf is None or \
-                                            _tfbuf.shape[-1] != _tbl:
-                                        _tfbuf = np.zeros(
-                                            (channels, _tbl), dtype=np.float32)
-                                        pending_frames[_tf] = _tfbuf
+                                _tfbuf = pending_frames.get(_tf)
+                                if _tfbuf is None or \
+                                        _tfbuf.shape[-1] != _tbl:
+                                    _tfbuf = np.zeros(
+                                        (channels, _tbl), dtype=np.float32)
+                                    pending_frames[_tf] = _tfbuf
                                     _tn = min(_tblock.shape[-1],
                                               _tfbuf.shape[-1])
                                     _tfbuf[:, :_tn] += _tblock[:channels, :_tn]

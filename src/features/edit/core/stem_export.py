@@ -838,15 +838,15 @@ def _iter_stem_pcm_chunks(
                             )
                             _tblock = apply_pdc_delay_line(
                                 clip_pdc_lines, clip.clip_id, _crel, _tblock)
-                            _key = (track.track_id, _tf)
-                            _tbuf = frame_sum.get(_key)
-                            if _tbuf is None:
-                                _tbuf = np.zeros((channels, _tbl),
-                                                 dtype=np.float32)
-                                frame_sum[_key] = _tbuf
-                            _m = min(_tblock.shape[-1], _tbuf.shape[-1])
-                            _tbuf[:, :_m] += _tblock[:channels, :_m].astype(
-                                np.float32, copy=False)
+                        _key = (track.track_id, _tf)
+                        _tbuf = frame_sum.get(_key)
+                        if _tbuf is None:
+                            _tbuf = np.zeros((channels, _tbl),
+                                             dtype=np.float32)
+                            frame_sum[_key] = _tbuf
+                        _m = min(_tblock.shape[-1], _tbuf.shape[-1])
+                        _tbuf[:, :_m] += _tblock[:channels, :_m].astype(
+                            np.float32, copy=False)
 
         # ── Phase 2：轨阶段（求和帧一次过链）+ 路由 + sends + SC tap ──
         chunk_sc: Dict[str, np.ndarray] = {}
