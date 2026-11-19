@@ -16,7 +16,7 @@ from PyQt6.QtGui import (
 VIEWER_ICON_NAMES = frozenset({
     "source_clip", "source_tape", "timeline", "single_view", "dual_view",
     "more", "chevron_down", "previous", "next", "reverse", "play", "pause",
-    "stop", "loop", "step_back", "step_forward", "transform", "guides",
+    "stop", "record", "record_active", "loop", "step_back", "step_forward", "transform", "guides",
     "match_frame", "mark_in", "mark_out", "source_patch", "proxy", "resolution",
     "bypass", "marker", "previous_marker", "next_marker", "video_only", "audio_only",
     "image_wipe", "split_screen", "highlight", "power_window", "unmix", "mute", "enhanced_viewer",
@@ -93,6 +93,7 @@ class _ViewerIconEngine(QIconEngine):
         painter.translate(rect.x() + (rect.width() - side) / 2.0, rect.y() + (rect.height() - side) / 2.0)
         painter.scale(side / 20.0, side / 20.0)
         color = QColor(
+            "#ed7b82" if self._name == "record_active" else
             "#555559" if mode == QIcon.Mode.Disabled else
             "#d2d2d6" if mode in {QIcon.Mode.Active, QIcon.Mode.Selected} or state == QIcon.State.On else
             "#969699")
@@ -141,6 +142,10 @@ class _ViewerIconEngine(QIconEngine):
             painter.drawRect(QRectF(11.8, 4.8, 3.2, 10.4))
         elif name == "stop":
             painter.fillRect(QRectF(5.0, 5.0, 10.0, 10.0), color)
+        elif name in {"record", "record_active"}:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawEllipse(QRectF(5.0, 5.0, 10.0, 10.0))
         elif name == "loop":
             path = QPainterPath(QPointF(13.4, 5.6))
             path.cubicTo(6.5, 2.6, 1.9, 6.1, 2.8, 10.8)

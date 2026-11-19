@@ -216,6 +216,8 @@ class _MonitorFooter(QFrame):
         self.left_group.setGeometry(10, y, left_width, 28)
         self.center_group.setGeometry((self.width() - center_width) // 2, y, center_width, 28)
         self.right_group.setGeometry(self.width() - right_width - 10, y, right_width, 28)
+        self.left_group.setVisible(self.left_group.geometry().right() < self.center_group.x())
+        self.right_group.setVisible(self.center_group.geometry().right() < self.right_group.x())
         self.marker_group.setVisible(self.width() >= 700)
         self.marker_group.setGeometry(self.center_group.x() - 90, y, 54, 28)
 
@@ -354,6 +356,7 @@ class EditViewport(QWidget):
     active_monitor_changed = pyqtSignal(str)
     program_seek_requested = pyqtSignal(int)
     program_stop_requested = pyqtSignal()
+    program_record_requested = pyqtSignal()
     # I03：能力宿主协议。capability_action_requested(key) —— 有真实
     # handler 的动作经宿主执行（Match Frame 等）；本地动作（reverse）
     # 在容器内消化。capabilities_context_requested —— 菜单即将展开/状
@@ -575,6 +578,14 @@ class EditViewport(QWidget):
         self.program_stop_button = self._stop_button(self.program_stop_requested.emit, footer)
         self.program_stop_button.hide()
         options.addAction(I18N.tr("edit.viewport.stop", "Stop"), self.program_stop_button.click)
+        record_label = I18N.tr("mixer.record.transport_record", "Record")
+        self.program_record_button = _tool("record", record_label, footer)
+        self.program_record_button.setObjectName("mixerTransportRecord")
+        self.program_record_button.setEnabled(False)
+        self.program_record_button.hide()
+        self.program_record_button.clicked.connect(self.program_record_requested.emit)
+        self._program_record_action = options.addAction(record_label, self.program_record_button.click)
+        self._program_record_action.setVisible(False)
         for button, name in ((transport.btn_jump_start, "first"), (transport.btn_prev_frame, "previous"),
                              (transport.btn_play, "play"), (transport.btn_next_frame, "next"),
                              (transport.btn_jump_end, "last"), (transport.btn_loop, "loop")):
@@ -604,6 +615,42 @@ class EditViewport(QWidget):
         footer.position_groups()
         self.program_footer = footer
         return header
+
+    def set_mixer_recording_controls(
+        self, visible: bool, *, can_record: bool = False, recording: bool = False,
+    ) -> None:
+        """Present the Mixer transport's record and stop controls."""
+        stop = self.program_stop_button
+        record = self.program_record_button
+        center = self.program_footer.groups[1]
+        controls_present = center.indexOf(record) >= 0
+        if visible != controls_present:
+            if visible:
+                play_index = center.indexOf(self._program_transport.btn_play)
+                center.insertWidget(play_index + 1, stop)
+                center.insertWidget(play_index + 2, record)
+            else:
+                center.removeWidget(stop)
+                center.removeWidget(record)
+            stop.setVisible(visible)
+            record.setVisible(visible)
+            self._program_record_action.setVisible(visible)
+            self.program_footer.position_groups()
+
+        can_start = visible and can_record and not recording
+        record.setEnabled(can_start)
+        self._program_record_action.setEnabled(can_start)
+        record.setIcon(viewer_icon("record_active" if recording else "record"))
+        if recording:
+            record.setToolTip(I18N.tr("mixer.record.transport_recording", "Recording armed tracks"))
+            stop.setToolTip(I18N.tr("mixer.record.stop", "Stop recording"))
+        else:
+            label = (I18N.tr("mixer.record.transport_start", "Record armed tracks") if can_record
+                     else I18N.tr("mixer.record.transport_arm_first", "Arm a track to record"))
+            record.setToolTip(label)
+            stop.setToolTip(I18N.tr("edit.viewport.stop", "Stop"))
+        record.setAccessibleDescription(record.toolTip())
+        stop.setAccessibleName(stop.toolTip())
 
     @staticmethod
     def _unavailable(menu: QMenu, text: str) -> None:
@@ -834,7 +881,8 @@ class EditViewport(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Activate the clicked/focused monitor without swallowing its input."""
-        if not (self._deliver_mode or self._program_only) and event.type() in {QEvent.Type.MouseButtonPress, QEvent.Type.FocusIn}:
+        if (event.type() in {QEvent.Type.MouseButtonPress, QEvent.Type.FocusIn}
+                and not (getattr(self, "_deliver_mode", True) or self._program_only)):
             if isinstance(watched, QWidget):
                 if watched is self.source_viewer or self.source_viewer.isAncestorOf(watched):
                     self._activate("source", False)

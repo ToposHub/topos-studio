@@ -8,11 +8,16 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow, QMenu, QMessageBox, QTabBar, QWidget
+from PyQt6.QtWidgets import (
+    QApplication, QDockWidget, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QStyle, QStyleOptionComboBox, QTabBar, QVBoxLayout, QWidget,
+)
+from pytestqt.qtbot import QtBot
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.edit_controller import EditControllerMixin
 from src.app.controllers.layer_controller import LayerOpsMixin
+from src.app.controllers.mixer_recording_controller import MixerRecordingControllerMixin
 from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
@@ -28,10 +33,12 @@ from src.features.edit.ui.timeline_view import MIME_TYPE_MEDIA_POOL_ASSETS
 from src.features.mixer.effects.panels.clip_editor import StudioAudioClipEditor
 from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 from src.features.mixer.ui.studio_console import StudioAudioMixerPanel
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.track_mixer_widget import db_to_linear
+from src.shared.ui.style_sheet import DARK_THEME
 
 
-class ProjectHost(QMainWindow, DockLayoutMixin, EditControllerMixin, LayerOpsMixin, MenuToolbarMixin):
+class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin, EditControllerMixin, LayerOpsMixin, MenuToolbarMixin):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1120, 720)
@@ -71,6 +78,7 @@ class ProjectHost(QMainWindow, DockLayoutMixin, EditControllerMixin, LayerOpsMix
         panel.master_volume_changed.connect(self._on_mixer_master_volume)
         panel.track_output_requested.connect(self._on_mixer_output_bus_requested)
         panel.add_bus_requested.connect(self._on_mixer_add_bus_requested)
+        panel.recording_settings_requested.connect(self._on_mixer_recording_settings)
         self.timeline_panel.timeline_view.timeline_changed.connect(self.sync_timeline)
 
         split = QAction("Split", self)
@@ -443,7 +451,10 @@ def test_media_pool_audio_file_opens_original_editor_without_a_timeline(
 
 
 def test_mixer_track_header_record_button_follows_capture_state(project_host, qtbot, monkeypatch) -> None:
+    """Workflow 内表头 R 的状态链：patch → arm → 走带录制 → 停止 → 退出清理。"""
+    from src.app.controllers.mixer_recording_controller import _InputPatch
     from src.features.edit.core import recording_manager
+    from src.features.edit.core.shared_recording_input import SharedRecordingInput
 
     class _Recorder(recording_manager.RecordingManager):
         def start_recording(self, **_kwargs: object) -> bool:
@@ -455,6 +466,9 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
             self._set_state(self.STATE_STOPPING)
 
     monkeypatch.setattr(recording_manager, "RecordingManager", _Recorder)
+    monkeypatch.setattr(SharedRecordingInput, "available_devices",
+                        staticmethod(lambda: (("dev-1", "Interface", 2),)))
+    monkeypatch.setattr(SharedRecordingInput, "monitor", lambda self, *_a, **_k: True)
     host = project_host
     host._current_edit_project = EditProject("project", "Recording")
     host.edit_page._current_frame = 48
@@ -465,26 +479,47 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     header = view._track_headers["audio-track"]
     bus = next(track for track in view.get_timeline().audio_tracks if track.is_bus)
     assert not view._track_headers[bus.track_id]._show_record_button
+
+    # 工作流激活：未 patch 的轨提示先分配输入，R 不可用。
+    host._set_mixer_recording_workflow(True)
+    assert header._recording_state == "unpatched"
+    assert not header._record_button_enabled()
+
+    # 分配共享输入后（对话框由桩替代）R 才可用。
+    patch = _InputPatch("dev-1", "Interface", (0,))
+    monkeypatch.setattr(host, "_choose_mixer_input", lambda *_a, **_k: (True, patch))
+    host._on_mixer_input_requested("audio-track")
+    assert header._recording_state == "idle"
+    assert header._record_button_enabled()
+
     point = view.mapFromScene(header.mapToScene(header._get_record_button_rect().center()))
     assert header._get_button_at_pos(header._get_record_button_rect().center()) == "record"
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert header._recording_state == "armed"
+    assert host._mixer_armed_inputs["audio-track"] == patch
+
+    # 走带 Record：armed 轨统一开录，锚点 = 当前播放头帧。
+    host._on_mixer_transport_record_requested()
+    recorder = host._mixer_timeline_recorders["audio-track"]
     assert header._recording_state == "recording"
     assert host._voiceover_sessions["audio-track"]["anchor_frame"] == 48
-
-    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
-    assert header._recording_state == "stopping"
-    recorder = host._mixer_timeline_recorders["audio-track"]
     assert not header._record_button_enabled()
-    recorder._set_state(recorder.STATE_IDLE)
-    assert header._recording_state == "idle"
-    assert not host._mixer_timeline_recorders
 
+    # 录制中表头 R 禁用（点击无效）；停止统一走 Program Viewer 的 Stop。
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
-    recorder = host._mixer_timeline_recorders["audio-track"]
-    host._sync_mixer_timeline_recorders(TimelineSequence())
-    assert recorder.state == recorder.STATE_STOPPING
+    assert header._recording_state == "recording"
+    host._on_program_transport_stop_requested()
+    assert header._recording_state == "stopping"
+    assert not header._record_button_enabled()
+    # take 结束后保持 armed（可直接补录）；退出工作流统一 disarm 并复位。
     recorder._set_state(recorder.STATE_IDLE)
+    assert header._recording_state == "armed"
     assert not host._mixer_timeline_recorders
+    assert "audio-track" not in host._voiceover_sessions
+
+    host._set_mixer_recording_workflow(False)
+    assert header._recording_state == "unpatched"
+    assert not host._mixer_armed_inputs
 
 
 def test_audio_workspace_switches_ruler_to_sample_display(project_host, qtbot) -> None:
@@ -1045,35 +1080,60 @@ def test_automation_lane_mode_commits_per_track(project_host, qtbot) -> None:
         host._automation_lanes.pop(track_id, None)
 
 
-def test_channel_strip_shows_send_count(project_host, qtbot) -> None:
-    """§7 P1 通道条：Send 徽标计数 + 点击入口（路由对话框信号）。"""
-    from src.features.edit.core.timeline_v2 import Send
-
-    host = project_host
-    host.show_mixer()
-    view = host.timeline_panel.timeline_view
-    timeline = view.get_timeline()
-    track = timeline.audio_tracks[0]
-    host._sync_audio_mixer_from_timeline(timeline)
-    strip = host.audio_mixer_panel._track_mixers[track.track_id]
-    assert strip.sends_button.text() == "S"
-
-    # 加一条活跃 send（目标占位 Bus ID；徽标显示活跃计数）。
-    updated_timeline = timeline.with_track_updated(replace(track, sends=(
-        Send(target_bus_id="bus-x", level=0.5),
-        Send(target_bus_id="bus-mute", level=0.5, muted=True),
-        Send(target_bus_id="bus-zero", level=0.0),
-        Send(target_bus_id="bus-disabled", level=0.5, enabled=False),
-    )))
-    host._sync_audio_mixer_from_timeline(updated_timeline)
-    strip = host.audio_mixer_panel._track_mixers[track.track_id]
-    assert strip.sends_button.text().startswith("S1")
-    assert strip.sends_button.toolTip().endswith("1/4")
-    # 点击入口走 show_routing（与右键路由同一命令路径）。
+def test_sends_are_reachable_from_track_menu(project_host: ProjectHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_host.show_mixer()
+    panel = project_host.audio_mixer_panel
+    strip = panel._track_mixers["audio-track"]
     requested: list[str] = []
-    strip.show_routing.connect(requested.append)
-    strip.sends_button.click()
-    assert requested == [track.track_id]
+    panel.track_show_routing.connect(requested.append)
+
+    def choose_routing(menu: QMenu, _position: QPoint) -> None:
+        label = I18N.tr("audio.mixer.routing", "Routing...")
+        next(action for action in menu.actions() if action.text() == label).trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_routing)
+    strip._on_label_context_menu(QPoint())
+    assert requested == ["audio-track"]
+
+
+@pytest.mark.parametrize("narrow", [False, True], ids=["standard", "compact"])
+def test_channel_strip_footer_text_fits_under_dark_theme(qtbot: QtBot, narrow: bool) -> None:
+    window = QWidget()
+    qtbot.addWidget(window)
+    window.setStyleSheet(DARK_THEME)
+    layout = QVBoxLayout(window)
+    panel = StudioAudioMixerPanel()
+    layout.addWidget(panel)
+    panel.register_track("dialogue", "Dialogue", "A1")
+    panel.set_narrow_layout(narrow)
+    strip = panel._track_mixers["dialogue"]
+    window.resize(240, 460)
+    available = window.screen().availableGeometry()
+    window.move(available.right() - window.width(), available.bottom() - window.height())
+    window.show()
+
+    combo = strip.output_bus_combo
+    master_combo = panel._master_mixer.output_bus_combo
+    assert not combo.parentWidget().findChildren(QPushButton)
+    assert master_combo.isHidden()
+    assert not master_combo.parentWidget().findChildren(QPushButton)
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)
+    label = combo.style().subControlRect(
+        QStyle.ComplexControl.CC_ComboBox, option, QStyle.SubControl.SC_ComboBoxEditField, combo)
+    assert label.width() >= combo.fontMetrics().horizontalAdvance(combo.currentText())
+
+    buses = tuple((str(i), f"Bus {i}") for i in range(40))
+    strip.set_output_routing(None, buses + (("reverb", "Dialogue and Foley Reverb Return — Stereo"),))
+    qtbot.mouseClick(combo, Qt.MouseButton.LeftButton)
+    view = combo.view()
+    try:
+        assert view.isVisible()
+        row_width = view.sizeHintForColumn(combo.modelColumn())
+        assert view.viewport().width() >= row_width + 2 * view.spacing()
+        assert available.contains(view.window().geometry())
+    finally:
+        combo.hidePopup()
 
 
 def test_linked_length_change_shows_independent_audio_option(qtbot, monkeypatch) -> None:
@@ -1126,14 +1186,10 @@ def test_insert_menu_exposes_existing_sound_design_effects(project_host) -> None
     assert [effect.effect_type for effect in track.effect_chain.effects] == ["voice_changer", "spectral_mangler"]
 
 
-def test_recording_prep_popover_updates_settings_chain(project_host, qtbot, monkeypatch) -> None:
-    """§7 P1：混音侧录音准备弹窗 → 设置链（ADR 面板缺席时兜底生效）。"""
+def test_mixer_recording_settings_menu_updates_settings_chain(project_host, monkeypatch) -> None:
+    """Mixer recording settings supply the defaults when the ADR panel is absent."""
     host = project_host
     host.show_mixer()
-    view = host.timeline_panel.timeline_view
-    track_id = view.get_timeline().audio_tracks[0].track_id
-    strip = host.audio_mixer_panel._track_mixers[track_id]
-    assert strip.record_prep_button.isVisible() or not strip.record_prep_button.isHidden()
 
     # 设备枚举固定（离屏环境无真实设备）。
     from src.features.edit.core import recording_manager
@@ -1160,7 +1216,15 @@ def test_recording_prep_popover_updates_settings_chain(project_host, qtbot, monk
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(QDialog, "exec", lambda dialog: _auto_accept(dialog))
-    host._on_mixer_record_prep(track_id)
+
+    def choose_recording_settings(menu: QMenu, _position: QPoint) -> None:
+        options = next(action.menu() for action in menu.actions() if action.menu() is not None)
+        settings = [action for action in options.actions() if action.objectName() == "mixer_recording_settings"]
+        assert len(settings) == 1
+        settings[0].trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_recording_settings)
+    host.audio_mixer_panel._master_mixer._on_label_context_menu(QPoint())
     assert accepted.get("ran") is True
     settings = host._adr_settings_dict()
     assert settings["device_id"] == "dev-2"
@@ -1176,12 +1240,7 @@ def test_mixer_workspace_controls_expose_accessible_names(project_host, qtbot, t
     view = host.timeline_panel.timeline_view
     track_id = view.get_timeline().audio_tracks[0].track_id
     strip = host.audio_mixer_panel._track_mixers[track_id]
-    for name, widget in (
-        ("sends", strip.sends_button),
-        ("record prep", strip.record_prep_button),
-        ("output routing", strip.output_bus_combo),
-    ):
-        assert widget.accessibleName(), f"{name} button lacks accessible name"
+    assert strip.output_bus_combo.accessibleName()
     # Clip Editor 的提交按钮同样可被读屏识别。
     clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
     audio_path = tmp_path / "a11y.wav"

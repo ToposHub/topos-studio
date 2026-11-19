@@ -32,6 +32,7 @@ import logging
 
 from src.features.edit.core.timeline_v2 import TimelineSequence, ClipInstance
 
+from src.features.edit.core.adr_cues import SetAdrCuesCommand
 from src.features.edit.core.project import EditProject
 
 logger = logging.getLogger(__name__)
@@ -1235,6 +1236,7 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "SetClipLabelColorCommand": SetClipLabelColorCommand.from_dict,
     "SetClipWaveformDisplayCommand": SetClipWaveformDisplayCommand.from_dict,
     "SetTimelineRangeCommand": SetTimelineRangeCommand.from_dict,
+    "SetAdrCuesCommand": SetAdrCuesCommand.from_dict,
     "ToggleClipEnabledCommand": ToggleClipEnabledCommand.from_dict,
     "SetClipLinkedCommand": SetClipLinkedCommand.from_dict,
 }

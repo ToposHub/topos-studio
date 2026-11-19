@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import os
 import sys
+import wave
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PyQt6.QtMultimedia import QAudioFormat, QMediaDevices
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -29,7 +31,9 @@ from src.features.edit.core.recording_manager import (
     write_take_wav,
     write_take_blocks,
     RecordingManager,
+    SharedRecordingInput,
 )
+from src.features.edit.core.shared_recording_input import RecordingInputError
 
 
 SR = 48000
@@ -40,6 +44,139 @@ def _sine(amp: float, freq: float, duration: float, sr: int = SR) -> np.ndarray:
     n = int(sr * duration)
     t = np.arange(n) / sr
     return (amp * np.sin(2 * np.pi * freq * t)).astype(np.float32).reshape(1, -1)
+
+
+class _InMemoryRecordingInput(SharedRecordingInput):
+    def __init__(self, channels: int) -> None:
+        super().__init__("test-input", channels)
+        self.starts = 0
+        self.stops = 0
+
+    def _open_device(self) -> None:
+        self.starts += 1
+
+    def _close_device(self) -> None:
+        self.stops += 1
+        super()._close_device()
+
+
+def test_shared_input_routes_pcm_to_each_take_and_keeps_armed_preview(tmp_path: Path) -> None:
+    source = _InMemoryRecordingInput(4)
+    levels: list[float] = []
+    assert source.monitor("dialogue", (2,), levels.append)
+
+    mono = RecordingManager(RecordingConfig(
+        output_dir=str(tmp_path), scene_name="Dialogue", pre_roll_seconds=0, bit_depth=16))
+    stereo = RecordingManager(RecordingConfig(
+        output_dir=str(tmp_path), scene_name="Stereo", channels=2, pre_roll_seconds=0, bit_depth=16))
+    mono.use_shared_input(source, (2,))
+    stereo.use_shared_input(source, (3, 0))
+    assert mono.start_recording()
+    assert stereo.start_recording()
+    assert source.starts == 1
+
+    frames = np.array([[0.125, -0.25, 0.375, -0.5], [0.25, 0.375, -0.5, 0.625]], dtype=np.float32)
+    data = frames.tobytes()
+    source._dispatch_bytes(data[:19])
+    source._dispatch_bytes(data[19:])
+
+    mono_take = mono.stop_recording()
+    assert mono_take is not None
+    assert source.stops == 0
+    source._dispatch_bytes(frames[1:].tobytes())
+    stereo_take = stereo.stop_recording()
+    assert stereo_take is not None
+    assert source.stops == 0
+    assert levels == pytest.approx([-8.5193746, -6.0205999, -6.0205999])
+
+    with wave.open(mono_take.file_path, "rb") as wav:
+        assert wav.getnchannels() == 1
+        output = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2") / 32768.0
+        np.testing.assert_allclose(output, frames[:, 2], atol=1 / 32768)
+    with wave.open(stereo_take.file_path, "rb") as wav:
+        assert wav.getnchannels() == 2
+        output = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").reshape(-1, 2) / 32768.0
+        expected = frames[[0, 1, 1]][:, [3, 0]]
+        np.testing.assert_allclose(output, expected, atol=1 / 32768)
+
+    assert mono.start_recording()
+    source.unmonitor("dialogue")
+    source._dispatch_bytes(frames.tobytes())
+    mono.cancel_recording()
+    assert source.starts == source.stops == 1
+    assert len(list(tmp_path.glob("*.wav"))) == 2
+
+
+def test_shared_input_failure_saves_partial_take_and_releases_all_tracks(tmp_path: Path) -> None:
+    source = _InMemoryRecordingInput(2)
+    manager = RecordingManager(RecordingConfig(output_dir=str(tmp_path), pre_roll_seconds=0))
+    manager.use_shared_input(source, (0,))
+    errors: list[str] = []
+    completed: list[TakeInfo] = []
+    states: list[str] = []
+    manager.on_error = errors.append
+    manager.on_take_completed = completed.append
+    manager.on_state_changed = states.append
+    assert source.monitor("armed-track", (1,), lambda _level: None, errors.append)
+    assert manager.start_recording()
+    source._dispatch_bytes(np.full((256, 2), 0.5, dtype=np.float32).tobytes())
+
+    source._fail_subscribers("Device disconnected")
+
+    assert source.stops == 1
+    assert not source._subscribers
+    assert errors == ["Device disconnected", "Device disconnected"]
+    assert states == [manager.STATE_RECORDING, manager.STATE_FAILED, manager.STATE_IDLE]
+    assert len(completed) == 1
+    assert completed[0].status == "completed_partial"
+    assert Path(completed[0].file_path).is_file()
+
+
+def test_shared_input_rejects_missing_device_without_using_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(QMediaDevices, "audioInputs", lambda: ())
+
+    def unexpected_default() -> None:
+        pytest.fail("An explicitly selected input must never open the default device")
+
+    monkeypatch.setattr(QMediaDevices, "defaultAudioInput", unexpected_default)
+    source = SharedRecordingInput("unplugged", 1)
+    manager = RecordingManager(RecordingConfig(pre_roll_seconds=0))
+    manager.use_shared_input(source, (0,))
+    errors: list[str] = []
+    manager.on_error = errors.append
+
+    assert not manager.start_recording()
+    assert manager.state == manager.STATE_FAILED
+    assert "unavailable" in errors[0]
+    assert not source._subscribers
+
+
+def test_shared_input_prefers_hardware_width_and_rejects_unsupported_format() -> None:
+    class Device:
+        def description(self) -> str:
+            return "Fake quad input"
+
+        def maximumChannelCount(self) -> int:
+            return 4
+
+        def preferredFormat(self) -> QAudioFormat:
+            fmt = QAudioFormat()
+            fmt.setChannelCount(4)
+            return fmt
+
+        def isFormatSupported(self, fmt: QAudioFormat) -> bool:
+            return (fmt.sampleRate() == SR and fmt.channelCount() == 4
+                    and fmt.sampleFormat() == QAudioFormat.SampleFormat.Float)
+
+    device = Device()
+    fmt = SharedRecordingInput("fake", 2)._capture_format(device)
+    assert fmt.channelCount() == 4
+    with pytest.raises(RecordingInputError, match="only 4"):
+        SharedRecordingInput("fake", 5)._capture_format(device)
+    with pytest.raises(RecordingInputError, match="doesn't support"):
+        SharedRecordingInput("fake", 2, sample_rate=44100)._capture_format(device)
 
 
 class TestLatencyCalibration:

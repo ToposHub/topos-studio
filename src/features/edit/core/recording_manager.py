@@ -40,6 +40,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, List, Optional, Tuple
 
 import numpy as np
 
+from src.features.edit.core.shared_recording_input import SharedRecordingInput
+
 if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
     from PyQt6.QtMultimedia import QAudio
 
@@ -887,6 +889,9 @@ class RecordingManager:
         # Qt 设备（惰性初始化，避免无 Qt 环境测试失败）
         self._audio_source: Any = None
         self._io_device: Any = None
+        self._shared_input: SharedRecordingInput | None = None
+        self._shared_channels: tuple[int, ...] = ()
+        self._shared_subscribed = False
         self._start_time: float = 0.0
         self._pre_roll_timer: Any = None
         self._post_roll_timer: Any = None
@@ -913,6 +918,16 @@ class RecordingManager:
     def set_calibration(self, calibration: LatencyCalibration) -> None:
         """设置延迟校准结果。"""
         self._calibration = calibration
+
+    def use_shared_input(self, source: SharedRecordingInput, channel_indices: tuple[int, ...]) -> None:
+        """Patch this manager to ordered, zero-based channels of a session input."""
+        if self._state not in (self.STATE_IDLE, self.STATE_FAILED):
+            raise RuntimeError("Cannot change the capture input during a take")
+        if source.sample_rate != self._config.sample_rate or len(channel_indices) != self._config.channels:
+            raise ValueError("The input patch does not match the take format")
+        source.validate_channels(channel_indices)
+        self._shared_input = source
+        self._shared_channels = channel_indices
 
     # ── P1 · Arm / Input Monitor / Record 三态分离 ──────────────────
 
@@ -1050,6 +1065,14 @@ class RecordingManager:
             self._rolling_chunks = []
             self._rolling_samples = 0
 
+        if self._shared_input is not None and not self._start_capture_device():
+            with self._buffer_lock:
+                self._pcm_buffer.clear()
+                self._pcm_buffer = None
+            self._current_take = None
+            self._set_state(self.STATE_FAILED)
+            return False
+
         # pre-roll
         if self._config.pre_roll_seconds > 0:
             self._set_state(self.STATE_PRE_ROLL)
@@ -1073,6 +1096,19 @@ class RecordingManager:
 
     def _start_capture_device(self) -> bool:
         """启动 QAudioSource 输入设备（已启动时直接返回 True）。"""
+        if self._shared_input is not None:
+            if self._shared_subscribed:
+                return True
+            try:
+                self._shared_input.subscribe(
+                    self, self._shared_channels, self._receive_pcm, self._on_shared_input_failed)
+            except (ImportError, RuntimeError) as exc:
+                logger.warning("Failed to start shared recording input: %s", exc)
+                if self.on_error is not None:
+                    self.on_error(str(exc))
+                return False
+            self._shared_subscribed = True
+            return True
         if self._io_device is not None:
             return True
         try:
@@ -1125,6 +1161,30 @@ class RecordingManager:
             if self.on_error:
                 self.on_error(f"录音启动失败: {e}")
             return False
+
+    def _release_capture_device(self) -> None:
+        if self._shared_subscribed and self._shared_input is not None:
+            self._shared_subscribed = False
+            self._shared_input.unsubscribe(self)
+        source, self._audio_source = self._audio_source, None
+        self._io_device = None
+        if source is not None:
+            try:
+                source.stop()
+            except RuntimeError as exc:
+                logger.debug("Recording device was already stopped: %s", exc)
+
+    def _on_shared_input_failed(self, message: str) -> None:
+        if not self._shared_subscribed:
+            return
+        self._shared_subscribed = False
+        if self._pre_roll_timer is not None:
+            self._pre_roll_timer.stop()
+            self._pre_roll_timer = None
+        self._set_state(self.STATE_FAILED)
+        if self.on_error is not None:
+            self.on_error(message)
+        self._finalize_take(save_partial=True)
 
     def _begin_capture(self) -> None:
         """pre-roll 结束：rolling 缓冲并入 take，正式进入 recording。"""
@@ -1184,9 +1244,8 @@ class RecordingManager:
             data = self._io_device.readAll()
             if data is None or data.size() == 0:
                 return
-            import numpy as _np
             # float32 planar（QAudio Float format）
-            raw = _np.frombuffer(bytes(data), dtype=_np.float32)
+            raw = np.frombuffer(bytes(data), dtype=np.float32)
             channels = self._config.channels
             if channels > 1:
                 # PyAV/Qt 交错 → reshape 为 (channels, n)
@@ -1194,59 +1253,66 @@ class RecordingManager:
                 raw = raw[:n * channels].reshape(n, channels).T
             else:
                 raw = raw.reshape(1, -1)
-            raw = _np.ascontiguousarray(raw, dtype=_np.float32)
+            raw = np.ascontiguousarray(raw, dtype=np.float32)
 
-            # P1-10 输入监听：实时块转发（pre-roll 期间演员就要听到输入）。
-            # P1 · 监听通道条：音量/Mono/DIM/Mute 只作用于监听转发——
-            # take 记录的是监听前信号（监听状态对录音零副作用）。
-            if self.on_monitor_block is not None and raw.size > 0:
-                try:
-                    self.on_monitor_block(self._monitor_section.process(raw))
-                except Exception as e:
-                    logger.warning(f"monitor block forward failed: {e}")
-
-            if self._state == self.STATE_PRE_ROLL:
-                # rolling pre-roll：只保留最近 pre_roll_seconds
-                keep = int(self._config.pre_roll_seconds * self._config.sample_rate)
-                with self._buffer_lock:
-                    self._rolling_chunks.append(raw)
-                    self._rolling_samples += raw.shape[1]
-                    while (self._rolling_samples > keep and self._rolling_chunks
-                           and self._rolling_chunks[0].shape[1] < self._rolling_samples - keep):
-                        self._rolling_samples -= self._rolling_chunks[0].shape[1]
-                        self._rolling_chunks.pop(0)
-            else:
-                disk_error: Optional[DiskSpaceExhausted] = None
-                with self._buffer_lock:
-                    if self._pcm_buffer is None:
-                        self._pcm_buffer = _ChunkedPcmBuffer(channels=channels)
-                    try:
-                        self._pcm_buffer.append(raw)
-                    except DiskSpaceExhausted as e:
-                        # P0-07：磁盘耗尽 → 安全终止并保留已录数据。
-                        # 锁内只捕获：_finalize_take 与 on_error 都可能再次
-                        # 获取 _buffer_lock（threading.Lock 非重入），
-                        # 必须退出 with 块后再处理，否则同线程死锁挂死。
-                        disk_error = e
-                if disk_error is not None:
-                    self._drain_disk_warnings()
-                    self._set_state(self.STATE_FAILED)
-                    if self.on_error:
-                        self.on_error(str(disk_error))
-                    self._finalize_take(save_partial=True)
-                    return
-            # 磁盘预警在锁外转发（append 期间只入队）
-            self._drain_disk_warnings()
-
-            # 实时电平
-            peak = float(_np.max(_np.abs(raw))) if raw.size > 0 else 0.0
-            dbfs = 20 * _np.log10(max(peak, 1e-9))
-            if self._current_take is not None:
-                self._current_take.peak_dbfs = max(self._current_take.peak_dbfs, dbfs)
-            if self.on_level:
-                self.on_level(dbfs)
+            self._receive_pcm(raw)
         except Exception as e:
             logger.warning(f"Audio read failed: {e}")
+
+    def _receive_pcm(self, raw: np.ndarray) -> None:
+        """Apply the active take state to routing from either capture source."""
+        if not raw.size or self._state not in (
+                self.STATE_PRE_ROLL, self.STATE_RECORDING, self.STATE_STOPPING):
+            return
+        # P1-10 输入监听：实时块转发（pre-roll 期间演员就要听到输入）。
+        # P1 · 监听通道条：音量/Mono/DIM/Mute 只作用于监听转发——
+        # take 记录的是监听前信号（监听状态对录音零副作用）。
+        if self.on_monitor_block is not None and raw.size > 0:
+            try:
+                self.on_monitor_block(self._monitor_section.process(raw))
+            except Exception as e:
+                logger.warning(f"monitor block forward failed: {e}")
+
+        if self._state == self.STATE_PRE_ROLL:
+            # rolling pre-roll：只保留最近 pre_roll_seconds
+            keep = int(self._config.pre_roll_seconds * self._config.sample_rate)
+            with self._buffer_lock:
+                self._rolling_chunks.append(raw)
+                self._rolling_samples += raw.shape[1]
+                while (self._rolling_samples > keep and self._rolling_chunks
+                       and self._rolling_chunks[0].shape[1] < self._rolling_samples - keep):
+                    self._rolling_samples -= self._rolling_chunks[0].shape[1]
+                    self._rolling_chunks.pop(0)
+        else:
+            disk_error: Optional[DiskSpaceExhausted] = None
+            with self._buffer_lock:
+                if self._pcm_buffer is None:
+                    self._pcm_buffer = _ChunkedPcmBuffer(channels=self._config.channels)
+                try:
+                    self._pcm_buffer.append(raw)
+                except DiskSpaceExhausted as e:
+                    # P0-07：磁盘耗尽 → 安全终止并保留已录数据。
+                    # 锁内只捕获：_finalize_take 与 on_error 都可能再次
+                    # 获取 _buffer_lock（threading.Lock 非重入），
+                    # 必须退出 with 块后再处理，否则同线程死锁挂死。
+                    disk_error = e
+            if disk_error is not None:
+                self._drain_disk_warnings()
+                self._set_state(self.STATE_FAILED)
+                if self.on_error:
+                    self.on_error(str(disk_error))
+                self._finalize_take(save_partial=True)
+                return
+        # 磁盘预警在锁外转发（append 期间只入队）
+        self._drain_disk_warnings()
+
+        # 实时电平
+        peak = float(np.max(np.abs(raw)))
+        dbfs = float(20 * np.log10(max(peak, 1e-9)))
+        if self._current_take is not None:
+            self._current_take.peak_dbfs = max(self._current_take.peak_dbfs, dbfs)
+        if self.on_level:
+            self.on_level(dbfs)
 
     def _on_source_state_changed(self, state: "QAudio.State") -> None:
         """设备状态变化（含错误/断开）。"""
@@ -1295,7 +1361,7 @@ class RecordingManager:
         # 二次调用（post-roll 中再按停止）立即落盘。
         if (self._state == self.STATE_RECORDING
                 and self.enable_live_post_roll
-                and self._io_device is not None
+                and (self._io_device is not None or self._shared_subscribed)
                 and self._config.post_roll_seconds > 0
                 and self._post_roll_timer is None):
             self._set_state(self.STATE_STOPPING)
@@ -1356,13 +1422,7 @@ class RecordingManager:
             self._post_roll_timer = None
 
         # 停止设备
-        if self._audio_source is not None:
-            try:
-                self._audio_source.stop()
-            except Exception:
-                pass
-            self._audio_source = None
-        self._io_device = None
+        self._release_capture_device()
 
         # 缓冲交接（锁内摘除引用；此后仅落盘路径持有 pcm）
         with self._buffer_lock:
@@ -1518,13 +1578,7 @@ class RecordingManager:
             except Exception:
                 pass
             self._post_roll_timer = None
-        if self._audio_source is not None:
-            try:
-                self._audio_source.stop()
-            except Exception:
-                pass
-            self._audio_source = None
-        self._io_device = None
+        self._release_capture_device()
         with self._buffer_lock:
             if self._pcm_buffer is not None:
                 self._pcm_buffer.clear()
@@ -1555,13 +1609,7 @@ class RecordingManager:
             except Exception:
                 pass
             self._post_roll_timer = None
-        if self._audio_source is not None:
-            try:
-                self._audio_source.stop()
-            except Exception:
-                pass
-            self._audio_source = None
-        self._io_device = None
+        self._release_capture_device()
         with self._buffer_lock:
             if self._pcm_buffer is not None:
                 self._pcm_buffer.clear()

@@ -9,8 +9,8 @@
 - 弹出列表定位在控件下方，自动适配屏幕边界
 - 自动应用 COMBO_DROPDOWN_VIEW_STYLE 弹出列表样式
 """
-from PyQt6.QtWidgets import QComboBox
-from PyQt6.QtCore import Qt, QPointF
+from PyQt6.QtWidgets import QComboBox, QListView
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QColor, QPainter
 
 from src.shared.ui.style_sheet import apply_combo_dropdown_style
@@ -86,39 +86,33 @@ class ChevronComboBox(QComboBox):
         super().leaveEvent(event)
         self.update()
 
-    def showPopup(self):
-        """Show the dropdown popup below the combo box, not overlaying it."""
+    def showPopup(self) -> None:
+        """Fit the dropdown to its contents and the available screen area."""
+        super().showPopup()
+        view = self.view()
+        if not view.isVisible():
+            return
         self._popup_open = True
         self.update()
-        super().showPopup()
-        popup = self.view().window()
-        if popup:
-            # Keep popup container transparent; the QListView inside already has
-            # COMBO_DROPDOWN_VIEW_STYLE (background + border + border-radius)
-            # applied by apply_combo_dropdown_style() in __init__.
-            popup.setStyleSheet("background: transparent; border: none;")
-            pos = self.mapToGlobal(QPointF(0, self.height()))
-            popup.move(int(pos.x()), int(pos.y()) + 2)
-            # Guarantee the popup is wide enough to show the longest item
-            # fully (the default popup geometry can be narrower than the
-            # combo itself when the list view has no explicit size hint).
-            fm = self.fontMetrics()
-            needed = max(
-                (fm.horizontalAdvance(self.itemText(i))
-                 for i in range(self.count())),
-                default=0) + 42  # padding + chevron/scroller slack
-            if popup.width() < needed:
-                self.view().setMinimumWidth(needed)
-                popup.resize(needed, popup.height())
-            # Keep within screen bounds
-            screen = self.screen()
-            if screen:
-                available = screen.availableGeometry()
-                popup_rect = popup.geometry()
-                if popup_rect.bottom() > available.bottom():
-                    popup.move(popup_rect.x(),
-                               int(self.mapToGlobal(QPointF(0, 0)).y())
-                               - popup_rect.height() - 2)
+
+        popup = view.window()
+        popup.setStyleSheet("background: transparent; border: none;")
+        available = self.screen().availableGeometry().adjusted(2, 2, -2, -2)
+        # The list delegate measures the popup font, item padding, and any icons.
+        spacing = view.spacing() if isinstance(view, QListView) else 0
+        list_insets = popup.width() - view.viewport().width() + 2 * spacing
+        content_width = view.sizeHintForColumn(self.modelColumn()) + list_insets
+        width = min(available.width(), max(popup.width(), self.width(), content_width))
+        popup.resize(width, min(popup.height(), available.height()))
+
+        bottom_left = self.mapToGlobal(QPoint(0, self.height() + 2))
+        last_x = available.right() - popup.width() + 1
+        last_y = available.bottom() - popup.height() + 1
+        x = max(available.left(), min(bottom_left.x(), last_x))
+        y = bottom_left.y()
+        if y > last_y:
+            y = self.mapToGlobal(QPoint(0, 0)).y() - popup.height() - 2
+        popup.move(x, max(available.top(), min(y, last_y)))
 
     def hidePopup(self):
         self._popup_open = False

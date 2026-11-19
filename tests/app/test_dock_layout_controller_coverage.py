@@ -582,6 +582,20 @@ def test_enforce_on_edit_page_keeps_edit_docks(
         assert _hidden(host, attr), f"{attr} must be hidden on the Edit page"
 
 
+def test_mixer_adr_action_opens_the_shared_adr_dock(layout_host: _DockHost) -> None:
+    layout_host.current_page = "Mixer"
+    adr = layout_host.dock_adr_take_sheet
+    layout_host.tabifyDockWidget(layout_host.dock_properties, adr)
+
+    layout_host._show_audio_adr_dock()
+    layout_host._enforce_page_dock_visibility()
+
+    assert not adr.isHidden()
+    assert adr.toggleViewAction().isEnabled()
+    assert layout_host.dockWidgetArea(adr) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert layout_host.dock_properties.isHidden()
+
+
 def test_enforce_on_composite_page_keeps_composite_and_shared_docks(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)

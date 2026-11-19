@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget,
                              QPlainTextEdit, QAbstractSpinBox)
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
 
+from src.app.controllers.adr_recording_controller import AdrRecordingControllerMixin
 from src.app.controllers.edit_controller import EditControllerMixin
 from src.app.controllers.deliver_controller import DeliverControllerMixin
 from src.app.controllers.color_controller import ColorControllerMixin
@@ -321,8 +322,9 @@ class PageContextManager:
 
 
 from src.app.controllers.stabilizer_controller import StabilizerControllerMixin
+from src.app.controllers.mixer_recording_controller import MixerRecordingControllerMixin
 
-class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, DeliverControllerMixin, ColorControllerMixin, CompositeControllerMixin, MenuToolbarMixin, PageManagementMixin, DockLayoutMixin, LayerOpsMixin, ColorWorkspaceMixin, FileOpsMixin, AiEditingMixin):
+class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControllerMixin, AdrRecordingControllerMixin, EditControllerMixin, DeliverControllerMixin, ColorControllerMixin, CompositeControllerMixin, MenuToolbarMixin, PageManagementMixin, DockLayoutMixin, LayerOpsMixin, ColorWorkspaceMixin, FileOpsMixin, AiEditingMixin):
     # AUD-3513: the audio-backend probe runs on a worker thread; the snapshot
     # is delivered back to the UI thread through this queued signal.
     audio_capabilities_probed = pyqtSignal(object)
@@ -2229,8 +2231,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, EditControllerMixin, De
             if hasattr(mp, "track_output_requested"):
                 mp.track_output_requested.connect(self._on_mixer_output_bus_requested)
                 mp.add_bus_requested.connect(self._on_mixer_add_bus_requested)
-            if hasattr(mp, "record_prep_requested"):
-                mp.record_prep_requested.connect(self._on_mixer_record_prep)
+            if hasattr(mp, "recording_settings_requested"):
+                mp.recording_settings_requested.connect(self._on_mixer_recording_settings)
+            # 混音器录音工作流（MixerRecordingControllerMixin）：
+            # 输入 patch 选择、ADR 共享 dock、走带级 arm 录制。
+            if hasattr(mp, "track_input_requested"):
+                mp.track_input_requested.connect(self._on_mixer_input_requested)
+                mp.adr_requested.connect(self._show_audio_adr_dock)
             mp.batch_solo_cleared.connect(self._on_mixer_batch_solo_cleared)
             mp.batch_mute_changed.connect(self._on_mixer_batch_mute_changed)
 
