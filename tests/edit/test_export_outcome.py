@@ -109,6 +109,7 @@ def _make_exporter(tmp_path, monkeypatch) -> "object":
 
 def _export_config(tmp_path, name: str, include_audio: bool = False):
     from src.features.edit.core.timeline_export import (
+    ExportPreflightResult,
         ExportCodec,
         ExportRangeType,
         ExportSource,
@@ -222,6 +223,11 @@ def test_cancel_skips_audio_render(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(exporter, "_render_audio_master", _count_render)
     monkeypatch.setattr(exporter, "_pipeline_eligible",
                         lambda start, end, config: False)
+    # 交付正确性批次的音频素材 preflight 以桩旁路（fixture 为空 clip，
+    # 本测试目标是取消/计数语义，不是素材在线性）
+    import src.features.edit.core.timeline_export as _tl
+    monkeypatch.setattr(_tl, "preflight_audio_export",
+                        lambda *a, **k: _tl.ExportPreflightResult(ok=True))
     calls = {"n": 0}
 
     def _render(frame_idx, config):
@@ -257,6 +263,10 @@ def test_topos_audio_supported_runs_audio_render(tmp_path, monkeypatch) -> None:
                         lambda *a, **k: fake_audio_seq)
     monkeypatch.setattr(exporter, "_pipeline_eligible",
                         lambda start, end, config: False)
+    # 同上：素材 preflight 桩旁路（本测试目标是音频渲染计数语义）
+    import src.features.edit.core.timeline_export as _tl
+    monkeypatch.setattr(_tl, "preflight_audio_export",
+                        lambda *a, **k: _tl.ExportPreflightResult(ok=True))
     monkeypatch.setattr(exporter, "_render_frame",
                         lambda frame_idx, config: _bgra_array(frame_idx))
 

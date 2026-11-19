@@ -62,6 +62,9 @@ def _view(timeline: TimelineSequence):
 
     view = MagicMock()
     view._timeline = timeline
+    # INT-10 边界遍历按 _audio_only 选轨集——mock 未定义时 MagicMock 恒真
+    # 会走 audio-only 分支（字幕轨不在 audio_tracks）→ 显式声明 False。
+    view._audio_only = False
     view._playhead_frame = 50
     view.set_playhead = lambda f: setattr(view, "_playhead_frame", f)
     view._ensure_playhead_visible = lambda: None

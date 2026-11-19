@@ -130,10 +130,24 @@ def test_ripple_independent_when_linked_selection_off() -> None:
     timeline = _linked_timeline()
     view, executed = _view_stub(timeline)
     view._linked_selection_enabled = False
+    # 链接判定收敛到 _effective_linked_selection()——MagicMock 会把
+    # self 方法解析吞成恒真 mock，绑回真实实现保持独立性语义覆盖。
+    view._independent_selection = False
+    view._audio_only = False
+    view._effective_linked_selection = (
+        lambda: TimelineView._effective_linked_selection(view))
 
     TimelineView._on_ripple_trim_right_finished(view, "vc", "v1", 100, 80)
     assert len(executed) == 1
-    assert isinstance(executed[0], RippleTrimCommand)
+    # 命令统一以 MacroCommand 包裹（label="Linked ripple trim right"）；
+    # 关联关闭时子命令只有该 RippleTrimCommand——独立性语义保持。
+    wrapper = executed[0]
+    if isinstance(wrapper, MacroCommand):
+        assert wrapper.sub_commands
+        assert all(isinstance(cmd, RippleTrimCommand)
+                   for cmd in wrapper.sub_commands)
+    else:
+        assert isinstance(wrapper, RippleTrimCommand)
     new_timeline = executed[0].apply(timeline)
     if isinstance(new_timeline, tuple):
         new_timeline = new_timeline[0]

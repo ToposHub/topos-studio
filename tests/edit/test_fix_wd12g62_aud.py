@@ -84,7 +84,7 @@ def test_aud_18405_empty_custom_range_fails_structured(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         te, "preflight_audio_export",
-        lambda config, sequence: ExportPreflightResult(ok=True))
+        lambda config, sequence, **_kw: ExportPreflightResult(ok=True))
     monkeypatch.setattr(
         te, "preflight_video_effects_export",
         lambda sequence: ExportPreflightResult(ok=True))

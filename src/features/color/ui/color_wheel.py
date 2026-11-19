@@ -602,7 +602,8 @@ class _WheelCanvas(QWidget):
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
+        # None 事件防护：无按下状态的 release（程序化调用/合成事件）直接忽略。
+        if event is None or event.button() != Qt.MouseButton.LeftButton:
             return
         if self.dragging_knob:
             self.mouseMoveEvent(event)

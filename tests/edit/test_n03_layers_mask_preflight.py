@@ -91,7 +91,9 @@ def _mask_grade(shapes, allow=False, qp=None):
         allow_degraded_grade=allow,
         _get_clip_color_grade=lambda layer, **_kw: grade,
         _get_decomposed_grade_fastpath=lambda *a, **k: None,
-        _color_grade_lut_cache={})
+        _color_grade_lut_cache={},
+        # N03 测试桩补上后加的权威图查询——None 走扁平 primary 路径。
+        _clip_color_graph=lambda layer, **_kw: None)
     # bd8b15f 起 _apply_color_grade = unstabilized + 稳定化包裹（无
     # _project/clip 状态 → 空态直通）
     stub._apply_color_grade_unstabilized = (

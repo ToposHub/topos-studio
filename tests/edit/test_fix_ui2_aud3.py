@@ -201,9 +201,17 @@ def test_retime_segment_speed_menu_builds_without_name_error(qapp, monkeypatch) 
     item._show_retime_segment_speed_menu(QPointF(10.0, 5.0), 10.0)
 
     assert len(menus) == 1
-    texts = [action.text() for action in menus[0].actions()]
-    # 速度百分比项 + Smooth Ramp（经 I18N 解析的实际文案）
-    assert "100%" in texts
-    assert I18N.tr("edit.clip.smooth_ramp", "Smooth Ramp") in texts
+    top = menus[0].actions()
+    texts = [action.text() for action in top]
+    # 速度百分比项收进 Change Speed 子菜单；Smooth Ramp 在 Speed Ramp 子菜单
+    change_menu = next(a for a in top if a.menu() is not None
+                       and a.text() == I18N.tr("edit.retime_menu.change_speed", "Change Speed"))
+    assert "100%" in [sub.text() for sub in change_menu.menu().actions()]
+    ramp_menu = next(a for a in top if a.menu() is not None
+                     and a.text() == I18N.tr("edit.retime_menu.speed_ramp", "Speed Ramp"))
+    ramp_texts = [sub.text() for sub in ramp_menu.menu().actions()]
+    assert I18N.tr("edit.clip.smooth_ramp", "Smooth Ramp") in ramp_texts
     # Smooth Ramp 是可勾选的切换项
-    assert menus[0].actions()[-1].isCheckable()
+    smooth = next(sub for sub in ramp_menu.menu().actions()
+                  if sub.text() == I18N.tr("edit.clip.smooth_ramp", "Smooth Ramp"))
+    assert smooth.isCheckable()
