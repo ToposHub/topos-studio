@@ -45,6 +45,12 @@ _SUPPORTED: dict = {
     ),
     # 轨链在立体声域：多声道素材在 clip 阶段已标准降混
     "track_dsp": (ChannelLayout.STEREO,),
+    # P2 环绕 Bus 路由核心：Bus 布局可声明 5.1/7.1（轨→Bus 上混、
+    # Bus→Master 降混走 routing_matrix）；Master 求和仍立体声域。
+    "bus_routing": (
+        ChannelLayout.STEREO, ChannelLayout.SURROUND_5_1,
+        ChannelLayout.SURROUND_7_1,
+    ),
     "bus_master": (ChannelLayout.STEREO,),
     "export": (
         ChannelLayout.STEREO, ChannelLayout.SURROUND_5_1,
@@ -58,6 +64,7 @@ _REASON: dict = {
     "clip_stage": "源布局→轨域使用标准 ITU downmix；未知布局回退并告警",
     "track_dsp": "轨链 DSP 为立体声域；多声道在 clip 阶段已降混（Panner 2×2，"
                  "VBAP 为 PAN-02 待办）",
+    "bus_routing": "Bus 布局支持 stereo/5.1/7.1；高度声道（x.y.z）不支持",
     "bus_master": "Bus/Master 求和为立体声域",
     "export": "交付容器仅支持 stereo/5.1/7.1；高度声道（7.1.4/Atmos）不支持",
 }
@@ -79,6 +86,8 @@ _ADAPTATION: dict = {
     "source_decode": "解码器读容器布局；未知布局逐次告警后安全回退",
     "clip_stage": "标准 ITU BS.775 downmix 矩阵（Lo/Ro；LFE 默认排除可显式包含）",
     "track_dsp": "多声道素材在 clip 阶段降混进立体声轨域",
+    "bus_routing": "轨→Bus 上混与 Bus→Master 降混走 routing_matrix"
+                   "（upmix：L/R 直通占位、mono 进 C；downmix：BS.775，LFE 排除）",
     "bus_master": "轨/Bus 输出在立体声域求和",
     "export": "resolve_export_channels 单一真相；混音域→交付布局经"
               " adapt_samples_for_delivery（不支持组合回退 + 告警）",

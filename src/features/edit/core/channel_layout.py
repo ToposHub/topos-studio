@@ -224,8 +224,54 @@ def downmix_matrix(
     # ── stereo → 5.1 / mono → 5.1 等 upmix：暂不支持（专业交付多为 downmix）──
     raise ValueError(
         f"Unsupported downmix {src.av_layout_name} → {dst.av_layout_name}: "
-        f"upmix 不支持。如需 upmix 请显式指定通道映射。"
+        f"upmix 请用 upmix_matrix / routing_matrix（环绕 Bus 路由语义）。"
     )
+
+
+def upmix_matrix(
+    src: ChannelLayout,
+    dst: ChannelLayout,
+) -> np.ndarray:
+    """计算 src → dst 的上混系数矩阵（P2 环绕 Bus 路由核心，2026-11-19 计划）。
+
+    路由语义（可预测、可 null-test）：
+    - mono → 5.1/7.1：单声道进 C（中置，对白惯例；L/R/LFE/Ls/Rs 静音）；
+    - stereo → 5.1/7.1：L/R 直通占位，C/LFE/Ls/Rs 静音；
+    - 5.1 → 7.1：L/R/C/LFE/Ls/Rs 直通，Lss/Rss 静音。
+
+    Raises:
+        ValueError: dst 声道数不大于 src（downmix 请用 downmix_matrix）。
+    """
+    if dst.channel_count < src.channel_count:
+        raise ValueError(
+            f"upmix {src.av_layout_name} → {dst.av_layout_name}: "
+            f"目标声道数必须不少于源；downmix 请用 downmix_matrix")
+    matrix = np.zeros((dst.channel_count, src.channel_count), dtype=np.float64)
+    center_index = {ChannelLayout.SURROUND_5_1: 2, ChannelLayout.SURROUND_7_1: 2}
+    if src == ChannelLayout.MONO and dst in center_index:
+        # 单声道（对白惯例）进 C
+        matrix[center_index[dst], 0] = 1.0
+        return matrix
+    # 其余（stereo→5.1/7.1、5.1→7.1、mono→stereo）：前 src_count 个声道
+    # 按标准顺序直通（stereo L/R 落 L/R；5.1 落 5.1 的 L/R/C/LFE/Ls/Rs）。
+    for i in range(src.channel_count):
+        matrix[i, i] = 1.0
+    return matrix
+
+
+def routing_matrix(
+    src: ChannelLayout,
+    dst: ChannelLayout,
+    include_lfe: bool = False,
+) -> np.ndarray:
+    """src → dst 的路由矩阵（环绕 Bus 路由的单一入口）。
+
+    上混走 :func:`upmix_matrix`，降混走 :func:`downmix_matrix`（LFE
+    默认排除，BS.775）；同布局为单位矩阵。
+    """
+    if dst.channel_count > src.channel_count:
+        return upmix_matrix(src, dst)
+    return downmix_matrix(src, dst, include_lfe=include_lfe)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

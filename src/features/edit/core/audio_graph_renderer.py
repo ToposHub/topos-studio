@@ -38,6 +38,11 @@ from typing import Any, Optional
 import numpy as np
 
 from src.features.edit.core.audio_dsp import EffectChain, StripEQFilter, apply_pdc_delay_line
+from src.features.edit.core.channel_layout import (
+    ChannelLayout,
+    downmix_matrix,
+    routing_matrix,
+)
 from src.features.edit.core.audio_playback import topological_sort_buses, unpack_send
 
 logger = logging.getLogger(__name__)
@@ -130,7 +135,7 @@ class _TrackNode:
 
     __slots__ = (
         "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled",
-        "output_bus_id", "sends", "automation", "automation_mode",
+        "output_bus_id", "bus_layout", "sends", "automation", "automation_mode",
         "eq_filter", "effect_chain", "panner", "fx_sampler",
     )
 
@@ -145,6 +150,14 @@ class _TrackNode:
         # AM-07: 自动化模式（off/read/write/touch/latch）
         self.automation_mode = str(getattr(track, "automation_mode", "off") or "off").lower()
         self.output_bus_id = getattr(track, "output_bus_id", None)
+        # P2 环绕 Bus 路由核心：Bus 声道布局（轨→Bus 上混 / Bus→Master 降混
+        # 走 channel_layout.routing_matrix；非 Bus 节点恒 stereo）。
+        if getattr(track, "is_bus", False):
+            layout_fn = getattr(track, "bus_channel_layout", None)
+            self.bus_layout = (layout_fn() if callable(layout_fn)
+                               else ChannelLayout.STEREO)
+        else:
+            self.bus_layout = ChannelLayout.STEREO
         # sends: [(target_bus_id, level, tap, muted), ...] 仅 enabled 的（MX-14 4 元组）
         raw_sends = getattr(track, "sends", ()) or ()
         self.sends = [
@@ -671,6 +684,38 @@ class AudioGraphRenderer:
         node = self._nodes.get(bus_id)
         return node is not None and node.is_bus
 
+    def _bus_layout_of(self, bus_id: str) -> ChannelLayout:
+        """Bus 节点的声道布局（未知/非 Bus 回退 stereo）。"""
+        node = self._nodes.get(bus_id)
+        return (node.bus_layout if node is not None else ChannelLayout.STEREO)
+
+    def _new_bus_buffer(self, bus_id: str, reference: np.ndarray) -> np.ndarray:
+        """按 Bus 布局分配空缓冲（宽度/ dtype 对齐参考 master 缓冲）。"""
+        layout = self._bus_layout_of(bus_id)
+        return np.zeros((layout.channel_count, reference.shape[-1]),
+                        dtype=reference.dtype)
+
+    def _downmix_to_master(self, samples: np.ndarray,
+                           src_layout: ChannelLayout) -> np.ndarray:
+        """Bus → Master（立体声域）降混：BS.775，LFE 默认排除。"""
+        dst = ChannelLayout.STEREO
+        if src_layout.channel_count == dst.channel_count:
+            return samples
+        matrix = downmix_matrix(src_layout, dst, include_lfe=False)
+        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+
+    def _upmix_to_bus(self, samples: np.ndarray, src_layout: ChannelLayout,
+                      bus_id: str) -> np.ndarray:
+        """轨/上游 Bus 立体声样本 → 目标 Bus 布局（routing_matrix 上混）。
+
+        同布局直通返回原数组（零拷贝）；上混为静态矩阵乘。
+        """
+        dst = self._bus_layout_of(bus_id)
+        if dst.channel_count == samples.shape[0]:
+            return samples
+        matrix = routing_matrix(src_layout, dst)
+        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+
     def route_track_output(
         self,
         track_id: str,
@@ -692,8 +737,10 @@ class AudioGraphRenderer:
         if target is not None:
             if self._is_known_bus(target):
                 if target not in bus_inputs:
-                    bus_inputs[target] = np.zeros_like(output)
-                bus_inputs[target][:, :n] += samples
+                    bus_inputs[target] = self._new_bus_buffer(target, output)
+                bus_inputs[target][:, :n] += self._upmix_to_bus(
+                    samples, node.bus_layout if node else ChannelLayout.STEREO,
+                    target)
             else:
                 # AUD-15402: 未知 bus 目标（如 bus 已删除但轨的路由未清理）。
                 # 旧代码为未知目标也创建缓冲——该轨样本累积进永不被消费的
@@ -722,7 +769,9 @@ class AudioGraphRenderer:
                     )
                     continue
                 if send_bus_id not in bus_inputs:
-                    bus_inputs[send_bus_id] = np.zeros_like(output)
+                    bus_inputs[send_bus_id] = self._new_bus_buffer(
+                        send_bus_id, output)
+                src_layout = node.bus_layout if node else ChannelLayout.STEREO
                 if send_tap == "pre_fader":
                     if pre_fader_samples is None:
                         logger.warning(
@@ -734,9 +783,13 @@ class AudioGraphRenderer:
                     else:
                         src = pre_fader_samples
                     sn = min(src.shape[-1], n)
-                    bus_inputs[send_bus_id][:, :sn] += src[:, :sn] * send_level
+                    bus_inputs[send_bus_id][:, :sn] += (
+                        self._upmix_to_bus(src, src_layout, send_bus_id)
+                        [:, :sn] * send_level)
                 else:
-                    bus_inputs[send_bus_id][:, :n] += samples * send_level
+                    bus_inputs[send_bus_id][:, :n] += (
+                        self._upmix_to_bus(samples, src_layout, send_bus_id)
+                        * send_level)
 
     # ── Bus 阶段（拓扑序，与 mix_samples 阶段 2 一致）──
 
@@ -792,10 +845,10 @@ class AudioGraphRenderer:
                 len(cycle_buses), sorted(cycle_buses),
             )
 
-        # 确保每个 Bus 都有 buffer
+        # 确保每个 Bus 都有 buffer（按 Bus 布局分配；P2 环绕 Bus 路由）
         for bid in bus_ids:
             if bid not in bus_inputs:
-                bus_inputs[bid] = np.zeros_like(output)
+                bus_inputs[bid] = self._new_bus_buffer(bid, output)
 
 
         # H02：Bus 阶段逐帧块内处理——volume/pan/mute ramp 与 fx 参数自动化
@@ -899,10 +952,13 @@ class AudioGraphRenderer:
                 # P0 · PDC：Bus 输出端延迟线对齐同级最迟 Bus 链
                 # （sends/下游路由同步延迟；跨块状态保存在延迟线里）。
                 bus_samples = self._apply_pdc(bus_id, bus_samples)
-                # 路由：Bus→Bus 或 →Master（output_bus_id）
+                # 路由：Bus→Bus 或 →Master（output_bus_id）。P2 环绕
+                # Bus 路由：跨布局走 routing_matrix（上混/降混；Bus→Master
+                # 为 BS.775 降混，LFE 默认排除）。
                 target = node.output_bus_id
                 if target is not None and target in bus_inputs:
-                    bus_inputs[target][:, c0:cN] += bus_samples
+                    bus_inputs[target][:, c0:cN] += self._upmix_to_bus(
+                        bus_samples, node.bus_layout, target)
                 else:
                     if target is not None and not self._is_known_bus(target):
                         # AUD-15402: Bus 输出指向未注册 bus——兜底进 master 并告警
@@ -910,7 +966,8 @@ class AudioGraphRenderer:
                             "AudioGraphRenderer: bus %r routes to unknown bus %r; "
                             "falling back to master", bus_id, target,
                         )
-                    output[:, c0:cN] += bus_samples
+                    output[:, c0:cN] += self._downmix_to_master(bus_samples,
+                                                                node.bus_layout)
                 # RMA-06: Bus sends（并行 tap；MX-14: pre_fader 取 Bus 输入）。
                 for send_entry in node.sends:
                     send_bus_id, send_level, send_tap, send_muted = (
@@ -921,7 +978,8 @@ class AudioGraphRenderer:
                         send_src = (bus_input if send_tap == "pre_fader"
                                     else bus_samples)
                         bus_inputs[send_bus_id][:, c0:cN] += \
-                            send_src * send_level
+                            self._upmix_to_bus(send_src, node.bus_layout,
+                                               send_bus_id) * send_level
                     elif not self._is_known_bus(send_bus_id):
                         # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
                         logger.warning(
