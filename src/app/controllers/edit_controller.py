@@ -6294,6 +6294,15 @@ class EditControllerMixin:
             mgr.clip_effect_params_committed.connect(
                 self._on_edit_clip_effect_params_committed
             )
+            # 十款新 rack FX（FxParamDialog 分支）：拖动预览实时生效 +
+            # 关窗回滚引擎链（预览不落模型、不入撤销栈）
+            if hasattr(mgr, "clip_effect_preview"):
+                mgr.clip_effect_preview.connect(
+                    self._on_edit_clip_effect_preview
+                )
+                mgr.clip_effect_preview_finished.connect(
+                    self._on_edit_clip_effect_preview_finished
+                )
             self._clip_audio_fx_dialog_mgr = mgr
         return mgr
 
@@ -6421,6 +6430,91 @@ class EditControllerMixin:
         self._resync_audio_after_effect_change()
 
         # 这里不重建属性面板（dialog 仍打开，重建会打断交互）。
+
+    def _clip_fx_preview_entries(self, clip: Any, effect_id: str,
+                                 override_params: Any) -> list:
+        """P-clip-FX：构建 clip 引擎链条目（指定实例参数可被预览 dict 覆盖）。
+
+        与 ``audio_retime.clip_fx_entries`` 同一过滤/排序/启用口径
+        （AUDIO_MIXER_EFFECT_TYPES、order 升序、is_enabled ∧ params.enabled），
+        但按 effect_id 精确匹配替换参数——供预览直送引擎使用。
+        """
+        from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
+        entries = []
+        for ef in sorted(getattr(clip, "effects", ()) or (),
+                         key=lambda e: getattr(e, "order", 0)):
+            etype = str(getattr(ef, "effect_type", "") or "")
+            if etype not in AUDIO_MIXER_EFFECT_TYPES:
+                continue
+            params = dict(getattr(ef, "params", None) or {})
+            if effect_id and str(getattr(ef, "effect_id", "")) == str(effect_id):
+                params = dict(override_params or {})
+            dsp_enabled = (bool(getattr(ef, "is_enabled", True))
+                           and bool(params.get("enabled", True)))
+            entries.append((etype, params, dsp_enabled))
+        return entries
+
+    def _on_edit_clip_effect_preview(
+        self, clip_id: str, effect_id: str, preview_params: dict,
+    ) -> None:
+        """P-clip-FX（十款新 rack FX）：对话框拖动预览 → 直送引擎。
+
+        预览参数只进引擎（set_clip_effects），不写模型、不入撤销栈——
+        与机架面板的 fx_preview 语义一致（试听 == 调参所见）。任何失败
+        只降级为无预览，不得中断调参交互。
+        """
+        edit_page = getattr(self, "edit_page", None)
+        timeline = getattr(edit_page, "_current_timeline", None)
+        if timeline is None:
+            return
+        clip = timeline.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        mgr = self._get_mixer_audio_manager()
+        set_clip_fx = getattr(mgr, "set_clip_effects", None) if mgr else None
+        if not callable(set_clip_fx):
+            return
+        entries = self._clip_fx_preview_entries(clip, effect_id, preview_params)
+        try:
+            set_clip_fx(clip.clip_id, entries, track_id=clip.track_id)
+        except TypeError:
+            try:  # 旧引擎签名无 track_id 关键字
+                set_clip_fx(clip.clip_id, entries)
+            except Exception:  # noqa: BLE001
+                logger.debug("clip fx preview apply failed", exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.debug("clip fx preview apply failed", exc_info=True)
+
+    def _on_edit_clip_effect_preview_finished(
+        self, clip_id: str, effect_id: str,
+    ) -> None:
+        """P-clip-FX：对话框关闭 → 引擎链回滚到模型状态。
+
+        丢弃未提交的预览参数（无副作用：提交路径已先落库再触发本信号，
+        模型状态即提交后的状态）。
+        """
+        edit_page = getattr(self, "edit_page", None)
+        timeline = getattr(edit_page, "_current_timeline", None)
+        if timeline is None:
+            return
+        clip = timeline.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        mgr = self._get_mixer_audio_manager()
+        set_clip_fx = getattr(mgr, "set_clip_effects", None) if mgr else None
+        if not callable(set_clip_fx):
+            return
+        # effect_id 传空 → 无覆盖，条目即模型全量状态；空列表 → None 清链
+        entries = self._clip_fx_preview_entries(clip, "", None) or None
+        try:
+            set_clip_fx(clip.clip_id, entries, track_id=clip.track_id)
+        except TypeError:
+            try:
+                set_clip_fx(clip.clip_id, entries)
+            except Exception:  # noqa: BLE001
+                logger.debug("clip fx preview revert failed", exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.debug("clip fx preview revert failed", exc_info=True)
 
     def _resync_audio_after_effect_change(self) -> None:
         """P-clip-FX: effect 参数变化后重新同步音频引擎。
