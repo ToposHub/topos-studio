@@ -106,7 +106,12 @@ from src.features.edit.core.audio_dsp import (
     apply_pdc_delay_line,
 )
 from src.features.edit.core.audio_edit import apply_clip_audio_edit, apply_clip_audio_edit_block
-from src.features.edit.core.channel_layout import adapt_channels
+from src.features.edit.core.channel_layout import (
+    ChannelLayout,
+    adapt_channels,
+    downmix_matrix,
+    routing_matrix,
+)
 from src.features.edit.core.source_patch import SourcePatchSpec
 from src.features.edit.core.timeline_v2 import StripEQParams, EffectChainParams
 from src.features.edit.core.loudness_meter import LoudnessMeter
@@ -1772,6 +1777,9 @@ class AudioMixer:
         # P1-5：自动化预览捕获层——{track_id: {param: KeyframeTrack}}；
         # 存在时优先于正式曲线（预听），commit 前不进命令栈/模型。
         self._automation_preview: Dict[str, Dict[str, Any]] = {}
+        # P2 环绕 Bus 路由核心：{bus_id: ChannelLayout}（轨→Bus 上混、
+        # Bus→Master 降混走 channel_layout.routing_matrix）。
+        self._bus_layouts: Dict[str, Any] = {}
         # W24/W25: 每轨路由信息 {track_id: {"output_bus_id": str|None, "sends": [(bus_id, level), ...]}}
         self._track_routing: Dict[str, Dict[str, Any]] = {}
         self._sample_rate: float = 48000.0
@@ -2734,6 +2742,46 @@ class AudioMixer:
                 normalized = "off"
             self._automation_modes[track_id] = normalized
 
+    def set_bus_layouts(self, layouts: Dict[str, str]) -> None:
+        """P2：设置 Bus 声道布局声明（{bus_id: "stereo"/"5.1"/"7.1"}）。线程安全。"""
+        parsed: Dict[str, Any] = {}
+        for bus_id, name in (layouts or {}).items():
+            try:
+                parsed[str(bus_id)] = ChannelLayout.from_av_layout_name(
+                    str(name or "stereo"))
+            except ValueError:
+                parsed[str(bus_id)] = ChannelLayout.STEREO
+        with QMutexLocker(self._mutex):
+            self._bus_layouts = parsed
+
+    def _bus_layout_of(self, bus_id: str) -> ChannelLayout:
+        """Bus 声道布局（未知回退 stereo）。"""
+        return self._bus_layouts.get(bus_id, ChannelLayout.STEREO)
+
+    def _new_bus_buffer(self, bus_id: str, num_samples: int) -> np.ndarray:
+        """按 Bus 布局分配零缓冲（layout-aware scratch 池）。"""
+        layout = self._bus_layout_of(bus_id)
+        return self._mix_scratch(self._mix_bus_scratch,
+                                 f"{bus_id}#{layout.channel_count}",
+                                 layout.channel_count, num_samples)
+
+    def _to_bus_layout(self, samples: np.ndarray, src_layout: ChannelLayout,
+                       bus_id: str) -> np.ndarray:
+        """轨/上游 Bus 样本 → 目标 Bus 布局（routing_matrix 上混）。"""
+        dst = self._bus_layout_of(bus_id)
+        if dst.channel_count == samples.shape[0]:
+            return samples
+        matrix = routing_matrix(src_layout, dst)
+        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+
+    def _downmix_to_master(self, samples: np.ndarray,
+                           src_layout: ChannelLayout) -> np.ndarray:
+        """Bus → Master（立体声域）降混：BS.775，LFE 默认排除。"""
+        if src_layout.channel_count == ChannelLayout.STEREO.channel_count:
+            return samples
+        matrix = downmix_matrix(src_layout, ChannelLayout.STEREO, include_lfe=False)
+        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+
     def set_track_automation_trim(self, track_id: str,
                                   trims: Dict[str, float]) -> None:
         """P1-5：设置某轨的 Trim Automation 倍率表（{}=清除）。线程安全。"""
@@ -3367,13 +3415,13 @@ class AudioMixer:
                 # W25: 路由到目标（Bus 或 Master）+ 处理 sends
                 target_bus = routing.get("output_bus_id")
                 if target_bus is not None and target_bus in registered_bus_set:
-                    # 路由到 Bus
+                    # 路由到 Bus（P2 环绕 Bus 路由：按 Bus 布局分配并上混）
                     if target_bus not in bus_inputs:
-                        bus_inputs[target_bus] = self._mix_scratch(
-                            self._mix_bus_scratch, target_bus,
-                            output_channels, num_samples,
-                        )
-                    bus_inputs[target_bus][:, :samples.shape[-1]] += samples
+                        bus_inputs[target_bus] = self._new_bus_buffer(
+                            target_bus, num_samples)
+                    bus_inputs[target_bus][:, :samples.shape[-1]] += \
+                        self._to_bus_layout(samples, ChannelLayout.STEREO,
+                                            target_bus)
                 elif target_bus is not None:
                     # AUD-15402: output_bus_id 指向未注册 bus（如 bus 已删除但
                     # 轨的路由未清理）。兜底进 master 并告警（与 Bus 阶段一致）。
@@ -3401,10 +3449,8 @@ class AudioMixer:
                         )
                         continue
                     if send_bus_id not in bus_inputs:
-                        bus_inputs[send_bus_id] = self._mix_scratch(
-                            self._mix_bus_scratch, send_bus_id,
-                            output_channels, num_samples,
-                        )
+                        bus_inputs[send_bus_id] = self._new_bus_buffer(
+                            send_bus_id, num_samples)
                     if send_tap == "pre_fader":
                         # MX-14: 推子前 tap——clip 求和块（音量/pan/EQ/FX 前），
                         # 不随推子变化；自动化静音门控同时门控 pre send
@@ -3412,9 +3458,14 @@ class AudioMixer:
                         pre_n = pre_src.shape[-1]
                         if mute_gate is not None:
                             pre_src = pre_src * mute_gate[np.newaxis, :pre_n]
-                        bus_inputs[send_bus_id][:, :pre_n] += pre_src * send_level
+                        bus_inputs[send_bus_id][:, :pre_n] += (
+                            self._to_bus_layout(pre_src, ChannelLayout.STEREO,
+                                                send_bus_id)[:, :pre_n]
+                            * send_level)
                     else:
-                        bus_inputs[send_bus_id][:, :samples.shape[-1]] += samples * send_level
+                        bus_inputs[send_bus_id][:, :samples.shape[-1]] += (
+                            self._to_bus_layout(samples, ChannelLayout.STEREO,
+                                                send_bus_id) * send_level)
 
                 if track_peak_l > 0.0 or track_peak_r > 0.0 or track_pre_peak > 0.0:
                     # CW-A1: 侧链 tap（该轨完整输出，推子后；仅在本块内消费）
@@ -3464,9 +3515,7 @@ class AudioMixer:
             # （注册 Bus 集合 all_registered_buses 已在阶段 1 前计算，AUD-15402）
             for bid in all_registered_buses:
                 if bid not in bus_inputs:
-                    bus_inputs[bid] = self._mix_scratch(
-                        self._mix_bus_scratch, bid, output_channels, num_samples
-                    )
+                    bus_inputs[bid] = self._new_bus_buffer(bid, num_samples)
             sorted_buses, cycle_buses = topological_sort_buses(all_registered_buses, self._track_routing)
             if cycle_buses:
                 logger.warning(
@@ -3614,8 +3663,11 @@ class AudioMixer:
                 bus_routing = self._track_routing.get(bus_id, {})
                 bus_target = bus_routing.get("output_bus_id") if isinstance(bus_routing, dict) else None
                 if bus_target is not None and bus_target in bus_inputs:
-                    # 输出到下游 Bus（多层路由）
-                    bus_inputs[bus_target][:, :bus_samples.shape[-1]] += bus_samples
+                    # 输出到下游 Bus（多层路由；P2 环绕：跨布局走 routing_matrix）
+                    bus_inputs[bus_target][:, :bus_samples.shape[-1]] += \
+                        self._to_bus_layout(bus_samples,
+                                            self._bus_layout_of(bus_id),
+                                            bus_target)
                 else:
                     if bus_target is not None:
                         # AUD-15402: Bus 输出指向未注册 bus——兜底进 master 并告警
@@ -3623,8 +3675,10 @@ class AudioMixer:
                             "audio bus %s routes to unknown bus %s; falling back to master",
                             bus_id, bus_target,
                         )
-                    # 输出到 Master（output_bus_id=None 或指向非 Bus）
-                    output += bus_samples
+                    # 输出到 Master（output_bus_id=None 或指向非 Bus；
+                    # P2 环绕：非立体声 Bus 经 BS.775 降混，LFE 排除）
+                    output += self._downmix_to_master(
+                        bus_samples, self._bus_layout_of(bus_id))
                 # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
                 # 此前实时 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
                 # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。
@@ -3635,13 +3689,15 @@ class AudioMixer:
                         if send_level <= 0.0 or send_muted:
                             continue
                         if send_bus_id not in bus_inputs and send_bus_id in registered_bus_set:
-                            bus_inputs[send_bus_id] = self._mix_scratch(
-                                self._mix_bus_scratch, send_bus_id,
-                                output_channels, num_samples,
-                            )
+                            bus_inputs[send_bus_id] = self._new_bus_buffer(
+                                send_bus_id, num_samples)
                         if send_bus_id in bus_inputs:
                             send_src = bus_input if send_tap == "pre_fader" else bus_samples
-                            bus_inputs[send_bus_id][:, :send_src.shape[-1]] += send_src * send_level
+                            bus_inputs[send_bus_id][:, :send_src.shape[-1]] += (
+                                self._to_bus_layout(send_src,
+                                                    self._bus_layout_of(bus_id),
+                                                    send_bus_id)
+                                * send_level)
                         elif send_bus_id not in registered_bus_set:
                             # AUD-15402: Bus send 指向未注册 bus——并行 tap 落空，告警
                             logger.warning(
@@ -5756,6 +5812,10 @@ class AudioPlaybackManager(QObject):
                                   trims: Dict[str, float]) -> None:
         """P1-5：设置某轨的 Trim Automation 倍率表。转发到 AudioMixer。"""
         self._mixer.set_track_automation_trim(track_id, trims)
+
+    def set_bus_layouts(self, layouts: Dict[str, str]) -> None:
+        """P2：设置 Bus 声道布局声明。转发到 AudioMixer。"""
+        self._mixer.set_bus_layouts(layouts)
 
     def set_track_automation_preview(self, track_id: str,
                                      automation: Dict[str, Any]) -> None:

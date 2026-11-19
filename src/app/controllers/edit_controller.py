@@ -2767,6 +2767,17 @@ class EditControllerMixin:
                                               sends_list, is_bus=track.is_bus)
                     except Exception as e:
                         logger.debug("routing sync failed: %s", e)
+                # P2 环绕 Bus 路由核心：Bus 布局声明同步到引擎
+                try:
+                    if hasattr(mgr, 'set_bus_layouts'):
+                        layouts = {
+                            track.track_id: str(getattr(track, 'bus_layout', 'stereo') or 'stereo')
+                            for track in timeline.audio_tracks
+                            if getattr(track, 'is_bus', False)
+                        }
+                        mgr.set_bus_layouts(layouts)
+                except Exception as e:
+                    logger.debug("bus layout sync failed: %s", e)
             # W22: 同步已打开的 Automation Lane 对话框
             for dlg in getattr(self, '_automation_lanes', {}).values():
                 if dlg.isVisible():

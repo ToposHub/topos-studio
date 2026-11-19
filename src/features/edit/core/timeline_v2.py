@@ -4400,6 +4400,11 @@ class EditTrack:
     # W24: Bus 路由字段
     is_bus: bool = False  # True=该轨是 Bus/Aux 轨（无 clips，只接收 send/routing）
     output_bus_id: Optional[str] = None  # 输出目标 Bus 的 track_id（None=直接输出到 Master）
+    # P2 环绕 Bus 路由核心（2026-11-19 计划）：Bus 的声道布局声明
+    # （"stereo"/"5.1"/"7.1"；仅 is_bus 轨有意义）。轨→Bus 上混与
+    # Bus→Master 降混走 channel_layout.routing_matrix；能力查询见
+    # layout_capability("bus_routing")。非法值读取回退 stereo。
+    bus_layout: str = "stereo"
     sends: tuple["Send", ...] = ()  # 发送列表（post-fader）
     # AM-10 阶段 3.5：Stem 分组标签（专业影视 D/M/E 交付）。
     # 空字符串=未分组；常用值："dialogue"/"music"/"effects"/"narration"/"ambience"。
@@ -4549,6 +4554,7 @@ class EditTrack:
                  automation_mode: Optional[str] = None,
                  automation_trim: Optional[dict] = None,
                  automation_write_protected: bool | None = None,
+                 bus_layout: str | None = None,
                  is_bus: bool | None = None,
                  output_bus_id: Optional[str] | None = None,
                  sends: tuple["Send", ...] | None = None,
@@ -4600,6 +4606,7 @@ class EditTrack:
                 self.automation_write_protected
                 if automation_write_protected is None else automation_write_protected
             ),
+            bus_layout=self.bus_layout if bus_layout is None else bus_layout,
             is_bus=self.is_bus if is_bus is None else is_bus,
             output_bus_id=self.output_bus_id if output_bus_id is None else output_bus_id,
             sends=self.sends if sends is None else sends,
@@ -4864,6 +4871,22 @@ class EditTrack:
         """
         return self._rebuild(caption_metadata=metadata)
 
+    def bus_channel_layout(self) -> "ChannelLayout":
+        """Bus 的声道布局（非法/未声明回退 stereo；仅 is_bus 有意义）。"""
+        from src.features.edit.core.channel_layout import ChannelLayout
+        try:
+            return ChannelLayout.from_av_layout_name(str(self.bus_layout))
+        except ValueError:
+            return ChannelLayout.STEREO
+
+    def with_bus_layout(self, layout: str) -> EditTrack:
+        """P2：设置 Bus 声道布局（"stereo"/"5.1"/"7.1"；非法值拒绝）。"""
+        from src.features.edit.core.channel_layout import ChannelLayout
+        normalized = str(layout or "stereo").strip().lower()
+        # 显式拒绝高度布局（与 MX-15 能力矩阵一致）
+        ChannelLayout.from_av_layout_name(normalized)
+        return self._rebuild(bus_layout=normalized)
+
     def with_output_bus(self, output_bus_id: Optional[str]) -> EditTrack:
         """W24: 设置该轨的输出目标 Bus（None=输出到 Master）。"""
         # AUD-19100：replace 携带全部字段；None 经 replace 正常传递。
@@ -4985,6 +5008,7 @@ class EditTrack:
             "automation_trim": dict(self.automation_trim),
             "automation_write_protected": self.automation_write_protected,
             "is_bus": self.is_bus,
+            "bus_layout": self.bus_layout,
             "output_bus_id": self.output_bus_id,
             "sends": [s.to_dict() for s in self.sends],
             "stem_group": self.stem_group,
@@ -5059,6 +5083,7 @@ class EditTrack:
             automation_write_protected=bool(
                 data.get("automation_write_protected", False)),
             is_bus=bool(data.get("is_bus", False)),
+            bus_layout=str(data.get("bus_layout", "stereo") or "stereo"),
             output_bus_id=data.get("output_bus_id"),
             sends=sends,
             stem_group=str(data.get("stem_group", "") or ""),
@@ -5073,7 +5098,8 @@ class EditTrack:
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
             "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
             "automation_mode", "automation_trim",
-            "automation_write_protected", "is_bus", "output_bus_id", "sends",
+            "automation_write_protected", "is_bus", "bus_layout",
+            "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })
         extras = {
