@@ -57,6 +57,7 @@ def _effect_default_params(effect_type: str) -> dict:
         StripEQParams, LimiterParams, CompressorParams, ReverbParams,
         DelayParams, SaturationParams, ImagerParams, ExpanderParams,
         VoiceChangerParams, SpectralManglerParams,
+        _ensure_effect_param_registry,
     )
     if effect_type == "voice_changer":
         return VoiceChangerParams.default().to_dict()
@@ -82,6 +83,15 @@ def _effect_default_params(effect_type: str) -> dict:
         if effect_type == "noise_gate":
             params["mode"] = "Gate"
         return params
+    # P1（2026-11-19 计划第三阶段）：参数注册表统一兜底（新 FX 与后续
+    # 扩展无需逐款加分支；DSP DEFAULTS 载体的 default().to_dict()）
+    try:
+        registry = _ensure_effect_param_registry()
+        cls = registry.get(effect_type)
+        if cls is not None:
+            return cls.default().to_dict()
+    except Exception:  # noqa: BLE001 — 注册表不可用回空（DSP 默认兜底）
+        pass
     return {}
 
 
@@ -101,8 +111,34 @@ def _effect_display_name(effect_type: str) -> str:
         # NF-02：两款新复合 FX（短名 + 完整 tooltip；紧凑轨宽不变）
         "voice_changer": I18N.tr("audio.fx.voice_changer", "Voice"),
         "spectral_mangler": I18N.tr("audio.fx.spectral_mangler", "Mangler"),
+        # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX 完整名
+        "de_esser": I18N.tr("audio.fx.name.de_esser", "De-Esser"),
+        "true_peak_limiter": I18N.tr("audio.fx.name.true_peak_limiter",
+                                     "True Peak Limiter"),
+        "dynamic_eq": I18N.tr("audio.fx.name.dynamic_eq", "Dynamic EQ"),
+        "bus_comp": I18N.tr("audio.fx.name.bus_comp", "Bus Compressor"),
+        "multiband_comp": I18N.tr("audio.fx.name.multiband_comp",
+                                  "Multiband Compressor"),
+        "convolution_reverb": I18N.tr("audio.fx.name.convolution_reverb",
+                                      "Convolution Reverb"),
+        "transient_designer": I18N.tr("audio.fx.name.transient_designer",
+                                      "Transient Designer"),
+        "tremolo_auto_pan": I18N.tr("audio.fx.name.tremolo_auto_pan",
+                                    "Tremolo / Auto Pan"),
+        "chorus_flanger": I18N.tr("audio.fx.name.chorus_flanger",
+                                  "Chorus / Flanger"),
+        "phaser": I18N.tr("audio.fx.name.phaser", "Phaser"),
     }
     return names.get(effect_type, effect_type)
+
+
+# P1（2026-11-19 计划第三阶段 #1-#7）：通用表驱动参数对话框覆盖的类型
+# （specs 定义在 fx_rack_dialogs._FX_FIELD_SPECS；shared 层字面量保持解耦）
+_FX_PARAM_EFFECT_TYPES = frozenset({
+    "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+    "multiband_comp", "convolution_reverb", "transient_designer",
+    "tremolo_auto_pan", "chorus_flanger", "phaser",
+})
 
 
 # 中性值
@@ -175,6 +211,10 @@ class TrackMixerWidget(QWidget):
         "dynamics", "strip_eq", "reverb", "delay", "saturation", "imager",
         "limiter", "compressor", "expander", "voice_changer",
         "spectral_mangler",
+        # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX
+        "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+        "multiband_comp", "convolution_reverb", "transient_designer",
+        "tremolo_auto_pan", "chorus_flanger", "phaser",
     })
 
     # 信号（track_id 统一为 str，与 EditTrack.track_id UUID 一致）
@@ -1099,6 +1139,26 @@ class TrackMixerWidget(QWidget):
                         instance_id, self._track_id,
                     )
                     self._close_dialogs_for_instance(instance_id)
+        # P1（第三阶段）：通用 FX 对话框——对话框自带 effect_type，
+        # 逐窗校验/回填（同一 attr 承载多类型）。
+        generic = getattr(self, '_fx_param_dialogs', None)
+        if generic:
+            for instance_id, dialog in list(generic.items()):
+                inst = live.get(instance_id)
+                dlg_type = getattr(dialog, 'fx_effect_type', None)
+                if inst is not None and inst.effect_type == dlg_type \
+                        and hasattr(dialog, "set_current_params"):
+                    try:
+                        dialog.set_current_params(
+                            dict(inst.params) if inst.params else {})
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        logger.warning(
+                            "R06: 通用对话框 %s 回填失败（track=%s instance=%s）",
+                            dlg_type, self._track_id, instance_id,
+                            exc_info=True,
+                        )
+                elif inst is None or inst.effect_type != dlg_type:
+                    self._close_dialogs_for_instance(instance_id)
 
     def _show_eq_insert_in_rack(self) -> bool:
         return False
@@ -1285,6 +1345,9 @@ class TrackMixerWidget(QWidget):
             self._open_expander_editor(inst)
         elif effect_type == "strip_eq":
             self._open_strip_eq_editor(inst)
+        elif effect_type in _FX_PARAM_EFFECT_TYPES:
+            # P1（第三阶段）：通用表驱动参数对话框
+            self._open_fx_param_editor(inst)
 
     def _on_effect_list_context_menu(self, pos) -> None:
         """W26: 统一右键菜单。
@@ -1372,6 +1435,10 @@ class TrackMixerWidget(QWidget):
         for effect_type in (
             "strip_eq", "reverb", "delay", "saturation", "imager",
             "voice_changer", "spectral_mangler",
+            # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX 菜单项
+            "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+            "multiband_comp", "convolution_reverb", "transient_designer",
+            "tremolo_auto_pan", "chorus_flanger", "phaser",
         ):
             display = _effect_display_name(effect_type)
             action = menu.addAction(display)
@@ -1586,6 +1653,7 @@ class TrackMixerWidget(QWidget):
         '_delay_dialogs', '_saturation_dialogs', '_imager_dialogs',
         '_expander_dialogs', '_strip_eq_dialogs',
         '_voice_changer_dialogs', '_spectral_mangler_dialogs',
+        '_fx_param_dialogs',
     )
 
     # R06: 对话框字典属性 → 效果类型（外部链变化时按 id+类型回填/关闭）
@@ -2028,6 +2096,57 @@ class TrackMixerWidget(QWidget):
         self._effect_chain = EffectChainParams(effects=effects)
         if commit:
             # enabled 通过 params 流转（开关/右键旁路），刷新列表 [name]/灰色显示
+            self._refresh_effect_list()
+            self.track_effects_committed.emit(self._track_id, self._effect_chain)
+        else:
+            self.track_effects_preview.emit(self._track_id, self._effect_chain)
+
+    def _open_fx_param_editor(self, inst: Any) -> None:
+        """P1（第三阶段）：打开通用 FX 参数对话框（表驱动，支持多实例）。"""
+        from src.shared.ui.audio_mixer.fx_rack_dialogs import FxParamDialog
+        existing = getattr(self, '_fx_param_dialogs', {})
+        dlg = existing.get(inst.instance_id)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        params = dict(inst.params) if inst.params else _effect_default_params(
+            inst.effect_type)
+        dlg = FxParamDialog(
+            track_id=self._track_id,
+            track_name=self._track_name,
+            instance_id=inst.instance_id,
+            effect_type=inst.effect_type,
+            initial_params=params,
+            parent=self.window(),
+        )
+        dlg.fx_preview.connect(
+            lambda tid, p: self._on_fx_param_edited(inst, p, commit=False)
+        )
+        dlg.fx_committed.connect(
+            lambda tid, p: self._on_fx_param_edited(inst, p, commit=True)
+        )
+        if not hasattr(self, '_fx_param_dialogs'):
+            self._fx_param_dialogs = {}
+        self._fx_param_dialogs[inst.instance_id] = dlg
+        self._show_effect_dialog(dlg)
+
+    def _on_fx_param_edited(self, inst: Any, params: dict,
+                            commit: bool = True) -> None:
+        """通用 FX 对话框提交/预览：更新机架中对应条目。"""
+        if self._effect_chain is None:
+            return
+        # AUD-37902: 实例已被删除——丢弃编辑（与专属对话框同一守卫）。
+        if not self._instance_in_chain(inst.instance_id):
+            return
+        from src.features.edit.core.timeline_v2 import EffectChainParams
+        new_params = dict(params)
+        effects = tuple(
+            replace(e, params=new_params) if e.instance_id == inst.instance_id else e
+            for e in self._effect_chain.effects
+        )
+        self._effect_chain = EffectChainParams(effects=effects)
+        if commit:
             self._refresh_effect_list()
             self.track_effects_committed.emit(self._track_id, self._effect_chain)
         else:

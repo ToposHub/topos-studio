@@ -166,6 +166,7 @@ def _get_audio_default_params() -> dict:
         with _AUDIO_DEFAULT_PARAMS_LOCK:
             if _AUDIO_DEFAULT_PARAMS is None:
                 from src.features.edit.core.timeline_v2 import (
+        _ensure_effect_param_registry,
                     StripEQParams, LimiterParams, CompressorParams, ReverbParams,
                     DelayParams, SaturationParams, ImagerParams, ExpanderParams,
                     DynamicsParams, VoiceChangerParams, SpectralManglerParams,
@@ -187,6 +188,17 @@ def _get_audio_default_params() -> dict:
                     # NF-01：两款新复合 FX 默认参数（新建 clip/Mixer 同源）
                     "voice_changer": VoiceChangerParams.default().to_dict(),
                     "spectral_mangler": SpectralManglerParams.default().to_dict(),
+                    # P1（2026-11-19 计划第三阶段）：新 FX 默认参数
+                    "de_esser": DeEsserParams.default().to_dict(),
+                    "true_peak_limiter": TruePeakLimiterParams.default().to_dict(),
+                    "dynamic_eq": DynamicEqParams.default().to_dict(),
+                    "bus_comp": BusCompParams.default().to_dict(),
+                    "multiband_comp": MultibandCompParams.default().to_dict(),
+                    "convolution_reverb": ConvolutionReverbParams.default().to_dict(),
+                    "transient_designer": TransientDesignerParams.default().to_dict(),
+                    "tremolo_auto_pan": TremoloAutoPanParams.default().to_dict(),
+                    "chorus_flanger": ChorusFlangerParams.default().to_dict(),
+                    "phaser": PhaserParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -199,6 +211,10 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "dynamics",  # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合）
     # NF-01（2026-11-15 计划 §6.3）：两款新复合 FX
     "voice_changer", "spectral_mangler",
+    # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX
+    "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+    "multiband_comp", "convolution_reverb", "transient_designer",
+    "tremolo_auto_pan", "chorus_flanger", "phaser",
 })
 
 
@@ -585,6 +601,160 @@ SPECTRAL_MANGLER_EFFECT = EffectDefinition(
 )
 
 
+# ── P1（2026-11-19 计划第三阶段 #1-#7）：新 FX 拖拽源条目 ──
+# schema 取 timeline_v2 Params dataclass 的核心连续键（与 mixer 通用
+# 参数对话框同源）；mode/panel 类元数据不进 schema。
+
+DE_ESSER_EFFECT = EffectDefinition(
+    effect_type="de_esser",
+    name="De-Esser",
+    category="audio",
+    description="Split-band sibilance control with streaming RMS envelope",
+    params_schema={
+        "threshold_dbfs": _float_schema(-32.0, -60.0, 0.0, 0.1,
+                                        "Threshold", "dBFS"),
+        "ratio": _float_schema(4.0, 1.0, 12.0, 0.1, "Ratio", ":1"),
+        "frequency": _float_schema(6500.0, 1000.0, 16000.0, 10.0,
+                                   "Split Frequency", "Hz"),
+        "max_reduction_db": _float_schema(12.0, 0.0, 24.0, 0.5,
+                                          "Max Reduction", "dB"),
+    },
+    icon="audio_track",
+)
+
+TRUE_PEAK_LIMITER_EFFECT = EffectDefinition(
+    effect_type="true_peak_limiter",
+    name="True Peak Limiter",
+    category="audio",
+    description="4x oversampled true-peak limiter with lookahead",
+    params_schema={
+        "ceiling_dbtp": _float_schema(-1.0, -12.0, 0.0, 0.1,
+                                      "Ceiling", "dBTP"),
+        "lookahead_ms": _float_schema(5.0, 1.0, 20.0, 0.1,
+                                      "Lookahead", "ms"),
+        "release_ms": _float_schema(80.0, 20.0, 500.0, 1.0,
+                                    "Release", "ms"),
+    },
+    icon="audio_track",
+)
+
+DYNAMIC_EQ_EFFECT = EffectDefinition(
+    effect_type="dynamic_eq",
+    name="Dynamic EQ",
+    category="audio",
+    description="Bell EQ whose gain follows the band energy envelope",
+    params_schema={
+        "frequency": _float_schema(3000.0, 20.0, 20000.0, 10.0,
+                                   "Frequency", "Hz"),
+        "q": _float_schema(1.4, 0.3, 12.0, 0.05, "Resonance", "Q"),
+        "gain_db": _float_schema(0.0, -18.0, 18.0, 0.1, "Base Gain", "dB"),
+        "threshold_dbfs": _float_schema(-30.0, -60.0, 0.0, 0.5,
+                                        "Threshold", "dBFS"),
+        "max_cut_db": _float_schema(9.0, 0.0, 24.0, 0.5, "Max Cut", "dB"),
+    },
+    icon="audio_track",
+)
+
+BUS_COMP_EFFECT = EffectDefinition(
+    effect_type="bus_comp",
+    name="Bus Compressor",
+    category="audio",
+    description="Glue compressor with DX/MX templates and sidechain HPF",
+    params_schema={
+        "template": _choice_schema("dx_glue", ("dx_glue", "mx_glue"),
+                                   "Template"),
+        "sc_hpf_hz": _float_schema(120.0, 0.0, 500.0, 5.0,
+                                   "Sidechain HPF", "Hz"),
+    },
+    icon="audio_track",
+)
+
+MULTIBAND_COMP_EFFECT = EffectDefinition(
+    effect_type="multiband_comp",
+    name="Multiband Compressor",
+    category="audio",
+    description="Three-band subtractive-crossover compressor",
+    params_schema={
+        "crossover_low": _float_schema(180.0, 60.0, 800.0, 5.0,
+                                       "Crossover 1", "Hz"),
+        "crossover_high": _float_schema(4200.0, 800.0, 12000.0, 25.0,
+                                        "Crossover 2", "Hz"),
+        "attack_ms": _float_schema(10.0, 1.0, 100.0, 0.5, "Attack", "ms"),
+    },
+    icon="audio_track",
+)
+
+CONVOLUTION_REVERB_EFFECT = EffectDefinition(
+    effect_type="convolution_reverb",
+    name="Convolution Reverb",
+    category="audio",
+    description="Partitioned-FFT convolution reverb with WAV impulse response",
+    params_schema={
+        "wet": _float_schema(0.35, 0.0, 1.0, 0.01, "Wet", ""),
+        "dry": _float_schema(1.0, 0.0, 1.0, 0.01, "Dry", ""),
+    },
+    icon="audio_track",
+)
+
+TRANSIENT_DESIGNER_EFFECT = EffectDefinition(
+    effect_type="transient_designer",
+    name="Transient Designer",
+    category="audio",
+    description="dB-domain attack/sustain shaping with 3 dB knee",
+    params_schema={
+        "attack_db": _float_schema(6.0, -12.0, 24.0, 0.5, "Attack", "dB"),
+        "sustain_db": _float_schema(0.0, -24.0, 12.0, 0.5, "Sustain", "dB"),
+        "attack_ms": _float_schema(8.0, 0.5, 50.0, 0.5, "Attack Time", "ms"),
+        "sustain_ms": _float_schema(80.0, 10.0, 300.0, 1.0,
+                                    "Sustain Release", "ms"),
+    },
+    icon="audio_track",
+)
+
+TREMOLO_AUTO_PAN_EFFECT = EffectDefinition(
+    effect_type="tremolo_auto_pan",
+    name="Tremolo / Auto Pan",
+    category="audio",
+    description="Phase-continuous LFO tremolo or equal-power auto pan",
+    params_schema={
+        "rate_hz": _float_schema(4.0, 0.05, 20.0, 0.05, "Rate", "Hz"),
+        "depth": _float_schema(0.7, 0.0, 1.0, 0.01, "Depth", ""),
+    },
+    icon="audio_track",
+)
+
+CHORUS_FLANGER_EFFECT = EffectDefinition(
+    effect_type="chorus_flanger",
+    name="Chorus / Flanger",
+    category="audio",
+    description="Modulated delay line with feedback tail budget",
+    params_schema={
+        "rate_hz": _float_schema(0.6, 0.01, 20.0, 0.01, "Rate", "Hz"),
+        "depth_ms": _float_schema(3.0, 0.0, 10.0, 0.05, "Depth", "ms"),
+        "feedback": _float_schema(0.0, 0.0, 0.95, 0.01, "Feedback", ""),
+        "mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
+    },
+    icon="audio_track",
+)
+
+PHASER_EFFECT = EffectDefinition(
+    effect_type="phaser",
+    name="Phaser",
+    category="audio",
+    description="All-pass cascade with phase-continuous LFO sweep",
+    params_schema={
+        "rate_hz": _float_schema(0.5, 0.01, 20.0, 0.01, "Rate", "Hz"),
+        "stages": _float_schema(4.0, 1.0, 12.0, 1.0, "Stages", ""),
+        "base_hz": _float_schema(600.0, 100.0, 4000.0, 10.0,
+                                 "Base Frequency", "Hz"),
+        "sweep_octaves": _float_schema(2.5, 0.5, 5.0, 0.1,
+                                       "Sweep", "oct"),
+        "mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
+    },
+    icon="audio_track",
+)
+
+
 def _paramdef_to_schema(param_def) -> ParamSchema:
     """Convert a composite ``ParamDef`` to an Edit ``ParamSchema``.
 
@@ -676,6 +846,10 @@ def _get_audio_default_params() -> dict:
                     StripEQParams, LimiterParams, CompressorParams, ReverbParams,
                     DelayParams, SaturationParams, ImagerParams, ExpanderParams,
                     DynamicsParams, VoiceChangerParams, SpectralManglerParams,
+                    DeEsserParams, TruePeakLimiterParams, DynamicEqParams,
+                    BusCompParams, MultibandCompParams, ConvolutionReverbParams,
+                    TransientDesignerParams, TremoloAutoPanParams,
+                    ChorusFlangerParams, PhaserParams,
                 )
                 # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
                 #（旧数据无损承接为 Gate），新增 expander 类型。
@@ -694,6 +868,17 @@ def _get_audio_default_params() -> dict:
                     # NF-01：两款新复合 FX 默认参数（新建 clip/Mixer 同源）
                     "voice_changer": VoiceChangerParams.default().to_dict(),
                     "spectral_mangler": SpectralManglerParams.default().to_dict(),
+                    # P1（2026-11-19 计划第三阶段）：新 FX 默认参数
+                    "de_esser": DeEsserParams.default().to_dict(),
+                    "true_peak_limiter": TruePeakLimiterParams.default().to_dict(),
+                    "dynamic_eq": DynamicEqParams.default().to_dict(),
+                    "bus_comp": BusCompParams.default().to_dict(),
+                    "multiband_comp": MultibandCompParams.default().to_dict(),
+                    "convolution_reverb": ConvolutionReverbParams.default().to_dict(),
+                    "transient_designer": TransientDesignerParams.default().to_dict(),
+                    "tremolo_auto_pan": TremoloAutoPanParams.default().to_dict(),
+                    "chorus_flanger": ChorusFlangerParams.default().to_dict(),
+                    "phaser": PhaserParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -706,6 +891,10 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "dynamics",  # CW-A1: Dynamics 完整单元（EG→Comp→Lim 单实例复合）
     # NF-01（2026-11-15 计划 §6.3）：两款新复合 FX
     "voice_changer", "spectral_mangler",
+    # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX
+    "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
+    "multiband_comp", "convolution_reverb", "transient_designer",
+    "tremolo_auto_pan", "chorus_flanger", "phaser",
 })
 
 
@@ -1169,6 +1358,17 @@ class EffectRegistry:
         # NF-01：两款新复合 FX
         self.register(VOICE_CHANGER_EFFECT)
         self.register(SPECTRAL_MANGLER_EFFECT)
+        # P1（2026-11-19 计划第三阶段 #1-#7）：新 FX
+        self.register(DE_ESSER_EFFECT)
+        self.register(TRUE_PEAK_LIMITER_EFFECT)
+        self.register(DYNAMIC_EQ_EFFECT)
+        self.register(BUS_COMP_EFFECT)
+        self.register(MULTIBAND_COMP_EFFECT)
+        self.register(CONVOLUTION_REVERB_EFFECT)
+        self.register(TRANSIENT_DESIGNER_EFFECT)
+        self.register(TREMOLO_AUTO_PAN_EFFECT)
+        self.register(CHORUS_FLANGER_EFFECT)
+        self.register(PHASER_EFFECT)
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an
