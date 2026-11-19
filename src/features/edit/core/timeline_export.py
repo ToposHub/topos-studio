@@ -4456,6 +4456,46 @@ class TimelineExporter:
                 clip_fx_cache: dict = {}
                 # D04：动画 FX 的逐帧参数采样器缓存（None=静态，无逐帧更新）
                 _clip_fx_cache_fx: dict = {}
+                # P0 · Clip FX PDC：轨内 clip 链统一在块循环前构建——
+                # 最大链延迟必须在任何 clip 渲染前可知（最迟路径对齐），
+                # 各 clip 相对延迟 = 轨最大 − 本链声明（同实时 mix_samples）。
+                from src.features.edit.core.audio_retime import (
+                    animated_fx_sampler as _afs_pre,
+                    clip_fx_entries as _cfe_pre,
+                )
+                from src.features.edit.core.audio_dsp import apply_pdc_delay_line
+                _clip_lat_map: dict = {}
+                _track_clip_lat_max = 0
+                for _pc in track.clips:
+                    _pc_effects = sorted(
+                        getattr(_pc, 'effects', ()) or (),
+                        key=lambda ef: getattr(ef, 'order', 0),
+                    )
+                    if not _pc_effects:
+                        continue
+                    _pc_entries = _cfe_pre(_pc_effects, None)
+                    if not _pc_entries:
+                        continue
+                    _pc_chain = EffectChain(float(sample_rate))
+                    _pc_chain.set_params(
+                        _pc_entries, sample_rate=float(sample_rate))
+                    clip_fx_cache[_pc.clip_id] = _pc_chain
+                    try:
+                        _pc_lat = max(0, int(_pc_chain.latency_samples()))
+                    except Exception:  # noqa: BLE001 — 声明异常按 0
+                        _pc_lat = 0
+                    _clip_lat_map[_pc.clip_id] = _pc_lat
+                    _track_clip_lat_max = max(_track_clip_lat_max, _pc_lat)
+                    _pc_sampler = _afs_pre(_pc_effects)
+                    if _pc_sampler is not None:
+                        _clip_fx_cache_fx[_pc.clip_id] = _pc_sampler
+                clip_pdc_lines: dict = {}
+                if _track_clip_lat_max > 0 and renderer is not None:
+                    # 轨节点 PDC 重算：节点延迟 = 轨链延迟 + clip 最大延迟
+                    # （尾音/输出长度预算经 pdc_total_samples 自动延长）。
+                    note_lat = getattr(renderer, "note_clip_chain_latency", None)
+                    if callable(note_lat):
+                        note_lat(track.track_id, _track_clip_lat_max)
                 # MX-04: 轨帧求和缓存——clip-major 解码后把 clip 阶段输出按帧
                 # 汇入 pending_frames，轨阶段（音量/pan/panner/EQ/FX）在 flush
                 # 时对求和后的输入**每帧只运行一次**（与实时 mix_samples 同构）。
@@ -5050,6 +5090,18 @@ class TimelineExporter:
                             # clip FX（pre-fader，在轨阶段 volume 之前）
                             if clip_chain is not None and clip_chain.is_active:
                                 samples = clip_chain.process(samples)
+                            # P0 · Clip FX PDC：同轨 clip 相对对齐——本链
+                            # 延迟小于轨内 clip 最大延迟时推迟差值（轨节点
+                            # 整体推迟已计入 note 上报重算）。旁路/失活的链
+                            # 无算法延迟按 0 计（与实时 mix_samples 同语义）。
+                            _rel = (_track_clip_lat_max
+                                    - (_clip_lat_map.get(clip.clip_id, 0) or 0
+                                       if clip_chain is not None
+                                       and clip_chain.is_active else 0))
+                            if _rel > 0:
+                                samples = apply_pdc_delay_line(
+                                    clip_pdc_lines, clip.clip_id,
+                                    _rel, samples)
 
                             # 汇入该轨该帧的求和缓冲（MX-04）
                             frame_buf = pending_frames.get(frame_idx)
@@ -5066,33 +5118,51 @@ class TimelineExporter:
                                 track_first_src_ch = int(
                                     getattr(decoder, "_channels", 2) or 2)
 
-                        # R04：clip FX 尾音——clip 结束后按其链尾音预算
-                        # 继续喂零块（保持链状态连续），输出汇入轨 pending；
-                        # 限选区内（不扩展选区）。帧与该 clip 最后一帧紧邻，
-                        # 链状态不跳跃；后续 clip 的内容帧与尾音帧在
-                        # pending 求和（MX-04 语义）。
-                        if clip_chain is not None and clip_chain.is_active:
-                            _cf_tail = int(clip_chain.tail_estimate_samples())
-                            if _cf_tail > 0 and samples_per_frame > 0:
-                                _cf_frames = int(math.ceil(
-                                    _cf_tail / float(samples_per_frame)))
-                                # H03：含尾模式 clip 尾音延伸进扩展区
-                                #（clip 结束于选区末时不再截断首回声）
-                                for _tf in range(clip_end,
-                                                  min(end_frame + render_tail_frames,
-                                                      clip_end + _cf_frames)):
-                                    _trel = _tf - feed_start
-                                    if _trel < 0 or \
-                                            _trel + 1 >= len(frame_sample_bounds):
-                                        break
-                                    _ts = frame_sample_bounds[_trel]
-                                    _te = frame_sample_bounds[_trel + 1]
-                                    _tbl = _te - _ts
-                                    if _tbl <= 0:
-                                        continue
+                        # R04：clip FX 尾音 + Clip FX PDC 线 flush——
+                        # clip 结束后按预算继续喂零块（保持链状态连续），
+                        # 输出汇入轨 pending；限选区内（不扩展选区）。帧与
+                        # 该 clip 最后一帧紧邻，链状态不跳跃；后续 clip 的
+                        # 内容帧与尾音帧在 pending 求和（MX-04 语义）。
+                        # P0 · Clip FX PDC：对全部已结束 clip 生效（不只挂
+                        # 链的 clip）——预算 = max(链尾音, 链延迟) + 相对
+                        # 延迟线持留量；无链/旁路 clip 的相对延迟线持留
+                        # 内容同样 flush（否则尾部最后 clip_max 样本丢失）。
+                        _c_active = (clip_chain is not None
+                                     and clip_chain.is_active)
+                        _c_lat = (_clip_lat_map.get(clip.clip_id, 0) or 0
+                                  if _c_active else 0)
+                        _crel = _track_clip_lat_max - _c_lat
+                        _cf_tail = max(
+                            (int(clip_chain.tail_estimate_samples())
+                             if _c_active else 0), _c_lat) + max(0, _crel)
+                        if _cf_tail > 0 and samples_per_frame > 0:
+                            _cf_frames = int(math.ceil(
+                                _cf_tail / float(samples_per_frame)))
+                            # H03：含尾模式 clip 尾音延伸进扩展区
+                            #（clip 结束于选区末时不再截断首回声）
+                            for _tf in range(clip_end,
+                                              min(end_frame + render_tail_frames,
+                                                  clip_end + _cf_frames)):
+                                _trel = _tf - feed_start
+                                if _trel < 0 or \
+                                        _trel + 1 >= len(frame_sample_bounds):
+                                    break
+                                _ts = frame_sample_bounds[_trel]
+                                _te = frame_sample_bounds[_trel + 1]
+                                _tbl = _te - _ts
+                                if _tbl <= 0:
+                                    continue
+                                if _c_active:
                                     _tblock = clip_chain.process(
                                         np.zeros((channels, _tbl),
                                                  dtype=np.float32))
+                                else:
+                                    _tblock = np.zeros(
+                                        (channels, _tbl), dtype=np.float32)
+                                if _crel > 0:
+                                    _tblock = apply_pdc_delay_line(
+                                        clip_pdc_lines, clip.clip_id,
+                                        _crel, _tblock)
                                     _tfbuf = pending_frames.get(_tf)
                                     if _tfbuf is None or \
                                             _tfbuf.shape[-1] != _tbl:

@@ -462,6 +462,40 @@ def _iter_stem_pcm_chunks(
     fx_chains: Dict[str, EffectChain] = {}
     fx_samplers: Dict[str, Any] = {}
 
+    # P0 · Clip FX PDC：轨内 clip 链统一预构建（work 已按选区过滤）——
+    # 最大链延迟必须在任何块渲染前可知（最迟路径对齐）；相对延迟线
+    # 键=clip_id，跨 chunk 持久（与 chunk 内 feed 坐标同域）。
+    _clip_lat_map: Dict[str, int] = {}
+    _track_clip_lat_max: Dict[str, int] = {}
+    clip_pdc_lines: Dict[str, np.ndarray] = {}
+    for _w_track, _w_clip, _ws, _we in work:
+        _w_effects = getattr(_w_clip, "effects", ()) or ()
+        if not _w_effects:
+            continue
+        _w_entries = clip_fx_entries(_w_effects, None)
+        if not _w_entries:
+            continue
+        _w_chain = EffectChain(float(sample_rate))
+        _w_chain.set_params(_w_entries, sample_rate=float(sample_rate))
+        fx_chains[_w_clip.clip_id] = _w_chain
+        try:
+            _w_lat = max(0, int(_w_chain.latency_samples()))
+        except Exception:  # noqa: BLE001 — 声明异常按 0
+            _w_lat = 0
+        _clip_lat_map[_w_clip.clip_id] = _w_lat
+        _w_tid = getattr(_w_track, "track_id", "")
+        _track_clip_lat_max[_w_tid] = max(
+            _track_clip_lat_max.get(_w_tid, 0), _w_lat)
+        _w_sampler = animated_fx_sampler(_w_effects)
+        if _w_sampler is not None:
+            fx_samplers[_w_clip.clip_id] = _w_sampler
+    # 轨节点 PDC 重算：节点延迟 = 轨链延迟 + clip 最大延迟
+    # （pdc_total_samples 随之延长预卷/长度预算）。
+    _note_lat = getattr(renderer, "note_clip_chain_latency", None)
+    if callable(_note_lat):
+        for _w_tid, _w_lat in _track_clip_lat_max.items():
+            _note_lat(_w_tid, _w_lat)
+
     def _clip_fx_for(clip: Any, frame_idx: int) -> Optional[EffectChain]:
         clip_id = getattr(clip, "clip_id", "")
         chain = fx_chains.get(clip_id)
@@ -735,6 +769,22 @@ def _iter_stem_pcm_chunks(
                 _clip_chain = _clip_fx_for(clip, frame_idx)
                 if _clip_chain is not None and _clip_chain.is_active:
                     samples = _clip_chain.process(samples)
+                # P0 · Clip FX PDC：同轨 clip 相对对齐（本链延迟小于轨内
+                # clip 最大延迟时推迟差值；轨节点整体推迟已计入
+                # note_clip_chain_latency 重算）。旁路/失活的链无算法延迟
+                # 按 0 计（与实时 mix_samples 同语义）。
+                _rel = (_track_clip_lat_max.get(
+                            getattr(track, "track_id", ""), 0)
+                        - (_clip_lat_map.get(
+                            getattr(clip, "clip_id", ""), 0) or 0
+                           if _clip_chain is not None
+                           and _clip_chain.is_active else 0))
+                if _rel > 0:
+                    from src.features.edit.core.audio_dsp import (
+                        apply_pdc_delay_line,
+                    )
+                    samples = apply_pdc_delay_line(
+                        clip_pdc_lines, clip.clip_id, _rel, samples)
 
                 key = (track.track_id, frame_idx)
                 frame_buf = frame_sum.get(key)
@@ -749,25 +799,45 @@ def _iter_stem_pcm_chunks(
             # 继续喂零（与成片导出同语义；修前 stem 的 clip Delay 尾音
             # 为 0而成片 0.344，复审 clip_tail_peaks 已复现）。帧紧邻
             # clip 末帧，链状态连续；帧块汇入轨求和（MX-04 语义）。
+            # P0 · Clip FX PDC：对全部已结束 clip 生效（不只挂链的
+            # clip）——预算 = max(链尾音, 链延迟) + 相对延迟线持留量；
+            # 无链/旁路 clip 的相对延迟线持留内容同样 flush。
             _clip_end = int(clip.timeline_start) + int(clip.timeline_duration)
             if f0 <= _clip_end < f1:
                 _chain = fx_chains.get(getattr(clip, "clip_id", ""))
-                if _chain is not None and _chain.is_active:
-                    _ctail = int(_chain.tail_estimate_samples())
-                    if _ctail > 0:
-                        _spf = max(1.0, sample_rate / max(1e-6, float(fps)))
-                        _ctail_frames = int(math.ceil(_ctail / _spf))
-                        for _tf in range(_clip_end,
-                                         min(f1, _clip_end + _ctail_frames)):
-                            _ts = frames_to_samples(
-                                _tf - feed_start, fps_exact, sample_rate)
-                            _tn = frames_to_samples(
-                                _tf + 1 - feed_start, fps_exact, sample_rate)
-                            _tbl = _tn - _ts
-                            if _tbl <= 0:
-                                continue
+                _c_active = (_chain is not None and _chain.is_active)
+                _c_lat = (_clip_lat_map.get(getattr(clip, "clip_id", ""), 0)
+                          or 0) if _c_active else 0
+                _t_max = _track_clip_lat_max.get(
+                    getattr(track, "track_id", ""), 0)
+                _crel = _t_max - _c_lat
+                _ctail = max(
+                    (int(_chain.tail_estimate_samples()) if _c_active else 0),
+                    _c_lat) + max(0, _crel)
+                if _ctail > 0:
+                    _spf = max(1.0, sample_rate / max(1e-6, float(fps)))
+                    _ctail_frames = int(math.ceil(_ctail / _spf))
+                    for _tf in range(_clip_end,
+                                     min(f1, _clip_end + _ctail_frames)):
+                        _ts = frames_to_samples(
+                            _tf - feed_start, fps_exact, sample_rate)
+                        _tn = frames_to_samples(
+                            _tf + 1 - feed_start, fps_exact, sample_rate)
+                        _tbl = _tn - _ts
+                        if _tbl <= 0:
+                            continue
+                        if _c_active:
                             _tblock = _chain.process(
                                 np.zeros((channels, _tbl), dtype=np.float32))
+                        else:
+                            _tblock = np.zeros(
+                                (channels, _tbl), dtype=np.float32)
+                        if _crel > 0:
+                            from src.features.edit.core.audio_dsp import (
+                                apply_pdc_delay_line,
+                            )
+                            _tblock = apply_pdc_delay_line(
+                                clip_pdc_lines, clip.clip_id, _crel, _tblock)
                             _key = (track.track_id, _tf)
                             _tbuf = frame_sum.get(_key)
                             if _tbuf is None:

@@ -1748,6 +1748,16 @@ class AudioMixer:
         # 的 mixer audio 效果）。在 decoder 解码后、track volume/pan 之前
         # 应用（item-FX = pre-track-FX 语义）。key=clip_id。
         self._clip_effect_chains: Dict[str, EffectChain] = {}
+        # P0 · Clip FX PDC：clip 链的算法延迟记账（true_peak_limiter
+        # lookahead / voice_changer 颗粒对齐等非零声明）。
+        # - _clip_chain_lat[clip_id] = 该 clip 链的 latency_samples()
+        # - _clip_lat_max[track_id] = 该轨全部 clip 链延迟的最大值
+        #   （轨节点 PDC max = 轨链延迟 + clip 最大延迟；同轨 clip 间
+        #   由 _clip_pdc_lines 相对延迟线对齐到 clip_max——「最迟路径
+        #   对齐」在 clip 级的延伸）。
+        self._clip_chain_lat: Dict[str, int] = {}
+        self._clip_lat_max: Dict[str, int] = {}
+        self._clip_pdc_lines: Dict[str, np.ndarray] = {}
         # H09：Freeze 捕获资产注册表（set_freeze_registry 注入）
         self._freeze_registry: Dict[str, dict] = {}
         # H03：clip 尾音 drain 记账（clip 结束帧 / 所属轨 / 剩余预算）
@@ -2184,6 +2194,10 @@ class AudioMixer:
                 self._clip_track_of.pop(cid, None)
                 self._clip_tail_left.pop(cid, None)
                 self._clip_to_track.pop(cid, None)
+                # P0 · Clip FX PDC：延迟记账与相对延迟线一并清理
+                self._clip_chain_lat.pop(cid, None)
+                self._clip_pdc_lines.pop(cid, None)
+            self._recompute_clip_lat_max_locked(track_id)
             # W11: 清理 LUFS 响度计
             self._lufs_meters.pop(track_id, None)
             # MX-10: 清理 fx 参数自动化采样器
@@ -2483,6 +2497,10 @@ class AudioMixer:
                     lat = int(chain.latency_samples())
                 except Exception:  # noqa: BLE001 — 声明异常按 0
                     lat = 0
+            # P0 · Clip FX PDC：轨节点延迟 = 轨链延迟 + 该轨 clip 链最大
+            # 延迟（clip 间已由相对延迟线对齐到 clip_max——轨级再统一
+            # 推迟 clip_max，声学事件与其它轨在 Master 汇合处同样本）。
+            lat += int(self._clip_lat_max.get(tid, 0) or 0)
             is_bus = bool(isinstance(self._track_routing.get(tid), dict)
                           and self._track_routing[tid].get("is_bus"))
             (bus_lat if is_bus else track_lat)[tid] = max(0, lat)
@@ -2502,7 +2520,7 @@ class AudioMixer:
         return self._pdc_track_max + self._pdc_bus_max
 
     def _advance_pdc_line(self, node_id: str, channels: int, num_samples: int) -> None:
-        """节点本块被跳过（mute/solo/禁用/无输入）时也推进延迟线（喂零）。
+        """节点本块被跳过（mute/solo/禁用/无输入块喂零）时也推进延迟线（喂零）。
 
         被推迟的内容必须按绝对时间继续流出，否则重新激活时缓冲内容
         在错误的时间涌出。
@@ -2512,6 +2530,34 @@ class AudioMixer:
             apply_pdc_delay_line(
                 self._pdc_lines, node_id, delay,
                 np.zeros((channels, num_samples), dtype=np.float32),
+            )
+
+    def _advance_clip_pdc_lines(self, track_id: str, num_samples: int) -> None:
+        """轨被跳过（mute/solo/禁用/无 decoder/自动化门控）时推进该轨全部
+        clip 相对延迟线（P0 · Clip FX PDC：持留内容按绝对时间继续流出）。
+
+        通道数取线缓冲自身的列形状（clip 阶段通道数与轨输出通道无需一致）；
+        空线/无持留内容时跳过（无内容可推进，也避免建错通道数的线）。
+        """
+        rel_map = self._clip_lat_max.get(track_id, 0)
+        if not rel_map:
+            return
+        for cid in list(self._clip_pdc_lines.keys()):
+            # 无链 clip 不经 set_clip_effects 登记（_clip_to_track 缺席），
+            # 但其解码块已在 _clip_track_of 记账——优先按后者反查。
+            if (self._clip_track_of.get(cid)
+                    or self._clip_to_track.get(cid)) != track_id:
+                continue
+            buffered = self._clip_pdc_lines.get(cid)
+            if buffered is None or buffered.shape[-1] == 0:
+                continue
+            rel = (int(rel_map or 0)
+                   - int(self._clip_chain_lat.get(cid, 0) or 0))
+            if rel <= 0:
+                continue
+            apply_pdc_delay_line(
+                self._clip_pdc_lines, cid, rel,
+                np.zeros((buffered.shape[0], num_samples), dtype=np.float32),
             )
 
     def reset_dsp_states(self) -> None:
@@ -2538,6 +2584,8 @@ class AudioMixer:
             self._track_tail_remaining.clear()
             # P0 · PDC: seek 清延迟线（旧位置的缓冲内容不得复活）
             self._pdc_lines.clear()
+            # P0 · Clip FX PDC：clip 相对延迟线一并清空
+            self._clip_pdc_lines.clear()
             for win in self._spectrum_windows.values():
                 win.fill(0.0)
             for tid in list(self._spectrum_write.keys()):
@@ -2682,14 +2730,40 @@ class AudioMixer:
                 # 清空：直接移除缓存的链（下次该 clip 无效果处理）
                 self._clip_effect_chains.pop(clip_id, None)
                 self._clip_effect_samplers.pop(clip_id, None)
+                self._clip_chain_lat.pop(clip_id, None)
+                self._clip_pdc_lines.pop(clip_id, None)
+                if track_id is not None:
+                    self._recompute_clip_lat_max_locked(track_id)
+                    self._recompute_pdc_locked()
                 return
             if clip_id not in self._clip_effect_chains:
                 self._clip_effect_chains[clip_id] = EffectChain(self._sample_rate)
             self._clip_effect_chains[clip_id].set_params(entries, sample_rate=self._sample_rate)
+            # P0 · Clip FX PDC：记录链延迟并重算轨级补偿量。
+            try:
+                self._clip_chain_lat[clip_id] = max(
+                    0, int(self._clip_effect_chains[clip_id].latency_samples()))
+            except Exception:  # noqa: BLE001 — 声明异常按 0
+                self._clip_chain_lat[clip_id] = 0
+            if track_id is not None:
+                self._recompute_clip_lat_max_locked(track_id)
+                self._recompute_pdc_locked()
             if animated_sampler is not None:
                 self._clip_effect_samplers[clip_id] = animated_sampler
             else:
                 self._clip_effect_samplers.pop(clip_id, None)
+
+    def _recompute_clip_lat_max_locked(self, track_id: str) -> None:
+        """重算某轨全部 clip 链的最大算法延迟（调用方须持 _mutex）。"""
+        max_lat = 0
+        for cid, tid in self._clip_to_track.items():
+            if tid != track_id:
+                continue
+            max_lat = max(max_lat, int(self._clip_chain_lat.get(cid, 0) or 0))
+        if max_lat > 0:
+            self._clip_lat_max[track_id] = max_lat
+        else:
+            self._clip_lat_max.pop(track_id, None)
 
     def set_audio_transitions(self, track_id: str, transitions: Optional[list]) -> None:
         """注册某音频轨的转场实例（AT — Audio Transitions）。线程安全。
@@ -2968,10 +3042,12 @@ class AudioMixer:
                 decoders = self._decoders.get(track_id)
                 if decoders is None:
                     self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
                 state = self._tracks.get(track_id)
                 if not state or not state.enabled:
                     self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
                 # W25: 跳过 Bus 轨（它们在阶段 2 处理，不在阶段 1 解码 clips）
                 routing = self._track_routing.get(track_id, {})
@@ -2981,12 +3057,14 @@ class AudioMixer:
                 # 计算有效音量
                 if state.muted:
                     self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
 
                 # RMA-04: solo 用可听闭包判断。旧逻辑 `not state.solo` 会把 solo 普通
                 # 轨的上游输入（喂给 solo Bus 的普通轨）错误剔除。闭包保留这些上游。
                 if has_solo and track_id not in audible_solo:
                     self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
 
                 pan = state.pan
@@ -3055,6 +3133,7 @@ class AudioMixer:
                         if not np.any(mute_gate):
                             # P0 · PDC: 整块被自动化静音门控剔除 → 推进延迟线
                             self._advance_pdc_line(track_id, output_channels, num_samples)
+                            self._advance_clip_pdc_lines(track_id, num_samples)
                             continue
                 # 累计该轨电平（跨多个 decoder/clip：peak 取 max，RMS 用平方和均值）
                 track_peak_l = 0.0
@@ -3244,6 +3323,20 @@ class AudioMixer:
                                     pass
                             if clip_chain.is_active:
                                 samples = clip_chain.process(samples)
+                        # P0 · Clip FX PDC：同轨 clip 间相对对齐——本 clip
+                        # 链延迟小于轨内 clip 最大延迟时，相对推迟差值（最迟
+                        # 路径对齐在 clip 级的延伸；轨节点整体推迟已计入
+                        # recompute）。无链/旁路/失活的链无算法延迟按 0 计
+                        #（内容本无位移，须补满 clip_max 才能与其余轨同样本
+                        # 汇合）——对全部 clip 生效，不只是挂链的 clip。
+                        _rel = (int(self._clip_lat_max.get(track_id, 0) or 0)
+                                - (int(self._clip_chain_lat.get(clip_id, 0) or 0)
+                                   if clip_chain is not None
+                                   and clip_chain.is_active else 0))
+                        if _rel > 0:
+                            samples = apply_pdc_delay_line(
+                                self._clip_pdc_lines, clip_id,
+                                _rel, samples)
 
                     # CW-A1: pre-fader 峰值改在轨阶段对求和输入测量（MX-04：
                     # 多 clip 重叠时求和电平才反映 Dynamics 检测到的真实输入）
@@ -3286,27 +3379,42 @@ class AudioMixer:
                         samples = samples[..., :num_samples]
                     track_input[:, :samples.shape[-1]] += samples
 
-                # ── H03: clip FX 尾音 ──
+                # ── H03: clip FX 尾音 + Clip FX PDC 线 flush ──
                 # 已结束 clip 的 per-clip 链按其尾音预算继续喂零（实时/
                 # 成片/Stem 同语义；修前实时 clip Delay 回声整段丢失——
                 # 复审 clip_tail_peaks live=0 已复现）。输出汇入轨求和
                 # （pan/链语义同成片：尾音不再过 clip pan——成片同口径）。
-                for _cid, _cchain in self._clip_effect_chains.items():
+                # P0 · Clip FX PDC：对全部已结束 clip 生效（不只挂链的
+                # clip）——预算 = max(链尾音, 链延迟) + 相对延迟线持留量；
+                # 无链/旁路 clip 的相对延迟线持留内容同样按绝对时间流出
+                # （否则 clip 尾部最后 clip_max 个样本滞留丢失）。
+                _clip_lat_max_t = int(self._clip_lat_max.get(track_id, 0) or 0)
+                for _cid in list(self._clip_track_of.keys()):
                     if self._clip_track_of.get(_cid) != track_id:
                         continue
                     _cend = self._clip_end_frames.get(_cid)
                     if _cend is None or current_frame < _cend:
                         continue
+                    _cchain = self._clip_effect_chains.get(_cid)
+                    _c_active = (_cchain is not None and _cchain.is_active)
+                    _c_lat = (int(self._clip_chain_lat.get(_cid, 0) or 0)
+                              if _c_active else 0)
+                    _crel = _clip_lat_max_t - _c_lat
                     if _cid not in self._clip_tail_left:
+                        _c_tail = (_cchain.tail_estimate_samples()
+                                   if _c_active else 0)
                         self._clip_tail_left[_cid] = (
-                            _cchain.tail_estimate_samples()
-                            if _cchain is not None else 0)
+                            max(_c_tail, _c_lat) + max(0, _crel))
                     _cleft = self._clip_tail_left.get(_cid, 0)
-                    if _cleft <= 0 or _cchain is None or not _cchain.is_active:
+                    if _cleft <= 0:
                         continue
-                    _ctail = _cchain.process(
-                        np.zeros((min(2, output_channels), num_samples),
-                                 dtype=np.float32))
+                    _ctail = np.zeros((min(2, output_channels), num_samples),
+                                      dtype=np.float32)
+                    if _c_active:
+                        _ctail = _cchain.process(_ctail)
+                    if _crel > 0:
+                        _ctail = apply_pdc_delay_line(
+                            self._clip_pdc_lines, _cid, _crel, _ctail)
                     _cn = min(_ctail.shape[-1], track_input.shape[-1])
                     track_input[:_ctail.shape[0], :_cn] += _ctail[:, :_cn]
                     self._clip_tail_left[_cid] = max(0, _cleft - num_samples)

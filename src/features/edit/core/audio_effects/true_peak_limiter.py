@@ -30,9 +30,6 @@ except ImportError:  # pragma: no cover
 
 OVERSAMPLE = 4
 
-#: 过采样 FIR 的群延迟（resample_poly 半长 FIR 的样本数，按输出率计）。
-_FIR_GROUP_DELAY_OUT = 10  # 经验：默认 kaiser 窗 FIR 半长（输出域）
-
 DEFAULTS = {
     "enabled": True,
     "ceiling_dbtp": -1.0,
@@ -88,11 +85,17 @@ class TruePeakLimiterEffect(AudioEffect):
             release_ms * self._sample_rate / 1000.0))
 
     def latency_samples(self) -> int:
-        """group delay = lookahead + 过采样 FIR 群延迟（PDC 消费）。"""
+        """group delay = lookahead（PDC 消费）。
+
+        修前声明额外加了 FIR 群延迟项（``_FIR_GROUP_DELAY_OUT`` 经验常数）：
+        实测 ``resample_poly`` 内部做零相位对齐（单位脉冲经 4× 上采样峰
+        恰落 ``index*OVERSAMPLE``），过采样 FIR 无净输入域群延迟——多声明
+        的 3 样本使挂链轨相对其它轨整体多延迟 3 样本（0.06 ms，对齐验收
+        可测）。以实测为准：声明 = lookahead。
+        """
         lookahead = int(self._params.get("lookahead_ms", 5.0)
                         * self._sample_rate / 1000.0)
-        fir_input_domain = _FIR_GROUP_DELAY_OUT // OVERSAMPLE + 1
-        return int(lookahead + fir_input_domain)
+        return int(lookahead)
 
     # ── 处理 ──────────────────────────────────────────────────────
     def _target_gain(self, peak: float) -> float:
