@@ -37,7 +37,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from src.features.edit.core.audio_dsp import EffectChain, StripEQFilter
+from src.features.edit.core.audio_dsp import EffectChain, StripEQFilter, apply_pdc_delay_line
 from src.features.edit.core.audio_playback import topological_sort_buses, unpack_send
 
 logger = logging.getLogger(__name__)
@@ -367,21 +367,9 @@ class AudioGraphRenderer:
         self._pdc_lines = {}
 
     def _apply_pdc(self, node_id: str, samples: np.ndarray) -> np.ndarray:
-        """节点输出端延迟线：把该路径对齐到同级最迟链。
-
-        首块前视为已有 ``delay`` 个零样本的历史——输出从第一块起就对齐
-        绝对时间（被推迟的内容由尾音预算延长的 drain 区释放）。
-        """
-        delay = self._pdc_delay.get(node_id, 0)
-        if delay <= 0 or samples.shape[-1] == 0:
-            return samples
-        buffered = self._pdc_lines.get(node_id)
-        pending = (buffered if buffered is not None and buffered.shape[-1] > 0
-                   else np.zeros((samples.shape[0], delay), dtype=np.float32))
-        combined = np.concatenate([pending, samples], axis=1)
-        out = combined[:, :samples.shape[-1]]
-        self._pdc_lines[node_id] = combined[:, samples.shape[-1]:]
-        return np.ascontiguousarray(out, dtype=np.float32)
+        """节点输出端延迟线：把该路径对齐到同级最迟链。"""
+        return apply_pdc_delay_line(
+            self._pdc_lines, node_id, self._pdc_delay.get(node_id, 0), samples)
 
     def master_sidechain_sources(self) -> set:
         """MX-03: Master 链引用的外部侧链检源 track_id 集合（导出拼 tap 用）。"""

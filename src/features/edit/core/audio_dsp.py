@@ -3688,6 +3688,26 @@ def _ensure_effect_registry() -> dict:
     return _EFFECT_CLASS_REGISTRY
 
 
+def apply_pdc_delay_line(
+    lines: dict, node_id: str, delay: int, samples: np.ndarray,
+) -> np.ndarray:
+    """节点输出端延迟线（PDC 共享实现，离线渲染与实时混音同语义）。
+
+    首块前视为已有 ``delay`` 个零样本的历史——输出从第一块起就对齐
+    绝对时间（被推迟的内容由尾音预算延长的 drain 区释放）。``lines``
+    是 {node_id: 尾部缓冲}，调用方负责清空时机（seek/重算）。
+    """
+    if delay <= 0 or samples.shape[-1] == 0:
+        return samples
+    buffered = lines.get(node_id)
+    pending = (buffered if buffered is not None and buffered.shape[-1] > 0
+               else np.zeros((samples.shape[0], delay), dtype=np.float32))
+    combined = np.concatenate([pending, samples], axis=1)
+    out = combined[:, :samples.shape[-1]]
+    lines[node_id] = combined[:, samples.shape[-1]:]
+    return np.ascontiguousarray(out, dtype=np.float32)
+
+
 class EffectChain:
     """有序效果器链。
 
