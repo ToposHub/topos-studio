@@ -242,6 +242,7 @@ def _iter_stem_pcm_chunks(
     asset_lookup: Optional[Callable] = None,
     chunk_frames: Optional[int] = None,
     pre_render_base_fn: Optional[Callable] = None,
+    frame_range: Optional[Tuple[int, int]] = None,
 ) -> Iterator[np.ndarray]:
     """按时间块流式渲染单个 stem 的 PCM（AUD-18216）。
 
@@ -263,9 +264,13 @@ def _iter_stem_pcm_chunks(
         decode_clip_fn: clip 解码回调（None=静音，测试用）
         sequence_resolver/asset_lookup: 嵌套序列展开（可选）
         chunk_frames: 每块帧数（None=约 1 秒）
+        frame_range: 选区 (start_frame, end_frame)（None=整片）。选区
+            导出按 H02 语义自动加预卷（效果器状态/自动化先收敛再进入
+            选区，预卷段裁掉不交付），与成片 _render_audio_master 同模型。
 
     Yields:
-        (channels, n) float32 PCM 块，顺序拼接即完整 stem。
+        (channels, n) float32 PCM 块，顺序拼接即完整 stem（长度 =
+        选区样本 + 尾音延长，与整片导出契约一致）。
     """
     from src.features.edit.core.audio_graph_renderer import AudioGraphRenderer
     from src.features.edit.core.audio_dsp import EffectChain
@@ -284,6 +289,15 @@ def _iter_stem_pcm_chunks(
         fps_exact = fps
     start_frame = 0
     end_frame = getattr(sequence, "duration_frames", 0) or 0
+    if frame_range is not None:
+        try:
+            _range_lo, _range_hi = int(frame_range[0]), int(frame_range[1])
+        except (TypeError, ValueError):
+            _range_lo, _range_hi = 0, -1
+        if _range_hi <= _range_lo:
+            return  # 空/退化选区：无内容
+        start_frame = max(0, _range_lo)
+        end_frame = min(end_frame, _range_hi) if end_frame > 0 else _range_hi
     if end_frame <= start_frame:
         return
 
@@ -302,7 +316,7 @@ def _iter_stem_pcm_chunks(
 
         expanded = flatten_nested_audio_tracks(
             sequence, sequence_resolver, asset_lookup, strict=True,
-            frame_range=(start_frame, end_frame),
+            frame_range=(feed_start, end_frame),
         )
         if expanded != tuple(getattr(sequence, "audio_tracks", ()) or ()):
             sequence = replace(sequence, audio_tracks=expanded)
@@ -368,6 +382,18 @@ def _iter_stem_pcm_chunks(
             _cfx = _cfe(getattr(_c, "effects", ()) or (), None)
             if _cfx:
                 _tail_max = max(_tail_max, _chain_tail_from_entries(_cfx))
+    # H02（选区预卷）：与成片 _render_audio_master 同一预算语义——
+    # 预卷 = min(start_frame, ceil(全路径尾音预算 / spf))。选区起点冷启动
+    # 时 Delay/Reverb/包络状态全零（成片复审：直接导出 f4..10 全零），
+    # 向前多渲染让状态收敛后进入选区。预算取 PDC 加入前的 _tail_max
+    # （PDC 是纯延迟线，只影响尾部 drain，由下方 += pdc 覆盖）。
+    _spf_pre = max(1.0, float(sample_rate) / max(1e-6, fps))
+    _preroll_tail = _tail_max
+    pre_roll_frames = (min(int(start_frame), int(math.ceil(_preroll_tail / _spf_pre)))
+                       if start_frame > 0 else 0)
+    preroll_samples = (frames_to_samples(pre_roll_frames, fps_exact, int(sample_rate))
+                       if pre_roll_frames > 0 else 0)
+    feed_start = start_frame - pre_roll_frames
     # P0 · PDC：图级补偿延迟线的总延迟计入预算（延迟内容需 drain 释放）。
     _tail_max += int(renderer.pdc_total_samples())
     if _tail_max > 0:
@@ -410,7 +436,7 @@ def _iter_stem_pcm_chunks(
         for clip in getattr(track, "clips", ()):
             clip_start = getattr(clip, "timeline_start", 0)
             clip_end = clip_start + getattr(clip, "timeline_duration", 0)
-            overlap_start = max(clip_start, start_frame)
+            overlap_start = max(clip_start, feed_start)
             overlap_end = min(clip_end, end_frame)
             if overlap_start >= overlap_end:
                 continue
@@ -494,7 +520,7 @@ def _iter_stem_pcm_chunks(
             for _clip in getattr(_t, "clips", ()):
                 _cs = getattr(_clip, "timeline_start", 0)
                 _ce = _cs + getattr(_clip, "timeline_duration", 0)
-                _os, _oe = max(_cs, start_frame), min(_ce, end_frame)
+                _os, _oe = max(_cs, feed_start), min(_ce, end_frame)
                 if _os >= _oe:
                     continue
                 if getattr(_clip, "freeze_source_frame", None) is not None:
@@ -547,10 +573,10 @@ def _iter_stem_pcm_chunks(
     # carry: 块边界处帧块尾部超出块尾的样本 (绝对样本位, 数据)。
     carry: List[Tuple[int, np.ndarray]] = []
 
-    for f0 in range(start_frame, end_frame, chunk_frames):
+    for f0 in range(feed_start, end_frame, chunk_frames):
         f1 = min(f0 + chunk_frames, end_frame)
-        s0 = frames_to_samples(f0 - start_frame, fps_exact, sample_rate)
-        s1 = frames_to_samples(f1 - start_frame, fps_exact, sample_rate)
+        s0 = frames_to_samples(f0 - feed_start, fps_exact, sample_rate)
+        s1 = frames_to_samples(f1 - feed_start, fps_exact, sample_rate)
         if s1 <= s0:
             continue
         chunk_len = s1 - s0
@@ -577,9 +603,9 @@ def _iter_stem_pcm_chunks(
             frame_hi = min(ovl_end, f1)
             for frame_idx in range(frame_lo, frame_hi):
                 # D06：块长用精确相邻样本边界差（与成片导出同源）。
-                out_start = frames_to_samples(frame_idx - start_frame, fps_exact, sample_rate)
+                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
                 out_next = frames_to_samples(
-                    frame_idx + 1 - start_frame, fps_exact, sample_rate)
+                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -616,7 +642,8 @@ def _iter_stem_pcm_chunks(
                     if samples is None:
                         continue
 
-                actual = min(samples.shape[-1], total_samples - out_start)
+                actual = min(samples.shape[-1],
+                             (total_samples + preroll_samples) - out_start)
                 if actual <= 0:
                     continue
 
@@ -731,9 +758,9 @@ def _iter_stem_pcm_chunks(
                         for _tf in range(_clip_end,
                                          min(f1, _clip_end + _ctail_frames)):
                             _ts = frames_to_samples(
-                                _tf - start_frame, fps_exact, sample_rate)
+                                _tf - feed_start, fps_exact, sample_rate)
                             _tn = frames_to_samples(
-                                _tf + 1 - start_frame, fps_exact, sample_rate)
+                                _tf + 1 - feed_start, fps_exact, sample_rate)
                             _tbl = _tn - _ts
                             if _tbl <= 0:
                                 continue
@@ -757,9 +784,9 @@ def _iter_stem_pcm_chunks(
             _track_frames = sorted(
                 f for (tid, f) in frame_sum if tid == track.track_id)
             for frame_idx in range(f0, f1):
-                out_start = frames_to_samples(frame_idx - start_frame, fps_exact, sample_rate)
+                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
                 out_next = frames_to_samples(
-                    frame_idx + 1 - start_frame, fps_exact, sample_rate)
+                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -786,7 +813,7 @@ def _iter_stem_pcm_chunks(
                 if processed is None:
                     continue
                 actual = min(processed.shape[-1], block_len,
-                             total_samples - out_start)
+                             (total_samples + preroll_samples) - out_start)
                 if actual <= 0:
                     continue
                 proc = processed[:channels, :actual]
@@ -863,6 +890,14 @@ def _iter_stem_pcm_chunks(
             buf = renderer.apply_master(buf, start_frame=f0, fps=fps,
                                         sidechain_taps=chunk_sc or None)
 
+        # H02: 裁掉预卷段（预卷可跨多个 chunk，按 feed 坐标精确跳过；
+        # 整块落在预卷内则整块跳过）
+        if preroll_samples > 0:
+            skip = int(preroll_samples - s0)
+            if skip >= buf.shape[-1]:
+                continue
+            if skip > 0:
+                buf = np.ascontiguousarray(buf[:, skip:])
         yield buf
 
 
@@ -875,6 +910,7 @@ def render_stem_pcm(
     sequence_resolver: Optional[Callable] = None,
     asset_lookup: Optional[Callable] = None,
     pre_render_base_fn: Optional[Callable] = None,
+    frame_range: Optional[Tuple[int, int]] = None,
 ) -> Optional[np.ndarray]:
     """渲染单个 stem 的完整 PCM（兼容入口；模型/测试用）。
 
@@ -900,6 +936,7 @@ def render_stem_pcm(
         sequence_resolver=sequence_resolver,
         asset_lookup=asset_lookup,
         pre_render_base_fn=pre_render_base_fn,
+        frame_range=frame_range,
     ))
     if not chunks:
         return None
@@ -1086,6 +1123,7 @@ def export_all_stems(
     sequence_resolver: Optional[Callable] = None,
     asset_lookup: Optional[Callable] = None,
     pre_render_base_fn: Optional[Callable] = None,
+    frame_range: Optional[Tuple[int, int]] = None,
 ) -> StemExportResult:
     """导出工程的全部 stem（AM-10 阶段 3.5 顶层入口）。
 
@@ -1145,6 +1183,7 @@ def export_all_stems(
             gen = _iter_stem_pcm_chunks(
                 sequence, spec, sample_rate, channels, decode_clip_fn,
                 pre_render_base_fn=pre_render_base_fn,
+                frame_range=frame_range,
             )
             first = next(gen, None)
             if first is None:
