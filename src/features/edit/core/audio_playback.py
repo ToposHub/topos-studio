@@ -103,6 +103,7 @@ from src.features.edit.core.audio_dsp import (
     apply_clip_fade,
     pan_gains_for_channels,
     balance_gains,
+    apply_pdc_delay_line,
 )
 from src.features.edit.core.audio_edit import apply_clip_audio_edit, apply_clip_audio_edit_block
 from src.features.edit.core.channel_layout import adapt_channels
@@ -1768,6 +1769,15 @@ class AudioMixer:
         # W24/W25: 每轨路由信息 {track_id: {"output_bus_id": str|None, "sends": [(bus_id, level), ...]}}
         self._track_routing: Dict[str, Dict[str, Any]] = {}
         self._sample_rate: float = 48000.0
+        # P0 · PDC（实时监听）：与离线 AudioGraphRenderer 同语义的两级
+        # "最迟路径对齐"——轨链一级、Bus 链一级（Master 链作用于汇合后
+        # 共同信号，不产生相对错位）。零延迟链不受影响（delay=0 直通）；
+        # 接线后监听输出与导出按同一延迟模型对齐（整体滞后
+        # track_max + bus_max 样本，约等于导出里的延迟线位置）。
+        self._pdc_delay: Dict[str, int] = {}
+        self._pdc_lines: Dict[str, np.ndarray] = {}
+        self._pdc_track_max: int = 0
+        self._pdc_bus_max: int = 0
         # A5: solo 计数器，避免 mix_samples 每帧 `any(t.solo for t in self._tracks.values())` 遍历。
         # 所有修改 _tracks 的入口（add/remove/set_track_state/update_track_solo）都负责维护它。
         self._solo_count: int = 0
@@ -2173,6 +2183,10 @@ class AudioMixer:
             self._sc_order_cache = None
             # MX-07: 清尾音调度
             self._track_tail_remaining.pop(track_id, None)
+            # P0 · PDC: 清补偿量与延迟线并重算（节点集变化）
+            self._pdc_delay.pop(track_id, None)
+            self._pdc_lines.pop(track_id, None)
+            self._recompute_pdc_locked()
             # 清理混音 scratch 缓冲（防轨道频繁增删时内存累积）
             self._mix_acc_scratch.pop(track_id, None)
             self._mix_pad_scratch.pop(track_id, None)
@@ -2212,6 +2226,8 @@ class AudioMixer:
             self._invalidate_solo_closure()
             # 确保 Bus 不在 _decoders 中（Bus 不解码；阶段 1 遍历 _decoders 时跳过 Bus）
             # 不动 _decoders，保持普通轨与 Bus 的解耦。
+            # P0 · PDC: 节点集变化 → 重算补偿量
+            self._recompute_pdc_locked()
 
     def unregister_bus_track(self, track_id: str) -> None:
         """AM-02: 注销 Bus 轨（与 register_bus_track 对称）。
@@ -2230,6 +2246,10 @@ class AudioMixer:
             self._track_routing.pop(track_id, None)
             # AUD-15506: 轨道集/路由变化 → 闭包缓存失效
             self._invalidate_solo_closure()
+            # P0 · PDC: 节点集变化 → 重算补偿量（旧延迟线一并丢弃）
+            self._pdc_delay.pop(track_id, None)
+            self._pdc_lines.pop(track_id, None)
+            self._recompute_pdc_locked()
 
     def _apply_solo_delta(self, track_id: str, new_solo: bool) -> None:
         """A5: 根据「即将写入的 solo 值」与「当前 _tracks 中的 solo 值」的差分更新 _solo_count。
@@ -2426,6 +2446,60 @@ class AudioMixer:
                     decoder._output_sample_rate = int(sample_rate)
                     decoder._purge_resampler_cache_entries()
 
+    # ── P0 · PDC（实时监听）：延迟声明聚合与输出端延迟线 ───────────────
+
+    def _recompute_pdc_locked(self) -> None:
+        """重算 per-node PDC 补偿量（持锁调用；与离线 _recompute_pdc 同型）。
+
+        每个轨/Bus 节点延迟 = max(同级链延迟) − 本链延迟（仅 >0 记录）；
+        声学事件在 Master 汇合处落在同一绝对样本。延迟量变化后旧缓冲
+        与新补偿量不再一致 → 清空延迟线（同离线 configure 语义）。
+        """
+        track_lat: Dict[str, int] = {}
+        bus_lat: Dict[str, int] = {}
+        # 遍历全部已知节点（无链的干轨 latency=0 也必须拿满补偿）
+        nodes = set(self._effect_chains) | set(self._track_routing) | set(self._tracks)
+        for tid in nodes:
+            if tid == MASTER_BUS_KEY:
+                continue
+            chain = self._effect_chains.get(tid)
+            lat = 0
+            if chain is not None:
+                try:
+                    lat = int(chain.latency_samples())
+                except Exception:  # noqa: BLE001 — 声明异常按 0
+                    lat = 0
+            is_bus = bool(isinstance(self._track_routing.get(tid), dict)
+                          and self._track_routing[tid].get("is_bus"))
+            (bus_lat if is_bus else track_lat)[tid] = max(0, lat)
+        self._pdc_track_max = max(track_lat.values(), default=0)
+        self._pdc_bus_max = max(bus_lat.values(), default=0)
+        self._pdc_delay = {}
+        for nid, lat in track_lat.items():
+            if self._pdc_track_max - lat > 0:
+                self._pdc_delay[nid] = self._pdc_track_max - lat
+        for nid, lat in bus_lat.items():
+            if self._pdc_bus_max - lat > 0:
+                self._pdc_delay[nid] = self._pdc_bus_max - lat
+        self._pdc_lines.clear()
+
+    def pdc_total_samples(self) -> int:
+        """实时监听的总补偿延迟（轨级 + Bus 级；Master 链不产生相对错位）。"""
+        return self._pdc_track_max + self._pdc_bus_max
+
+    def _advance_pdc_line(self, node_id: str, channels: int, num_samples: int) -> None:
+        """节点本块被跳过（mute/solo/禁用/无输入）时也推进延迟线（喂零）。
+
+        被推迟的内容必须按绝对时间继续流出，否则重新激活时缓冲内容
+        在错误的时间涌出。
+        """
+        delay = self._pdc_delay.get(node_id, 0)
+        if delay > 0:
+            apply_pdc_delay_line(
+                self._pdc_lines, node_id, delay,
+                np.zeros((channels, num_samples), dtype=np.float32),
+            )
+
     def reset_dsp_states(self) -> None:
         """复位所有效果器/滤波器的内部状态（seek 后调用）。线程安全。
 
@@ -2448,6 +2522,8 @@ class AudioMixer:
             self._sc_bus_taps.clear()
             # MX-07: seek 清尾音调度（旧位置的尾音不得复活）
             self._track_tail_remaining.clear()
+            # P0 · PDC: seek 清延迟线（旧位置的缓冲内容不得复活）
+            self._pdc_lines.clear()
             for win in self._spectrum_windows.values():
                 win.fill(0.0)
             for tid in list(self._spectrum_write.keys()):
@@ -2514,6 +2590,8 @@ class AudioMixer:
                 self._track_effect_samplers[track_id] = animated_sampler
             else:
                 self._track_effect_samplers.pop(track_id, None)
+            # P0 · PDC: 链延迟声明可能变化 → 重算补偿量
+            self._recompute_pdc_locked()
 
     def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
         """MX-03: 设置 Master Strip EQ。线程安全。
@@ -2723,6 +2801,8 @@ class AudioMixer:
             }
             # AUD-15506: 路由变化 → 闭包缓存失效
             self._invalidate_solo_closure()
+            # P0 · PDC: is_bus 归属变化 → 重算补偿量分组
+            self._recompute_pdc_locked()
 
     def has_solo_tracks(self) -> bool:
         """
@@ -2806,9 +2886,11 @@ class AudioMixer:
             for track_id in track_order:
                 decoders = self._decoders.get(track_id)
                 if decoders is None:
+                    self._advance_pdc_line(track_id, output_channels, num_samples)
                     continue
                 state = self._tracks.get(track_id)
                 if not state or not state.enabled:
+                    self._advance_pdc_line(track_id, output_channels, num_samples)
                     continue
                 # W25: 跳过 Bus 轨（它们在阶段 2 处理，不在阶段 1 解码 clips）
                 routing = self._track_routing.get(track_id, {})
@@ -2817,11 +2899,13 @@ class AudioMixer:
 
                 # 计算有效音量
                 if state.muted:
+                    self._advance_pdc_line(track_id, output_channels, num_samples)
                     continue
 
                 # RMA-04: solo 用可听闭包判断。旧逻辑 `not state.solo` 会把 solo 普通
                 # 轨的上游输入（喂给 solo Bus 的普通轨）错误剔除。闭包保留这些上游。
                 if has_solo and track_id not in audible_solo:
+                    self._advance_pdc_line(track_id, output_channels, num_samples)
                     continue
 
                 volume = state.volume * self._vca_factors.get(track_id, 1.0)
@@ -2873,6 +2957,8 @@ class AudioMixer:
                             mute_gate, float(self._sample_rate),
                         )
                         if not np.any(mute_gate):
+                            # P0 · PDC: 整块被自动化静音门控剔除 → 推进延迟线
+                            self._advance_pdc_line(track_id, output_channels, num_samples)
                             continue
                 # 累计该轨电平（跨多个 decoder/clip：peak 取 max，RMS 用平方和均值）
                 track_peak_l = 0.0
@@ -3217,6 +3303,11 @@ class AudioMixer:
                     )
                     padded[:, :samples.shape[-1]] = samples
                     samples = padded
+                # P0 · PDC（实时监听）：轨输出端延迟线，对齐同级最迟链。
+                # 峰值计量/路由/post-fader sends/侧链 tap 随之同步延迟，
+                # 与离线渲染语义一致（音量/pan/mute 门控在延迟线之前）。
+                samples = apply_pdc_delay_line(
+                    self._pdc_lines, track_id, self._pdc_delay.get(track_id, 0), samples)
                 track_output_acc = samples
 
                 # 累计该轨电平（求和后的完整轨输出；drain 块峰值为回声能量）
@@ -3350,6 +3441,9 @@ class AudioMixer:
                     # Delay/Reverb；尾音调度与普通轨同一契约）
                     tail_rem = self._track_tail_remaining.get(bus_id, 0)
                     if tail_rem <= 0:
+                        # P0 · PDC：无输入 Bus 的延迟线也要推进（被推迟的
+                        # 内容需按绝对时间继续流出），否则重新激活时错位。
+                        self._advance_pdc_line(bus_id, output_channels, num_samples)
                         continue
                     self._track_tail_remaining[bus_id] = max(
                         0, tail_rem - num_samples)
@@ -3359,10 +3453,12 @@ class AudioMixer:
                     bus_inputs[bus_id] = bus_input
                 bus_state = self._tracks.get(bus_id)
                 if bus_state is None or not bus_state.enabled or bus_state.muted:
+                    self._advance_pdc_line(bus_id, output_channels, num_samples)
                     continue
                 # RMA-04: solo 用可听闭包判断。旧逻辑 `not bus_state.solo` 会把 solo
                 # 普通轨必经的 Bus（该 Bus 未 solo）错误剔除，导致 solo 普通轨无声。
                 if has_solo and bus_id not in audible_solo:
+                    self._advance_pdc_line(bus_id, output_channels, num_samples)
                     continue
                 # RMA-06: Bus automation（volume/pan/mute）逐样本求值。
                 # 此前 Bus 阶段只读静态 bus_state.volume/pan，automation 被无声忽略。
@@ -3463,6 +3559,10 @@ class AudioMixer:
                                           for iid, buf in raw_map.items()}
                     bus_samples = bus_chain.process(
                         bus_samples, sidechain_by_id=bus_sc_map)
+                # P0 · PDC（实时监听）：Bus 输出端延迟线，对齐同级最迟链
+                # （下游路由/sends/Bus 检源 tap 随之同步延迟，与离线一致）。
+                bus_samples = apply_pdc_delay_line(
+                    self._pdc_lines, bus_id, self._pdc_delay.get(bus_id, 0), bus_samples)
                 # MX-07: Bus 尾音调度（有真实输入时刷新估计；drain 块已提前扣减）
                 if bus_had_input:
                     self._track_tail_remaining[bus_id] = (
