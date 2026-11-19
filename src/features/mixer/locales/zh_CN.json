@@ -39,19 +39,42 @@
       "independent_audio_tip": "确认改变音频长度时保留链接视频的位置。"
     },
     "record": {
-      "start": "在当前播放头位置向这条轨录音",
       "stop": "停止录音",
-      "preroll": "预卷中 · 点击停止",
       "finishing": "正在完成录音…",
       "locked": "解锁轨道后可录音",
       "busy": "请先结束当前录音",
       "failed": "无法从所选输入设备录音",
-      "save_failed": "未能保存录音"
+      "save_failed": "未能保存录音",
+      "settings": "录音设置",
+      "settings_menu": "录音设置…",
+      "settings_saved": "录音设置已保存。按轨道上的 R 开始录音。",
+      "arm": "为录音 Arm 该轨道",
+      "disarm": "取消 Arm",
+      "first_channel": "第一声道",
+      "input": "录音输入",
+      "input_peak": "输入峰值电平 (dBFS)",
+      "input_unavailable": "所选输入或声道不可用。",
+      "mono": "单声道",
+      "no_input": "无输入",
+      "patch_first": "请先分配录音输入",
+      "patch_version": "该时间线使用了更新版本的录音输入格式。",
+      "preparing": "录音预卷中",
+      "second_channel": "第二声道",
+      "transport_arm_first": "请先 Arm 一条轨道",
+      "transport_record": "录制",
+      "transport_recording": "正在录制已 Arm 的轨道",
+      "transport_start": "录制已 Arm 的轨道",
+      "unavailable": "不可用"
     },
     "routing": {
       "output": "轨道输出",
       "missing_bus": "总线不可用",
       "add_bus": "添加总线"
+    },
+    "recording": {
+      "monitor_tip": "录音时监听输入（对下一条 take 生效）",
+      "mono": "单声道",
+      "stereo": "立体声"
     }
   }
 }

@@ -1,44 +1,40 @@
-"""ADR Take Sheet 面板（P1-10）。
-
-专业 ADR/VO 录音控制台：
-- 输入 patch：设备 / 声道（mono/stereo）选择
-- 录音设置：pre-roll / post-roll / 循环录音 / 输入监听
-- 延迟校准状态（≤10ms 合格）
-- 输入电平表（实时 dBFS）
-- take 列表：时长 / 峰值 / 入点时间码 / 状态 / 最佳 take ★
-- 操作：试听（PyAV 解码 + QAudioSink 播放）、标记最佳、替换所选片段
-
-面板只发信号和暴露设置读取接口，录音编排（RecordingManager、命令栈、
-时间线替换）由 edit_controller 完成——与混音器 R 按钮共用同一条链路。
-"""
+"""ADR workspace for configuring, cueing, recording and comparing takes."""
 
 from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from src.features.edit.core.take_sheet import TakeSheet
+    from src.features.edit.core.timeline_v2 import TimelineSequence
 
 import numpy as np
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QPlainTextEdit, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
+from src.features.edit.core.adr_cues import AdrCue, read_adr_cues
+from src.features.edit.core.interchange import frames_to_timecode, timecode_to_frames
+from src.features.edit.core.recording_manager import is_drop_frame_rate
 from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
 
 _STATE_LABELS = {
     "idle": ("edit.adr.state_idle", "Ready"),
+    "rehearsing": ("edit.adr.state_rehearsing", "Rehearsing"),
     "pre_roll": ("edit.adr.state_preroll", "Pre-roll…"),
     "recording": ("edit.adr.state_recording", "● REC"),
     "stopping": ("edit.adr.state_postroll", "Post-roll…"),
+    "flushing": ("edit.adr.state_saving", "Saving take…"),
     "failed": ("edit.adr.state_failed", "Failed"),
 }
 _STATE_COLORS = {
@@ -317,6 +313,12 @@ class AdrTakeSheetPanel(QWidget):
     calibrate_requested = pyqtSignal()
     mark_best_requested = pyqtSignal(str)        # take_id
     replace_clip_requested = pyqtSignal(str)     # take_id
+    cue_changed = pyqtSignal(object)             # AdrCue
+    cue_removed = pyqtSignal(str)                # cue_id
+    cue_selected = pyqtSignal(object)             # AdrCue
+    rehearse_requested = pyqtSignal(object)       # AdrCue
+    record_requested = pyqtSignal(object)         # AdrCue
+    stop_requested = pyqtSignal()
 
     _COLS = ("#", "Take", "Length", "Peak", "In TC", "Status", "Best")
 
@@ -325,25 +327,32 @@ class AdrTakeSheetPanel(QWidget):
         self._take_sheet = None  # lazy: core.TakeSheet
         self._audition = TakeAuditionPlayer(self)
         self._monitor_sink = InputMonitorSink(self)
+        self._timeline: TimelineSequence | None = None
+        self._cues: tuple[AdrCue, ...] = ()
+        self._record_state = "idle"
+        self._current_frame = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
 
-        root.addWidget(self._build_settings_group())
-        root.addWidget(self._build_status_row())
-        root.addWidget(self._build_take_table(), stretch=1)
-        root.addLayout(self._build_action_row())
+        tabs = QTabWidget(self)
+        tabs.addTab(self._build_cue_list(), I18N.tr("edit.adr.list_tab", "Cues"))
+        tabs.addTab(self._build_record_tab(), I18N.tr("edit.adr.record_tab", "Record"))
+        tabs.addTab(self._build_settings_group(), I18N.tr("edit.adr.setup_tab", "Setup"))
+        root.addWidget(tabs)
 
         self.set_recording_state("idle")
 
     # ── 构建 UI ──
 
     def _build_settings_group(self) -> QWidget:
-        from PyQt6.QtWidgets import QCheckBox, QGroupBox
-
         box = QGroupBox(I18N.tr("edit.adr.settings", "ADR Input"), self)
         form = QFormLayout(box)
+
+        self._track_combo = QComboBox(box)
+        self._track_combo.currentIndexChanged.connect(self._update_session_actions)
+        form.addRow(I18N.tr("edit.adr.record_track", "Record Track"), self._track_combo)
 
         self._device_combo = QComboBox(box)
         self._refresh_btn = QPushButton(I18N.tr("edit.adr.refresh", "⟳"), box)
@@ -382,6 +391,9 @@ class AdrTakeSheetPanel(QWidget):
         options_row.addStretch(1)
         form.addRow("", options_row)
 
+        self._count_in_check = QCheckBox(I18N.tr("edit.adr.count_in_beeps", "Count-in beeps"), box)
+        form.addRow("", self._count_in_check)
+
         calib_row = QHBoxLayout()
         self._calib_label = QLabel(I18N.tr("edit.adr.uncalibrated", "Latency: not calibrated"), box)
         self._calibrate_btn = QPushButton(I18N.tr("edit.adr.calibrate", "Calibrate"), box)
@@ -406,6 +418,64 @@ class AdrTakeSheetPanel(QWidget):
         # 构造函数保持零阻塞；⟳ 按钮保留手动重扫入口。
         QTimer.singleShot(0, self.reload_devices)
         return box
+
+    def _build_cue_list(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        self._cue_table = QTableWidget(0, 4, page)
+        self._cue_table.setHorizontalHeaderLabels([
+            I18N.tr("edit.adr.cue_in", "In"),
+            I18N.tr("edit.adr.cue_out", "Out"),
+            I18N.tr("edit.adr.character", "Character"),
+            I18N.tr("edit.adr.dialog", "Dialog"),
+        ])
+        self._cue_table.verticalHeader().hide()
+        self._cue_table.horizontalHeader().setStretchLastSection(True)
+        self._cue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._cue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._cue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._cue_table.itemSelectionChanged.connect(self._on_cue_selection_changed)
+        self._cue_table.itemDoubleClicked.connect(self._edit_cue)
+        layout.addWidget(self._cue_table)
+
+        actions = QHBoxLayout()
+        self._add_cue_btn = QPushButton(I18N.tr("edit.adr.add_cue", "Add Cue"), page)
+        self._edit_cue_btn = QPushButton(I18N.tr("edit.adr.edit_cue", "Edit Cue"), page)
+        self._remove_cue_btn = QPushButton(I18N.tr("edit.adr.remove_cue", "Remove Cue"), page)
+        self._add_cue_btn.clicked.connect(self._add_cue)
+        self._edit_cue_btn.clicked.connect(self._edit_cue)
+        self._remove_cue_btn.clicked.connect(self._remove_cue)
+        for button in (self._add_cue_btn, self._edit_cue_btn, self._remove_cue_btn):
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        return page
+
+    def _build_record_tab(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        self._record_cue_combo = QComboBox(page)
+        self._record_cue_combo.setAccessibleName(I18N.tr("edit.adr.list_tab", "Cues"))
+        self._record_cue_combo.activated.connect(self._cue_table.selectRow)
+        layout.addWidget(self._record_cue_combo)
+        self._prompt_label = QLabel(page)
+        self._prompt_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._prompt_label.setWordWrap(True)
+        layout.addWidget(self._prompt_label)
+
+        actions = QHBoxLayout()
+        self._rehearse_btn = QPushButton(I18N.tr("edit.adr.rehearse", "Rehearse"), page)
+        self._record_btn = QPushButton(I18N.tr("edit.adr.record_tab", "Record"), page)
+        self._stop_btn = QPushButton(I18N.tr("edit.adr.stop", "Stop"), page)
+        self._rehearse_btn.clicked.connect(self._rehearse_cue)
+        self._record_btn.clicked.connect(self._record_cue)
+        self._stop_btn.clicked.connect(self.stop_requested.emit)
+        for button in (self._rehearse_btn, self._record_btn, self._stop_btn):
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        layout.addWidget(self._build_status_row())
+        layout.addWidget(self._build_take_table(), stretch=1)
+        layout.addLayout(self._build_action_row())
+        return page
 
     def _build_status_row(self) -> QWidget:
         row = QWidget(self)
@@ -447,6 +517,166 @@ class AdrTakeSheetPanel(QWidget):
             row.addWidget(btn)
         return row
 
+    def set_adr_context(self, timeline: TimelineSequence | None) -> None:
+        """Refresh the cue list and eligible destinations from the active timeline."""
+        if self._timeline is timeline:
+            return
+        previous_id = self._timeline.timeline_id if self._timeline is not None else None
+        timeline_id = timeline.timeline_id if timeline is not None else None
+        current = self.current_cue()
+        selected_id = current.cue_id if current is not None and previous_id == timeline_id else None
+        track_id = self._track_combo.currentData() if previous_id == timeline_id else None
+        self._timeline = timeline
+        self._cues = read_adr_cues(timeline) if timeline is not None else ()
+
+        with QSignalBlocker(self._track_combo):
+            self._track_combo.clear()
+            self._track_combo.addItem(I18N.tr("edit.adr.select_track", "Select a track"), None)
+            if timeline is not None:
+                for track in timeline.audio_tracks:
+                    if not track.is_bus and not track.is_locked:
+                        self._track_combo.addItem(track.name or track.track_id, track.track_id)
+            self._track_combo.setCurrentIndex(max(0, self._track_combo.findData(track_id)))
+        with QSignalBlocker(self._cue_table), QSignalBlocker(self._record_cue_combo):
+            self._cue_table.setRowCount(len(self._cues))
+            self._record_cue_combo.clear()
+            selected_row = 0
+            for index, cue in enumerate(self._cues):
+                timecode = self._frame_to_timecode(cue.in_frame)
+                self._record_cue_combo.addItem(f"{timecode} · {cue.character or cue.dialog}", cue.cue_id)
+                for column, value in enumerate((timecode, self._frame_to_timecode(cue.out_frame),
+                                                cue.character, cue.dialog)):
+                    self._cue_table.setItem(index, column, QTableWidgetItem(value))
+                if cue.cue_id == selected_id:
+                    selected_row = index
+            if self._cues:
+                self._cue_table.selectRow(selected_row)
+                self._record_cue_combo.setCurrentIndex(selected_row)
+        self._refresh_cue_selection()
+
+    def set_timeline_frame(self, frame: int) -> None:
+        self._current_frame = max(0, frame)
+
+    def current_cue(self) -> AdrCue | None:
+        row = self._cue_table.currentRow()
+        if 0 <= row < len(self._cues):
+            return self._cues[row]
+        return None
+
+    def set_count_in(self, seconds: int) -> None:
+        cue = self.current_cue()
+        lines = [value for value in (cue.character, cue.dialog) if value] if cue is not None else []
+        if seconds > 0:
+            lines.insert(0, I18N.tr("edit.adr.count_in", "Starts in {seconds}").format(seconds=seconds))
+        self._prompt_label.setText("\n".join(lines))
+
+    def _on_cue_selection_changed(self) -> None:
+        self._refresh_cue_selection()
+        cue = self.current_cue()
+        if cue is not None and self._record_state in {"idle", "failed"}:
+            self.cue_selected.emit(cue)
+
+    def _refresh_cue_selection(self) -> None:
+        with QSignalBlocker(self._record_cue_combo):
+            self._record_cue_combo.setCurrentIndex(self._cue_table.currentRow())
+        self.set_count_in(0)
+        self._refresh_table()
+        self._update_session_actions()
+
+    def _update_session_actions(self) -> None:
+        ready = self._record_state in {"idle", "failed"}
+        has_cue = self.current_cue() is not None
+        self._cue_table.setEnabled(ready)
+        self._record_cue_combo.setEnabled(ready)
+        self._add_cue_btn.setEnabled(ready and self._timeline is not None)
+        self._edit_cue_btn.setEnabled(ready and has_cue)
+        self._remove_cue_btn.setEnabled(ready and has_cue)
+        self._rehearse_btn.setEnabled(ready and has_cue)
+        self._record_btn.setEnabled(ready and has_cue and bool(self._track_combo.currentData()))
+        self._stop_btn.setEnabled(self._record_state in {"rehearsing", "pre_roll", "recording"})
+        self._audition_btn.setEnabled(ready)
+
+    def _frame_to_timecode(self, frame: int) -> str:
+        fps = float(self._timeline.fps) if self._timeline is not None else 24.0
+        return frames_to_timecode(frame, fps, drop_frame=is_drop_frame_rate(fps))
+
+    def _add_cue(self) -> None:
+        timeline = self._timeline
+        if timeline is None:
+            return
+        start, end = timeline.range_start, timeline.range_end
+        if start is None or end is None or end <= start:
+            start = self._current_frame
+            end = start + round(float(timeline.fps) * 5)
+        self._show_cue_editor(AdrCue(str(uuid.uuid4()), start, end), new=True)
+
+    def _edit_cue(self) -> None:
+        cue = self.current_cue()
+        if cue is not None:
+            self._show_cue_editor(cue, new=False)
+
+    def _remove_cue(self) -> None:
+        cue = self.current_cue()
+        if cue is not None:
+            self.cue_removed.emit(cue.cue_id)
+
+    def _show_cue_editor(self, cue: AdrCue, *, new: bool) -> None:
+        timeline = self._timeline
+        if timeline is None:
+            return
+        fps = float(timeline.fps)
+        dialog = QDialog(self)
+        key, title = ("add_cue", "Add Cue") if new else ("edit_cue", "Edit Cue")
+        dialog.setWindowTitle(I18N.tr(f"edit.adr.{key}", title))
+        form = QFormLayout(dialog)
+        in_edit = QLineEdit(self._frame_to_timecode(cue.in_frame), dialog)
+        out_edit = QLineEdit(self._frame_to_timecode(cue.out_frame), dialog)
+        character_edit = QLineEdit(cue.character, dialog)
+        dialog_edit = QPlainTextEdit(cue.dialog, dialog)
+        form.addRow(I18N.tr("edit.adr.cue_in", "In"), in_edit)
+        form.addRow(I18N.tr("edit.adr.cue_out", "Out"), out_edit)
+        form.addRow(I18N.tr("edit.adr.character", "Character"), character_edit)
+        form.addRow(I18N.tr("edit.adr.dialog", "Dialog"), dialog_edit)
+        error = QLabel(dialog)
+        error.setWordWrap(True)
+        form.addRow(error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+
+        def apply() -> None:
+            try:
+                in_tc, out_tc = in_edit.text().strip(), out_edit.text().strip()
+                if not in_tc or not out_tc:
+                    raise ValueError("Missing timecode")
+                start = timecode_to_frames(in_tc, fps, drop_frame=";" in in_tc)
+                end = timecode_to_frames(out_tc, fps, drop_frame=";" in out_tc)
+                updated = AdrCue(cue.cue_id, start, end, character_edit.text().strip(), dialog_edit.toPlainText())
+            except ValueError:
+                error.setText(I18N.tr("edit.adr.invalid_timecodes", "Enter valid timecodes with Out after In."))
+                return
+            dialog.accept()
+            if self._timeline is not None and self._timeline.timeline_id == timeline.timeline_id:
+                self.cue_changed.emit(updated)
+                row = next((i for i, item in enumerate(self._cues) if item.cue_id == updated.cue_id), -1)
+                if row >= 0:
+                    self._cue_table.selectRow(row)
+
+        buttons.accepted.connect(apply)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        dialog.exec()
+
+    def _rehearse_cue(self) -> None:
+        cue = self.current_cue()
+        if cue is not None:
+            self._audition.stop()
+            self.rehearse_requested.emit(cue)
+
+    def _record_cue(self) -> None:
+        cue = self.current_cue()
+        if cue is not None:
+            self._audition.stop()
+            self.record_requested.emit(cue)
+
     # ── 设置（控制器读取）──
 
     def adr_settings(self) -> Dict[str, Any]:
@@ -459,6 +689,8 @@ class AdrTakeSheetPanel(QWidget):
             "post_roll_seconds": float(self._post_roll_spin.value()),
             "loop": self._loop_check.isChecked(),
             "monitor": self._monitor_check.isChecked(),
+            "record_track_id": self._track_combo.currentData(),
+            "count_in_beeps": self._count_in_check.isChecked(),
         }
 
     def apply_settings(self, values: Dict[str, Any]) -> None:
@@ -467,28 +699,22 @@ class AdrTakeSheetPanel(QWidget):
         面板是录音设置的展示面；混音通道条的录音准备弹窗提交后经此
         同步，两个表面读同一组值。
         """
-        device_id = values.get("device_id")
-        if device_id:
-            index = self._device_combo.findData(str(device_id))
-            if index >= 0:
-                self._device_combo.setCurrentIndex(index)
-        channels = values.get("channels")
-        if channels in (1, 2):
-            index = self._channels_combo.findData(int(channels))
-            if index >= 0:
-                self._channels_combo.setCurrentIndex(index)
-        for attr, key, cast in (
-                ("_pre_roll_spin", "pre_roll_seconds", float),
-                ("_post_roll_spin", "post_roll_seconds", float)):
+        for combo, key, default in (
+                (self._device_combo, "device_id", ""), (self._channels_combo, "channels", 1)):
+            if key in values:
+                index = combo.findData(values[key] or default)
+                if index >= 0:
+                    with QSignalBlocker(combo):
+                        combo.setCurrentIndex(index)
+        for spinner, key in ((self._pre_roll_spin, "pre_roll_seconds"),
+                             (self._post_roll_spin, "post_roll_seconds")):
             value = values.get(key)
-            if isinstance(value, (int, float)):
-                spinner = getattr(self, attr, None)
-                if spinner is not None:
-                    spinner.setValue(cast(value))
-        for attr, key in (("_loop_check", "loop"), ("_monitor_check", "monitor")):
+            if isinstance(value, (int, float)) and np.isfinite(value):
+                with QSignalBlocker(spinner):
+                    spinner.setValue(float(value))
+        for checkbox, key in ((self._loop_check, "loop"), (self._monitor_check, "monitor")):
             if isinstance(values.get(key), bool):
-                checkbox = getattr(self, attr, None)
-                if checkbox is not None:
+                with QSignalBlocker(checkbox):
                     checkbox.setChecked(values[key])
 
     def reload_devices(self) -> None:
@@ -521,12 +747,15 @@ class AdrTakeSheetPanel(QWidget):
     # ── 会话状态（控制器写入）──
 
     def set_recording_state(self, state: str) -> None:
+        self._record_state = state
         key, default = _STATE_LABELS.get(state, ("edit.adr.state_idle", "Ready"))
         self._state_label.setText(I18N.tr(key, default))
         self._state_label.setStyleSheet(
             f"font-weight: bold; color: {_STATE_COLORS.get(state, _STATE_COLORS['idle']).name()};")
         if state in ("idle", "failed"):
             self._level_bar.reset()
+            self.set_count_in(0)
+        self._update_session_actions()
 
     def set_input_level(self, dbfs: float) -> None:
         self._level_bar.set_level(dbfs)
@@ -594,6 +823,9 @@ class AdrTakeSheetPanel(QWidget):
     def _refresh_table(self, select_take_id: str = "") -> None:
         sheet = self._take_sheet
         entries = sheet.entries if sheet is not None else []
+        cue = self.current_cue()
+        if cue is not None:
+            entries = [entry for entry in entries if entry.scene_name == cue.scene_name]
         # 审计修复：未指定选择目标时保持当前选择（重建后 ★/替换/试听
         # 按钮不至于静默失效）
         if not select_take_id:

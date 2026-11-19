@@ -222,6 +222,36 @@ def test_stop_uses_explicit_in_place_route_without_toggling_play(viewport) -> No
     assert played == []
 
 
+def test_mixer_transport_exposes_separate_record_and_stop_actions(viewport: EditViewport, qapp: QApplication) -> None:
+    requests: list[str] = []
+    viewport.program_record_requested.connect(lambda: requests.append("record"))
+    viewport.program_stop_requested.connect(lambda: requests.append("stop"))
+    stop, record = viewport.program_stop_button, viewport.program_record_button
+    assert stop.isHidden() and record.isHidden()
+
+    viewport.program_footer.setFixedWidth(300)
+    viewport.set_mixer_recording_controls(True)
+    qapp.processEvents()
+    assert stop.isVisible() and record.isVisible()
+    assert not record.isEnabled()
+    record.click()
+    assert requests == []
+    center = viewport.program_footer.center_group
+    assert center.geometry().contains(record.geometry().translated(center.pos()))
+
+    viewport.set_mixer_recording_controls(True, can_record=True)
+    record.click()
+    assert requests == ["record"]
+    viewport.set_mixer_recording_controls(True, recording=True)
+    record.click()
+    stop.click()
+    assert requests == ["record", "stop"]
+
+    viewport.set_mixer_recording_controls(False)
+    assert stop.isHidden() and record.isHidden()
+    assert viewport.program_footer.groups[1].count() == 6
+
+
 def test_source_loop_menu_tracks_policy_and_requires_open_asset(viewport) -> None:
     menu = viewport.source_header.options_button.menu()
     menu.aboutToShow.emit()

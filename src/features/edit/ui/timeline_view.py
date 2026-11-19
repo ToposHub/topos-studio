@@ -942,6 +942,7 @@ class TimelineView(QGraphicsView):
         self._audio_only = False
         self._professional_audio_editor_available = False
         self._recording_track_states: dict[str, str] = {}
+        self._mixer_record_arm_busy = False
         self._playhead_follow_enabled = PLAYHEAD_FOLLOW_ENABLED  # Playhead centering during playback
         self._target_track_id: Optional[str] = None  # UI-09: Target track for insert operations (video)
         self._target_audio_track_id: Optional[str] = None  # P2: Separate audio target track
@@ -1447,8 +1448,8 @@ class TimelineView(QGraphicsView):
         return None
 
     def set_track_recording_state(self, track_id: str, state: str) -> None:
-        """Reflect the recorder's state in both existing and rebuilt headers."""
-        if state == "idle":
+        """Reflect input, arm, or recording state in existing and rebuilt headers."""
+        if state == "unpatched":
             self._recording_track_states.pop(track_id, None)
         else:
             self._recording_track_states[track_id] = state
@@ -1459,10 +1460,21 @@ class TimelineView(QGraphicsView):
         if track is not None and header is not None:
             self._sync_header_recording_control(header, track)
 
+    def set_mixer_record_arm_busy(self, busy: bool) -> None:
+        if self._mixer_record_arm_busy == busy:
+            return
+        self._mixer_record_arm_busy = busy
+        if self._timeline is not None:
+            for track in self._timeline.audio_tracks:
+                header = self._track_headers.get(track.track_id)
+                if header is not None:
+                    self._sync_header_recording_control(header, track)
+
     def _sync_header_recording_control(self, header: TrackHeaderItem, track: EditTrack) -> None:
         header.set_recording_control(
             self._audio_only and track.track_type == "audio" and not track.is_bus,
-            self._recording_track_states.get(track.track_id, "idle"),
+            self._recording_track_states.get(track.track_id, "unpatched"),
+            busy=self._mixer_record_arm_busy,
         )
 
     def _ordered_tracks(self) -> List[EditTrack]:

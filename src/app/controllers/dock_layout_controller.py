@@ -871,6 +871,7 @@ class DockLayoutMixin:
                 if self.dock_properties is not None:
                     self.tabifyDockWidget(self.dock_properties,
                                           self.dock_adr_take_sheet)
+                self.dock_adr_take_sheet.visibilityChanged.connect(self._on_adr_dock_visibility_changed)
                 self.dock_adr_take_sheet.setVisible(False)
 
             # P1-01: Multicam angles - Right area, tabified with Properties
@@ -1363,6 +1364,11 @@ class DockLayoutMixin:
         view.set_professional_audio_editor_available(True)
         view.audio_clip_editor_requested.connect(self._open_project_audio_clip_editor)
         view.track_record_requested.connect(self._on_mixer_timeline_record_requested)
+        # 走带级录制：Program Viewer 的 Record/Stop 控件驱动 armed 轨采集。
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None and hasattr(self, "_on_mixer_transport_record_requested"):
+            viewport.program_record_requested.connect(self._on_mixer_transport_record_requested)
+            viewport.program_stop_requested.connect(self._on_program_transport_stop_requested)
         display_changed = getattr(self.edit_page, "timeline_display_changed", None)
         if display_changed is not None:
             display_changed.connect(panel.sync_clip)
@@ -1537,6 +1543,23 @@ class DockLayoutMixin:
         self.dock_audio_timeline.show()
         self.dock_audio_timeline.raise_()
         self.timeline_panel.get_timeline_view().setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _show_audio_adr_dock(self) -> None:
+        dock = getattr(self, "dock_adr_take_sheet", None)
+        if dock is None or self.current_page not in ("Edit", "Mixer"):
+            return
+        # Qt drops tab group membership while every dock in the group is
+        # hidden, so tabifiedDockWidgets() cannot tell where the ADR dock
+        # lives. Fall back to its area: on Mixer the right stack is reserved
+        # for the (hidden) Properties dock, so give ADR its own left slot.
+        if self.current_page == "Mixer" and self.dockWidgetArea(dock) == Qt.DockWidgetArea.RightDockWidgetArea:
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        dock.show()
+        dock.raise_()
+
+    def _on_adr_dock_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            self._wire_adr_panel()
 
     def _attach_edit_panels_to_mixer(self) -> None:
         """Borrow Edit's live widgets without rebinding their signals or history."""
@@ -3760,6 +3783,9 @@ class DockLayoutMixin:
         """
         mixer_docks = self._audio_workspace_docks()
         mixer_active = self.current_page == "Mixer"
+        adr = getattr(self, "dock_adr_take_sheet", None)
+        if adr is not None:
+            adr.toggleViewAction().setEnabled(self.current_page in ("Edit", "Mixer"))
         if getattr(getattr(self, "mixer_page", None), "project_backed", False):
             self.dock_audio_mixer.toggleViewAction().setEnabled(not mixer_active)
         for dock in mixer_docks:
@@ -3767,9 +3793,9 @@ class DockLayoutMixin:
             if not mixer_active:
                 dock.hide()
         if mixer_active:
-            # Only Mixer dock frames are visible while they host the shared widgets.
+            # The ADR dock is shared with Edit alongside the Mixer frames.
             for dock in getattr(self, "all_docks", ()):
-                if dock not in mixer_docks:
+                if dock not in mixer_docks and dock is not adr:
                     dock.hide()
             return
 

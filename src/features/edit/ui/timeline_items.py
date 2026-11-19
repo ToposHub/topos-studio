@@ -7541,6 +7541,7 @@ class TrackHeaderItem(QGraphicsObject):
         self._audio_workspace_style = False
         self._show_record_button = False
         self._recording_state = "idle"
+        self._record_arm_busy = False
         self._track_role = track_role
         self._track_height = track_height
         self._is_muted = is_muted
@@ -8030,11 +8031,11 @@ class TrackHeaderItem(QGraphicsObject):
                 "M",
             )
             if self._show_record_button:
+                armed = self._recording_state not in {"idle", "unpatched"}
                 self._draw_button(
                     painter, self._get_record_button_rect(), "record",
-                    self._recording_state != "idle", QColor("#9A3947"),
-                    "■" if self._recording_state == "recording" else "R",
-                    enabled=self._record_button_enabled(),
+                    armed, QColor("#B4495A" if self._recording_state == "recording" else "#9A3947"),
+                    "R", enabled=armed or self._record_button_enabled(),
                 )
 
     def _draw_button(
@@ -8371,12 +8372,18 @@ class TrackHeaderItem(QGraphicsObject):
             if self._recording_state in {"stopping", "flushing"}:
                 return I18N.tr("mixer.record.finishing", "Finishing the recording…")
             if self._recording_state == "pre_roll":
-                return I18N.tr("mixer.record.preroll", "Pre-roll · click to stop")
+                return I18N.tr("mixer.record.preparing", "Recording pre-roll")
             if self._recording_state == "recording":
-                return I18N.tr("mixer.record.stop", "Stop recording")
+                return I18N.tr("mixer.record.transport_recording", "Recording armed tracks")
             if self._is_locked:
                 return I18N.tr("mixer.record.locked", "Unlock this track to record")
-            return I18N.tr("mixer.record.start", "Record to this track at the playhead")
+            if self._record_arm_busy:
+                return I18N.tr("mixer.record.busy", "Finish the current recording first")
+            if self._recording_state == "unpatched":
+                return I18N.tr("mixer.record.patch_first", "Assign a recording input first")
+            if self._recording_state == "armed":
+                return I18N.tr("mixer.record.disarm", "Disarm track")
+            return I18N.tr("mixer.record.arm", "Arm track for recording")
         if button == "visibility":
             return "显示轨道" if not self._is_visible else "隐藏轨道"
         if button == "volume":
@@ -8558,18 +8565,17 @@ class TrackHeaderItem(QGraphicsObject):
             self._audio_workspace_style = enabled
             self.update()
 
-    def set_recording_control(self, visible: bool, state: str) -> None:
-        if (visible, state) != (self._show_record_button, self._recording_state):
+    def set_recording_control(self, visible: bool, state: str, *, busy: bool = False) -> None:
+        if (visible, state, busy) != (self._show_record_button, self._recording_state, self._record_arm_busy):
             self._show_record_button = visible
             self._recording_state = state
+            self._record_arm_busy = busy
             if self._hover_button == "record":
                 self.setToolTip(self._button_tooltip("record") if visible else "")
             self.update()
 
     def _record_button_enabled(self) -> bool:
-        if self._recording_state in {"pre_roll", "recording"}:
-            return True
-        return self._recording_state == "idle" and not self._is_locked
+        return not self._is_locked and not self._record_arm_busy and self._recording_state in {"idle", "armed"}
 
     def set_volume(self, volume: float) -> None:
         """Set volume level (external call)."""

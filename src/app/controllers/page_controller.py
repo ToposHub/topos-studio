@@ -655,6 +655,10 @@ class PageManagementMixin:
             page_name == "Mixer"
             and getattr(getattr(self, "mixer_page", None), "project_backed", False)
         ):
+            if page_name == "Mixer":
+                workflow = getattr(self, "_set_mixer_recording_workflow", None)
+                if callable(workflow):
+                    workflow(False)
             if self._edit_available and self.edit_page is not None:
                 self.edit_page.on_leave()
             coordinator = getattr(self, "_viewport_playback_coordinator", None)
@@ -746,6 +750,9 @@ class PageManagementMixin:
             self.edit_page.on_enter()
             self._sync_audio_mixer_from_current_timeline()
             self.update_undo_redo_actions()
+            workflow = getattr(self, "_set_mixer_recording_workflow", None)
+            if callable(workflow):
+                workflow(True)
             return
 
         # Edit page enter hook (P1 placeholder)

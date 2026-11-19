@@ -2712,8 +2712,6 @@ class EditControllerMixin:
                 "is_solo": bool(getattr(track, 'is_solo', False)),
                 "is_bus": getattr(track, "is_bus", False),
                 "output_bus_id": getattr(track, "output_bus_id", None),
-                # §7 P1 通道条：Send 计数徽标（活跃/总数）。
-                "sends": tuple(getattr(track, "sends", ()) or ()),
                 # W8: Strip EQ 参数（None=禁用）
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
@@ -2815,6 +2813,10 @@ class EditControllerMixin:
                 panel.set_master_volume_linear(1.0)
                 panel.set_master_muted(False)
                 panel.set_master_strip_state(None, None)
+        # 混音器录音工作流：轨集/时间线变化后重算 patch、arm 与录制状态。
+        refresh = getattr(self, "_refresh_mixer_recording_controls", None)
+        if callable(refresh):
+            refresh()
 
     def _get_mixer_audio_manager(self):
         """获取 EditPage 的 AudioPlaybackManager（懒加载），用于实时听感预览。"""
@@ -3259,7 +3261,11 @@ class EditControllerMixin:
 
         arm=True：启动录音（pre-roll 倒计时后采集输入设备）。
         arm=False：停止录音，落盘 take，导入为新 asset。
+        （Mixer 录音工作流激活时由 MixerRecordingControllerMixin 路由。）
         """
+        self._legacy_mixer_record_arm(track_id, armed)
+
+    def _legacy_mixer_record_arm(self, track_id: str, armed: bool) -> None:
         if armed:
             self._start_recording(track_id)
         else:
@@ -3317,6 +3323,12 @@ class EditControllerMixin:
             QTimer.singleShot(0, lambda: self._retire_failed_mixer_recorder(track_id, recorder))
         if not recorders and getattr(self, "_mixer_recording_close_pending", False):
             QTimer.singleShot(0, self.close)
+        if state == "idle":
+            # 录音工作流：recorder 退出后重算 busy/arm（表头 R 恢复可用，
+            # 已 arm 的轨保持 armed 以便直接补录下一条）。
+            refresh = getattr(self, "_refresh_mixer_recording_controls", None)
+            if callable(refresh):
+                refresh()
 
     def _retire_failed_mixer_recorder(self, track_id: str, recorder: Any) -> None:
         if (self._mixer_timeline_recorders.get(track_id) is recorder
@@ -3349,6 +3361,9 @@ class EditControllerMixin:
 
     def _start_recording(
         self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
+        anchor_frame: int | None = None, scene_name: str | None = None,
+        recording_settings: dict | None = None,
+        shared_input: Any = None, input_channels: tuple[int, ...] = (),
     ) -> None:
         """启动录音（§4.4 / P1-10：input patch、时间码对齐、监听、电平）。
 
@@ -3364,6 +3379,11 @@ class EditControllerMixin:
         （project/timeline/track/anchor/generation），take 完成后按
         会话在目标轨锚点落 clip；ADR 面板/混音器 R 的素材采集路径
         （默认 False）行为不变，只导入素材。
+
+        ADR/混音控制器入口：``anchor_frame``/``scene_name`` 覆盖打点与
+        场次；``recording_settings`` 整体替换面板设置链；
+        ``shared_input``+``input_channels`` 让本次 take 订阅会话共享的
+        采集设备（多轨同设备录制），此时通道数取 patch 宽度。
         """
         from src.features.edit.core.recording_manager import (
             RecordingManager, RecordingConfig,
@@ -3376,13 +3396,15 @@ class EditControllerMixin:
         else:
             import tempfile
             output_dir = tempfile.gettempdir()
-        # 获取 track 名作为场次
+        # 获取 track 名作为场次（ADR 台词可显式指定）
         timeline = getattr(edit_page, '_current_timeline', None) if edit_page else None
         track_name = track_id
         if timeline is not None:
             track = timeline.get_track_by_id(track_id)
             if track is not None:
                 track_name = getattr(track, 'name', '') or track_id
+        if scene_name:
+            track_name = scene_name
 
         # 防御：同轨已 armed（manager 仍在采）不得覆盖，否则旧采集成孤儿
         existing = getattr(self, '_recording_managers', {}).get(track_id)
@@ -3392,8 +3414,13 @@ class EditControllerMixin:
 
         # P1-10：input patch / pre-post roll / loop / 监听
         self._wire_adr_panel()
-        settings = self._adr_settings_dict()
-        fps, in_point_frame = self._adr_timeline_context()
+        if recording_settings is not None:
+            settings = dict(recording_settings)
+        else:
+            settings = self._adr_settings_dict()
+        fps, context_frame = self._adr_timeline_context()
+        in_point_frame = (int(anchor_frame) if anchor_frame is not None
+                          else context_frame)
 
         config = RecordingConfig(
             device_id=settings.get('device_id') or None,
@@ -3401,12 +3428,22 @@ class EditControllerMixin:
             scene_name=track_name,
             pre_roll_seconds=float(settings.get('pre_roll_seconds', 1.0)),
             post_roll_seconds=float(settings.get('post_roll_seconds', 1.0)),
-            channels=int(settings.get('channels', 1) or 1),  # VO/ADR mono
+            channels=(len(input_channels) if shared_input is not None
+                      else int(settings.get('channels', 1) or 1)),  # VO/ADR mono
             bit_depth=24,
             fps=fps,
             latency_ms=float(getattr(self, '_adr_latency_ms', 0.0) or 0.0),
         )
         mgr = RecordingManager(config)
+        if shared_input is not None:
+            try:
+                mgr.use_shared_input(shared_input, tuple(input_channels))
+            except (RuntimeError, ValueError) as exc:
+                logger.warning("Shared recording input rejected for track %s: %s",
+                               track_id, exc)
+                if from_mixer_timeline:
+                    self._set_mixer_timeline_recording_state(track_id, mgr, "failed")
+                return
         if getattr(self, '_adr_calibration', None) is not None:
             mgr.set_calibration(self._adr_calibration)
         mgr.enable_live_post_roll = True  # 停止后采集 post-roll 尾巴再落盘
@@ -3825,6 +3862,10 @@ class EditControllerMixin:
             panel.calibrate_requested.connect(self._on_adr_calibrate)
             panel.mark_best_requested.connect(self._on_adr_mark_best)
             panel.replace_clip_requested.connect(self._on_adr_replace_clip)
+            # ADR 台词/排练/录制（AdrRecordingControllerMixin）一次性接线。
+            session_hook = getattr(self, "_wire_adr_session_controls", None)
+            if callable(session_hook):
+                session_hook(panel)
             self._adr_panel_wired = True
         except Exception as e:
             logger.warning("ADR panel wiring failed: %s", e)
@@ -3846,8 +3887,8 @@ class EditControllerMixin:
                 logger.warning("ADR settings read failed: %s", e)
         return settings
 
-    def _on_mixer_record_prep(self, track_id: str) -> None:
-        """§7 P1：混音侧录音准备弹窗（输入设备/声道/预卷/监听）。
+    def _on_mixer_recording_settings(self) -> None:
+        """打开混音器共用的录音设置（输入设备/声道/预卷/监听）。
 
         与 ADR 面板共用同一设置链（提交后 ``apply_settings`` 回填面板），
         时间线 R 的下一次录音立即生效。
@@ -3863,7 +3904,7 @@ class EditControllerMixin:
         settings = self._adr_settings_dict()
         dialog = QDialog(self._main_window_ref() or None)
         dialog.setWindowTitle(I18N.tr(
-            "mixer.recording.prep_title", "Recording prep"))
+            "mixer.record.settings", "Recording Settings"))
         form = QFormLayout(dialog)
         device_combo = QComboBox()
         device_combo.addItem(
@@ -3921,8 +3962,8 @@ class EditControllerMixin:
                 logger.debug("ADR panel settings backfill failed", exc_info=True)
         if getattr(self, 'status_bar', None) is not None:
             self.status_bar.showMessage(I18N.tr(
-                "mixer.recording.prep_saved",
-                "Recording prep saved — arm R on the track to record"), 4000)
+                "mixer.record.settings_saved",
+                "Recording settings saved. Press R on the track to record."), 4000)
 
     def _adr_timeline_context(self):
         """(fps, in_point_frame)：录音打点 = 当前播放头帧（P1-10 时间码对齐）。"""

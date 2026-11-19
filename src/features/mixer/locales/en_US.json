@@ -39,19 +39,42 @@
       "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length."
     },
     "record": {
-      "start": "Record to this track at the playhead",
       "stop": "Stop recording",
-      "preroll": "Pre-roll · click to stop",
       "finishing": "Finishing the recording…",
       "locked": "Unlock this track to record",
       "busy": "Finish the current recording first",
       "failed": "Could not record from the selected input",
-      "save_failed": "Could not save the recording"
+      "save_failed": "Could not save the recording",
+      "settings": "Recording Settings",
+      "settings_menu": "Recording Settings…",
+      "settings_saved": "Recording settings saved. Press R on the track to record.",
+      "arm": "Arm track for recording",
+      "disarm": "Disarm track",
+      "first_channel": "First channel",
+      "input": "Recording input",
+      "input_peak": "Input peak level (dBFS)",
+      "input_unavailable": "The selected input or channel is unavailable.",
+      "mono": "Mono",
+      "no_input": "No input",
+      "patch_first": "Assign a recording input first",
+      "patch_version": "This timeline uses a newer recording input format.",
+      "preparing": "Recording pre-roll",
+      "second_channel": "Second channel",
+      "transport_arm_first": "Arm a track to record",
+      "transport_record": "Record",
+      "transport_recording": "Recording armed tracks",
+      "transport_start": "Record armed tracks",
+      "unavailable": "Unavailable"
     },
     "routing": {
       "output": "Output routing",
       "missing_bus": "Missing bus",
       "add_bus": "Add Bus"
+    },
+    "recording": {
+      "monitor_tip": "Hear the input while recording (takes effect on the next take)",
+      "mono": "Mono",
+      "stereo": "Stereo"
     }
   }
 }
