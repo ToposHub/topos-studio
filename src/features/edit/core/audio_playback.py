@@ -2775,11 +2775,20 @@ class AudioMixer:
         return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
 
     def _downmix_to_master(self, samples: np.ndarray,
-                           src_layout: ChannelLayout) -> np.ndarray:
-        """Bus → Master（立体声域）降混：BS.775，LFE 默认排除。"""
-        if src_layout.channel_count == ChannelLayout.STEREO.channel_count:
+                           src_layout: ChannelLayout,
+                           dst_channels: int = 2) -> np.ndarray:
+        """Bus → Master 降混：BS.775，LFE 默认排除。
+
+        ``dst_channels`` 来自实际 master 缓冲宽度；不可推断的宽度原样
+        返回（不虚构映射）。
+        """
+        if src_layout.channel_count == dst_channels:
             return samples
-        matrix = downmix_matrix(src_layout, ChannelLayout.STEREO, include_lfe=False)
+        try:
+            dst = ChannelLayout.from_channel_count(dst_channels)
+        except ValueError:
+            return samples
+        matrix = downmix_matrix(src_layout, dst, include_lfe=False)
         return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
 
     def set_track_automation_trim(self, track_id: str,
@@ -3678,7 +3687,8 @@ class AudioMixer:
                     # 输出到 Master（output_bus_id=None 或指向非 Bus；
                     # P2 环绕：非立体声 Bus 经 BS.775 降混，LFE 排除）
                     output += self._downmix_to_master(
-                        bus_samples, self._bus_layout_of(bus_id))
+                        bus_samples, self._bus_layout_of(bus_id),
+                        output.shape[0])
                 # RMA-06: Bus sends（Bus 也可 send 到其他 Bus，并行 tap）。
                 # 此前实时 Bus 阶段只处理 output_bus_id，sends 被无声忽略。
                 # MX-14: pre_fader tap 取 Bus 输入（音量/EQ/FX 前）+ 独立 mute。

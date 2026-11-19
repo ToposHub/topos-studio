@@ -696,10 +696,18 @@ class AudioGraphRenderer:
                         dtype=reference.dtype)
 
     def _downmix_to_master(self, samples: np.ndarray,
-                           src_layout: ChannelLayout) -> np.ndarray:
-        """Bus → Master（立体声域）降混：BS.775，LFE 默认排除。"""
-        dst = ChannelLayout.STEREO
-        if src_layout.channel_count == dst.channel_count:
+                           src_layout: ChannelLayout,
+                           dst_channels: int = 2) -> np.ndarray:
+        """Bus → Master 降混：BS.775，LFE 默认排除。
+
+        ``dst_channels`` 来自实际 master 缓冲宽度（单声道 stem=1、
+        立体声=2）；不可推断的宽度原样返回（不虚构映射）。
+        """
+        if src_layout.channel_count == dst_channels:
+            return samples
+        try:
+            dst = ChannelLayout.from_channel_count(dst_channels)
+        except ValueError:
             return samples
         matrix = downmix_matrix(src_layout, dst, include_lfe=False)
         return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
@@ -966,8 +974,8 @@ class AudioGraphRenderer:
                             "AudioGraphRenderer: bus %r routes to unknown bus %r; "
                             "falling back to master", bus_id, target,
                         )
-                    output[:, c0:cN] += self._downmix_to_master(bus_samples,
-                                                                node.bus_layout)
+                    output[:, c0:cN] += self._downmix_to_master(
+                        bus_samples, node.bus_layout, output.shape[0])
                 # RMA-06: Bus sends（并行 tap；MX-14: pre_fader 取 Bus 输入）。
                 for send_entry in node.sends:
                     send_bus_id, send_level, send_tap, send_muted = (
