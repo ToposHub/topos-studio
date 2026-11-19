@@ -288,6 +288,10 @@
       "snapshot": {
         "slot_a": "A",
         "slot_b": "B"
+      },
+      "automation": {
+        "lane": "自动化参数 Lane",
+        "lane_track": "轨道:"
       }
     },
     "fx": {
@@ -838,7 +842,10 @@
     "aqua": "青色",
     "blue": "蓝色",
     "purple": "紫色",
-    "magenta": "洋红"
+    "magenta": "洋红",
+    "automation": {
+      "write_protected": "该轨道自动化已写保护"
+    }
   },
   "mask": {
     "title": "遮罩控制",

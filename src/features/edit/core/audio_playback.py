@@ -1766,6 +1766,12 @@ class AudioMixer:
         # 引擎据此判断是否读取 automation 曲线。Off 模式用静态值（不读曲线）。
         # 默认 "off"（向后兼容：无模式时存在关键帧不读取，由调用方显式设为 read）。
         self._automation_modes: Dict[str, str] = {}
+        # P1-5：Trim Automation——{track_id: {param: 倍率}}；曲线值与静态
+        # 默认值同乘（volume 线性域 0.5≈-6dB / 2.0≈+6dB）。
+        self._automation_trim: Dict[str, Dict[str, float]] = {}
+        # P1-5：自动化预览捕获层——{track_id: {param: KeyframeTrack}}；
+        # 存在时优先于正式曲线（预听），commit 前不进命令栈/模型。
+        self._automation_preview: Dict[str, Dict[str, Any]] = {}
         # W24/W25: 每轨路由信息 {track_id: {"output_bus_id": str|None, "sends": [(bus_id, level), ...]}}
         self._track_routing: Dict[str, Dict[str, Any]] = {}
         self._sample_rate: float = 48000.0
@@ -2728,6 +2734,24 @@ class AudioMixer:
                 normalized = "off"
             self._automation_modes[track_id] = normalized
 
+    def set_track_automation_trim(self, track_id: str,
+                                  trims: Dict[str, float]) -> None:
+        """P1-5：设置某轨的 Trim Automation 倍率表（{}=清除）。线程安全。"""
+        with QMutexLocker(self._mutex):
+            self._automation_trim[track_id] = {
+                str(param): float(factor) for param, factor in (trims or {}).items()
+                if factor and 0.01 <= float(factor) <= 4.0
+            }
+
+    def set_track_automation_preview(self, track_id: str,
+                                     automation: Dict[str, Any]) -> None:
+        """P1-5：设置/清除（None/空）某轨的预览自动化层（预听优先）。"""
+        with QMutexLocker(self._mutex):
+            if automation:
+                self._automation_preview[track_id] = automation
+            else:
+                self._automation_preview.pop(track_id, None)
+
     def _apply_audio_crossfade(
         self,
         samples: np.ndarray,
@@ -2908,15 +2932,28 @@ class AudioMixer:
                     self._advance_pdc_line(track_id, output_channels, num_samples)
                     continue
 
-                volume = state.volume * self._vca_factors.get(track_id, 1.0)
                 pan = state.pan
                 # AM-07/§3.2: automation 模式判断 + 逐样本 ramp（替代每帧单标量）。
                 # Off 模式不读取曲线（用静态值）。Read/Write/Touch/Latch 读取曲线。
                 # §3.2: 当一个 block 内 automation 快速变化时，逐样本 ramp 避免阶跃
                 # click，斜坡段误差 < 0.1dB（计划表验收）。
                 auto_mode = self._automation_modes.get(track_id, "off")
-                auto = self._automation.get(track_id) if auto_mode != "off" else None
+                # P1-5：预览层优先（预听捕获未提交）；Trim 倍率乘在
+                # 曲线值上（与模型 get_automation_value 同语义）。
+                auto = self._automation_preview.get(track_id)
+                if auto is None:
+                    auto = self._automation.get(track_id) if auto_mode != "off" else None
+                trim = self._automation_trim.get(track_id, {}) or {}
+                volume = state.volume * self._vca_factors.get(track_id, 1.0)
+                # P1-5：Trim Automation 倍率乘在音量上（静态值与曲线值同
+                # 语义；pan/mute 不参与 trim）。
+                vol_trim = trim.get("volume") if trim else None
+                # get_value_ramp 的 default 用未修剪值：整条 ramp 统一乘
+                # trim（曲线段与静态段各只乘一次，不叠加）。
+                volume_for_ramp = volume
                 # 逐样本 ramp（None=该参数无曲线，用标量）
+                if vol_trim is not None and float(vol_trim) != 1.0:
+                    volume = volume * float(vol_trim)
                 volume_ramp = None
                 pan_ramp = None
                 mute_gate = None
@@ -2926,10 +2963,12 @@ class AudioMixer:
                         volume_ramp = np.array(
                             vol_track.get_value_ramp(
                                 float(current_frame), fps, num_samples,
-                                float(self._sample_rate), volume,
+                                float(self._sample_rate), volume_for_ramp,
                             ),
                             dtype=np.float32,
                         )
+                        if vol_trim is not None and float(vol_trim) != 1.0:
+                            volume_ramp = volume_ramp * float(vol_trim)
                     pan_track = auto.get("pan")
                     if pan_track is not None and pan_track.keyframes:
                         pan_ramp = np.array(
@@ -5712,6 +5751,16 @@ class AudioPlaybackManager(QObject):
     def set_track_automation_mode(self, track_id: str, mode: str) -> None:
         """AM-07: 设置某轨的自动化模式。转发到 AudioMixer。"""
         self._mixer.set_track_automation_mode(track_id, mode)
+
+    def set_track_automation_trim(self, track_id: str,
+                                  trims: Dict[str, float]) -> None:
+        """P1-5：设置某轨的 Trim Automation 倍率表。转发到 AudioMixer。"""
+        self._mixer.set_track_automation_trim(track_id, trims)
+
+    def set_track_automation_preview(self, track_id: str,
+                                     automation: Dict[str, Any]) -> None:
+        """P1-5：设置/清除某轨的预览自动化层。转发到 AudioMixer。"""
+        self._mixer.set_track_automation_preview(track_id, automation)
 
     def set_track_routing(self, track_id: str, output_bus_id: Optional[str],
                           sends: list, is_bus: bool = False) -> None:

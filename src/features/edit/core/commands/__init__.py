@@ -34,6 +34,10 @@ from src.features.edit.core.timeline_v2 import TimelineSequence, ClipInstance
 
 from src.features.edit.core.adr_cues import SetAdrCuesCommand
 from src.features.edit.core.commands.clip_props_commands import SetDialogueGroupCommand
+from src.features.edit.core.commands.audio_commands import (
+    SetTrackAutomationTrimCommand,
+    SetTrackAutomationWriteProtectCommand,
+)
 from src.features.edit.core.project import EditProject
 
 logger = logging.getLogger(__name__)
@@ -1238,6 +1242,9 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "SetClipWaveformDisplayCommand": SetClipWaveformDisplayCommand.from_dict,
     "SetTimelineRangeCommand": SetTimelineRangeCommand.from_dict,
     "SetDialogueGroupCommand": SetDialogueGroupCommand.from_dict,
+    "SetTrackAutomationTrimCommand": SetTrackAutomationTrimCommand.from_dict,
+    "SetTrackAutomationWriteProtectCommand": (
+        SetTrackAutomationWriteProtectCommand.from_dict),
     "SetAdrCuesCommand": SetAdrCuesCommand.from_dict,
     "ToggleClipEnabledCommand": ToggleClipEnabledCommand.from_dict,
     "SetClipLinkedCommand": SetClipLinkedCommand.from_dict,

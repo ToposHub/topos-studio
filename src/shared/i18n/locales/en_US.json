@@ -288,6 +288,10 @@
       "snapshot": {
         "slot_a": "A",
         "slot_b": "B"
+      },
+      "automation": {
+        "lane": "Automation Lane",
+        "lane_track": "Track:"
       }
     },
     "fx": {
@@ -796,7 +800,10 @@
     "aqua": "Aqua",
     "blue": "Blue",
     "purple": "Purple",
-    "magenta": "Magenta"
+    "magenta": "Magenta",
+    "automation": {
+      "write_protected": "Track automation is write-protected"
+    }
   },
   "mask": {
     "title": "Mask Controls",

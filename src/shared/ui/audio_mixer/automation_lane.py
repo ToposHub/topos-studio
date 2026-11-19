@@ -298,11 +298,13 @@ class AutomationCurveWidget(QWidget):
                     self.update()
 
 
-class AutomationLane(QDialog):
-    """Automation Lane 对话框（W22）+ 模式选择器（W23）。
+class AutomationLanePanel(QWidget):
+    """Automation Lane 内容面板（P1-5 时间线参数 lane 载体）。
 
-    显示某轨道某参数的 automation 曲线，可编辑。
-    顶部有参数选择器（volume/pan/mute）+ 全局 automation 模式选择器。
+    显示某轨道某参数的 automation 曲线，可编辑；顶部有参数选择器
+    （volume/pan/mute + fx/*）与模式选择器。既被 :class:`AutomationLane`
+    对话框包裹（W22 形态），也作为「时间线参数 lane」停靠在时间线
+    面板下方的条带里（P1-5 形态）——同一套信号契约，命令层共用。
     """
 
     # 信号
@@ -312,6 +314,8 @@ class AutomationLane(QDialog):
     set_keyframe_interp = pyqtSignal(str, str, int, str)  # track_id, param, frame, interp_name
     # §7 P1：模式按轨道提交（track_id, mode: Off/Read/Write/Touch/Latch）。
     automation_mode_changed = pyqtSignal(str, str)
+    # P1-5：条带形态的关闭请求（对话框形态转 accept）。
+    close_requested = pyqtSignal()
 
     # 参数配置（name → (min, max, default)）
     PARAM_CONFIG = {
@@ -344,13 +348,6 @@ class AutomationLane(QDialog):
             self._param_config[_key] = (mn, mx, 0.0)
         # 各参数的 KeyframeTrack（由 controller 同步进来）
         self._tracks: dict[str, Optional[KeyframeTrack]] = {}
-
-        self.setWindowTitle(I18N.tr(
-            "audio.mixer.automation.title",
-            "Automation — {name}"
-        ).format(name=track_name))
-        self.setMinimumSize(640, 300)
-        self.setModal(False)
 
         self._init_ui()
 
@@ -392,7 +389,7 @@ class AutomationLane(QDialog):
         top.addWidget(self._clear_btn)
 
         self._close_btn = QPushButton(I18N.tr("common.close", "Close"))
-        self._close_btn.clicked.connect(self.accept)
+        self._close_btn.clicked.connect(self.close_requested.emit)
         top.addWidget(self._close_btn)
 
         layout.addLayout(top)
@@ -475,3 +472,61 @@ class AutomationLane(QDialog):
     def set_total_frames(self, total: int) -> None:
         self._total_frames = max(1, int(total))
         self._curve.set_total_frames(self._total_frames)
+
+
+class AutomationLane(QDialog):
+    """Automation Lane 对话框（W22 形态；内容承载在 AutomationLanePanel）。
+
+    保留原有构造签名与信号契约：``lane._curve`` / ``update_track_data``
+    / ``set_automation_mode`` 等经 ``__getattr__`` 委托到内容面板。
+    """
+
+    add_keyframe = pyqtSignal(str, str, int, float)  # track_id, param, frame, value
+    remove_keyframe = pyqtSignal(str, str, int)      # track_id, param, frame
+    clear_param = pyqtSignal(str, str)               # track_id, param
+    set_keyframe_interp = pyqtSignal(str, str, int, str)
+    automation_mode_changed = pyqtSignal(str, str)
+
+    PARAM_CONFIG = AutomationLanePanel.PARAM_CONFIG
+
+    def __init__(
+        self,
+        track_id: str,
+        track_name: str,
+        total_frames: int = 1000,
+        initial_param: str = "volume",
+        parent: Optional[QWidget] = None,
+        fx_param_specs: Optional[list] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._track_id = track_id
+        self.setWindowTitle(I18N.tr(
+            "audio.mixer.automation.title",
+            "Automation — {name}"
+        ).format(name=track_name))
+        self.setMinimumSize(640, 300)
+        self.setModal(False)
+
+        from PyQt6.QtWidgets import QVBoxLayout as _QVBoxLayout
+        self._panel = AutomationLanePanel(
+            track_id, track_name, total_frames=total_frames,
+            initial_param=initial_param, fx_param_specs=fx_param_specs,
+            parent=self,
+        )
+        layout = _QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._panel)
+        # 面板信号 → 对话框信号（消费方接线保持不变）
+        self._panel.add_keyframe.connect(self.add_keyframe)
+        self._panel.remove_keyframe.connect(self.remove_keyframe)
+        self._panel.clear_param.connect(self.clear_param)
+        self._panel.set_keyframe_interp.connect(self.set_keyframe_interp)
+        self._panel.automation_mode_changed.connect(self.automation_mode_changed)
+        self._panel.close_requested.connect(self.accept)
+
+    def __getattr__(self, name: str):
+        # 委托到内容面板（_curve / update_track_data / set_automation_mode / …）
+        panel = self.__dict__.get("_panel")
+        if panel is None:
+            raise AttributeError(name)
+        return getattr(panel, name)
