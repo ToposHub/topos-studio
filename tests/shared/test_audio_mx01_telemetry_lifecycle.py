@@ -69,6 +69,12 @@ class TestMx01SilentPayload:
                     self.calls = []
                     self._meter = _Meter()
 
+                # 35a4451d 起 update_per_track_levels 读取表模式决定
+                # peak/rms/lufs 取值键——stub 不实现会 AttributeError。
+                @property
+                def display_meter_mode(self):  # noqa: D401
+                    return None
+
                 def reset_meter(self):
                     self.calls.append("reset")
 
