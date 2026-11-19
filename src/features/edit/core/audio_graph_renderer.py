@@ -230,6 +230,12 @@ class AudioGraphRenderer:
         self._pdc_master_lat = 0
         self._pdc_delay: dict[str, int] = {}
         self._pdc_lines: dict[str, np.ndarray] = {}
+        # P0 · Clip FX PDC：每轨 clip 链最大算法延迟（导出循环经
+        # note_clip_chain_latency 申报；configure 时未知 → 空 = 恒等）。
+        # 轨节点延迟 = 轨链延迟 + clip 最大延迟；同轨 clip 间由
+        # _clip_pdc_lines（键=clip_id，经 render_track_block 推入）对齐。
+        self._track_clip_lat: dict[str, int] = {}
+        self._clip_pdc_lines: dict[str, np.ndarray] = {}
         # P1 · VCA 倍率缓存（未 configure 的渲染器恒等）。
         self._vca_factors: dict = {}
         # R05: Master fx 参数自动化采样器（configure_from_sequence 构建）
@@ -345,6 +351,10 @@ class AudioGraphRenderer:
                     lat = int(chain.latency_samples())
                 except Exception:  # noqa: BLE001 — 声明异常按 0
                     lat = 0
+            # P0 · Clip FX PDC：轨节点延迟 = 轨链延迟 + 该轨 clip 链最大
+            # 延迟（同轨 clip 间先由相对延迟线对齐到 clip_max，轨级再统一
+            # 推迟 clip_max——与实时 mix_samples 同语义）。
+            lat += int(self._track_clip_lat.get(nid, 0) or 0)
             (bus_lat if node.is_bus else track_lat)[nid] = max(0, lat)
         master_lat = 0
         if self._master_chain is not None:
@@ -366,6 +376,24 @@ class AudioGraphRenderer:
                 self._pdc_delay[nid] = delay
         # 延迟线缓冲（feed 后保留尾部，输出为"缓冲 + 新块"的前段）。
         self._pdc_lines: dict[str, np.ndarray] = {}
+        # P0 · Clip FX PDC：轨级 clip 延迟申报变化 → 相对延迟线一并清空
+        # （调用时序：导出循环在块循环前申报；渲染中途不重入）。
+        self._clip_pdc_lines: dict[str, np.ndarray] = {}
+
+    def note_clip_chain_latency(self, track_id: str, latency_samples: int) -> None:
+        """申报某轨 clip FX 链的最大算法延迟（P0 · Clip FX PDC）。
+
+        导出循环在块循环前调用（每轨一次，传该轨全部 clip 链延迟的
+        最大值；无延迟声明传 0）。轨节点 PDC 随之重算：轨节点延迟 =
+        轨链延迟 + clip 最大延迟——同轨 clip 间由 render_track_block 的
+        相对延迟线对齐，轨级与其他轨在 Master 汇合处同样本落点。
+        """
+        lat = max(0, int(latency_samples or 0))
+        if lat > 0:
+            self._track_clip_lat[str(track_id)] = lat
+        else:
+            self._track_clip_lat.pop(str(track_id), None)
+        self._recompute_pdc()
 
     def pdc_total_samples(self) -> int:
         """最迟路径的总补偿延迟（轨级 + Bus 级 + Master 链声明）。
@@ -476,6 +504,8 @@ class AudioGraphRenderer:
         source_channels: int = 2,
         fps: Optional[float] = None,
         sidechain_taps: Optional[dict] = None,
+        clip_pdc_delay: int = 0,
+        clip_pdc_key: str = "",
     ) -> Optional[np.ndarray]:
         """处理单个普通轨的一个样本块。
 
@@ -488,6 +518,10 @@ class AudioGraphRenderer:
             samples: 解码后的样本 (channels, n)
             current_frame: 当前时间线帧（automation 求值用）
             clip_fx_chain: 该 clip 的 FX 链（可选，pre-fader）
+            clip_pdc_delay: P0 · Clip FX PDC——本 clip 相对同轨最大 clip 链
+                延迟的差值（track_clip_max − 本链 latency；>0 时经
+                clip_pdc_key 定位的持久延迟线推迟，与轨节点 PDC 同语义）。
+            clip_pdc_key: 相对延迟线的稳定键（clip_id；空 = 不建线）。
             clip_fade: clip 淡化参数 dict，含 keys:
                 timeline_start, timeline_duration, fade_in_frames, fade_out_frames, fps。
                 提供 AM-06 clip 淡入淡出（在所有其他节点之前）。
@@ -598,6 +632,14 @@ class AudioGraphRenderer:
         # clip FX（pre-fader，在 volume 之前）
         if clip_fx_chain is not None and clip_fx_chain.is_active:
             samples = clip_fx_chain.process(samples)
+        # P0 · Clip FX PDC：同轨 clip 间相对对齐（与实时 mix_samples 同
+        # 语义；轨节点整体推迟已计入 _track_clip_lat 重算）。对全部 clip
+        # 生效：无链/旁路/失活链无算法延迟按 0 计（内容本无位移，须补满
+        # clip_max 才能与其余轨同样本汇合）。
+        if clip_pdc_delay > 0 and clip_pdc_key:
+            samples = apply_pdc_delay_line(
+                self._clip_pdc_lines, str(clip_pdc_key),
+                int(clip_pdc_delay), samples)
 
         # volume（§3.2: ramp 时逐样本）；P1 · VCA 推子级倍率一并应用
         # （pre-fader send 的 tap 在轨链之前，不受 VCA 影响）。
