@@ -86,18 +86,36 @@ Normalize/LUFS 对实际插入阶段（处理后预览）与目标声道测量�
 ## P2 · Reconform（`53faf668`）
 `shot_fingerprint`（4 时间块亮度统计，抗噪/敏感）；`match_shots`（LCS → keep/insert/delete/move 候选）；`plan_audio_reconform`（音频 handles 保留）。6 项验收。
 
-## 已知边界与后续批次
+## 后续批次（2026-11-20 · 已知边界收口）
 
-1. **实时监听 PDC**：`AudioMixer` 未接图级延迟补偿（voice/mangler 类监听存在导出对齐差异；零延迟 DSP 不受影响）。
-2. **Stem 选区预卷**：成片选区预卷既有；Stem 的 frame_range+预卷待复用同一预算逻辑接线。
+原"已知边界与后续批次"清单中全部可离线完成项已按批次落地并独立提交：
+
+| 批次 | 内容 | 提交 |
+| --- | --- | --- |
+| WIP 收口 | ADR 台词/录制工作流接入 MainWindow（mixin 挂载、`_start_recording` 扩展 anchor/scene/shared_input、ADR dock 左槽迁移修复、混音器录音走带接线、语言包补齐） | `0424b982` |
+| 边界 1 | 实时监听 PDC：`AudioMixer` 两级最迟路径对齐（共享 `apply_pdc_delay_line`；mute/solo/无输入块喂零推进；seek 清线）；新增 10 项对齐验收 | `73eb0b21` |
+| 边界 2 | Stem 选区预卷：`_iter_stem_pcm_chunks`/`render_stem_pcm`/`export_all_stems` 增 `frame_range`，复用成片 H02 预卷预算（不含 PDC），预卷段裁剪交付；新增 5 项 | `a74abe48` |
+| 边界 4 | 十款 rack FX 生产 UI：timeline_v2 参数载体（`effect_type_support` 修复为 supported）+ `FxParamDialog` 表驱动对话框 + 机架菜单/拖拽/默认参数 + `effect_registry` 注册 + 卷积混响 `ir_path` 装载；新增 19 项 | `e0741a5a` |
+| 边界 6 | P1-4 子项：切空不动同步（`plan_gap_splits` + 静音间隙降序宏切分）与同场对话编辑组（`dialogue_group_id` + `SetDialogueGroupCommand`）；P1-5 子项：Trim Automation（`automation_trim` + 引擎 ramp 同语义）、写保护（录制/切写模式守卫）、预览捕获（`AutomationPreviewCapture` + 引擎预览层优先）、时间线参数 lane（`AutomationLanePanel` 停靠条带）；新增 12+12 项 | `a476f008`、`9a42a36e` |
+| 边界 7 | 环绕 Bus 路由核心：`upmix_matrix`/`routing_matrix` + `bus_routing` 能力域 + `EditTrack.bus_layout` + 离线图/实时混音器全边路由矩阵（Bus→Master BS.775 降混按实际 master 宽度）；stereo Bus 逐位零回归；新增 14 项 | `ec860a90` |
+| 边界 5 | 既有套件失败清理：n03 调色门×8（测试桩补 `_clip_color_graph`）、channel_layout_import×2（探测 str() 防御）、export_outcome×2（preflight 桩）、stopgaps×2（mock 声明 `_audio_only`）、media pool×3（sip 属性/事件泵）、plain-D（委托绑定）、retime 菜单/涟漪宏/降级日志/color wheel None 事件防护；连带回归 5 项同批修复（Bus→Master 宽度泛化、嵌套展开全量、注册表契约） | test(edit) + fix(edit) |
+
+延后项不变：#8 效果器批次（"剧情性设计需求明确时再做"）、真机项（边界 3：真机监听/多声道路由监看/第三方 AAF 实文件往返，计划明示现场补测）。十款新 FX 的 Clip FX 插槽适配（clip 级对话框）与 ADR/混音录音的整段实机联调留待后续需求。
+
+## 已知边界（收口后余项）
+
+1. ~~实时监听 PDC~~ → 已落地（批次"边界 1"）。
+2. ~~Stem 选区预卷~~ → 已落地（批次"边界 2"）。
 3. **真机项**（计划明示现场补测）：真机监听（macOS/Windows 双设备）、多声道路由监看、第三方 AAF 实文件往返。
-4. **效果器 UI 面板**：8 款新效果器已入 EffectChain/注册表（轨道/Bus/Master 插槽可加载）；专属面板按批次接 UI。
-5. **全量 Edit 套件既有失败**：~32 项 UI 测试在基线 `51dbe7a1` 即失败（timeline 手势/快捷键、n03 调色门、media pool、export_outcome 预检假 clip、channel_layout_import mock 等，抽查项经 stash 对比确认），与本轮改动无关；本轮引入的 5 项回归（clip_pcm×2、automation_timebase×3）均已修复（`97160162`、`b8dacaea`），相关文件单独运行全过。定向回归 620 项全过。
-6. **P1 实施方法列未落地的 UI 级子项**（两行验收列要求已由核心工具/既有能力满足）：P1-4 的"切空不动同步"、"同场对话编辑组"；P1-5 的"时间线参数 lane、Trim Automation、自动化写保护、自动化预览捕获"。均属 UI/命令层扩展，按后续批次独立排期。
-7. **环绕 Bus 路由**：源解码/交付矩阵（stereo/5.1/7.1）已通（`layout_capability` 能力查询为单一真相）；混音图内 per-bus 环绕布局与路由仍在"多声道路由监看"真机项范围内（见 3）。
+4. ~~效果器 UI 面板~~ → 已落地（批次"边界 4"；十款 FX 的 clip 级插槽适配留待后续）。
+5. **全量套件余项**：timeline 手势/指针 chrome 8 项为 Qt 离屏加载序波动（单独运行全过）；本轮修复后已无既有持久失败。
+6. ~~P1-4/P1-5 方法列子项~~ → 已全部落地（批次"边界 6"）。
+7. ~~环绕 Bus 路由（核心）~~ → 已落地（批次"边界 7"；"多声道路由监看"真机验收仍属边界 3）。
 
 ## 回归基线
 
-- 本轮新增：185 项（见各文件 `tests/edit/test_*` 与 `tests/mixer/test_*`）。
-- 定向回归：620 项（audio_edit/pcm_render_cache/length_edit/playback/parity×3/stem/round7/h02/h03/r03/dsp/clip_pcm/recording/delivery_qc + mixer 全域）。
-- 修复的连带回归：`test_clip_pcm` 2 项（P0-5 引入，`97160162` 修复）；`test_project_workspace` timepitch 语义更新（P1-3 行为变更，测试同步）。
+- 上一轮（2026-11-19）：新增 185 项；定向回归 620 项。
+- 本轮（2026-11-20 后续批次）新增验收：**66 项**（ADR 工作流 6、PDC 对齐 10、Stem 预卷 5、FX UI 19、对白剪辑/编辑组 16、自动化 P1-5 12、环绕路由 14）；ADR 录音工作流域另有 59 项（recording/arm/adr 全域）。
+- 全量 Edit+Mixer 套件终态：**14145 通过 / 9 失败 / 65 skipped**——9 项失败全部为 timeline 手势/指针 chrome 的 Qt 离屏加载序波动（`test_timeline_clip_affordance_gestures.py`×7 + `test_timeline_pointer_and_chrome.py`×1，单独运行 77/77 全过），既有持久失败清零。
+- 修复的连带回归：本轮引入并当批修复——Bus→Master 单声道 stem 宽度、嵌套展开顺序依赖、注册表契约测试、表头 arm 状态 busy 重算与工作流退出复位。
+
