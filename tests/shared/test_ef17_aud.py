@@ -764,8 +764,6 @@ class TestAud25517PresetScanAndExport:
     def test_scan_still_populates_items(self, qapp, monkeypatch, tmp_path) -> None:
         pp = importlib.import_module("src.features.color.ui.presets_panel")
         from src.features.color.ui.presets_panel import PresetsPanel
-        (tmp_path / "a.topos").write_bytes(b"x")
-        (tmp_path / "a.thumb.jpg").write_bytes(b"jpg")
         decoded: list = []
 
         class _FakePixmap:
@@ -776,9 +774,28 @@ class TestAud25517PresetScanAndExport:
                 return False
 
         monkeypatch.setattr(pp, "QPixmap", _FakePixmap)
+
+        import zipfile
+        from src.features.color.core.gallery_repository import (
+            GalleryFolderRepository,
+        )
+        from src.features.color.core.gallery_query_service import (
+            GalleryQueryService,
+        )
+        presets_root = tmp_path / "Presets"
+        (presets_root / "User").mkdir(parents=True)
+        # G01 起扫描走 repository 查询：条目必须落在库内（User 分区）且
+        # 是合法 topos bundle 才会被查询返回（库外目录 → album_missing，
+        # 空列表是诚实语义）。库根整体替换为本测试目录（密闭）。
+        with zipfile.ZipFile(presets_root / "User" / "a.topos", "w") as zf:
+            zf.writestr("project.json", "{}")
+        (presets_root / "User" / "a.thumb.jpg").write_bytes(b"jpg")
         panel = PresetsPanel()
         try:
-            panel._current_folder = str(tmp_path)
+            panel.presets_root = str(presets_root)
+            panel._repository = GalleryFolderRepository(str(presets_root))
+            panel._query_service = GalleryQueryService(panel._repository)
+            panel._current_folder = str(presets_root / "User")
             panel.scan_presets()
             assert panel.list_widget.count() == 1  # 正例：条目照常入列
             # 回退（扫描路径解码 QPixmap）时非空 → 失败
