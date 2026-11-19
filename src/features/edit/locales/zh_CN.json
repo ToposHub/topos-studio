@@ -284,7 +284,11 @@
       "audio_gain_prompt": "增益（dB，范围 -48 ~ +12，0 = 不变）：",
       "replace_with": "替换为…",
       "db_suffix": " dB",
-      "normalize_asset_missing": "无法定位素材文件，无法分析"
+      "normalize_asset_missing": "无法定位素材文件，无法分析",
+      "split_at_silence": "切空不动同步",
+      "dialogue_group_menu": "同场对话组",
+      "dialogue_group_assign": "按场次归组",
+      "dialogue_group_clear": "退出对话组"
     },
     "track": {
       "sync_lock": "同步锁定",

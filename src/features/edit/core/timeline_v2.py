@@ -355,6 +355,10 @@ class ClipInstance:
     # label_color（片段配色）；序列化非默认才消费，未知值读取保留、
     # UI 绘制 fallback 默认色。split/复制/Replace 经字段保留自动继承。
     flag_color: str | None = None
+    # P1-4（2026-11-19 计划第二阶段）：同场对话编辑组标记。非 None 时
+    # 该片段属于同名场次的对白编辑组（组操作经批量命令一步提交）。
+    # split/复制/Replace 经字段保留自动继承（与 flag_color 同契约）。
+    dialogue_group_id: str | None = None
     # Audio timeline display preference. False keeps stereo source peaks
     # mixed into one compact envelope; True shows separate L/R envelopes.
     waveform_show_channels: bool = False
@@ -1273,6 +1277,10 @@ class ClipInstance:
         """W05：返回更新了彩色旗标的新实例（None = 清除，契约 D4）。"""
         return replace(self, flag_color=flag_color)
 
+    def with_dialogue_group(self, group_id: str | None) -> ClipInstance:
+        """P1-4：返回更新了同场对话编辑组的新实例（None = 退出组）。"""
+        return replace(self, dialogue_group_id=group_id)
+
     def with_waveform_show_channels(self, show_channels: bool) -> ClipInstance:
         """Create a new clip with mono or separate-channel waveform display."""
         return replace(self, waveform_show_channels=bool(show_channels))
@@ -1603,6 +1611,7 @@ class ClipInstance:
             "label_color": self.label_color,
             # W05：与 label_color 同型直出；旧工程缺该键读取 → None（契约 D4）
             "flag_color": self.flag_color,
+            "dialogue_group_id": self.dialogue_group_id,
             "waveform_show_channels": self.waveform_show_channels,
             # Phase 1.2: Fade in/out
             "fade_in_duration": self.fade_in_duration,
@@ -1716,6 +1725,8 @@ class ClipInstance:
             label_color=data.get("label_color"),
             # W05：旧工程缺键 → None；未知颜色值保留（UI fallback 绘制）
             flag_color=data.get("flag_color"),
+            dialogue_group_id=(str(data["dialogue_group_id"])
+                               if data.get("dialogue_group_id") else None),
             waveform_show_channels=bool(data.get("waveform_show_channels", False)),
             # Phase 1.2: Fade in/out
             fade_in_duration=data.get("fade_in_duration", 0),

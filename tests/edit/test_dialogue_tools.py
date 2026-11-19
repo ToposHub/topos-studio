@@ -20,6 +20,7 @@ from src.features.edit.core.dialogue_tools import (
     estimate_alignment_offset,
     fill_room_tone,
     plan_batch_crossfades,
+    plan_gap_splits,
     plan_jl_cut,
 )
 
@@ -154,3 +155,65 @@ class TestAlignmentEstimate:
             np.zeros(int(1.0 * RATE), dtype=np.float32),
             np.zeros(int(0.3 * RATE), dtype=np.float32), RATE)
         assert est is None
+
+
+class TestGapSplits:
+    """切空不动同步：静音间隙检测与切分计划（P1-4）。"""
+
+    SR = 48000
+    FPS = 25.0
+
+    @staticmethod
+    def _clip(start=100, duration=50):
+        return SimpleNamespace(timeline_start=start, timeline_duration=duration)
+
+    def _pcm(self, sections):
+        sr = self.SR
+        parts = []
+        for kind, seconds in sections:
+            n = int(sr * seconds)
+            if kind == "tone":
+                parts.append(np.full((2, n), 0.2, dtype=np.float32))
+            else:
+                parts.append(np.zeros((2, n), dtype=np.float32))
+        return np.concatenate(parts, axis=1)
+
+    def test_cuts_at_gap_midpoints_ascending(self):
+        plan = plan_gap_splits(self._clip(), self._pcm(
+            [("tone", 0.5), ("sil", 0.3), ("tone", 0.5), ("sil", 0.3), ("tone", 0.4)]),
+            self.SR, self.FPS)
+        assert plan.valid
+        assert plan.cuts == (116, 136)
+        assert plan.skipped_gaps == 0
+
+    def test_short_gaps_are_skipped(self):
+        plan = plan_gap_splits(self._clip(), self._pcm(
+            [("tone", 0.5), ("sil", 0.05), ("tone", 0.5), ("sil", 0.3), ("tone", 0.4)]),
+            self.SR, self.FPS)
+        assert plan.valid
+        assert plan.cuts == (130,)
+        assert plan.skipped_gaps == 1
+
+    def test_edge_gaps_do_not_split(self):
+        plan = plan_gap_splits(self._clip(), self._pcm(
+            [("sil", 0.4), ("tone", 0.5), ("sil", 0.4)]),
+            self.SR, self.FPS)
+        assert not plan.valid
+        assert plan.cuts == ()
+
+    def test_below_threshold_content_is_silence(self):
+        # -60 dBFS 底噪低于默认 -45 阈值 → 视为静音可切
+        sr = self.SR
+        noise = np.full((2, int(sr * 0.4)), 10 ** (-60.0 / 20.0), dtype=np.float32)
+        tone = np.full((2, int(sr * 0.5)), 0.2, dtype=np.float32)
+        plan = plan_gap_splits(self._clip(),
+                               np.concatenate([tone, noise, tone], axis=1),
+                               sr, self.FPS)
+        assert plan.valid
+
+    def test_invalid_pcm(self):
+        plan = plan_gap_splits(self._clip(), None, self.SR, self.FPS)
+        assert not plan.valid
+        plan = plan_gap_splits(self._clip(), np.zeros((2, 0), dtype=np.float32),
+                               self.SR, self.FPS)
+        assert not plan.valid

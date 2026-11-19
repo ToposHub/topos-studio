@@ -284,7 +284,11 @@
       "audio_gain_prompt": "Gain (dB, -48 ~ +12, 0 = unchanged):",
       "replace_with": "Replace With…",
       "db_suffix": " dB",
-      "normalize_asset_missing": "Cannot locate the media file; analysis unavailable"
+      "normalize_asset_missing": "Cannot locate the media file; analysis unavailable",
+      "split_at_silence": "Split at Silence Gaps",
+      "dialogue_group_menu": "Dialogue Group",
+      "dialogue_group_assign": "Assign to Scene Group",
+      "dialogue_group_clear": "Remove from Group"
     },
     "track": {
       "sync_lock": "Sync Lock",
