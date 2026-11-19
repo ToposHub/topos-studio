@@ -151,7 +151,65 @@
     },
     {
       "category": "audio",
-      "description": "Dynamic range compressor",
+      "description": "Glue compressor with DX/MX templates and sidechain HPF",
+      "effect_type": "bus_comp",
+      "name": "Bus Compressor",
+      "params": {
+        "sc_hpf_hz": {
+          "default": 120.0,
+          "label": "Sidechain HPF",
+          "max": 500.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "template": {
+          "default": "dx_glue",
+          "label": "Template",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Modulated delay line with feedback tail budget",
+      "effect_type": "chorus_flanger",
+      "name": "Chorus / Flanger",
+      "params": {
+        "depth_ms": {
+          "default": 3.0,
+          "label": "Depth",
+          "max": 10.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "feedback": {
+          "default": 0.0,
+          "label": "Feedback",
+          "max": 0.95,
+          "min": 0.0,
+          "type": "float"
+        },
+        "mix": {
+          "default": 0.5,
+          "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "rate_hz": {
+          "default": 0.6,
+          "label": "Rate",
+          "max": 20.0,
+          "min": 0.01,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Dynamic range compressor with sidechain",
       "effect_type": "compressor",
       "name": "Compressor",
       "params": {
@@ -163,14 +221,72 @@
           "type": "float"
         },
         "ratio": {
-          "default": 4.0,
+          "default": 2.5,
           "label": "Ratio",
           "max": 20.0,
-          "min": 1.0,
+          "min": 1.2,
           "type": "float"
         },
         "threshold_db": {
-          "default": -24.0,
+          "default": -15.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -60.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Partitioned-FFT convolution reverb with WAV impulse response",
+      "effect_type": "convolution_reverb",
+      "name": "Convolution Reverb",
+      "params": {
+        "dry": {
+          "default": 1.0,
+          "label": "Dry",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "wet": {
+          "default": 0.35,
+          "label": "Wet",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Split-band sibilance control with streaming RMS envelope",
+      "effect_type": "de_esser",
+      "name": "De-Esser",
+      "params": {
+        "frequency": {
+          "default": 6500.0,
+          "label": "Split Frequency",
+          "max": 16000.0,
+          "min": 1000.0,
+          "type": "float"
+        },
+        "max_reduction_db": {
+          "default": 12.0,
+          "label": "Max Reduction",
+          "max": 24.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "ratio": {
+          "default": 4.0,
+          "label": "Ratio",
+          "max": 12.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "threshold_dbfs": {
+          "default": -32.0,
           "label": "Threshold",
           "max": 0.0,
           "min": -60.0,
@@ -237,29 +353,29 @@
     },
     {
       "category": "audio",
-      "description": "Delay with feedback and ping-pong",
+      "description": "Dual-line stereo delay with cross feedback",
       "effect_type": "delay",
-      "name": "Delay",
+      "name": "Stereo Delay",
       "params": {
-        "feedback": {
-          "default": 40.0,
-          "label": "Feedback",
-          "max": 90.0,
-          "min": 0.0,
-          "type": "float"
-        },
-        "mix": {
+        "dry_wet": {
           "default": 30.0,
-          "label": "Mix",
+          "label": "Dry/Wet",
           "max": 100.0,
           "min": 0.0,
           "type": "float"
         },
-        "time_ms": {
-          "default": 300.0,
-          "label": "Time",
-          "max": 2000.0,
-          "min": 1.0,
+        "left_delay": {
+          "default": 121.0,
+          "label": "L Time",
+          "max": 1200.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "right_delay": {
+          "default": 135.0,
+          "label": "R Time",
+          "max": 1200.0,
+          "min": 0.0,
           "type": "float"
         }
       }
@@ -302,6 +418,64 @@
           "default": 0.5,
           "label": "Strength",
           "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Bell EQ whose gain follows the band energy envelope",
+      "effect_type": "dynamic_eq",
+      "name": "Dynamic EQ",
+      "params": {
+        "frequency": {
+          "default": 3000.0,
+          "label": "Frequency",
+          "max": 20000.0,
+          "min": 20.0,
+          "type": "float"
+        },
+        "gain_db": {
+          "default": 0.0,
+          "label": "Base Gain",
+          "max": 18.0,
+          "min": -18.0,
+          "type": "float"
+        },
+        "max_cut_db": {
+          "default": 9.0,
+          "label": "Max Cut",
+          "max": 24.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "q": {
+          "default": 1.4,
+          "label": "Resonance",
+          "max": 12.0,
+          "min": 0.3,
+          "type": "float"
+        },
+        "threshold_dbfs": {
+          "default": -30.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -60.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Expander/Gate + Compressor + Limiter as one Dynamics unit",
+      "effect_type": "dynamics",
+      "name": "Dynamics",
+      "params": {
+        "makeup": {
+          "default": 0.0,
+          "label": "Make Up",
+          "max": 24.0,
           "min": 0.0,
           "type": "float"
         }
@@ -429,6 +603,35 @@
       }
     },
     {
+      "category": "audio",
+      "description": "Downward expander with gate mode",
+      "effect_type": "expander",
+      "name": "Expander / Gate",
+      "params": {
+        "range_db": {
+          "default": 18.0,
+          "label": "Range",
+          "max": 60.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "release_ms": {
+          "default": 93.0,
+          "label": "Release",
+          "max": 4000.0,
+          "min": 50.0,
+          "type": "float"
+        },
+        "threshold_db": {
+          "default": -35.0,
+          "label": "Threshold",
+          "max": 0.0,
+          "min": -50.0,
+          "type": "float"
+        }
+      }
+    },
+    {
       "category": "stylize",
       "description": "Bloom/glow with threshold, tint and intensity.",
       "effect_type": "glow",
@@ -550,61 +753,140 @@
       "name": "Limiter",
       "params": {
         "release_ms": {
-          "default": 100.0,
+          "default": 93.0,
           "label": "Release",
-          "max": 1000.0,
-          "min": 10.0,
+          "max": 4000.0,
+          "min": 50.0,
           "type": "float"
         },
         "threshold_db": {
-          "default": -3.0,
+          "default": -6.0,
           "label": "Threshold",
           "max": 0.0,
-          "min": -20.0,
+          "min": -30.0,
           "type": "float"
         }
       }
     },
     {
       "category": "audio",
-      "description": "Gate signals below a threshold",
+      "description": "Three-band subtractive-crossover compressor",
+      "effect_type": "multiband_comp",
+      "name": "Multiband Compressor",
+      "params": {
+        "attack_ms": {
+          "default": 10.0,
+          "label": "Attack",
+          "max": 100.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "crossover_high": {
+          "default": 4200.0,
+          "label": "Crossover 2",
+          "max": 12000.0,
+          "min": 800.0,
+          "type": "float"
+        },
+        "crossover_low": {
+          "default": 180.0,
+          "label": "Crossover 1",
+          "max": 800.0,
+          "min": 60.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Legacy noise gate (alias of expander in Gate mode)",
       "effect_type": "noise_gate",
-      "name": "Noise Gate",
+      "name": "Expander / Gate",
       "params": {
+        "range_db": {
+          "default": 18.0,
+          "label": "Range",
+          "max": 60.0,
+          "min": 0.0,
+          "type": "float"
+        },
         "release_ms": {
-          "default": 100.0,
+          "default": 93.0,
           "label": "Release",
-          "max": 1000.0,
-          "min": 10.0,
+          "max": 4000.0,
+          "min": 50.0,
           "type": "float"
         },
         "threshold_db": {
-          "default": -40.0,
+          "default": -35.0,
           "label": "Threshold",
           "max": 0.0,
-          "min": -60.0,
+          "min": -50.0,
           "type": "float"
         }
       }
     },
     {
       "category": "audio",
-      "description": "Schroeder FDN reverb (room / hall / plate)",
-      "effect_type": "reverb",
-      "name": "Reverb",
+      "description": "All-pass cascade with phase-continuous LFO sweep",
+      "effect_type": "phaser",
+      "name": "Phaser",
       "params": {
-        "decay": {
-          "default": 2.0,
-          "label": "Decay",
-          "max": 10.0,
-          "min": 0.1,
+        "base_hz": {
+          "default": 600.0,
+          "label": "Base Frequency",
+          "max": 4000.0,
+          "min": 100.0,
           "type": "float"
         },
         "mix": {
-          "default": 30.0,
+          "default": 0.5,
           "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "rate_hz": {
+          "default": 0.5,
+          "label": "Rate",
+          "max": 20.0,
+          "min": 0.01,
+          "type": "float"
+        },
+        "stages": {
+          "default": 4.0,
+          "label": "Stages",
+          "max": 12.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "sweep_octaves": {
+          "default": 2.5,
+          "label": "Sweep",
+          "max": 5.0,
+          "min": 0.5,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Acoustic room reverb (direct / ER / late FDN)",
+      "effect_type": "reverb",
+      "name": "Acoustic Reverb",
+      "params": {
+        "dry_wet": {
+          "default": 100.0,
+          "label": "Dry/Wet",
           "max": 100.0,
           "min": 0.0,
+          "type": "float"
+        },
+        "reverb_time": {
+          "default": 2730.0,
+          "label": "Reverb Time",
+          "max": 4000.0,
+          "min": 100.0,
           "type": "float"
         }
       }
@@ -681,16 +963,182 @@
     },
     {
       "category": "audio",
-      "description": "Multi-band graphic equalizer (open panel for full curve)",
-      "effect_type": "strip_eq",
-      "name": "Graphic EQ",
+      "description": "2D/3D spatial panner (L/R, F/B, elevation, spread, boom)",
+      "effect_type": "spatial_panner",
+      "name": "Spatial Panner",
+      "params": {}
+    },
+    {
+      "category": "audio",
+      "description": "Ring / Granular / Distortion mangling topology",
+      "effect_type": "spectral_mangler",
+      "name": "Spectral Mangler",
       "params": {
-        "gain": {
+        "dist_curve": {
+          "default": "fold",
+          "label": "Dist Curve",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
+        },
+        "global_mix_pct": {
+          "default": 100.0,
+          "label": "Global Mix",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "output_gain_db": {
           "default": 0.0,
-          "label": "Gain",
+          "label": "Output Gain",
+          "max": 12.0,
+          "min": -24.0,
+          "type": "float"
+        },
+        "routing": {
+          "default": "ring_grain_dist",
+          "label": "Routing",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "6-band parametric equalizer (open panel for full curve)",
+      "effect_type": "strip_eq",
+      "name": "Parametric EQ",
+      "params": {
+        "master_gain": {
+          "default": 0.0,
+          "label": "Master Gain",
+          "max": 20.0,
+          "min": -20.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "dB-domain attack/sustain shaping with 3 dB knee",
+      "effect_type": "transient_designer",
+      "name": "Transient Designer",
+      "params": {
+        "attack_db": {
+          "default": 6.0,
+          "label": "Attack",
+          "max": 24.0,
+          "min": -12.0,
+          "type": "float"
+        },
+        "attack_ms": {
+          "default": 8.0,
+          "label": "Attack Time",
+          "max": 50.0,
+          "min": 0.5,
+          "type": "float"
+        },
+        "sustain_db": {
+          "default": 0.0,
+          "label": "Sustain",
+          "max": 12.0,
+          "min": -24.0,
+          "type": "float"
+        },
+        "sustain_ms": {
+          "default": 80.0,
+          "label": "Sustain Release",
+          "max": 300.0,
+          "min": 10.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Phase-continuous LFO tremolo or equal-power auto pan",
+      "effect_type": "tremolo_auto_pan",
+      "name": "Tremolo / Auto Pan",
+      "params": {
+        "depth": {
+          "default": 0.7,
+          "label": "Depth",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "rate_hz": {
+          "default": 4.0,
+          "label": "Rate",
+          "max": 20.0,
+          "min": 0.05,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "4x oversampled true-peak limiter with lookahead",
+      "effect_type": "true_peak_limiter",
+      "name": "True Peak Limiter",
+      "params": {
+        "ceiling_dbtp": {
+          "default": -1.0,
+          "label": "Ceiling",
+          "max": 0.0,
+          "min": -12.0,
+          "type": "float"
+        },
+        "lookahead_ms": {
+          "default": 5.0,
+          "label": "Lookahead",
+          "max": 20.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "release_ms": {
+          "default": 80.0,
+          "label": "Release",
+          "max": 500.0,
+          "min": 20.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Formant / Pitch / Vocoder voice transform chain",
+      "effect_type": "voice_changer",
+      "name": "Voice Changer",
+      "params": {
+        "formant_shift_st": {
+          "default": 0.0,
+          "label": "Formant Shift",
           "max": 12.0,
           "min": -12.0,
           "type": "float"
+        },
+        "output_gain_db": {
+          "default": 0.0,
+          "label": "Output Gain",
+          "max": 20.0,
+          "min": -20.0,
+          "type": "float"
+        },
+        "pitch_semitones": {
+          "default": 0.0,
+          "label": "Semitones",
+          "max": 24.0,
+          "min": -24.0,
+          "type": "float"
+        },
+        "vocoder_carrier": {
+          "default": "saw",
+          "label": "Carrier",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
         }
       }
     }

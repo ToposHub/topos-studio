@@ -45,8 +45,11 @@ class TestCatalogFreshness:
         digest = ec.catalog_digest()
         assert digest == ec.catalog_digest(ec.load_catalog_file())
         # 2026-10-25 冻结值（plugin:* 动态插件不入冻结目录）；目录
-        # 演进（追加条目）时同步更新
-        assert digest.startswith("214ca242c9b82c1a")
+        # 演进（追加条目）时同步更新。2026-11-20：十款新 rack FX
+        #（de_esser/true_peak_limiter/dynamic_eq/bus_comp/multiband_comp/
+        # convolution_reverb/transient_designer/tremolo_auto_pan/
+        # chorus_flanger/phaser）入库后重冻结。
+        assert digest.startswith("86cab9672633c867")
 
 
 class TestCatalogIntegrity:
