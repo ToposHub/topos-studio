@@ -4390,6 +4390,13 @@ class EditTrack:
     # 引擎据此判断是否读取 automation 曲线。Off=用静态值，Read/Write/Touch/Latch=读取曲线。
     # Write/Touch/Latch 的录制采集留待完整实现，当前先支持模式持久化与读取判断。
     automation_mode: str = "off"
+    # P1-5（2026-11-19 计划第二阶段）：Trim Automation——参数 → 恒定倍率
+    #（volume 为线性域，trim 因子乘在曲线上；0.5≈-6 dB、2.0≈+6 dB）。
+    # 求值点：EditTrack.get_automation_value 与引擎逐样本 ramp。
+    automation_trim: dict = field(default_factory=dict)
+    # P1-5：自动化写保护——保护后录制入口拒绝采集/切 Write/Touch/Latch
+    #（与轨锁同一守卫模式；写入仍可经命令栈显式撤销）。
+    automation_write_protected: bool = False
     # W24: Bus 路由字段
     is_bus: bool = False  # True=该轨是 Bus/Aux 轨（无 clips，只接收 send/routing）
     output_bus_id: Optional[str] = None  # 输出目标 Bus 的 track_id（None=直接输出到 Master）
@@ -4540,6 +4547,8 @@ class EditTrack:
                  color: Optional[str] | None = None,
                  automation: Optional[dict] = None,
                  automation_mode: Optional[str] = None,
+                 automation_trim: Optional[dict] = None,
+                 automation_write_protected: bool | None = None,
                  is_bus: bool | None = None,
                  output_bus_id: Optional[str] | None = None,
                  sends: tuple["Send", ...] | None = None,
@@ -4584,6 +4593,13 @@ class EditTrack:
                 if automation is None else automation
             ),
             automation_mode=self.automation_mode if automation_mode is None else automation_mode,
+            automation_trim=(
+                dict(self.automation_trim) if automation_trim is None else automation_trim
+            ),
+            automation_write_protected=(
+                self.automation_write_protected
+                if automation_write_protected is None else automation_write_protected
+            ),
             is_bus=self.is_bus if is_bus is None else is_bus,
             output_bus_id=self.output_bus_id if output_bus_id is None else output_bus_id,
             sends=self.sends if sends is None else sends,
@@ -4808,6 +4824,29 @@ class EditTrack:
         """AM-07: 设置自动化模式（off/read/write/touch/latch）。"""
         return self._rebuild(automation_mode=str(mode))
 
+    def with_automation_trim(self, param: str, factor: float | None) -> EditTrack:
+        """P1-5：设置/清除某参数的 Trim Automation 恒定倍率（None=清除）。"""
+        trim = dict(self.automation_trim)
+        if factor is None:
+            trim.pop(param, None)
+        else:
+            trim[param] = float(factor)
+        return self._rebuild(automation_trim=trim)
+
+    def with_automation_write_protected(self, protected: bool) -> EditTrack:
+        """P1-5：设置自动化写保护。"""
+        return self._rebuild(automation_write_protected=bool(protected))
+
+    def automation_trim_factor(self, param: str) -> float:
+        """该参数的 Trim 倍率（1.0 = 无 trim）。"""
+        try:
+            factor = float(self.automation_trim.get(param, 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        if not (0.01 <= factor <= 4.0):
+            return 1.0
+        return factor
+
     def with_stem_group(self, stem_group: str) -> EditTrack:
         """AM-10 阶段 3.5：设置 Stem 分组标签（dialogue/music/effects/narration/ambience）。
 
@@ -4856,14 +4895,16 @@ class EditTrack:
 
 
     def get_automation_value(self, param: str, frame: int, default: float) -> float:
-        """查询某参数在指定帧的自动化值（线性插值）。
+        """查询某参数在指定帧的自动化值（线性插值 + Trim 倍率）。
 
-        若该参数无 automation，返回 default（即静态值）。
+        若该参数无 automation，返回 default（即静态值）；Trim 倍率对
+        曲线值与静态默认值一致生效（Trim Automation 语义：相对偏移）。
         """
         track = self.automation.get(param)
+        factor = self.automation_trim_factor(param)
         if track is None or not track.keyframes:
-            return default
-        return track.get_value(frame, default)
+            return default * factor
+        return track.get_value(frame, default) * factor
 
     def has_automation(self, param: str) -> bool:
         """该参数是否有 automation 关键帧。"""
@@ -4941,6 +4982,8 @@ class EditTrack:
             "color": self.color,
             "automation": {k: v.to_dict() for k, v in self.automation.items()} if self.automation else {},
             "automation_mode": self.automation_mode,
+            "automation_trim": dict(self.automation_trim),
+            "automation_write_protected": self.automation_write_protected,
             "is_bus": self.is_bus,
             "output_bus_id": self.output_bus_id,
             "sends": [s.to_dict() for s in self.sends],
@@ -5012,6 +5055,9 @@ class EditTrack:
             color=data.get("color"),
             automation=automation,
             automation_mode=str(data.get("automation_mode", "off") or "off"),
+            automation_trim=dict(data.get("automation_trim", {}) or {}),
+            automation_write_protected=bool(
+                data.get("automation_write_protected", False)),
             is_bus=bool(data.get("is_bus", False)),
             output_bus_id=data.get("output_bus_id"),
             sends=sends,
@@ -5026,7 +5072,8 @@ class EditTrack:
             "subtitle_clips", "transitions", "is_enabled", "is_locked",
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
             "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
-            "automation_mode", "is_bus", "output_bus_id", "sends",
+            "automation_mode", "automation_trim",
+            "automation_write_protected", "is_bus", "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })
         extras = {

@@ -75,6 +75,11 @@
       "monitor_tip": "Hear the input while recording (takes effect on the next take)",
       "mono": "Mono",
       "stereo": "Stereo"
+    },
+    "automation": {
+      "lane": "Automation Lane",
+      "lane_track": "Track:",
+      "write_protected": "Track automation is write-protected"
     }
   }
 }

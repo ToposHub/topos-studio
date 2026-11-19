@@ -75,6 +75,11 @@
       "monitor_tip": "录音时监听输入（对下一条 take 生效）",
       "mono": "单声道",
       "stereo": "立体声"
+    },
+    "automation": {
+      "lane": "自动化参数 Lane",
+      "lane_track": "轨道:",
+      "write_protected": "该轨道自动化已写保护"
     }
   }
 }

@@ -2785,6 +2785,8 @@ class EditControllerMixin:
         if edit_page is not None:
             edit_page.timeline_display_changed.connect(
                 self._on_audio_mixer_timeline_display_changed)
+        # P1-5：时间线参数 lane（一次接线；条带惰性创建）。
+        self._wire_automation_lane_strip()
         # A restored workspace can make the dock visible before these
         # connections are installed, so reconcile its initial state too.
         if dock is not None and dock.isVisible():
@@ -2896,6 +2898,73 @@ class EditControllerMixin:
         except (RuntimeError, ValueError, TypeError):
             return False, 0
 
+    def _wire_automation_lane_strip(self) -> None:
+        """P1-5：时间线参数 lane 条带接到既有命令处理器（一次接线）。"""
+        panel = getattr(self, 'timeline_panel', None)
+        if panel is None or not hasattr(panel, 'toggle_automation_lane'):
+            return
+        if getattr(self, '_automation_lane_wired', False):
+            return
+        lane = getattr(panel, '_automation_lane', None)
+        # 条带惰性创建：首次 toggle 后再接（挂 toggle 的后置钩子即可）
+        original_toggle = panel.toggle_automation_lane
+
+        def toggle_with_wiring(visible=None):
+            original_toggle(visible)
+            lane_now = getattr(panel, '_automation_lane', None)
+            if lane_now is not None and not getattr(self, '_automation_lane_wired', False):
+                lane_now.add_keyframe.connect(self._on_mixer_automation_add)
+                lane_now.remove_keyframe.connect(self._on_mixer_automation_remove)
+                lane_now.clear_param.connect(self._on_mixer_automation_clear)
+                lane_now.set_keyframe_interp.connect(
+                    self._on_mixer_automation_set_interp)
+                lane_now.automation_mode_changed.connect(
+                    self._on_mixer_automation_mode_changed)
+                self._automation_lane_wired = True
+                self._sync_automation_lane_fx_specs()
+                panel.automation_lane_track_changed.connect(
+                    self._sync_track_automation_to_engine)
+
+        panel.toggle_automation_lane = toggle_with_wiring  # type: ignore[method-assign]
+        self._automation_lane_wired = False
+
+    def _sync_automation_lane_fx_specs(self) -> None:
+        """条带挂载后补 fx 参数规格（与对话框同源）。"""
+        panel = getattr(self, 'timeline_panel', None)
+        lane = getattr(panel, '_automation_lane', None) if panel is not None else None
+        combo = getattr(panel, '_automation_lane_track_combo', None) if panel is not None else None
+        if lane is None or combo is None:
+            return
+        track_id = combo.currentData()
+        if not track_id:
+            return
+        specs = self._collect_fx_param_specs(track_id)
+        if specs:
+            lane._fx_specs = list(specs)
+            for _key, label, _mn, _mx in specs:
+                lane._param_combo.addItem(label, _key)
+
+    def _sync_track_automation_to_engine(self, track_id: str) -> None:
+        """条带换轨：同步 automation/trim/mode 到引擎（听感即时）。"""
+        timeline = getattr(getattr(self, 'edit_page', None),
+                           '_current_timeline', None)
+        track = (timeline.get_track_by_id(track_id)
+                 if timeline is not None else None)
+        mgr = self._get_mixer_audio_manager()
+        if track is None or mgr is None:
+            return
+        try:
+            if hasattr(mgr, 'set_track_automation'):
+                mgr.set_track_automation(track_id, dict(track.automation))
+            if hasattr(mgr, 'set_track_automation_trim'):
+                mgr.set_track_automation_trim(
+                    track_id, dict(getattr(track, 'automation_trim', {}) or {}))
+            if hasattr(mgr, 'set_track_automation_mode'):
+                mgr.set_track_automation_mode(
+                    track_id, str(getattr(track, 'automation_mode', 'off') or 'off'))
+        except Exception:  # noqa: BLE001
+            logger.debug("lane track sync failed", exc_info=True)
+
     def _automation_mode_for_track(self, track_id: str) -> str:
         """§7 P1：录制模式按轨道模型优先（AM-07 同一真相源），全局态兜底。"""
         timeline = getattr(getattr(self, 'edit_page', None), '_current_timeline', None)
@@ -2912,6 +2981,17 @@ class EditControllerMixin:
         """
         mode = self._automation_mode_for_track(track_id)
         if mode not in ("write", "touch", "latch"):
+            return
+        # P1-5：自动化写保护——保护轨拒绝采集（与轨锁同一守卫模式）。
+        timeline_now = getattr(getattr(self, 'edit_page', None),
+                               '_current_timeline', None)
+        track_now = (timeline_now.get_track_by_id(track_id)
+                     if timeline_now is not None else None)
+        if track_now is not None and bool(
+                getattr(track_now, 'automation_write_protected', False)):
+            logger.debug(
+                "automation recording skipped: track %s is write-protected",
+                track_id)
             return
         # E05: 需在播放中才录制（权威状态见 _edit_playback_state）
         is_playing, frame = self._edit_playback_state()
@@ -2953,6 +3033,104 @@ class EditControllerMixin:
             default = bounds.get(param, (0.0, 1.0))[0]
             return float(kf_track.get_value(int(frame), default=default))
         return _provider
+
+    # ── P1-5：自动化预览捕获（预听层，commit 前不进命令栈） ──────────
+
+    def _get_automation_preview_captures(self) -> dict:
+        if not hasattr(self, '_automation_preview_captures'):
+            self._automation_preview_captures = {}
+        return self._automation_preview_captures
+
+    def _automation_preview_capture_active(self) -> bool:
+        return bool(getattr(self, '_automation_preview_captures', None))
+
+    def begin_automation_preview_capture(self, track_id: str, param: str,
+                                         mode: str = "write") -> bool:
+        """开始预览捕获（采集写进预览层，预听；不进命令栈/模型）。"""
+        from src.features.edit.core.automation_recorder import (
+            AutomationPreviewCapture,
+        )
+        captures = self._get_automation_preview_captures()
+        key = (track_id, param)
+        if key in captures:
+            return True
+        capture = AutomationPreviewCapture(param, mode, track_id)
+        capture.start()
+        captures[key] = capture
+        return True
+
+    def record_automation_preview_sample(self, track_id: str, param: str,
+                                         frame: int, value: float,
+                                         fader_down: bool = True) -> None:
+        """预览捕获路径的样本采集（播放中推子拖动经此分流）。"""
+        capture = self._get_automation_preview_captures().get((track_id, param))
+        if capture is not None and capture.is_recording:
+            capture.record(int(frame), float(value), fader_down=fader_down)
+
+    def finish_automation_preview_capture(self, track_id: str, param: str) -> bool:
+        """停止采集并把简化关键帧挂到引擎预览层（预听）。"""
+        capture = self._get_automation_preview_captures().pop(
+            (track_id, param), None)
+        if capture is None:
+            return False
+        keyframes = capture.finish()
+        if not keyframes:
+            return False
+        mgr = self._get_mixer_audio_manager()
+        if mgr is None or not hasattr(mgr, 'set_track_automation_preview'):
+            return False
+        from src.shared.keyframe import Keyframe, KeyframeTrack
+        curve = KeyframeTrack(param_name=param, min_val=0.0, max_val=2.0)
+        bounds = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}
+        curve.min_val, curve.max_val = bounds.get(param, (0.0, 1.0))
+        for frame, value in keyframes:
+            curve.add_keyframe(Keyframe(frame=float(frame), value=float(value)))
+        try:
+            mgr.set_track_automation_preview(track_id, {param: curve})
+            return True
+        except Exception:  # noqa: BLE001 — 预览失败不阻断混音
+            logger.debug("automation preview attach failed", exc_info=True)
+            return False
+
+    def commit_automation_preview(self, track_id: str, param: str) -> bool:
+        """把预览层提交为覆盖式写入命令（单次 undo），并清除预览层。"""
+        mgr = self._get_mixer_audio_manager()
+        preview = getattr(mgr, '_mixer', None)
+        preview_map = (getattr(preview, '_automation_preview', {}) or {}
+                       ).get(track_id, {}) if preview is not None else {}
+        curve = preview_map.get(param)
+        if curve is None or not getattr(curve, 'keyframes', ()):
+            return False
+        keyframes = tuple((int(kf.frame), float(kf.value))
+                          for kf in curve.keyframes)
+        tview = getattr(getattr(self, 'timeline_panel', None),
+                        'timeline_view', None)
+        if tview is None:
+            return False
+        from src.features.edit.core.automation_recorder import (
+            OverwriteAutomationCommand,
+        )
+        lo = min(frame for frame, _v in keyframes)
+        hi = max(frame for frame, _v in keyframes)
+        bounds = {"volume": (0.0, 2.0), "pan": (-1.0, 1.0), "mute": (0.0, 1.0)}
+        min_val, max_val = bounds.get(param, (0.0, 1.0))
+        command = OverwriteAutomationCommand.create(
+            track_id=track_id, param=param, keyframes=keyframes,
+            overwrite_ranges=((lo, hi),), interpolation="linear",
+            min_val=min_val, max_val=max_val)
+        tview._execute_command(command)
+        self.discard_automation_preview(track_id, param)
+        return True
+
+    def discard_automation_preview(self, track_id: str, param: str) -> None:
+        """丢弃预览层（不入历史）。"""
+        mgr = self._get_mixer_audio_manager()
+        if mgr is not None and hasattr(mgr, 'set_track_automation_preview'):
+            try:
+                mgr.set_track_automation_preview(track_id, {})
+            except Exception:  # noqa: BLE001
+                logger.debug("automation preview discard failed", exc_info=True)
+        self._get_automation_preview_captures().pop((track_id, param), None)
 
     def _commit_automation_recordings(self) -> None:
         """停止播放时提交所有活跃的自动化录制（单次 undo each）。"""
@@ -4395,6 +4573,19 @@ class EditControllerMixin:
                 mgr.set_track_automation(track_id, dict(track.automation))
             except Exception as e:  # noqa: BLE001
                 logger.debug("automation sync failed: %s", e)
+        # P1-5：写保护轨拒绝切换到写模式（Write/Touch/Latch）。
+        normalized_mode = str(mode or "off").lower()
+        if (normalized_mode in ("write", "touch", "latch")
+                and bool(getattr(track, 'automation_write_protected', False))):
+            status_bar = getattr(self, 'status_bar', None)
+            if status_bar is not None:
+                status_bar.showMessage(
+                    I18N.tr("mixer.automation.write_protected",
+                            "Track automation is write-protected"), 4000)
+            logger.info(
+                "automation mode change to %s rejected: track %s is "
+                "write-protected", normalized_mode, track_id)
+            return
         # 命令入栈（模型 → AM-07 签名 → 引擎重建；此处再即时下发听感）。
         from src.features.edit.core.commands import SetTrackAutomationModeCommand
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)

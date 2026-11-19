@@ -189,6 +189,141 @@ class SetTrackAutomationModeCommand:
 
 
 @dataclass(frozen=True)
+class SetTrackAutomationTrimCommand:
+    """P1-5：Trim Automation——某参数的恒定倍率（相对既有曲线偏移）。
+
+    volume 为线性域：0.5 ≈ −6 dB、2.0 ≈ +6 dB；None=清除 trim。
+    求值点：EditTrack.get_automation_value 与引擎逐样本 ramp（同语义）。
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    param: str
+    factor: float | None
+    _old_factor: float | None = None
+
+    _FACTOR_MIN, _FACTOR_MAX = 0.01, 4.0
+
+    def apply(self, timeline: TimelineSequence):
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        old = track.automation_trim_factor(self.param)
+        old_effective = old if old != 1.0 else None
+        new_timeline = timeline.with_track_updated(
+            track.with_automation_trim(self.param, self.factor))
+        updated_cmd = SetTrackAutomationTrimCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, param=self.param, factor=self.factor,
+            _old_factor=old_effective)
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        return timeline.with_track_updated(
+            track.with_automation_trim(self.param, self._old_factor))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackAutomationTrimCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "param": self.param,
+            "factor": self.factor,
+            "old_factor": self._old_factor,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetTrackAutomationTrimCommand":
+        factor = data.get("factor")
+        return SetTrackAutomationTrimCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Automation Trim"),
+            track_id=data.get("track_id", ""),
+            param=data.get("param", "volume"),
+            factor=(float(factor) if factor is not None else None),
+            _old_factor=(float(data["old_factor"])
+                         if data.get("old_factor") is not None else None),
+        )
+
+    @staticmethod
+    def create(track_id: str, param: str,
+               factor: float | None) -> "SetTrackAutomationTrimCommand":
+        return SetTrackAutomationTrimCommand(
+            command_id=str(uuid.uuid4()),
+            label=(f"Trim automation {param} ×{factor:g}"
+                   if factor is not None else
+                   f"Clear automation trim {param}"),
+            track_id=track_id, param=param, factor=factor)
+
+
+@dataclass(frozen=True)
+class SetTrackAutomationWriteProtectCommand:
+    """P1-5：自动化写保护——保护轨的录制入口拒绝采集与写模式切换。"""
+
+    command_id: str
+    label: str
+    track_id: str
+    protected: bool
+    _old_protected: bool | None = None
+
+    def apply(self, timeline: TimelineSequence):
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        old = bool(track.automation_write_protected)
+        new_timeline = timeline.with_track_updated(
+            track.with_automation_write_protected(bool(self.protected)))
+        updated_cmd = SetTrackAutomationWriteProtectCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, protected=bool(self.protected),
+            _old_protected=old)
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._old_protected is None:
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        return timeline.with_track_updated(
+            track.with_automation_write_protected(bool(self._old_protected)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackAutomationWriteProtectCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "protected": self.protected,
+            "old_protected": self._old_protected,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetTrackAutomationWriteProtectCommand":
+        return SetTrackAutomationWriteProtectCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Automation Write Protect"),
+            track_id=data.get("track_id", ""),
+            protected=bool(data.get("protected", False)),
+            _old_protected=(bool(data["old_protected"])
+                            if data.get("old_protected") is not None else None),
+        )
+
+    @staticmethod
+    def create(track_id: str, protected: bool) -> "SetTrackAutomationWriteProtectCommand":
+        return SetTrackAutomationWriteProtectCommand(
+            command_id=str(uuid.uuid4()),
+            label=("Protect automation on track" if protected
+                   else "Unprotect automation on track"),
+            track_id=track_id, protected=bool(protected))
+
+
+@dataclass(frozen=True)
 class SetTrackPanCommand:
     """
     Command to set track pan (stereo balance / 声相).

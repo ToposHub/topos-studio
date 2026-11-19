@@ -525,6 +525,24 @@ class AutomationRecorder:
             max_val=max_val,
         )
 
+    def stop_for_preview(
+        self, simplify_threshold: float = 0.005,
+    ) -> List[Tuple[int, float]]:
+        """P1-5：停止录制并返回简化关键帧（不构建命令——预览捕获用）。
+
+        返回 [(frame, value), ...]；无样本返回空列表。
+        """
+        with self._lock:
+            if not self._active:
+                return []
+            self._active = False
+            samples = self._samples
+            self._samples = []
+            self._segments = []
+            self._segment_start = None
+        keyframes = simplify_samples(samples, threshold=simplify_threshold)
+        return [(int(kf.frame), float(kf.value)) for kf in keyframes]
+
     def cancel(self) -> None:
         """取消录制（不生成命令）。"""
         with self._lock:
@@ -533,3 +551,36 @@ class AutomationRecorder:
             self._touched = False
             self._segments = []
             self._segment_start = None
+
+class AutomationPreviewCapture:
+    """P1-5：自动化预览捕获——采集样本不进命令栈，预听后可提交/丢弃。
+
+    与 :class:`AutomationRecorder` 同一采集语义（write/touch/latch），
+    区别在 ``finish()``：不构建命令，而是返回简化后的关键帧样本，供
+    引擎预览层（``AudioMixer.set_track_automation_preview``）挂载预听。
+    ``commit()`` 由调用方据预览样本构建 ``OverwriteAutomationCommand``
+    （单次 undo）；``discard()`` 直接丢弃预览层。
+    """
+
+    def __init__(self, param: str, mode: str, track_id: str = "") -> None:
+        self._inner = AutomationRecorder()
+        self.param = str(param)
+        self.mode = str(mode)
+        self.track_id = str(track_id)
+
+    def start(self) -> None:
+        self._inner.start(self.param, self.mode, self.track_id)
+
+    def record(self, frame: int, value: float, fader_down: bool = True) -> None:
+        self._inner.record(frame, value, fader_down=fader_down)
+
+    @property
+    def is_recording(self) -> bool:
+        return self._inner.is_recording
+
+    def finish(self, simplify_threshold: float = 0.005) -> list[tuple[int, float]]:
+        """停止采集并返回简化关键帧 [(frame, value), ...]（不建命令）。"""
+        return self._inner.stop_for_preview(simplify_threshold)
+
+    def cancel(self) -> None:
+        self._inner.cancel()

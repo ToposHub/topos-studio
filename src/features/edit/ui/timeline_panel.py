@@ -147,6 +147,7 @@ class TimelinePanel(QWidget):
     playback_state_changed = pyqtSignal(bool, float, int)  # is_playing, speed, direction (1=forward, -1=backward)
     playback_reanchored = pyqtSignal(int)  # stable frame after render backpressure
     timeline_changed = pyqtSignal(object)  # TimelineSequence - forwarded from TimelineView
+    automation_lane_track_changed = pyqtSignal(str)  # P1-5: lane 绑定的 track_id
     project_changed = pyqtSignal(object)  # EditProject - forwarded from TimelineView external imports
     project_needed = pyqtSignal()  # Forwarded request to auto-create a project for file drops
     # T7: Open in Color via right-click context menu
@@ -676,6 +677,7 @@ class TimelinePanel(QWidget):
         self.timeline_view.corner_timecode_clicked.connect(self._on_timecode_panel_clicked)
         # Forward timeline_changed signal to external listeners
         self.timeline_view.timeline_changed.connect(self.timeline_changed.emit)
+        self.timeline_changed.connect(lambda _t: self.refresh_automation_lane())
         self.timeline_view.project_changed.connect(self.project_changed.emit)
         self.timeline_view.project_needed.connect(self.project_needed.emit)
         # T7: Forward open_in_color_requested signal
@@ -723,9 +725,117 @@ class TimelinePanel(QWidget):
 
         layout.addWidget(self.timeline_view, stretch=1)
 
+        # P1-5：时间线参数 lane——停靠在时间线下方的自动化条带（惰性
+        # 创建、默认隐藏）。与 Automation Lane 对话框共用内容面板与
+        # 命令接线；toggle_automation_lane() 控制，状态回写工具栏按钮。
+        self._automation_lane: Optional[Any] = None
+        self._automation_lane_btn: Optional[Any] = None
+        self._automation_lane_shown: bool = False
+
         # W03：Keyframe Tray 宿主位（惰性创建、默认隐藏；EditPage 经
         # set_keyframe_tray_visible 控制，实际状态回写工具栏按钮）。
         self._keyframe_tray: Optional[Any] = None
+
+    # ── P1-5：时间线参数 lane（自动化条带） ─────────────────────────
+
+    def automation_lane_visible(self) -> bool:
+        """参数 lane 是否可见（显式状态；父窗口未 show 时也准确）。"""
+        return bool(getattr(self, "_automation_lane_shown", False))
+
+    def toggle_automation_lane(self, visible: Optional[bool] = None) -> None:
+        """显示/隐藏时间线下方的自动化参数 lane（含轨道选择器）。"""
+        from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
+        from src.shared.ui.audio_mixer.automation_lane import AutomationLanePanel
+
+        target = bool(visible)
+        if self._automation_lane is None and target:
+            strip = QWidget(self)
+            outer = QVBoxLayout(strip)
+            outer.setContentsMargins(8, 4, 8, 4)
+            outer.setSpacing(4)
+            header = QHBoxLayout()
+            header.addWidget(QLabel(
+                I18N.tr("audio.mixer.automation.lane", "Automation Lane")))
+            header.addWidget(QLabel(
+                I18N.tr("audio.mixer.automation.lane_track", "Track:")))
+            self._automation_lane_track_combo = QComboBox(strip)
+            self._automation_lane_track_combo.currentIndexChanged.connect(
+                self._on_automation_lane_track_changed)
+            header.addWidget(self._automation_lane_track_combo, 1)
+            outer.addLayout(header)
+
+            self._automation_lane = AutomationLanePanel(
+                "", "", total_frames=max(1, self._total_frames or 1000), parent=strip)
+            self._automation_lane.close_requested.connect(
+                lambda: self.toggle_automation_lane(False))
+            outer.addWidget(self._automation_lane, 1)
+            layout = self.layout()
+            layout.insertWidget(layout.indexOf(self.timeline_view) + 1, strip)
+
+        lane = self._automation_lane
+        if lane is None:
+            self._automation_lane_shown = False
+            if self._automation_lane_btn is not None:
+                self._automation_lane_btn.setChecked(False)
+            return
+        lane.parentWidget().setVisible(target)
+        self._automation_lane_shown = target
+        if target:
+            self.sync_automation_lane_tracks()
+        if self._automation_lane_btn is not None:
+            self._automation_lane_btn.setChecked(target)
+
+    def set_automation_lane_button(self, button: Any) -> None:
+        """注册工具栏切换按钮（状态回写）。"""
+        self._automation_lane_btn = button
+        button.setCheckable(True)
+        button.setChecked(self.automation_lane_visible())
+        button.clicked.connect(lambda: self.toggle_automation_lane())
+
+    def sync_automation_lane_tracks(self) -> None:
+        """按当前时间线刷新条带的轨道选择器（保留当前选择）。"""
+        combo = getattr(self, "_automation_lane_track_combo", None)
+        lane = self._automation_lane
+        if combo is None or lane is None:
+            return
+        timeline = self.timeline_view.get_timeline() if self.timeline_view else None
+        tracks = [t for t in (getattr(timeline, "audio_tracks", ()) or ())
+                  if not getattr(t, "is_bus", False)]
+        previous = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        for track in tracks:
+            combo.addItem(track.name or track.track_id, track.track_id)
+        if previous is not None:
+            index = combo.findData(previous)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        self._on_automation_lane_track_changed(combo.currentIndex())
+
+    def _on_automation_lane_track_changed(self, index: int) -> None:
+        combo = getattr(self, "_automation_lane_track_combo", None)
+        lane = self._automation_lane
+        if combo is None or lane is None:
+            return
+        track_id = combo.itemData(index) if index >= 0 else None
+        timeline = self.timeline_view.get_timeline() if self.timeline_view else None
+        track = timeline.get_track_by_id(track_id) if (
+                timeline is not None and track_id) else None
+        if track is None:
+            lane.update_track_data({})
+            lane.set_total_frames(max(1, getattr(timeline, "duration_frames", 1000) or 1000))
+            return
+        lane._track_id = track_id
+        lane.set_total_frames(max(1, getattr(timeline, "duration_frames", 1000) or 1000))
+        lane.update_track_data(dict(getattr(track, "automation", {}) or {}))
+        lane.set_automation_mode(str(getattr(track, "automation_mode", "off") or "off"))
+        self.automation_lane_track_changed.emit(str(track_id))
+
+    def refresh_automation_lane(self) -> None:
+        """时间线变化后刷新条带曲线（可见时）。"""
+        if self.automation_lane_visible():
+            self.sync_automation_lane_tracks()
 
     def _configure_resolve_toolbar(self, layout: QVBoxLayout, tools_bar: QHBoxLayout) -> None:
         """Group the editing instruments while preserving public button objects."""
