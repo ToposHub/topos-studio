@@ -122,6 +122,13 @@ class TestCompressorSidechainTelemetry:
             def __init__(self) -> None:
                 self.payloads: list = []
 
+            # 35a4451d 起 update_per_track_levels 读取表模式决定
+            # peak/rms/lufs 取值键——stub 不实现会 AttributeError。
+            # None = 默认 peak 模式。
+            @property
+            def display_meter_mode(self):  # noqa: D401
+                return None
+
             def update_audio_level(self, vals: list) -> None:
                 pass
 

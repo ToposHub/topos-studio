@@ -1,7 +1,11 @@
 """P-clip-FX: clip-level audio effect dialog adapter.
 
-复用 Audio Mixer 的 8 个独立参数对话框（StripEQDialog / ReverbDialog / ...），
-让它们也能为**单个音频片段**上的 mixer 效果打开。
+两条对话框来源，都能为**单个音频片段**上的 mixer 效果打开：
+
+1. Audio Mixer 的专用参数对话框（StripEQDialog / ReverbDialog / ...）——
+   强类型 ``*Params`` dataclass 表示。
+2. 十款新 rack FX（de_esser / true_peak_limiter / ...，2026-11-19 计划
+   第三阶段 1-7 批次）——通用表驱动 ``FxParamDialog``，dict 表示。
 
 Mixer dialog 是为 track-level 设计的：
   - 构造签名 ``(track_id, track_name, instance_id, initial_params, parent)``
@@ -34,14 +38,39 @@ logger = logging.getLogger(__name__)
 # 延迟构建避免循环 import（dialog 模块在 import 时拉起大量 UI 依赖）。
 _DIALOG_REGISTRY: Optional[dict] = None
 
+# 十款新 rack FX（2026-11-19 计划第三阶段 1-7 批次）走通用表驱动
+# FxParamDialog（fx_rack_dialogs）：与 mixer 专用对话框不同——
+#   - 构造签名多一个 ``effect_type`` 位置参数
+#   - ``initial_params`` 直接吃 dict（表驱动 FieldSpec 渲染）
+#   - committed/preview 信号回传 **dict**（非 *Params dataclass）
+# ParamsClass 仍用于 open 前的归一化（from_dict 校验/补默认 → to_dict），
+# 保证损坏参数降级语义与 mixer 对话框一致（AUD-19720）。
+_FX_DIALOG_PARAM_TYPES: Optional[dict] = None
 
-_DIALOG_REGISTRY: Optional[dict] = None
 
-
-_DIALOG_REGISTRY: Optional[dict] = None
-
-
-_DIALOG_REGISTRY: Optional[dict] = None
+def _ensure_fx_dialog_param_types() -> dict:
+    """惰性构建十款新 FX 的 effect_type → Params 类映射。"""
+    global _FX_DIALOG_PARAM_TYPES
+    if _FX_DIALOG_PARAM_TYPES is not None:
+        return _FX_DIALOG_PARAM_TYPES
+    from src.features.edit.core.timeline_v2 import (
+        BusCompParams, ChorusFlangerParams, ConvolutionReverbParams,
+        DeEsserParams, DynamicEqParams, MultibandCompParams, PhaserParams,
+        TransientDesignerParams, TremoloAutoPanParams, TruePeakLimiterParams,
+    )
+    _FX_DIALOG_PARAM_TYPES = {
+        "de_esser": DeEsserParams,
+        "true_peak_limiter": TruePeakLimiterParams,
+        "dynamic_eq": DynamicEqParams,
+        "bus_comp": BusCompParams,
+        "multiband_comp": MultibandCompParams,
+        "convolution_reverb": ConvolutionReverbParams,
+        "transient_designer": TransientDesignerParams,
+        "tremolo_auto_pan": TremoloAutoPanParams,
+        "chorus_flanger": ChorusFlangerParams,
+        "phaser": PhaserParams,
+    }
+    return _FX_DIALOG_PARAM_TYPES
 
 
 def _ensure_dialog_registry() -> dict:
@@ -108,6 +137,11 @@ class ClipAudioEffectDialogManager(QObject):
     # controller 收到后用 MacroCommand 把变化字段逐个 UpdateEffectParamCommand
     # 聚合成单步撤销。
     clip_effect_params_committed = pyqtSignal(str, str, dict)
+    # 预览信号（FxParamDialog 分支）：拖动过程中实时生效——controller 把
+    # 预览 dict 直送引擎 set_clip_effects（不落模型、不入撤销栈）。
+    clip_effect_preview = pyqtSignal(str, str, dict)
+    # 对话框关闭：引擎链回滚到模型状态（丢弃未提交的预览参数）。
+    clip_effect_preview_finished = pyqtSignal(str, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -136,6 +170,11 @@ class ClipAudioEffectDialogManager(QObject):
         Returns:
             打开的 QDialog，effect_type 不支持时返回 None。
         """
+        fx_types = _ensure_fx_dialog_param_types()
+        if effect_type in fx_types:
+            return self._open_fx_param_dialog(
+                effect_type, clip_id, effect_id, params_dict, clip_name,
+                parent=parent)
         registry = _ensure_dialog_registry()
         meta = registry.get(effect_type)
         if meta is None:
@@ -206,21 +245,108 @@ class ClipAudioEffectDialogManager(QObject):
         dialog.show()
         return dialog
 
+    def _open_fx_param_dialog(
+        self,
+        effect_type: str,
+        clip_id: str,
+        effect_id: str,
+        params_dict: dict[str, Any],
+        clip_name: str = "",
+        parent: Optional[QWidget] = None,
+    ) -> QDialog:
+        """十款新 rack FX 的通用表驱动对话框分支（FxParamDialog）。
+
+        与 mixer 专用对话框的差异（见模块头 _FX_DIALOG_PARAM_TYPES 注释）：
+        构造多 ``effect_type``、initial_params 吃 dict、信号回传 dict。
+        打开前仍经 ParamsClass ``from_dict → to_dict`` 归一化——缺键补默认、
+        越界钳制、损坏参数降级为默认（AUD-19720 同语义，留警告日志）。
+        """
+        params_cls = _ensure_fx_dialog_param_types()[effect_type]
+
+        key = (clip_id, effect_id)
+        cached = self._dialogs.get(key)
+        if cached is not None:
+            if cached.isVisible():
+                cached.raise_()
+                cached.activateWindow()
+                return cached
+            self._dialogs.pop(key, None)
+
+        try:
+            normalized = params_cls.from_dict(dict(params_dict or {})).to_dict()
+        except Exception:  # noqa: BLE001 — 防御：用默认参数兜底
+            logger.warning(
+                "Clip audio effect params failed to parse (effect_type=%s, "
+                "clip_id=%s, effect_id=%s) — opening dialog with DEFAULT "
+                "params; committing them would overwrite the stored params",
+                effect_type, clip_id, effect_id,
+                exc_info=True,
+            )
+            normalized = params_cls.default().to_dict()
+
+        win_parent = parent if parent is not None else self.parent()
+        from src.shared.ui.audio_mixer.fx_rack_dialogs import FxParamDialog
+        dialog = FxParamDialog(
+            track_id=clip_id,
+            track_name=clip_name or clip_id,
+            instance_id=effect_id,
+            effect_type=effect_type,
+            initial_params=normalized,
+            parent=win_parent,
+        )
+
+        # committed/preview 信号回传 dict：直接转发（提交走既有 MacroCommand
+        # 落库路径；预览由 controller 直送引擎，不入模型）。
+        dialog.fx_committed.connect(
+            lambda _tid, payload, cid=clip_id, eid=effect_id:
+                self._on_committed(cid, eid, payload)
+        )
+        dialog.fx_preview.connect(
+            lambda _tid, payload, cid=clip_id, eid=effect_id:
+                self.clip_effect_preview.emit(cid, eid, dict(payload))
+        )
+        # 关闭 → 清缓存 + 通知 controller 引擎回滚到模型状态。
+        dialog.finished.connect(
+            lambda _result, cid=clip_id, eid=effect_id:
+                self._on_fx_dialog_finished(cid, eid)
+        )
+
+        # 与 mixer 分支同一销毁契约：关闭即 deleteLater 链路上的确定性
+        # 析构（FxParamDialog 自身已设 WA_DeleteOnClose，此处显式对齐）。
+        from PyQt6.QtCore import Qt
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+        self._dialogs[key] = dialog
+        dialog.show()
+        return dialog
+
+    def _on_fx_dialog_finished(self, clip_id: str, effect_id: str) -> None:
+        """FxParamDialog 关闭：清缓存并广播预览结束（引擎回滚）。"""
+        self._dialogs.pop((clip_id, effect_id), None)
+        try:
+            self.clip_effect_preview_finished.emit(clip_id, effect_id)
+        except RuntimeError:
+            pass  # 管理器/接收方可能已销毁
+
     def _on_committed(self, clip_id: str, effect_id: str, params: Any) -> None:
         """dialog committed 信号 → 转成 dict → emit 给 controller 落库。
 
         Args:
             clip_id: 片段 ID
             effect_id: 效果实例 ID
-            params: mixer ``*Params`` dataclass（dialog 回传）
+            params: mixer ``*Params`` dataclass（专用对话框回传）或已归一的
+                参数 dict（FxParamDialog 十款新 FX 回传）
         """
-        try:
-            params_dict = params.to_dict() if params is not None else {}
-        except Exception:  # noqa: BLE001
-            return
+        if isinstance(params, dict):
+            params_dict = dict(params)
+        else:
+            try:
+                params_dict = params.to_dict() if params is not None else {}
+            except Exception:  # noqa: BLE001
+                return
         if not params_dict:
             return
-        self.clip_effect_params_committed.emit(clip_id, effect_id, dict(params_dict))
+        self.clip_effect_params_committed.emit(clip_id, effect_id, params_dict)
 
     def close_all(self) -> None:
         """关闭并清理所有已打开的对话框（面板销毁时调用）。"""
