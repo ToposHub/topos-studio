@@ -1344,7 +1344,7 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     panel.stretch_knob.setValue(150.0, emit=False)
     assert panel._timepitch_button.isEnabled()
     panel._timepitch_button.click()
-    qtbot.waitUntil(lambda: panel._timepitch_pcm is not None, timeout=10000)
+    qtbot.waitUntil(lambda: panel._timepitch_request is not None, timeout=10000)
     assert panel._pending_timepitch is not None
     assert panel._timepitch_commit_button.isEnabled()
     assert not panel._timepitch_discard_button.isHidden()
