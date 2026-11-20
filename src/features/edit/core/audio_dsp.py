@@ -26,6 +26,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 from src.features.edit.core.audio_capabilities import is_scipy_available_for_dsp
+from src.features.edit.core.fade_curve_spec import fade_power
 
 logger = logging.getLogger(__name__)
 
@@ -645,6 +646,9 @@ def fade_curve_factor(shape: str | None, progress: float) -> float:
     像素只做透明度系数、无理由不 clamp 颜色数据。
     """
     p = 0.0 if progress < 0.0 else (1.0 if progress > 1.0 else progress)
+    power = fade_power(shape)
+    if power is not None:
+        return p ** power
     if shape == "equal_power":
         import math
         return math.sin(math.pi / 2.0 * p)
@@ -754,6 +758,9 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
         # R09：两端独立曲线优先（in/out 各自），再回落共享 fade_curve。
         per_end = fade_curve_in if fade_in else fade_curve_out
         chosen = per_end if per_end is not None else fade_curve
+        power = fade_power(chosen)
+        if power is not None:
+            return np.power(t if fade_in else 1.0 - t, power)
         selected = (FADE_CURVE_ENVELOPES.get(chosen)
                     if chosen is not None else None)
         if selected is smooth_fade_envelope:

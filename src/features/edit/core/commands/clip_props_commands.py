@@ -26,6 +26,7 @@ import copy as _copy
 import logging
 import uuid
 
+from src.features.edit.core.fade_curve_spec import is_fade_curve
 from src.features.edit.core.timeline_v2 import (
     TimelineSequence,
     EditTrack,
@@ -2036,7 +2037,7 @@ class SetFadeCurveCommand:
     白名单外新写拒绝；undo 快照直接还原。
 
     Attributes:
-        fade_curve: "linear" | "equal_power" | "smooth" | None（清除）
+        fade_curve: 预设名称、自定义幂曲线，或 None（清除）
         _previous: apply 期捕获的原值
     """
 
@@ -2052,11 +2053,8 @@ class SetFadeCurveCommand:
     _previous_raw: Any = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
-        if self.fade_curve is not None and self.fade_curve not in (
-                "linear", "equal_power", "smooth"):
-            raise ValueError(
-                f"Invalid fade curve: {self.fade_curve!r}; expected "
-                f"linear|equal_power|smooth or None")
+        if self.fade_curve is not None and not is_fade_curve(self.fade_curve):
+            raise ValueError(f"Invalid fade curve: {self.fade_curve!r}")
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
@@ -2157,11 +2155,8 @@ class SetFadeEndCurveCommand:
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         if self.end not in ("in", "out"):
             raise ValueError(f"end must be 'in' or 'out': {self.end!r}")
-        if self.fade_curve is not None and self.fade_curve not in (
-                "linear", "equal_power", "smooth"):
-            raise ValueError(
-                f"Invalid fade curve: {self.fade_curve!r}; expected "
-                f"linear|equal_power|smooth or None")
+        if self.fade_curve is not None and not is_fade_curve(self.fade_curve):
+            raise ValueError(f"Invalid fade curve: {self.fade_curve!r}")
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")

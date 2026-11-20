@@ -165,7 +165,10 @@ def _write_stereo(path: Path, channel: int) -> None:
         output.writeframes(pcm.tobytes())
 
 
-def test_existing_fades_join_continuously_in_playback_master_and_stems(tmp_path: Path) -> None:
+@pytest.mark.parametrize("adjusted", [False, True])
+def test_existing_fades_join_continuously_in_playback_master_and_stems(
+    tmp_path: Path, adjusted: bool,
+) -> None:
     assets = {}
     for channel, side in enumerate(("left", "right")):
         path = tmp_path / f"{side}.wav"
@@ -174,6 +177,15 @@ def test_existing_fades_join_continuously_in_playback_master_and_stems(tmp_path:
     project = EditProject("project", "Crossfade", assets=assets)
     sequence = _sequence(50)
     track = sequence.audio_tracks[0]
+    if adjusted:
+        from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+
+        shape = fade_curve_from_midpoint(0.25)
+        left, right = track.clips
+        track = replace(track, clips=(
+            left.with_fade_end_curve("out", shape),
+            right.with_fade_end_curve("in", shape),
+        ))
     crossfade = replace(track.transitions[0], transition_type="audio:linear")
     sequence = sequence.with_track_updated(replace(track, transitions=(crossfade,)))
     decode, close = create_clip_decode_fn(project, FPS, SAMPLE_RATE)
@@ -212,7 +224,8 @@ def test_existing_fades_join_continuously_in_playback_master_and_stems(tmp_path:
     np.testing.assert_allclose(playback, export, atol=3e-5)
     first, last = 50 * SAMPLES_PER_FRAME, 60 * SAMPLES_PER_FRAME
     midpoint = (first + last) // 2
-    np.testing.assert_allclose(export[:, midpoint], (0.0625, 0.0625), atol=1e-5)
+    expected = 0.03125 if adjusted else 0.0625
+    np.testing.assert_allclose(export[:, midpoint], (expected, expected), atol=1e-5)
     assert abs(export[0, first] - export[0, first - 1]) < 1e-5
     assert abs(export[1, last] - export[1, last - 1]) < 1e-5
 

@@ -182,3 +182,17 @@ class TestPreviewWorker:
         QCoreApplication.processEvents()
         assert failures and failures[0][0] == ("bad",)
         assert "dsp unavailable" in failures[0][1]
+
+
+def test_timeline_custom_fade_is_displayed_in_clip_editor(qapp) -> None:
+    from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+    from src.features.mixer.effects.panels.clip_editor import _display_fade_factor
+
+    editor, panel = _panel(qapp)
+    panel._duration = 1.0
+    shape = fade_curve_from_midpoint(0.25)
+    panel.sync_gain_fade(0.0, 0.2, 0.1, shape, "linear", locked=False)
+    assert panel.canvas._fade_curve_type == shape
+    assert panel.canvas._fade_out_curve_type == "Linear"
+    assert _display_fade_factor(shape, 0.5) == pytest.approx(0.25)
+    editor.close()

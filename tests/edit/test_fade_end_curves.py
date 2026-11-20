@@ -315,3 +315,25 @@ def test_r09_macro_single_undo_roundtrip():
     assert changed.get_clip_by_id("c1").fade_curve_in == "smooth"
     undone = macro.undo(changed)
     assert undone.get_clip_by_id("c1").fade_curve_in is None
+
+
+def test_adjusted_fade_curve_round_trips_and_matches_audio_samples() -> None:
+    import numpy as np
+
+    from src.features.edit.core.audio_dsp import apply_clip_fade, fade_curve_factor
+    from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+    from src.features.edit.core.timeline_v2 import ClipInstance
+
+    shape = fade_curve_from_midpoint(0.25)
+    clip = ClipInstance("c", "asset", "a", 0, 10, 0, 10, fade_in_duration=4)
+    clip = clip.with_fade_end_curve("in", shape)
+    loaded = ClipInstance.from_dict(clip.to_dict())
+    assert loaded.effective_fade_curve_in == shape
+    assert loaded.effective_fade_curve_out is None
+
+    result = apply_clip_fade(
+        np.ones((2, 10)), 0, 10, 0, 4, 0, 1, 1,
+        fade_in_samples_override=5, fade_curve_in=loaded.effective_fade_curve_in,
+    )
+    np.testing.assert_allclose(result[:, 2], fade_curve_factor(shape, 0.5))
+    np.testing.assert_allclose(result[:, 2], 0.25)

@@ -17,6 +17,8 @@ from PyQt6.QtGui import (
 )
 
 
+from src.features.edit.core.fade_curve_spec import fade_power
+
 # =====================================================================
 # 1. 全局色彩系统与声学常量（与 EQ-UI.py 保持一致的暗色工作室美学）
 # =====================================================================
@@ -50,6 +52,9 @@ def format_freq_short(hz: float) -> str:
 
 
 def _display_fade_factor(curve: str, progress: float) -> float:
+    power = fade_power(curve)
+    if power is not None:
+        return progress ** power
     if curve == "S-Curve":
         return progress * progress * (3.0 - 2.0 * progress)
     if curve == "Log":

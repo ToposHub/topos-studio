@@ -952,7 +952,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             control.setEnabled(self._fade_editable)
         self.canvas._fade_in_sec = fade_in
         self.canvas._fade_out_sec = fade_out
-        self.canvas.setFadeCurves(_DISPLAY_FADE_CURVES[fade_in_curve], _DISPLAY_FADE_CURVES[fade_out_curve])
+        self.canvas.setFadeCurves(
+            _DISPLAY_FADE_CURVES.get(fade_in_curve, fade_in_curve),
+            _DISPLAY_FADE_CURVES.get(fade_out_curve, fade_out_curve),
+        )
         for name, button in self._fade_curve_btns.items():
             button.setChecked(fade_in_curve == fade_out_curve == _FADE_CURVES[name])
         self._update_fade_display(fade_in, fade_out)
