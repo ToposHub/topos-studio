@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import numpy as np
 
@@ -147,6 +147,7 @@ def denoise_spectral_subtraction(
     nfft: int = 2048,
     link_stereo: bool = True,
     *,
+    channels: Optional[Sequence[int]] = None,
     progress: Optional[Callable[[float], bool]] = None,
 ) -> np.ndarray:
     """软频谱减法（参考实现的直接移植；progress 返回 False 时取消）。
@@ -154,6 +155,9 @@ def denoise_spectral_subtraction(
     ``noise``/``target`` 均为半开样本区间；只有 target 内变化，两侧加
     5 ms 干湿过渡。固定块 + 上下文（nfft 余量）+ overlap-add，按绝对
     位置累积，首尾长度不变。
+
+    P1-1 · 声道域：``channels`` 限定目标通道（None=全部）——噪声特征
+    与减法只在目标通道上估计/应用，**未选通道逐样本不变**。
     """
     if not _SCIPY_AVAILABLE:
         raise RuntimeError("SciPy DSP backend unavailable")
@@ -165,6 +169,38 @@ def denoise_spectral_subtraction(
         raise ValueError("Unsupported rate, FFT or reduction")
     if not (0 <= a < b <= pcm.shape[-1] and 0 <= lo < hi <= pcm.shape[-1]):
         raise ValueError("Invalid range")
+    work_rows = (np.arange(pcm.shape[0]) if channels is None
+                 else np.asarray(sorted({
+                     int(ch) for ch in channels
+                     if isinstance(ch, (int, np.integer))
+                       and 0 <= int(ch) < pcm.shape[0]}), dtype=np.int64))
+    if work_rows.size == 0:
+        return pcm.copy()  # 无合法目标声道：恒等返回
+    result = _denoise_channels(
+        np.ascontiguousarray(pcm[work_rows]) if channels is not None else pcm,
+        sample_rate, noise, target, reduction_db, nfft, link_stereo,
+        progress=progress)
+    if channels is None:
+        return result
+    out = pcm.copy()
+    out[work_rows] = result
+    return out
+
+
+def _denoise_channels(
+    pcm: np.ndarray,
+    sample_rate: int,
+    noise: tuple[int, int],
+    target: tuple[int, int],
+    reduction_db: float = 12.0,
+    nfft: int = 2048,
+    link_stereo: bool = True,
+    *,
+    progress: Optional[Callable[[float], bool]] = None,
+) -> np.ndarray:
+    """denoise_spectral_subtraction 的实现（输入已是目标声道子组）。"""
+    a, b = noise
+    lo, hi = target
     hop = nfft // 4
     if b - a < max(round(MIN_NOISE_SECONDS * sample_rate), nfft + 5 * hop):
         raise ValueError("Select a longer section of background noise")
