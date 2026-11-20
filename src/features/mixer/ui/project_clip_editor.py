@@ -1749,26 +1749,138 @@ class ProjectClipEditor(QWidget):
             append_step(self._clip.audio_edit if self._clip else None, step),
             I18N.tr("mixer.clip_editor.mute_selection", "Silence selection"))
 
-    def _on_normalize_requested(self, t0: float, t1: float, target_db: float) -> None:
-        """P1 · Normalize：对**实际插入阶段**的数据测量（处理后预览）。
+    def _measurement_labels(self) -> tuple[str, ...]:
+        """旧工程响度步骤的历史标签（含本地化变体），供迁移识别。"""
+        return (
+            "Loudness match",
+            I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"),
+        )
 
-        选区/声道与提交的 range 一致；静音无解提示；允许实际衰减或
-        提升；同约束（处理器+区间+声道）重复提交**替换**不叠加；写入
-        后复测峰值并回报。
+    def _prepare_measurement(self, processor_id: str, operation: str,
+                             start: int, end: int,
+                             channels: tuple[int, ...]) -> dict | None:
+        """P0-1 · 解析测量上下文：插入点、选区折算与被替换步骤。
+
+        返回 dict（insertion_index / sel_start / sel_end / replace_index /
+        migrated_edit），预渲染后端缺席时置 ``error`` 信息键由调用方提示。
+        """
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None or panel._raw_pcm is None:
+            return None
+        from src.features.edit.core.audio_edit import (
+            find_measurement_step_index,
+            map_selection_to_insertion,
+            tag_legacy_measurement_operations,
+        )
+        migrated = tag_legacy_measurement_operations(
+            clip.audio_edit, legacy_labels=self._measurement_labels())
+        replace_index = find_measurement_step_index(
+            migrated, processor_id=processor_id, operation=operation,
+            start=start, end=end, channels=channels,
+            legacy_labels=self._measurement_labels())
+        sel_start, sel_end = map_selection_to_insertion(
+            migrated, start, end, replace_index)
+        step_count = len((migrated or {}).get("steps", []) or []) if isinstance(migrated, dict) else 0
+        return {
+            "migrated_edit": migrated,
+            "replace_index": replace_index,
+            "insertion_index": replace_index,
+            "sel_start": sel_start,
+            "sel_end": sel_end,
+            # 替换语义：已有同身份步骤时必须写入新系数（哪怕 ≈0），
+            # 否则旧的远端增益会残留；只有新增时才允许"已在目标"跳过。
+            "replacing": replace_index < step_count,
+        }
+
+    def _render_measurement_baseline(self, context: dict) -> np.ndarray | None:
+        """插入点基准 PCM；预渲染后端缺席/渲染失败返回 None（调用方提示）。"""
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None:
+            return None
+        from src.features.edit.core.audio_edit import render_to_step_insertion
+        try:
+            return render_to_step_insertion(
+                panel._raw_pcm, context["migrated_edit"],
+                insertion_index=context["insertion_index"],
+                sample_rate=panel._pcm_rate)
+        except Exception:  # noqa: BLE001 - 后端缺席/解码失败均按不可测量提示
+            return None
+
+    def _verify_candidate_measurement(self, candidate_edit: dict,
+                                      start: int, end: int,
+                                      channels: tuple[int, ...]) -> np.ndarray | None:
+        """P0-1 · 用同一渲染路径重建候选栈后的选区 PCM（复测/回报用）。
+
+        读数与测量基准同语义：乘候选步骤的 unity 包络——边缘 3 ms 是
+        防爆音干湿过渡带，逐样本回退到原始电平，不参与目标读数。
+        """
+        panel = self._panel
+        if panel is None or panel._raw_pcm is None:
+            return None
+        from src.features.edit.core.audio_edit import (
+            render_audio_edit_full, selection_measurement_envelope,
+        )
+        try:
+            full = render_audio_edit_full(
+                panel._raw_pcm, candidate_edit, sample_rate=panel._pcm_rate)
+        except Exception:  # noqa: BLE001 - 复测失败只影响回报精度
+            return None
+        lo = max(0, min(start, full.shape[1]))
+        hi = max(lo, min(end, full.shape[1]))
+        if hi <= lo:
+            return None
+        usable = [c for c in channels if c < full.shape[0]]
+        if not usable:
+            return None
+        segment = full[usable, lo:hi] if len(usable) < full.shape[0] else full[:, lo:hi]
+        env = selection_measurement_envelope(
+            full.shape[1], start, end, sample_rate=panel._pcm_rate)
+        if env is not None:
+            segment = segment * env[lo:hi][None, :]
+        return segment
+
+    def _on_normalize_requested(self, t0: float, t1: float, target_db: float) -> None:
+        """P0-1 · Normalize：对**步骤插入点**的数据测量，替换同身份旧系数。
+
+        基准 = 按机架序渲染到目标步骤插入点的 PCM（替换时移除本次要
+        替换的增益，不叠加）；提交后用同一渲染路径复测实际峰值并回报。
+        静音无解提示；允许实际衰减或提升；同身份（处理器+操作+区间+
+        声道）重复提交替换不叠加；旧工程无 operation 的步骤按迁移规则
+        识别并沿用 step ID 与排序。
         """
         panel = self._panel
         if panel is None or panel._raw_pcm is None or self._clip is None:
             return
-        # 插入阶段 = 处理后预览（栈已生效；无预览时回退原始数据）。
-        source = panel._pcm if panel._pcm is not None else panel._raw_pcm
-        duration = max(1e-9, panel._duration)
-        lo = int(round(max(0.0, t0) / duration * source.shape[1]))
-        hi = int(round(min(duration, t1) / duration * source.shape[1]))
+        from src.features.edit.core.audio_edit import (
+            OPERATION_NORMALIZE_PEAK,
+            upsert_step,
+        )
+        start, end = self._selection_output_range((t0, t1))
         channels = self._target_channels()
-        usable = [c for c in channels if c < source.shape[0]]
+        context = self._prepare_measurement(
+            "normalize", OPERATION_NORMALIZE_PEAK, start, end, channels)
+        if context is None:
+            return
+        baseline = self._render_measurement_baseline(context)
+        if baseline is None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.measurement_unavailable",
+                "Cannot measure this selection (render backend unavailable)"))
+            return
+        lo = max(0, min(context["sel_start"], baseline.shape[1]))
+        hi = max(lo, min(context["sel_end"], baseline.shape[1]))
+        usable = [c for c in channels if c < baseline.shape[0]]
         if hi <= lo or not usable:
             return
-        window = np.abs(source[usable, lo:hi])
+        from src.features.edit.core.audio_edit import (
+            selection_measurement_envelope,
+        )
+        env = selection_measurement_envelope(
+            baseline.shape[1], context["sel_start"], context["sel_end"],
+            sample_rate=panel._pcm_rate)
+        window = np.abs(baseline[usable, lo:hi])
+        if env is not None:
+            window = window * env[lo:hi][None, :]
         peak = float(window.max()) if window.size else 0.0
         if peak <= 1e-6:
             panel.info_label.setText(I18N.tr(
@@ -1776,23 +1888,39 @@ class ProjectClipEditor(QWidget):
             return
         import math as _math
         gain_db = target_db - 20.0 * _math.log10(peak)
-        if abs(gain_db) < 0.05:
+        if abs(gain_db) < 0.05 and not context["replacing"]:
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.already_normalized",
                 f"Selection already peaks at {target_db:+.1f} dBFS"))
             return
-        start, end = self._selection_output_range()
         step = make_step(
-            "normalize", start=start, end=end, channels=self._target_channels(),
+            "normalize", start=start, end=end, channels=channels,
             gain_db=round(gain_db, 2),
+            operation=OPERATION_NORMALIZE_PEAK,
             label=I18N.tr("mixer.clip_editor.step_normalize", "Normalize"))
-        from src.features.edit.core.audio_edit import upsert_step
+        candidate = upsert_step(context["migrated_edit"], step)
+        # 复测：同一渲染路径重建候选栈，回报实际落点（非线性后级会改写
+        # 插入点目标，此处按最终输出读数呈现）。
+        achieved_db: float | None = None
+        segment = self._verify_candidate_measurement(
+            candidate, start, end, channels)
+        if segment is not None and segment.size:
+            peak_after = float(np.abs(segment).max())
+            if peak_after > 1e-9:
+                achieved_db = 20.0 * _math.log10(peak_after)
         self._commit_audio_edit(
-            upsert_step(self._clip.audio_edit, step),
+            candidate,
             I18N.tr("mixer.clip_editor.normalize_selection", "Normalize selection"))
-        panel.info_label.setText(I18N.tr(
-            "mixer.clip_editor.normalize_submitted", "Peak normalization requested · target {target:+.1f} dBFS"
-        ).format(target=target_db))
+        if achieved_db is not None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.normalize_measured",
+                "Measured {achieved:+.1f} dBFS after normalize (target {target:+.1f})"
+            ).format(achieved=achieved_db, target=target_db))
+        else:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.normalize_submitted",
+                "Peak normalization requested · target {target:+.1f} dBFS"
+            ).format(target=target_db))
 
     def _on_stack_step_toggled(self, step_id: str, enabled: bool) -> None:
         if self._clip is None or self._clip.audio_edit is None:
@@ -2288,31 +2416,54 @@ class ProjectClipEditor(QWidget):
 
     def _on_lufs_normalize_requested(self, t0: float, t1: float,
                                      target_lufs: float, tp_ceiling: float) -> None:
-        """P1 · BS.1770 实测响度匹配（插入阶段/声道/同一选区）。
+        """P0-1 · BS.1770 实测响度匹配（插入点基准/声道/同一选区）。
 
-        测量基于**处理后预览**（栈已生效的插入阶段）与目标声道；允许
-        实际衰减或提升（−10 LUFS 素材对 −23 LUFS 目标应衰减）；升益受
-        dBTP 上限钳制；静音无解提示；同约束重复提交**替换**不叠加；
-        写入后按新栈复测目标与 dBTP 并回报。
+        测量基于**步骤插入点**的渲染基准（替换时移除本次要替换的旧
+        增益，不叠加）与目标声道；允许实际衰减或提升（−10 LUFS 素材
+        对 −23 LUFS 目标应衰减）；升益受 dBTP 上限钳制；静音无解提示；
+        同身份重复提交**替换**不叠加；写入后按候选栈同一渲染路径复测
+        目标与 dBTP 并回报实测值。
         """
         clip, panel = self._clip, self._panel
         if clip is None or self._locked or panel is None or panel._raw_pcm is None:
             return
+        from src.features.edit.core.audio_edit import (
+            OPERATION_LOUDNESS_MATCH,
+            upsert_step,
+        )
         from src.features.edit.core.loudness_analyzer import analyze_loudness
         rate = panel._pcm_rate
-        duration = max(1e-9, panel._duration)
-        source = panel._pcm if panel._pcm is not None else panel._raw_pcm
-        channels = [c for c in self._target_channels() if c < source.shape[0]]
-        lo = int(round(max(0.0, t0) / duration * source.shape[1]))
-        hi = int(round(min(duration, t1) / duration * source.shape[1]))
+        start, end = self._selection_output_range((t0, t1))
+        channels = self._target_channels()
+        context = self._prepare_measurement(
+            "range_gain", OPERATION_LOUDNESS_MATCH, start, end, channels)
+        if context is None:
+            return
+        baseline = self._render_measurement_baseline(context)
+        if baseline is None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.measurement_unavailable",
+                "Cannot measure this selection (render backend unavailable)"))
+            return
+        usable = [c for c in channels if c < baseline.shape[0]]
+        if not usable:
+            return
+        lo = max(0, min(context["sel_start"], baseline.shape[1]))
+        hi = max(lo, min(context["sel_end"], baseline.shape[1]))
         if hi - lo < int(0.4 * rate):
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.selection_too_short",
                 "Select at least 400 ms for a loudness measurement"))
             return
-        if not channels:
-            return
-        segment = source[channels, lo:hi] if len(channels) < source.shape[0] else source[:, lo:hi]
+        segment = baseline[usable, lo:hi] if len(usable) < baseline.shape[0] else baseline[:, lo:hi]
+        from src.features.edit.core.audio_edit import (
+            selection_measurement_envelope,
+        )
+        env = selection_measurement_envelope(
+            baseline.shape[1], context["sel_start"], context["sel_end"],
+            sample_rate=panel._pcm_rate)
+        if env is not None:
+            segment = segment * env[lo:hi][None, :]
         report = analyze_loudness(np.ascontiguousarray(segment), float(rate))
         if not getattr(report, "backend_available", False):
             panel.info_label.setText(I18N.tr(
@@ -2328,26 +2479,50 @@ class ProjectClipEditor(QWidget):
             return
         gain = target_lufs - integrated
         if gain > 0.0:
-            # 升益受 dBTP 上限钳制；衰减不受限（压低峰值只会更安全）。
+            # 升益受 dBTP 上限钳制（基准的 true peak + gain ≤ 上限）；
+            # 衰减不受限（压低峰值只会更安全）。
             gain = min(gain, tp_ceiling - true_peak)
-        if abs(gain) < 0.05:
+        if abs(gain) < 0.05 and not context["replacing"]:
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.loudness_capped",
                 f"Already at {integrated:+.1f} LUFS / {true_peak:+.1f} dBTP — "
                 f"peak-limited, no gain applied"))
             return
-        start, end = self._selection_output_range()
         step = make_step(
-            "range_gain", start, end, self._target_channels(),
+            "range_gain", start, end, channels,
             gain_db=round(gain, 2),
+            operation=OPERATION_LOUDNESS_MATCH,
             label=I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"))
-        from src.features.edit.core.audio_edit import upsert_step
+        candidate = upsert_step(context["migrated_edit"], step)
+        # 复测：候选栈同一渲染路径重建后实测 LUFS/dBTP，回报实际落点。
+        achieved_lufs: float | None = None
+        achieved_tp: float | None = None
+        verify_segment = self._verify_candidate_measurement(
+            candidate, start, end, channels)
+        if verify_segment is not None and verify_segment.shape[1] >= int(0.4 * rate):
+            verify_report = analyze_loudness(
+                np.ascontiguousarray(verify_segment), float(rate))
+            if getattr(verify_report, "backend_available", False):
+                candidate_lufs = float(verify_report.integrated_lufs)
+                if math.isfinite(candidate_lufs) and candidate_lufs > -70.0:
+                    achieved_lufs = candidate_lufs
+                    achieved_tp = float(verify_report.true_peak_dbtp)
         self._commit_audio_edit(
-            upsert_step(clip.audio_edit, step),
+            candidate,
             I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
-        panel.info_label.setText(I18N.tr(
-            "mixer.clip_editor.loudness_submitted", "Loudness match requested · target {target:+.1f} LUFS"
-        ).format(target=target_lufs))
+        if achieved_lufs is not None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.loudness_measured",
+                "Measured {lufs:+.1f} LUFS / {tp:+.1f} dBTP after match "
+                "(target {target:+.1f} LUFS)"
+            ).format(lufs=achieved_lufs,
+                     tp=achieved_tp if achieved_tp is not None else 0.0,
+                     target=target_lufs))
+        else:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.loudness_submitted",
+                "Loudness match requested · target {target:+.1f} LUFS"
+            ).format(target=target_lufs))
 
     def _on_time_pitch_requested(self, t0: float, t1: float, ratio_pct: float,
                                  pitch_semitones: float, preserve: bool,
