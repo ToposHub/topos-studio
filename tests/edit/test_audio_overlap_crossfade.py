@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt
 from PyQt6.QtTest import QTest
 
 from src.features.edit.core.audio_playback import AudioPlaybackManager
@@ -65,7 +65,12 @@ def test_drag_creates_crossfade_and_handles_edit_curves(qtbot: Any, audio_only: 
     qtbot.addWidget(view)
     view.resize(1100, 530)
     view.set_audio_only(audio_only)
-    view.load_timeline(_sequence())
+    original = _sequence()
+    left, right = original.audio_tracks[0].clips
+    view.load_timeline(
+        original.with_clip_updated(replace(left, fade_in_duration=8))
+        .with_clip_updated(replace(right, fade_out_duration=8))
+    )
     view.set_zoom(5.0)
     view.set_snap_enabled(False)
     view.show()
@@ -77,11 +82,21 @@ def test_drag_creates_crossfade_and_handles_edit_curves(qtbot: Any, audio_only: 
     QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
     QTest.mouseMove(view.viewport(), target, 10)
     assert view._drag_crossfades
+    outgoing, incoming = (view._items_map[clip_id] for clip_id in ("left", "right"))
+    assert outgoing._fade_end_is_visible("in") and not outgoing._fade_end_is_visible("out")
+    assert incoming._fade_end_is_visible("out") and not incoming._fade_end_is_visible("in")
     QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
     sequence = view.get_timeline()
     left, right = sequence.audio_tracks[0].clips
     fade, = sequence.audio_tracks[0].transitions
     assert not view._drag_crossfades
+    assert not outgoing._fade_end_is_visible("out") and not incoming._fade_end_is_visible("in")
+    assert not outgoing._fade_curve_handle_points("out")
+    assert not incoming._fade_curve_handle_points("in")
+    for clip, hidden_end in ((outgoing, "out"), (incoming, "in")):
+        clip_rect = QRectF(0, 0, clip._width, clip._track_height)
+        x, y = clip._fade_handle_position(clip_rect, hidden_end)
+        assert clip._fade_handle_at(QPointF(x, y)) is None
     assert (left.timeline_start, right.timeline_start) == (10, 50)
     assert (left.source_start, right.source_start) == (3, 4)
     assert (left.fade_out_duration, right.fade_in_duration) == (20, 20)
@@ -103,8 +118,29 @@ def test_drag_creates_crossfade_and_handles_edit_curves(qtbot: Any, audio_only: 
     assert view.get_timeline().audio_tracks[0].transitions[0].overlap_curve_adjustments == (0, 0)
     view.undo()
     assert view.get_timeline().audio_tracks[0].transitions == ()
+    assert view._items_map["left"]._fade_end_is_visible("out")
+    assert view._items_map["right"]._fade_end_is_visible("in")
     view.redo()
     assert view.get_timeline().audio_tracks[0].transitions[0].transition_id == fade.transition_id
+    outgoing, incoming = (view._items_map[clip_id] for clip_id in ("left", "right"))
+    assert not outgoing._fade_end_is_visible("out") and not incoming._fade_end_is_visible("in")
+
+    start = view.mapFromScene(incoming.mapToScene(QPointF(100, 32)))
+    target = start + QPoint(30 * 5, 0)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(view.viewport(), target, 10)
+    assert outgoing._fade_end_is_visible("out") and incoming._fade_end_is_visible("in")
+    QTest.keyClick(view, Qt.Key.Key_Escape)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+    assert not outgoing._fade_end_is_visible("out") and not incoming._fade_end_is_visible("in")
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(view.viewport(), target, 10)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+    assert view.get_timeline().audio_tracks[0].transitions == ()
+    assert outgoing._fade_end_is_visible("out") and incoming._fade_end_is_visible("in")
+    assert view.get_timeline().get_clip_by_id("left").fade_out_duration == 20
+    assert view.get_timeline().get_clip_by_id("right").fade_in_duration == 20
 
 
 def test_group_move_preserves_curve_and_bad_drop_preserves_sources() -> None:
@@ -282,3 +318,22 @@ def test_very_long_crossfade_only_evaluates_audio_block(monkeypatch: Any) -> Non
     left = audio_dsp.apply_crossfade_block(block, role="left", **kwargs)
     right = audio_dsp.apply_crossfade_block(block, role="right", **kwargs)
     np.testing.assert_allclose(left**2 + right**2, 1.0, atol=1e-12)
+
+
+def test_crossfade_shades_waveform_without_border_or_label_overlay() -> None:
+    from PyQt6.QtGui import QColor, QImage, QPainter
+
+    from src.features.edit.ui.timeline_items import paint_overlap_crossfade
+
+    base = QColor("#228b67")
+    image = QImage(100, 70, QImage.Format.Format_ARGB32)
+    image.fill(base)
+    painter = QPainter(image)
+    paint_overlap_crossfade(painter, QRectF(10, 0, 80, 70), "audio:equal_power")
+    painter.end()
+
+    assert image.pixelColor(50, 8).green() < base.green()
+    assert image.pixelColor(50, 40) == base
+    assert image.pixelColor(50, 60) == base
+    assert image.pixelColor(9, 8) == base
+    assert image.pixelColor(10, 8).red() < base.red()

@@ -1667,3 +1667,37 @@ def test_mixer_workspace_controls_expose_accessible_names(project_host, qtbot, t
     qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
     commit_button = editor._panel._timepitch_commit_button
     assert commit_button is not None and commit_button.accessibleName()
+
+
+@pytest.mark.parametrize("pin_to_splitter", [False, True])
+def test_edit_video_scroll_survives_mixer_round_trip(
+    project_host: ProjectHost, qtbot: QtBot, pin_to_splitter: bool,
+) -> None:
+    from dataclasses import replace
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    sequence = view.get_timeline()
+    tracks = sequence.video_tracks + tuple(
+        EditTrack(f"v{i}", f"Video {i}", "video", index=i)
+        for i in range(1, 9)
+    )
+    view.load_timeline(replace(sequence, video_tracks=tracks))
+    host.sync_timeline(view.get_timeline())
+    bar = view._video_v_scroll
+    qtbot.waitUntil(lambda: bar.maximum() > 30)
+    bar.setValue(bar.maximum() - 1 if pin_to_splitter else 29)
+    if pin_to_splitter:
+        bar.setValue(bar.maximum())
+    qtbot.waitUntil(lambda: not view._scroll_layout_timer.isActive())
+
+    for _ in range(2):
+        host.show_mixer()
+        qtbot.waitUntil(lambda: bar.maximum() == 0)
+        host._restore_edit_panels_from_mixer()
+        host.current_page = "Edit"
+        qtbot.waitUntil(lambda: bar.maximum() > 30)
+        assert bar.value() == (bar.maximum() if pin_to_splitter else 29)
+        if pin_to_splitter:
+            layout = view._layout_engine
+            assert layout.track_rect("video-track").bottom() == pytest.approx(layout.splitter_rect().top())
