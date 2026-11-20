@@ -913,6 +913,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             pass
 
     def eventFilter(self, obj, event):
+        if (event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space
+                and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+                and getattr(self, "_mixer_recording_workflow_active", False)):
+            if ((not event.isAutoRepeat() and self._handle_motion_graphic_space_playback())
+                    or self._handle_mixer_record_shortcut(obj, event)):
+                event.accept()
+                return True
+            return super().eventFilter(obj, event)
         if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
             key = event.key()
             # Space is the default transport key for every page; the Motion
@@ -1175,6 +1183,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox),
         ):
             return False
+        if page == "Mixer" and getattr(self, "_mixer_timeline_recorders", None):
+            return self._stop_mixer_transport_recording()
+        if getattr(self, "_adr_pass", None) is not None:
+            self._stop_adr_session()
+            return True
 
         source_viewer = getattr(self, "source_viewer_widget", None)
         if page == "Edit" and MainWindow._focus_is_within(focus, source_viewer):
@@ -2566,12 +2579,19 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         协作停止（中断请求 + 有界等待 + terminate 兜底）。
         """
         recordings = getattr(self, "_mixer_timeline_recorders", None)
+        adr_session = getattr(self, "_adr_pass", None)
         closing_after_recording = getattr(self, "_mixer_recording_close_pending", False)
-        if closing_after_recording and recordings:
+        if closing_after_recording and (recordings or adr_session is not None):
             event.ignore()
             return
         if closing_after_recording:
             self._mixer_recording_close_pending = False
+        project_changed_during_close = (
+            closing_after_recording
+            and getattr(self, "_current_edit_project", None)
+            is not getattr(self, "_project_before_recording_close", None)
+        )
+        self._project_before_recording_close = None
 
         confirm_bypassed = False
         try:
@@ -2579,7 +2599,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             confirm = getattr(self, "_confirm_save_before_close", None)
             if callable(confirm):
                 confirmed = True
-                if not closing_after_recording:
+                if not closing_after_recording or project_changed_during_close:
                     try:
                         confirmed = bool(confirm())
                     except Exception:
@@ -2587,6 +2607,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                         logger.exception(
                             "MainWindow: save-before-close confirmation failed")
                 if not confirmed:
+                    if closing_after_recording:
+                        self._refresh_mixer_recording_controls()
                     event.ignore()
                     return
                 # 首轮已确认（保存/丢弃/无未保存变更）——mixin 的二次
@@ -2594,11 +2616,18 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 self._confirm_save_before_close = lambda: True
                 confirm_bypassed = True
 
-            if getattr(self, "_mixer_timeline_recorders", None):
+            if recordings or adr_session is not None:
                 event.ignore()
                 self._mixer_recording_close_pending = True
+                self._project_before_recording_close = getattr(self, "_current_edit_project", None)
                 self._finish_mixer_timeline_recordings()
+                self._clear_mixer_armed_inputs()
+                self._finish_adr_session()
+                self._refresh_mixer_recording_controls()
                 return
+            clear_recording_inputs = getattr(self, "_clear_mixer_armed_inputs", None)
+            if callable(clear_recording_inputs):
+                clear_recording_inputs()
 
             mixer_page = getattr(self, "mixer_page", None)
             if mixer_page is not None:

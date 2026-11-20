@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import wave
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
+from PyQt6.QtGui import QAction, QImage, QKeySequence, QPainter
 from PyQt6.QtWidgets import (
     QApplication, QDockWidget, QMainWindow, QMenu, QMessageBox, QPushButton,
     QStyle, QStyleOptionComboBox, QTabBar, QVBoxLayout, QWidget,
 )
 from pytestqt.qtbot import QtBot
 
+from src.app.controllers.adr_recording_controller import AdrRecordingControllerMixin
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.edit_controller import EditControllerMixin
 from src.app.controllers.layer_controller import LayerOpsMixin
@@ -38,7 +40,8 @@ from src.shared.ui.audio_mixer.track_mixer_widget import db_to_linear
 from src.shared.ui.style_sheet import DARK_THEME
 
 
-class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin, EditControllerMixin, LayerOpsMixin, MenuToolbarMixin):
+class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin,
+                  AdrRecordingControllerMixin, EditControllerMixin, LayerOpsMixin, MenuToolbarMixin):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1120, 720)
@@ -471,7 +474,6 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     monkeypatch.setattr(SharedRecordingInput, "monitor", lambda self, *_a, **_k: True)
     host = project_host
     host._current_edit_project = EditProject("project", "Recording")
-    host.edit_page._current_frame = 48
     view = host.timeline_panel.timeline_view
     panel = host.audio_mixer_panel
     panel.add_bus_requested.emit()
@@ -499,9 +501,12 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     assert host._mixer_armed_inputs["audio-track"] == patch
 
     # 走带 Record：armed 轨统一开录，锚点 = 当前播放头帧。
+    host.timeline_panel.set_total_frames(120)
+    host.timeline_panel.set_playhead_frame(48)
     host._on_mixer_transport_record_requested()
     recorder = host._mixer_timeline_recorders["audio-track"]
     assert header._recording_state == "recording"
+    assert len(view._recording_previews) == 1
     assert host._voiceover_sessions["audio-track"]["anchor_frame"] == 48
     assert not header._record_button_enabled()
 
@@ -515,11 +520,165 @@ def test_mixer_track_header_record_button_follows_capture_state(project_host, qt
     recorder._set_state(recorder.STATE_IDLE)
     assert header._recording_state == "armed"
     assert not host._mixer_timeline_recorders
+    assert not view._recording_previews
     assert "audio-track" not in host._voiceover_sessions
 
     host._set_mixer_recording_workflow(False)
     assert header._recording_state == "unpatched"
     assert not host._mixer_armed_inputs
+
+
+@pytest.mark.parametrize("start_with_shortcut", [False, True], ids=["record-button", "shift-space"])
+def test_mixer_transport_records_two_patched_tracks_into_timeline(
+    project_host: ProjectHost, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    start_with_shortcut: bool,
+) -> None:
+    import numpy as np
+
+    from src.app.controllers.mixer_recording_controller import _InputPatch
+    from src.features.edit.core.shared_recording_input import SharedRecordingInput
+
+    opened: list[SharedRecordingInput] = []
+    monkeypatch.setattr(SharedRecordingInput, "available_devices",
+                        staticmethod(lambda: (("interface", "Interface", 2),)))
+    monkeypatch.setattr(SharedRecordingInput, "_open_device", lambda source: opened.append(source))
+    host = project_host
+    host._current_edit_project = EditProject.create(name="Recording")
+    host._current_edit_project_filepath = str(tmp_path / "recording.topos")
+    panel = host.audio_mixer_panel
+    panel.track_input_requested.connect(host._on_mixer_input_requested)
+    panel.track_record_arm_toggled.connect(host._on_mixer_record_arm_toggled)
+    host.edit_viewport.program_stop_requested.connect(host._on_program_transport_stop_requested)
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    track = EditTrack(track_id="mic-two", name="Mic two", track_type="audio")
+    timeline = replace(timeline, audio_tracks=(*timeline.audio_tracks, track))
+    host.timeline_panel.load_timeline(timeline)
+    host.sync_timeline(timeline)
+    host.show_mixer()
+    host._set_mixer_recording_workflow(True)
+
+    if start_with_shortcut:
+        from src.app.main_window import MainWindow
+
+        class RecordShortcutFilter(QObject):
+            def eventFilter(self, target: QObject, event: QEvent) -> bool:
+                if (event.type() == QEvent.Type.KeyPress
+                        and event.key() == Qt.Key.Key_Space
+                        and event.modifiers() == Qt.KeyboardModifier.ShiftModifier):
+                    return MainWindow.eventFilter(host, target, event)
+                return False
+
+        monkeypatch.setattr(host, "_handle_motion_graphic_space_playback", lambda: False, raising=False)
+        shortcut_filter = RecordShortcutFilter(view)
+        view.viewport().installEventFilter(shortcut_filter)
+        qtbot.keyClick(view.viewport(), Qt.Key.Key_Space, Qt.KeyboardModifier.ShiftModifier)
+        assert not getattr(host, "_recording_managers", {})
+        assert host.status_bar.currentMessage() == I18N.tr(
+            "mixer.record.transport_arm_first", "Arm a track to record")
+
+    for index, track_id in enumerate(("audio-track", "mic-two")):
+        patch = _InputPatch("interface", "Interface", (index,))
+        monkeypatch.setattr(host, "_choose_mixer_input", lambda *_a, **_k: (True, patch))
+        panel.track_input_requested.emit(track_id)
+        panel._track_mixers[track_id]._monitor_btn.click()
+        assert view._track_headers[track_id]._recording_state == "armed"
+    assert len(opened) == 1
+    assert not getattr(host, "_recording_managers", {})
+    assert host.edit_viewport.program_record_button.isEnabled()
+
+    anchor = 140
+    host.timeline_panel.set_playhead_frame(anchor)
+    view.set_zoom(3.0)
+    if start_with_shortcut:
+        qtbot.keyClick(view.viewport(), Qt.Key.Key_Space, Qt.KeyboardModifier.ShiftModifier)
+        active = dict(host._mixer_timeline_recorders)
+        qtbot.keyClick(view.viewport(), Qt.Key.Key_Space, Qt.KeyboardModifier.ShiftModifier)
+        assert host._mixer_timeline_recorders == active
+        assert all(recorder.is_recording for recorder in active.values())
+    else:
+        host.edit_viewport.program_record_button.click()
+    assert set(host._mixer_timeline_recorders) == {"audio-track", "mic-two"}
+    previews = {track_id: item for (track_id, _generation), item in view._recording_previews.items()}
+    assert set(previews) == {"audio-track", "mic-two"}
+    assert all(item.start_frame == anchor for item in previews.values())
+    assert previews["audio-track"].rect.top() < previews["mic-two"].rect.top()
+
+    frames = np.tile(np.array([0.25, -0.5], dtype=np.float32), (240000, 1))
+    opened[0]._dispatch_bytes(frames[:4800].tobytes())
+    qtbot.waitUntil(lambda: all(item.rect.width() > 3 for item in previews.values()))
+    first_width = previews["audio-track"].rect.width()
+    region = previews["audio-track"].rect
+    image = QImage(region.size().toSize(), QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.translate(-region.topLeft())
+    view.drawForeground(painter, region)
+    painter.end()
+    paint_color = image.pixelColor(1, 2)
+    assert paint_color.red() > paint_color.green() + 50
+    opened[0]._dispatch_bytes(frames[4800:].tobytes())
+    qtbot.waitUntil(lambda: previews["audio-track"].rect.width() > first_width)
+    assert previews["audio-track"]._peaks[-1] == pytest.approx(0.25)
+    assert previews["mic-two"]._peaks[-1] == pytest.approx(0.5)
+    assert host.timeline_panel.get_playback_controller().timeline_duration > anchor + 120
+    assert all(not any(clip.timeline_start == anchor for clip in track.clips)
+               for track in view.get_timeline().audio_tracks)
+
+    view.set_zoom(6.0)
+    assert previews["audio-track"].rect.width() == pytest.approx(120 * view._pixels_per_frame)
+    host.edit_viewport.program_stop_button.click()
+    assert view._recording_previews  # Keep the preview in place during asynchronous WAV output.
+    qtbot.waitUntil(lambda: not host._mixer_timeline_recorders, timeout=5000)
+    assert not view._recording_previews
+    for track_id, sample in (("audio-track", 0.25), ("mic-two", -0.5)):
+        track = view.get_timeline().get_track_by_id(track_id)
+        clip = next(clip for clip in track.clips if clip.timeline_start == anchor)
+        asset = host._current_edit_project.get_asset_by_id(clip.asset_id)
+        assert Path(asset.path).parent == tmp_path / "recordings"
+        with wave.open(asset.path, "rb") as recorded:
+            assert recorded.getnchannels() == 1
+            assert recorded.getnframes() == len(frames)
+            pcm = int.from_bytes(recorded.readframes(1), "little", signed=True)
+            assert pcm / (2 ** 23) == pytest.approx(sample)
+        assert view._track_headers[track_id]._recording_state == "armed"
+    host._set_mixer_recording_workflow(False)
+    assert not opened[0]._subscribers
+
+
+def test_adr_record_tab_starts_real_recorder_and_associates_take(
+    project_host: ProjectHost, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    import numpy as np
+
+    from src.features.edit.core.adr_cues import AdrCue
+    from src.features.edit.core.shared_recording_input import SharedRecordingInput
+    from src.features.edit.ui.adr_take_sheet_panel import AdrTakeSheetPanel
+
+    inputs: list[SharedRecordingInput] = []
+    monkeypatch.setattr(SharedRecordingInput, "_open_device", lambda source: inputs.append(source))
+    host = project_host
+    host._current_edit_project = EditProject.create(name="Dialogue")
+    host._current_edit_project_filepath = str(tmp_path / "dialogue.topos")
+    host.timeline_panel.set_total_frames(240)
+    panel = host.adr_take_sheet_panel = AdrTakeSheetPanel()
+    qtbot.addWidget(panel)
+    host._wire_adr_panel()
+    panel._device_combo.addItem("Interface", "interface")
+    panel.apply_settings({"device_id": "interface", "pre_roll_seconds": 0, "post_roll_seconds": 0})
+    panel._track_combo.setCurrentIndex(panel._track_combo.findData("audio-track"))
+    cue = AdrCue("test-cue", 140, 160, "Alex", "Ready.")
+    panel.cue_changed.emit(cue)
+    panel._record_btn.click()
+    assert host._adr_pass is not None and host._adr_pass.manager.is_recording
+    assert inputs[0].device_id == "interface"
+    inputs[0]._dispatch_bytes(np.full(4800, 0.25, dtype=np.float32).tobytes())
+    panel._stop_btn.click()
+    qtbot.waitUntil(lambda: host._adr_pass is None, timeout=5000)
+    assert panel._table.rowCount() == 1
+    track = host.timeline_panel.timeline_view.get_timeline().audio_tracks[0]
+    assert any(clip.timeline_start == cue.in_frame for clip in track.clips)
+    assert not inputs[0]._subscribers
 
 
 def test_audio_workspace_switches_ruler_to_sample_display(project_host, qtbot) -> None:

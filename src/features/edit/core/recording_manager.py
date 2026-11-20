@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -818,6 +819,7 @@ class RecordingManager:
     - on_state_changed(state): idle/pre_roll/recording/stopping/failed
     - on_take_completed(take): 一个 take 录完
     - on_level(dbfs): 实时电平（供 UI meter）
+    - on_recording_progress(seconds, peak): 已缓存音频的时长与当前块的线性峰值
     - on_error(msg): 错误上报（设备拔出等）
 
     线程安全：录音数据采集在设备线程，take 管理在主线程。
@@ -856,6 +858,7 @@ class RecordingManager:
         self.on_state_changed: Optional[Callable[[str], None]] = None
         self.on_take_completed: Optional[Callable[[TakeInfo], None]] = None
         self.on_level: Optional[Callable[[float], None]] = None
+        self.on_recording_progress: Callable[[float, float], None] | None = None
         self.on_error: Optional[Callable[[str], None]] = None
         # P1-10：输入监听 —— 实时采集块转发（planar (channels, n)），
         # 由 UI 层接 QAudioSink 做输入监听，核心保持无输出设备依赖。
@@ -903,6 +906,11 @@ class RecordingManager:
     @property
     def takes(self) -> List[TakeInfo]:
         return list(self._takes)
+
+    @property
+    def capture_start_frame(self) -> int | None:
+        take = self._current_take
+        return take.first_sample_frame if take is not None else None
 
     @property
     def calibration(self) -> Optional[LatencyCalibration]:
@@ -1010,12 +1018,15 @@ class RecordingManager:
         scene = self._config.scene_name or "Untitled"
         take_name = f"{scene}_Take{take_number:02d}"
         timestamp = datetime.now().isoformat()
+        safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", take_name)
+        safe_name = safe_name.encode("utf-8")[:160].decode("utf-8", errors="ignore").strip(". ")
+        take_id = str(uuid.uuid4())
         file_path = os.path.join(
             self._config.output_dir or ".",
-            f"{take_name}_{timestamp.replace(':', '-')}.wav",
+            f"{safe_name}_{timestamp.replace(':', '-')}_{take_id[:8]}.wav",
         )
         take = TakeInfo(
-            take_number=take_number, name=take_name, file_path=file_path,
+            take_id=take_id, take_number=take_number, name=take_name, file_path=file_path,
             start_timestamp=timestamp, sample_rate=self._config.sample_rate,
             channels=self._config.channels, scene_name=scene,
             talent_name=self._config.talent_name, status="recording",
@@ -1273,6 +1284,7 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"monitor block forward failed: {e}")
 
+        captured_seconds = None
         if self._state == self.STATE_PRE_ROLL:
             # rolling pre-roll：只保留最近 pre_roll_seconds
             keep = int(self._config.pre_roll_seconds * self._config.sample_rate)
@@ -1290,6 +1302,8 @@ class RecordingManager:
                     self._pcm_buffer = _ChunkedPcmBuffer(channels=self._config.channels)
                 try:
                     self._pcm_buffer.append(raw)
+                    if self.on_recording_progress is not None:
+                        captured_seconds = self._pcm_buffer.total_samples / self._config.sample_rate
                 except DiskSpaceExhausted as e:
                     # P0-07：磁盘耗尽 → 安全终止并保留已录数据。
                     # 锁内只捕获：_finalize_take 与 on_error 都可能再次
@@ -1313,6 +1327,8 @@ class RecordingManager:
             self._current_take.peak_dbfs = max(self._current_take.peak_dbfs, dbfs)
         if self.on_level:
             self.on_level(dbfs)
+        if captured_seconds is not None and self.on_recording_progress is not None:
+            self.on_recording_progress(captured_seconds, peak)
 
     def _on_source_state_changed(self, state: "QAudio.State") -> None:
         """设备状态变化（含错误/断开）。"""

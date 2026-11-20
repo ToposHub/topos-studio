@@ -548,7 +548,8 @@ class DockLayoutMixin:
                 controller = self.timeline_panel.get_playback_controller()
                 if controller is not None:
                     self.edit_viewport.program_seek_requested.connect(controller.seek)
-                    self.edit_viewport.program_stop_requested.connect(controller.stop_in_place)
+                    stop = getattr(self, "_on_program_transport_stop_requested", controller.stop_in_place)
+                    self.edit_viewport.program_stop_requested.connect(stop)
                     controller.frame_changed.connect(self.edit_viewport.set_program_position)
                 self.edit_page.timeline_display_changed.connect(self._sync_edit_viewport_timeline)
                 self.edit_viewport.bind_timeline_widget(
@@ -1368,7 +1369,10 @@ class DockLayoutMixin:
         viewport = getattr(self, "edit_viewport", None)
         if viewport is not None and hasattr(self, "_on_mixer_transport_record_requested"):
             viewport.program_record_requested.connect(self._on_mixer_transport_record_requested)
-            viewport.program_stop_requested.connect(self._on_program_transport_stop_requested)
+        playback = self.timeline_panel.get_playback_controller()
+        playback_state = getattr(self, "_on_mixer_recording_playback_state", None)
+        if playback is not None and callable(playback_state):
+            playback.state_changed.connect(playback_state)
         display_changed = getattr(self.edit_page, "timeline_display_changed", None)
         if display_changed is not None:
             display_changed.connect(panel.sync_clip)

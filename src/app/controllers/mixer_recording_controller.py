@@ -6,9 +6,16 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QDockWidget, QWidget
+
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.shortcut_scope import text_input_focused
 
 if TYPE_CHECKING:
+    from PyQt6.QtCore import QObject
+    from PyQt6.QtGui import QKeyEvent
+
     from src.features.edit.core.shared_recording_input import SharedRecordingInput
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
@@ -104,7 +111,8 @@ class MixerRecordingControllerMixin:
             if track_id not in eligible or patches.get(track_id) != patch:
                 self._disarm_mixer_input(track_id)
 
-        busy = bool(recorders) or self._mixer_transport_starting
+        busy = (bool(recorders) or self._mixer_transport_starting
+                or getattr(self, "_mixer_recording_close_pending", False))
         panel = getattr(self, "audio_mixer_panel", None)
         if panel is not None and hasattr(panel, "set_record_arm_state") and active:
             panel.set_recording_inputs({track_id: patch.label() for track_id, patch in patches.items()})
@@ -314,8 +322,28 @@ class MixerRecordingControllerMixin:
         for track_id in tuple(getattr(self, "_mixer_armed_inputs", {})):
             self._disarm_mixer_input(track_id)
 
+    def _handle_mixer_record_shortcut(self, target: QObject, event: QKeyEvent) -> bool:
+        if (event.key() != Qt.Key.Key_Space
+                or event.modifiers() != Qt.KeyboardModifier.ShiftModifier
+                or getattr(self, "current_page", None) != "Mixer"
+                or not self._mixer_recording_workflow_active
+                or not isinstance(target, QWidget)
+                or QApplication.activeModalWidget() is not None
+                or QApplication.activePopupWidget() is not None
+                or text_input_focused()):
+            return False
+        window = target.window()
+        if window is not self and not (
+            isinstance(window, QDockWidget) and window.parentWidget() is self
+        ):
+            return False
+        if not event.isAutoRepeat():
+            self._on_mixer_transport_record_requested()
+        return True
+
     def _on_mixer_transport_record_requested(self) -> None:
-        if not self._mixer_recording_workflow_active or self._mixer_transport_starting:
+        if (not self._mixer_recording_workflow_active or self._mixer_transport_starting
+                or getattr(self, "_mixer_recording_close_pending", False)):
             return
         if (getattr(self, "_mixer_timeline_recorders", None)
                 or getattr(self, "_adr_pass", None) is not None
@@ -325,8 +353,10 @@ class MixerRecordingControllerMixin:
         self._refresh_mixer_recording_controls()
         armed = tuple(getattr(self, "_mixer_armed_inputs", {}).items())
         if not armed:
+            self._show_mixer_recording_message(I18N.tr("mixer.record.transport_arm_first", "Arm a track to record"))
             return
-        _fps, anchor = self._adr_timeline_context()
+        self.timeline_panel.pause_playback()
+        anchor = self.timeline_panel.get_current_frame()
         self._mixer_transport_starting = True
         try:
             for track_id, patch in armed:
@@ -345,20 +375,27 @@ class MixerRecordingControllerMixin:
             self._mixer_transport_playing = True
             self.timeline_panel.start_playback()
 
+    def _on_mixer_recording_playback_state(self, state: str) -> None:
+        # Playback naturally reaches the end of existing material. Capture keeps
+        # going there until the user stops it. An explicit pause also stops capture.
+        if state == "paused" and self._mixer_transport_playing:
+            self._stop_mixer_transport_recording()
+
     def _on_program_transport_stop_requested(self) -> None:
         # The ADR session lives in AdrRecordingControllerMixin, which hosts
         # may load separately from this mixin.
         stop_adr = getattr(self, "_stop_adr_session", None)
         if callable(stop_adr):
             stop_adr()
-        self._stop_mixer_transport_recording()
-        controller = self.timeline_panel.get_playback_controller()
-        if controller is not None:
-            controller.stop_in_place()
+        if not self._stop_mixer_transport_recording():
+            controller = self.timeline_panel.get_playback_controller()
+            if controller is not None:
+                controller.stop_in_place()
 
     def _stop_mixer_transport_recording(self) -> bool:
         recorders = tuple(getattr(self, "_mixer_timeline_recorders", {}).items())
         if not recorders:
+            self._mixer_transport_playing = False
             return False
         self._mixer_transport_playing = False
         for track_id, recorder in recorders:

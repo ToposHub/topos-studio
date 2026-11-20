@@ -3152,7 +3152,7 @@ class TimelinePanel(QWidget):
             fps = float(fps_value.to_float() if hasattr(fps_value, "to_float") else fps_value)
         except (TypeError, ValueError):
             fps = DEFAULT_FPS
-        return max(duration, int(round(max(1.0, fps) * 10.0)))
+        return max(duration, int(round(max(1.0, fps) * 10.0)), self.timeline_view.recording_runtime_duration)
 
     def set_timeline_sequence(self, timeline: Any) -> None:
         """
