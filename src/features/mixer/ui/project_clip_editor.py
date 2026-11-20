@@ -158,14 +158,20 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._preview_spec_key: tuple | str = ""
         self._pre_render_plan_for_preview: Any = lambda: None
         self._preview_failure_note = ""
+        # P1-2 · FFT 独立换档的内容复用缓存（键 = 内容键；PCM 只在内容
+        # 变化时重算，FFT 换档只重算频谱）。
+        self._last_edited_key: tuple | None = None
+        self._last_edited_pcm: np.ndarray | None = None
         self._preview_offline = False
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
         self._noise_profile: Any = None
         self._denoise_preview: tuple[tuple[int, int], tuple[int, int], float, int] | None = None
         # P2-7：变速/音高预览——P1-1/P1-2 起 DSP 在预览 worker 内计算
         # （请求快照 (lo, hi, ratio_pct, semitones, preserve)，可取消/
-        # 替换），UI 线程不再同步做 retime/pitch。
+        # 替换），UI 线程不再同步做 retime/pitch。基准时长在进入预览
+        # 时记录、清除时恢复。
         self._timepitch_request: tuple | None = None
+        self._timepitch_base_duration: float | None = None
         self._audition = ClipAuditionSession(self)
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
@@ -348,7 +354,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._on_edit_channel_selected(-1)
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
         self._timepitch_request = None
+        self._timepitch_base_duration = None
         self._denoise_preview = None
+        self._last_edited_key = None
+        self._last_edited_pcm = None
         self.set_pending_timepitch(None)
         self._preview_generation += 1  # 旧片段在途预览全部作废
         if self._model_audio_edit is None:
@@ -383,7 +392,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm = None
         self._raw_pcm = None
         self._timepitch_request = None
+        self._timepitch_base_duration = None
         self._denoise_preview = None
+        self._last_edited_key = None
+        self._last_edited_pcm = None
         self._pending_repair = None
         self.set_noise_profile(None)
         self._preview_generation += 1  # 在途预览作废，旧回调不误写
@@ -594,12 +606,12 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         duration = self._duration
         fft = self.current_fft_size()
         generation = self._preview_generation
-        key = (
+        content_key = (
             self._preview_spec_key, steps_signature(edit) if edit else (),
-            self._denoise_preview, fft, generation,
-            self._timepitch_request,
+            self._denoise_preview, self._timepitch_request,
             self._clip_gain_fade,
         )
+        key = (content_key, fft, generation)
         # 深拷贝编辑字典：后台计算期间工程命令可能替换模型对象。
         import copy as _copy
         return {
@@ -613,6 +625,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             "fft": fft,
             "bypass": self.btn_bypass.isChecked(),
             "clip_gain_fade": self._clip_gain_fade,
+            # P1-2 · FFT 独立换档：内容键未变时复用上一轮 edited PCM，
+            # 只重算频谱/波形统计（不重跑基底与处理栈，不打断会话）。
+            "reuse_edited": (self._last_edited_pcm
+                             if content_key == self._last_edited_key
+                             else None),
         }
 
     def _compute_preview(self, inputs: dict) -> ClipPreviewResult:
@@ -620,38 +637,42 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
         from src.features.edit.core.audio_dsp import apply_clip_fade
 
-        base = self._compute_base_pcm(inputs)
-        if base is None:
-            base = inputs["raw"]
-        edit = inputs["edit"]
-        if edit is not None and not inputs["bypass"]:
-            # P0-3 前缀语义：基底已含截至最后预渲染步骤的全部前缀（含
-            # 混排 inline），这里只应用后缀——inline 不再双重应用。
-            edited = apply_audio_edit_to_pcm(
-                base, suffix_audio_edit(edit), sample_rate=inputs["rate"])
+        reused = inputs.get("reuse_edited")
+        if reused is not None:
+            edited = reused
         else:
-            edited = base
-        # P0-3 · 片段级 gain/fade 与播放/成片/Stem 同一消费路径
-        # （apply_clip_fade 共享曲线规格与绝对片段样本位置；采样域字段
-        # 按 48k 参考域传入，函数内部换算消费率）。顺序与实时路径一致：
-        # 处理栈 → fade → gain。
-        gain_fade = inputs.get("clip_gain_fade")
-        if gain_fade is not None:
-            (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
-             curve_in, curve_out, fps, duration_frames) = gain_fade
-            if fin_frames or fout_frames or fin_samples or fout_samples:
-                try:
-                    edited = apply_clip_fade(
-                        edited, 0, int(duration_frames), 0,
-                        int(fin_frames), int(fout_frames), float(fps),
-                        float(inputs["rate"]),
-                        fade_in_samples_override=fin_samples,
-                        fade_out_samples_override=fout_samples,
-                        fade_curve_in=curve_in, fade_curve_out=curve_out)
-                except Exception:  # noqa: BLE001 - 淡化失败保持栈结果
-                    self._note_preview_failure("clip fade preview failed")
-            if abs(float(gain_db or 0.0)) > 1e-9:
-                edited = edited * (10.0 ** (float(gain_db) / 20.0))
+            base = self._compute_base_pcm(inputs)
+            if base is None:
+                base = inputs["raw"]
+            edit = inputs["edit"]
+            if edit is not None and not inputs["bypass"]:
+                # P0-3 前缀语义：基底已含截至最后预渲染步骤的全部前缀（含
+                # 混排 inline），这里只应用后缀——inline 不再双重应用。
+                edited = apply_audio_edit_to_pcm(
+                    base, suffix_audio_edit(edit), sample_rate=inputs["rate"])
+            else:
+                edited = base
+            # P0-3 · 片段级 gain/fade 与播放/成片/Stem 同一消费路径
+            # （apply_clip_fade 共享曲线规格与绝对片段样本位置；采样域字段
+            # 按 48k 参考域传入，函数内部换算消费率）。顺序与实时路径一致：
+            # 处理栈 → fade → gain。
+            gain_fade = inputs.get("clip_gain_fade")
+            if gain_fade is not None:
+                (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
+                 curve_in, curve_out, fps, duration_frames) = gain_fade
+                if fin_frames or fout_frames or fin_samples or fout_samples:
+                    try:
+                        edited = apply_clip_fade(
+                            edited, 0, int(duration_frames), 0,
+                            int(fin_frames), int(fout_frames), float(fps),
+                            float(inputs["rate"]),
+                            fade_in_samples_override=fin_samples,
+                            fade_out_samples_override=fout_samples,
+                            fade_curve_in=curve_in, fade_curve_out=curve_out)
+                    except Exception:  # noqa: BLE001 - 淡化失败保持栈结果
+                        self._note_preview_failure("clip fade preview failed")
+                if abs(float(gain_db or 0.0)) > 1e-9:
+                    edited = edited * (10.0 ** (float(gain_db) / 20.0))
         bins = min(8192, max(64, edited.shape[1] // 64))
         mins, maxs, rmss = compute_waveform_stats(edited, bins)
         spectrogram = compute_spectrogram(
@@ -781,14 +802,14 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _on_preview_ready(self, result: ClipPreviewResult) -> None:
         # 代际校验：切片段/重连/退出后旧结果不得覆盖新窗口。
-        if result.key != self._preview_request_key or result.key[4] != self._preview_generation:
+        if result.key != self._preview_request_key or result.key[2] != self._preview_generation:
             return
         if self._raw_pcm is None:
             return
         self._publish_preview(result)
 
     def _on_preview_failed(self, key: tuple, error: str) -> None:
-        if key == self._preview_request_key and key[4] == self._preview_generation:
+        if key == self._preview_request_key and key[2] == self._preview_generation:
             self._note_preview_failure(error)
             self.set_status_message(I18N.tr(
                 "mixer.clip_editor.preview_failed", "Audio preview failed · {error}"
@@ -798,6 +819,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if result is None:
             return
         self._pcm = result.edited
+        # P1-2 · 内容复用缓存：记录本轮内容键（FFT 换档复用 edited）。
+        if result.key and isinstance(result.key[0], tuple):
+            self._last_edited_key = result.key[0]
+            self._last_edited_pcm = result.edited
         preserve_view = math.isclose(result.duration, self.canvas._duration)
         playhead = self._playhead
         self._audition.load(result.edited, result.sample_rate)
@@ -863,11 +888,18 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         """P1-1/P1-2 · 变速/变调预览请求（DSP 在 worker 内计算）。
 
         ``request``: ``(lo, hi, ratio_pct, semitones, preserve)`` 选区与
-        参数快照（None=取消预览）。时长变化由发布的结果携带——
-        ``load_audio_data`` 依 result.duration 更新画布与 ``_duration``。
+        参数快照（None=取消预览）。进入预览时记录基准时长，清除时恢复
+        ——发布结果携带合同长度（load_audio_data 依 result.duration 更
+        新画布与 ``_duration``）。
         """
         if self._timepitch_request == request:
             return
+        if request is not None and self._timepitch_request is None:
+            self._timepitch_base_duration = self._duration
+        if request is None and self._timepitch_request is not None \
+                and self._timepitch_base_duration is not None:
+            self._duration = self._timepitch_base_duration
+            self._timepitch_base_duration = None
         self._timepitch_request = request
         self._refresh_stack_preview()
 
