@@ -27,6 +27,10 @@ import numpy as np
 
 from src.features.edit.core.audio_capabilities import is_scipy_available_for_dsp
 from src.features.edit.core.fade_curve_spec import fade_power
+from src.features.edit.core.sample_time import (
+    AUDIO_REFERENCE_SAMPLE_RATE,
+    reference_position_to_rate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -687,6 +691,13 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
       样本数）——淡化区随内容整体右移，与 SampleSkipGate 的内容位移
       严格一致（预听/成片同刻）。
 
+    P0-3（2026-11-21 计划）跨率合同：``*_samples_override`` 与
+    ``audio_sample_offset`` 一律按 **48 kHz 参考域** 传入（模型声明域，
+    timeline_v2 / sample_time），本函数内部经 ``reference_position_to_rate``
+    有理换算到 ``sample_rate`` 消费域——20 ms 在 44.1/48/96 kHz 分别
+    落 882/960/1920 个样本；显式 0 保持 0（关闭该端）。帧域参数本身
+    即时间量纲（帧 × 消费率/fps），无需换算。
+
     Args:
         samples: (channels, n) 样本块
         clip_timeline_start: clip 在时间线的起始帧
@@ -697,9 +708,9 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
         fps: 时间线帧率
         sample_rate: 采样率
         envelope_fn: 包络函数（linear_fade_envelope / equal_power_fade_envelope）
-        fade_in_samples_override: 采样域淡入（None=用帧域换算）
-        fade_out_samples_override: 采样域淡出（None=用帧域换算）
-        audio_sample_offset: 子帧位置偏移（样本，内容延迟量）
+        fade_in_samples_override: 采样域淡入（48k 参考域；None=用帧域换算）
+        fade_out_samples_override: 采样域淡出（48k 参考域；None=用帧域换算）
+        audio_sample_offset: 子帧位置偏移（48k 参考域样本，内容延迟量）
 
     Returns:
         应用包络后的样本（同 shape）。
@@ -707,6 +718,19 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
     n = samples.shape[-1]
     if n == 0:
         return samples
+    # P0-3 · 参考域 → 消费域：单一换算点（播放/成片/Stem/试听共用本
+    # 函数；调用方一律传模型参考域值，杜绝各自换算造成双重转换）。
+    consumption_rate = int(round(float(sample_rate)))
+    if consumption_rate != AUDIO_REFERENCE_SAMPLE_RATE:
+        if fade_in_samples_override is not None:
+            fade_in_samples_override = reference_position_to_rate(
+                int(fade_in_samples_override), consumption_rate)
+        if fade_out_samples_override is not None:
+            fade_out_samples_override = reference_position_to_rate(
+                int(fade_out_samples_override), consumption_rate)
+        if audio_sample_offset:
+            audio_sample_offset = reference_position_to_rate(
+                int(audio_sample_offset), consumption_rate)
     samples_per_frame = sample_rate / fps if fps > 0 else 0.0
     if samples_per_frame <= 0.0:
         return samples
