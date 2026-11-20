@@ -258,6 +258,16 @@ def generate_analysis(
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "checkmark.svg"),
             "src/shared/assets/icons",
         ),
+        # Fonts used by the cross-platform Qt UI and their licenses.
+        *[
+            (os.path.join(PROJECT_ROOT, "src", "assets", "fonts", filename),
+             "src/assets/fonts")
+            for filename in (
+                "DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSansMono.ttf",
+                "LICENSE_DEJAVU", "NotoSansSC-Regular.otf", "LICENSE_NOTO_SANS_SC",
+                "NOTO_SANS_SC_SOURCE.md",
+            )
+        ],
         # Factory default layout — the only source "Reset to Default" reads.
         (
             os.path.join(PROJECT_ROOT, "default_layout.json"),

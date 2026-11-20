@@ -13,6 +13,11 @@ after the colon is the ``curve`` used by :func:`audio_dsp.crossfade_envelopes`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
+from typing import TYPE_CHECKING, Any, Iterable, Mapping
+
+if TYPE_CHECKING:
+    from src.features.edit.core.timeline_v2 import TransitionInstance
 
 
 @dataclass(frozen=True)
@@ -32,9 +37,7 @@ class AudioTransitionDefinition:
     curve: str
 
 
-# Cut-point model only — clips stay non-overlapping (the existing
-# EditTrack overlap invariant is intentionally NOT relaxed).  Each flavour just
-# picks a different pair of complementary gain curves over the transition span.
+# These curves are used for both cut-point transitions and real overlaps.
 AUDIO_TRANSITION_DEFINITIONS: tuple[AudioTransitionDefinition, ...] = (
     AudioTransitionDefinition(
         "audio:constant_power", "Constant Power", "constant_power"
@@ -79,3 +82,36 @@ def is_audio_transition(transition_type: str) -> bool:
 def audio_curve_for(transition_type: str) -> str | None:
     """Return the DSP curve key for an audio transition type, else ``None``."""
     return AUDIO_CURVE_MAP.get(transition_type)
+
+
+def overlap_fade_regions(
+    transitions: Iterable[TransitionInstance], clip_id: str,
+) -> tuple[tuple[str, int, int], ...]:
+    """Manual fade edges that are continued by an automatic crossfade."""
+    regions: list[tuple[str, int, int]] = []
+    for transition in transitions:
+        if not transition.is_overlap_crossfade or transition.params.get("overlap_enabled") is False:
+            continue
+        if transition.left_clip_id == clip_id:
+            regions.append(("left", *transition.audio_envelope_range))
+        elif transition.right_clip_id == clip_id:
+            regions.append(("right", *transition.audio_envelope_range))
+    return tuple(regions)
+
+
+def overlap_curve_adjustments(params: Mapping[str, Any]) -> tuple[float, float]:
+    """Read the bounded outgoing/incoming curve controls from project data."""
+    values: list[float] = []
+    for key in ("outgoing_curve", "incoming_curve"):
+        value = params.get(key, 0.0)
+        if not isinstance(value, (int, float)) or not isfinite(value):
+            value = 0.0
+        values.append(max(-1.0, min(1.0, float(value))))
+    return values[0], values[1]
+
+
+def audio_transition_curve(transition: TransitionInstance) -> str | None:
+    """Resolve the playback curve, including the foreground-only overlap mode."""
+    if transition.is_overlap_crossfade and transition.params.get("overlap_enabled") is False:
+        return "overlap_cut"
+    return audio_curve_for(transition.transition_type)

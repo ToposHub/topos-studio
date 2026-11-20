@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QDockWidget, QHBoxLayout, QInputDialog, QLabel,
                              QMenu, QMessageBox, QSizePolicy, QTabWidget,
-                             QTabBar, QToolButton, QVBoxLayout, QWidget, QApplication)
+                             QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget, QApplication)
 
 from src.shared.i18n.i18n import I18N
 from src.shared.layout.store import LayoutStore
@@ -77,11 +77,9 @@ _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 2
 _COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
-# Mixer 页新增 Media Pool / Effects dock 的一次性补齐：旧 saveState 不含
-# 这两个 objectName，恢复后它们保持隐藏；进入 Mixer 时补一次可见并
-# 重新持久化，之后完全交还用户控制。
+# Restore newly introduced Mixer docks on the first visit with an old layout.
 _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY = "mixer_media_docks_layout_version"
-_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION = 1
+_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION = 2
 
 # 浮动 dock 标题栏高度（与原生窗口标题栏接近）
 _FLOATING_TITLEBAR_HEIGHT = 28
@@ -126,11 +124,18 @@ class FloatingDockTitleBar(QWidget):
             "QToolButton { color: #999; border: none; background: transparent; }"
             "QToolButton:hover { color: #fff; background: #c42b1c; }"
         )
-        close_btn.clicked.connect(lambda: dock.setVisible(False))
+        close_btn.clicked.connect(self._close_dock)
         layout.addWidget(close_btn)
 
         # 标题随 dock 窗口标题同步
         dock.windowTitleChanged.connect(self._title_label.setText)
+
+    def _close_dock(self) -> None:
+        action = self._dock.property("toposPanelCloseAction")
+        if isinstance(action, QAction) and action.isChecked() and action.isEnabled():
+            action.trigger()
+        else:
+            self._dock.hide()
 
 
 class DockLayoutMixin:
@@ -814,8 +819,7 @@ class DockLayoutMixin:
             self.edit_page.signal_hub.transform_tool_toggled.connect(self.on_transform_tool_toggled)
             self.edit_page.signal_hub.program_guide_changed.connect(self.on_program_guide_changed)
 
-        # Unified Properties Dock - Right area (shared by Edit & Composite pages)
-        # Create generic properties dock if edit_properties_panel exists
+        # Edit properties and contextual inspectors occupy the right side.
         self.dock_properties = None
         self.dock_edit_info = None
         self.dock_edit_effects = None
@@ -839,16 +843,17 @@ class DockLayoutMixin:
                 self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_info)
                 self.tabifyDockWidget(self.dock_properties, self.dock_edit_info)
 
-            # Edit Effects - Right area, tabified with Properties
+            # Effects are browsed alongside the media pool.
             if self.edit_effects_panel is not None:
                 self.dock_edit_effects = create_custom_dock(
                     I18N.tr("panel.edit_effects", "Effects"), self.edit_effects_panel, "dockEditEffects"
                 )
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_effects)
-                self.tabifyDockWidget(self.dock_properties, self.dock_edit_effects)
+                self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_effects)
+                if self.dock_edit_media_pool is not None:
+                    self.tabifyDockWidget(self.dock_edit_media_pool, self.dock_edit_effects)
 
             # SUB-P2-03: Caption Workspace - Right area, tabified with Properties
-            # so it shares the same dock stack as Properties/Effects on Edit page.
+            # so it shares the same dock stack as Properties/Info on Edit page.
             if self.caption_workspace_panel is not None:
                 self.dock_caption_workspace = create_custom_dock(
                     I18N.tr("panel.caption_workspace", "Captions"),
@@ -1227,6 +1232,7 @@ class DockLayoutMixin:
             if callable(attach_batch_host):
                 attach_batch_host(self)
 
+        self._bind_timeline_recording()
         self._create_audio_workspace_docks(create_custom_dock)
 
         self.all_docks = [
@@ -1330,25 +1336,25 @@ class DockLayoutMixin:
         }
         for key, dock_attr, panel_attr, title in MIXER_PANEL_SPECS:
             if not page.project_backed and key in MIXER_PROJECT_ONLY_KEYS:
-                # The prototype Mixer page has no shared media/effects panels.
                 continue
+            title_key = MIXER_PANEL_TITLE_KEYS.get(key, f"panel.audio_{key}")
+            dock_title = I18N.tr(title_key, title)
             if page.project_backed and key == "clip_editor":
                 from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 
                 panel = ProjectClipEditor()
+            elif page.project_backed and key == "effects":
+                from src.features.mixer.ui.effects_panel import MixerEffectsPanel
+
+                panel = MixerEffectsPanel()
+                panel.effect_activated.connect(self._apply_selected_mixer_effect)
             elif page.project_backed:
                 panel = QWidget()
                 layout = QVBoxLayout(panel)
                 layout.setContentsMargins(0, 0, 0, 0)
             else:
                 panel = getattr(page, panel_attr)
-            title_key = MIXER_PANEL_TITLE_KEYS.get(key, f"panel.audio_{key}")
-            dock = factory(I18N.tr(title_key, title),
-                           panel, object_names[key])
-            dock.setProperty("mixer_workspace_panel", True)
-            # A visible native drag handle matters for independent panels;
-            # unlike tabbed legacy docks these must not have a 1px titlebar.
-            dock.setTitleBarWidget(FloatingDockTitleBar(dock))
+            dock = factory(dock_title, panel, object_names[key])
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea
                                if key in ("console", "viewer",
                                           "media_pool", "effects") else
@@ -1357,6 +1363,60 @@ class DockLayoutMixin:
             setattr(self, dock_attr, dock)
         if page.project_backed:
             self._bind_project_audio_clip_editor()
+            self._bind_mixer_transport()
+
+    def _bind_mixer_transport(self) -> None:
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is None:
+            return
+        from src.features.mixer.ui.output_meter import MixerOutputMeter
+
+        meter = MixerOutputMeter()
+        viewport.bind_mixer_transport(self.timeline_panel.install_mixer_toolbar(meter))
+        self.audio_mixer_panel.output_levels_changed.connect(meter.update_output_levels)
+        self.audio_mixer_panel.output_meter_reset.connect(meter.reset_meter)
+
+    def _apply_selected_mixer_effect(self, effect_type: str) -> None:
+        """Apply the library effect through the regular timeline command path."""
+        if self.current_page != "Mixer":
+            return
+        view = self.timeline_panel.get_timeline_view()
+        timeline = view.get_timeline()
+        clip_id = view.selected_audio_clip_id()
+        clip = timeline.get_clip_by_id(clip_id) if timeline is not None and clip_id else None
+        track = timeline.get_track_by_id(clip.track_id) if clip is not None else None
+        if not clip_id or track is None or track.is_locked:
+            self.statusBar().showMessage(I18N.tr(
+                "mixer.effects_browser.select_clip",
+                "Select an unlocked audio clip, or drag the effect to a clip or a mixer channel.",
+            ), 4500)
+            return
+        self._on_edit_effect_add_requested(effect_type, clip_id)
+
+    def _bind_timeline_recording(self) -> None:
+        """Bind Edit and Mixer to the same timeline recording workflow."""
+        timeline = getattr(self, "timeline_panel", None)
+        record = getattr(self, "_on_mixer_transport_record_requested", None)
+        if timeline is None or not callable(record):
+            return
+        view = timeline.get_timeline_view()
+        if getattr(self, "_timeline_recording_view", None) is view:
+            return
+        self._timeline_recording_view = view
+        view.track_record_requested.connect(self._on_mixer_timeline_record_requested)
+        view.track_recording_input_requested.connect(self._on_mixer_input_requested)
+        viewport = getattr(self, "edit_viewport", None)
+        if viewport is not None:
+            viewport.program_record_requested.connect(record)
+        playback = timeline.get_playback_controller()
+        playback_state = getattr(self, "_on_mixer_recording_playback_state", None)
+        if playback is not None and callable(playback_state):
+            playback.state_changed.connect(playback_state)
+        display_changed = getattr(self.edit_page, "timeline_display_changed", None)
+        if display_changed is not None:
+            display_changed.connect(self._sync_mixer_timeline_recorders)
+        else:
+            view.timeline_changed.connect(self._sync_mixer_timeline_recorders)
 
     def _bind_project_audio_clip_editor(self) -> None:
         dock = self.dock_audio_clip_editor
@@ -1364,19 +1424,9 @@ class DockLayoutMixin:
         view = self.timeline_panel.get_timeline_view()
         view.set_professional_audio_editor_available(True)
         view.audio_clip_editor_requested.connect(self._open_project_audio_clip_editor)
-        view.track_record_requested.connect(self._on_mixer_timeline_record_requested)
-        # 走带级录制：Program Viewer 的 Record/Stop 控件驱动 armed 轨采集。
-        viewport = getattr(self, "edit_viewport", None)
-        if viewport is not None and hasattr(self, "_on_mixer_transport_record_requested"):
-            viewport.program_record_requested.connect(self._on_mixer_transport_record_requested)
-        playback = self.timeline_panel.get_playback_controller()
-        playback_state = getattr(self, "_on_mixer_recording_playback_state", None)
-        if playback is not None and callable(playback_state):
-            playback.state_changed.connect(playback_state)
         display_changed = getattr(self.edit_page, "timeline_display_changed", None)
         if display_changed is not None:
             display_changed.connect(panel.sync_clip)
-            display_changed.connect(self._sync_mixer_timeline_recorders)
         else:
             view.timeline_changed.connect(panel.sync_clip)
         media_pool = getattr(self, "media_pool_panel", None)
@@ -1403,7 +1453,7 @@ class DockLayoutMixin:
         self._audio_clip_editor_placed = False
         self._opening_audio_clip_editor = False
         self.tabifiedDockWidgetActivated.connect(self._on_mixer_audio_dock_activated)
-        dock.topLevelChanged.connect(self._sync_mixer_clip_editor_title_bar)
+        dock.topLevelChanged.connect(self._sync_mixer_clip_editor_dock_mode)
         dock.visibilityChanged.connect(self._on_project_audio_clip_editor_visibility_changed)
 
     def _pause_timeline_for_clip_audition(self, active: bool) -> None:
@@ -1442,7 +1492,7 @@ class DockLayoutMixin:
         dock = self.dock_audio_clip_editor
         if active_dock not in (dock, self.dock_audio_timeline) or self.current_page != "Mixer":
             return
-        self._sync_mixer_clip_editor_title_bar()
+        self._sync_mixer_clip_editor_dock_mode()
         if active_dock is dock:
             self._load_selected_audio_clip_for_editor()
 
@@ -1461,11 +1511,10 @@ class DockLayoutMixin:
         if clip_id is not None or panel.clip_id is not None:
             panel.reset()
 
-    def _sync_mixer_clip_editor_title_bar(self, _floating: bool = False) -> None:
+    def _sync_mixer_clip_editor_dock_mode(self, _floating: bool = False) -> None:
         dock = self.dock_audio_clip_editor
         floating = dock.isFloating()
         tabbed = not floating and self.dock_audio_timeline in self.tabifiedDockWidgets(dock)
-        dock.titleBarWidget().setFixedHeight(0 if tabbed else _FLOATING_TITLEBAR_HEIGHT)
         dock.widget().set_dock_mode(floating=floating, tabbed=tabbed)
 
     def _open_project_audio_source_editor(self, asset_id: str) -> None:
@@ -1493,7 +1542,7 @@ class DockLayoutMixin:
                 dock.setFloating(True)
                 dock.resize(1220, 780)
             self._audio_clip_editor_placed = True
-            self._sync_mixer_clip_editor_title_bar()
+            self._sync_mixer_clip_editor_dock_mode()
             self._focus_project_audio_clip_editor()
         finally:
             self._opening_audio_clip_editor = False
@@ -1537,7 +1586,7 @@ class DockLayoutMixin:
         if timeline not in self.tabifiedDockWidgets(dock):
             self.tabifyDockWidget(timeline, dock)
         # The editor has its own compact header in this tab group.
-        self._sync_mixer_clip_editor_title_bar()
+        self._sync_mixer_clip_editor_dock_mode()
         timeline.show()
 
     def _raise_mixer_audio_timeline(self) -> None:
@@ -1566,12 +1615,13 @@ class DockLayoutMixin:
             self._wire_adr_panel()
 
     def _attach_edit_panels_to_mixer(self) -> None:
-        """Borrow Edit's live widgets without rebinding their signals or history."""
+        """Present the live sequence and transport in the mixing workspace."""
         if not getattr(getattr(self, "mixer_page", None), "project_backed", False):
             return
         self.program_viewer_widget.get_viewer().exit_fullscreen()
         if self.edit_viewport is not None:
             self.edit_viewport.set_program_only(True)
+        self.timeline_panel.set_display_mode("mixer")
         self.timeline_panel.get_timeline_view().set_audio_only(True)
         self.audio_mixer_panel.close_effect_editors()
         borrowed: list[tuple[QDockWidget, QWidget]] = [
@@ -1580,15 +1630,10 @@ class DockLayoutMixin:
             (self.dock_audio_timeline, self.timeline_panel),
         ]
         media_pool_dock = getattr(self, "dock_audio_media_pool", None)
-        effects_dock = getattr(self, "dock_audio_effects", None)
         media_pool_panel = getattr(self, "media_pool_panel", None)
-        effects_panel = getattr(self, "edit_effects_panel", None)
         if media_pool_dock is not None and media_pool_panel is not None:
             media_pool_panel.enter_audio_workspace()
             borrowed.append((media_pool_dock, media_pool_panel))
-        if effects_dock is not None and effects_panel is not None:
-            effects_panel.enter_audio_workspace()
-            borrowed.append((effects_dock, effects_panel))
         for dock, widget in borrowed:
             dock.widget().layout().addWidget(widget)
             widget.show()
@@ -1600,8 +1645,12 @@ class DockLayoutMixin:
             return
         self.program_viewer_widget.get_viewer().exit_fullscreen()
         self.audio_mixer_panel.close_effect_editors()
+        clip_effect_dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
+        if clip_effect_dialogs is not None:
+            clip_effect_dialogs.close_all()
         self.dock_audio_clip_editor.widget().reset()
         self.timeline_panel.get_timeline_view().set_audio_only(False)
+        self.timeline_panel.set_display_mode("edit")
         for dock, widget in (
             (self.dock_audio_mixer, self.audio_mixer_panel),
             (self.dock_edit_timeline, self.timeline_panel),
@@ -1615,13 +1664,6 @@ class DockLayoutMixin:
             media_pool_panel.leave_audio_workspace()
             self.dock_edit_media_pool.setWidget(media_pool_panel)
             media_pool_panel.show()
-        effects_dock = getattr(self, "dock_audio_effects", None)
-        effects_panel = getattr(self, "edit_effects_panel", None)
-        if (effects_dock is not None and effects_panel is not None
-                and getattr(self, "dock_edit_effects", None) is not None):
-            effects_panel.leave_audio_workspace()
-            self.dock_edit_effects.setWidget(effects_panel)
-            effects_panel.show()
         viewport = self.edit_viewport or self.program_viewer_widget
         self.dock_program_viewer.setWidget(viewport)
         if self.edit_viewport is not None:
@@ -1655,24 +1697,24 @@ class DockLayoutMixin:
                 dock.hide()
             for dock in docks:
                 dock.setFloating(False)
+            media_pool = getattr(self, "dock_audio_media_pool", None)
+            effects = getattr(self, "dock_audio_effects", None)
+            project_backed = getattr(
+                getattr(self, "mixer_page", None), "project_backed", False)
             self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, console)
-            self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
+            has_library = isinstance(effects, QDockWidget) and isinstance(media_pool, QDockWidget)
+            if has_library:
+                self.splitDockWidget(console, effects, Qt.Orientation.Horizontal)
+                self.splitDockWidget(effects, viewer, Qt.Orientation.Horizontal)
+                self.tabifyDockWidget(effects, media_pool)
+                media_pool.show()
+                effects.show()
+                effects.raise_()
+            else:
+                self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
             self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
             for dock in (console, viewer, timeline):
                 dock.show()
-            # Media Pool 与 Effects 共用一个标签组，放在 Viewport 一侧；
-            # 原型形态没有这两个 dock。
-            media_pool = getattr(self, "dock_audio_media_pool", None)
-            effects = getattr(self, "dock_audio_effects", None)
-            if isinstance(media_pool, QDockWidget):
-                self.splitDockWidget(viewer, media_pool, Qt.Orientation.Horizontal)
-                media_pool.show()
-                if isinstance(effects, QDockWidget):
-                    self.tabifyDockWidget(media_pool, effects)
-                    effects.show()
-                    media_pool.raise_()
-            project_backed = getattr(
-                getattr(self, "mixer_page", None), "project_backed", False)
             clip_editor = getattr(self, "dock_audio_clip_editor", None)
             if isinstance(clip_editor, QDockWidget):
                 if project_backed:
@@ -1681,11 +1723,12 @@ class DockLayoutMixin:
                     timeline.raise_()
                 else:
                     clip_editor.hide()
-            top_row = [d for d in (console, viewer, media_pool)
-                       if isinstance(d, QDockWidget)]
-            self.resizeDocks(top_row, [620, 440, 300][:len(top_row)],
-                             Qt.Orientation.Horizontal)
-            self.resizeDocks([console, timeline], [370, 330], Qt.Orientation.Vertical)
+            if has_library:
+                self.resizeDocks([console, effects, viewer], [540, 265, 435], Qt.Orientation.Horizontal)
+            else:
+                self.resizeDocks([console, viewer], [620, 440], Qt.Orientation.Horizontal)
+            self.resizeDocks([console, timeline], [360, 480] if project_backed else [370, 330],
+                             Qt.Orientation.Vertical)
             self._mixer_default_layout = self.saveState()
             self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
         finally:
@@ -1739,23 +1782,16 @@ class DockLayoutMixin:
         # Older factory/user profiles predate Mixer. Seed its own layout
         # before loading them, so first entry never inherits a Color layout.
         self._seed_audio_workspace_layout()
-        # Phase A: Create LayoutStore and migrate legacy page_layouts
+        # Legacy Qt states are read below without promoting them to an
+        # unscoped profile. The next normal save records a scoped profile.
         self.layout_store = LayoutStore(self.config_manager)
-        try:
-            self.layout_store.migrate_legacy_page_layouts()
-        except Exception as exc:
-            logger.warning("LayoutStore migration failed (non-fatal): %s", exc)
-
         saved_layouts = self.config_manager.get("page_layouts")
+        _factory_geom, factory_state, factory_panels = self._load_factory_layout()
         # page_layouts may be mode-scoped: {effective_mode: {page: hex}}, or a
         # legacy flat {page: hex}. Pick the current mode's bucket (fallback to
         # "all") so image/video layouts stay independent.
         if saved_layouts and isinstance(saved_layouts, dict):
-            try:
-                from src.shared.feature_flags import get_effective_layout_mode
-                elm = get_effective_layout_mode(self.config_manager)
-            except Exception:
-                elm = "studio"
+            elm = self._layout_profile_mode()
             mode_bucket = None
             if all(isinstance(v, str) for v in saved_layouts.values()):
                 # Legacy flat structure — use as-is for backward compatibility.
@@ -1769,13 +1805,17 @@ class DockLayoutMixin:
                     if isinstance(state_hex, str):
                         self.page_layouts[page] = QByteArray.fromHex(state_hex.encode())
 
-            # Phase A: Also try to load from LayoutStore for current product mode.
-            # This overrides legacy data if LayoutStore has newer profiles.
-            self._load_layouts_from_store()
+        # Overlay mode-scoped profiles on the older page-layout mirror.
+        self._load_layouts_from_store()
 
-            # Ensure current_page has a layout state (use default if missing)
-            if self.current_page not in self.page_layouts:
-                self.page_layouts[self.current_page] = self.saveState()
+        # Seed every missing page before using a partial saved layout.
+        # When no factory capture exists for this mode, generate the layout
+        # for each page below and overlay these saved states afterwards.
+        for page, state_hex in (factory_panels or {}).items():
+            if isinstance(state_hex, str):
+                self.page_layouts.setdefault(page, QByteArray.fromHex(state_hex.encode()))
+        if factory_state and saved_layouts:
+            self.page_layouts.setdefault(self.current_page, QByteArray.fromHex(factory_state.encode()))
 
             # Hide page-specific docks before restore_layout_state applies global state
             # This prevents composite/edit docks from flashing on the wrong page
@@ -1816,11 +1856,7 @@ class DockLayoutMixin:
         # (repo ``default_layout.json``) for the CURRENT work mode.  Video and
         # image modes capture separately; a mode without its own capture (and
         # no "all" bucket) falls through to the hardcoded default below.
-        _factory_geom, factory_state, factory_panels = self._load_factory_layout()
         if factory_state:
-            for page, state_hex in (factory_panels or {}).items():
-                if isinstance(state_hex, str):
-                    self.page_layouts[page] = QByteArray.fromHex(state_hex.encode())
             if self.current_page not in self.page_layouts:
                 self.page_layouts[self.current_page] = QByteArray.fromHex(factory_state.encode())
 
@@ -1863,7 +1899,8 @@ class DockLayoutMixin:
             self.switch_to_page(self.current_page, force=True)
             return
 
-        # Fallback to hardcoded default layouts if none saved
+        saved_page_layouts = self.page_layouts.copy()
+        # Seed the pages without a captured default.
         # Hide page-specific docks before saving Color layout so they
         # don't leak into the Color page's saved state
         for d in [self.dock_edit_media_pool, self.dock_program_viewer, self.dock_source_viewer,
@@ -1935,9 +1972,10 @@ class DockLayoutMixin:
             if self.dock_edit_info:
                 self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_info)
             if self.dock_edit_effects:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_effects)
-            if self.dock_properties and self.dock_edit_effects:
-                self.tabifyDockWidget(self.dock_properties, self.dock_edit_effects)
+                self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_effects)
+            if self.dock_edit_media_pool and self.dock_edit_effects:
+                self.tabifyDockWidget(self.dock_edit_media_pool, self.dock_edit_effects)
+                self.dock_edit_media_pool.raise_()
             if self.dock_properties and self.dock_edit_info:
                 self.tabifyDockWidget(self.dock_properties, self.dock_edit_info)
             # SUB-P2-03: Caption Workspace joins the right-area stack.
@@ -2099,6 +2137,7 @@ class DockLayoutMixin:
             )
             self.page_layouts["Composite"] = self.saveState()
 
+        self.page_layouts.update(saved_page_layouts)
         # Ensure current_page has a layout state (for pages other than Color/Library/Deliver)
         if self.current_page not in self.page_layouts:
             self.page_layouts[self.current_page] = self.saveState()
@@ -2129,6 +2168,10 @@ class DockLayoutMixin:
             self.dock_composite_material.setVisible(False)
         if self.dock_composite_scope:
             self.dock_composite_scope.setVisible(False)
+        if self.current_page in saved_page_layouts:
+            # restore_layout_state applies the established page after geometry.
+            return
+        self.restoreState(self.page_layouts[self.current_page])
         # force=True so that when the app opens directly on a page (e.g.
         # Composite), switch_to_page runs the full activation path — restoring
         # dock visibility, installing the correct Properties panel widget, and
@@ -2147,11 +2190,10 @@ class DockLayoutMixin:
         return get_product_mode()
 
     def _current_work_mode(self) -> str:
-        """Return the current studio work mode ('all'/'image'/'video').
-
-        Non-studio products always report 'all' (they keep their own preset).
-        Used to scope saved layout presets per work mode.
-        """
+        """Return the work mode of the current UI, which changes at restart."""
+        active_mode = getattr(self, "_active_work_mode", None)
+        if active_mode is not None:
+            return active_mode
         from src.shared.feature_flags import get_work_mode
         try:
             return get_work_mode(getattr(self, "config_manager", None))
@@ -2162,6 +2204,14 @@ class DockLayoutMixin:
         """Return the set of currently registered panel IDs."""
         registry = get_panel_registry()
         return {desc.panel_id for desc in registry.get_all()}
+
+    def _layout_profile_mode(self) -> str:
+        """Keep Studio image and video panel states in separate profiles."""
+        product_mode = self._current_product_mode()
+        work_mode = self._current_work_mode()
+        if product_mode == "studio" and work_mode in ("image", "video"):
+            return f"{product_mode}_{work_mode}"
+        return product_mode
 
     def _get_enabled_features(self) -> set[str]:
         """Return the set of currently enabled feature IDs."""
@@ -2176,7 +2226,7 @@ class DockLayoutMixin:
         entries in page_layouts are preserved if no LayoutStore
         profile exists for that page.
         """
-        product_mode = self._current_product_mode()
+        product_mode = self._layout_profile_mode()
         registered_ids = self._get_registered_panel_ids()
         enabled_features = self._get_enabled_features()
 
@@ -2193,7 +2243,7 @@ class DockLayoutMixin:
                 )
 
     def _save_current_layout_to_store(
-        self, page_id: str, *, qt_state: QByteArray | None = None,
+        self, page_id: str, *, qt_state: QByteArray | None = None, auto_save: bool = True,
     ) -> None:
         """Save the current dock layout to LayoutStore.
 
@@ -2201,7 +2251,7 @@ class DockLayoutMixin:
         systems stay in sync during the transition period.
         """
         try:
-            product_mode = self._current_product_mode()
+            product_mode = self._layout_profile_mode()
             if qt_state is None:
                 qt_state = self.saveState()
             qt_state_hex = qt_state.toHex().data().decode()
@@ -2211,7 +2261,7 @@ class DockLayoutMixin:
             visible_panel_ids: list[str] = []
             for desc in registry.get_all():
                 dock = getattr(self, desc.dock_attr, None) if desc.dock_attr else None
-                if dock is not None and isinstance(dock, QDockWidget) and dock.isVisible():
+                if isinstance(dock, QDockWidget) and not dock.isHidden():
                     visible_panel_ids.append(desc.panel_id)
 
             profile = LayoutProfile(
@@ -2220,36 +2270,58 @@ class DockLayoutMixin:
                 visible_panels=tuple(visible_panel_ids),
                 qt_state_hex=qt_state_hex,
             )
-            self.layout_store.save_profile(profile)
+            if not auto_save and profile == self.layout_store.get_profile(product_mode, page_id):
+                return
+            self.layout_store.save_profile(profile, auto_save=auto_save)
+            if not auto_save:
+                # Restore from memory on the next visit. Coalesce disk writes
+                # when the user tries several pages in quick succession.
+                timer = getattr(self, "_layout_profile_save_timer", None)
+                if timer is None:
+                    timer = QTimer(self)
+                    timer.setSingleShot(True)
+                    timer.setInterval(350)
+                    timer.timeout.connect(self.config_manager.save_config)
+                    self._layout_profile_save_timer = timer
+                timer.start()
         except Exception as exc:
             logger.warning("Failed to save layout to LayoutStore: %s", exc)
 
     def _restore_layout_from_store(self, page_id: str) -> bool:
         """Try to restore layout from LayoutStore.
 
-        Returns True if a LayoutStore profile was found (regardless of
-        whether restoreState succeeded), False if no profile exists.
+        The older unscoped profile is a fallback for installs that have not
+        yet saved a mode-specific layout. Once a mode bucket exists, the
+        per-page legacy reader handles missing profiles for that mode.
         """
         try:
+            profile_mode = self._layout_profile_mode()
             product_mode = self._current_product_mode()
             registered_ids = self._get_registered_panel_ids()
             enabled_features = self._get_enabled_features()
 
             profile = self.layout_store.get_or_default(
-                product_mode, page_id,
+                profile_mode, page_id,
                 enabled_features=enabled_features,
                 registered_panel_ids=registered_ids,
             )
+            if not profile.qt_state_hex and profile_mode != product_mode:
+                legacy = self.config_manager.get("page_layouts")
+                has_mode_buckets = isinstance(legacy, dict) and any(
+                    isinstance(legacy.get(key), dict) for key in ("studio_image", "studio_video")
+                )
+                if not has_mode_buckets:
+                    profile = self.layout_store.get_or_default(
+                        product_mode, page_id,
+                        enabled_features=enabled_features,
+                        registered_panel_ids=registered_ids,
+                    )
 
             if profile and profile.qt_state_hex:
                 state = QByteArray.fromHex(profile.qt_state_hex.encode())
-                if not self.restoreState(state):
-                    logger.debug(
-                        "LayoutStore restoreState failed for %s/%s, "
-                        "will fall back to default layout",
-                        product_mode, page_id,
-                    )
-                return True
+                if self.restoreState(state):
+                    return True
+                logger.debug("LayoutStore restoreState failed for %s/%s", profile_mode, page_id)
         except Exception as exc:
             logger.warning("LayoutStore restore failed (non-fatal): %s", exc)
 
@@ -2376,11 +2448,7 @@ class DockLayoutMixin:
             if all(isinstance(value, str) for value in saved_layouts.values()):
                 saved_layouts["Composite"] = state_hex
             else:
-                try:
-                    from src.shared.feature_flags import get_effective_layout_mode
-                    mode_key = get_effective_layout_mode(self.config_manager)
-                except Exception:
-                    mode_key = "all"
+                mode_key = self._layout_profile_mode()
                 bucket = saved_layouts.get(mode_key)
                 if not isinstance(bucket, dict):
                     mode_key = "all"
@@ -2401,20 +2469,13 @@ class DockLayoutMixin:
         logger.info("Added Composite Scopes dock to legacy layout")
 
     def _migrate_mixer_media_docks_layout(self) -> None:
-        """Add the Mixer Media Pool / Effects docks to existing layouts once.
-
-        Qt states saved before these docks existed omit their object names,
-        so restoring them leaves both hidden in the top area.  Place them
-        beside the Viewport as one tab group once, persist the repaired
-        state, and leave later visibility/placement to the user.
-        """
+        """Upgrade the old Mixer layout while retaining custom floating docks."""
         migration_version = self.config_manager.get(
             _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY
         )
-        if (
-            isinstance(migration_version, int)
-            and migration_version >= _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION
-        ):
+        if not isinstance(migration_version, int):
+            migration_version = 0
+        if migration_version >= _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION:
             return
 
         media_pool = getattr(self, "dock_audio_media_pool", None)
@@ -2427,20 +2488,33 @@ class DockLayoutMixin:
         ):
             return
 
-        viewer = getattr(self, "dock_audio_viewer", None)
-        if (
-            isinstance(viewer, QDockWidget)
-            and not viewer.isFloating()
-            and not media_pool.isFloating()
-            and not effects.isFloating()
-        ):
-            # 与出厂种子一致的默认位置：Viewport 一侧的同组标签。
-            self.splitDockWidget(viewer, media_pool, Qt.Orientation.Horizontal)
-            self.tabifyDockWidget(media_pool, effects)
-        media_pool.setVisible(True)
-        effects.setVisible(True)
-        media_pool.raise_()
-
+        console = self.dock_audio_console
+        viewer = self.dock_audio_viewer
+        grouped = effects in self.tabifiedDockWidgets(media_pool)
+        open_pool, open_effects = not media_pool.isHidden(), not effects.isHidden()
+        same_area = self.dockWidgetArea(media_pool) == self.dockWidgetArea(effects)
+        only_one_open = same_area and open_pool != open_effects
+        missing_library = migration_version == 0 and not (open_pool or open_effects or grouped)
+        foreground = media_pool if open_pool and (
+            not open_effects or not media_pool.visibleRegion().isEmpty()
+        ) else effects
+        top_area = Qt.DockWidgetArea.TopDockWidgetArea
+        library_below = self.dockWidgetArea(effects) == Qt.DockWidgetArea.BottomDockWidgetArea
+        library_after_viewer = (self.dockWidgetArea(effects) == top_area
+                                and self.dockWidgetArea(viewer) == top_area
+                                and not viewer.isFloating() and not viewer.isHidden()
+                                and console.geometry().x() < viewer.geometry().x() < foreground.geometry().x())
+        if ((missing_library or ((grouped or only_one_open) and (library_below or library_after_viewer)))
+                and self.dockWidgetArea(console) == top_area
+                and not console.isFloating()
+                and not self.tabifiedDockWidgets(console)
+                and not (media_pool.isFloating() or effects.isFloating())):
+            self.splitDockWidget(console, effects, Qt.Orientation.Horizontal)
+            self.tabifyDockWidget(effects, media_pool)
+            effects.setVisible(open_effects or missing_library)
+            media_pool.setVisible(open_pool or missing_library)
+            foreground.raise_()
+            self.resizeDocks([effects], [270], Qt.Orientation.Horizontal)
         mixer_state = self.saveState()
         self.page_layouts["Mixer"] = mixer_state
 
@@ -2453,11 +2527,7 @@ class DockLayoutMixin:
             if all(isinstance(value, str) for value in saved_layouts.values()):
                 saved_layouts["Mixer"] = state_hex
             else:
-                try:
-                    from src.shared.feature_flags import get_effective_layout_mode
-                    mode_key = get_effective_layout_mode(self.config_manager)
-                except Exception:
-                    mode_key = "all"
+                mode_key = self._layout_profile_mode()
                 bucket = saved_layouts.get(mode_key)
                 if not isinstance(bucket, dict):
                     mode_key = "all"
@@ -2475,7 +2545,7 @@ class DockLayoutMixin:
         )
         self._save_current_layout_to_store("Mixer")
         self.config_manager.save_config()
-        logger.info("Added Mixer Media Pool / Effects docks to legacy layout")
+        logger.info("Updated Mixer dock layout to version %d", _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION)
 
     def _migrate_ai_assistant_dock_layout(self) -> None:
         """Merge the AI assistant into the Edit right-side tab group once.
@@ -2755,6 +2825,7 @@ class DockLayoutMixin:
             and isinstance(migration_version, int)
             and migration_version >= _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION
         ):
+            self._compact_factory_color_tools()
             return
 
         if self.current_page != "Color":
@@ -2776,6 +2847,7 @@ class DockLayoutMixin:
         elif not warper.isFloating():
             warper.raise_()
 
+        self._compact_factory_color_tools(force=force)
         color_state = self.saveState()
         self.page_layouts["Color"] = color_state
         saved_layouts = self.config_manager.get("page_layouts")
@@ -2795,6 +2867,17 @@ class DockLayoutMixin:
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
         logger.info("Split Color Mapping into independent Warper and Mixer docks")
+
+    def _compact_factory_color_tools(self, *, force: bool = False) -> None:
+        if self.current_page != "Color":
+            return
+        if not force and (getattr(self, "_has_saved_state", False)
+                          or getattr(self, "_factory_color_tools_compacted", False)):
+            return
+        bar = getattr(self, "workspace_panel_bar", None)
+        if bar is not None:
+            bar.compact_default_color_tools()
+            self._factory_color_tools_compacted = True
 
     def _toggle_color_node_display_mode(self) -> None:
         self.dock_viewport.setVisible(self.dock_viewport.isHidden())
@@ -2833,7 +2916,7 @@ class DockLayoutMixin:
 
         Layouts for other product modes are preserved.
         """
-        product_mode = self._current_product_mode()
+        product_mode = self._layout_profile_mode()
         profiles = self.layout_store.get_profiles_for_mode(product_mode)
         for page_id in list(profiles.keys()):
             self.layout_store.delete_profile(product_mode, page_id)
@@ -2992,6 +3075,12 @@ class DockLayoutMixin:
             # regular panel QTabBars are descendants of their own widgets.
             if tab_bar.parent() is self:
                 apply_dock_tab_bar_style(tab_bar)
+        # Qt can leave a dormant dock tab bar at (0, 0) during a layout
+        # restore. Keep the toolbar above those internal widgets so they
+        # cannot paint over the menu or intercept its mouse input.
+        toolbar = self.findChild(QToolBar, "mainToolbar")
+        if toolbar is not None:
+            toolbar.raise_()
 
     # ------------------------------------------------------------------
     # _perform_update_all_titlebars
@@ -3023,7 +3112,7 @@ class DockLayoutMixin:
                 # Detect floating state
                 is_floating = dock.isFloating()
 
-                if is_floating or bool(dock.property("mixer_workspace_panel")):
+                if is_floating:
                     # Floating dock: 必须用一个有真实高度的自定义标题栏，而不能
                     # 调用 setTitleBarWidget(None) 依赖原生标题栏。原因：项目全局
                     # QSS 把 QDockWidget::title 的 max-height 钉死成 0px，Qt 在有
@@ -3217,13 +3306,18 @@ class DockLayoutMixin:
     # _apply_all_page_layouts
     # ------------------------------------------------------------------
     def _apply_all_page_layouts(self, panel_states: dict) -> None:
-        """应用所有页面的布局状态到内存（不立即恢复）"""
+        """Replace each captured page in memory and in its persisted profile."""
         if not panel_states:
             return
 
-        # 恢复所有页面的布局状态到 page_layouts
+        profile_mode = self._layout_profile_mode()
         for page, state_hex in panel_states.items():
+            if not isinstance(state_hex, str):
+                continue
             self.page_layouts[page] = QByteArray.fromHex(state_hex.encode())
+            self.layout_store.save_profile(LayoutProfile(
+                product_mode=profile_mode, page_id=page, qt_state_hex=state_hex,
+            ))
 
         # 立即应用当前页面的布局
         if self.current_page in self.page_layouts:
@@ -3274,7 +3368,7 @@ class DockLayoutMixin:
 
         self.layout_combo.blockSignals(True)
         self.layout_combo.clear()
-        self.layout_combo.addItem("Layout Presets")
+        self.layout_combo.addItem(I18N.tr("workspace.layout_presets", "Layout Presets"))
         # P1-24：内建工作区预设排最前，itemData 携带 preset_id；
         # 用户自定义布局 itemData 为 None，on_layout_combo_activated 据此分流。
         if getattr(self, "_edit_available", False):
@@ -3329,6 +3423,9 @@ class DockLayoutMixin:
             # another page is active. Apply page rules after the final Qt
             # restore so the independent tools cannot leak across pages.
             self._enforce_page_dock_visibility()
+            panel_bar = getattr(self, "workspace_panel_bar", None)
+            if panel_bar is not None:
+                panel_bar.set_page(self.current_page)
             # Restore docked dock sizes
             QTimer.singleShot(60, self._restore_docked_sizes)
             # Sync floating docks tracking after restore
@@ -3588,6 +3685,10 @@ class DockLayoutMixin:
             self._sync_floating_docks()
             self._perform_update_all_titlebars()
             self._save_current_layout_to_store("Mixer")
+            panel_bar = getattr(self, "workspace_panel_bar", None)
+            if panel_bar is not None:
+                panel_bar.reset_groups("Mixer")
+                panel_bar.set_page(self.current_page)
             self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
             return
         factory_geom, factory_state, panel_states = self._load_factory_layout()
@@ -3607,6 +3708,7 @@ class DockLayoutMixin:
                 self._color_keyframes_reseat = True
             # 出厂文件可能采集自另一种工作模式，修正越界的 dock 可见性
             self._enforce_page_dock_visibility()
+            self._reset_workspace_panel_controls()
             self._sync_floating_docks()
             self._perform_update_all_titlebars()
             if self.current_page == "Composite":
@@ -3624,6 +3726,7 @@ class DockLayoutMixin:
         )
         self.apply_default_layout()
         self._enforce_page_dock_visibility()
+        self._reset_workspace_panel_controls()
         self._sync_floating_docks()
         self._perform_update_all_titlebars()
         if self.current_page == "Composite":
@@ -3631,6 +3734,15 @@ class DockLayoutMixin:
         if self.current_page == "Color":
             self._migrate_color_remapping_dock_layout(force=True)
         self.status_bar.showMessage(I18N.tr("status.layout_reset_hardcoded", "Layout reset to hardcoded default."), 3000)
+
+    def _reset_workspace_panel_controls(self) -> None:
+        panel_bar = getattr(self, "workspace_panel_bar", None)
+        if panel_bar is not None:
+            panel_bar.reset_groups()
+            panel_bar.set_page(self.current_page)
+        reset_queue = getattr(getattr(self, "deliver_page", None), "reset_render_queue_visibility", None)
+        if callable(reset_queue):
+            reset_queue()
 
     # ------------------------------------------------------------------
     # set_current_layout_as_default (developer mode only)
@@ -3730,6 +3842,9 @@ class DockLayoutMixin:
         # Saved layouts from older versions (or from a time when composite was
         # on-screen during Color save) may have these docks visible incorrectly.
         self._enforce_page_dock_visibility()
+        panel_bar = getattr(self, "workspace_panel_bar", None)
+        if panel_bar is not None:
+            panel_bar.set_page(self.current_page)
 
         self.updateGeometry()
         self._perform_update_all_titlebars()
@@ -3785,6 +3900,10 @@ class DockLayoutMixin:
         mode they stay usable. Media Pool is already unavailable in image mode
         (Edit feature disabled at startup).
         """
+        activate_deliver = getattr(getattr(self, "deliver_page", None), "set_workspace_active", None)
+        if callable(activate_deliver):
+            activate_deliver(self.current_page == "Deliver")
+
         mixer_docks = self._audio_workspace_docks()
         mixer_active = self.current_page == "Mixer"
         adr = getattr(self, "dock_adr_take_sheet", None)
@@ -4166,9 +4285,6 @@ class DockLayoutMixin:
             if dock.isFloating():
                 self._floating_docks.add(dock)
                 # 浮动 dock 用有真实高度的 FloatingDockTitleBar（可拖拽移动/停靠）
-                if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
-                    dock.setTitleBarWidget(FloatingDockTitleBar(dock))
-            elif bool(dock.property("mixer_workspace_panel")):
                 if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
                     dock.setTitleBarWidget(FloatingDockTitleBar(dock))
             else:

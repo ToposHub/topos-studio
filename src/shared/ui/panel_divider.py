@@ -8,7 +8,7 @@ Both drawing paths stay transparent to mouse input.
 
 from functools import lru_cache
 
-from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, Qt
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPaintEvent, QResizeEvent, QMoveEvent, QShowEvent, QHideEvent
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStyle, QTabBar, QWidget
 
@@ -360,6 +360,28 @@ def _exposed_rules(rectangles: list[QRect], extent: int) -> list[tuple[str, int,
     return result
 
 
+class _DockDividerRepaintTimer(QTimer):
+    """Invalidate all dock outlines once after Qt settles the new geometry."""
+
+    def __init__(self, window: QMainWindow) -> None:
+        super().__init__(window)
+        self.setSingleShot(True)
+        self.timeout.connect(self._repaint)
+
+    def _repaint(self) -> None:
+        window = self.parent()
+        if not isinstance(window, QMainWindow):
+            return
+        for child in window.findChildren(
+            QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly,
+        ):
+            if isinstance(child, (PanelDockWidget, QTabBar)) and child.isVisible():
+                overlay = getattr(child, "_divider_overlay", None)
+                if overlay is not None:
+                    overlay.update()
+        window.update()
+
+
 class PanelDockWidget(QDockWidget):
     """QDockWidget with an application-owned, platform-neutral 1px outline."""
 
@@ -374,13 +396,12 @@ class PanelDockWidget(QDockWidget):
         self._divider_overlay.raise_()
         main_window = self.window()
         if isinstance(main_window, QMainWindow):
-            # Another panel may have become shared/exposed without changing
-            # its own size (tab switch, hide, float or re-dock).
-            for child in main_window.children():
-                overlay = getattr(child, "_divider_overlay", None)
-                if isinstance(overlay, _PanelDividerOverlay):
-                    overlay.update()
-            main_window.update()
+            timer = getattr(main_window, "_panel_divider_repaint_timer", None)
+            if timer is None:
+                timer = _DockDividerRepaintTimer(main_window)
+                main_window._panel_divider_repaint_timer = timer
+            if not timer.isActive():
+                timer.start(0)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)

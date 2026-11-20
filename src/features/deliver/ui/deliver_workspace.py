@@ -15,7 +15,8 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QWidget
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QWidget
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.deliver.core.video_batch_export_controller import (
@@ -25,12 +26,15 @@ from src.features.deliver.core.video_export_job import VideoExportJob
 from src.features.deliver.ui.detachable_panel_host import DetachablePanelHost
 from src.features.deliver.ui.video_batch_export_panel import VideoBatchExportPanel
 from src.features.deliver.ui.video_export_settings_panel import VideoExportSettingsPanel
+from src.shared.feature_flags import get_effective_layout_mode
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["DeliverWorkspace"]
+
+_DEFAULT_QUEUE_WIDTH = 370
 
 
 class DeliverWorkspace(QWidget):
@@ -71,7 +75,14 @@ class DeliverWorkspace(QWidget):
         self._settings_panel.range_type_changed.connect(self._on_range_type_changed)
         self._batch_panel = VideoBatchExportPanel(self)
         self._batch_panel_host = DetachablePanelHost(self)
-        self._main_window: Optional[Any] = None
+        self._main_window: Optional[QMainWindow] = None
+        self._workspace_active = True
+        self._render_queue_width = _DEFAULT_QUEUE_WIDTH
+        self._render_queue_visibility_action = QAction(
+            I18N.tr("deliver.queue.title", "Render Queue"), self
+        )
+        self._render_queue_visibility_action.setCheckable(True)
+        self._render_queue_visibility_action.setChecked(True)
         # AUD-12209: legacy signal contract tracking — export_started is
         # emitted when the queue actually starts running (not on enqueue),
         # export_completed/export_cancelled when it stops / a cancel is
@@ -91,7 +102,7 @@ class DeliverWorkspace(QWidget):
         self._edit_preview_splitter.addWidget(self._batch_panel)
         self._edit_preview_splitter.setStretchFactor(0, 1)
         self._edit_preview_splitter.setStretchFactor(1, 0)
-        self._edit_preview_splitter.setSizes([680, 370])
+        self._edit_preview_splitter.setSizes([680, _DEFAULT_QUEUE_WIDTH])
 
         # Bottom row: the timeline is deliberately outside the top splitter,
         # so it spans under both the viewer and the render queue.
@@ -150,6 +161,27 @@ class DeliverWorkspace(QWidget):
         return self._batch_panel
 
     @property
+    def render_queue_visibility_action(self) -> QAction:
+        """Show or hide the existing render queue from the workspace toolbar."""
+        return self._render_queue_visibility_action
+
+    def set_workspace_active(self, active: bool) -> None:
+        """Keep a detached render queue within the Deliver workspace."""
+        self._workspace_active = active
+        if self._batch_panel_host.dock is not None:
+            self._apply_render_queue_visibility()
+
+    def reset_render_queue_visibility(self) -> None:
+        """Restore the factory open, embedded queue layout."""
+        self._render_queue_width = _DEFAULT_QUEUE_WIDTH
+        self._render_queue_visibility_action.setChecked(True)
+        if self._batch_panel_host.mode == "floating":
+            self.return_batch_panel_to_deliver()
+        else:
+            self._apply_render_queue_visibility()
+        self._save_render_queue_layout()
+
+    @property
     def edit_preview_splitter(self) -> QSplitter:
         """The top-right splitter containing viewer and render queue."""
         return self._edit_preview_splitter
@@ -182,17 +214,17 @@ class DeliverWorkspace(QWidget):
             right_height = max(self._right_splitter.height(), 520)
             top_height = max(360, int(right_height * 0.57))
             self._right_splitter.setSizes([top_height, max(240, right_height - top_height)])
-            top_width = max(self._edit_preview_splitter.width(), 760)
-            queue_width = 370
-            self._edit_preview_splitter.setSizes(
-                [max(420, top_width - queue_width), queue_width]
-            )
+        self._apply_render_queue_visibility()
 
     # ------------------------------------------------------------------
     # Wiring
     # ------------------------------------------------------------------
 
     def _setup_connections(self) -> None:
+        self._render_queue_visibility_action.triggered.connect(
+            self._on_render_queue_visibility_requested
+        )
+        self._edit_preview_splitter.splitterMoved.connect(self._on_render_queue_resized)
         self._settings_panel.add_to_queue_requested.connect(self._on_add_jobs)
         self._settings_panel.add_and_start_requested.connect(self._on_add_and_start)
 
@@ -231,9 +263,9 @@ class DeliverWorkspace(QWidget):
             )
         self._refresh_batch_panel()
 
-    def attach_batch_panel_host(self, main_window: Any) -> None:
+    def attach_batch_panel_host(self, main_window: QMainWindow) -> None:
         """Enable queue detaching after the Deliver dock is in MainWindow."""
-        if self._main_window is main_window and self._batch_panel_host.mode == "embedded":
+        if self._main_window is main_window:
             return
         self._main_window = main_window
         # M21.2c 接线：批队列排空后的逐版本 QC 回填主窗口缓存——
@@ -256,7 +288,86 @@ class DeliverWorkspace(QWidget):
         except (TypeError, RuntimeError):
             pass
         self._batch_panel_host.mode_changed.connect(self._on_batch_host_mode_changed)
+        self._load_render_queue_layout()
         self._refresh_batch_panel()
+
+    def _render_queue_layout_key(self) -> str:
+        profile_mode = getattr(self._main_window, "_layout_profile_mode", None)
+        mode = (profile_mode() if callable(profile_mode) else
+                get_effective_layout_mode(getattr(self._main_window, "config_manager", None)))
+        return f"{mode}_deliver_render_queue"
+
+    def _load_render_queue_layout(self) -> None:
+        config = getattr(self._main_window, "config_manager", None)
+        if config is None:
+            return
+        prefs = config.get(self._render_queue_layout_key())
+        if isinstance(prefs, dict):
+            width = prefs.get("width")
+            if (type(width) is int
+                    and self._batch_panel.minimumWidth() <= width <= self._batch_panel.maximumWidth()):
+                self._render_queue_width = width
+            self._render_queue_visibility_action.setChecked(prefs.get("visible") is not False)
+        self._apply_render_queue_visibility()
+
+    def _save_render_queue_layout(self, *, auto_save: bool = True) -> None:
+        config = getattr(self._main_window, "config_manager", None)
+        if config is not None:
+            config.set(
+                self._render_queue_layout_key(),
+                {
+                    "visible": self._render_queue_visibility_action.isChecked(),
+                    "width": self._render_queue_width,
+                },
+                auto_save=auto_save,
+            )
+
+    def _remember_embedded_render_queue_width(self) -> None:
+        index = self._edit_preview_splitter.indexOf(self._batch_panel)
+        if index >= 0 and self._batch_panel.isVisible():
+            width = self._edit_preview_splitter.sizes()[index]
+            if width >= self._batch_panel.minimumWidth():
+                self._render_queue_width = width
+
+    def _restore_embedded_render_queue_width(self) -> None:
+        if (self._edit_preview_splitter.count() != 2
+                or self._edit_preview_splitter.indexOf(self._batch_panel) != 1
+                or self._batch_panel.isHidden()):
+            return
+        splitter = self._edit_preview_splitter
+        available = splitter.width() - splitter.handleWidth()
+        if not splitter.isVisible():
+            # Seed the ratio before the workspace has received its first layout.
+            available = 680 + self._render_queue_width
+        self._edit_preview_splitter.setSizes(
+            [max(1, available - self._render_queue_width), self._render_queue_width]
+        )
+
+    def _apply_render_queue_visibility(self) -> None:
+        visible = self._render_queue_visibility_action.isChecked()
+        dock = self._batch_panel_host.dock
+        if dock is not None:
+            visible = visible and self._workspace_active
+            dock.setVisible(visible)
+            if visible:
+                self._batch_panel.show()
+                dock.raise_()
+        else:
+            self._batch_panel.setVisible(visible)
+            if visible:
+                self._restore_embedded_render_queue_width()
+
+    def _on_render_queue_visibility_requested(self, checked: bool) -> None:
+        if not checked:
+            self._remember_embedded_render_queue_width()
+        self._apply_render_queue_visibility()
+        self._save_render_queue_layout()
+
+    def _on_render_queue_resized(self, _position: int, _index: int) -> None:
+        previous_width = self._render_queue_width
+        self._remember_embedded_render_queue_width()
+        if self._render_queue_width != previous_width:
+            self._save_render_queue_layout(auto_save=False)
 
     def _on_multi_version_qc_ready(self, report: dict) -> None:
         """M21.2c：逐版本 QC 报告 → 主窗口缓存（面板呈现数据源）。"""
@@ -271,6 +382,7 @@ class DeliverWorkspace(QWidget):
     def float_batch_panel(self) -> None:
         """Detach only the queue into a floatable/dockable QDockWidget."""
         if self._main_window is not None:
+            self._remember_embedded_render_queue_width()
             self._batch_panel_host.float_panel()
 
     def return_batch_panel_to_deliver(self) -> None:
@@ -279,10 +391,13 @@ class DeliverWorkspace(QWidget):
 
     def _on_batch_host_mode_changed(self, mode: str) -> None:
         """Register a dynamic floating queue dock with the dock manager."""
+        dock = self._batch_panel_host.dock
+        if dock is not None:
+            dock.setProperty("toposPanelCloseAction", self._render_queue_visibility_action)
+        self._apply_render_queue_visibility()
         if self._main_window is None:
             return
         docks = getattr(self._main_window, "all_docks", None)
-        dock = self._batch_panel_host.dock
         if not isinstance(docks, list):
             return
 
@@ -387,7 +502,6 @@ class DeliverWorkspace(QWidget):
 
         self._edit_preview_splitter.setStretchFactor(0, 3)
         self._edit_preview_splitter.setStretchFactor(1, 0)
-        self._edit_preview_splitter.setSizes([680, 370])
         self._right_splitter.setStretchFactor(0, 0)
         self._right_splitter.setStretchFactor(1, 1)
         self._right_splitter.setSizes([600, 430])
@@ -410,6 +524,7 @@ class DeliverWorkspace(QWidget):
         """
         if not self._edit_panels_attached:
             return
+        self._remember_embedded_render_queue_width()
         fully_restored = True
         if self._shared_program_viewer is not None:
             dock = self._program_viewer_dock

@@ -563,7 +563,7 @@ class ThumbnailWidget(QWidget):
         self.setFixedSize(max(1, int(width)), max(1, int(height)))
         self.update()
 
-    def set_pixmap(self, pixmap: QPixmap) -> None:
+    def set_pixmap(self, pixmap: QPixmap | None) -> None:
         self._pixmap = pixmap
         self.update()
 
@@ -876,6 +876,12 @@ class TimelineClipCard(QFrame):
         self._pixmap = pixmap
         self._thumb_widget.set_pixmap(pixmap)
 
+    def clear_preview_override(self) -> None:
+        self._preview_override_active = False
+        self._thumbnail_requested = False
+        self._pixmap = None
+        self._thumb_widget.set_pixmap(None)
+
     def update_bottom_mode(self, mode: BottomLabelMode) -> None:
         self._bottom_mode = mode
         self._update_bottom_label()
@@ -997,6 +1003,7 @@ class TimelineClipStrip(QWidget):
         self._current_timeline = None
         self._current_timeline_id: str | None = None
         self._graded_preview_cache: dict[str, QPixmap] = {}
+        self._graded_previews_invalidated = False
         # P1-COLOR-20: 按调色状态过滤（all / ungraded / graded）。
         # _all_entries 是过滤前的完整清单，过滤只影响显示与导航。
         self._all_entries: list[ColorClipEntry] = []
@@ -1530,16 +1537,16 @@ class TimelineClipStrip(QWidget):
     def _register_image_card(self, card: TimelineClipCard) -> None:
         """Register a card waiting for an image thumbnail result."""
         key = (self._thumbnail_generation, card._entry.asset_path)
-        if key not in self._pending_image_cards:
-            self._pending_image_cards[key] = []
-        self._pending_image_cards[key].append(card)
+        cards = self._pending_image_cards.setdefault(key, [])
+        if card not in cards:
+            cards.append(card)
 
     def _register_frame_card(self, card: TimelineClipCard, frame_index: int) -> None:
         """Register a card waiting for a video frame thumbnail result."""
         key = (self._thumbnail_generation, card._entry.asset_path, frame_index)
-        if key not in self._pending_frame_cards:
-            self._pending_frame_cards[key] = []
-        self._pending_frame_cards[key].append(card)
+        cards = self._pending_frame_cards.setdefault(key, [])
+        if card not in cards:
+            cards.append(card)
 
     def _on_strip_thumbnail_ready(self, path: str, pixmap: QPixmap) -> None:
         """Handle image thumbnail ready — route to registered cards only.
@@ -1724,12 +1731,27 @@ class TimelineClipStrip(QWidget):
             timeline_id = project.active_timeline_id
         self._current_timeline_id = timeline_id or None
         self.version_ui.bind_context(str(getattr(project, "project_id", "") or ""), timeline_id)
-        if (previous_timeline_id != self._current_timeline_id
-                or previous_project_id != getattr(project, "project_id", None)):
+        context_changed = (previous_timeline_id != self._current_timeline_id
+                           or previous_project_id != getattr(project, "project_id", None))
+        if context_changed:
             self._graded_preview_cache.clear()
 
+        entries = build_clip_entries(project, timeline_sequence, timeline_id)
+        if (entries and not context_changed and not self._graded_previews_invalidated
+                and entries == self._all_entries):
+            # Keep existing cards. Retry unresolved thumbnails on the next
+            # visible pass. The provider deduplicates work still in progress.
+            for card in self._cards:
+                if card._preview_override_active and card.entry.clip_id not in self._graded_preview_cache:
+                    card.clear_preview_override()
+                    self._prime_card_from_thumbnail_cache(card)
+                if card._pixmap is None:
+                    card._thumbnail_requested = False
+            if self.isVisible():
+                self._thumbnail_debounce_timer.start(0)
+            return
         previous_entries = {entry.clip_id: entry for entry in self._all_entries}
-        self._all_entries = build_clip_entries(project, timeline_sequence, timeline_id)
+        self._all_entries = entries
         current_entries = {entry.clip_id: entry for entry in self._all_entries}
         for clip_id in list(self._graded_preview_cache):
             previous = previous_entries.get(clip_id)
@@ -1794,6 +1816,7 @@ class TimelineClipStrip(QWidget):
         for entry in self._all_entries:
             if entry.color_stack_id in stack_ids:
                 self._graded_preview_cache.pop(entry.clip_id, None)
+                self._graded_previews_invalidated = True
 
     @staticmethod
     def stack_has_grade(stack: object, clip_id: str, shared: bool) -> bool:
@@ -1917,6 +1940,7 @@ class TimelineClipStrip(QWidget):
 
     def _rebuild_cards(self) -> None:
         """Clear existing cards and create new ones from ``self._entries``."""
+        self._graded_previews_invalidated = False
         # Stop debounce timer to prevent double-invocation against stale state
         self._thumbnail_debounce_timer.stop()
 

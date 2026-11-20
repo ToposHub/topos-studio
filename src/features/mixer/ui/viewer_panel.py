@@ -15,6 +15,7 @@ from src.shared.assets.icon_manager import (
     IconColors, icon_folder_open, icon_jump_end, icon_jump_start, icon_loop,
     icon_pause, icon_play, icon_step_back, icon_step_forward, icon_stop,
 )
+from src.shared.ui.style_sheet import UI_FONT_FAMILIES
 from .workspace_style import PANEL_QSS, compact_combo, tool_button, toolbar_divider
 from .session import DISPLAY_RATES, MixerUiSession
 
@@ -35,7 +36,7 @@ class PicturePreview(QWidget):
             painter.drawPixmap((self.width() - scaled.width()) // 2, (self.height() - scaled.height()) // 2, scaled)
         else:
             painter.setPen(QColor("#A4A4B2"))
-            painter.setFont(QFont("PingFang SC", 11))
+            painter.setFont(QFont(UI_FONT_FAMILIES, 11))
             painter.drawText(self.rect().adjusted(10, 10, -10, -10), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.caption)
 
 

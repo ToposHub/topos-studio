@@ -94,6 +94,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QMutexLocker
 from PyQt6.QtMultimedia import QAudioSink, QAudioFormat, QMediaDevices
 
 from src.features.edit.core.playback_debug import playback_trace
+from src.features.edit.core.audio_transition_catalog import overlap_fade_regions
 from src.features.edit.core.audio_dsp import (
     StripEQFilter,
     EffectChain,
@@ -2900,7 +2901,7 @@ class AudioMixer:
         transitions = self._audio_transitions.get(track_id)
         if not transitions or not clip_id or samples.shape[-1] == 0:
             return samples
-        from src.features.edit.core.audio_transition_catalog import audio_curve_for
+        from src.features.edit.core.audio_transition_catalog import audio_transition_curve
         from src.features.edit.core.audio_dsp import apply_crossfade_block
         out = samples
         for tr in transitions:
@@ -2911,19 +2912,21 @@ class AudioMixer:
                 role = "right"
             else:
                 continue
-            curve = audio_curve_for(tr.transition_type)
+            curve = audio_transition_curve(tr)
             if curve is None:
                 continue
+            start, end = tr.audio_envelope_range
             try:
                 out = apply_crossfade_block(
                     out,
-                    transition_start_frame=tr.start_frame,
-                    transition_duration_frames=tr.duration,
+                    transition_start_frame=start,
+                    transition_duration_frames=end - start,
                     current_frame=current_frame,
                     role=role,
                     curve=curve,
                     fps=fps if fps > 0 else 24.0,
                     sample_rate=float(self._sample_rate),
+                    adjustments=tr.overlap_curve_adjustments,
                 )
             except Exception as e:  # pragma: no cover - defensive, never break playback
                 logger.debug(f"audio crossfade apply failed: {e}")
@@ -3275,6 +3278,10 @@ class AudioMixer:
                                 fade_curve=fade.get("fade_curve"),
                                 fade_curve_in=fade.get("fade_curve_in"),
                                 fade_curve_out=fade.get("fade_curve_out"),
+                                overlap_regions=overlap_fade_regions(
+                                    self._audio_transitions.get(track_id, ()),
+                                    getattr(decoder, "_clip_id", ""),
+                                ),
                             )
                         except Exception as e:
                             logger.debug(f"clip fade apply failed: {e}")

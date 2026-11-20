@@ -555,6 +555,7 @@ class AudioGraphRenderer:
                 fade_curve=clip_fade.get("fade_curve"),
                 fade_curve_in=clip_fade.get("fade_curve_in"),
                 fade_curve_out=clip_fade.get("fade_curve_out"),
+                overlap_regions=clip_fade.get("overlap_regions", ()),
             )
             # AT: 音频转场 crossfade（与 clip fade 同级，source 电平调整）。
             # crossfade 是一个 list，每个元素描述该 clip 参与的一个转场。
@@ -569,6 +570,7 @@ class AudioGraphRenderer:
                     curve=str(xf.get("curve", "constant_power")),
                     fps=float(clip_fade.get("fps", 24.0)),
                     sample_rate=self._sample_rate,
+                    adjustments=xf.get("adjustments", (0.0, 0.0)),
                 )
         node = self._nodes.get(track_id)
         if node is None:

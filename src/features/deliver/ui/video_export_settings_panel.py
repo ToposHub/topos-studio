@@ -97,7 +97,7 @@ from src.features.deliver.core.video_export_presets import (
 from src.shared.i18n.i18n import I18N
 from src.shared.export.export_panel import ExportSectionWidget
 from src.shared.assets.icon_manager import make_link_button
-from src.shared.ui.style_sheet import C, apply_combo_dropdown_style
+from src.shared.ui.style_sheet import C, apply_combo_dropdown_style, orange_tab_style
 from src.shared.ui.widgets import ChevronComboBox, DragValue
 
 logger = logging.getLogger(__name__)
@@ -399,6 +399,7 @@ class VideoExportSettingsPanel(QWidget):
         tabs_row.setSpacing(0)
         self._mode_tabs = QTabBar()
         self._mode_tabs.setObjectName("DeliverModeTabs")
+        self._mode_tabs.setStyleSheet(orange_tab_style("QTabBar#DeliverModeTabs"))
         self._mode_tabs.setExpanding(True)
         self._mode_tabs.setDrawBase(False)
         self._mode_tabs.addTab(I18N.tr("deliver.video.video_settings", "Video"))
@@ -519,15 +520,6 @@ class VideoExportSettingsPanel(QWidget):
             QWidget#DeliverOutputHeader, QWidget#DeliverRenderMode,
             QWidget#VideoPresetBar {{ border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
             QWidget#DeliverSettingsFooter {{ border-top: 1px solid {C.PANEL_DIVIDER}; }}
-            QTabBar#DeliverModeTabs {{ background: transparent; border: none; }}
-            QTabBar#DeliverModeTabs::tab {{
-                background: {C.BG_DARK}; color: {C.TEXT_HINT};
-                border: 1px solid {C.PANEL_DIVIDER}; border-left: none;
-                padding: 3px 8px; font-size: 11px; min-height: 16px; border-radius: 0;
-            }}
-            QTabBar#DeliverModeTabs::tab:first {{ border-left: 1px solid {C.PANEL_DIVIDER}; }}
-            QTabBar#DeliverModeTabs::tab:selected {{ background: {C.BG_DEEPEST}; color: {C.TEXT_BRIGHT}; }}
-            QTabBar#DeliverModeTabs::tab:hover:!selected {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
             QGroupBox#VideoSettingsSection, QGroupBox#AudioSection, QGroupBox#FileSection {{
                 background: {C.BG_PANEL}; border: none; margin: 0; padding: 0;
             }}

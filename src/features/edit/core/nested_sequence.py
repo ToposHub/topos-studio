@@ -819,17 +819,16 @@ def flatten_nested_audio_tracks(
         for child_track in child.audio_tracks or ():
             from dataclasses import replace as _dc_replace
 
-            # F3.1：子音轨 crossfade 此前在 transitions=() 处静默丢弃——
-            # strict 交付也不知情。补结构化诊断（clip 级 fade_in/out 仍随
-            # 字段复制保留），完整转场平移登记为后续差量。
-            if child_track.transitions:
+            cut_transitions = tuple(
+                tr for tr in child_track.transitions if not tr.is_overlap_crossfade
+            )
+            if cut_transitions:
                 _diagnose(
                     "nested_audio_transition_dropped", nested_clip, child_id,
-                    f"child audio crossfades dropped: "
-                    f"{len(child_track.transitions)} transition(s) not mapped by flatten")
+                    f"{len(cut_transitions)} child cut-point transition(s) not mapped by flatten")
 
             mapped_clips = []
-            for cc in child_track.clips:
+            for cc in sorted(child_track.clips, key=lambda clip: clip.timeline_start):
                 mapped = _map_clip_into_window(cc, offset, window)
                 if mapped is not None:
                     mapped_clips.append(_dc_replace(
@@ -839,6 +838,22 @@ def flatten_nested_audio_tracks(
                         linked_clip_id=(prefix + cc.linked_clip_id)
                         if cc.linked_clip_id else None,
                     ))
+            mapped_ids = {clip.clip_id for clip in mapped_clips}
+            mapped_crossfades = tuple(
+                _dc_replace(
+                    tr, transition_id=prefix + tr.transition_id,
+                    track_id=prefix + child_track.track_id,
+                    left_clip_id=prefix + tr.left_clip_id,
+                    right_clip_id=prefix + tr.right_clip_id,
+                    params={**tr.params, "source_envelope": [
+                        frame + offset for frame in tr.audio_envelope_range
+                    ]},
+                )
+                for tr in child_track.transitions
+                if tr.is_overlap_crossfade
+                and prefix + tr.left_clip_id in mapped_ids
+                and prefix + tr.right_clip_id in mapped_ids
+            )
             new_sends = tuple(
                 _dc_replace(s, target_bus_id=_remap_bus(s.target_bus_id))
                 for s in (child_track.sends or ())
@@ -848,7 +863,7 @@ def flatten_nested_audio_tracks(
                 track_id=prefix + child_track.track_id,
                 name=f"{child_track.name or child_track.track_id} (nested)",
                 clips=tuple(mapped_clips),
-                transitions=(),
+                transitions=mapped_crossfades,
                 output_bus_id=_remap_bus(child_track.output_bus_id)
                 if child_track.output_bus_id else None,
                 sends=new_sends,

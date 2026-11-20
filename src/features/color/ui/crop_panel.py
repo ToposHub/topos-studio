@@ -399,9 +399,9 @@ class CropPanel(QWidget):
         panel's window is active AND a crop session is in progress.
         """
         if (
-            event.type() == QEvent.Type.KeyPress
+            self.crop_active
+            and event.type() == QEvent.Type.KeyPress
             and not event.isAutoRepeat()
-            and self.crop_active
             and shortcut_owner_window_active(self)
             and not isinstance(
                 QApplication.focusWidget(),

@@ -65,6 +65,27 @@ def test_minimap_deferred_slot_is_bound_method(qtbot, qapp):
         page.deleteLater()
 
 
+def test_page_entry_reuses_only_an_unchanged_empty_output(qtbot) -> None:
+    from src.features.composite.ui.composite_page import CompositePage
+
+    page = CompositePage(parent=None)
+    qtbot.addWidget(page)
+    page.reset_to_empty_workspace()
+    output_id = next(iter(page._node_graph.nodes))
+
+    page.reset_to_empty_workspace(reuse_clean_graph=True)
+    assert list(page._node_graph.nodes) == [output_id]
+
+    page._node_graph.add_sticky_note("scratch-note", {"text": "temporary"})
+    page.reset_to_empty_workspace(reuse_clean_graph=True)
+    assert output_id not in page._node_graph.nodes
+    assert not page._node_graph.get_sticky_notes()
+    new_id = next(iter(page._node_graph.nodes))
+
+    page.reset_to_empty_workspace()
+    assert new_id not in page._node_graph.nodes
+
+
 def test_frame_ready_handler_survives_page_destruction(qtbot, qapp):
     """T-P1-71 第二处段错误回归：VideoContext 单例回调 vs 页面生命周期。
 

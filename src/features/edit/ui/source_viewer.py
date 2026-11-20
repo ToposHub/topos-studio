@@ -90,6 +90,7 @@ from src.features.edit.core.source_drag_payload import (
 from src.shared.media.timecode import Timecode
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
 from src.features.edit.ui.edit_style import EDIT_COLORS
+from src.shared.ui.style_sheet import UI_MONO_FONT_FAMILIES
 from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 
 logger = logging.getLogger(__name__)
@@ -439,7 +440,7 @@ class SourceViewerBar(QFrame):
                 background-color: {EDIT_COLORS['bg_input']};
                 padding: 3px 8px;
                 border-radius: 4px;
-                font-family: 'Courier New', monospace;
+                font-family: '{UI_MONO_FONT_FAMILIES[0]}';
             }}
             QLabel:hover {{
                 background-color: {EDIT_COLORS['bg_panel_alt']};

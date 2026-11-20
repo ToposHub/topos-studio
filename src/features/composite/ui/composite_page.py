@@ -277,6 +277,7 @@ class CompositePage(QWidget):
         # full-graph to_dict() + deep compare when nothing changed.
         # -1 = "never published / force publish on next evaluation".
         self._last_published_graph_generation: int = -1
+        self._empty_workspace_graph: dict[str, Any] | None = None
 
         # Dirty flag: set when Color page changes while Composite is inactive
         self._color_dirty = False
@@ -850,7 +851,7 @@ class CompositePage(QWidget):
         self._node_graph.create_default_graph()
         self._node_editor.build_from_graph(self._node_graph)
 
-    def reset_to_empty_workspace(self) -> None:
+    def reset_to_empty_workspace(self, *, reuse_clean_graph: bool = False) -> None:
         """Reset the page to an unbound, non-persistent scratch workspace.
 
         This is used when the user opens Composite directly without selecting
@@ -858,6 +859,15 @@ class CompositePage(QWidget):
         editor remains usable, but clear all composition/runtime identity so
         edits cannot be written into a previously opened Comp Clip.
         """
+        reuse_output = (
+            reuse_clean_graph and self._empty_workspace_graph is not None
+            and not self._current_composite_id and self._runtime_context is None
+            and not self._composition_active
+            and len(self._node_graph.nodes) == 1
+            # The serialized graph includes notes and navigation state, which
+            # can change without bumping the render generation.
+            and self._node_graph.to_dict() == self._empty_workspace_graph
+        )
         self.comp_pause()
         self.set_keyframes_transport(None)
         self._current_composite_id = ""
@@ -904,18 +914,18 @@ class CompositePage(QWidget):
         self._source_image_size = None
         self.set_composition_active(False)
 
-        self._node_graph.clear()
         self._node_graph.fps = self._composite_fps
         self._node_graph.duration_frames = 0
-        self._node_editor.clear_all()
-
-        # An Output-only graph represents an empty composition without
-        # inventing a source clip or a persistent composition record.
-        output_node = OutputNode()
-        output_node.position = (300, 200)
-        output_node.set_parameter("format_mode", "custom")
-        self._node_graph.add_node(output_node)
-        self._node_editor.build_from_graph(self._node_graph)
+        if not reuse_output:
+            self._node_graph.clear()
+            self._node_editor.clear_all()
+            # Keep an Output-only graph without creating a composition record.
+            output_node = OutputNode()
+            output_node.position = (300, 200)
+            output_node.set_parameter("format_mode", "custom")
+            self._node_graph.add_node(output_node)
+            self._node_editor.build_from_graph(self._node_graph)
+            self._empty_workspace_graph = self._node_graph.to_dict()
         if self._viewer is not None:
             self._viewer.set_texture(0, 0, 0)
         self._rebind_properties_panel_to_live_node()

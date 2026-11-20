@@ -544,7 +544,7 @@ def test_switch_store_restore_takes_precedence_over_legacy() -> None:
 
     host._restore_layout_from_store.assert_called_once_with("Color")
     host._save_current_layout_to_store.assert_called_once_with(
-        "Library", qt_state=host.page_layouts["Library"])
+        "Library", qt_state=host.page_layouts["Library"], auto_save=False)
     assert host.restore_state_calls == []
 
 
@@ -727,7 +727,7 @@ def test_rapid_switch_discards_stale_migration_render_and_files_refresh(
 
     host._migrate_deliver_layout.assert_not_called()
     host.files_panel.refresh_layout.assert_called_once()
-    assert render.call_count == 2  # Only the final visit's normal two passes.
+    render.assert_not_called()  # The final Library visit has no visible canvas.
     assert host.current_page == "Library"
 
 
@@ -761,15 +761,15 @@ def test_second_restore_pass_is_discarded_after_another_switch(
     host.canvas.viewport = lambda: SimpleNamespace(update=lambda: None)
     render = MagicMock()
     host.engine = SimpleNamespace(render_pipeline=render)
-    host.switch_to_page("Edit")
+    host.switch_to_page("Color")
     _delay, restore = recorder.calls.pop(0)
-    restore()  # Schedules Edit's second pass before the user switches again.
+    restore()  # Schedules Color's second pass before the user switches again.
     assert render.call_count == 1
     host.switch_to_page("Library")
     while recorder.calls:
         _delay, callback = recorder.calls.pop(0)
         callback()
-    assert render.call_count == 3  # Old second pass never renders into Library.
+    assert render.call_count == 1  # Old second pass never renders into Library.
 
 
 def test_safe_switch_to_page_reports_failure_without_raising() -> None:
@@ -1106,6 +1106,31 @@ def test_restore_viewport_swallows_exceptions() -> None:
     )
 
     host._restore_viewport_after_page_switch()  # must not raise
+
+
+def test_hidden_tab_does_not_render_outside_color_but_visible_canvas_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = _SingleShotRecorder()
+    monkeypatch.setattr(pc, "QTimer", recorder)
+    host = _PageHost(current_page="Library")
+    gl_viewport = MagicMock()
+    gl_viewport.isVisible.return_value = True
+    gl_viewport.visibleRegion.return_value.isEmpty.return_value = True
+    host.canvas = SimpleNamespace(
+        gl_viewport=gl_viewport, _update_lod=MagicMock(), scene=MagicMock(),
+    )
+    host.engine = SimpleNamespace(render_pipeline=MagicMock())
+
+    host._restore_viewport_after_page_switch()
+    host._finalize_viewport_restore()
+    host.engine.render_pipeline.assert_not_called()
+    assert not recorder.calls
+
+    gl_viewport.visibleRegion.return_value.isEmpty.return_value = False
+    host._restore_viewport_after_page_switch()
+    host.engine.render_pipeline.assert_called_once_with(render_reason="viewport_refresh")
+    assert len(recorder.calls) == 1
 
 
 def test_finalize_viewport_restore_skips_composite_and_handles_errors() -> None:
@@ -2374,7 +2399,7 @@ def test_prepare_empty_composite_workspace_resets_state() -> None:
 
     host._prepare_empty_composite_workspace()
 
-    page.reset_to_empty_workspace.assert_called_once()
+    page.reset_to_empty_workspace.assert_called_once_with(reuse_clean_graph=True)
     assert host._current_composite_id == ""
     assert host._suppress_composite_auto_bind_once is False
 

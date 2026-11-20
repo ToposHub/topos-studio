@@ -41,6 +41,7 @@ def qt_stub(monkeypatch):
     app_instance = mock.MagicMock(name="QApplication")
     app_instance.exec.return_value = 0
     monkeypatch.setattr(main_mod, "QApplication", mock.MagicMock(return_value=app_instance))
+    monkeypatch.setattr(main_mod, "apply_application_theme", mock.MagicMock())
 
     window = mock.MagicMock(name="MainWindow")
     fake_mw_mod = types.ModuleType("src.app.main_window")
@@ -111,11 +112,10 @@ def test_unknown_args_are_ignored(monkeypatch, qt_stub, shutdown_recorder):
 
 
 def test_product_arg_sets_env_once(monkeypatch, qt_stub, shutdown_recorder):
-    monkeypatch.delenv("TOPOS_PRODUCT_MODE", raising=False)
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "")
     _run_main(monkeypatch, "--product", "edit")
     assert os.environ["TOPOS_PRODUCT_MODE"] == "edit"
     assert os.environ["QSG_RHI_BACKEND"] == "opengl"
-    monkeypatch.delenv("TOPOS_PRODUCT_MODE", raising=False)
 
 
 def test_product_arg_does_not_override_existing_env(monkeypatch, qt_stub, shutdown_recorder, caplog):
@@ -143,10 +143,30 @@ def test_test_startup_exits_zero(monkeypatch, qt_stub, shutdown_recorder):
     qt_stub["window"].show.assert_not_called()
 
 
+@pytest.mark.parametrize(("platform", "disable_native_bar"), [("darwin", False), ("linux", True)])
+def test_startup_uses_platform_menu_bar_and_qt_popup_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    qt_stub: dict[str, mock.MagicMock],
+    shutdown_recorder: list[int],
+    platform: str,
+    disable_native_bar: bool,
+) -> None:
+    monkeypatch.setattr(main_mod.sys, "platform", platform)
+    _run_main(monkeypatch, "--test-startup")
+    attrs = main_mod.Qt.ApplicationAttribute
+    assert mock.call(attrs.AA_DontUseNativeMenuBar, disable_native_bar) in (
+        main_mod.QApplication.setAttribute.call_args_list
+    )
+    for attr in (attrs.AA_DontUseNativeMenuWindows, attrs.AA_DontUseNativeDialogs):
+        assert mock.call(attr) in main_mod.QApplication.setAttribute.call_args_list
+    main_mod.apply_application_theme.assert_called_once_with(qt_stub["app"])
+
+
 def test_fatal_startup_error_exits_one(monkeypatch, shutdown_recorder, caplog):
     # QApplication 仍真实可用（异常发生在装配阶段之前/之后均应收敛到退出码 1）
     app_instance = mock.MagicMock(name="QApplication")
     monkeypatch.setattr(main_mod, "QApplication", mock.MagicMock(return_value=app_instance))
+    monkeypatch.setattr(main_mod, "apply_application_theme", mock.MagicMock())
     boom = types.ModuleType("src.app.main_window")
     boom.MainWindow = mock.MagicMock(side_effect=RuntimeError("boom-during-assembly"))
     monkeypatch.setitem(sys.modules, "src.app.main_window", boom)

@@ -664,7 +664,8 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
                     audio_sample_offset: int = 0,
                     fade_curve: str | None = None,
                     fade_curve_in: str | None = None,
-                    fade_curve_out: str | None = None) -> np.ndarray:
+                    fade_curve_out: str | None = None,
+                    overlap_regions: tuple[tuple[str, int, int], ...] = ()) -> np.ndarray:
     """对一块样本应用 clip 淡入/淡出包络（AM-06）。
 
     根据当前块在 clip 时间线范围内的绝对采样位置生成包络并逐样本相乘。
@@ -767,16 +768,32 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
         # linear（显式或缺省注入）与未知自定义曲线：可预测的线性回退
         return t if fade_in else 1.0 - t
 
+    # Crossfades replace the changing part of the manual fade on the same
+    # edge. Sample that edge at the outer join so gain remains continuous.
+    in_positions = out_positions = sample_positions
+    for role, start, end in overlap_regions:
+        absolute_positions = sample_positions + (
+            float(clip_timeline_start) * samples_per_frame + audio_sample_offset
+        )
+        start_sample, end_sample = start * samples_per_frame, end * samples_per_frame
+        inside = (absolute_positions >= start_sample) & (absolute_positions < end_sample)
+        anchor = (start_sample if role == "left" else end_sample)
+        anchor -= float(clip_timeline_start) * samples_per_frame + audio_sample_offset
+        if role == "left":
+            out_positions = np.where(inside, anchor, out_positions)
+        else:
+            in_positions = np.where(inside, anchor, in_positions)
+
     if has_in:
-        fade_in_t = sample_positions / max(1.0, fade_in_samples - 1.0)
+        fade_in_t = in_positions / max(1.0, fade_in_samples - 1.0)
         fade_in_gain = curve_values(fade_in_t, fade_in=True)
-        fade_in_mask = sample_positions < fade_in_samples
+        fade_in_mask = in_positions < fade_in_samples
         env = np.where(fade_in_mask, fade_in_gain, env)
 
     if has_out:
-        fade_out_t = (sample_positions - fade_out_start) / max(1.0, fade_out_samples - 1.0)
+        fade_out_t = (out_positions - fade_out_start) / max(1.0, fade_out_samples - 1.0)
         fade_out_gain = curve_values(fade_out_t, fade_in=False)
-        fade_out_mask = sample_positions >= fade_out_start
+        fade_out_mask = out_positions >= fade_out_start
         # If the two fades overlap, the quieter envelope wins.  This avoids a
         # sudden gain bump in very short clips where both edges meet.
         env = np.where(fade_out_mask, np.minimum(env, fade_out_gain), env)
@@ -800,7 +817,9 @@ AUDIO_CROSSFADE_CURVES: frozenset = frozenset(
 )
 
 
-def crossfade_envelopes(curve: str, n: int) -> tuple[np.ndarray, np.ndarray]:
+def crossfade_envelopes(
+    curve: str, n: int, adjustments: tuple[float, float] = (0.0, 0.0),
+) -> tuple[np.ndarray, np.ndarray]:
     """生成一段交叉淡化的左/右增益包络。
 
     左包络从 1 降到 0（左片段淡出），右包络从 0 升到 1（右片段淡入），
@@ -825,35 +844,32 @@ def crossfade_envelopes(curve: str, n: int) -> tuple[np.ndarray, np.ndarray]:
     """
     if n <= 0:
         raise ValueError(f"crossfade length must be positive: {n}")
-    t = np.linspace(0.0, 1.0, n, dtype=np.float64)
-    if curve == "linear":
-        left = 1.0 - t
-        right = t
-    elif curve == "equal_power":
-        # 半角 sqrt 形式：left=√(1-t)，right=√t，交叉点功率≈1
-        left = np.sqrt(1.0 - t)
-        right = np.sqrt(t)
-    elif curve == "fade":
-        # 前半：左片段线性淡出到 0；后半：右片段从 0 线性淡入。
-        # 中点附近两片段均为 0（静音间隙），因此命名为 fade 而非 crossfade。
-        # 用 floor(n/2) 作为分界，保证两段各自在端点达到 0/1（避免 n 为奇数
-        # 时半段斜率不对称导致端点不为整值）。
+    return _crossfade_gains(curve, np.arange(n, dtype=np.float64), n, adjustments)
+
+
+def _crossfade_gains(
+    curve: str, positions: np.ndarray, n: int, adjustments: tuple[float, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate only the requested positions in a crossfade envelope."""
+    if curve == "overlap_cut":
+        return np.zeros_like(positions), np.ones_like(positions)
+    if curve == "fade" and n > 1:
         half = n // 2
-        idx = np.arange(n, dtype=np.float64)
-        if half <= 0:
-            # 极短跨度：退化为 constant_power（已有默认分支），避免除零。
-            theta = np.pi / 2.0 * t
-            left = np.cos(theta) ** 2
-            right = np.sin(theta) ** 2
-        else:
-            left = np.where(idx < half, 1.0 - idx / half, 0.0)
-            right = np.where(idx >= (n - half), (idx - (n - half - 1)) / half, 0.0)
-    else:  # constant_power (default)
-        # cos²/sin²：交叉点 left²+right² = 0.5+0.5 = 1.0（恒功率）。
-        theta = np.pi / 2.0 * t
-        left = np.cos(theta) ** 2
-        right = np.sin(theta) ** 2
-    return left, right
+        return (
+            np.where(positions < half, 1.0 - positions / half, 0.0),
+            np.where(positions >= n - half, (positions - (n - half - 1)) / half, 0.0),
+        )
+    t = positions / max(1, n - 1)
+    left, right = 1.0 - t, t
+    if adjustments[0] != 0.0:
+        left = left ** (2.0 ** adjustments[0])
+    if adjustments[1] != 0.0:
+        right = right ** (2.0 ** adjustments[1])
+    if curve == "equal_power":
+        return np.sqrt(left), np.sqrt(right)
+    if curve == "linear":
+        return left, right
+    return np.sin(np.pi / 2.0 * left) ** 2, np.sin(np.pi / 2.0 * right) ** 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -899,6 +915,7 @@ def apply_crossfade_block(
     curve: str,
     fps: float,
     sample_rate: float,
+    adjustments: tuple[float, float] = (0.0, 0.0),
 ) -> np.ndarray:
     """对一个样本块应用音频转场增益包络。
 
@@ -936,16 +953,20 @@ def apply_crossfade_block(
     if block_positions[-1] < 0.0 or block_positions[0] >= float(span_samples):
         return samples
 
-    left_full, right_full = _crossfade_envelopes_cached(curve, span_samples)
-    full = left_full if role == "left" else right_full
-
     # 切片：把块位置 clamp 到 [0, span-1] 取包络值，块外的样本增益为 1。
     env = np.ones(n, dtype=np.float64)
     in_span = (block_positions >= 0.0) & (block_positions < float(span_samples))
     if not np.any(in_span):
         return samples
     clamped = np.clip(block_positions[in_span], 0.0, float(span_samples - 1)).astype(np.int64)
-    env[in_span] = full[clamped]
+    if curve == "overlap_cut":
+        env[in_span] = 0.0 if role == "left" else 1.0
+    elif adjustments == (0.0, 0.0) and 2 * span_samples <= _CROSSFADE_ENV_CACHE_MAX_SAMPLES:
+        left, right = _crossfade_envelopes_cached(curve, span_samples)
+        env[in_span] = (left if role == "left" else right)[clamped]
+    else:
+        left, right = _crossfade_gains(curve, clamped, span_samples, adjustments)
+        env[in_span] = left if role == "left" else right
     return samples * env
 
 

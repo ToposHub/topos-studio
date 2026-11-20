@@ -367,6 +367,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         # --- Apply preference-backed settings on startup ---
         self.config_manager = ConfigManager()
+        from src.shared.feature_flags import get_work_mode
+        self._active_work_mode = get_work_mode(self.config_manager)
         if self.config_manager.get("show_version_in_title"):
             self.setWindowTitle(f"Topos {CURRENT_VERSION}")
         # Append the active work mode to the title so users always know which
@@ -579,11 +581,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             )
             self.setup_toolbar()
 
-            # 禁用原生菜单栏，由工具栏统一提供菜单入口
-            # 共享 QMenu 对象时，原生菜单栏会显示快捷键但工具栏弹出菜单不会
-            # 禁用后两者都由 Qt 渲染，快捷键显示一致
-            self.menuBar().setNativeMenuBar(False)
-            self.menuBar().hide()
+            # Platforms without a native menu bar use the toolbar entry.
+            self.menuBar().setVisible(self.menuBar().isNativeMenuBar())
             self.setup_statusbar()
             self.setup_connections()
             # M1.2/M1.3/M2.2：装配 AI 编辑子系统（dock 面板已由 setup_docks 创建）
@@ -605,6 +604,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         if not self._test_mode:
             self.restore_layout_state()
+            if self.current_page == "Edit" and not self._mixer_recording_workflow_active:
+                self._set_mixer_recording_workflow(True)
 
             self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
 
@@ -913,7 +914,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             pass
 
     def eventFilter(self, obj, event):
-        if (event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space
+        if event.type() != QEvent.Type.KeyPress:
+            return super().eventFilter(obj, event)
+        if (event.key() == Qt.Key.Key_Space
                 and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
                 and getattr(self, "_mixer_recording_workflow_active", False)):
             if ((not event.isAutoRepeat() and self._handle_motion_graphic_space_playback())
@@ -921,7 +924,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 event.accept()
                 return True
             return super().eventFilter(obj, event)
-        if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+        if not event.isAutoRepeat():
             key = event.key()
             # Space is the default transport key for every page; the Motion
             # Graphic editor's play key is user-customizable, so include it

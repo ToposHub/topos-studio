@@ -501,13 +501,9 @@ class CompositeControllerMixin:
             node_color=getattr(node, 'header_color', '#666666'),
         )
 
-        # Auto-raise Composite's own Node Properties dock so it's visible.
-        # (Previously this raised Edit's shared dock_properties, which does
-        # not exist in Image mode.)
+        # Selecting a node updates the inspector even while it is collapsed.
         dock_np = getattr(self, 'dock_node_properties', None)
-        if dock_np is not None:
-            if not dock_np.isVisible():
-                dock_np.show()
+        if dock_np is not None and not dock_np.isHidden():
             dock_np.raise_()
 
     # ------------------------------------------------------------------

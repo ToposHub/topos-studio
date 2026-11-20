@@ -5,9 +5,35 @@
   "panel": {
     "audio_viewer": "视频监看",
     "audio_timeline": "音频时间线",
-    "audio_clip_editor": "片段编辑"
+    "audio_clip_editor": "片段编辑",
+    "audio_effects": "音频效果"
   },
   "mixer": {
+    "effects_browser": {
+      "search": "搜索音频效果",
+      "no_results": "没有匹配的音频效果。",
+      "unavailable": "当前没有可用的音频效果。",
+      "select_clip": "请选择未锁定的音频片段，或将效果拖到片段或混音通道。",
+      "target_track": "拖到音频片段，或选中片段后双击，以设置片段所在轨道的声像。",
+      "targets_clip_channel": "拖到音频片段或混音通道。双击可应用到选中的片段。",
+      "target_clip": "拖到音频片段，或双击应用到选中片段。",
+      "voice_changer": "变声器",
+      "spectral_mangler": "频谱塑形",
+      "group": {
+        "eq": "均衡与修复",
+        "dynamics": "动态与瞬态",
+        "space": "空间与延迟",
+        "modulation": "调制",
+        "tone": "音色与人声",
+        "other": "其他音频效果"
+      }
+    },
+    "monitor": {
+      "picture_options": "画面选项"
+    },
+    "transport": {
+      "output_peak": "主输出峰值（dBFS）"
+    },
     "clip_editor": {
       "open": "专业音频编辑…",
       "offline": "此片段的音频素材不可用",
@@ -37,35 +63,6 @@
       "length_stack_change": "此处理步骤会改变片段时长。请使用时间线的撤销来恢复之前的编辑。",
       "independent_audio": "仅编辑音频（链接视频保持原位）",
       "independent_audio_tip": "确认改变音频长度时保留链接视频的位置。"
-    },
-    "record": {
-      "stop": "停止录音",
-      "finishing": "正在完成录音…",
-      "locked": "解锁轨道后可录音",
-      "busy": "请先结束当前录音",
-      "failed": "无法从所选输入设备录音",
-      "save_failed": "未能保存录音",
-      "settings": "录音设置",
-      "settings_menu": "录音设置…",
-      "settings_saved": "录音设置已保存。",
-      "arm": "为录音 Arm 该轨道",
-      "disarm": "取消 Arm",
-      "first_channel": "第一声道",
-      "input": "录音输入",
-      "input_peak": "输入峰值电平 (dBFS)",
-      "input_unavailable": "所选输入或声道不可用。",
-      "live_clip": "录音中…",
-      "mono": "单声道",
-      "no_input": "无输入",
-      "patch_first": "请先分配录音输入",
-      "patch_version": "该时间线使用了更新版本的录音输入格式。",
-      "preparing": "录音预卷中",
-      "second_channel": "第二声道",
-      "transport_arm_first": "请先按轨道上的 R 待录",
-      "transport_record": "录制",
-      "transport_recording": "正在录制已 Arm 的轨道",
-      "transport_start": "录制待录轨道（Shift + 空格）",
-      "unavailable": "不可用"
     },
     "routing": {
       "output": "轨道输出",

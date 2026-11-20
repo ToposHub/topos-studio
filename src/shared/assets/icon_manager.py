@@ -32,13 +32,15 @@ class IconColors:
     CYAN = "#88ffff"         # 青色 (AI功能)
 
 
-def get_icon(name: str, color: Optional[str] = None, scale: float = 1.0) -> QIcon:
+def get_icon(name: str, color: Optional[str] = None, scale: float = 1.0, *,
+             active_color: Optional[str] = None) -> QIcon:
     """获取 QtAwesome 图标
     
     Args:
         name: 图标名称 (如 'fa5s.eye', 'fa5s.trash')
         color: 图标颜色 (十六进制颜色字符串)
         scale: 图标缩放比例
+        active_color: 悬停与选中状态的颜色（默认沿用基本颜色）
     
     Returns:
         QIcon 对象
@@ -47,7 +49,8 @@ def get_icon(name: str, color: Optional[str] = None, scale: float = 1.0) -> QIco
         color = IconColors.DEFAULT
     
     try:
-        return qta.icon(name, color=color, scale=scale)
+        return qta.icon(name, color=color, scale=scale,
+                        color_on=active_color or color, color_active=active_color or color)
     except Exception as e:
         logger.error(f"Failed to load icon '{name}': {e}")
         return QIcon()

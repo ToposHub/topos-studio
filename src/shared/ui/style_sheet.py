@@ -6,11 +6,18 @@ Topos Color - 全局暗色主题样式表
 包含全局暗色主题样式表和下拉组合框样式工具函数。
 """
 
-from PyQt6.QtWidgets import QComboBox, QListView
-from PyQt6.QtGui import QPalette, QColor
+import logging
 from pathlib import Path
 
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPalette
+from PyQt6.QtWidgets import QApplication, QComboBox, QListView
 
+
+_LOGGER = logging.getLogger(__name__)
+UI_CJK_FONT_FAMILY = "Noto Sans SC"
+UI_FONT_FAMILIES = ("DejaVu Sans", UI_CJK_FONT_FAMILY)
+UI_MONO_FONT_FAMILIES = ("DejaVu Sans Mono", UI_CJK_FONT_FAMILY)
+_UI_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 
 _CHECKMARK_ICON_FILE = (
     Path(__file__).resolve().parents[1] / "assets" / "icons" / "checkmark.svg"
@@ -1033,6 +1040,58 @@ Topos Color - 全局暗色主题样式表
 # ============================================================================
 # 主主题样式表
 # ============================================================================
+_ORANGE_TAB_STYLE = """
+__TAB_BAR__ {
+    background: transparent;
+    border: none;
+    alignment: center;
+}
+
+__TAB_BAR__::tab {
+    background: rgb(70, 70, 77);
+    color: #bbbbbb;
+    padding: 3px 14px;
+    border: none;
+    margin: 0;
+    min-height: 18px;
+}
+
+__TAB_BAR__::tab:hover {
+    background: rgb(85, 85, 91);
+    color: #bbbbbb;
+}
+
+__TAB_BAR__::tab:selected {
+    background: __TAB_ACCENT__;
+    color: #ffffff;
+}
+
+__TAB_BAR__::tab:first {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+__TAB_BAR__::tab:last {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+__TAB_BAR__::tab:only-one {
+    border-radius: 8px;
+}
+"""
+
+
+def orange_tab_style(selector: str) -> str:
+    """Render the original Topos tab geometry for a QTabBar selector."""
+    red, green, blue, _ = QColor(C.ACCENT_SURFACE).getRgb()
+    # Keep the tab accent fixed even when the separate highlight preference
+    # substitutes hex colors in the main-window stylesheet.
+    return _ORANGE_TAB_STYLE.replace("__TAB_BAR__", selector).replace(
+        "__TAB_ACCENT__", f"rgb({red}, {green}, {blue})"
+    )
+
+
 DARK_THEME = """
 /* ============================================
    Topos Color - 全局暗色主题样式表
@@ -1040,8 +1099,7 @@ DARK_THEME = """
 
 /* === 全局重置与基础样式 === */
 * {
-    /* 字体设置：系统默认无衬线字体 */
-    font-family: "PingFang SC", "Helvetica Neue", "Segoe UI", Arial, Helvetica, sans-serif;
+    font-family: __UI_FONT_FAMILIES__;
     /* 全局默认字号 */
     font-size: 13px;
 }
@@ -1097,11 +1155,15 @@ QMenuBar::item:selected {
     background-color: #333333;   /* 选中菜单项背景 */
 }
 
+/* 工具栏内的容器继承工具栏背景 */
+QToolBar QWidget {
+    background-color: transparent;
+}
+
 /* === 下拉菜单 === */
-QMenu {
-    background-color: rgba(39, 39, 43, 240);
-    border: 1px solid rgba(80, 80, 80, 200);
-    border-radius: 4px;
+QMenu, QToolBar QMenu {
+    background-color: #27272b;
+    border: 1px solid #505050;
     padding: 4px 0px;
     color: #ccc;
     font-size: 12px;
@@ -1112,7 +1174,7 @@ QMenu::item {
 }
 
 QMenu::item:selected {
-    background-color: rgba(255, 136, 0, 180);
+    background-color: #b36012;
     color: white;
 }
 
@@ -1141,11 +1203,6 @@ QToolBar {
     spacing: 10px;               /* 工具按钮间距 */
     padding: 5px;
     margin: 0px;
-}
-
-/* 工具栏内的容器继承工具栏背景 */
-QToolBar QWidget {
-    background-color: transparent;
 }
 
 /* === 状态栏 === */
@@ -1672,42 +1729,66 @@ QTabWidget::pane {
     border: none;
 }
 
-QTabBar::tab {
-    background: rgb(70, 70, 77);
-    color: #bbb;
-    padding: 3px 14px;
-    border: none;
+QDockWidget QTabWidget::tab-bar {
+    alignment: center;
 }
-
-QTabBar::tab:hover {
-    color: #bbb;
-    background: rgba(255, 255, 255, 15);
-}
-
-QTabBar::tab:selected {
-    color: #fff;
-    background: rgb(204, 102, 0);
-}
-
-QTabBar::tab:first {
-    border-top-left-radius: 8px;
-    border-bottom-left-radius: 8px;
-}
-
-QTabBar::tab:last {
-    border-top-right-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
-QTabBar::tab:only-one {
-    border-radius: 8px;
-}
-"""
+""" + orange_tab_style("QTabBar")
 
 # ``QCheckBox::indicator`` 使用自定义背景后，Qt 不会再绘制平台原生勾选标记。
 # 以运行时绝对 URL 注入资源，开发环境和 PyInstaller 包内均能可靠加载。
 DARK_THEME = DARK_THEME.replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH)
 DARK_THEME = DARK_THEME.replace("__PANEL_DIVIDER__", C.PANEL_DIVIDER)
+DARK_THEME = DARK_THEME.replace(
+    "__UI_FONT_FAMILIES__", ", ".join(f'"{family}"' for family in UI_FONT_FAMILIES)
+)
+
+
+def apply_application_theme(app: QApplication) -> None:
+    """Set the Qt widget style and Topos theme before creating application windows."""
+    app.setStyle("Fusion")
+    role = QPalette.ColorRole
+    palette = app.style().standardPalette()
+    for palette_role, color in (
+        (role.Window, C.BG_PANEL),
+        (role.WindowText, C.TEXT_PRIMARY),
+        (role.Base, C.BG_INPUT),
+        (role.AlternateBase, C.BG_ACTIVE),
+        (role.Text, C.TEXT_PRIMARY),
+        (role.PlaceholderText, C.TEXT_HINT),
+        (role.Button, C.BG_BUTTON),
+        (role.ButtonText, C.TEXT_PRIMARY),
+        (role.Light, C.BG_BUTTON_HOVER),
+        (role.Midlight, C.BORDER_HOVER),
+        (role.Mid, C.BORDER),
+        (role.Dark, C.BG_DARK),
+        (role.Shadow, C.BG_DEEPEST),
+        (role.BrightText, "#ffffff"),
+        (role.ToolTipBase, C.BG_INPUT),
+        (role.ToolTipText, C.TEXT_PRIMARY),
+        (role.Highlight, C.ACCENT_SURFACE),
+        (role.HighlightedText, "#ffffff"),
+        (role.Link, C.ORANGE),
+        (role.LinkVisited, C.ORANGE_HOVER),
+        (role.Accent, C.ORANGE),
+    ):
+        palette.setColor(palette_role, QColor(color))
+    for palette_role in (role.WindowText, role.Text, role.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, palette_role, QColor(C.TEXT_HINT))
+    app.setPalette(palette)
+
+    for filename in (
+        "DejaVuSans.ttf",
+        "DejaVuSans-Bold.ttf",
+        "DejaVuSansMono.ttf",
+        "NotoSansSC-Regular.otf",
+    ):
+        path = _UI_FONT_DIR / filename
+        if QFontDatabase.addApplicationFont(str(path)) == -1:
+            _LOGGER.warning("Unable to load the bundled UI font %s", path.name)
+    font = QFont(UI_FONT_FAMILIES)
+    font.setPixelSize(13)
+    app.setFont(font)
+    app.setStyleSheet(DARK_THEME)
 
 # ============================================================================
 # 标签页样式

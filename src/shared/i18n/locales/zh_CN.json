@@ -440,6 +440,7 @@
     }
   },
   "menu": {
+    "application_menu": "主菜单",
     "file": "文件 (&F)",
     "edit": "编辑 (&E)",
     "image": "图像 (&I)",
@@ -572,6 +573,7 @@
     "close_panel": "关闭面板"
   },
   "panel": {
+    "audio_mixer": "混音器",
     "viewport": "视口",
     "library": "素材库",
     "files": "文件",
@@ -599,6 +601,9 @@
     "presets": "预设",
     "composite": "合成",
     "media_pool": "媒体池",
+    "properties": "属性",
+    "node_properties": "节点属性",
+    "timeline_clips": "片段条",
     "timeline": "时间线",
     "edit_properties": "属性",
     "edit_effects": "效果",
@@ -832,6 +837,41 @@
     "point_to_point_mode": "点到点模式"
   },
   "mixer": {
+    "track_header": {
+      "volume": "轨道音量 · {db} dB · 左右声道峰值 · 双击恢复 0 dB",
+      "pan": "左右声道平衡 · {value} · 拖动调节，双击居中"
+    },
+    "record": {
+      "choose_input": "选择录音输入",
+      "input_menu": "录音输入…",
+      "stop": "停止录音",
+      "finishing": "正在完成录音…",
+      "locked": "解锁轨道后可录音",
+      "busy": "请先结束当前录音",
+      "failed": "无法从所选输入设备录音",
+      "save_failed": "未能保存录音",
+      "settings": "录音设置",
+      "settings_menu": "录音设置…",
+      "settings_saved": "录音设置已保存。",
+      "arm": "为录音 Arm 该轨道",
+      "disarm": "取消 Arm",
+      "first_channel": "第一声道",
+      "input": "录音输入",
+      "input_peak": "输入峰值电平 (dBFS)",
+      "input_unavailable": "所选输入或声道不可用。",
+      "live_clip": "录音中…",
+      "mono": "单声道",
+      "no_input": "无输入",
+      "patch_first": "请先分配录音输入",
+      "patch_version": "该时间线使用了更新版本的录音输入格式。",
+      "preparing": "录音预卷中",
+      "second_channel": "第二声道",
+      "transport_arm_first": "请先按轨道上的 R 待录",
+      "transport_record": "录制",
+      "transport_recording": "正在录制已 Arm 的轨道",
+      "transport_start": "录制待录轨道（Shift + 空格）",
+      "unavailable": "不可用"
+    },
     "hue": "色相",
     "saturation": "饱和度",
     "luminance": "亮度",
@@ -2759,6 +2799,10 @@
     "denoise_tooltip": "视频降噪渲染档位：preview（播放）/ paused（暂停）/ export（导出）"
   },
   "workspace": {
+    "grading_tools": "调色工具",
+    "color_resources": "调色资源",
+    "animation": "动画",
+    "layout_presets": "布局预设",
     "primary": "一级调色",
     "secondary": "二级调色",
     "hdr": "HDR",

@@ -5032,7 +5032,10 @@ class TimelineExporter:
                             # 一个 clip 理论上可能在多个转场中出现（一左一右）。
                             if getattr(track, "transitions", None):
                                 from src.features.edit.core.audio_transition_catalog import (
-                                    audio_curve_for,
+                                    audio_transition_curve, overlap_fade_regions,
+                                )
+                                clip_fade["overlap_regions"] = overlap_fade_regions(
+                                    track.transitions, clip.clip_id,
                                 )
                                 xfades = []
                                 for tr in track.transitions:
@@ -5043,14 +5046,16 @@ class TimelineExporter:
                                         role = "right"
                                     if role is None:
                                         continue
-                                    curve = audio_curve_for(tr.transition_type)
+                                    curve = audio_transition_curve(tr)
                                     if curve is None:
                                         continue
+                                    start, end = tr.audio_envelope_range
                                     xfades.append({
                                         "role": role,
                                         "curve": curve,
-                                        "start_frame": tr.start_frame,
-                                        "duration": tr.duration,
+                                        "adjustments": tr.overlap_curve_adjustments,
+                                        "start_frame": start,
+                                        "duration": end - start,
                                     })
                                 if xfades:
                                     clip_fade["crossfade"] = xfades
@@ -5075,6 +5080,7 @@ class TimelineExporter:
                                 fade_curve=clip_fade.get("fade_curve"),
                                 fade_curve_in=clip_fade.get("fade_curve_in"),
                                 fade_curve_out=clip_fade.get("fade_curve_out"),
+                                overlap_regions=clip_fade.get("overlap_regions", ()),
                             )
                             for xf in clip_fade.get("crossfade", ()) or ():
                                 samples = _apply_xfade_block(
@@ -5086,6 +5092,7 @@ class TimelineExporter:
                                     curve=str(xf.get("curve", "constant_power")),
                                     fps=float(clip_fade.get("fps", 24.0)),
                                     sample_rate=float(sample_rate),
+                                    adjustments=xf["adjustments"],
                                 )
                             # clip FX（pre-fader，在轨阶段 volume 之前）
                             if clip_chain is not None and clip_chain.is_active:

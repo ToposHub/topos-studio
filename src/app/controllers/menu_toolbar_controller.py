@@ -13,16 +13,16 @@ import logging
 from typing import Any
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout,
+    QWidget, QHBoxLayout, QGridLayout, QButtonGroup,
     QPushButton, QToolBar, QStatusBar, QMessageBox, QMenu,
-    QInputDialog, QApplication, QProgressBar, QToolButton,
-    QSizePolicy, QComboBox, QDialog, QLabel,
+    QInputDialog, QApplication, QProgressBar,
+    QComboBox, QDialog, QLabel,
 )
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, QSize, pyqtSignal
 
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import apply_combo_dropdown_style
+from src.shared.ui.style_sheet import C, apply_combo_dropdown_style
 from src.shared.assets.icon_manager import icon_reset, icon_settings, icon_home
 from src.features.color.core.plugin_manager import get_plugin_manager
 
@@ -206,6 +206,7 @@ class MenuToolbarMixin:
         file_menu.addSeparator()
 
         exit_action = QAction(I18N.tr("action.exit", "E&xit"), self)
+        exit_action.setMenuRole(QAction.MenuRole.QuitRole)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -252,6 +253,7 @@ class MenuToolbarMixin:
             I18N.tr("action.keyboard_shortcuts", "Keyboard Shortcuts..."), "Edit", "Ctrl+K", shortcut_act)
 
         pref_act = QAction(I18N.tr("action.preferences", "Preferences..."), self)
+        pref_act.setMenuRole(QAction.MenuRole.PreferencesRole)
         pref_act.setShortcut("Ctrl+,")
         pref_act.triggered.connect(self.show_preferences_dialog)
         edit_menu.addAction(pref_act)
@@ -458,6 +460,7 @@ class MenuToolbarMixin:
         self.menu_help = menu_bar.addMenu(I18N.tr("menu.help", "&Help"))
 
         about_act = QAction(I18N.tr("action.about", "About Topos Color..."), self)
+        about_act.setMenuRole(QAction.MenuRole.AboutRole)
         about_act.triggered.connect(self.show_about_dialog)
         self.menu_help.addAction(about_act)
 
@@ -502,11 +505,7 @@ class MenuToolbarMixin:
         # Build actual QMenu/QAction entries from module contributions
         self._build_module_menus()
 
-        # 确保 toolbar 弹出菜单中显示快捷键
-        # macOS 上 QToolButton 弹出的 QMenu 可能不自动渲染 setShortcut() 的快捷键
-        # 通过在 action text 末尾追加 \t{shortcut} 显式显示
-        # (Must run after _build_module_menus so module actions are included)
-        self._update_menu_shortcut_display()
+        self._show_popup_shortcuts(menu_bar)
 
     # ------------------------------------------------------------------
     # Shortcut display helpers
@@ -656,24 +655,14 @@ class MenuToolbarMixin:
         if callable(update):
             update()
 
-    def _update_menu_shortcut_display(self) -> None:
-        """将已注册的快捷键以 \\t 格式追加到菜单项文本，确保 toolbar 弹出菜单中可见。"""
-        for menu in (self.menu_file, self.menu_edit, self.menu_effects,
-                     self.menu_window, self.menu_help, self.menu_layer):
-            if menu:
-                self._inject_shortcut_text(menu)
-
-    def _inject_shortcut_text(self, menu) -> None:
+    def _show_popup_shortcuts(self, menu: QWidget) -> None:
+        """Let Qt render current shortcuts in the toolbar popup and native menu."""
         for action in menu.actions():
-            if action.menu():
-                self._inject_shortcut_text(action.menu())
+            submenu = action.menu()
+            if submenu is not None:
+                self._show_popup_shortcuts(submenu)
             elif not action.isSeparator():
-                seq = action.shortcut()
-                if not seq.isEmpty() and '\t' not in action.text():
-                    action.setText(
-                        action.text() + '\t' +
-                        seq.toString(QKeySequence.SequenceFormat.NativeText)
-                    )
+                action.setShortcutVisibleInContextMenu(True)
 
     # ------------------------------------------------------------------
     # Shortcut registration
@@ -1521,6 +1510,8 @@ class MenuToolbarMixin:
     # ------------------------------------------------------------------
 
     def setup_toolbar(self) -> None:
+        from src.app.ui.workspace_panel_bar import WorkspacePanelBar, create_toolbar_menu_button
+
         toolbar = QToolBar("Main Toolbar")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -1535,44 +1526,28 @@ class MenuToolbarMixin:
 
         # === 创建工具栏主容器 ===
         toolbar_container = QWidget()
-        main_layout = QHBoxLayout(toolbar_container)
+        main_layout = QGridLayout(toolbar_container)
         main_layout.setContentsMargins(10, 0, 10, 0)
-        main_layout.setSpacing(0)
+        main_layout.setSpacing(4)
+        main_layout.setColumnStretch(0, 1)
+        main_layout.setColumnStretch(2, 1)
+        left_tools = QWidget(toolbar_container)
+        left_layout = QHBoxLayout(left_tools)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(3)
+        main_layout.addWidget(left_tools, 0, 0)
 
-        # --- 菜单按钮区域（替代 Preferences 按钮） ---
-        menu_button_style = """
-            QToolButton {
-                background-color: transparent; border: none; border-radius: 4px;
-                color: #aaa; font-size: 12px; padding: 4px 10px; font-weight: bold;
-            }
-            QToolButton:hover { background-color: #3d3d3d; color: #fff; }
-            QToolButton:pressed { background-color: #2d2d2d; }
-            QToolButton::menu-indicator { image: none; }
-        """
-
-        menu_configs = [
-            (self.menu_file, I18N.tr("menu.file", "&File")),
-            (self.menu_edit, I18N.tr("menu.edit", "&Edit")),
-            (self.menu_effects, I18N.tr("menu.effects", "&Effects")),
-            (self.menu_window, I18N.tr("menu.window", "&Window")),
-            (self.menu_help, I18N.tr("menu.help", "&Help")),
-        ]
-
-        for menu, label in menu_configs:
-            # Remove & mnemonic prefix for toolbar display
-            display_text = label.replace("&", "")
-            btn = QToolButton()
-            btn.setText(display_text)
-            btn.setMenu(menu)
-            btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            btn.setStyleSheet(menu_button_style)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            main_layout.addWidget(btn)
-
-        # --- 左侧弹性间距，将 Page Switcher 推到中间 ---
-        left_spacer = QWidget()
-        left_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        main_layout.addWidget(left_spacer)
+        menu_label = I18N.tr("menu.application_menu", "Application Menu")
+        app_menu = QMenu(toolbar_container)
+        for action in self.menuBar().actions():
+            app_menu.addAction(action)
+        self.application_menu_button = create_toolbar_menu_button(left_tools, menu_label, "list", app_menu)
+        self.application_menu_button.setObjectName("applicationMenuButton")
+        left_layout.addWidget(self.application_menu_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.workspace_panel_bar = WorkspacePanelBar(self)
+        left_layout.addWidget(self.workspace_panel_bar, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.workspace_panel_bar.set_page(self.current_page)
+        left_layout.addStretch(1)
 
         # --- 中间 Page Switcher（居中突出显示） ---
         switcher_container = QWidget()
@@ -1581,6 +1556,7 @@ class MenuToolbarMixin:
         switcher_layout.setSpacing(0)
 
         self.page_buttons = {}
+        page_group = QButtonGroup(switcher_container)
         pages = ["Library", "Edit", "Color", "Composite", "Mixer", "Deliver"]
         if not getattr(self, "_mixer_available", False):
             pages = [p for p in pages if p != "Mixer"]
@@ -1596,7 +1572,9 @@ class MenuToolbarMixin:
             page_text = I18N.tr(page_key, page).upper()
             btn = QPushButton(page_text)
             btn.setCheckable(True)
+            page_group.addButton(btn)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
             # 根据位置设置圆角：第一个左圆角，最后一个右圆角，中间无圆角
             if len(pages) == 1:
@@ -1610,15 +1588,17 @@ class MenuToolbarMixin:
 
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: rgb(70, 70, 77); border: none;
+                    background-color: rgb(70, 70, 77); border: none; outline: none;
                     color: #bbb; font-size: 12px; font-weight: bold;
                     padding: 6px 16px; {radius}
                 }}
                 QPushButton:hover {{ color: #fff; background-color: #3d3d3d; }}
                 QPushButton:checked {{
                     color: #fff;
-                    background-color: rgb(204, 102, 0);
+                    background-color: {C.ACCENT_SURFACE};
                 }}
+                QPushButton:focus {{ color: #fff; background-color: #5b5b63; }}
+                QPushButton:checked:focus {{ background-color: {C.ORANGE_HOVER}; }}
             """)
             btn.clicked.connect(lambda checked, p=page: self.switch_to_page(p))
             if page == self.current_page:
@@ -1633,12 +1613,14 @@ class MenuToolbarMixin:
                 border: none;
             }
         """)
-        main_layout.addWidget(switcher_container)
-
-        # --- 右侧弹性间距 ---
-        right_spacer = QWidget()
-        right_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        main_layout.addWidget(right_spacer)
+        main_layout.addWidget(switcher_container, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        right_tools = QWidget(toolbar_container)
+        right_layout = QHBoxLayout(right_tools)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        right_layout.addStretch(1)
+        right_layout.addWidget(self.workspace_panel_bar.right_tools)
+        main_layout.addWidget(right_tools, 0, 2)
 
         # --- 右侧工具区域（添加到工具栏末尾）---
         # Reset button (放在最前面)
@@ -1654,7 +1636,7 @@ class MenuToolbarMixin:
             QPushButton:pressed { background-color: #2d2d2d; }
         """)
         self.reset_all_btn.clicked.connect(self.on_reset_all_click)
-        main_layout.addWidget(self.reset_all_btn)
+        right_layout.addWidget(self.reset_all_btn)
 
         # Preferences button
         self.pref_btn = QPushButton()
@@ -1669,7 +1651,7 @@ class MenuToolbarMixin:
             QPushButton:pressed { background-color: #2d2d2d; }
         """)
         self.pref_btn.clicked.connect(self.show_preferences_dialog)
-        main_layout.addWidget(self.pref_btn)
+        right_layout.addWidget(self.pref_btn)
 
         # Project Manager button — video mode only. It remains available after
         # the startup manager is closed, matching the File menu action.
@@ -1691,8 +1673,8 @@ class MenuToolbarMixin:
                 QPushButton:pressed { background-color: #2d2d2d; }
             """)
             self.project_manager_btn.clicked.connect(self._show_project_manager)
-            main_layout.addWidget(self.project_manager_btn)
-        main_layout.addSpacing(8)
+            right_layout.addWidget(self.project_manager_btn)
+        right_layout.addSpacing(8)
 
         # Layout combo
         self.layout_combo = QComboBox()
@@ -1708,8 +1690,8 @@ class MenuToolbarMixin:
         """)
         apply_combo_dropdown_style(self.layout_combo)
         self.layout_combo.activated.connect(self.on_layout_combo_activated)
-        main_layout.addWidget(self.layout_combo)
-        main_layout.addSpacing(8)
+        right_layout.addWidget(self.layout_combo)
+        right_layout.addSpacing(8)
         self.update_layout_combobox()
 
         # Export button
@@ -1724,7 +1706,7 @@ class MenuToolbarMixin:
             QPushButton:pressed { background-color: #b35900; }
         """)
         self.export_btn.clicked.connect(self.export_file_as)
-        main_layout.addWidget(self.export_btn)
+        right_layout.addWidget(self.export_btn)
 
         # 将容器添加到工具栏
         toolbar.addWidget(toolbar_container)

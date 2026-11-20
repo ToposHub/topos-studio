@@ -5,9 +5,35 @@
   "panel": {
     "audio_viewer": "Video Monitor",
     "audio_timeline": "Audio Timeline",
-    "audio_clip_editor": "Clip Editor"
+    "audio_clip_editor": "Clip Editor",
+    "audio_effects": "Audio Effects"
   },
   "mixer": {
+    "effects_browser": {
+      "search": "Search audio effects",
+      "no_results": "No matching audio effects.",
+      "unavailable": "No audio effects are currently available.",
+      "select_clip": "Select an unlocked audio clip, or drag the effect to a clip or a mixer channel.",
+      "target_track": "Drag onto an audio clip or double-click with one selected to configure its track.",
+      "targets_clip_channel": "Drag onto an audio clip or a mixer channel. Double-click to add to the selected clip.",
+      "target_clip": "Drag onto an audio clip or double-click to add to the selected clip.",
+      "voice_changer": "Voice Changer",
+      "spectral_mangler": "Spectral Mangler",
+      "group": {
+        "eq": "EQ & Cleanup",
+        "dynamics": "Dynamics & Transients",
+        "space": "Space & Time",
+        "modulation": "Modulation",
+        "tone": "Tone & Voice",
+        "other": "Other Audio Effects"
+      }
+    },
+    "monitor": {
+      "picture_options": "Picture Options"
+    },
+    "transport": {
+      "output_peak": "Master output peak (dBFS)"
+    },
     "clip_editor": {
       "open": "Open Professional Audio Editor…",
       "offline": "The source audio for this clip is unavailable",
@@ -37,35 +63,6 @@
       "length_stack_change": "This step changes the clip length. Use timeline Undo to restore the previous edit.",
       "independent_audio": "Independent audio edit (linked video stays put)",
       "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length."
-    },
-    "record": {
-      "stop": "Stop recording",
-      "finishing": "Finishing the recording…",
-      "locked": "Unlock this track to record",
-      "busy": "Finish the current recording first",
-      "failed": "Could not record from the selected input",
-      "save_failed": "Could not save the recording",
-      "settings": "Recording Settings",
-      "settings_menu": "Recording Settings…",
-      "settings_saved": "Recording settings saved.",
-      "arm": "Arm track for recording",
-      "disarm": "Disarm track",
-      "first_channel": "First channel",
-      "input": "Recording input",
-      "input_peak": "Input peak level (dBFS)",
-      "input_unavailable": "The selected input or channel is unavailable.",
-      "live_clip": "Recording…",
-      "mono": "Mono",
-      "no_input": "No input",
-      "patch_first": "Assign a recording input first",
-      "patch_version": "This timeline uses a newer recording input format.",
-      "preparing": "Recording pre-roll",
-      "second_channel": "Second channel",
-      "transport_arm_first": "Arm a track to record",
-      "transport_record": "Record",
-      "transport_recording": "Recording armed tracks",
-      "transport_start": "Record armed tracks (Shift+Space)",
-      "unavailable": "Unavailable"
     },
     "routing": {
       "output": "Output routing",

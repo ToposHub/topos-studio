@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.ui.panel_splitter import PanelSplitter
+from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.shared.i18n.i18n import I18N
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
@@ -175,6 +176,7 @@ class _MonitorFooter(QFrame):
         self.center_group = QWidget(self)
         self.right_group = QWidget(self)
         self.marker_group = QWidget(self)
+        self.mixer_mode = False
         self.optional_controls: list[QWidget] = []
         self.narrow_controls: list[QWidget] = []
         self.compact_controls: list[QWidget] = []
@@ -216,9 +218,11 @@ class _MonitorFooter(QFrame):
         self.left_group.setGeometry(10, y, left_width, 28)
         self.center_group.setGeometry((self.width() - center_width) // 2, y, center_width, 28)
         self.right_group.setGeometry(self.width() - right_width - 10, y, right_width, 28)
-        self.left_group.setVisible(self.left_group.geometry().right() < self.center_group.x())
-        self.right_group.setVisible(self.center_group.geometry().right() < self.right_group.x())
-        self.marker_group.setVisible(self.width() >= 700)
+        self.left_group.setVisible(
+            not self.mixer_mode and self.left_group.geometry().right() < self.center_group.x())
+        self.right_group.setVisible(
+            not self.mixer_mode and self.center_group.geometry().right() < self.right_group.x())
+        self.marker_group.setVisible(not self.mixer_mode and self.width() >= 700)
         self.marker_group.setGeometry(self.center_group.x() - 90, y, 54, 28)
 
 
@@ -231,6 +235,7 @@ class _MonitorHeader(QFrame):
         self.setFixedHeight(HEADER_HEIGHT)
         self.setMinimumWidth(0)
         self.show_monitor_switches = True
+        self.mixer_mode = False
         self.extra_controls: list[QWidget] = []
         self.setStyleSheet("""
 QFrame#editMonitorHeader { background: #202024; border-bottom: 1px solid #101013; }
@@ -282,7 +287,7 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         timecode.setParent(self.right_group)
         timecode.setFixedWidth(90)
         timecode.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        timecode.setStyleSheet("color: #e1e1e3; background: transparent; padding: 0; font-size: 12px; font-weight: 600;")
+        self._style_timecode()
         timecode.setToolTip(I18N.tr("edit.viewport.timecode", "Current Timecode"))
         timecode.setAccessibleName(timecode.toolTip())
         self.right.addWidget(timecode)
@@ -301,7 +306,7 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         title.setMaximumWidth(320)
         title.setFixedHeight(HEADER_HEIGHT)
         title.setProperty("resolveMonitorTitle", True)
-        title.setFont(QFont("Helvetica Neue", 12, QFont.Weight.DemiBold))
+        title.setFont(QFont(UI_FONT_FAMILIES, 12, QFont.Weight.DemiBold))
         title.show()
         self.position_title()
 
@@ -324,9 +329,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         for button in (self.source_button, self.timeline_button):
             button.setVisible(self.show_monitor_switches)
         self.source_tape_button.setVisible(self.show_monitor_switches and self.width() >= 560)
-        self.duration.setVisible(self.width() >= 560)
+        self.duration.setVisible(not self.mixer_mode and self.width() >= 560)
         for control in self.extra_controls:
-            control.setVisible(self.width() >= 760)
+            control.setVisible(not self.mixer_mode and self.width() >= 760)
         self.layout().activate()
         center = self.width() / 2.0
         available = max(0, int(2 * min(center - self.left_group.geometry().right() - 8,
@@ -335,6 +340,14 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         self.title.setGeometry((self.width() - width) // 2, 0, width, HEADER_HEIGHT)
         self.title.setVisible(width >= 48)
         self.title.raise_()
+
+    def _style_timecode(self) -> None:
+        size = 15 if self.mixer_mode else 12
+        self.timecode.setFont(QFont(UI_MONO_FONT_FAMILIES if self.mixer_mode
+                                    else UI_FONT_FAMILIES, size, QFont.Weight.DemiBold))
+        self.timecode.setFixedWidth(116 if self.mixer_mode else 90)
+        self.timecode.setStyleSheet(
+            f"color: #e1e1e3; background: transparent; padding: 0; font-size: {size}px; font-weight: 600;")
 
     def set_active(self, active: bool) -> None:
         color = "#e26458" if active else "#dedee1"
@@ -379,6 +392,8 @@ class EditViewport(QWidget):
         self._active_monitor = "program"
         self._deliver_mode = False
         self._program_only = False
+        self._mixer_picture_options: QMenu | None = None
+        self._mixer_transport_layout: QHBoxLayout | None = None
         self._program_fps = 24.0
         self._dual_sizes: list[int] | None = None
         self._timeline_widget: QWidget | None = None
@@ -539,6 +554,7 @@ class EditViewport(QWidget):
             I18N.tr("edit.viewport.match_frame", "Match Frame"))
         options.aboutToShow.connect(self.capabilities_context_requested.emit)
         header.options_button.setMenu(options)
+        self._program_options = options
         guides_group = QWidget(header)
         guides_group.setObjectName("monitorGuidesGroup")
         guides_group.setStyleSheet("QWidget#monitorGuidesGroup { background: transparent; border: none; }")
@@ -622,7 +638,7 @@ class EditViewport(QWidget):
         """Present the Mixer transport's record and stop controls."""
         stop = self.program_stop_button
         record = self.program_record_button
-        center = self.program_footer.groups[1]
+        center = self._program_controls_layout()
         controls_present = center.indexOf(record) >= 0
         if visible != controls_present:
             if visible:
@@ -651,6 +667,34 @@ class EditViewport(QWidget):
             stop.setToolTip(I18N.tr("edit.viewport.stop", "Stop"))
         record.setAccessibleDescription(record.toolTip())
         stop.setAccessibleName(stop.toolTip())
+
+    def bind_mixer_transport(self, controls: QHBoxLayout) -> None:
+        """Provide the timeline-side layout for the existing transport buttons."""
+        self._mixer_transport_layout = controls
+
+    def _program_controls_layout(self) -> QHBoxLayout:
+        if self._program_only and self._mixer_transport_layout is not None:
+            return self._mixer_transport_layout
+        return self.program_footer.groups[1]
+
+    def _place_program_transport(self, mixer: bool) -> None:
+        mixer_controls = self._mixer_transport_layout
+        if mixer_controls is None:
+            return
+        footer_controls = self.program_footer.groups[1]
+        source, destination = ((footer_controls, mixer_controls) if mixer
+                               else (mixer_controls, footer_controls))
+        while source.count():
+            button = source.takeAt(0).widget()
+            if button is not None:
+                destination.addWidget(button)
+                button.show()
+
+        if not mixer:
+            for button in (self.program_stop_button, self.program_record_button):
+                if not self.program_footer.isAncestorOf(button):
+                    button.setParent(self.program_footer)
+        self.program_footer.setVisible(not mixer)
 
     @staticmethod
     def _unavailable(menu: QMenu, text: str) -> None:
@@ -812,13 +856,31 @@ class EditViewport(QWidget):
             header.set_active(monitor == self._active_monitor and self._dual_view and not self._program_only)
 
     def set_program_only(self, enabled: bool) -> None:
-        """Show Program while the viewport is hosted in Mixer."""
+        """Show the audio monitoring presentation in the Mixer dock."""
         if enabled == self._program_only:
             return
         previous_sizes = self.splitter.sizes()
         if enabled and self._dual_view and all(previous_sizes):
             self._dual_sizes = previous_sizes
         self._program_only = enabled
+        header = self.program_header
+        if enabled and self._mixer_picture_options is None:
+            options = self._mixer_picture_options = QMenu(header)
+            options.addMenu(self._program_toolbar.view_menu)
+            options.addMenu(self._program_toolbar.quality_menu)
+            options.addAction(I18N.tr("viewport.fullscreen", "Fullscreen"),
+                              self.program_viewer.toggle_fullscreen)
+        header.mixer_mode = enabled
+        header._style_timecode()
+        header.options_button.setMenu(self._mixer_picture_options if enabled else self._program_options)
+        header.options_button.setToolTip(
+            I18N.tr("mixer.monitor.picture_options", "Picture Options") if enabled
+            else I18N.tr("edit.viewport.options", "Viewer Options"))
+        header.options_button.setAccessibleName(header.options_button.toolTip())
+        self.program_slider.setVisible(not enabled)
+        self.program_footer.mixer_mode = enabled
+        self._place_program_transport(enabled)
+        self.program_footer.position_groups()
         self._apply_mode()
         if not enabled and self._dual_view and self._dual_sizes:
             self.splitter.setSizes(self._dual_sizes)

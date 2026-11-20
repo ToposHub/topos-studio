@@ -227,3 +227,47 @@ def test_pasted_shared_stack_discards_all_affected_snapshots(strip):
     strip._graded_preview_cache = {f"clip-{i}": QPixmap(32, 18) for i in range(3)}
     strip.invalidate_graded_preview_stacks({"shared"})
     assert set(strip._graded_preview_cache) == {"clip-2"}
+
+
+def test_unchanged_timeline_reuses_cards_until_grade_preview_is_invalidated(
+    strip: ui.TimelineClipStrip, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clips = [replace(entry(i), color_stack_id="shared") for i in range(3)]
+    monkeypatch.setattr(ui, "build_clip_entries", lambda *args: list(clips))
+    timeline = SimpleNamespace(timeline_id="timeline", fps=24.0)
+    strip.set_project_and_timeline(None, timeline)
+    first_card = strip._cards[0]
+    preview = QPixmap(32, 18)
+    preview.fill(Qt.GlobalColor.gray)
+    strip.set_graded_preview(clips[0].clip_id, preview)
+    strip.set_project_and_timeline(None, timeline)
+    assert strip._cards[0] is first_card
+    assert first_card._preview_override_active
+
+    strip.invalidate_graded_preview_stacks({"shared"})
+    strip.set_project_and_timeline(None, timeline)
+    assert strip._cards[0] is not first_card
+    assert not strip._cards[0]._preview_override_active
+
+
+def test_reused_card_releases_evicted_preview_and_can_retry_thumbnail(
+    strip: ui.TimelineClipStrip, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clips = [entry(i) for i in range(18)]
+    monkeypatch.setattr(ui, "build_clip_entries", lambda *args: list(clips))
+    timeline = SimpleNamespace(timeline_id="timeline", fps=24.0)
+    strip.set_project_and_timeline(None, timeline)
+    first, second = strip._cards[:2]
+    preview = QPixmap(32, 18)
+    for clip in [clips[0], *clips[2:]]:
+        strip.set_graded_preview(clip.clip_id, preview)
+    # Cache eviction removes the oldest snapshot when another is added.
+    assert first._preview_override_active
+    assert first.entry.clip_id not in strip._graded_preview_cache
+    second._thumbnail_requested = True
+
+    strip.set_project_and_timeline(None, timeline)
+
+    assert strip._cards[:2] == [first, second]
+    assert not first._preview_override_active
+    assert not second._thumbnail_requested

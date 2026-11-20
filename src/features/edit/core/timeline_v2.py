@@ -17,7 +17,7 @@ Timeline v2 Data Models Module
 - 完整类型注解
 - 不依赖 PyQt，纯 Python 数据模型
 - 参数验证在 __post_init__ 中进行
-- 同轨剪辑不允许重叠
+- 同轨剪辑只在音频交叉淡化区域允许重叠
 
 ## P5.3 - Keyframe Animation
 
@@ -1929,6 +1929,30 @@ class TransitionInstance:
     def is_one_sided(self) -> bool:
         """Whether this is a clip-edge transition rather than a cut blend."""
         return not (self.left_clip_id and self.right_clip_id)
+
+    @property
+    def is_overlap_crossfade(self) -> bool:
+        """A crossfade tied to the actual shared span of two audio clips."""
+        return self.is_audio and self.params.get("overlap_crossfade") == 1
+
+    @property
+    def overlap_curve_adjustments(self) -> tuple[float, float]:
+        if not self.is_overlap_crossfade:
+            return 0.0, 0.0
+        from src.features.edit.core.audio_transition_catalog import overlap_curve_adjustments
+        return overlap_curve_adjustments(self.params)
+
+    @property
+    def audio_envelope_range(self) -> tuple[int, int]:
+        """Absolute frame range used for audio, including cropped nested fades."""
+        envelope = self.params.get("source_envelope") if self.is_overlap_crossfade else None
+        if (
+            isinstance(envelope, (tuple, list)) and len(envelope) == 2
+            and all(isinstance(frame, int) for frame in envelope)
+            and envelope[0] < envelope[1]
+        ):
+            return envelope[0], envelope[1]
+        return self.start_frame, self.end_frame
 
     @property
     def is_audio(self) -> bool:
@@ -4347,6 +4371,33 @@ class EffectChainParams:
         ]
 
 
+class AudioOverlapError(ValueError):
+    """An edit would create a contained clip or more than two active clips."""
+
+
+def audio_overlap_pairs(
+    clips: Collection[ClipInstance],
+    *,
+    cropped_pairs: tuple[tuple[str, str], ...] = (),
+) -> tuple[tuple[ClipInstance, ClipInstance], ...]:
+    """Find tail-to-head overlaps. Each sample can belong to at most one pair."""
+    ordered = sorted(clips, key=lambda clip: clip.timeline_start)
+    pairs: list[tuple[ClipInstance, ClipInstance]] = []
+    for index, (left, right) in enumerate(zip(ordered, ordered[1:])):
+        if left.timeline_end <= right.timeline_start:
+            continue
+        if (
+            (
+                (left.timeline_start == right.timeline_start or left.timeline_end >= right.timeline_end)
+                and (left.clip_id, right.clip_id) not in cropped_pairs
+            )
+            or (index > 0 and ordered[index - 1].timeline_end > right.timeline_start)
+        ):
+            raise AudioOverlapError("Audio crossfades require a tail-to-head overlap between two clips")
+        pairs.append((left, right))
+    return tuple(pairs)
+
+
 @dataclass(frozen=True)
 class EditTrack:
     """编辑轨道。支持视频轨、音频轨、字幕轨。
@@ -4439,12 +4490,13 @@ class EditTrack:
             raise ValueError(
                 f"Subtitle track {self.track_id} cannot carry regular media clips"
             )
-        # Validate clip overlap for regular clips
-        sorted_clips = sorted(self.clips, key=lambda c: c.timeline_start)
-        for i in range(len(sorted_clips) - 1):
-            curr, next_ = sorted_clips[i], sorted_clips[i + 1]
-            if curr.timeline_end > next_.timeline_start:
-                raise ValueError(f"Clips overlap: {curr.clip_id} and {next_.clip_id}")
+        if self.track_type == "audio":
+            self._sync_overlap_crossfades()
+        else:
+            sorted_clips = sorted(self.clips, key=lambda c: c.timeline_start)
+            for left, right in zip(sorted_clips, sorted_clips[1:]):
+                if left.timeline_end > right.timeline_start:
+                    raise ValueError(f"Clips overlap: {left.clip_id} and {right.clip_id}")
         # P10.3: Validate subtitle clip overlap
         sorted_sub = sorted(self.subtitle_clips, key=lambda c: c.timeline_start)
         for i in range(len(sorted_sub) - 1):
@@ -4623,6 +4675,49 @@ class EditTrack:
             return new_track.reanchor_transitions()
         return new_track
 
+    def _sync_overlap_crossfades(self) -> None:
+        """Preserve curve settings by pair and derive placement from clip geometry."""
+        stored = {
+            (transition.left_clip_id, transition.right_clip_id): transition
+            for transition in self.transitions if transition.is_overlap_crossfade
+        }
+        pairs = audio_overlap_pairs(
+            self.clips,
+            cropped_pairs=tuple(
+                key for key, transition in stored.items()
+                if "source_envelope" in transition.params
+            ),
+        )
+        if not pairs and not stored:
+            return
+        overlapping = {(left.clip_id, right.clip_id) for left, right in pairs}
+        transitions = [
+            transition for transition in self.transitions
+            if not transition.is_overlap_crossfade
+            and (transition.left_clip_id, transition.right_clip_id) not in overlapping
+        ]
+        for left, right in pairs:
+            key = left.clip_id, right.clip_id
+            previous = stored.get(key)
+            if previous is None:
+                previous = TransitionInstance(
+                    transition_id=str(uuid.uuid5(uuid.NAMESPACE_OID, repr((self.track_id, *key)))),
+                    transition_type="audio:equal_power",
+                    track_id=self.track_id,
+                    left_clip_id=left.clip_id,
+                    right_clip_id=right.clip_id,
+                    center_frame=left.timeline_end,
+                    duration=left.timeline_end - right.timeline_start,
+                    alignment="end_on_cut",
+                    params={"overlap_crossfade": 1},
+                )
+            transitions.append(replace(
+                previous, track_id=self.track_id, alignment="end_on_cut",
+                center_frame=left.timeline_end,
+                duration=left.timeline_end - right.timeline_start,
+            ))
+        object.__setattr__(self, "transitions", tuple(transitions))
+
     def reanchor_transitions(self) -> "EditTrack":
         """C12：把轨道上的转场重新锚定到引用片段的当前边缘。
 
@@ -4646,6 +4741,9 @@ class EditTrack:
         new_transitions: list[TransitionInstance] = []
         changed = False
         for t in self.transitions:
+            if t.is_overlap_crossfade:
+                new_transitions.append(t)
+                continue
             left = by_id.get(t.left_clip_id) if t.left_clip_id else None
             right = by_id.get(t.right_clip_id) if t.right_clip_id else None
             if left is not None and right is not None:
@@ -4724,9 +4822,10 @@ class EditTrack:
         return (prev, next_)
 
     def with_clip_added(self, clip: ClipInstance) -> EditTrack:
-        for existing in self.clips:
-            if clip.timeline_start < existing.timeline_end and clip.timeline_end > existing.timeline_start:
-                raise ValueError(f"Clip overlaps with {existing.clip_id}")
+        if self.track_type != "audio":
+            for existing in self.clips:
+                if clip.timeline_start < existing.timeline_end and clip.timeline_end > existing.timeline_start:
+                    raise ValueError(f"Clip overlaps with {existing.clip_id}")
         new_clips = tuple(sorted(self.clips + (clip,), key=lambda c: c.timeline_start))
         return self._rebuild(clips=new_clips)
 
@@ -4737,9 +4836,10 @@ class EditTrack:
 
     def with_clip_updated(self, clip: ClipInstance) -> EditTrack:
         other_clips = tuple(c for c in self.clips if c.clip_id != clip.clip_id)
-        for existing in other_clips:
-            if clip.timeline_start < existing.timeline_end and clip.timeline_end > existing.timeline_start:
-                raise ValueError(f"Updated clip overlaps with {existing.clip_id}")
+        if self.track_type != "audio":
+            for existing in other_clips:
+                if clip.timeline_start < existing.timeline_end and clip.timeline_end > existing.timeline_start:
+                    raise ValueError(f"Updated clip overlaps with {existing.clip_id}")
         new_clips = tuple(sorted(other_clips + (clip,), key=lambda c: c.timeline_start))
         return self._rebuild(clips=new_clips)
 

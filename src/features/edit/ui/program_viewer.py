@@ -71,6 +71,7 @@ from src.shared.assets.icon_manager import (
 )
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
 from src.features.edit.ui.edit_style import EDIT_COLORS
+from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.ui.subtitle_handle_controller import SubtitleHandleController
 from src.features.edit.ui.clip_transform_handle_controller import (
@@ -697,7 +698,7 @@ class TransportControlBar(QFrame):
                 background-color: {EDIT_COLORS['bg_input']};
                 padding: 3px 8px;
                 border-radius: 4px;
-                font-family: 'Courier New', monospace;
+                font-family: '{UI_MONO_FONT_FAMILIES[0]}';
             }}
             QLabel:hover {{
                 background-color: {EDIT_COLORS['bg_panel_alt']};
@@ -2755,7 +2756,7 @@ class ProgramViewer(QOpenGLWidget):
         # 根据错误状态绘制不同内容
         if self._error_state == "no_clip":
             # 显示"无片段"提示
-            font = QFont("Arial", 16)
+            font = QFont(UI_FONT_FAMILIES, 16)
             painter.setFont(font)
             painter.setPen(QColor(180, 180, 180))
             text = I18N.tr("program_viewer.no_clip", "No clips at this frame")
@@ -2783,7 +2784,7 @@ class ProgramViewer(QOpenGLWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawPolygon(triangle)
 
-            warning_font = QFont("Arial", max(26, triangle_width // 2))
+            warning_font = QFont(UI_FONT_FAMILIES, max(26, triangle_width // 2))
             warning_font.setBold(True)
             painter.setFont(warning_font)
             painter.setPen(QColor(20, 0, 0))
@@ -2798,7 +2799,7 @@ class ProgramViewer(QOpenGLWidget):
                 "!",
             )
 
-            title_font = QFont("Arial", max(20, min(42, int(w * 0.045))))
+            title_font = QFont(UI_FONT_FAMILIES, max(20, min(42, int(w * 0.045))))
             title_font.setBold(True)
             painter.setFont(title_font)
             painter.setPen(QColor(255, 45, 45))
@@ -2810,7 +2811,7 @@ class ProgramViewer(QOpenGLWidget):
                 title,
             )
 
-            painter.setFont(QFont("Arial", 12))
+            painter.setFont(QFont(UI_FONT_FAMILIES, 12))
             painter.setPen(QColor(240, 210, 210))
             detail = self._error_message or I18N.tr(
                 "program_viewer.media_offline_hint",
@@ -2825,7 +2826,7 @@ class ProgramViewer(QOpenGLWidget):
 
         elif self._error_state == "render_error":
             # 显示错误信息
-            font = QFont("Arial", 14)
+            font = QFont(UI_FONT_FAMILIES, 14)
             painter.setFont(font)
             painter.setPen(QColor(255, 100, 100))
 
@@ -2838,7 +2839,7 @@ class ProgramViewer(QOpenGLWidget):
 
             # 错误消息
             if self._error_message:
-                msg_font = QFont("Arial", 12)
+                msg_font = QFont(UI_FONT_FAMILIES, 12)
                 painter.setFont(msg_font)
                 painter.setPen(QColor(200, 200, 200))
                 msg_rect = painter.fontMetrics().boundingRect(self._error_message)
@@ -2848,7 +2849,7 @@ class ProgramViewer(QOpenGLWidget):
 
         elif self._error_state == "decode_error":
             # 显示解码错误
-            font = QFont("Arial", 14)
+            font = QFont(UI_FONT_FAMILIES, 14)
             painter.setFont(font)
             painter.setPen(QColor(255, 150, 50))
 
@@ -2859,7 +2860,7 @@ class ProgramViewer(QOpenGLWidget):
             painter.drawText(int(x), int(y + title_rect.height()), title)
 
             if self._error_message:
-                msg_font = QFont("Arial", 12)
+                msg_font = QFont(UI_FONT_FAMILIES, 12)
                 painter.setFont(msg_font)
                 painter.setPen(QColor(200, 200, 200))
                 msg_rect = painter.fontMetrics().boundingRect(self._error_message)
@@ -2874,7 +2875,7 @@ class ProgramViewer(QOpenGLWidget):
             painter.fillRect(self.rect(), QColor(80, 20, 20, 120))
 
             # Title
-            font = QFont("Arial", 14)
+            font = QFont(UI_FONT_FAMILIES, 14)
             painter.setFont(font)
             painter.setPen(QColor(255, 80, 80))
 
@@ -2886,7 +2887,7 @@ class ProgramViewer(QOpenGLWidget):
 
             # Error message
             if self._error_message:
-                msg_font = QFont("Arial", 12)
+                msg_font = QFont(UI_FONT_FAMILIES, 12)
                 painter.setFont(msg_font)
                 painter.setPen(QColor(220, 200, 200))
                 msg_rect = painter.fontMetrics().boundingRect(self._error_message)
@@ -2936,7 +2937,7 @@ class ProgramViewer(QOpenGLWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Timecode font
-        font = QFont("Monospace", 14, QFont.Weight.Bold)
+        font = QFont(UI_MONO_FONT_FAMILIES, 14, QFont.Weight.Bold)
         painter.setFont(font)
 
         # Calculate text size

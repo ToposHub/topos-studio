@@ -114,6 +114,7 @@ class AddClipCommand:
     track_id: str
     clip: ClipInstance
     _previous_timeline_id: str | None = None  # Set during apply
+    overlap_crossfade: TransitionInstance | None = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         """
@@ -132,8 +133,16 @@ class AddClipCommand:
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
 
-        # Check for overlap
+        # Paste may restore the overlap with an explicitly paired predecessor.
+        fade = self.overlap_crossfade
+        previous_id = (
+            fade.left_clip_id if fade is not None and fade.is_overlap_crossfade
+            and track.track_type == "audio" and fade.right_clip_id == self.clip.clip_id
+            else None
+        )
         for existing in track.clips:
+            if existing.clip_id == previous_id:
+                continue
             if (self.clip.timeline_start < existing.timeline_end and
                 self.clip.timeline_end > existing.timeline_start):
                 raise ValueError(
@@ -145,7 +154,11 @@ class AddClipCommand:
         # metadata used by the precise timeline frame mapper.
         clip_with_track = self.clip.with_track(self.track_id)
 
-        new_track = track.with_clip_added(clip_with_track)
+        if previous_id is None:
+            new_track = track.with_clip_added(clip_with_track)
+        else:
+            clips = tuple(sorted((*track.clips, clip_with_track), key=lambda item: item.timeline_start))
+            new_track = track._rebuild(clips=clips, transitions=(*track.transitions, fade))
         new_timeline = timeline.with_track_updated(new_track)
 
         logger.debug(f"AddClipCommand applied: {self.clip.clip_id} to track {self.track_id}")
@@ -173,26 +186,33 @@ class AddClipCommand:
             "label": self.label,
             "track_id": self.track_id,
             "clip": self.clip.to_dict(),
+            **({"overlap_crossfade": self.overlap_crossfade.to_dict()} if self.overlap_crossfade else {}),
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> AddClipCommand:
         """Deserialize command."""
+        fade = data.get("overlap_crossfade")
         return AddClipCommand(
             command_id=data.get("command_id", str(uuid.uuid4())),
             label=data.get("label", "Add Clip"),
             track_id=data.get("track_id", ""),
             clip=ClipInstance.from_dict(data.get("clip", {})),
+            overlap_crossfade=TransitionInstance.from_dict(fade) if isinstance(fade, dict) else None,
         )
 
     @staticmethod
-    def create(track_id: str, clip: ClipInstance) -> AddClipCommand:
+    def create(
+        track_id: str, clip: ClipInstance, *,
+        overlap_crossfade: TransitionInstance | None = None,
+    ) -> AddClipCommand:
         """Factory method to create command."""
         return AddClipCommand(
             command_id=str(uuid.uuid4()),
             label=f"Add Clip at {clip.timeline_start}",
             track_id=track_id,
             clip=clip,
+            overlap_crossfade=overlap_crossfade,
         )
 
 
@@ -1524,9 +1544,10 @@ class MoveClipToExistingTrackCommand:
 @dataclass(frozen=True)
 class MoveClipsOverwriteCommand:
     """
-    Move one or more clips, overwriting material on existing target tracks.
+    Move one or more clips on existing target tracks.
 
-    This matches common NLE drag behavior: dropping a clip onto occupied track
+    With audio_crossfades, audio moves retain the destination clips and create
+    crossfades. Video and explicit overwrite moves use normal overwrite behavior: dropping a clip onto occupied track
     space removes the covered region, trimming or splitting existing target
     clips as needed. All moving clips are removed before overwrite is applied,
     so selected groups can move atomically without cutting each other.
@@ -1536,14 +1557,16 @@ class MoveClipsOverwriteCommand:
     label: str
     moves: tuple[dict[str, Any], ...]
     _before_timeline: TimelineSequence | None = None
+    audio_crossfades: bool = False
 
-    def apply(self, timeline: TimelineSequence) -> TimelineSequence:
+    def apply(self, timeline: TimelineSequence) -> tuple[TimelineSequence, MoveClipsOverwriteCommand]:
         if not self.moves:
-            return timeline
+            return timeline, self
 
         moving_ids = {str(move["clip_id"]) for move in self.moves}
         moving_clips: dict[str, ClipInstance] = {}
         target_ranges: dict[str, list[tuple[int, int]]] = {}
+        overlap_additions: dict[str, list[ClipInstance]] = {}
 
         for move in self.moves:
             clip_id = str(move["clip_id"])
@@ -1570,9 +1593,14 @@ class MoveClipsOverwriteCommand:
             if clip is None:
                 raise ValueError(f"Clip not found: {clip_id}")
             moving_clips[clip_id] = clip
-            target_ranges.setdefault(target_track_id, []).append(
-                (new_start, new_start + clip.timeline_duration)
-            )
+            if self.audio_crossfades and target_track.track_type == "audio":
+                overlap_additions.setdefault(target_track_id, []).append(
+                    replace(clip, track_id=target_track_id, timeline_start=new_start)
+                )
+            else:
+                target_ranges.setdefault(target_track_id, []).append(
+                    (new_start, new_start + clip.timeline_duration)
+                )
 
         working = timeline
         for clip_id in moving_ids:
@@ -1602,6 +1630,27 @@ class MoveClipsOverwriteCommand:
 
         working = self._clear_links_to_overwritten_clips(working, overwritten_clip_ids)
 
+        if overlap_additions:
+            saved_crossfades = tuple(
+                transition
+                for track in timeline.audio_tracks
+                for transition in track.transitions
+                if transition.is_overlap_crossfade
+                and ({transition.left_clip_id, transition.right_clip_id} & moving_ids)
+            )
+            for track_id, additions in overlap_additions.items():
+                track = working.get_track_by_id(track_id)
+                clips = tuple(sorted((*track.clips, *additions), key=lambda c: c.timeline_start))
+                clip_ids = {clip.clip_id for clip in clips}
+                retained = tuple(
+                    transition for transition in saved_crossfades
+                    if transition.left_clip_id in clip_ids and transition.right_clip_id in clip_ids
+                )
+                working = working.with_track_updated(
+                    replace(track, clips=clips, transitions=track.transitions + retained)
+                    .reanchor_transitions()
+                )
+
         for move in self.moves:
             clip_id = str(move["clip_id"])
             target_track_id = str(move["target_track_id"])
@@ -1615,7 +1664,8 @@ class MoveClipsOverwriteCommand:
             track = working.get_track_by_id(target_track_id)
             if track is None:
                 raise ValueError(f"Target track not found while adding moved clip: {target_track_id}")
-            working = working.with_track_updated(track.with_clip_added(moved_clip))
+            if target_track_id not in overlap_additions:
+                working = working.with_track_updated(track.with_clip_added(moved_clip))
 
             working = _move_scoped_markers_with_clip(
                 working,
@@ -1625,12 +1675,7 @@ class MoveClipsOverwriteCommand:
                 target_track_id,
             )
 
-        updated_cmd = MoveClipsOverwriteCommand(
-            command_id=self.command_id,
-            label=self.label,
-            moves=self.moves,
-            _before_timeline=timeline,
-        )
+        updated_cmd = replace(self, _before_timeline=timeline)
         logger.debug(
             f"MoveClipsOverwriteCommand applied: moves={len(self.moves)}, "
             f"overwritten={len(overwritten_clip_ids)}"
@@ -1735,12 +1780,15 @@ class MoveClipsOverwriteCommand:
             "command_type": "MoveClipsOverwriteCommand",
             "label": self.label,
             "moves": list(self.moves),
+            "audio_crossfades": self.audio_crossfades,
         }
 
     @staticmethod
     def create(
         moves: list[dict[str, Any]] | tuple[dict[str, Any], ...],
         label: str = "Move clips with overwrite",
+        *,
+        audio_crossfades: bool = False,
     ) -> MoveClipsOverwriteCommand:
         normalized = tuple(
             {
@@ -1756,6 +1804,7 @@ class MoveClipsOverwriteCommand:
             command_id=str(uuid.uuid4()),
             label=label,
             moves=normalized,
+            audio_crossfades=audio_crossfades,
         )
 
 
@@ -1925,15 +1974,6 @@ class TrimClipCommand:
             trimmed_clip.source_start, trimmed_clip.source_duration,
             trimmed_clip.timeline_start - clip.timeline_start
             if self.trim_side == "left" else 0))
-
-        # Check for overlap with other clips
-        other_clips = [c for c in track.clips if c.clip_id != self.clip_id]
-        for existing in other_clips:
-            if (trimmed_clip.timeline_start < existing.timeline_end and
-                trimmed_clip.timeline_end > existing.timeline_start):
-                raise ValueError(
-                    f"Trimmed clip overlaps with {existing.clip_id}"
-                )
 
         new_track = track.with_clip_updated(trimmed_clip)
         new_timeline = timeline.with_track_updated(new_track)
@@ -2467,10 +2507,10 @@ class SplitClipCommand:
         # C15：记录 marker 快照
         object.__setattr__(self, "_before_markers", timeline.markers)
 
-        # Remove original clip and add two new clips
-        track_without_original = track.with_clip_removed(clip.clip_id)
-        track_with_left = track_without_original.with_clip_added(left_clip)
-        track_with_both = track_with_left.with_clip_added(right_clip)
+        clips = tuple(sorted(
+            tuple(item for item in track.clips if item.clip_id != clip.clip_id) + (left_clip, right_clip),
+            key=lambda item: item.timeline_start,
+        ))
 
         # C11：迁移引用原片段的转场——头转场/左邻切点转场挂左段，尾转
         # 场/右邻切点转场挂右段；随后按新边缘重锚（center/duration 由
@@ -2487,8 +2527,8 @@ class SplitClipCommand:
                 )
             else:
                 migrated_transitions.append(trans)
-        track_with_both = track_with_both._rebuild(
-            transitions=tuple(migrated_transitions)
+        track_with_both = track._rebuild(
+            clips=clips, transitions=tuple(migrated_transitions),
         ).reanchor_transitions()
 
         new_timeline = timeline.with_track_updated(track_with_both)

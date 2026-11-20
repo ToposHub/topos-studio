@@ -15,6 +15,8 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QAction, QHideEvent
 )
 
+from src.shared.ui.rotary_knob_style import paint_rotary_knob
+
 # ============================================================================
 # 1. 全局色彩系统与跨平台字体栈 (与 AudioClipEditor-UI.py 保持完全一致)
 # ============================================================================
@@ -244,44 +246,11 @@ class RotaryKnob(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w, h = self.width(), self.height()
-        cx, cy = w / 2.0, h / 2.0
-        arc_r = min(w, h) / 2.0 - 2.6
-
-        start_angle = 225.0
-        total_span = -270.0
         norm = (self.value - self.min_val) / max(1e-6, self.max_val - self.min_val)
-        current_angle = start_angle + norm * total_span
-        arc_rect = QRectF(cx - arc_r, cy - arc_r, arc_r * 2, arc_r * 2)
-
-        # 1. 深黑凹槽轨道
-        p.setPen(QPen(QColor("#141417"), 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawArc(arc_rect, int(start_angle * 16), int(total_span * 16))
-
-        # 2. 单层锐利高亮数值弧
-        p.setPen(QPen(self.accent_color, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        if self.bipolar:
-            span_deg = current_angle - 90.0
-            if abs(span_deg) > 0.5:
-                p.drawArc(arc_rect, int(90.0 * 16), int(span_deg * 16))
-        else:
-            span_deg = current_angle - start_angle
-            if abs(span_deg) > 0.5:
-                p.drawArc(arc_rect, int(start_angle * 16), int(span_deg * 16))
-
-        # 3. 达芬奇风格哑光浅灰阳极铝旋钮帽
-        knob_r = arc_r - 3.4
-        p.setPen(QPen(QColor("#111114"), 1.1))
-        p.setBrush(QColor("#8E9096" if (self._hovered or self._dragging) else "#7A7C82"))
-        p.drawEllipse(QPointF(cx, cy), knob_r, knob_r)
-
-        # 4. 深黑指针刻线
-        rad = math.radians(current_angle)
-        p1 = QPointF(cx + math.cos(rad) * (knob_r * 0.25), cy - math.sin(rad) * (knob_r * 0.25))
-        p2 = QPointF(cx + math.cos(rad) * (knob_r - 1.2), cy - math.sin(rad) * (knob_r - 1.2))
-        p.setPen(QPen(QColor("#141416"), 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(p1, p2)
+        paint_rotary_knob(
+            p, QRectF(self.rect()), norm, self.accent_color,
+            bipolar=self.bipolar, highlighted=self._hovered or self._dragging,
+        )
 
 
 # ============================================================================

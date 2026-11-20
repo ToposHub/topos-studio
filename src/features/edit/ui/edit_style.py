@@ -105,7 +105,8 @@ EDIT_COLORS = {
 EDIT_SIZES = {
     "toolbar_h": 30,            # 工具栏高度
     "icon_btn": 26,             # 图标按钮尺寸
-    "track_header_w": 220,      # 轨道头宽度 (DaVinci-like 加宽)
+    "track_header_w": 220,      # 独立关键帧面板的轨道列表宽度
+    "timeline_track_header_w": 204,  # 剪辑与混音共用的时间线轨道头宽度
     "track_h_video": 82,        # 视频轨道高度，接近 DaVinci 的可读缩略图轨道
     "track_h_audio": 66,        # 音频轨道高度，为波形和轨道头信息留空间
     "track_h_min": 24,          # BUG-09: 轨道最小高度 (统一常量)

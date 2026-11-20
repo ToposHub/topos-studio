@@ -133,6 +133,8 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QCoreApplication
 from PyQt6.QtGui import QSurfaceFormat
 
+from src.shared.ui.style_sheet import apply_application_theme
+
 
 def _orderly_shutdown(app: QCoreApplication | None, exit_code: int) -> None:
     """有序关闭：停掉原生 worker 后直接退出进程，跳过解释器终结化。
@@ -260,8 +262,12 @@ def main() -> int:
 
         # 必须开启全局 OpenGL 上下文共享，否则 QOpenGLWidget 无法读取渲染线程的纹理
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar, sys.platform != "darwin")
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuWindows)
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
 
         app = QApplication(sys.argv)
+        apply_application_theme(app)
 
         # [R2-9] 移除 Windows 每次启动创建一次性 QOpenGLContext 仅打版本日志
         # 的诊断残留；GL 环境问题由渲染管线自身的错误路径呈现
