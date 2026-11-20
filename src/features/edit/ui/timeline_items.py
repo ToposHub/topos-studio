@@ -832,6 +832,11 @@ class ClipItem(QGraphicsObject):
         self._fade_curve_drag_end: str | None = None
         self._fade_curve_drag_height = 1.0
         self._fade_curve_preview: str | None = None
+        # P0-3 · 有效淡化消费：采样域字段（48k 参考）经时间线帧率换算，
+        # 正值至少显示 1 帧（960 样本/20 ms 在 24 fps ≈ 0.5 帧，整数帧
+        # 取整会消失）。``_timeline_fps`` 由视图在创建后写入（构造缺省
+        # 用资产 fps 近似，仅影响换算精度不影响有无）。
+        self._timeline_fps: float = float(fps or 24.0)
         self._fade_in_duration = fade_in_duration
         self._fade_out_duration = fade_out_duration
         self._fade_in_duration, self._fade_out_duration = self._clamp_fade_pair(
@@ -1411,6 +1416,13 @@ class ClipItem(QGraphicsObject):
     def fade_out_duration(self) -> int:
         """Get fade out duration in frames."""
         return self._fade_out_duration
+
+    @staticmethod
+    def _effective_fade_display_frames(value: float) -> int:
+        """有效淡化长度的显示帧数：正值至少 1 帧（极短淡化不取整消失）。"""
+        if value <= 0.0:
+            return 0
+        return max(1, int(math.ceil(value)))
 
     def _clamp_fade_pair(self, fade_in: int, fade_out: int) -> tuple[int, int]:
         """Keep the two fade ramps within the clip without crossing."""
@@ -6584,8 +6596,11 @@ class ClipItem(QGraphicsObject):
             getattr(clip, "effective_fade_curve_in", None),
             getattr(clip, "effective_fade_curve_out", None),
         )
-        self._fade_in_duration = clip.fade_in_duration
-        self._fade_out_duration = clip.fade_out_duration
+        # P0-3 · 有效长度（采样域优先，48k 参考率换算；正值 ≥1 帧防消失）。
+        self._fade_in_duration = self._effective_fade_display_frames(
+            clip.effective_fade_in_frames(self._timeline_fps))
+        self._fade_out_duration = self._effective_fade_display_frames(
+            clip.effective_fade_out_frames(self._timeline_fps))
 
         # Update visual properties
         self._opacity = clip.opacity if hasattr(clip, 'opacity') else 1.0

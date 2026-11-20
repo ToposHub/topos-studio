@@ -331,9 +331,12 @@ def test_adjusted_fade_curve_round_trips_and_matches_audio_samples() -> None:
     assert loaded.effective_fade_curve_in == shape
     assert loaded.effective_fade_curve_out is None
 
+    # P0-3：override 按 48k 参考域传入——消费率 1 Hz 下 5 个消费样本
+    # 对应 5×48000 参考样本（apply_clip_fade 内部有理换算）。
     result = apply_clip_fade(
         np.ones((2, 10)), 0, 10, 0, 4, 0, 1, 1,
-        fade_in_samples_override=5, fade_curve_in=loaded.effective_fade_curve_in,
+        fade_in_samples_override=5 * 48000,
+        fade_curve_in=loaded.effective_fade_curve_in,
     )
     np.testing.assert_allclose(result[:, 2], fade_curve_factor(shape, 0.5))
     np.testing.assert_allclose(result[:, 2], 0.25)

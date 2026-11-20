@@ -146,6 +146,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._raw_pcm: np.ndarray | None = None      # 处理栈前的原始 PCM
         self._model_audio_edit: dict | None = None   # 工程模型驱动的处理栈
+        # P0-3 · 片段级 gain/fade 快照（模型 → 预览/试听消费；None=无片段）：
+        # (gain_db, fade_in_frames, fade_out_frames, fade_in_samples,
+        #  fade_out_samples, curve_in, curve_out, fps, timeline_duration)。
+        self._clip_gain_fade: tuple | None = None
         # P0 · 预览 worker 状态：代际（旧发布丢弃）、spec 键、缓存计划
         # 钩子（外层注入）、失败留痕、离线模式（测试同步计算）。
         self._preview_generation = 0
@@ -572,6 +576,17 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             worker.finish()
             self._preview_worker = None
 
+    def set_clip_gain_fade(self, snapshot: tuple | None) -> None:
+        """P0-3 · 片段级 gain/fade 快照（模型 → 预览/试听消费）。
+
+        预览重算以快照为键：gain/淡化命令落地后 sync 路径调用本方法，
+        变化即刷新（波形/频谱/试听与交付消费同一份片段级设置）。
+        """
+        if self._clip_gain_fade == snapshot:
+            return
+        self._clip_gain_fade = snapshot
+        self._refresh_stack_preview()
+
     def _collect_preview_inputs(self) -> dict | None:
         raw = self._raw_pcm
         if raw is None:
@@ -584,6 +599,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             self._preview_spec_key, steps_signature(edit) if edit else (),
             self._denoise_preview, fft, generation,
             id(self._timepitch_pcm),
+            self._clip_gain_fade,
         )
         # 深拷贝编辑字典：后台计算期间工程命令可能替换模型对象。
         import copy as _copy
@@ -597,11 +613,13 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             "timepitch_pcm": self._timepitch_pcm,
             "fft": fft,
             "bypass": self.btn_bypass.isChecked(),
+            "clip_gain_fade": self._clip_gain_fade,
         }
 
     def _compute_preview(self, inputs: dict) -> ClipPreviewResult:
-        """纯计算（后台线程安全）：基底 → 后缀栈 → 波形/频谱/计量。"""
+        """纯计算（后台线程安全）：基底 → 后缀栈 → 片段 gain/fade → 波形/频谱/计量。"""
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
+        from src.features.edit.core.audio_dsp import apply_clip_fade
 
         base = self._compute_base_pcm(inputs)
         if base is None:
@@ -614,6 +632,27 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 base, suffix_audio_edit(edit), sample_rate=inputs["rate"])
         else:
             edited = base
+        # P0-3 · 片段级 gain/fade 与播放/成片/Stem 同一消费路径
+        # （apply_clip_fade 共享曲线规格与绝对片段样本位置；采样域字段
+        # 按 48k 参考域传入，函数内部换算消费率）。顺序与实时路径一致：
+        # 处理栈 → fade → gain。
+        gain_fade = inputs.get("clip_gain_fade")
+        if gain_fade is not None:
+            (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
+             curve_in, curve_out, fps, duration_frames) = gain_fade
+            if fin_frames or fout_frames or fin_samples or fout_samples:
+                try:
+                    edited = apply_clip_fade(
+                        edited, 0, int(duration_frames), 0,
+                        int(fin_frames), int(fout_frames), float(fps),
+                        float(inputs["rate"]),
+                        fade_in_samples_override=fin_samples,
+                        fade_out_samples_override=fout_samples,
+                        fade_curve_in=curve_in, fade_curve_out=curve_out)
+                except Exception:  # noqa: BLE001 - 淡化失败保持栈结果
+                    self._note_preview_failure("clip fade preview failed")
+            if abs(float(gain_db or 0.0)) > 1e-9:
+                edited = edited * (10.0 ** (float(gain_db) / 20.0))
         bins = min(8192, max(64, edited.shape[1] // 64))
         mins, maxs, rmss = compute_waveform_stats(edited, bins)
         spectrogram = compute_spectrogram(
@@ -1690,6 +1729,7 @@ class ProjectClipEditor(QWidget):
             panel.sync_gain_fade(0.0, 0.0, 0.0, "equal_power", "equal_power", locked=True)
             panel.set_stack_editable_hint(False)
             panel.sync_audio_edit(None)
+            panel.set_clip_gain_fade(None)
             return
         fade_in = (clip.fade_in_samples / AUDIO_REFERENCE_SAMPLE_RATE if clip.fade_in_samples is not None
                    else clip.fade_in_duration / self._fps)
@@ -1699,6 +1739,15 @@ class ProjectClipEditor(QWidget):
                              clip.effective_fade_curve_in or "equal_power",
                              clip.effective_fade_curve_out or "equal_power",
                              locked=self._locked)
+        # P0-3 · 快照驱动预览/试听消费片段级 gain/fade（模型参考域原样
+        # 传递；apply_clip_fade 内部换算消费率）。
+        panel.set_clip_gain_fade((
+            float(clip.audio_gain_db or 0.0),
+            int(clip.fade_in_duration or 0), int(clip.fade_out_duration or 0),
+            clip.fade_in_samples, clip.fade_out_samples,
+            clip.effective_fade_curve_in, clip.effective_fade_curve_out,
+            float(self._fps), int(clip.timeline_duration or 0),
+        ))
 
     # ------------------------------------------------------------------
     # P0-3：处理栈提交（控件 → 命令）

@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
+from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
 # R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
 from src.features.edit.core.fade_curve_spec import is_fade_curve
 from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
@@ -1097,6 +1098,27 @@ class ClipInstance:
         return self.fade_curve_out if self.fade_curve_out is not None \
             else self.fade_curve
 
+    # ── P0-3（2026-11-21 计划）：有效淡化长度 ────────────────────────
+
+    def effective_fade_in_frames(self, fps: float) -> float:
+        """有效淡入长度（帧，浮点）：采样域设置时按 48k 参考率换算。
+
+        画布绘制/命中与编辑器显示共用本换算——960 参考样本（20 ms）在
+        24/23.976 fps 下约 0.5/0.499 帧，按整数帧取整会消失；浮点帧让
+        极短淡化保持可绘制、可命中。
+        """
+        if self.fade_in_samples is not None:
+            rate = float(AUDIO_REFERENCE_SAMPLE_RATE)
+            return self.fade_in_samples / rate * float(fps or 0.0)
+        return float(self.fade_in_duration)
+
+    def effective_fade_out_frames(self, fps: float) -> float:
+        """有效淡出长度（帧，浮点；语义同 ``effective_fade_in_frames``）。"""
+        if self.fade_out_samples is not None:
+            rate = float(AUDIO_REFERENCE_SAMPLE_RATE)
+            return self.fade_out_samples / rate * float(fps or 0.0)
+        return float(self.fade_out_duration)
+
     def with_fade_end_curve(self, end: str, curve: "str | None",
                             ) -> ClipInstance:
         """R09：用户显式写单端曲线（另一端与共享字段不动；清该端原值）。"""
@@ -1188,7 +1210,11 @@ class ClipInstance:
             0,
             min(new_fade_in, self.timeline_duration - self.fade_out_duration),
         )
-        return replace(self, fade_in_duration=clamped_fade_in)
+        # P0-3：帧域写入即该端的权威长度——清掉采样域覆盖（否则
+        # fade_in_samples 继续压制帧字段，时间线拖拽表现为无效）。
+        # 另一端的字段类型不受影响（混合字段不串改）。
+        return replace(self, fade_in_duration=clamped_fade_in,
+                       fade_in_samples=None)
 
     def with_fade_out(self, new_fade_out: int) -> ClipInstance:
         """
@@ -1205,7 +1231,9 @@ class ClipInstance:
             0,
             min(new_fade_out, self.timeline_duration - self.fade_in_duration),
         )
-        return replace(self, fade_out_duration=clamped_fade_out)
+        # P0-3：帧域写入即该端权威长度（同 with_fade_in 的清覆盖语义）。
+        return replace(self, fade_out_duration=clamped_fade_out,
+                       fade_out_samples=None)
 
     def with_fade(self, new_fade_in: int, new_fade_out: int) -> ClipInstance:
         """
@@ -1223,10 +1251,14 @@ class ClipInstance:
             0,
             min(new_fade_out, self.timeline_duration - clamped_fade_in),
         )
+        # P0-3：帧域写入即两端权威长度（清采样域覆盖；单端写用
+        # with_fade_in/with_fade_out 时另一端字段不动）。
         return replace(
             self,
             fade_in_duration=clamped_fade_in,
             fade_out_duration=clamped_fade_out,
+            fade_in_samples=None,
+            fade_out_samples=None,
         )
 
     def with_composite_id(self, composite_id: str | None) -> ClipInstance:
