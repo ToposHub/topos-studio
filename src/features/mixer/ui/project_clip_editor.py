@@ -855,6 +855,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if self._audition.is_playing:
             self._audition.stop()
             return
+        self._audition.set_skip_range(None)
         t0, t1, _, _ = self.canvas.getSelection()
         start = self._audition_start_sample()
         rate = self._pcm_rate
@@ -885,11 +886,17 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def _stop_playback(self) -> None:
         # 停止回到开始试听的游标（会话负责回到 return_sample）。
         self._skip_selection_mode = False
+        self._audition.set_skip_range(None)
         self._audition.stop()
         self._is_playing = False
 
     def _toggle_skip_play(self) -> None:
-        """跳过选区试听 (Ctrl+Space)：从选区前 1.2 s 起播，越过 [t0, t1)。"""
+        """跳过选区试听 (Ctrl+Space)：从选区前 1.2 s 起播，越过 [t0, t1)。
+
+        P0-4 · 跳过在供块层生效（``ClipAuditionSession.set_skip_range``）：
+        选区内容不进设备缓冲，与旧的事后 seek 不同，选区开头不会先送
+        入设备再跳；播放头经块记录映射直接落在选区后。
+        """
         if self._pcm is None:
             return
         t0, t1, _, _ = self.canvas.getSelection()
@@ -899,9 +906,12 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         rate = self._pcm_rate
         self._skip_selection_mode = True
         start = max(0, int(round((t0 - 1.2) * rate)))
+        s0, s1 = int(round(t0 * rate)), int(round(t1 * rate))
         self._audition.set_loop(False)
+        self._audition.set_skip_range(s0, s1)
         if not self._audition.play(start):
             self._skip_selection_mode = False
+            self._audition.set_skip_range(None)
 
     def _on_audition_playing_changed(self, playing: bool) -> None:
         self._is_playing = playing
@@ -909,6 +919,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.playStateChanged.emit(playing)
         if not playing:
             self._skip_selection_mode = False
+            self._audition.set_skip_range(None)
             if self._pcm is not None:
                 self.update_playhead(self._audition.return_sample() / self._pcm_rate)
             self.update_output_meter(-60.0, -60.0)
@@ -926,12 +937,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         rate = self._pcm_rate
         sec = sample / rate
         if self._skip_selection_mode:
+            # P0-4 · 跳过已在供块层完成（选区内容不进设备）；这里只
+            # 负责越过选区尾 1.2 s 后的收尾停止。
             t0, t1, _, _ = self.canvas.getSelection()
             if t1 - t0 > 0.01:
-                s0, s1 = int(round(t0 * rate)), int(round(t1 * rate))
-                if s0 <= sample < s1:
-                    self._audition.seek(s1)
-                    return
                 if sample >= min(self._pcm.shape[1], int(round((t1 + 1.2) * rate))):
                     self._audition.stop()
                     return
