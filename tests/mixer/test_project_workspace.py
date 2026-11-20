@@ -316,7 +316,7 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     # P1-6：噪声采集/降噪随真实 PCM 启用（预览态）；频谱修复笔仍待后端。
     assert editor._panel.btn_denoise.isEnabled()
     qtbot.waitUntil(lambda: editor._panel.btn_tool_brush.isEnabled(), timeout=10000)
-    editor.float_requested.emit()
+    dock.setFloating(True)
     host._sync_floating_docks()
     assert dock.isFloating() and isinstance(dock.titleBarWidget(), FloatingDockTitleBar)
     dock.move(-20000, -20000)
@@ -350,7 +350,34 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     assert view.get_timeline().get_clip_by_id(clip.clip_id).effective_fade_curve_in is None
     editor.redo_requested.emit()
     assert view.get_timeline().get_clip_by_id(clip.clip_id).effective_fade_curve_out == "smooth"
-    editor.tab_requested.emit()
+    panel = editor._panel
+    panel.fadeApplied.emit(0.5, 0.25)
+    canvas = panel.canvas
+    for side, other in (("in", "out"), ("out", "in")):
+        before = view.get_timeline()
+        wave_rect, _, _ = canvas._wave_and_spec_rects()
+        handle = next(point for end, point, _ in canvas._fade_curve_points(wave_rect) if end == side)
+        start = handle.toPoint()
+        target = start + QPoint(0, 12 if side == "in" else -12)
+        qtbot.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+        qtbot.mouseMove(canvas, pos=target)
+        preview = canvas._fade_curve_preview
+        assert preview is not None and preview.startswith("power_v1:")
+        assert view.get_timeline() is before
+        qtbot.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=target)
+
+        previous = before.get_clip_by_id(clip.clip_id)
+        committed = view.get_timeline().get_clip_by_id(clip.clip_id)
+        edited_field, other_field = f"fade_curve_{side}", f"fade_curve_{other}"
+        assert getattr(committed, edited_field) == preview
+        assert getattr(committed, other_field) == getattr(previous, other_field)
+        assert (committed.fade_in_duration, committed.fade_out_duration) == (12, 6)
+        editor.undo_requested.emit()
+        assert getattr(view.get_timeline().get_clip_by_id(clip.clip_id), edited_field) == "smooth"
+        editor.redo_requested.emit()
+        assert getattr(view.get_timeline().get_clip_by_id(clip.clip_id), edited_field) == preview
+    assert editor._panel.btn_tab.isVisible()
+    editor._panel.btn_tab.click()
     assert not dock.isFloating()
     assert dock in host.tabifiedDockWidgets(host.dock_audio_timeline)
     host._sync_floating_docks()
@@ -384,7 +411,18 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     editor = dock.widget()
     assert editor.clip_id == first.clip_id
     assert dock.titleBarWidget().maximumHeight() == 1
-    assert editor.findChild(QWidget, "ClipEditorHeader").height() == 30
+    assert editor.findChild(QWidget, "ClipEditorHeader") is None
+    panel = editor._panel
+    transport = panel.btn_play.parentWidget().layout()
+    assert transport.indexOf(panel.btn_timeline) + 1 == transport.indexOf(panel.btn_play)
+    assert panel.btn_timeline.objectName() == panel.btn_play.objectName()
+    assert panel.btn_timeline.height() == panel.btn_play.height()
+    assert panel.btn_timeline.width() >= panel.btn_timeline.sizeHint().width()
+    assert not panel.btn_timeline.icon().isNull()
+    assert panel.btn_tab.isHidden()
+    assert editor._title.parentWidget() is panel.sel_info_lbl.parentWidget()
+    assert editor._status.parentWidget() is panel.sel_info_lbl.parentWidget()
+    assert editor._title.accessibleName() == asset.display_name
     editor._panel.fi_pill.valueEdited.emit("0.030 s")
     edited = view.get_timeline().get_clip_by_id(first.clip_id)
     assert (edited.fade_in_samples, edited.fade_out_samples) == (1440, None)
@@ -393,7 +431,7 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     editor.undo_requested.emit()
     assert view.get_timeline().get_clip_by_id(first.clip_id).fade_in_samples == 960
 
-    editor._return_to_timeline()
+    qtbot.mouseClick(panel.btn_timeline, Qt.MouseButton.LeftButton)
     tabs = next(bar for bar in host.findChildren(QTabBar) if dock.windowTitle() in
                 [bar.tabText(index) for index in range(bar.count())])
     clip_tab = next(index for index in range(tabs.count()) if tabs.tabText(index) == dock.windowTitle())
@@ -403,7 +441,7 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     qtbot.mouseClick(tabs, Qt.MouseButton.LeftButton, pos=tabs.tabRect(clip_tab).center())
     assert editor.clip_id == second.clip_id
 
-    editor._return_to_timeline()
+    qtbot.mouseClick(panel.btn_timeline, Qt.MouseButton.LeftButton)
     view.set_selection(TimelineSelection())
     qtbot.mouseClick(tabs, Qt.MouseButton.LeftButton, pos=tabs.tabRect(clip_tab).center())
     assert editor.clip_id is None and editor._empty.isVisible()
@@ -459,6 +497,9 @@ def test_media_pool_audio_file_opens_original_editor_without_a_timeline(
     qtbot.waitUntil(lambda: editor._panel.peak_val_lbl.text() != "—", timeout=10000)
     assert host.timeline_panel.timeline_view.get_timeline() is None
     assert host._current_edit_project is project
+    assert editor._title.accessibleName() == asset.display_name
+    qtbot.mouseClick(editor._panel.btn_timeline, Qt.MouseButton.LeftButton)
+    assert dock.isHidden() and host.dock_audio_timeline.isVisible()
     host._clear_project_audio_clip_editor()
     assert dock.isHidden() and editor._asset is None
 
@@ -1219,6 +1260,47 @@ def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_pa
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
 
 
+def test_clip_editor_canvas_selection_gain_commits_to_target_channel(project_host, qtbot, tmp_path) -> None:
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    path = tmp_path / "gain.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setparams((2, 2, 48000, 0, "NONE", "not compressed"))
+        wav.writeframes(b"\x00\x20\x00\x20" * 240000)
+    asset = MediaAsset(
+        asset_id="audio", path=str(path), media_type="audio", display_name="Gain",
+        metadata={"audio_info": {"sample_rate": 48000, "channels": 2},
+                  "duration_seconds": 5.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Gain", assets={"audio": asset})
+    host.show_mixer()
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    host._open_project_audio_clip_editor(clip_id)
+    panel = host.dock_audio_clip_editor.widget()._panel
+    qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=10000)
+    raw = panel._raw_pcm
+    panel.canvas.setSelection(1.0, 3.0)
+    panel._edit_ch_btns[0].click()
+    panel.canvas.setPreviewGain(-6.0)
+    panel.canvas.repaint()
+    assert panel.canvas._gain_commit_rect.isValid()
+    qtbot.mouseClick(panel.canvas, Qt.MouseButton.LeftButton,
+                     pos=panel.canvas._gain_commit_rect.center().toPoint())
+
+    edited = view.get_timeline().get_clip_by_id(clip_id)
+    step = edited.audio_edit["steps"][0]
+    assert step["processor_id"] == "range_gain"
+    assert step["params"]["channels"] == [0]
+    assert (step["params"]["start"], step["params"]["end"]) == (48000, 144000)
+    assert edited.audio_gain_db == 0.0
+    qtbot.waitUntil(lambda: panel._pcm[0, 96000] < raw[0, 96000], timeout=10000)
+    np.testing.assert_array_equal(panel._pcm[1], raw[1])
+    view.undo()
+    qtbot.waitUntil(lambda: np.array_equal(panel._pcm, raw), timeout=10000)
+
+
 def test_clip_editor_timepitch_commit_changes_length_and_undoes(
         project_host, qtbot, tmp_path, monkeypatch) -> None:
     """§6.2：变速预览 → 提交（gap 模式）→ 片段变短 + 步骤入栈 → 一次撤销。"""
@@ -1265,6 +1347,16 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     qtbot.waitUntil(lambda: panel._timepitch_pcm is not None, timeout=10000)
     assert panel._pending_timepitch is not None
     assert panel._timepitch_commit_button.isEnabled()
+    assert not panel._timepitch_discard_button.isHidden()
+    revision = view.get_timeline().revision
+    panel._timepitch_discard_button.click()
+    assert view.get_timeline().revision == revision
+    assert panel._pending_timepitch is None and not panel._timepitch_commit_button.isEnabled()
+    assert panel._timepitch_discard_button.isHidden()
+    qtbot.waitUntil(lambda: panel.canvas._duration == 5.0, timeout=10000)
+    panel.canvas.setSelection(1.0, 4.0)
+    panel.stretch_knob.setValue(150.0, emit=False)
+    panel._timepitch_button.click()
 
     # 提交：改长度事务一次落库（片段时长 + audio_edit time_stretch）。
     panel._timepitch_commit_button.click()

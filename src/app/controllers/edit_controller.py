@@ -5121,6 +5121,13 @@ class EditControllerMixin:
             ),
         )
 
+    def _commit_mixer_clip_fade_end_curve(self, clip_id: str, end: str, curve: str) -> None:
+        from src.features.edit.core.commands import SetFadeEndCurveCommand
+
+        self._execute_mixer_clip_editor_command(
+            clip_id, lambda clip: SetFadeEndCurveCommand.create(clip_id, clip.track_id, end, curve),
+        )
+
     def _commit_mixer_clip_audio_edit(self, clip_id: str, audio_edit, label: str) -> None:
         """P0-3：Clip Editor 处理栈事务（新增/旁路/删除/清空共用入口）。"""
         from src.features.edit.core.commands import UpdateClipAudioEditCommand

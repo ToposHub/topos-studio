@@ -545,9 +545,13 @@ class _ClipPcmWorker(QThread):
                     spec.sample_rate, cancel_check=canceled,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.failed.emit(spec.cache_key(), str(exc))
+                if not canceled():
+                    self.failed.emit(spec.cache_key(), str(exc))
                 continue
-            if canceled() or pcm is None:
+            if canceled():
+                continue
+            if pcm is None:
+                self.failed.emit(spec.cache_key(), "")
                 continue
             if spec.reverse:
                 pcm = pcm[:, ::-1]
@@ -575,7 +579,7 @@ class ClipPcmProvider(QObject):
         self._cache_order: list[tuple] = []
         self._worker = _ClipPcmWorker()
         self._worker.finished_pcm.connect(self._on_worker_pcm)
-        self._worker.failed.connect(self.pcm_failed)
+        self._worker.failed.connect(self._on_worker_failed)
         self._pending: dict[tuple, list[Callable[[ClipPcmResult], None]]] = {}
         self._done_once: set[tuple] = set()
 
@@ -610,6 +614,10 @@ class ClipPcmProvider(QObject):
         self._worker.wait(200)
 
     # ------------------------------------------------------------------
+    def _on_worker_failed(self, key: tuple, error: str) -> None:
+        self._pending.pop(key, None)
+        self.pcm_failed.emit(key, error)
+
     def _on_worker_pcm(self, result: ClipPcmResult) -> None:
         key = result.spec_key
         self._cache[key] = result

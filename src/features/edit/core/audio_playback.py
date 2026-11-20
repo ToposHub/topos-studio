@@ -1155,9 +1155,9 @@ class AudioDecoder:
             "fade_out_frames": int(fade_out_frames),
             "fps": float(fps),
             "fade_in_samples": int(fade_in_samples)
-            if fade_in_samples else None,
+            if fade_in_samples is not None else None,
             "fade_out_samples": int(fade_out_samples)
-            if fade_out_samples else None,
+            if fade_out_samples is not None else None,
             "audio_sample_offset": int(audio_sample_offset or 0),
             # B16：曲线形状（None=音频 legacy equal_power）；R09 两端独立
             "fade_curve": fade_curve,
@@ -5662,7 +5662,7 @@ class AudioPlaybackManager(QObject):
         # preserve_pitch_request 同口径解析（倒放/曲线回退变调并留痕）。
         decoder.set_preserve_pitch(bool(preserve_pitch))
         # F3.3: 采样域淡化/子帧偏移（预览/成片同语义）
-        if fade_in_samples or fade_out_samples \
+        if fade_in_samples is not None or fade_out_samples is not None \
                 or audio_sample_offset or source_sample_offset:
             # F3.3 完整路径（采样域覆盖 + 子帧偏移）。此前此处之后还有
             # 一次无条件 set_fade，把 overrides/offset 整个冲掉——已修。

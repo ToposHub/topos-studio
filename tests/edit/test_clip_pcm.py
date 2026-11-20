@@ -241,6 +241,18 @@ class TestProvider:
 
 
 class TestProjectClipEditorPcm:
+    def test_missing_source_reports_pcm_failure(self, qtbot, tmp_path) -> None:
+        from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
+
+        asset = make_asset("missing", str(tmp_path / "missing.wav"), duration_seconds=1.0)
+        editor = ProjectClipEditor()
+        qtbot.addWidget(editor)
+        editor.open_source(asset)
+        qtbot.waitUntil(lambda: editor._pcm_load_failed, timeout=5000)
+        assert not editor._panel.btn_play.isEnabled()
+        assert editor._status.toolTip() == editor._panel.btn_play.toolTip()
+        assert not editor._pcm_provider._pending.get(editor._pcm_spec_key)
+
     def test_open_source_attaches_pcm_enables_playback(self, qtbot, tmp_path) -> None:
         from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 

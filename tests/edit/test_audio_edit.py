@@ -29,6 +29,7 @@ from src.features.edit.core.audio_edit import (
     set_envelope,
     set_markers,
     steps_signature,
+    upsert_step,
     validate_audio_edit,
 )
 from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
@@ -60,6 +61,17 @@ def make_clip(**overrides) -> ClipInstance:
 
 
 class TestModel:
+    def test_range_gain_replacement_preserves_other_operation(self) -> None:
+        manual = make_step("range_gain", 0, 48000, (0,), gain_db=-2.0,
+                           operation="selection_gain")
+        match = make_step("range_gain", 0, 48000, (0,), gain_db=-5.0)
+        updated = upsert_step(new_audio_edit([manual, match]),
+                              make_step("range_gain", 0, 48000, (0,), gain_db=-7.0))
+        manual_after, match_after = updated["steps"]
+        assert manual_after == manual
+        assert match_after["step_id"] == match["step_id"]
+        assert match_after["params"]["gain_db"] == -7.0
+
     def test_make_step_structure_and_validation(self) -> None:
         step = make_step("range_gain", start=4800, end=9600, channels=(0,), gain_db=-6.0)
         assert step["processor_id"] == "range_gain"

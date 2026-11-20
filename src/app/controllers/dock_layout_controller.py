@@ -1438,6 +1438,7 @@ class DockLayoutMixin:
         panel.fade_committed.connect(self._commit_mixer_clip_fade)
         panel.sample_fade_committed.connect(self._commit_mixer_clip_sample_fade)
         panel.fade_curve_committed.connect(self._commit_mixer_clip_fade_curve)
+        panel.fade_end_curve_committed.connect(self._commit_mixer_clip_fade_end_curve)
         # P0-2：试听开始时暂停时间线播放，两套输出不叠音。
         panel.audition_active_changed.connect(self._pause_timeline_for_clip_audition)
         # P0-3：处理栈提交走时间线命令（旁路/删除/清空可撤销）。
@@ -1446,10 +1447,8 @@ class DockLayoutMixin:
         panel.length_change_committed.connect(self._commit_mixer_clip_length_change)
         panel.undo_requested.connect(view.undo)
         panel.redo_requested.connect(view.redo)
-        panel.float_requested.connect(self._float_project_audio_clip_editor)
         panel.tab_requested.connect(self._tab_project_audio_clip_editor)
         panel.timeline_requested.connect(self._raise_mixer_audio_timeline)
-        panel.close_requested.connect(dock.hide)
         self._audio_clip_editor_placed = False
         self._opening_audio_clip_editor = False
         self.tabifiedDockWidgetActivated.connect(self._on_mixer_audio_dock_activated)
@@ -1515,7 +1514,7 @@ class DockLayoutMixin:
         dock = self.dock_audio_clip_editor
         floating = dock.isFloating()
         tabbed = not floating and self.dock_audio_timeline in self.tabifiedDockWidgets(dock)
-        dock.widget().set_dock_mode(floating=floating, tabbed=tabbed)
+        dock.widget().set_dock_mode(tabbed=tabbed)
 
     def _open_project_audio_source_editor(self, asset_id: str) -> None:
         project = getattr(self, "_current_edit_project", None)
@@ -1530,7 +1529,7 @@ class DockLayoutMixin:
             self.switch_to_page("Mixer")
         return self.current_page == "Mixer"
 
-    def _show_project_audio_clip_editor(self, placement: Literal["clip", "source", "tabbed", "floating"]) -> None:
+    def _show_project_audio_clip_editor(self, placement: Literal["clip", "source", "tabbed"]) -> None:
         dock = self.dock_audio_clip_editor
         self._opening_audio_clip_editor = True
         try:
@@ -1538,7 +1537,7 @@ class DockLayoutMixin:
                               or self.tabifiedDockWidgets(dock))
             if placement == "tabbed" or (placement == "clip" and first_open):
                 self._dock_project_audio_clip_editor_with_timeline()
-            elif placement == "floating" or (placement == "source" and first_open):
+            elif placement == "source" and first_open:
                 dock.setFloating(True)
                 dock.resize(1220, 780)
             self._audio_clip_editor_placed = True
@@ -1573,9 +1572,6 @@ class DockLayoutMixin:
             dock.widget().reset()
             dock.hide()
 
-    def _float_project_audio_clip_editor(self) -> None:
-        self._show_project_audio_clip_editor("floating")
-
     def _tab_project_audio_clip_editor(self) -> None:
         self._show_project_audio_clip_editor("tabbed")
 
@@ -1585,7 +1581,6 @@ class DockLayoutMixin:
         dock.setFloating(False)
         if timeline not in self.tabifiedDockWidgets(dock):
             self.tabifyDockWidget(timeline, dock)
-        # The editor has its own compact header in this tab group.
         self._sync_mixer_clip_editor_dock_mode()
         timeline.show()
 
