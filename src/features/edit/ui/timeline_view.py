@@ -11726,7 +11726,9 @@ class TimelineView(QGraphicsView):
                 "Gap split skipped for retimed clip %s (silence mapping "
                 "needs constant speed)", clip_id)
             return
-        from src.features.edit.core.clip_pcm import decode_audio_range
+        from src.features.edit.core.clip_pcm import (
+            decode_audio_range, resolve_source_channel_map,
+        )
         from src.features.edit.core.dialogue_tools import plan_gap_splits
         from src.features.edit.core.sample_time import (
             AUDIO_REFERENCE_SAMPLE_RATE,
@@ -11741,7 +11743,9 @@ class TimelineView(QGraphicsView):
         src_in = int(getattr(clip, "source_in", 0) or 0)
         src_out = int(getattr(clip, "source_out", 0) or src_in)
         pcm = decode_audio_range(str(path), src_in, max(src_out, src_in),
-                                 sample_rate)
+                                 sample_rate,
+                                 channel_map=resolve_source_channel_map(
+                                     self._project, asset) or None)
         if pcm is None or pcm.shape[-1] <= 0:
             logger.info("Gap split skipped: could not decode clip %s", clip_id)
             return

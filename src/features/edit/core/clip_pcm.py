@@ -66,16 +66,20 @@ class ClipAudioRenderSpec:
     reverse: bool
     offset_seconds: float = 0.0
     display_duration: float = 0.0
+    # P0-2 · 生效的源选道（绑定优先，其次工程 patch；()=直通）。
+    # 进入 cache_key：patch/绑定切换后旧结果不得复用。
+    source_channel_map: tuple = ()
 
     @property
     def sample_count(self) -> int:
         return max(0, self.end_sample - self.start_sample)
 
     def cache_key(self) -> tuple:
-        """结果缓存的稳定标识：源指纹 + 精确范围 + 速率/声道。"""
+        """结果缓存的稳定标识：源指纹 + 精确范围 + 速率/声道/选道。"""
         return (
             self.source_fingerprint, self.sample_rate, self.channel_count,
             self.start_sample, self.end_sample, self.reverse,
+            self.source_channel_map,
         )
 
 
@@ -110,6 +114,34 @@ def _audio_channel_count(asset) -> int:
 def _audio_channel_layout(asset) -> Optional[str]:
     layout = getattr(asset, "audio_channel_layout", None)
     return layout if isinstance(layout, str) and layout else None
+
+
+def resolve_source_channel_map(project, asset) -> tuple:
+    """P0-2 · 素材生效的源选道：绑定优先，其次工程 patch 覆盖。
+
+    绑定的 ``audio_channel_map`` 只在绑定实际切换音频源（外录 WAV）时
+    生效；否则回退 ``source_patch_overrides`` 里该素材的 patch（要求
+    ``audio_enabled`` 且显式选道）。与预渲染计划（pcm_render_cache）同
+    一解析顺序——片段取样与渲染基底共享同一通道域。返回
+    ``((src, dst), ...)``；无选道 = ``()``（直通）。
+    """
+    asset_id = str(getattr(asset, "asset_id", ""))
+    try:
+        binding = binding_for_asset(
+            getattr(project, "audio_sync_bindings", None) or {}, asset_id)
+        if binding is not None and binding.audio_channel_map:
+            return tuple(tuple(pair) for pair in binding.audio_channel_map)
+    except Exception:  # noqa: BLE001 - 绑定解析失败按直通（键仍稳定）
+        pass
+    try:
+        from src.features.edit.core.source_patch import patch_for_asset
+        overrides = getattr(project, "source_patch_overrides", None) or {}
+        patch = patch_for_asset(overrides, asset_id)
+        if patch.audio_enabled and patch.audio_channel_map:
+            return tuple(tuple(pair) for pair in patch.audio_channel_map)
+    except Exception:  # noqa: BLE001 - patch 解析失败按直通（键仍稳定）
+        pass
+    return ()
 
 
 def resolve_clip_audio_spec(
@@ -154,6 +186,7 @@ def resolve_clip_audio_spec(
         reverse=bool(clip.is_reverse_playback()),
         offset_seconds=offset,
         display_duration=clip.timeline_duration / timeline_fps,
+        source_channel_map=resolve_source_channel_map(project, asset),
     )
 
 
@@ -190,6 +223,7 @@ def resolve_asset_audio_spec(
         reverse=False,
         offset_seconds=offset,
         display_duration=total / working_rate,
+        source_channel_map=resolve_source_channel_map(project, asset),
     )
 
 
@@ -236,75 +270,38 @@ def decode_audio_range(
         # 会引入样本漂移；片段取样受 300 s 上限约束，从头解码并精确跳过
         # preroll 更可靠（脉冲位置容差 1 sample 的验收依赖这一点）。
         resampler = None
-        mono_resampler = None
+        # P0-2 · >2ch 逐声道独立 mono resampler：swresample 是有状态的
+        # （FIR 历史 + 小数采样累加器）——共用单实例会把前一声道的滤波
+        # 尾泄漏进后续声道（串音），率转换下逐声道输出长度还会不等长
+        # （np.stack 失败 → 整帧被吞 → 输出短缺）。每声道一个实例、喂
+        # 等长 mono 输入，输出逐样本独立且等长（见 AUD：44.1k 4ch 只给
+        # CH1 0.25 时右声道串漏 0.281 / 只收 4458 样本）。
+        channel_resamplers: list = []
         source_channels = 0
         blocks: list[np.ndarray] = []
         collected = 0
         # 先丢到入点前的 preroll，再收满所需采样。
         skip = start_sample
-        for frame in container.decode(stream):
-            if cancel_check is not None and cancel_check():
-                return None
-            if resampler is None and mono_resampler is None:
-                source_channels = len(frame.layout.channels)
-                # P0：保留源布局解码（>2ch 不在重采样阶段 naive 混声）；
-                # 工作域折叠在解码完成后走我们的 BS.775 矩阵。无名多声道
-                # 布局（无 channel mask 的 WAV）会让 PyAV 重采样器崩溃——
-                # >2ch 一律逐声道以 mono 重采样（声道数无关、率精确）。
-                if source_channels <= 2:
-                    resampler = av.AudioResampler(
-                        format="fltp",
-                        layout="mono" if source_channels == 1 else "stereo",
-                        rate=sample_rate)
-                else:
-                    mono_resampler = av.AudioResampler(
-                        format="fltp", layout="mono", rate=sample_rate)
-            if resampler is not None:
-                try:
-                    resampled = resampler.resample(frame)
-                except Exception:  # noqa: BLE001 - 个别帧重采样失败时跳过
-                    continue
-                if resampled is None:
-                    continue
-                if not isinstance(resampled, (list, tuple)):
-                    resampled = [resampled]
-                chunks = [
-                    out.to_ndarray() for out in resampled
-                ]
-            else:
-                # >2ch：packed → (chs, n) float32，逐声道 mono 重采样。
-                try:
-                    raw = frame.to_ndarray()
-                except Exception:  # noqa: BLE001
-                    continue
-                if raw.ndim == 1:
-                    raw = raw.reshape(1, -1)
-                if raw.dtype != np.float32:
-                    raw = raw.astype(np.float32) / 32768.0
-                if raw.shape[0] == 1:
-                    raw = raw.reshape(-1, source_channels).T
-                try:
-                    per_channel = []
-                    for ch in range(source_channels):
-                        mono_row = np.ascontiguousarray(
-                            raw[ch], dtype=np.float32).reshape(1, -1)
-                        mono_frame = av.AudioFrame.from_ndarray(
-                            mono_row, format="fltp", layout="mono")
-                        mono_frame.sample_rate = frame.sample_rate or sample_rate
-                        res_ch = mono_resampler.resample(mono_frame)
-                        if res_ch is None:
-                            continue
-                        if isinstance(res_ch, (list, tuple)):
-                            res_ch = res_ch[0]
-                        per_channel.append(res_ch.to_ndarray()[0])
-                    if not per_channel:
-                        continue
-                    chunks = [np.stack(per_channel)]
-                except Exception:  # noqa: BLE001
-                    continue
-            for data in chunks:
+
+        def _resampled_ndarrays(result) -> list[np.ndarray]:
+            """resample() 结果（帧或帧列表）→ 平面 float32 数组列表。"""
+            if result is None:
+                return []
+            frames = result if isinstance(result, (list, tuple)) else [result]
+            arrays = []
+            for out in frames:
+                data = out.to_ndarray()
+                if data.ndim == 1:
+                    data = data.reshape(1, -1)
+                arrays.append(data.astype(np.float32, copy=False))
+            return arrays
+
+        def _feed(data_list: list[np.ndarray]) -> bool:
+            """块入账（跳过 preroll / 收满即停）；返回是否已收满。"""
+            nonlocal skip, collected
+            for data in data_list:
                 if cancel_check is not None and cancel_check():
-                    return None
+                    return True
                 if data.ndim == 1:
                     data = data.reshape(1, -1)
                 if skip > 0:
@@ -316,9 +313,99 @@ def decode_audio_range(
                 blocks.append(data.astype(np.float32, copy=False))
                 collected += data.shape[1]
                 if collected >= wanted:
-                    break
-            if collected >= wanted:
-                break
+                    return True
+            return collected >= wanted
+
+        for frame in container.decode(stream):
+            if cancel_check is not None and cancel_check():
+                return None
+            if resampler is None and not channel_resamplers:
+                source_channels = len(frame.layout.channels)
+                # P0：保留源布局解码（>2ch 不在重采样阶段 naive 混声）；
+                # 工作域折叠在解码完成后走我们的 BS.775 矩阵。无名多声道
+                # 布局（无 channel mask 的 WAV）会让 PyAV 重采样器崩溃——
+                # >2ch 一律逐声道以 mono 重采样（声道数无关、率精确）。
+                if source_channels <= 2:
+                    resampler = av.AudioResampler(
+                        format="fltp",
+                        layout="mono" if source_channels == 1 else "stereo",
+                        rate=sample_rate)
+                else:
+                    channel_resamplers = [
+                        av.AudioResampler(
+                            format="fltp", layout="mono", rate=sample_rate)
+                        for _ in range(source_channels)
+                    ]
+            if resampler is not None:
+                try:
+                    if _feed(_resampled_ndarrays(resampler.resample(frame))):
+                        break
+                except Exception:  # noqa: BLE001 - 个别帧重采样失败时跳过
+                    continue
+            else:
+                # >2ch：packed → (chs, n) float32，逐声道独立 mono 重采样。
+                try:
+                    raw = frame.to_ndarray()
+                except Exception:  # noqa: BLE001
+                    continue
+                if raw.ndim == 1:
+                    raw = raw.reshape(1, -1)
+                if raw.dtype != np.float32:
+                    raw = raw.astype(np.float32) / 32768.0
+                if raw.shape[0] == 1:
+                    raw = raw.reshape(-1, source_channels).T
+                per_channel: list[np.ndarray] = []
+                try:
+                    for ch in range(source_channels):
+                        mono_row = np.ascontiguousarray(
+                            raw[ch], dtype=np.float32).reshape(1, -1)
+                        mono_frame = av.AudioFrame.from_ndarray(
+                            mono_row, format="fltp", layout="mono")
+                        mono_frame.sample_rate = frame.sample_rate or sample_rate
+                        parts = _resampled_ndarrays(
+                            channel_resamplers[ch].resample(mono_frame))
+                        if not parts:
+                            continue
+                        per_channel.append(np.concatenate(parts, axis=1)[0])
+                    if not per_channel:
+                        continue
+                    # 独立实例喂等长输入时逐声道输出等长；防御性对齐到
+                    # 最短通道（个别后端差异宁可裁掉尾部也不丢整帧）。
+                    width = min(part.shape[0] for part in per_channel)
+                    if any(part.shape[0] != width for part in per_channel):
+                        logger.warning(
+                            "clip pcm multichannel resample length mismatch "
+                            "for %s (trimmed to %d)", path, width)
+                        per_channel = [part[:width] for part in per_channel]
+                    if _feed([np.stack(per_channel)]):
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+        else:
+            # 解码自然耗尽仍未收满 → 冲刷重采样器内部延迟块（swresample
+            # 的 FIR 尾部），保留最后几个样本（EOF 语义）。
+            tails: list[np.ndarray] = []
+            try:
+                if resampler is not None:
+                    tails = _resampled_ndarrays(resampler.resample(None))
+                elif channel_resamplers:
+                    per_channel = []
+                    for channel_resampler in channel_resamplers:
+                        parts = _resampled_ndarrays(
+                            channel_resampler.resample(None))
+                        if not parts:
+                            continue
+                        per_channel.append(np.concatenate(parts, axis=1)[0])
+                    if per_channel:
+                        width = min(part.shape[0] for part in per_channel)
+                        per_channel = [part[:width] for part in per_channel]
+                        tails = [np.stack(per_channel)]
+            except Exception:  # noqa: BLE001 - 冲刷失败按已有块交付
+                tails = []
+            if tails:
+                _feed(tails)
+        if cancel_check is not None and cancel_check():
+            return None
         if not blocks:
             return None
         pcm = np.concatenate(blocks, axis=1)[:, :wanted]
@@ -543,6 +630,9 @@ class _ClipPcmWorker(QThread):
                 pcm = decode_audio_range(
                     spec.source_path, spec.start_sample, spec.end_sample,
                     spec.sample_rate, cancel_check=canceled,
+                    # P0-2 · 片段取样与预渲染基底同一通道域：spec 携带
+                    # 绑定/patch 选道，decode 在完整 Nch 域先选道再降混。
+                    channel_map=spec.source_channel_map or None,
                 )
             except Exception as exc:  # noqa: BLE001
                 if not canceled():

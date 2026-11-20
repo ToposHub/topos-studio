@@ -76,7 +76,7 @@ class TestResolveSpec:
         assert spec.sample_rate == 48000 and spec.channel_count == 2
         assert not spec.reverse
         assert spec.cache_key() == (
-            spec.source_fingerprint, 48000, 2, 24000, 120000, False)
+            spec.source_fingerprint, 48000, 2, 24000, 120000, False, ())
 
     def test_source_sample_offset_and_nonzero_fps(self, tmp_path) -> None:
         from src.features.edit.core.clip_params import SpeedParams

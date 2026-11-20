@@ -57,6 +57,10 @@ class ChannelLayout(Enum):
     STEREO = "stereo"
     SURROUND_5_1 = "5.1"
     SURROUND_7_1 = "7.1"
+    # P0-2（2026-11-21 计划）：四声道素材（quad/4.0，L R Ls Rs）此前
+    # from_channel_count(4) 直接拒绝 → 解码整体失败。补充标准 ITU
+    # quad 折混（Lo = L + 0.707*Ls，Ro = R + 0.707*Rs）。
+    QUAD = "4.0"
 
     @property
     def channel_count(self) -> int:
@@ -66,6 +70,7 @@ class ChannelLayout(Enum):
             ChannelLayout.STEREO: 2,
             ChannelLayout.SURROUND_5_1: 6,
             ChannelLayout.SURROUND_7_1: 8,
+            ChannelLayout.QUAD: 4,
         }[self]
 
     @property
@@ -76,6 +81,7 @@ class ChannelLayout(Enum):
             ChannelLayout.STEREO: ("L", "R"),
             ChannelLayout.SURROUND_5_1: ("L", "R", "C", "LFE", "Ls", "Rs"),
             ChannelLayout.SURROUND_7_1: ("L", "R", "C", "LFE", "Ls", "Rs", "Lss", "Rss"),
+            ChannelLayout.QUAD: ("L", "R", "Ls", "Rs"),
         }[self]
 
     @property
@@ -86,17 +92,19 @@ class ChannelLayout(Enum):
             ChannelLayout.STEREO: "stereo",
             ChannelLayout.SURROUND_5_1: "5.1",
             ChannelLayout.SURROUND_7_1: "7.1",
+            ChannelLayout.QUAD: "4.0",
         }[self]
 
     @staticmethod
     def from_channel_count(count: int) -> "ChannelLayout":
-        """根据声道数推断布局（1=mono, 2=stereo, 6=5.1, 8=7.1）。未知抛 ValueError。"""
+        """根据声道数推断布局（1=mono, 2=stereo, 4=quad, 6=5.1, 8=7.1）。未知抛 ValueError。"""
         mapping = {1: ChannelLayout.MONO, 2: ChannelLayout.STEREO,
+                   4: ChannelLayout.QUAD,
                    6: ChannelLayout.SURROUND_5_1, 8: ChannelLayout.SURROUND_7_1}
         if count not in mapping:
             raise ValueError(
                 f"Unknown channel count {count}: 无法推断 ChannelLayout。"
-                f"支持: 1(mono)/2(stereo)/6(5.1)/8(7.1)，其他需显式指定。"
+                f"支持: 1(mono)/2(stereo)/4(quad)/6(5.1)/8(7.1)，其他需显式指定。"
             )
         return mapping[count]
 
@@ -114,6 +122,8 @@ class ChannelLayout(Enum):
             return ChannelLayout.MONO
         if n in ("stereo", "2c", "2.0"):
             return ChannelLayout.STEREO
+        if n in ("4.0", "quad", "4c"):
+            return ChannelLayout.QUAD
         if n.startswith("5.1"):
             if n.startswith("5.1."):
                 raise ValueError(
@@ -208,6 +218,21 @@ def downmix_matrix(
         m[4, 4] = 1.0
         m[5, 5] = 1.0
         return m
+
+    # ── quad → stereo ──
+    # 源顺序: [L, R, Ls, Rs]
+    # Lo = L + 0.707*Ls, Ro = R + 0.707*Rs（ITU quad，与 7.1→5.1 的
+    # 侧环并入系数一致）
+    if src == ChannelLayout.QUAD and dst == ChannelLayout.STEREO:
+        return np.array([
+            # L    R    Ls         Rs
+            [1.0, 0.0, _SQRT_HALF, 0.0],         # Lo
+            [0.0, 1.0, 0.0,        _SQRT_HALF],  # Ro
+        ], dtype=np.float64)
+
+    # ── quad → mono（等功率 0.25×4 = 1）──
+    if src == ChannelLayout.QUAD and dst == ChannelLayout.MONO:
+        return np.array([[0.5, 0.5, 0.5, 0.5]], dtype=np.float64)
 
     # ── 7.1 → stereo（经 5.1 中转）──
     if src == ChannelLayout.SURROUND_7_1 and dst == ChannelLayout.STEREO:
