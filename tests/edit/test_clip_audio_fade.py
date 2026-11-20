@@ -89,6 +89,19 @@ class TestEqualPowerFadeEnvelope:
 class TestApplyClipFade:
     """apply_clip_fade 在样本块上应用淡化。"""
 
+    def test_zero_sample_override_disables_only_its_legacy_frame_fade(self) -> None:
+        samples = np.full((2, 2000), 0.25, dtype=np.float32)
+        settings = dict(fade_in_frames=4, fade_out_frames=4, fps=24.0, sample_rate=48000.0)
+        first = apply_clip_fade(samples, 0, 24, current_frame=0,
+                                fade_in_samples_override=0, **settings)
+        last = apply_clip_fade(samples, 0, 24, current_frame=23,
+                               fade_in_samples_override=0, **settings)
+        zero_out = apply_clip_fade(samples, 0, 24, current_frame=23,
+                                   fade_out_samples_override=0, **settings)
+        np.testing.assert_array_equal(first, samples)
+        assert last[0, -1] == pytest.approx(0.0)
+        np.testing.assert_array_equal(zero_out, samples)
+
     def test_fade_in_at_clip_start(self):
         """clip 开头的块应用淡入（首样本≈0）。"""
         samples = np.ones((2, 480), dtype=np.float32) * 0.5

@@ -711,10 +711,8 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
     if samples_per_frame <= 0.0:
         return samples
 
-    has_in = fade_in_frames > 0 or (
-        fade_in_samples_override is not None and fade_in_samples_override > 0)
-    has_out = fade_out_frames > 0 or (
-        fade_out_samples_override is not None and fade_out_samples_override > 0)
+    has_in = (fade_in_frames if fade_in_samples_override is None else fade_in_samples_override) > 0
+    has_out = (fade_out_frames if fade_out_samples_override is None else fade_out_samples_override) > 0
     if not has_in and not has_out:
         return samples
 
@@ -729,14 +727,14 @@ def apply_clip_fade(samples: np.ndarray, clip_timeline_start: int,
     # 中间段（sustain）O(1) 早退：块完全不在任何淡化区 → 包络恒 1，无需
     # 逐样本计算。区间判定与下方完整路径的 mask 语义一致：
     #   淡入区 = 位置 < fade_in_samples；淡出区 = 位置 >= fade_out_start。
-    if fade_in_samples_override is not None and fade_in_samples_override > 0:
-        fade_in_samples = float(fade_in_samples_override)
+    if fade_in_samples_override is not None:
+        fade_in_samples = max(0.0, float(fade_in_samples_override))
     else:
         fade_in_samples = max(1.0, float(fade_in_frames) * samples_per_frame) \
             if fade_in_frames > 0 else 0.0
     clip_duration_samples = max(0.0, float(clip_timeline_duration) * samples_per_frame)
-    if fade_out_samples_override is not None and fade_out_samples_override > 0:
-        fade_out_samples = float(fade_out_samples_override)
+    if fade_out_samples_override is not None:
+        fade_out_samples = max(0.0, float(fade_out_samples_override))
     else:
         fade_out_samples = max(1.0, float(fade_out_frames) * samples_per_frame) \
             if fade_out_frames > 0 else 0.0

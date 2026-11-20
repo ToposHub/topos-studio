@@ -49,9 +49,11 @@ class TestReopenProcessedPreview:
         panel._duration = 1.0
         panel.sync_audio_edit(_mute_edit(RATE))
         panel.attach_pcm(_pcm(), RATE)
+        panel.sync_gain_fade(0.0, 0.2, 0.3, "power_v1:1.50000", "linear", locked=False)
         # attach_pcm 后不切 A/B、不重载——预览发布即为处理结果。
         panel._refresh_stack_preview()
         assert panel._pcm is not None
+        assert (panel.canvas._fade_in_sec, panel.canvas._fade_out_sec) == (0.2, 0.3)
         # 静音含 3 ms 边缘过渡（防爆音合同）：内部为 0，整体峰值远低于
         # 原始 0.25（原 bug 首次预览即源音 0.25）。
         assert np.max(np.abs(panel._pcm[:, 500:-500])) == 0.0
@@ -129,9 +131,10 @@ class TestPreviewGenerationGuard:
         panel._refresh_stack_preview()
         good = panel._pcm
         # worker 失败：保留上一份有效预览，只留痕。
-        panel._on_preview_failed(("k",), "boom")
+        panel._on_preview_failed(panel._preview_request_key, "boom")
         assert panel._pcm is good
         assert panel._preview_failure_note == "boom"
+        assert "boom" in _editor._status.toolTip()
 
 
 class TestPreviewWorker:
@@ -160,7 +163,7 @@ class TestPreviewWorker:
         assert len(runs) <= 1
         assert worker.isRunning() is False
 
-    def test_failed_job_reports_and_continues(self, qapp) -> None:
+    def test_failed_job_reports_and_continues(self, qtbot) -> None:
         import threading
 
         from src.features.mixer.ui.clip_preview_worker import ClipPreviewWorker
@@ -176,12 +179,62 @@ class TestPreviewWorker:
 
         worker.submit(("bad",), bad)
         assert started.wait(3.0)  # 任务已进入执行，finish 不再吞掉它
+        qtbot.waitUntil(lambda: bool(failures))
         worker.finish()
         worker.wait(3000)
-        from PyQt6.QtCore import QCoreApplication
-        QCoreApplication.processEvents()
         assert failures and failures[0][0] == ("bad",)
         assert "dsp unavailable" in failures[0][1]
+
+    def test_superseded_job_and_identical_inflight_requests(self, qtbot) -> None:
+        import threading
+
+        from src.features.mixer.ui.clip_preview_worker import ClipPreviewResult, ClipPreviewWorker
+
+        worker = ClipPreviewWorker()
+        entered = threading.Event()
+        release = threading.Event()
+        results = []
+        calls = []
+        worker.preview_ready.connect(lambda result: results.append(result.key))
+
+        def result(key: tuple) -> ClipPreviewResult:
+            return ClipPreviewResult(key, _pcm(), RATE, 1.0, [], [], [], [])
+
+        def old_job() -> ClipPreviewResult:
+            calls.append("old")
+            entered.set()
+            assert release.wait(3.0)
+            return result(("old",))
+
+        try:
+            worker.submit(("old",), old_job)
+            assert entered.wait(3.0)
+            worker.submit(("old",), old_job)
+            worker.submit(("new",), lambda: result(("new",)))
+            release.set()
+            qtbot.waitUntil(lambda: bool(results))
+            assert calls == ["old"]
+            assert results == [("new",)]
+        finally:
+            release.set()
+            worker.finish()
+            assert worker.wait(3000)
+
+
+def test_preview_preserves_same_clip_selection_viewport_and_envelope(qapp) -> None:
+    editor, panel = _panel(qapp)
+    panel.load_audio_data(RATE, 1.0, [], [], [])
+    panel.attach_pcm(_pcm(), RATE)
+    panel.canvas.setSelection(0.2, 0.6)
+    panel._sync_viewport(0.1, 0.8)
+    panel.update_playhead(0.4)
+    panel.canvas._env_points = [{"t": 0.3, "db": -4.0}]
+    panel._refresh_stack_preview()
+    assert panel.canvas.getSelection()[:2] == (0.2, 0.6)
+    assert (panel.canvas._view_start, panel.canvas._view_end) == (0.1, 0.8)
+    assert panel._playhead == 0.4
+    assert panel.canvas._env_points == [{"t": 0.3, "db": -4.0}]
+    editor.close()
 
 
 def test_timeline_custom_fade_is_displayed_in_clip_editor(qapp) -> None:

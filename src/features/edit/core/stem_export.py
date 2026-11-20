@@ -39,6 +39,7 @@ import os
 from src.features.edit.core.interchange import frames_to_samples
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from fractions import Fraction
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -1041,6 +1042,7 @@ class _StemWavWriter:
     ) -> None:
         self._path = path
         self._sample_rate = int(sample_rate)
+        self._samples_written = 0
         self._bit_depth = int(bit_depth)
         self._ok = True
         self._container = None
@@ -1092,8 +1094,11 @@ class _StemWavWriter:
         frame = self._av.AudioFrame.from_ndarray(
             clipped, format="fltp", layout=self._layout)
         frame.sample_rate = self._sample_rate
+        frame.time_base = Fraction(1, self._sample_rate)
+        frame.pts = self._samples_written
         for packet in self._stream.encode(frame):
             self._container.mux(packet)
+        self._samples_written += frame.samples
 
     def close(self) -> bool:
         """flush 编码器并关闭容器；返回是否成功。"""

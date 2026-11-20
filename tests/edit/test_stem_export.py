@@ -295,16 +295,22 @@ class TestStemWavWriting:
 
     def test_write_stem_wav_creates_file(self, tmp_path):
         """write_stem_wav 创建 WAV 文件。"""
+        import av
+
         n = SR  # 1 秒
         t = np.arange(n) / SR
         sig = (0.5 * np.sin(2 * np.pi * 1000 * t)).astype(np.float32)
         samples = np.stack([sig, sig])
 
         path = str(tmp_path / "test_stem.wav")
-        ok = write_stem_wav(path, samples, SR, bit_depth=24)
+        with av.logging.Capture() as logs:
+            ok = write_stem_wav(path, samples, SR, bit_depth=24)
         assert ok
         assert Path(path).exists()
         assert Path(path).stat().st_size > 0
+        assert not any("Timestamps are unset" in message for _level, _name, message in logs)
+        with av.open(path) as container:
+            assert sum(frame.samples for frame in container.decode(audio=0)) == n
 
     def test_write_stem_wav_16bit(self, tmp_path):
         """16-bit WAV 写入。"""

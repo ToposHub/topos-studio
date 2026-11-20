@@ -63,8 +63,8 @@ class ClipPreviewWorker(QThread):
         try:
             if self._stopped:
                 return
-            if self._inflight_key == key and self._key == key:
-                return  # 同 key 合并
+            if key == self._key or (self._key is None and key == self._inflight_key):
+                return
             self._generation += 1
             self._key = key
             self._job = job
@@ -96,6 +96,7 @@ class ClipPreviewWorker(QThread):
                     if self._stopped:
                         return
                     key, job = self._key, self._job
+                    generation = self._generation
                     self._key = None
                     self._job = None
                     self._inflight_key = key
@@ -103,20 +104,24 @@ class ClipPreviewWorker(QThread):
                     self._mutex.unlock()
                 if job is None:
                     break
+                result = None
+                error = None
                 try:
                     result = job()
                 except Exception as exc:  # noqa: BLE001 - 失败上报并清理
                     logger.warning("clip preview job failed: %s", exc,
                                    exc_info=True)
-                    self.preview_failed.emit(key, str(exc))
-                    continue
+                    error = str(exc)
                 finally:
                     self._mutex.lock()
                     try:
                         self._inflight_key = None
+                        publish = not self._stopped and generation == self._generation
                     finally:
                         self._mutex.unlock()
-                if result is not None:
+                if publish and error is not None:
+                    self.preview_failed.emit(key, error)
+                if publish and result is not None:
                     self.preview_ready.emit(result)
             if self._stopped:
                 return

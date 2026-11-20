@@ -798,7 +798,7 @@ def inline_audio_edit(audio_edit: Any) -> Any:
 
 
 def upsert_step(audio_edit: Any, step: dict) -> dict:
-    """P1 · 同约束幂等插入：替换"同处理器 + 同区间 + 同声道"的既有步骤。
+    """P1 · 同约束幂等插入：替换处理器、操作身份、区间与声道相同的步骤。
 
     Normalize/LUFS 连击同一选区不得叠加同一个增益——测量基于插入阶段
     的实际数据，重复提交应以**替换**语义保持单一增益。无匹配则按
@@ -807,7 +807,7 @@ def upsert_step(audio_edit: Any, step: dict) -> dict:
     if not isinstance(audio_edit, dict):
         return append_step(audio_edit, step)
     params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
-    identity = (step.get("processor_id"),
+    identity = (step.get("processor_id"), params.get("operation"),
                 params.get("start"), params.get("end"),
                 tuple(params.get("channels") or ()))
     updated = copy.deepcopy(audio_edit)
@@ -816,7 +816,7 @@ def upsert_step(audio_edit: Any, step: dict) -> dict:
             continue
         e_params = (existing.get("params", {})
                     if isinstance(existing.get("params"), dict) else {})
-        e_identity = (existing.get("processor_id"),
+        e_identity = (existing.get("processor_id"), e_params.get("operation"),
                       e_params.get("start"), e_params.get("end"),
                       tuple(e_params.get("channels") or ()))
         if e_identity == identity:

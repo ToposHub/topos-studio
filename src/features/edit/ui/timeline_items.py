@@ -75,6 +75,10 @@ from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import resolve_track_color
 from src.features.edit.core.audio_dsp import fade_curve_factor
 from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+from src.features.edit.ui.fade_overlay import (
+    FADE_HANDLE_HEIGHT, FADE_HANDLE_HIT_HEIGHT, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_SIZE,
+    paint_fade_curve_point, paint_fade_ramp, paint_fade_tab,
+)
 from src.features.edit.core.audio_waveform import (
     WaveformData,
     WaveformExtractor,
@@ -380,12 +384,6 @@ LINKED_GROUP_BORDER_HIGHLIGHT_WIDTH = 3  # Highlighted border width
 # Fade Handle Constants (Phase 1.2)
 # ================================================================
 
-FADE_HANDLE_SIZE = 6  # Resolve's narrow white tab at the clip's top edge
-FADE_HANDLE_HEIGHT = 9
-FADE_HANDLE_HIT_RADIUS = 7
-FADE_HANDLE_HIT_HEIGHT = 13  # Keep the lower edge available for trim/roll
-FADE_HANDLE_COLOR = QColor(246, 246, 246, 250)  # Light neutral handle face
-FADE_HANDLE_HOVER_COLOR = QColor(255, 255, 255, 242)  # Crisp active face
 MIN_CLIP_WIDTH_FOR_FADE_HANDLES = 24
 
 # ================================================================
@@ -2196,7 +2194,7 @@ class ClipItem(QGraphicsObject):
 
         if show_fade_in_handle:
             fade_in_x, _ = self._fade_handle_position(clip_rect, "in")
-            self._draw_fade_tab(
+            paint_fade_tab(
                 painter, fade_in_x - FADE_HANDLE_SIZE / 2.0,
                 clip_rect.top() + 0.5,
                 hover=self._hover_fade_handle == "fade_in",
@@ -2204,7 +2202,7 @@ class ClipItem(QGraphicsObject):
 
         if show_fade_out_handle:
             fade_out_x, _ = self._fade_handle_position(clip_rect, "out")
-            self._draw_fade_tab(
+            paint_fade_tab(
                 painter, fade_out_x - FADE_HANDLE_SIZE / 2.0,
                 clip_rect.top() + 0.5,
                 hover=self._hover_fade_handle == "fade_out",
@@ -2329,39 +2327,14 @@ class ClipItem(QGraphicsObject):
         edge = rect.left() if end == "in" else rect.right()
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(9, 12, 18, 115))
-        steps = max(8, min(48, math.ceil(width)))
         for band in self._fade_bands(rect):
-            mask = QPainterPath()
-            mask.moveTo(edge, band.top())
-            mask.lineTo(edge, band.bottom())
-            for sample in range(1, steps + 1):
-                progress = sample / steps
-                mask.lineTo(
-                    edge + direction * width * progress,
-                    band.bottom() - band.height() * fade_curve_factor(curve, progress),
-                )
-            mask.closeSubpath()
-            painter.drawPath(mask)
+            paint_fade_ramp(painter, band, edge, direction * width,
+                            lambda progress: fade_curve_factor(curve, progress))
 
         drag_end = self._fade_curve_drag_end
         if self._pointer_inside or drag_end == end:
-            painter.setPen(QPen(QColor(13, 17, 23), 1.0))
-            painter.setBrush(QColor(TEXT_COLOR))
             for point in self._fade_curve_handle_points(end):
-                painter.drawEllipse(point, 3.0, 3.0)
-        painter.restore()
-
-    def _draw_fade_tab(
-        self, painter: QPainter, x: float, y: float, hover: bool = False,
-    ) -> None:
-        """Paint the small white, rounded top tab observed in Resolve 20."""
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(12, 12, 14, 220), 0.7))
-        painter.setBrush(FADE_HANDLE_HOVER_COLOR if hover else FADE_HANDLE_COLOR)
-        painter.drawRoundedRect(QRectF(x, y, FADE_HANDLE_SIZE, FADE_HANDLE_HEIGHT), 1.8, 1.8)
+                paint_fade_curve_point(painter, point, TEXT_COLOR)
         painter.restore()
 
     def _draw_trim_handles(self, painter: QPainter, handle_size: int) -> None:
