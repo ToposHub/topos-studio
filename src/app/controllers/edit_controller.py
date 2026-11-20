@@ -2810,6 +2810,9 @@ class EditControllerMixin:
 
     def _on_audio_mixer_timeline_display_changed(self, _timeline: Any) -> None:
         """Initial project loads and timeline switches also refresh the mixer."""
+        sync_adr = getattr(self, "_sync_adr_session_timeline", None)
+        if callable(sync_adr) and getattr(self, "_adr_panel_wired", False):
+            sync_adr(_timeline)
         # Read the canonical current timeline when the timer fires rather
         # than capturing a sequence that may already have been switched out.
         self._schedule_audio_mixer_sync()
@@ -3485,7 +3488,7 @@ class EditControllerMixin:
         self._start_recording(track_id, voiceover=True, from_mixer_timeline=True)
 
     def _set_mixer_timeline_recording_state(
-        self, track_id: str, recorder: Any, state: str,
+        self, track_id: str, recorder: Any, state: str, *, mirror_adr: bool = True,
     ) -> None:
         recorders = self._mixer_timeline_recorders
         if recorders.get(track_id) is not recorder:
@@ -3501,7 +3504,7 @@ class EditControllerMixin:
         if view is not None:
             view.set_track_recording_state(track_id, "idle" if state == "failed" else state)
         panel = self._adr_panel()
-        if panel is not None:
+        if panel is not None and mirror_adr:
             panel.set_recording_state(state)
             if state in {"idle", "failed"}:
                 panel.end_monitor()
@@ -3512,12 +3515,12 @@ class EditControllerMixin:
             QTimer.singleShot(0, lambda: self._retire_failed_mixer_recorder(track_id, recorder))
         if not recorders and getattr(self, "_mixer_recording_close_pending", False):
             QTimer.singleShot(0, self.close)
-        if state == "idle":
-            # 录音工作流：recorder 退出后重算 busy/arm（表头 R 恢复可用，
-            # 已 arm 的轨保持 armed 以便直接补录下一条）。
-            refresh = getattr(self, "_refresh_mixer_recording_controls", None)
-            if callable(refresh):
-                refresh()
+        managers = getattr(self, "_recording_managers", {})
+        if state == "idle" and managers.get(track_id) is recorder:
+            managers.pop(track_id)
+        refresh = getattr(self, "_refresh_mixer_recording_controls", None)
+        if callable(refresh):
+            refresh()
 
     def _retire_failed_mixer_recorder(self, track_id: str, recorder: Any) -> None:
         if (self._mixer_timeline_recorders.get(track_id) is recorder
@@ -3528,6 +3531,9 @@ class EditControllerMixin:
 
     def _finish_mixer_timeline_recordings(self) -> None:
         """Release the microphone when its project closes and let each take finish writing."""
+        stop_transport = getattr(self, "_stop_mixer_transport_recording", None)
+        if callable(stop_transport):
+            stop_transport()
         for track_id, recorder in tuple(getattr(self, "_mixer_timeline_recorders", {}).items()):
             self._stop_recording_and_import(track_id)
             # A live recording can have moved to post-roll before the project
@@ -3543,17 +3549,20 @@ class EditControllerMixin:
             session = self._voiceover_sessions.get(track_id)
             if session is None:
                 continue
-            if (timeline is None or timeline.timeline_id != session["timeline_id"]
-                    or timeline.get_track_by_id(track_id) is None):
+            track = timeline.get_track_by_id(track_id) if timeline is not None else None
+            project_id = getattr(getattr(self, "_current_edit_project", None), "project_id", None)
+            if (project_id != session["project_id"] or track is None
+                    or timeline.timeline_id != session["timeline_id"]
+                    or track.is_locked or track.is_bus):
                 self._finish_mixer_timeline_recordings()
                 return
 
     def _start_recording(
         self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
         anchor_frame: int | None = None, scene_name: str | None = None,
-        recording_settings: dict | None = None,
+        recording_settings: dict[str, Any] | None = None,
         shared_input: Any = None, input_channels: tuple[int, ...] = (),
-    ) -> None:
+    ) -> Any | None:
         """启动录音（§4.4 / P1-10：input patch、时间码对齐、监听、电平）。
 
         P1-10 增强：
@@ -3580,8 +3589,12 @@ class EditControllerMixin:
         # 获取输出目录（工程目录下的 recordings/，或临时目录）
         edit_page = getattr(self, 'edit_page', None)
         project = getattr(self, '_current_edit_project', None)
-        if project is not None and getattr(project, 'project_dir', ''):
-            output_dir = os.path.join(project.project_dir, 'recordings')
+        project_path = getattr(self, "_current_edit_project_filepath", None)
+        project_dir = getattr(project, "project_dir", None)
+        if not project_dir and project_path:
+            project_dir = os.path.dirname(os.path.abspath(project_path))
+        if project_dir:
+            output_dir = os.path.join(project_dir, "recordings")
         else:
             import tempfile
             output_dir = tempfile.gettempdir()
@@ -3630,9 +3643,10 @@ class EditControllerMixin:
             except (RuntimeError, ValueError) as exc:
                 logger.warning("Shared recording input rejected for track %s: %s",
                                track_id, exc)
-                if from_mixer_timeline:
-                    self._set_mixer_timeline_recording_state(track_id, mgr, "failed")
-                return
+                report = getattr(self, "_show_mixer_recording_message", None)
+                if callable(report):
+                    report(str(exc))
+                return None
         if getattr(self, '_adr_calibration', None) is not None:
             mgr.set_calibration(self._adr_calibration)
         mgr.enable_live_post_roll = True  # 停止后采集 post-roll 尾巴再落盘
@@ -3662,7 +3676,7 @@ class EditControllerMixin:
             self._on_take_recorded(track_id, take, _pid, _vs))
         mgr.on_error = lambda msg: logger.error("Recording error: %s", msg)
         panel = self._adr_panel()
-        if panel is not None:
+        if panel is not None and not (shared_input is not None and from_mixer_timeline):
             mgr.on_level = panel.set_input_level
             mgr.on_state_changed = panel.set_recording_state
             if settings.get('monitor') and panel.begin_monitor(
@@ -3672,14 +3686,51 @@ class EditControllerMixin:
             if not hasattr(self, "_mixer_timeline_recorders"):
                 self._mixer_timeline_recorders = {}
             self._mixer_timeline_recorders[track_id] = mgr
-            mgr.on_state_changed = lambda state: self._set_mixer_timeline_recording_state(track_id, mgr, state)
+            mgr.on_state_changed = lambda state: self._set_mixer_timeline_recording_state(
+                track_id, mgr, state, mirror_adr=shared_input is None)
+            view = self._edit_timeline_view()
+            if shared_input is not None and voiceover_session is not None and view is not None:
+                generation = voiceover_session["generation"]
+                sync_state = mgr.on_state_changed
+                import_take = mgr.on_take_completed
+
+                def update_preview_state(state: str) -> None:
+                    sync_state(state)
+                    if state == "recording":
+                        start_frame = mgr.capture_start_frame
+                        view.begin_recording_preview(
+                            track_id, generation, voiceover_session["timeline_id"],
+                            voiceover_session["anchor_frame"] if start_frame is None else start_frame,
+                        )
+                    elif state == "idle":
+                        mgr.on_recording_progress = None
+                        takes = mgr.takes
+                        if not takes or takes[-1].status not in ("completed", "completed_partial"):
+                            view.end_recording_preview(track_id, generation)
+
+                def import_and_clear_preview(take: Any) -> None:
+                    try:
+                        import_take(take)
+                    finally:
+                        view.end_recording_preview(track_id, generation)
+
+                mgr.on_state_changed = update_preview_state
+                mgr.on_take_completed = import_and_clear_preview
+                mgr.on_recording_progress = lambda seconds, peak: view.update_recording_preview(
+                    track_id, generation, seconds, peak)
         if not mgr.start_recording(in_point_frame=in_point_frame):
             if from_mixer_timeline:
-                self._set_mixer_timeline_recording_state(track_id, mgr, "failed")
+                self._set_mixer_timeline_recording_state(
+                    track_id, mgr, "failed", mirror_adr=shared_input is None)
+            else:
+                if voiceover_session is not None:
+                    self._voiceover_sessions.pop(track_id, None)
+                if panel is not None:
+                    panel.end_monitor()
             logger.warning("Failed to start recording for track %s", track_id)
-            return
-        if from_mixer_timeline and mgr.state == "failed":
-            return
+            return None
+        if getattr(mgr, "state", None) == "failed":
+            return None
         if not hasattr(self, '_recording_managers'):
             self._recording_managers = {}
         self._recording_managers[track_id] = mgr
@@ -3705,6 +3756,7 @@ class EditControllerMixin:
                 logger.info("Loop record ignored: no timeline In/Out range")
         logger.info("Recording started for track %s (pre-roll %.1fs)",
                     track_id, config.pre_roll_seconds)
+        return mgr
 
     def _stop_recording_and_import(self, track_id: str) -> None:
         """停止录音并导入 take（§4.4 / RMA-11）。
@@ -3724,7 +3776,7 @@ class EditControllerMixin:
             return
         mgr.on_monitor_block = None
         panel = self._adr_panel()
-        if panel is not None:
+        if panel is not None and track_id not in getattr(self, "_mixer_armed_inputs", {}):
             panel.end_monitor()
         # stop_recording → _finalize_take → on_take_completed → _on_take_recorded
         # 这是 take 完成的唯一事件源；不再在此二次调用 _on_take_recorded。
@@ -4152,7 +4204,7 @@ class EditControllerMixin:
         if getattr(self, 'status_bar', None) is not None:
             self.status_bar.showMessage(I18N.tr(
                 "mixer.record.settings_saved",
-                "Recording settings saved. Press R on the track to record."), 4000)
+                "Recording settings saved."), 4000)
 
     def _adr_timeline_context(self):
         """(fps, in_point_frame)：录音打点 = 当前播放头帧（P1-10 时间码对齐）。"""
@@ -8525,6 +8577,12 @@ class EditControllerMixin:
                 scene_cut_controller.clear_session_cache()
             except Exception:
                 logger.debug("Failed to clear scene-cut session cache", exc_info=True)
+        stop_adr = getattr(self, "_finish_adr_session", None)
+        if callable(stop_adr):
+            stop_adr()
+        clear_armed = getattr(self, "_clear_mixer_armed_inputs", None)
+        if callable(clear_armed):
+            clear_armed()
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}

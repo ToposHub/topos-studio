@@ -622,6 +622,10 @@ class PageManagementMixin:
         page_id = page_name.lower()
         if self.feature_registry:
             self.feature_registry.on_page_leave(page_id)
+        if page_name in ("Edit", "Mixer"):
+            stop_adr = getattr(self, "_stop_adr_session", None)
+            if callable(stop_adr):
+                stop_adr()
 
         # Edit page leave hook (P1 placeholder)
         if page_name == "Edit":

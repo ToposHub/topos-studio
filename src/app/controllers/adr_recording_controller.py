@@ -31,6 +31,7 @@ class _AdrPass:
     deadline: QTimer | None = None
     count_in: int = -1
     ending: bool = False
+    failed: bool = False
 
 
 class AdrRecordingControllerMixin:
@@ -145,9 +146,20 @@ class AdrRecordingControllerMixin:
         self.timeline_panel.set_playhead_frame(start_frame)
         self._adr_pass = session
         if track_id is not None:
+            from src.features.edit.core.shared_recording_input import SharedRecordingInput
+            from PyQt6.QtMultimedia import QMediaDevices
+
+            device_id = settings["device_id"]
+            if not device_id:
+                device_id = bytes(QMediaDevices.defaultAudioInput().id()).decode("utf-8", "replace") or None
+            source = getattr(self, "_mixer_capture_inputs", {}).get(device_id)
+            channels = tuple(range(settings["channels"]))
+            if source is None:
+                source = SharedRecordingInput(device_id, len(channels))
             manager = self._start_recording(
                 track_id, voiceover=True, anchor_frame=cue.in_frame, scene_name=cue.scene_name,
                 recording_settings={**settings, "pre_roll_seconds": actual_pre_roll, "loop": False},
+                shared_input=source, input_channels=channels,
             )
             if manager is None:
                 self._adr_pass = None
@@ -159,10 +171,15 @@ class AdrRecordingControllerMixin:
             on_state = manager.on_state_changed
 
             def state_changed(state: str) -> None:
+                if state == "failed":
+                    session.failed = True
                 if on_state is not None:
                     on_state(state)
-                if state in {"idle", "failed"}:
-                    self._end_adr_pass(session, state)
+                if state == "idle":
+                    managers = getattr(self, "_recording_managers", {})
+                    if managers.get(track_id) is manager:
+                        managers.pop(track_id)
+                    self._end_adr_pass(session, "failed" if session.failed else state)
 
             manager.on_state_changed = state_changed
         else:
@@ -227,6 +244,12 @@ class AdrRecordingControllerMixin:
         else:
             self._end_adr_pass(session, "idle")
 
+    def _finish_adr_session(self) -> None:
+        self._stop_adr_session()
+        session = self._adr_pass
+        if session is not None and session.manager is not None and session.manager.state == "stopping":
+            session.manager.stop_recording()
+
     def _end_adr_pass(self, session: _AdrPass, state: str) -> None:
         if self._adr_pass is not session:
             return
@@ -235,8 +258,11 @@ class AdrRecordingControllerMixin:
             session.deadline.stop()
             session.deadline.deleteLater()
         self.timeline_panel.pause_playback()
+        if getattr(self, "_mixer_recording_close_pending", False):
+            QTimer.singleShot(0, self.close)
         panel = self._adr_panel()
         if panel is not None:
+            panel.end_monitor()
             panel.set_recording_state(state)
             if session.repeat and state == "idle":
                 generation = self._adr_repeat_generation

@@ -645,7 +645,7 @@ class EditViewport(QWidget):
             record.setToolTip(I18N.tr("mixer.record.transport_recording", "Recording armed tracks"))
             stop.setToolTip(I18N.tr("mixer.record.stop", "Stop recording"))
         else:
-            label = (I18N.tr("mixer.record.transport_start", "Record armed tracks") if can_record
+            label = (I18N.tr("mixer.record.transport_start", "Record armed tracks (Shift+Space)") if can_record
                      else I18N.tr("mixer.record.transport_arm_first", "Arm a track to record"))
             record.setToolTip(label)
             stop.setToolTip(I18N.tr("edit.viewport.stop", "Stop"))

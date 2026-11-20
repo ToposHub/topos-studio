@@ -244,6 +244,7 @@ from src.features.edit.ui.timeline_items import (
     MarkerItem,
 )
 from src.features.edit.ui.subtitle_clip_item import SubtitleClipItem
+from src.features.edit.ui.timeline_recording_preview import RecordingPreview
 from src.features.edit.ui.timeline_interaction import InteractionState, InteractionSession, ClipDragSession, MoveGroup, MoveGroupMember
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
 from src.features.edit.ui.timeline_layout import (
@@ -943,6 +944,11 @@ class TimelineView(QGraphicsView):
         self._audio_only = False
         self._professional_audio_editor_available = False
         self._recording_track_states: dict[str, str] = {}
+        self._recording_previews: dict[tuple[str, int], RecordingPreview] = {}
+        self._recording_preview_timer = QTimer(self)
+        self._recording_preview_timer.setSingleShot(True)
+        self._recording_preview_timer.setInterval(33)
+        self._recording_preview_timer.timeout.connect(lambda: self._layout_recording_previews(follow=True))
         self._mixer_record_arm_busy = False
         self._playhead_follow_enabled = PLAYHEAD_FOLLOW_ENABLED  # Playhead centering during playback
         self._target_track_id: Optional[str] = None  # UI-09: Target track for insert operations (video)
@@ -1400,6 +1406,8 @@ class TimelineView(QGraphicsView):
         if not self._interaction.is_idle:
             self._cancel_current_interaction()
         self._audio_only = enabled
+        if not enabled:
+            self._clear_recording_previews()
         # P2-8（P0）：音频工作区的时间尺切到采样域（子帧位置显式可见），
         # 返回 Edit 恢复帧域；尺渲染本身支持两种模式。
         if self._ruler_item is not None:
@@ -1470,6 +1478,65 @@ class TimelineView(QGraphicsView):
                 header = self._track_headers.get(track.track_id)
                 if header is not None:
                     self._sync_header_recording_control(header, track)
+
+    @property
+    def recording_runtime_duration(self) -> int:
+        return self._runtime_duration_frames if self._recording_previews else 0
+
+    def begin_recording_preview(
+        self, track_id: str, generation: int, timeline_id: str, start_frame: int,
+    ) -> None:
+        if (self._audio_only and self._timeline is not None and self._timeline.timeline_id == timeline_id
+                and track_id in self._track_headers):
+            self._recording_previews[track_id, generation] = RecordingPreview(start_frame)
+            self._layout_recording_previews()
+
+    def update_recording_preview(self, track_id: str, generation: int, seconds: float, peak: float) -> None:
+        preview = self._recording_previews.get((track_id, generation))
+        if preview is not None:
+            preview.add_audio(seconds, peak)
+            if not self._recording_preview_timer.isActive():
+                self._recording_preview_timer.start()
+
+    def end_recording_preview(self, track_id: str, generation: int) -> None:
+        preview = self._recording_previews.pop((track_id, generation), None)
+        if preview is not None:
+            self.viewport().update(self.mapFromScene(preview.rect).boundingRect())
+        if not self._recording_previews:
+            self._recording_preview_timer.stop()
+
+    def _clear_recording_previews(self) -> None:
+        for track_id, generation in tuple(self._recording_previews):
+            self.end_recording_preview(track_id, generation)
+
+    def _layout_recording_previews(self, *, follow: bool = False) -> None:
+        if self._timeline is None or not self._recording_previews:
+            return
+        fps = float(self._timeline.fps)
+        furthest_end = 0
+        scroll_to = 0.0
+        visible = self.mapToScene(self.viewport().rect()).boundingRect() if follow and self.isVisible() else None
+        for (track_id, _generation), preview in self._recording_previews.items():
+            header = self._track_headers.get(track_id)
+            if header is None:
+                continue
+            old_rect = preview.rect
+            preview.move_to_track(
+                self._layout_engine.frame_to_x(max(0, preview.start_frame)), header.y(),
+                self._layout_engine.track_height(track_id), self._pixels_per_frame, fps,
+            )
+            self.viewport().update(self.mapFromScene(old_rect.united(preview.rect)).boundingRect())
+            furthest_end = max(furthest_end, math.ceil(preview.start_frame + preview.duration_seconds * fps))
+            if (visible is not None
+                    and visible.left() + TRACK_HEADER_WIDTH <= old_rect.right() <= visible.right()
+                    and preview.rect.right() > visible.right()):
+                scroll_to = max(scroll_to, preview.rect.right() - visible.right() + visible.width() / 5)
+        # Keep room ahead of the captured region so a short timeline can play
+        # through its existing end while the recording continues.
+        self._extend_runtime_duration(furthest_end + math.ceil(fps))
+        if scroll_to > 0:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() + math.ceil(scroll_to))
 
     def _sync_header_recording_control(self, header: TrackHeaderItem, track: EditTrack) -> None:
         header.set_recording_control(
@@ -1876,6 +1943,7 @@ class TimelineView(QGraphicsView):
             base_rect.x(), base_rect.y(),
             base_rect.width(), base_rect.height(),
         )
+        self._layout_recording_previews()
         self._update_range_visuals(self._timeline)
         self._sync_split_vertical_scrollbars()
 
@@ -2175,6 +2243,7 @@ class TimelineView(QGraphicsView):
             previous_id = getattr(self._timeline, "timeline_id", None)
             if previous_id != timeline.timeline_id:
                 self._selected_edit_edges.clear()
+                self._clear_recording_previews()
             known_snapshot = (
                 self._timeline if previous_id == timeline.timeline_id
                 else self._timeline_history_snapshots.get(timeline.timeline_id)
@@ -14499,6 +14568,14 @@ class TimelineView(QGraphicsView):
         # Content stays continuous between tracks. Only the ruler and V/A
         # boundaries span it; individual track rules belong to the headers.
         self._paint_timeline_dividers(painter)
+        if self._recording_previews:
+            content = self.viewport().rect().adjusted(TRACK_HEADER_WIDTH, RULER_HEIGHT, 0, 0)
+            exposed = rect.intersected(self.mapToScene(content).boundingRect())
+            painter.save()
+            painter.setClipRect(exposed, Qt.ClipOperation.IntersectClip)
+            for preview in self._recording_previews.values():
+                preview.paint(painter, exposed)
+            painter.restore()
         playhead = self._playhead_item
         if playhead is None:
             return
@@ -14851,6 +14928,7 @@ class TimelineView(QGraphicsView):
         if not self._interaction.is_idle:
             self._cancel_current_interaction()
         self._hide_trim_monitor()
+        self._clear_recording_previews()
         self._clear_items()
         self._remove_persistent_items()
         self._timeline = None
