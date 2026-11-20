@@ -41,7 +41,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Optional, Dict, Any, List, NamedTuple, Callable, Mapping
+from typing import Optional, Dict, Any, List, NamedTuple, Callable, Mapping, Iterable
 
 from PyQt6.QtWidgets import (
     QGraphicsView,
@@ -950,6 +950,7 @@ class TimelineView(QGraphicsView):
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
         self._drag_crossfades: tuple[tuple[QRectF, str, tuple[float, float], bool], ...] = ()
         self._drag_hidden_crossfades: set[str] = set()
+        self._drag_crossfade_clip_ids: set[str] = set()
         self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
         self._audio_only = False
@@ -1749,6 +1750,14 @@ class TimelineView(QGraphicsView):
         except Exception:  # noqa: BLE001 - 包络可视化失败不影响布局
             logger.debug("clip envelope overlay failed", exc_info=True)
 
+    @staticmethod
+    def _overlap_fade_ends_by_clip(pairs: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
+        result: dict[str, set[str]] = {}
+        for left_id, right_id in pairs:
+            result.setdefault(left_id, set()).add("out")
+            result.setdefault(right_id, set()).add("in")
+        return result
+
     def _layout_track_items(self, *, geometry_only: bool = False) -> None:
         """Position items; resizing retains existing cut and tool metadata."""
         if self._timeline is None:
@@ -1822,10 +1831,15 @@ class TimelineView(QGraphicsView):
                           if track.track_type == "video" else (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT))
                 base_height = max(lo, min(hi, base_height))
             expansion = max(0, track_h - base_height) if expanded else 0
+            fade_ends = self._overlap_fade_ends_by_clip(
+                (transition.left_clip_id, transition.right_clip_id)
+                for transition in track.transitions if transition.is_overlap_crossfade
+            )
             for clip in track.clips:
                 clip_item = self._items_map.get(clip.clip_id)
                 if clip_item and isinstance(clip_item, ClipItem):
                     clip_item.set_audio_display_color(display_color)
+                    clip_item.set_overlap_fade_ends(frozenset(fade_ends.get(clip.clip_id, ())))
                     # P1-4 余项：包络叠加随每次布局刷新（命令提交 → 模型
                     # 变更 → 布局 → 折线更新）。
                     if track.track_type == "audio":
@@ -2095,10 +2109,12 @@ class TimelineView(QGraphicsView):
                 else:
                     current = max(minimum, min(maximum, current))
                 if track_type == "video":
-                    self._layout_state.video_scroll_offset = current
+                    # Mixer has no video lanes, and dock reparenting can also
+                    # temporarily collapse the range. Clamp the widget only.
                     rect = area.video_area
                 elif track_type == "subtitle":
-                    self._layout_state.subtitle_scroll_offset = current
+                    if not self._audio_only:
+                        self._layout_state.subtitle_scroll_offset = current
                     rect = area.subtitle_area
                 else:
                     self._layout_state.audio_scroll_offset = current
@@ -2144,14 +2160,13 @@ class TimelineView(QGraphicsView):
         """Keep the bottom of the video stack anchored above the V/A splitter."""
         if self._timeline is None:
             return
-        self._configure_layout_engine()
-        _, maximum, _ = self._layout_engine.scroll_range_for_area("video")
-        self._layout_state.video_scroll_offset = maximum
+        self._layout_state.video_scroll_offset = -1
 
     def _on_video_scrollbar_changed(self, value: int) -> None:
         if self._syncing_split_scrollbars:
             return
-        self._layout_state.video_scroll_offset = value
+        maximum = self._video_v_scroll.maximum()
+        self._layout_state.video_scroll_offset = -1 if maximum > 0 and value == maximum else value
         # AUD-21410: coalesce full relayouts to one per display frame while
         # the scrollbar emits per-tick updates during a drag.
         self._schedule_scroll_layout_update()
@@ -2810,6 +2825,7 @@ class TimelineView(QGraphicsView):
     def _clear_items(self) -> None:
         """Clear all timeline items from scene."""
         self._clear_subtitle_copy_drag_preview()
+        self._clear_drag_crossfades()
 
         # Stop accepting results for the old timeline before the scene is
         # mutated.  This prevents a queued thumbnail completion from touching
@@ -8991,6 +9007,11 @@ class TimelineView(QGraphicsView):
             if isinstance(item, TransitionItem):
                 item.set_overlap_preview_hidden(False)
         self._drag_hidden_crossfades.clear()
+        for clip_id in self._drag_crossfade_clip_ids:
+            item = self._items_map.get(clip_id)
+            if isinstance(item, ClipItem):
+                item.set_preview_overlap_fade_ends(None)
+        self._drag_crossfade_clip_ids.clear()
 
     def _preview_drag_crossfades(self, members: tuple[MoveGroupMember, ...]) -> None:
         if not self._moves_allow_crossfades(members):
@@ -9011,16 +9032,23 @@ class TimelineView(QGraphicsView):
                 ))
 
         settings: dict[tuple[str, str], TransitionInstance] = {}
+        final_pairs: list[tuple[str, str]] = []
+        affected_ids: set[str] = set()
         for track_id in touched:
             track = self._timeline.get_track_by_id(track_id)
             for transition in track.transitions:
                 pair = transition.left_clip_id, transition.right_clip_id
-                if transition.is_overlap_crossfade and moving_ids.intersection(pair):
+                if not transition.is_overlap_crossfade:
+                    continue
+                if moving_ids.intersection(pair):
+                    affected_ids.update(pair)
                     settings[pair] = transition
                     item = self._items_map.get(transition.transition_id)
                     if isinstance(item, TransitionItem):
                         item.set_overlap_preview_hidden(True)
                         self._drag_hidden_crossfades.add(transition.transition_id)
+                else:
+                    final_pairs.append(pair)
 
         previews = []
         for track_id, moved in additions.items():
@@ -9036,6 +9064,8 @@ class TimelineView(QGraphicsView):
                 pair = left.clip_id, right.clip_id
                 if not moving_ids.intersection(pair):
                     continue
+                affected_ids.update(pair)
+                final_pairs.append(pair)
                 start = self._layout_engine.frame_to_x(right.timeline_start)
                 end = self._layout_engine.frame_to_x(left.timeline_end)
                 rect = QRectF(start, self._layout_engine.track_top(track_id),
@@ -9047,6 +9077,12 @@ class TimelineView(QGraphicsView):
                     transition.overlap_curve_adjustments if transition else (0.0, 0.0),
                     transition is None or transition.params.get("overlap_enabled") is not False,
                 ))
+        fade_ends = self._overlap_fade_ends_by_clip(final_pairs)
+        for clip_id in affected_ids:
+            item = self._items_map.get(clip_id)
+            if isinstance(item, ClipItem):
+                item.set_preview_overlap_fade_ends(frozenset(fade_ends.get(clip_id, ())))
+                self._drag_crossfade_clip_ids.add(clip_id)
         self._drag_crossfades = tuple(previews)
         for rect, *_ in self._drag_crossfades:
             self.viewport().update(self.mapFromScene(rect).boundingRect())

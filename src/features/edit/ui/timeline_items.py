@@ -386,8 +386,6 @@ FADE_HANDLE_HIT_RADIUS = 7
 FADE_HANDLE_HIT_HEIGHT = 13  # Keep the lower edge available for trim/roll
 FADE_HANDLE_COLOR = QColor(246, 246, 246, 250)  # Light neutral handle face
 FADE_HANDLE_HOVER_COLOR = QColor(255, 255, 255, 242)  # Crisp active face
-FADE_RAMP_COLOR = QColor(238, 238, 238, 210)  # Fine diagonal ramp line
-FADE_REGION_COLOR = QColor(8, 12, 16, 108)  # Resolve-like dark translucent range
 MIN_CLIP_WIDTH_FOR_FADE_HANDLES = 24
 
 # ================================================================
@@ -830,6 +828,8 @@ class ClipItem(QGraphicsObject):
 
         # Phase 1.2: Fade in/out state
         self._fade_curves = fade_curves
+        self._overlap_fade_ends: frozenset[str] = frozenset()
+        self._preview_overlap_fade_ends: frozenset[str] | None = None
         self._stereo_fade_display = False
         self._fade_curve_drag_end: str | None = None
         self._fade_curve_drag_height = 1.0
@@ -2154,19 +2154,24 @@ class ClipItem(QGraphicsObject):
             pass
         return self._media_type == "audio" or self._track_id.lower().startswith("a")
 
+    def set_overlap_fade_ends(self, ends: frozenset[str]) -> None:
+        """Hide individual fades on the edges occupied by a crossfade."""
+        if ends != self._overlap_fade_ends:
+            self._overlap_fade_ends = ends
+            self.update()
+
+    def set_preview_overlap_fade_ends(self, ends: frozenset[str] | None) -> None:
+        """Show the fade controls for the proposed drag geometry."""
+        if ends != self._preview_overlap_fade_ends:
+            self._preview_overlap_fade_ends = ends
+            self.update()
+
+    def _fade_end_is_visible(self, end: str) -> bool:
+        ends = self._preview_overlap_fade_ends
+        return end not in (self._overlap_fade_ends if ends is None else ends)
+
     def _draw_fade_handles(self, painter: QPainter, clip_rect: QRectF) -> None:
-        """
-        Draw Resolve-style fade ramps and endpoint handles (Phase 1.2).
-
-        The diagonal ramp makes the actual fade range visible.  The endpoint
-        handle moves with the range, so the user can grab the same visual
-        boundary they are adjusting instead of hunting for a fixed corner.
-
-        Args:
-            painter: QPainter instance
-            clip_rect: Clip bounding rectangle
-        """
-        # Only show fade handles for clips wider than minimum width
+        """Paint the fade ranges and reveal their controls on hover or drag."""
         if self._width < MIN_CLIP_WIDTH_FOR_FADE_HANDLES:
             return
 
@@ -2175,27 +2180,18 @@ class ClipItem(QGraphicsObject):
             self._fade_out_duration,
         )
 
-        # Draw the ranges first so the handles and ramps stay crisp above the
-        # thumbnails/waveform.  The pair is clamped so the diagonals can meet
-        # at most at the clip center and never cross.
-        if fade_in_duration > 0:
-            fade_in_width = self._fade_visual_width(fade_in_duration)
-            self._draw_fade_overlay(painter, clip_rect, fade_in_width, "in")
+        in_visible = self._fade_end_is_visible("in")
+        out_visible = self._fade_end_is_visible("out")
+        if in_visible and fade_in_duration > 0:
+            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_in_duration), "in")
+        if out_visible and fade_out_duration > 0:
+            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_out_duration), "out")
 
-        if fade_out_duration > 0:
-            fade_out_width = self._fade_visual_width(fade_out_duration)
-            self._draw_fade_overlay(painter, clip_rect, fade_out_width, "out")
-
-        # Resolve exposes tabs on the hovered clip, independently of linked
-        # selection; an authored ramp remains visible away from the pointer.
-        audio = self._is_audio_track()
-        show_fade_in_handle = (
-            (fade_in_duration > 0 and not audio) or self._pointer_inside
-            or self._hover_fade_handle == "fade_in" or self._drag_mode == "fade_in"
+        show_fade_in_handle = in_visible and (
+            self._pointer_inside or self._hover_fade_handle == "fade_in" or self._drag_mode == "fade_in"
         )
-        show_fade_out_handle = (
-            (fade_out_duration > 0 and not audio) or self._pointer_inside
-            or self._hover_fade_handle == "fade_out" or self._drag_mode == "fade_out"
+        show_fade_out_handle = out_visible and (
+            self._pointer_inside or self._hover_fade_handle == "fade_out" or self._drag_mode == "fade_out"
         )
 
         if show_fade_in_handle:
@@ -2265,6 +2261,8 @@ class ClipItem(QGraphicsObject):
         clip_rect = QRectF(0.0, 0.0, self._width, self._track_height)
         candidates: list[tuple[float, str]] = []
         for fade_type in ("in", "out"):
+            if not self._fade_end_is_visible(fade_type):
+                continue
             x, y = self._fade_handle_position(clip_rect, fade_type)
             hit_rect = QRectF(
                 x - FADE_HANDLE_HIT_RADIUS,
@@ -2283,7 +2281,7 @@ class ClipItem(QGraphicsObject):
         preferred = "in" if pos.x() < midpoint else "out"
         return min(candidates, key=lambda candidate: (candidate[0], candidate[1] != preferred))[1]
 
-    def _audio_fade_bands(self, rect: QRectF) -> tuple[QRectF, ...]:
+    def _fade_bands(self, rect: QRectF) -> tuple[QRectF, ...]:
         top = rect.top() + 1.0
         bottom = max(top + 1.0, rect.bottom() - 19.0)
         if self._stereo_fade_display and rect.height() > 36:
@@ -2294,26 +2292,30 @@ class ClipItem(QGraphicsObject):
             )
         return (QRectF(rect.left(), top, rect.width(), bottom - top),)
 
-    def _audio_fade_curve(self, end: str) -> str:
+    def _fade_curve(self, end: str) -> str:
         if self._fade_curve_drag_end == end and self._fade_curve_preview is not None:
             return self._fade_curve_preview
-        return self._fade_curves[0 if end == "in" else 1] or "equal_power"
+        return self._fade_curves[0 if end == "in" else 1] or (
+            "equal_power" if self._is_audio_track() else "linear"
+        )
 
     def _fade_curve_handle_points(self, end: str) -> tuple[QPointF, ...]:
+        if not self._fade_end_is_visible(end):
+            return ()
         duration = self._fade_in_duration if end == "in" else self._fade_out_duration
         width = self._fade_visual_width(duration)
         if duration <= 0 or width < 24 or self._track_height < 38:
             return ()
         x = width / 2 if end == "in" else self._width - width / 2
-        gain = fade_curve_factor(self._audio_fade_curve(end), 0.5)
+        gain = fade_curve_factor(self._fade_curve(end), 0.5)
         return tuple(
             QPointF(x, band.bottom() - band.height() * gain)
-            for band in self._audio_fade_bands(QRectF(0, 0, self._width, self._track_height))
+            for band in self._fade_bands(QRectF(0, 0, self._width, self._track_height))
         )
 
     def _fade_curve_handle_at(self, pos: QPointF) -> str | None:
         if (self._is_track_locked or self._retime_controls_visible
-                or self._width < MIN_CLIP_WIDTH_FOR_FADE_HANDLES or not self._is_audio_track()):
+                or self._media_type == "transition" or self._width < MIN_CLIP_WIDTH_FOR_FADE_HANDLES):
             return None
         for end in ("in", "out"):
             for point in self._fade_curve_handle_points(end):
@@ -2321,8 +2323,8 @@ class ClipItem(QGraphicsObject):
                     return end
         return None
 
-    def _draw_audio_fade(self, painter: QPainter, rect: QRectF, width: float, end: str) -> None:
-        curve = self._audio_fade_curve(end)
+    def _draw_fade_overlay(self, painter: QPainter, rect: QRectF, width: float, end: str) -> None:
+        curve = self._fade_curve(end)
         direction = 1 if end == "in" else -1
         edge = rect.left() if end == "in" else rect.right()
         painter.save()
@@ -2330,7 +2332,7 @@ class ClipItem(QGraphicsObject):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(9, 12, 18, 115))
         steps = max(8, min(48, math.ceil(width)))
-        for band in self._audio_fade_bands(rect):
+        for band in self._fade_bands(rect):
             mask = QPainterPath()
             mask.moveTo(edge, band.top())
             mask.lineTo(edge, band.bottom())
@@ -2349,62 +2351,6 @@ class ClipItem(QGraphicsObject):
             painter.setBrush(QColor(TEXT_COLOR))
             for point in self._fade_curve_handle_points(end):
                 painter.drawEllipse(point, 3.0, 3.0)
-        painter.restore()
-
-    def _draw_fade_overlay(
-        self,
-        painter: QPainter,
-        clip_rect: QRectF,
-        fade_width: float,
-        fade_type: str
-    ) -> None:
-        """
-        Draw fade overlay gradient (Phase 1.2).
-
-        Args:
-            painter: QPainter instance
-            clip_rect: Clip bounding rectangle
-            fade_width: Width of fade region in pixels
-            fade_type: 'in' or 'out'
-        """
-        if fade_width <= 0:
-            return
-
-        if self._is_audio_track():
-            self._draw_audio_fade(painter, clip_rect, fade_width, fade_type)
-            return
-
-        painter.save()
-
-        body_bottom = max(clip_rect.top() + 1.0, clip_rect.bottom() - 19.0)
-        if fade_type == "in":
-            start = QPointF(clip_rect.left(), body_bottom)
-            end = QPointF(clip_rect.left() + fade_width, clip_rect.top())
-            region = QPainterPath()
-            region.moveTo(clip_rect.left(), clip_rect.top())
-            region.lineTo(end)
-            region.lineTo(start)
-            region.closeSubpath()
-        else:
-            start = QPointF(clip_rect.right() - fade_width, clip_rect.top())
-            end = QPointF(clip_rect.right(), body_bottom)
-            region = QPainterPath()
-            region.moveTo(start)
-            region.lineTo(clip_rect.right(), clip_rect.top())
-            region.lineTo(end)
-            region.closeSubpath()
-
-        # A restrained translucent wedge shows the affected range without
-        # hiding the image or waveform underneath it.
-        painter.setBrush(QBrush(FADE_REGION_COLOR))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawPath(region)
-
-        active = self._is_selected or self._hover_fade_handle == ("fade_in" if fade_type == "in" else "fade_out")
-        ramp_color = QColor(FADE_RAMP_COLOR)
-        ramp_color.setAlpha(235 if active else 175)
-        painter.setPen(QPen(ramp_color, 1.35 if active else 1.0))
-        painter.drawLine(start, end)
         painter.restore()
 
     def _draw_fade_tab(
@@ -5041,7 +4987,7 @@ class ClipItem(QGraphicsObject):
                 self._drag_mode = "fade_curve"
                 self._fade_curve_drag_end = curve_end
                 self._fade_curve_preview = None
-                bands = self._audio_fade_bands(QRectF(0, 0, self._width, self._track_height))
+                bands = self._fade_bands(QRectF(0, 0, self._width, self._track_height))
                 points = self._fade_curve_handle_points(curve_end)
                 band_index = min(range(len(points)), key=lambda index: abs(points[index].y() - pos.y()))
                 self._fade_curve_drag_height = bands[band_index].height()
@@ -6015,7 +5961,9 @@ class ClipItem(QGraphicsObject):
 
             elif self._drag_mode == "fade_curve" and self._fade_curve_drag_end is not None:
                 end = self._fade_curve_drag_end
-                shape = self._fade_curves[0 if end == "in" else 1] or "equal_power"
+                shape = self._fade_curves[0 if end == "in" else 1] or (
+                    "equal_power" if self._is_audio_track() else "linear"
+                )
                 offset = delta.y() / self._fade_curve_drag_height
                 self._fade_curve_preview = (
                     fade_curve_from_midpoint(fade_curve_factor(shape, 0.5) - offset)
@@ -6757,47 +6705,50 @@ class ClipItem(QGraphicsObject):
 
 def paint_overlap_crossfade(
     painter: QPainter, rect: QRectF, transition_type: str,
-    adjustments: tuple[float, float] = (0.0, 0.0), *, enabled: bool = True,
+    adjustments: tuple[float, float] = (0.0, 0.0), *,
+    enabled: bool = True, active_handle: str | None = None,
 ) -> None:
-    """Draw the actual envelope over the audio waveform."""
+    """Shade each gain envelope over the waveform with no outline."""
     from src.features.edit.core.audio_dsp import crossfade_envelopes
 
+    if rect.isEmpty():
+        return
     painter.save()
     painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.fillRect(rect, QColor(12, 14, 19, 45))
-    accent = QColor(get_color("transition"))
-    accent.setAlpha(220 if enabled else 100)
-    painter.setPen(QPen(accent, 1.0))
-    painter.drawLine(rect.topLeft(), rect.bottomLeft())
-    painter.drawLine(rect.topRight(), rect.bottomRight())
+    painter.setPen(Qt.PenStyle.NoPen)
 
-    top = rect.top() + 13.0
-    bottom = rect.bottom() - min(21.0, rect.height() * 0.25)
+    top = rect.top() + 2.0
+    bottom = rect.bottom() - min(19.0, rect.height() * 0.35)
     if enabled and bottom > top:
         count = max(2, min(49, int(rect.width()) + 1))
-        left, right = crossfade_envelopes(
+        envelopes = crossfade_envelopes(
             audio_curve_for(transition_type) or "equal_power", count, adjustments,
         )
-        for gains in (left, right):
-            path = QPainterPath()
+        shading = QLinearGradient(0, top, 0, bottom)
+        shading.setColorAt(0.0, QColor(9, 12, 18, 75))
+        shading.setColorAt(1.0, QColor(9, 12, 18, 38))
+        painter.setBrush(QBrush(shading))
+        for gains in envelopes:
+            mask = QPainterPath()
+            mask.moveTo(rect.left(), top)
             for index, gain in enumerate(gains):
                 x = rect.left() + rect.width() * index / (count - 1)
-                y = bottom - (bottom - top) * gain
-                if index == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-            painter.setPen(QPen(QColor(15, 16, 20, 150), 2.6))
-            painter.drawPath(path)
-            painter.setPen(QPen(accent, 1.2))
-            painter.drawPath(path)
+                mask.lineTo(x, bottom - (bottom - top) * gain)
+            mask.lineTo(rect.right(), top)
+            mask.closeSubpath()
+            painter.drawPath(mask)
 
-    width = min(6.0, rect.width() / 3.0)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(accent)
-    for x in (rect.left() + 1.0, rect.right() - width - 1.0):
-        painter.drawRoundedRect(QRectF(x, rect.top() + 4, width, 5), 1.5, 1.5)
+    width = min(7.0, rect.width() * 0.26)
+    inset = min(3.0, rect.width() * 0.10)
+    for side, x in (
+        ("left", rect.left() + inset),
+        ("right", rect.right() - inset - width),
+    ):
+        color = QColor(TEXT_COLOR)
+        color.setAlpha(230 if active_handle == side else (143 if enabled else 86))
+        painter.setBrush(color)
+        painter.drawRoundedRect(QRectF(x, rect.top() + 4.0, width, 4.0), 1.5, 1.5)
     painter.restore()
 
 
@@ -7024,6 +6975,7 @@ class TransitionItem(QGraphicsObject):
                 self._transition_type,
                 self._overlap_drag_values or overlap_curve_adjustments(self._overlap_params),
                 enabled=self._overlap_params.get("overlap_enabled") is not False,
+                active_handle=self._overlap_drag_side or self._hover_edge,
             )
             painter.restore()
             return
@@ -7252,6 +7204,10 @@ class TransitionItem(QGraphicsObject):
                 Qt.CursorShape.ArrowCursor if self._is_track_locked
                 else Qt.CursorShape.SizeVerCursor
             )
+            side = "left" if event.pos().x() < self._width / 2 else "right"
+            if self._hover_edge != side:
+                self._hover_edge = side
+                self.update()
             return
         pos = event.pos()
 

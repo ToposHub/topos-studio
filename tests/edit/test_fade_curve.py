@@ -129,6 +129,10 @@ def test_b16_video_render_plan_uses_curve():
     # 1/4 处可区分：linear 0.3 vs smooth 0.216
     assert _opacity_at(base, 3) == pytest.approx(0.3)
     assert _opacity_at(curved, 3) == pytest.approx(0.216)
+    from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+
+    adjusted = base.with_fade_end_curve("in", fade_curve_from_midpoint(0.25))
+    assert _opacity_at(adjusted, 5) == pytest.approx(0.25)
 
 
 # ── 音频消费者（实时/离线/Stem 共用 apply_clip_fade） ────────────────
