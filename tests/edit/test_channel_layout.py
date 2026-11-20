@@ -67,9 +67,9 @@ class TestChannelLayoutEnum:
         with pytest.raises(ValueError):
             ChannelLayout.from_channel_count(3)
         with pytest.raises(ValueError):
-            ChannelLayout.from_channel_count(4)
-        with pytest.raises(ValueError):
             ChannelLayout.from_channel_count(7)
+        with pytest.raises(ValueError):
+            ChannelLayout.from_channel_count(9)
 
     def test_from_av_layout_name(self):
         assert ChannelLayout.from_av_layout_name("mono") == ChannelLayout.MONO
@@ -80,7 +80,7 @@ class TestChannelLayoutEnum:
 
     def test_from_av_layout_name_unknown_raises(self):
         with pytest.raises(ValueError):
-            ChannelLayout.from_av_layout_name("quad")
+            ChannelLayout.from_av_layout_name("22.2")
 
 
 class TestDownmixMatrix:
