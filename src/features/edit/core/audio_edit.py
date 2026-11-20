@@ -56,6 +56,13 @@ PROCESSING_RATE = AUDIO_REFERENCE_SAMPLE_RATE
 # 选区处理边缘的干湿过渡（2–5 ms 区间取 3 ms；防爆音）。
 EDGE_FADE_SECONDS = 0.003
 
+# P0-1 · 稳定操作身份：同一操作（处理器+operation+半开区间+声道）重复
+# 提交按 upsert_step 替换而非叠加。三类操作互不替换（并存）：
+# 手动选区增益 / 峰值标准化 / LUFS 响度匹配各自维护自己的系数。
+OPERATION_SELECTION_GAIN = "selection_gain"
+OPERATION_NORMALIZE_PEAK = "normalize_peak"
+OPERATION_LOUDNESS_MATCH = "loudness_match"
+
 # V1 处理器注册表：全部保长。algorithm_version 语义见各实现。
 PROCESSORS: dict[str, dict[str, Any]] = {
     "range_gain": {
@@ -797,6 +804,20 @@ def inline_audio_edit(audio_edit: Any) -> Any:
     return updated
 
 
+def step_identity_key(step: Any) -> tuple | None:
+    """P0-1 · 步骤的操作身份键（处理器+操作+半开区间+声道集合）。
+
+    ``None`` 表示无法解析（非 dict 步骤）。gain_db/label 不参与身份——
+    它们是同一次操作的参数而非身份。
+    """
+    if not isinstance(step, dict):
+        return None
+    params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+    return (step.get("processor_id"), params.get("operation"),
+            params.get("start"), params.get("end"),
+            tuple(params.get("channels") or ()))
+
+
 def upsert_step(audio_edit: Any, step: dict) -> dict:
     """P1 · 同约束幂等插入：替换处理器、操作身份、区间与声道相同的步骤。
 
@@ -806,20 +827,10 @@ def upsert_step(audio_edit: Any, step: dict) -> dict:
     """
     if not isinstance(audio_edit, dict):
         return append_step(audio_edit, step)
-    params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
-    identity = (step.get("processor_id"), params.get("operation"),
-                params.get("start"), params.get("end"),
-                tuple(params.get("channels") or ()))
+    identity = step_identity_key(step)
     updated = copy.deepcopy(audio_edit)
     for existing in updated.get("steps", []) or []:
-        if not isinstance(existing, dict):
-            continue
-        e_params = (existing.get("params", {})
-                    if isinstance(existing.get("params"), dict) else {})
-        e_identity = (existing.get("processor_id"), e_params.get("operation"),
-                      e_params.get("start"), e_params.get("end"),
-                      tuple(e_params.get("channels") or ()))
-        if e_identity == identity:
+        if step_identity_key(existing) == identity:
             replacement = dict(step)
             replacement["step_id"] = existing.get("step_id") or step.get("step_id")
             steps = list(updated.get("steps", []))
@@ -827,6 +838,247 @@ def upsert_step(audio_edit: Any, step: dict) -> dict:
             updated["steps"] = steps
             return updated
     return append_step(updated, step)
+
+
+def tag_legacy_measurement_operations(
+    audio_edit: Any, *, legacy_labels: "tuple[str, ...]" = (),
+) -> Any:
+    """P0-1 · 旧工程迁移：为无操作身份的历史测量步骤补上稳定身份。
+
+    识别规则（只点名测量类步骤，其他历史 ``range_gain`` 原样保留）：
+
+    - ``normalize`` 步骤且无 ``operation`` → ``normalize_peak``；
+    - ``range_gain`` 步骤且无 ``operation``、label 命中
+      ``legacy_labels``（响度匹配的历史标签，含本地化变体）→
+      ``loudness_match``。
+
+    返回迁移后的深拷贝；无匹配步骤时返回原对象语义的拷贝。
+    """
+    if not isinstance(audio_edit, dict):
+        return audio_edit
+    updated = copy.deepcopy(audio_edit)
+    for step in updated.get("steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        processor_id = step.get("processor_id")
+        params = step.get("params", {})
+        if not isinstance(params, dict) or params.get("operation"):
+            continue
+        if processor_id == "normalize":
+            params["operation"] = OPERATION_NORMALIZE_PEAK
+        elif (processor_id == "range_gain"
+                and str(params.get("label", "")) in legacy_labels):
+            params["operation"] = OPERATION_LOUDNESS_MATCH
+    return updated
+
+
+def find_measurement_step_index(
+    audio_edit: Any, *, processor_id: str, operation: str,
+    start: int, end: int, channels: "tuple[int, ...] | list[int]",
+    legacy_labels: "tuple[str, ...]" = (),
+) -> int:
+    """P0-1 · 定位将被替换的既有步骤下标（无匹配 = 追加位置 = 栈末）。
+
+    先按与 ``upsert_step`` 一致的身份键匹配（含 ``operation``）；未命中
+    再按迁移规则识别旧工程无身份的步骤（normalize 无 operation /
+    range_gain+legacy label），替换语义对旧步骤同样生效。
+    """
+    if not isinstance(audio_edit, dict):
+        return 0
+    steps = audio_edit.get("steps", []) or []
+    target = (processor_id, operation, int(start), int(end), tuple(channels))
+    legacy: dict[str, set[str] | bool] = {}
+    if processor_id == "normalize":
+        legacy["normalize"] = True
+    if processor_id == "range_gain" and operation == OPERATION_LOUDNESS_MATCH:
+        legacy["range_gain_labels"] = set(legacy_labels)
+    for index, existing in enumerate(steps):
+        key = step_identity_key(existing)
+        if key is None:
+            continue
+        if key[:2] != target[:2]:
+            continue
+        if (key[2], key[3], tuple(key[4])) != (target[2], target[3], target[4]):
+            continue
+        if key[1] == operation:
+            return index
+        # 身份键 operation 缺失 → 迁移识别（见 tag_legacy…）。
+        if key[1] is None:
+            pid = key[0]
+            if (pid == "normalize" and "normalize" in legacy
+                    and legacy["normalize"]):
+                return index
+            labels = legacy.get("range_gain_labels")
+            if (pid == "range_gain" and labels is not None):
+                params = existing.get("params", {}) if isinstance(
+                    existing.get("params"), dict) else {}
+                if str(params.get("label", "")) in labels:
+                    return index
+    return len(steps)
+
+
+def _enabled_length_maps(steps: list, from_index: int) -> list[tuple[int, int, int]]:
+    """``steps[from_index:]`` 中 enabled 改长度步骤的 forward map（按机架序）。
+
+    供测量基准渲染把最终输出域的区间/坐标折回插入点域——与
+    ``render_pre_render_steps._later_length_maps`` 同一构造，只是作用域
+    覆盖整个栈（改长度步骤全部是预渲染步骤，均在机架前缀内）。
+    """
+    maps: list[tuple[int, int, int]] = []
+    for step in steps[from_index:]:
+        if not isinstance(step, dict) or not step.get("enabled", True):
+            continue
+        params = step.get("params", {}) if isinstance(
+            step.get("params"), dict) else {}
+        pid = step.get("processor_id")
+        if pid == "time_stretch":
+            s, e = int(params.get("start", 0)), int(params.get("end", 0))
+            maps.append((s, e, _time_stretch_output_length(
+                max(0, e - s), float(params.get("ratio_pct", 100.0)))))
+        elif pid == "delete_range":
+            maps.append((int(params.get("start", 0)), int(params.get("end", 0)), 0))
+    return maps
+
+
+def _invert_range_through_maps(
+    start: int, end: int, maps: list[tuple[int, int, int]],
+) -> tuple[int, int]:
+    """最终输出域半开区间 → 经改长度步骤逆映射（反向逐个，floor/ceil）。"""
+    lo, hi = Fraction(int(start)), Fraction(int(end))
+    for s, e, seg in reversed(maps):
+        lo = invert_position_through_step(lo, s, e, seg)
+        hi = invert_position_through_step(hi, s, e, seg)
+    return max(0, math.floor(lo)), max(1, math.ceil(hi))
+
+
+def map_selection_to_insertion(
+    audio_edit: Any, start: int, end: int, insertion_index: int,
+) -> tuple[int, int]:
+    """P0-1 · 最终输出域选区 → 插入点域选区（供测量基准取段）。"""
+    steps = (audio_edit.get("steps", []) or []) if isinstance(audio_edit, dict) else []
+    maps = _enabled_length_maps(steps, insertion_index)
+    if not maps:
+        return int(start), int(end)
+    return _invert_range_through_maps(int(start), int(end), maps)
+
+
+def render_to_step_insertion(
+    pcm: np.ndarray,
+    audio_edit: Any,
+    *,
+    insertion_index: int,
+    sample_rate: int = PROCESSING_RATE,
+    progress: Any = None,
+    cancel_check: Any = None,
+) -> np.ndarray:
+    """P0-1 · 渲染到目标步骤插入点的 PCM（替换时移除被替换系数）。
+
+    按机架顺序应用 ``insertion_index`` 之前的全部 enabled 步骤；inline
+    步骤的持久化区间在最终输出域，经 ``_enabled_length_maps`` 折回其
+    机架位置所在域后应用（与 ``render_pre_render_steps`` 前缀烘焙同一
+    语义，但折叠覆盖整个栈——改长度步骤均为预渲染步骤）。包络/标记
+    在全部步骤之后应用，不属于插入点基准。不含被替换步骤本身。
+    """
+    if not isinstance(audio_edit, dict):
+        return pcm
+    steps = [s for s in (audio_edit.get("steps", []) or [])
+             if isinstance(s, dict) and s.get("enabled", True)]
+    steps = steps[:max(0, int(insertion_index))]
+    if not steps:
+        return pcm
+    from src.features.edit.core.audio_denoise import (
+        denoise_spectral_subtraction, scipy_available,
+    )
+    out = pcm
+    for index, step in enumerate(steps):
+        processor_id = step.get("processor_id")
+        params = step.get("params", {}) if isinstance(
+            step.get("params"), dict) else {}
+        if processor_id in PRE_RENDER_PROCESSORS:
+            if not scipy_available():
+                raise RuntimeError(
+                    "SciPy DSP backend unavailable for pre-render steps")
+            if processor_id == "spectral_denoise":
+                def _progress(fraction: float, _params=params) -> bool:
+                    if progress is not None:
+                        progress(float(fraction))
+                    return not (cancel_check is not None and cancel_check())
+
+                out = denoise_spectral_subtraction(
+                    out,
+                    sample_rate,
+                    (int(params.get("noise_start", 0)), int(params.get("noise_end", 0))),
+                    (int(params.get("start", 0)), int(params.get("end", 0))),
+                    float(params.get("reduction_db", 12.0)),
+                    nfft=int(params.get("nfft", 2048)),
+                    link_stereo=bool(params.get("link_stereo", True)),
+                    progress=_progress,
+                )
+            elif processor_id == "time_stretch":
+                out = _render_time_stretch_step(
+                    out, params, sample_rate,
+                    progress=progress, cancel_check=cancel_check)
+            elif processor_id == "delete_range":
+                out = _render_delete_range_step(out, params, sample_rate)
+            elif processor_id == "spectral_repair":
+                from src.features.edit.core.audio_repair import repair_spectral
+                out = repair_spectral(
+                    out,
+                    sample_rate,
+                    list(params.get("strokes", []) or []),
+                    (int(params.get("start", 0)), int(params.get("end", 0))),
+                    amount_db=float(params.get("amount_db", 24.0)),
+                    mode=str(params.get("mode", "attenuate")),
+                    nfft=int(params.get("nfft", 2048)),
+                    link_stereo=bool(params.get("link_stereo", True)),
+                    progress=progress,
+                )
+            else:
+                raise RuntimeError(
+                    f"pre-render processor {processor_id!r} has no renderer")
+            continue
+        if processor_id not in KNOWN_PROCESSOR_IDS:
+            continue  # 未知处理器：保持原样（上游 validate 负责阻断）
+        # inline 步骤：最终输出域区间 → 当前域（经后续全部改长度步骤）。
+        mapped = dict(step)
+        m_params = dict(params)
+        start, end = params.get("start", 0), params.get("end", 0)
+        if isinstance(start, int) and isinstance(end, int):
+            m_params["start"], m_params["end"] = _invert_range_through_maps(
+                start, end, _enabled_length_maps(steps, index + 1))
+        mapped["params"] = m_params
+        temp = {"version": AUDIO_EDIT_SCHEMA_VERSION,
+                "processing_rate": PROCESSING_RATE, "steps": [mapped]}
+        out = apply_clip_audio_edit(out, 0, temp, sample_rate=sample_rate)
+    return out
+
+
+def render_audio_edit_full(
+    pcm: np.ndarray,
+    audio_edit: Any,
+    *,
+    sample_rate: int = PROCESSING_RATE,
+    progress: Any = None,
+    cancel_check: Any = None,
+) -> np.ndarray:
+    """P0-1 · 全栈整段渲染（前缀烘焙 + 后缀 inline + 包络），复测共用。
+
+    与编辑器预览 ``_compute_preview`` 同一语义：预渲染步骤整段烘焙成
+    基底，后缀 inline 步骤与包络在其上应用。测量候选步骤的**最终输出
+    读数**时使用（插入点目标见 ``render_to_step_insertion``）。
+    """
+    if not isinstance(audio_edit, dict):
+        return pcm
+    steps = audio_edit.get("steps", []) or []
+    if not steps and not envelope_nodes(audio_edit):
+        return pcm
+    base = pcm
+    if requires_pre_render(audio_edit):
+        base = render_pre_render_steps(
+            pcm, audio_edit, sample_rate=sample_rate,
+            progress=progress, cancel_check=cancel_check)
+    return apply_audio_edit_to_pcm(
+        base, suffix_audio_edit(audio_edit), sample_rate=sample_rate)
 
 
 def replace_processor_step(audio_edit: Any, processor_id: str, step: dict) -> dict:
@@ -1296,6 +1548,20 @@ def evaluate_envelope_gain(
 
 def edge_fade_samples(sample_rate: int) -> int:
     return max(1, int(round(EDGE_FADE_SECONDS * sample_rate)))
+
+
+def selection_measurement_envelope(
+    length: int, start: int, end: int, *, sample_rate: int,
+) -> "np.ndarray | None":
+    """P0-1 · 候选测量步骤的 unity 增益包络（None = 区间外不涉及）。
+
+    测量基准必须乘以该包络再取峰值/响度：步骤边缘的 3 ms 过渡不达
+    全增益，直接量基准会把过渡区样本误当峰值目标（重复标准化落点
+    漂移的来源之一）。乘包络后 ``gain = target − 测量值`` 与最终渲染
+    逐样本一致。
+    """
+    return _range_gain_envelope(
+        int(length), 0, int(start), int(end), edge_fade_samples(int(sample_rate)))
 
 
 def _range_gain_envelope(
