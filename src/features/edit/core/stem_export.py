@@ -725,6 +725,10 @@ def _iter_stem_pcm_chunks(
 
                 # MX-04/R03：clip 阶段（fade/crossfade/clip-FX）在求和前
                 # 完成——与成片导出同一调用序列。
+                from src.features.edit.core.audio_transition_catalog import (
+                    audio_transition_curve, overlap_fade_regions,
+                )
+                transitions = getattr(track, "transitions", ()) or ()
                 samples = _apply_clip_fade(
                     samples,
                     clip_timeline_start=int(getattr(clip, "timeline_start", 0)),
@@ -740,32 +744,31 @@ def _iter_stem_pcm_chunks(
                     fade_curve=getattr(clip, "fade_curve", None),
                     fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
                     fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
+                    overlap_regions=overlap_fade_regions(transitions, clip.clip_id),
                 )
-                if getattr(track, "transitions", None):
-                    from src.features.edit.core.audio_transition_catalog import (
-                        audio_curve_for,
+                for tr in transitions:
+                    role = None
+                    if tr.left_clip_id == clip.clip_id:
+                        role = "left"
+                    elif tr.right_clip_id == clip.clip_id:
+                        role = "right"
+                    if role is None:
+                        continue
+                    curve = audio_transition_curve(tr)
+                    if curve is None:
+                        continue
+                    start, end = tr.audio_envelope_range
+                    samples = _apply_xfade_block(
+                        samples,
+                        transition_start_frame=start,
+                        transition_duration_frames=end - start,
+                        current_frame=frame_idx,
+                        role=role,
+                        curve=str(curve),
+                        fps=fps,
+                        sample_rate=float(sample_rate),
+                        adjustments=tr.overlap_curve_adjustments,
                     )
-                    for tr in track.transitions:
-                        role = None
-                        if tr.left_clip_id == clip.clip_id:
-                            role = "left"
-                        elif tr.right_clip_id == clip.clip_id:
-                            role = "right"
-                        if role is None:
-                            continue
-                        curve = audio_curve_for(tr.transition_type)
-                        if curve is None:
-                            continue
-                        samples = _apply_xfade_block(
-                            samples,
-                            transition_start_frame=int(tr.start_frame),
-                            transition_duration_frames=int(tr.duration),
-                            current_frame=frame_idx,
-                            role=role,
-                            curve=str(curve),
-                            fps=fps,
-                            sample_rate=float(sample_rate),
-                        )
                 _clip_chain = _clip_fx_for(clip, frame_idx)
                 if _clip_chain is not None and _clip_chain.is_active:
                     samples = _clip_chain.process(samples)

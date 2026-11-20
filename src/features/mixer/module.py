@@ -14,24 +14,22 @@ if TYPE_CHECKING:
 
 MIXER_PANEL_SPECS: tuple[tuple[str, str, str, str], ...] = (
     ("console", "dock_audio_console", "console_panel", "Audio Mixer"),
-    ("viewer", "dock_audio_viewer", "viewer_panel", "Viewport"),
+    ("viewer", "dock_audio_viewer", "viewer_panel", "Video Monitor"),
     ("timeline", "dock_audio_timeline", "timeline_panel", "Audio Timeline"),
     ("clip_editor", "dock_audio_clip_editor", "clip_editor_panel", "Clip Editor"),
     ("media_pool", "dock_audio_media_pool", "media_pool_panel", "Media Pool"),
-    ("effects", "dock_audio_effects", "effects_panel", "Effects"),
+    ("effects", "dock_audio_effects", "effects_panel", "Audio Effects"),
 )
 
-# 只在 project-backed（Studio 共享 Edit 面板）形态下存在的 dock：原型
-# MixerPage 没有对应的媒体池/效果面板，无对应功能模块的产品跳过。
 MIXER_PROJECT_ONLY_KEYS: frozenset[str] = frozenset({"media_pool", "effects"})
 
 # Panels 菜单标题 i18n key：console/viewer/media_pool/effects 复用现有 key，
 # 其余走 panel.audio_<key>（locales 已覆盖）。
 MIXER_PANEL_TITLE_KEYS: dict[str, str] = {
     "console": "panel.audio_mixer",
-    "viewer": "panel.edit_viewport",
+    "viewer": "panel.audio_viewer",
     "media_pool": "panel.media_pool",
-    "effects": "panel.edit_effects",
+    "effects": "panel.audio_effects",
 }
 
 

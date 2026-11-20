@@ -9,7 +9,7 @@ persistence contract — do not rename.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 import logging
 import uuid
@@ -440,11 +440,17 @@ class RemoveTransitionCommand:
         if transition is None:
             raise ValueError(f"Transition not found: {self.transition_id}")
 
-        # Remove transition
-        new_transitions = tuple(
-            t for t in track.transitions
-            if t.transition_id != self.transition_id
-        )
+        # Removing the effect from a real overlap leaves both sources in place.
+        if transition.is_overlap_crossfade:
+            disabled = replace(transition, params={**transition.params, "overlap_enabled": False})
+            new_transitions = tuple(
+                disabled if item.transition_id == self.transition_id else item
+                for item in track.transitions
+            )
+        else:
+            new_transitions = tuple(
+                item for item in track.transitions if item.transition_id != self.transition_id
+            )
 
         # 审计修复 AUD-16201：_rebuild 保留全部轨道字段（见
         # AddTransitionCommand.apply 内注释）
@@ -475,8 +481,13 @@ class RemoveTransitionCommand:
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
 
-        # Add transition back
-        new_track = track.with_transition_added(self._deleted_transition)
+        if self._deleted_transition.is_overlap_crossfade:
+            new_track = track._rebuild(transitions=tuple(
+                self._deleted_transition if item.transition_id == self.transition_id else item
+                for item in track.transitions
+            ))
+        else:
+            new_track = track.with_transition_added(self._deleted_transition)
         new_timeline = timeline.with_track_updated(new_track)
 
         logger.debug(f"RemoveTransitionCommand undone: restored {self.transition_id}")

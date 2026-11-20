@@ -440,6 +440,7 @@
     }
   },
   "menu": {
+    "application_menu": "Application Menu",
     "file": "&File",
     "edit": "&Edit",
     "image": "&Image",
@@ -572,6 +573,7 @@
     "close_panel": "Close Panel"
   },
   "panel": {
+    "audio_mixer": "Audio Mixer",
     "viewport": "Viewport",
     "library": "Library",
     "files": "Files",
@@ -599,6 +601,9 @@
     "presets": "Presets",
     "composite": "Composite",
     "media_pool": "Media Pool",
+    "properties": "Properties",
+    "node_properties": "Node Properties",
+    "timeline_clips": "Timeline Clips",
     "timeline": "Timeline",
     "edit_properties": "Properties",
     "edit_effects": "Effects",
@@ -790,6 +795,41 @@
     "point_to_point_mode": "Point to Point Mode"
   },
   "mixer": {
+    "track_header": {
+      "volume": "Track volume · {db} dB · L/R peaks · double-click for 0 dB",
+      "pan": "Stereo balance · {value} · drag to adjust, double-click to center"
+    },
+    "record": {
+      "choose_input": "Choose a recording input",
+      "input_menu": "Recording input…",
+      "stop": "Stop recording",
+      "finishing": "Finishing the recording…",
+      "locked": "Unlock this track to record",
+      "busy": "Finish the current recording first",
+      "failed": "Could not record from the selected input",
+      "save_failed": "Could not save the recording",
+      "settings": "Recording Settings",
+      "settings_menu": "Recording Settings…",
+      "settings_saved": "Recording settings saved.",
+      "arm": "Arm track for recording",
+      "disarm": "Disarm track",
+      "first_channel": "First channel",
+      "input": "Recording input",
+      "input_peak": "Input peak level (dBFS)",
+      "input_unavailable": "The selected input or channel is unavailable.",
+      "live_clip": "Recording…",
+      "mono": "Mono",
+      "no_input": "No input",
+      "patch_first": "Assign a recording input first",
+      "patch_version": "This timeline uses a newer recording input format.",
+      "preparing": "Recording pre-roll",
+      "second_channel": "Second channel",
+      "transport_arm_first": "Arm a track to record",
+      "transport_record": "Record",
+      "transport_recording": "Recording armed tracks",
+      "transport_start": "Record armed tracks (Shift+Space)",
+      "unavailable": "Unavailable"
+    },
     "hue": "Hue",
     "saturation": "Saturation",
     "luminance": "Luminance",
@@ -2759,6 +2799,10 @@
     "denoise_tooltip": "Video denoise render tier: preview (playing) / paused / export"
   },
   "workspace": {
+    "grading_tools": "Grading Tools",
+    "color_resources": "Color Resources",
+    "animation": "Animation",
+    "layout_presets": "Layout Presets",
     "primary": "Primary",
     "secondary": "Secondary",
     "hdr": "HDR",

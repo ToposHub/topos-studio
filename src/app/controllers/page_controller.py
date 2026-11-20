@@ -414,7 +414,8 @@ class PageManagementMixin:
         outgoing_state = self.saveState()
         self.page_layouts[self.current_page] = outgoing_state
         if hasattr(self, '_save_current_layout_to_store'):
-            self._save_current_layout_to_store(self.current_page, qt_state=outgoing_state)
+            self._save_current_layout_to_store(
+                self.current_page, qt_state=outgoing_state, auto_save=False)
 
         # Deliver reuses the real Edit Program Viewer and TimelinePanel. Move
         # them back before restoring another page's dock state, otherwise the
@@ -427,13 +428,6 @@ class PageManagementMixin:
                 restore_deliver_panels()
         if from_page == "Mixer" and page_name != "Mixer":
             self._restore_edit_panels_from_mixer()
-
-        # Composite owns its Node Properties dock (widget bound at creation),
-        # so no panel swap is needed when entering Composite. Edit still uses
-        # the shared dock_properties with its own panel.
-        if page_name != "Composite":
-            if self.dock_properties is not None and self.edit_properties_panel is not None:
-                self.dock_properties.setWidget(self.edit_properties_panel)
 
         # Update buttons UI
         for name, btn in self.page_buttons.items():
@@ -471,6 +465,10 @@ class PageManagementMixin:
         if hasattr(self, '_enforce_page_dock_visibility'):
             self._enforce_page_dock_visibility()
 
+        panel_bar = getattr(self, "workspace_panel_bar", None)
+        if panel_bar is not None:
+            panel_bar.set_page(page_name)
+
         # Repair only legacy saved Edit layouts after their Qt state has been
         # restored.  The migration is versioned and never constrains later
         # user-driven splitter resizing.
@@ -495,8 +493,7 @@ class PageManagementMixin:
             # it to existing Composite layouts once, after restoreState().
             schedule(0, self._migrate_composite_scopes_dock_visibility)
         if page_name == "Mixer" and hasattr(self, "_migrate_mixer_media_docks_layout"):
-            # Old Mixer states predate the Media Pool / Effects docks; add
-            # them once after restoreState() so they are not stuck hidden.
+            # Place added Mixer panels once after the saved Qt layout is restored.
             schedule(0, self._migrate_mixer_media_docks_layout)
         if page_name == "Deliver" and hasattr(self, "_migrate_deliver_layout"):
             # Old Deliver layouts had a separate queue dock and could restore
@@ -568,10 +565,18 @@ class PageManagementMixin:
             return
 
         try:
+            gl_viewport = getattr(self.canvas, "gl_viewport", None)
+            viewport_visible = gl_viewport is not None and gl_viewport.isVisible()
+            # Color still feeds external monitoring when its local canvas is
+            # hidden. Other pages only need this pass if they show the canvas.
+            if page_name != "Color" and (
+                not viewport_visible or gl_viewport.visibleRegion().isEmpty()
+            ):
+                return
             # Ensure floating viewport is visible and raised (respect user's floating preference)
-            if hasattr(self, 'dock_viewport'):
-                if self.dock_viewport.isVisible():
-                    self.dock_viewport.raise_()
+            dock_viewport = getattr(self, "dock_viewport", None)
+            if dock_viewport is not None and dock_viewport.isVisible():
+                dock_viewport.raise_()
 
             # Ensure the GL viewport widget is visible. AUD-3107: 此前的显式
             # ``makeCurrent()`` 在 UI 线程保持 GL 上下文 current，其后无任何
@@ -579,14 +584,14 @@ class PageManagementMixin:
             # OpenGL"铁律相悖（QOpenGLWidget 的 paint 事件会自行
             # makeCurrent），且与异步渲染线程共享上下文存在争用风险。
             # 可见性 + 下面的 update/invalidate 已足以触发重绘，删除该调用。
-            if hasattr(self.canvas, 'gl_viewport') and self.canvas.gl_viewport and self.canvas.gl_viewport.isVisible():
-                self.canvas.gl_viewport.show()
+            if viewport_visible:
+                gl_viewport.show()
 
                 # Trigger LOD update
                 self.canvas._update_lod()
 
                 # Force viewport update and invalidate scene
-                self.canvas.gl_viewport.update()
+                gl_viewport.update()
                 from PyQt6.QtWidgets import QGraphicsScene
                 self.canvas.scene.invalidate(self.canvas.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer)
 
@@ -606,6 +611,11 @@ class PageManagementMixin:
         try:
             if self.current_page in ("Composite", "Mixer"):
                 return
+            if self.current_page != "Color":
+                gl_viewport = getattr(self.canvas, "gl_viewport", None)
+                if (gl_viewport is None or not gl_viewport.isVisible()
+                        or gl_viewport.visibleRegion().isEmpty()):
+                    return
             self.canvas.viewport().update()
             if self.engine and hasattr(self.engine, 'render_pipeline'):
                 self.engine.render_pipeline(render_reason='viewport_refresh')
@@ -626,6 +636,9 @@ class PageManagementMixin:
             stop_adr = getattr(self, "_stop_adr_session", None)
             if callable(stop_adr):
                 stop_adr()
+            workflow = getattr(self, "_set_mixer_recording_workflow", None)
+            if callable(workflow):
+                workflow(False)
 
         # Edit page leave hook (P1 placeholder)
         if page_name == "Edit":
@@ -659,10 +672,6 @@ class PageManagementMixin:
             page_name == "Mixer"
             and getattr(getattr(self, "mixer_page", None), "project_backed", False)
         ):
-            if page_name == "Mixer":
-                workflow = getattr(self, "_set_mixer_recording_workflow", None)
-                if callable(workflow):
-                    workflow(False)
             if self._edit_available and self.edit_page is not None:
                 self.edit_page.on_leave()
             coordinator = getattr(self, "_viewport_playback_coordinator", None)
@@ -759,10 +768,10 @@ class PageManagementMixin:
                 workflow(True)
             return
 
-        # Edit page enter hook (P1 placeholder)
         if page_name == "Edit":
             if self._edit_available and self.edit_page is not None:
-                if self.dock_properties is not None:
+                if (self.dock_properties is not None and self.edit_properties_panel is not None
+                        and self.dock_properties.widget() is not self.edit_properties_panel):
                     self.dock_properties.setWidget(self.edit_properties_panel)
                 try:
                     self.edit_page.on_enter()
@@ -778,6 +787,9 @@ class PageManagementMixin:
                         self._refresh_edit_preview_after_composite_change()
                     except Exception as e:
                         logger.warning(f"enter_page_hook: composite preview refresh failed: {e}")
+                workflow = getattr(self, "_set_mixer_recording_workflow", None)
+                if callable(workflow):
+                    workflow(True)
             # I01（复查计划）：回到 Edit 恢复页面仲裁模式与显示对齐。
             coordinator = getattr(self, "_viewport_playback_coordinator", None)
             if coordinator is not None:
@@ -884,11 +896,6 @@ class PageManagementMixin:
                 self._composite_adapter.on_enter_page(tex_id, co_w, co_h, co_rev)
                 self._composite_context_applied_during_enter = composite_context_applied
                 return
-
-            # Fallback: legacy direct path. Node Properties dock already
-            # owns its widget, so no setWidget is needed here.
-            if self.dock_node_properties is not None and not self.dock_node_properties.isVisible():
-                self.dock_node_properties.show()
 
             if self.composite_viewer and self.dock_viewport:
                 self.dock_viewport.setWidget(self.composite_viewer)
@@ -1007,7 +1014,7 @@ class PageManagementMixin:
         page = getattr(self, "composite_page", None)
         reset = getattr(page, "reset_to_empty_workspace", None)
         if callable(reset):
-            reset()
+            reset(reuse_clean_graph=True)
         else:
             # Keep this fallback safe for lightweight test doubles and older
             # CompositePage implementations.

@@ -1007,6 +1007,7 @@ def test_initialize_falls_back_to_hardcoded_defaults(
 def test_save_current_layout_to_store_records_visible_panels(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_product_mode(host, "studio", monkeypatch)
+    _set_work_mode(host, "video", monkeypatch)
     registry = PanelRegistry()
     registry.register(PanelDescriptor(
         panel_id="color.wheel_test",
@@ -1023,7 +1024,7 @@ def test_save_current_layout_to_store_records_visible_panels(
     host.dock_lut.setVisible(False)
     host._save_current_layout_to_store("Color")
 
-    profile = host.layout_store.get_profile("studio", "Color")
+    profile = host.layout_store.get_profile("studio_video", "Color")
     assert profile is not None
     assert profile.visible_panels == ("color.wheel_test",)
     assert profile.qt_state_hex == _hex_of(host.saveState())
@@ -1033,6 +1034,7 @@ def test_save_current_layout_reuses_supplied_qt_state_without_recapture(
     host: _DockHost, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_product_mode(host, "studio", monkeypatch)
+    _set_work_mode(host, "image", monkeypatch)
     state = host.saveState()
 
     def unexpected_save_state() -> QByteArray:
@@ -1040,9 +1042,37 @@ def test_save_current_layout_reuses_supplied_qt_state_without_recapture(
 
     monkeypatch.setattr(host, "saveState", unexpected_save_state)
     host._save_current_layout_to_store("Color", qt_state=state)
-    profile = host.layout_store.get_profile("studio", "Color")
+    profile = host.layout_store.get_profile("studio_image", "Color")
     assert profile is not None
     assert profile.qt_state_hex == _hex_of(state)
+
+
+def test_switch_layout_writes_are_coalesced_without_delaying_restore(
+    host: _DockHost, qtbot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_product_mode(host, "studio", monkeypatch)
+    _set_work_mode(host, "video", monkeypatch)
+    host._save_current_layout_to_store("Color", auto_save=False)
+    host._save_current_layout_to_store("Edit", auto_save=False)
+
+    for page in ("Color", "Edit"):
+        profile = host.layout_store.get_profile("studio_video", page)
+        assert profile is not None and profile.qt_state_hex
+    assert host.config_manager.save_config_calls == 0
+    qtbot.waitUntil(lambda: host.config_manager.save_config_calls == 1)
+
+    host._save_current_layout_to_store("Edit", auto_save=False)
+    assert not host._layout_profile_save_timer.isActive()
+
+
+def test_profile_mode_uses_work_mode_of_running_window(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_product_mode(host, "studio", monkeypatch)
+    host._active_work_mode = "video"
+    host.config_manager.set("work_mode", "image")
+    host._save_current_layout_to_store("Color")
+    assert host.layout_store.get_profile("studio_video", "Color") is not None
+    assert host.layout_store.get_profile("studio_image", "Color") is None
 
 
 def test_restore_layout_from_store_true_and_false_paths(
@@ -1060,34 +1090,36 @@ def test_restore_layout_from_store_true_and_false_paths(
 def test_load_layouts_from_store_populates_page_layouts(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_product_mode(host, "studio", monkeypatch)
+    _set_work_mode(host, "video", monkeypatch)
     state_hex = _hex_of(host.saveState())
     host.layout_store.save_profile(LayoutProfile(
-        product_mode="studio", page_id="Edit", qt_state_hex=state_hex))
+        product_mode="studio_video", page_id="Edit", qt_state_hex=state_hex))
     host.layout_store.save_profile(LayoutProfile(
-        product_mode="other_mode", page_id="Color", qt_state_hex=state_hex))
+        product_mode="studio_image", page_id="Color", qt_state_hex=state_hex))
 
     host._load_layouts_from_store()
 
     assert host.page_layouts.get("Edit") == _from_hex(state_hex)
     assert "Color" not in host.page_layouts, (
-        "profiles of other product modes must not leak into this mode")
+        "the other work mode's Color layout must not leak into video")
 
 
 def test_reset_product_layout_clears_current_mode_only(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_product_mode(host, "studio", monkeypatch)
+    _set_work_mode(host, "video", monkeypatch)
     host.layout_store.save_profile(LayoutProfile(
-        product_mode="studio", page_id="Color", qt_state_hex="ab"))
+        product_mode="studio_video", page_id="Color", qt_state_hex="ab"))
     host.layout_store.save_profile(LayoutProfile(
-        product_mode="other_mode", page_id="Edit", qt_state_hex="cd"))
+        product_mode="studio_image", page_id="Color", qt_state_hex="cd"))
     host.page_layouts = {"Color": QByteArray(b"x"), "Edit": QByteArray(b"y")}
 
     host.reset_product_layout()
 
-    assert host.layout_store.get_profiles_for_mode("studio") == {}
+    assert host.layout_store.get_profiles_for_mode("studio_video") == {}
     assert host.page_layouts == {}
-    kept = host.layout_store.get_profiles_for_mode("other_mode")
-    assert set(kept) == {"Edit"}, "other product modes must be preserved"
+    kept = host.layout_store.get_profiles_for_mode("studio_image")
+    assert set(kept) == {"Color"}, "the other work mode must be preserved"
 
 
 # ═══════════════════════════════════════════════════════════════════════

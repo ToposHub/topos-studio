@@ -70,19 +70,20 @@ class LayoutStore:
     # Profile CRUD
     # ------------------------------------------------------------------
 
-    def save_profile(self, profile: LayoutProfile) -> None:
+    def save_profile(self, profile: LayoutProfile, *, auto_save: bool = True) -> None:
         """
         Save a LayoutProfile to config.
 
         Args:
             profile: The LayoutProfile to persist.
+            auto_save: Flush config immediately when True.
         """
         key = profile.config_key
         self._cache[key] = profile
 
         if self._config is not None:
             self._set_config_nested(
-                key, profile.to_dict(), auto_save=True
+                key, profile.to_dict(), auto_save=auto_save
             )
 
         logger.debug(

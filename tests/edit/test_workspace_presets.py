@@ -55,7 +55,8 @@ def test_editing_preset_matches_factory_edit_layout():
     }
     # Source lives inside Viewport; only the right inspector stack is tabified.
     assert "dockSourceViewer" not in EDIT_WORKSPACE_MANAGED_DOCKS
-    assert ("dockProperties", "dockEditEffects", "dockEditInfo") in preset.tabify_groups
+    assert ("dockEditMediaPool", "dockEditEffects") in preset.tabify_groups
+    assert ("dockProperties", "dockEditInfo") in preset.tabify_groups
 
 
 def test_task_presets_swap_panels_meaningfully():

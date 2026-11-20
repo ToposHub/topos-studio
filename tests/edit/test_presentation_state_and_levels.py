@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, Qt, pyqtSignal
 
 from src.features.edit.core.timeline_v2 import EditTrack, Rational, TimelineSequence
 
@@ -149,7 +149,8 @@ def test_uistate_presentation_roundtrip_and_legacy() -> None:
 
 class _FakeAudioManager(QObject):
     audio_level_changed = pyqtSignal(list)
-    audio_track_levels_changed = pyqtSignal(list)
+    audio_track_levels_changed = pyqtSignal(dict)
+    audio_telemetry_reset = pyqtSignal(int)
 
     def cleanup(self) -> None:  # W08：shutdown 路径幂等
         pass
@@ -165,6 +166,73 @@ def _page(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     page = EditPage()
     qtbot.addWidget(page)
     return page
+
+
+def test_mixer_header_uses_track_levels_and_commits_pan_with_undo(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features.edit.ui.timeline_view import EditTool
+
+    page = _page(qtbot, monkeypatch)
+    manager = _FakeAudioManager()
+    page._audio_manager = manager
+    panel = _panel(qtbot)
+    page.set_timeline_panel(panel)
+    view = panel.get_timeline_view()
+    view.load_timeline(_timeline())
+    view.set_audio_only(True)
+    panel.resize(800, 480)
+    panel.show()
+
+    header = view._track_headers["a1"]
+    pan_pos = view.mapFromScene(header.mapToScene(header._get_pan_rect().center()))
+    viewport = view.viewport()
+    view.set_tool(EditTool.BLADE)
+    qtbot.mousePress(viewport, Qt.MouseButton.LeftButton, pos=pan_pos)
+    qtbot.mouseMove(viewport, pos=pan_pos + QPoint(30, 0))
+    assert view.get_timeline().get_track_by_id("a1").pan == 0.0
+    qtbot.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=pan_pos + QPoint(30, 0))
+    assert view.get_timeline().get_track_by_id("a1").pan == pytest.approx(0.5)
+    assert header._pan == pytest.approx(0.5)
+    view.undo()
+    assert view._track_headers["a1"]._pan == 0.0
+    view.redo()
+    header = view._track_headers["a1"]
+    assert header._pan == pytest.approx(0.5)
+    pan_pos = view.mapFromScene(header.mapToScene(header._get_pan_rect().center()))
+    qtbot.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=pan_pos)
+    qtbot.mouseDClick(viewport, Qt.MouseButton.LeftButton, pos=pan_pos)
+    assert header._pan == 0.0
+
+    gain_rect = header._get_volume_slider_rect()
+    gain_pos = view.mapFromScene(header.mapToScene(gain_rect.center()))
+    gain_end = gain_pos - QPoint(round((gain_rect.width() - 8.0) / 4.0), 0)
+    view.set_tool(EditTool.ZOOM)
+    qtbot.mousePress(viewport, Qt.MouseButton.LeftButton, pos=gain_pos)
+    qtbot.mouseMove(viewport, pos=gain_end)
+    assert view.get_timeline().get_track_by_id("a1").volume == 1.0
+    qtbot.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=gain_end)
+    assert view.get_timeline().get_track_by_id("a1").volume == pytest.approx(0.5)
+    qtbot.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=gain_pos)
+    qtbot.mouseDClick(viewport, Qt.MouseButton.LeftButton, pos=gain_pos)
+    assert view.get_timeline().get_track_by_id("a1").volume == 1.0
+
+    manager.audio_track_levels_changed.emit({"a1": {"peak": [-12.0, -31.0], "generation": 1}})
+    assert header._peak_db == (-12.0, -31.0)
+    manager.audio_telemetry_reset.emit(2)
+    assert header._peak_db == (-60.0, -60.0)
+    manager.audio_track_levels_changed.emit({"a1": {"peak": [-5.0, -3.0], "generation": 2}})
+    manager.audio_track_levels_changed.emit({"other": {"peak": [-1.0, -1.0], "generation": 1}})
+    assert header._peak_db == (-5.0, -3.0)
+    manager.audio_track_levels_changed.emit({"other": {"peak": [-1.0, -1.0], "generation": 2}})
+    assert header._peak_db == (-60.0, -60.0)
+
+    page.shutdown_audio_playback()
+    manager.audio_track_levels_changed.emit({"a1": {"peak": [-5.0, -3.0], "generation": 3}})
+    assert header._peak_db == (-60.0, -60.0)
+    view.set_audio_only(False)
+    assert header._shows_audio_controls()
+    assert header._get_button_at_pos(header._get_sync_lock_button_rect().center()) == "sync_lock"
 
 
 def test_level_feed_follows_attached_panel(qtbot: Any,
@@ -198,6 +266,9 @@ def test_level_feed_follows_attached_panel(qtbot: Any,
 
 def test_shutdown_disconnects_level_feed(qtbot: Any,
                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.ui.edit_page import EditPage
+
+    reuse_audio_manager = EditPage._ensure_audio_manager
     page = _page(qtbot, monkeypatch)
     manager = _FakeAudioManager()
     page._audio_manager = manager
@@ -211,6 +282,11 @@ def test_shutdown_disconnects_level_feed(qtbot: Any,
     assert page._timeline_level_connection is None
     manager.audio_level_changed.emit([-1.0, -1.0])
     assert feed == []
+
+    assert reuse_audio_manager(page) is manager
+    assert reuse_audio_manager(page) is manager
+    manager.audio_level_changed.emit([-8.0, -10.0])
+    assert feed == [[-8.0, -10.0]]
 
 
 def test_no_double_connect_when_manager_created_after_panel(

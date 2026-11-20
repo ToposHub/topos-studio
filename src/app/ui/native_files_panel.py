@@ -451,6 +451,11 @@ class NativeFilesPanel(QWidget):
             QLineEdit:focus {{ border-color: {C.ORANGE_PRESS}; }}
             QPushButton {{ background: transparent; color: {C.TEXT_SECONDARY}; border: 1px solid transparent; border-radius: 5px; padding: 5px 9px; }}
             QPushButton:hover, QPushButton:checked {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
+            QPushButton[workspacePanelSwitch="true"]:checked,
+            QPushButton[workspacePanelSwitch="true"]:hover {{
+                background: transparent; color: {C.TEXT_PRIMARY};
+            }}
+            QPushButton[workspacePanelSwitch="true"]:focus {{ border-bottom-color: {C.TEXT_PRIMARY}; }}
             QPushButton:disabled {{ color: {C.TEXT_HINT}; }}
             QPushButton#filesBreadcrumb {{ text-align: left; color: {C.TEXT_SECONDARY}; }}
             QFrame#filesRule {{ background: {C.PANEL_DIVIDER}; border: none; }}
@@ -477,6 +482,7 @@ class NativeFilesPanel(QWidget):
         navigation.setContentsMargins(8, 4, 8, 4)
         navigation.setSpacing(3)
         self.sidebar_button = self._button(_tr("locations", "位置"), _tr("toggle_sidebar", "显示或隐藏位置栏"), self._toggle_sidebar)
+        self.sidebar_button.setProperty("workspacePanelSwitch", True)
         self.sidebar_button.setCheckable(True)
         self.sidebar_button.setChecked(True)
         navigation.addWidget(self.sidebar_button)
@@ -536,6 +542,7 @@ class NativeFilesPanel(QWidget):
         navigation.addWidget(self.plugins_button)
         navigation.addWidget(self._button("↻", _tr("refresh", "刷新"), self.refresh))
         self.inspector_button = self._button(_tr("inspector_short", "信息"), _tr("toggle_inspector", "显示或隐藏文件信息"), self._toggle_inspector)
+        self.inspector_button.setProperty("workspacePanelSwitch", True)
         self.inspector_button.setCheckable(True)
         navigation.addWidget(self.inspector_button)
         self.more_button = self._button("•••", _tr("more", "更多工具"), self._show_tools)

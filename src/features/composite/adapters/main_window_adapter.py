@@ -320,13 +320,6 @@ class MainWindowAdapter:
         if not self._runtime.is_available():
             return
 
-        # The Node Properties dock permanently owns its widget (set at
-        # creation time), so there is no setWidget swap here. We only ensure
-        # the dock is visible when entering the Composite page.
-        dock_np = getattr(self._mw, 'dock_node_properties', None)
-        if dock_np is not None and not dock_np.isVisible():
-            dock_np.show()
-
         if self._runtime.viewer and hasattr(self._mw, 'dock_viewport') and self._mw.dock_viewport:
             self._mw.dock_viewport.setWidget(self._runtime.viewer)
 

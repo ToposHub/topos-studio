@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt,
+    QEvent,
     QRectF,
     QPointF,
     QPoint,
@@ -65,6 +66,11 @@ from PyQt6.QtGui import (
 
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
 from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_trim_bracket
+from src.features.edit.ui.timeline_layout import TRACK_HEADER_WIDTH
+from src.shared.assets.icon_manager import get_icon
+from src.shared.ui.horizontal_peak_meter import paint_horizontal_peak_bar
+from src.shared.ui.rotary_knob_style import paint_rotary_knob
+from src.shared.ui.style_sheet import C, UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import resolve_track_color
 from src.features.edit.core.audio_waveform import (
@@ -79,6 +85,8 @@ from src.features.edit.core.audio_waveform import (
 from src.features.edit.core.transition_catalog import TRANSITION_LABELS
 from src.features.edit.core.audio_transition_catalog import (
     AUDIO_TRANSITION_LABEL_MAP,
+    audio_curve_for,
+    overlap_curve_adjustments,
     is_audio_transition,
 )
 
@@ -90,7 +98,6 @@ logger = logging.getLogger(__name__)
 # ================================================================
 
 # Track geometry (from EDIT_SIZES)
-TRACK_HEADER_WIDTH = EDIT_SIZES["track_header_w"]
 TRACK_HEIGHT = EDIT_SIZES["track_h_video"]  # Default, actual varies by track type
 TRACK_GAP = 2
 TRACK_RESIZE_HANDLE_HEIGHT = 6
@@ -280,7 +287,6 @@ BUTTON_INACTIVE_COLOR = QColor(128, 133, 143)  # icon-only idle state
 BUTTON_HOVER_COLOR = QColor(55, 58, 67)        # understated hover well
 
 BUTTON_SIZE = EDIT_SIZES["track_button_size"]  # 18 (DaVinci-like)
-BUTTON_MARGIN = EDIT_SIZES["track_button_margin"]  # 3 (DaVinci-like)
 ICON_SIZE = 16  # Size for SVG icons
 
 # ================================================================
@@ -1024,7 +1030,7 @@ class ClipItem(QGraphicsObject):
             painter.drawEllipse(point, 2.6, 2.6)
             if self._is_selected and clip_rect.width() >= 140:
                 painter.setPen(label_pen)
-                painter.setFont(QFont("SF Mono", 7))
+                painter.setFont(QFont(UI_MONO_FONT_FAMILIES, 7))
                 painter.drawText(
                     QPointF(point.x() + 4.0, point.y() - 4.0),
                     f"{gain_db:+.1f}")
@@ -1958,7 +1964,7 @@ class ClipItem(QGraphicsObject):
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             painter.drawRoundedRect(label_bar_rect, 2, 2)
 
-            name_font = QFont("Arial", 8)
+            name_font = QFont(UI_FONT_FAMILIES, 8)
             name_font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(name_font)
             name_color = TEXT_COLOR if not is_locked else TEXT_MUTED_COLOR
@@ -2092,7 +2098,7 @@ class ClipItem(QGraphicsObject):
         label = self._asset_name
         if len(label) > 36:
             label = f"{label[:33]}..."
-        painter.setFont(QFont("Arial", 8))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8))
         painter.setPen(QPen(TEXT_MUTED_COLOR if is_locked else TEXT_COLOR))
         painter.drawText(
             QRectF(6.0, clip_rect.height() - 17.0, max(1.0, self._width - 12.0), 13.0),
@@ -2199,7 +2205,7 @@ class ClipItem(QGraphicsObject):
             delta = duration - original
             text = f"{delta:+d}f   {duration // fps:02d}:{duration % fps:02d}"
             painter.save()
-            painter.setFont(QFont("Arial", 8))
+            painter.setFont(QFont(UI_FONT_FAMILIES, 8))
             width = min(max(0.0, self._width - 4.0), painter.fontMetrics().horizontalAdvance(text) + 12.0)
             x, _y = self._fade_handle_position(clip_rect, "in" if incoming else "out")
             rect = QRectF(max(2.0, min(self._width-width-2.0, x-width/2.0)), 14.0, width, 17.0)
@@ -2339,7 +2345,7 @@ class ClipItem(QGraphicsObject):
 
     def _draw_source_info(self, painter: QPainter) -> None:
         """Draw source in/out or duration at bottom of clip (P1.4)."""
-        info_font = QFont("Arial", 8)
+        info_font = QFont(UI_FONT_FAMILIES, 8)
         painter.setFont(info_font)
         painter.setPen(QPen(TEXT_MUTED_COLOR))
 
@@ -3528,7 +3534,7 @@ class ClipItem(QGraphicsObject):
 
         # Loading text
         painter.setPen(QPen(TEXT_MUTED_COLOR))
-        loading_font = QFont("Arial", 8)
+        loading_font = QFont(UI_FONT_FAMILIES, 8)
         painter.setFont(loading_font)
         text_rect = QRectF(x_start, y_center - 8, display_width, 16)
         painter.drawText(text_rect, Qt.TextFlag.TextSingleLine | Qt.AlignmentFlag.AlignHCenter, "...")
@@ -3762,7 +3768,7 @@ class ClipItem(QGraphicsObject):
         badge_text_color = QColor(get_color("badge_text"))
 
         # Draw icon or text
-        painter.setFont(QFont("Arial", font_size))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size))
         painter.setPen(QPen(badge_text_color))
 
         # Show effects count: "3 effects" or just count with icon
@@ -3844,7 +3850,7 @@ class ClipItem(QGraphicsObject):
             speed_color = QColor(get_color("speed_slow"))  # Blue
 
         # Draw text
-        painter.setFont(QFont("Arial", font_size, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size, QFont.Weight.Bold))
         painter.setPen(QPen(speed_color))
 
         text_rect = indicator_rect.adjusted(2, 1, -2, -1)
@@ -3924,7 +3930,7 @@ class ClipItem(QGraphicsObject):
         painter.drawRoundedRect(indicator_rect, indicator_radius, indicator_radius)
 
         # 雪蓝配色呼应冻结语义
-        painter.setFont(QFont("Arial", font_size, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size, QFont.Weight.Bold))
         painter.setPen(QPen(QColor(126, 190, 225)))
         painter.drawText(
             indicator_rect.adjusted(2, 1, -2, -1),
@@ -3960,7 +3966,7 @@ class ClipItem(QGraphicsObject):
         painter.setPen(QPen(Qt.PenStyle.NoPen))
         painter.drawRoundedRect(indicator_rect, indicator_radius, indicator_radius)
 
-        painter.setFont(QFont("Arial", font_size, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size, QFont.Weight.Bold))
         painter.setPen(QPen(QColor(170, 200, 255)))
         painter.drawText(
             indicator_rect.adjusted(2, 1, -2, -1),
@@ -4117,7 +4123,7 @@ class ClipItem(QGraphicsObject):
         title = QRectF(1.0, 1.0, max(0.0, self._width - 2.0), 16.0)
         painter.fillRect(title, QColor(get_color("video_clip")).darker(125))
         painter.setPen(QPen(TEXT_COLOR))
-        painter.setFont(QFont("Arial", 8))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8))
         painter.drawText(QRectF(3, 1, 12, 14), Qt.AlignmentFlag.AlignCenter, "×")
         text = I18N.tr("edit.clip.speed_change", "Speed Change") + "    " + self._asset_name
         painter.drawText(title.adjusted(17, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter,
@@ -4140,7 +4146,7 @@ class ClipItem(QGraphicsObject):
             segment = QRectF(x1+1, self._track_height-19, max(0.0,x2-x1-1), 18)
             painter.fillRect(segment, QColor(get_color("video_clip")))
             painter.setPen(QPen(TEXT_COLOR))
-            painter.setFont(QFont("Arial", 8))
+            painter.setFont(QFont(UI_FONT_FAMILIES, 8))
             if segment.width() >= 32:
                 direction = -1.0 if self._retime_reverse else 1.0
                 label = f"{direction*speed*100.0:.0f}%"
@@ -4246,7 +4252,7 @@ class ClipItem(QGraphicsObject):
 
         if icon_char:
             # Draw icon as text (Unicode emoji)
-            painter.setFont(QFont("Arial", font_size))
+            painter.setFont(QFont(UI_FONT_FAMILIES, font_size))
             painter.setPen(QPen(icon_color))
             icon_rect = QRectF(icon_x, icon_y, icon_size, icon_size)
             painter.drawText(
@@ -4315,7 +4321,7 @@ class ClipItem(QGraphicsObject):
         opacity_color = QColor(get_color("opacity_indicator"))
 
         # Draw text
-        painter.setFont(QFont("Arial", font_size))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size))
         painter.setPen(QPen(opacity_color))
 
         text_rect = indicator_rect.adjusted(2, 1, -2, -1)
@@ -4391,7 +4397,7 @@ class ClipItem(QGraphicsObject):
         )
 
         if show_label:
-            painter.setFont(QFont("Arial", font_size, QFont.Weight.Bold))
+            painter.setFont(QFont(UI_FONT_FAMILIES, font_size, QFont.Weight.Bold))
             painter.setPen(QPen(COMP_BADGE_TEXT_COLOR))
             text_rect = badge_rect.adjusted(20, 1, -2, -1)
             painter.drawText(
@@ -4462,7 +4468,7 @@ class ClipItem(QGraphicsObject):
             painter.drawRoundedRect(swatch_rect, 2, 2)
             text_rect.adjust(swatch_size + 2, 0, 0, 0)
 
-        painter.setFont(QFont("Arial", font_size, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, font_size, QFont.Weight.Bold))
         painter.setPen(QPen(COMP_BADGE_TEXT_COLOR))
         painter.drawText(
             text_rect,
@@ -4562,7 +4568,7 @@ class ClipItem(QGraphicsObject):
         painter.drawRoundedRect(label_rect, label_radius, label_radius)
 
         # Draw text
-        painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 10, QFont.Weight.Bold))
         painter.setPen(QPen(text_color))
 
         text_rect = label_rect.adjusted(4, 2, -4, -2)
@@ -6623,6 +6629,52 @@ class ClipItem(QGraphicsObject):
 # TransitionItem
 # ================================================================
 
+def paint_overlap_crossfade(
+    painter: QPainter, rect: QRectF, transition_type: str,
+    adjustments: tuple[float, float] = (0.0, 0.0), *, enabled: bool = True,
+) -> None:
+    """Draw the actual envelope over the audio waveform."""
+    from src.features.edit.core.audio_dsp import crossfade_envelopes
+
+    painter.save()
+    painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.fillRect(rect, QColor(12, 14, 19, 45))
+    accent = QColor(get_color("transition"))
+    accent.setAlpha(220 if enabled else 100)
+    painter.setPen(QPen(accent, 1.0))
+    painter.drawLine(rect.topLeft(), rect.bottomLeft())
+    painter.drawLine(rect.topRight(), rect.bottomRight())
+
+    top = rect.top() + 13.0
+    bottom = rect.bottom() - min(21.0, rect.height() * 0.25)
+    if enabled and bottom > top:
+        count = max(2, min(49, int(rect.width()) + 1))
+        left, right = crossfade_envelopes(
+            audio_curve_for(transition_type) or "equal_power", count, adjustments,
+        )
+        for gains in (left, right):
+            path = QPainterPath()
+            for index, gain in enumerate(gains):
+                x = rect.left() + rect.width() * index / (count - 1)
+                y = bottom - (bottom - top) * gain
+                if index == 0:
+                    path.moveTo(x, y)
+                else:
+                    path.lineTo(x, y)
+            painter.setPen(QPen(QColor(15, 16, 20, 150), 2.6))
+            painter.drawPath(path)
+            painter.setPen(QPen(accent, 1.2))
+            painter.drawPath(path)
+
+    width = min(6.0, rect.width() / 3.0)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(accent)
+    for x in (rect.left() + 1.0, rect.right() - width - 1.0):
+        painter.drawRoundedRect(QRectF(x, rect.top() + 4, width, 5), 1.5, 1.5)
+    painter.restore()
+
+
 class TransitionItem(QGraphicsObject):
     """
     Visual representation of a transition between clips.
@@ -6656,6 +6708,8 @@ class TransitionItem(QGraphicsObject):
     transition_moved = pyqtSignal(str, str, int)  # transition_id, track_id, new_center_frame (live preview)
     move_finished = pyqtSignal(str, str, int, int)  # transition_id, track_id, old_center_frame, new_center_frame
 
+    overlap_settings_changed = pyqtSignal(str, str, str, dict)
+
     def __init__(
         self,
         transition_id: str,
@@ -6667,7 +6721,9 @@ class TransitionItem(QGraphicsObject):
         transition_type: str = "cross_dissolve",
         alignment: str = "centered",
         is_track_locked: bool = False,
-        parent: Optional[QGraphicsItem] = None
+        parent: Optional[QGraphicsItem] = None,
+        *,
+        overlap_params: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(parent)
 
@@ -6687,6 +6743,17 @@ class TransitionItem(QGraphicsObject):
         # Phase 4.1: 转场类型
         self._transition_type: str = transition_type
         self._alignment: str = alignment
+        self._overlap_params = dict(overlap_params) if overlap_params is not None else None
+        self._overlap_preview_hidden = False
+        self._overlap_lane_range: tuple[float, float] | None = None
+        self._overlap_drag_side: str | None = None
+        self._overlap_drag_initial = (0.0, 0.0)
+        self._overlap_drag_values: tuple[float, float] | None = None
+        if self._overlap_params is not None:
+            self.setToolTip(I18N.tr(
+                "timeline.overlap.tooltip",
+                "Drag a handle vertically to shape the crossfade. Right-click for options.",
+            ))
 
         # Drag state
         self._is_dragging = False
@@ -6781,6 +6848,34 @@ class TransitionItem(QGraphicsObject):
         # corners from being clipped during a drag.
         return QRectF(-1, 0, self._width + 2, max(16.0, float(self._track_height)))
 
+    def set_overlap_lane_range(self, top: float, bottom: float) -> None:
+        lane = top, bottom
+        if self._overlap_lane_range != lane:
+            self._overlap_lane_range = lane
+            self.update()
+
+    def set_overlap_preview_hidden(self, hidden: bool) -> None:
+        if hidden != self._overlap_preview_hidden:
+            self._overlap_preview_hidden = hidden
+            self.update()
+
+    def shape(self) -> QPainterPath:
+        if self._overlap_preview_hidden:
+            return QPainterPath()
+        if self._overlap_params is None:
+            return super().shape()
+        # The waveforms and clip edges remain editable below the handles.
+        path = QPainterPath()
+        hit_width = min(12.0, self._width / 2.0)
+        path.addRect(QRectF(0, 2, hit_width, 10))
+        path.addRect(QRectF(self._width - hit_width, 2, hit_width, 10))
+        if self._overlap_lane_range is not None:
+            top, bottom = self._overlap_lane_range
+            lane = QPainterPath()
+            lane.addRect(QRectF(0, top, self._width, max(0.0, bottom - top)))
+            path = path.intersected(lane)
+        return path
+
     def paint(
         self,
         painter: QPainter,
@@ -6788,6 +6883,24 @@ class TransitionItem(QGraphicsObject):
         widget: Optional[Any] = None
     ) -> None:
         """Paint the transition item with type-specific visuals (Phase 4.1)."""
+        if self._overlap_preview_hidden:
+            return
+        if self._overlap_params is not None:
+            painter.save()
+            if self._overlap_lane_range is not None:
+                top, bottom = self._overlap_lane_range
+                painter.setClipRect(
+                    QRectF(0, top, self._width, max(0.0, bottom - top)),
+                    Qt.ClipOperation.IntersectClip,
+                )
+            paint_overlap_crossfade(
+                painter, QRectF(0, 0, self._width, max(1.0, self._track_height - 1.0)),
+                self._transition_type,
+                self._overlap_drag_values or overlap_curve_adjustments(self._overlap_params),
+                enabled=self._overlap_params.get("overlap_enabled") is not False,
+            )
+            painter.restore()
+            return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
@@ -6898,7 +7011,7 @@ class TransitionItem(QGraphicsObject):
         label = TRANSITION_TYPE_LABELS.get(self._transition_type, "Transition")
         text_color = QColor(255, 255, 255, 235)
         painter.setPen(QPen(text_color))
-        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.DemiBold))
 
         # Keep a compact icon on wider cards; narrow cards still display an
         # elided name instead of becoming a nameless yellow stripe.
@@ -6994,7 +7107,7 @@ class TransitionItem(QGraphicsObject):
         painter.drawRoundedRect(label_rect, label_radius, label_radius)
 
         # Text: white
-        painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.Bold))
         painter.setPen(QPen(QColor(255, 255, 255, 230)))
 
         text_rect = label_rect.adjusted(4, 2, -4, -2)
@@ -7008,6 +7121,12 @@ class TransitionItem(QGraphicsObject):
 
     def hoverMoveEvent(self, event: Any) -> None:
         """Handle hover move to detect edge proximity and set cursor (Phase 4.1)."""
+        if self._overlap_params is not None:
+            self.setCursor(
+                Qt.CursorShape.ArrowCursor if self._is_track_locked
+                else Qt.CursorShape.SizeVerCursor
+            )
+            return
         pos = event.pos()
 
         # AUD-21102: 锁定轨道上显示禁止光标，不进入修剪/移动 hover 态
@@ -7053,6 +7172,21 @@ class TransitionItem(QGraphicsObject):
 
     def mousePressEvent(self, event: Any) -> None:
         """Handle mouse press for selection and trim/move start (Phase 4.2)."""
+        if self._overlap_params is not None:
+            if self._is_track_locked:
+                event.ignore()
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._show_overlap_menu(event.screenPos())
+                event.accept()
+            elif (event.button() == Qt.MouseButton.LeftButton
+                  and self._overlap_params.get("overlap_enabled") is not False):
+                self._overlap_drag_side = "left" if event.pos().x() < self._width / 2 else "right"
+                self._drag_start_pos = event.scenePos()
+                self._overlap_drag_initial = overlap_curve_adjustments(self._overlap_params)
+                event.accept()
+            else:
+                event.ignore()
+            return
         # AUD-21102: 锁定轨道上只允许选中，不允许修剪/移动/删除（与
         # ClipItem.mousePressEvent 的锁守卫一致）。
         if self._is_track_locked:
@@ -7112,6 +7246,52 @@ class TransitionItem(QGraphicsObject):
 
         super().mousePressEvent(event)
 
+    def _show_overlap_menu(self, screen_pos: QPoint) -> None:
+        from PyQt6.QtWidgets import QMenu
+
+        params = self._overlap_params
+        if params is None:
+            return
+        menu = QMenu()
+        enabled = params.get("overlap_enabled") is not False
+        toggle = menu.addAction(I18N.tr("timeline.overlap.enabled", "Crossfade"))
+        toggle.setCheckable(True)
+        toggle.setChecked(enabled)
+        menu.addSeparator()
+        curves = {}
+        for kind, text in (
+            ("audio:equal_power", I18N.tr("timeline.overlap.power", "Equal Power")),
+            ("audio:linear", I18N.tr("timeline.overlap.linear", "Linear")),
+            ("audio:constant_power", I18N.tr("timeline.overlap.cosine", "Cosine")),
+        ):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(self._transition_type == kind)
+            curves[action] = kind
+        menu.addSeparator()
+        linked = menu.addAction(I18N.tr("timeline.overlap.symmetric", "Symmetrical Curves"))
+        linked.setCheckable(True)
+        linked.setChecked(params.get("symmetrical") is not False)
+        reset = menu.addAction(I18N.tr("timeline.overlap.reset", "Reset Curve Shape"))
+        selected = menu.exec(screen_pos)
+        kind = self._transition_type
+        if selected is toggle:
+            params = {**params, "overlap_enabled": not enabled}
+        elif selected in curves:
+            kind = curves[selected]
+            params = {**params, "overlap_enabled": True}
+        elif selected is linked:
+            params = {**params, "symmetrical": linked.isChecked()}
+            if linked.isChecked():
+                outgoing, incoming = overlap_curve_adjustments(params)
+                params.update(outgoing_curve=(outgoing + incoming) / 2,
+                              incoming_curve=(outgoing + incoming) / 2)
+        elif selected is reset:
+            params = {**params, "outgoing_curve": 0.0, "incoming_curve": 0.0}
+        else:
+            return
+        self.overlap_settings_changed.emit(self._transition_id, self._track_id, kind, params)
+
     def _show_transition_context_menu(self, screen_pos: Any) -> None:
         """Show the context menu for this transition card."""
         from PyQt6.QtWidgets import QMenu
@@ -7127,6 +7307,19 @@ class TransitionItem(QGraphicsObject):
 
     def mouseMoveEvent(self, event: Any) -> None:
         """Handle mouse move for trim/move (Phase 4.2)."""
+        if self._overlap_drag_side is not None and self._overlap_params is not None:
+            index = 0 if self._overlap_drag_side == "left" else 1
+            delta = (event.scenePos().y() - self._drag_start_pos.y()) / 36.0
+            value = max(-1.0, min(1.0, self._overlap_drag_initial[index] + delta))
+            if self._overlap_params.get("symmetrical") is not False:
+                self._overlap_drag_values = value, value
+            elif index == 0:
+                self._overlap_drag_values = value, self._overlap_drag_initial[1]
+            else:
+                self._overlap_drag_values = self._overlap_drag_initial[0], value
+            self.update()
+            event.accept()
+            return
         if self._is_dragging:
             delta = event.scenePos() - self._drag_start_pos
             delta_frames = int(delta.x() / self._pixels_per_frame)
@@ -7165,6 +7358,19 @@ class TransitionItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event: Any) -> None:
         """Handle mouse release to finish trim/move (Phase 4.2)."""
+        if self._overlap_drag_side is not None:
+            values = self._overlap_drag_values
+            self._overlap_drag_side = None
+            self._overlap_drag_values = None
+            if values is not None and values != self._overlap_drag_initial:
+                params = {**self._overlap_params, "outgoing_curve": values[0],
+                          "incoming_curve": values[1]}
+                self.overlap_settings_changed.emit(
+                    self._transition_id, self._track_id, self._transition_type, params,
+                )
+            self.update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             if self._drag_mode == "trim_left":
                 if self._duration_frames != self._original_duration:
@@ -7281,6 +7487,9 @@ class TransitionItem(QGraphicsObject):
             self._transition_type = trans.transition_type
         if hasattr(trans, 'alignment'):
             self._alignment = trans.alignment
+
+        if self._overlap_params is not None:
+            self._overlap_params = dict(trans.params)
 
         # Update geometry and repaint
         self._update_geometry()
@@ -7522,7 +7731,9 @@ class TrackHeaderItem(QGraphicsObject):
     source_patch_requested = pyqtSignal(str, bool)  # UI-only source destination request
     visibility_changed = pyqtSignal(str, bool)  # track_id, visible
     volume_changed = pyqtSignal(str, float)  # track_id, volume
+    pan_changed = pyqtSignal(str, float)  # track_id, stereo balance
     record_requested = pyqtSignal(str)
+    recording_input_requested = pyqtSignal(str)
     rename_requested = pyqtSignal(str)  # track_id
     delete_requested = pyqtSignal(str)  # track_id
     add_track_requested = pyqtSignal(str, str, int)  # track_type, position ('above'/'below'), track_index
@@ -7563,6 +7774,7 @@ class TrackHeaderItem(QGraphicsObject):
         track_role: str = "standard",
         parent: Optional[QGraphicsItem] = None,
         track_color: Optional[str] = None,
+        pan: float = 0.0,
     ) -> None:
         super().__init__(parent)
 
@@ -7576,6 +7788,7 @@ class TrackHeaderItem(QGraphicsObject):
         self._show_record_button = False
         self._recording_state = "idle"
         self._record_arm_busy = False
+        self._record_input_setup = False
         self._track_role = track_role
         self._track_height = track_height
         self._is_muted = is_muted
@@ -7585,6 +7798,8 @@ class TrackHeaderItem(QGraphicsObject):
         self._is_visible = is_visible
         self._is_target = is_target  # NEW
         self._volume = max(0.0, min(2.0, volume))  # Clamp to valid range
+        self._pan = max(-1.0, min(1.0, pan))
+        self._peak_db = (-60.0, -60.0)
         self._clip_count: int = 0  # Number of clips on this track (displayed in header)
         self._source_patch_enabled: bool = track_index == 0 and track_type != "subtitle"
 
@@ -7594,6 +7809,8 @@ class TrackHeaderItem(QGraphicsObject):
         self._resize_start_y: int = 0
         self._resize_start_height: int = 0
         self._is_dragging_volume: bool = False
+        self._volume_drag_x = 0.0
+        self._pan_drag: tuple[QPointF, float] | None = None
 
         # Phase 6.2: Clip hover highlight state (when a clip on this track is hovered)
         self._is_clip_hover_highlighted: bool = False
@@ -7706,39 +7923,68 @@ class TrackHeaderItem(QGraphicsObject):
 
     # ==================== Button Areas (Enhanced) ====================
 
+    def _has_audio_controls(self) -> bool:
+        return self._track_type == "audio"
+
+    def _shows_audio_controls(self) -> bool:
+        if not self._has_audio_controls() or self._track_height < 60:
+            return False
+        scene = self.scene()
+        views = scene.views() if scene is not None else ()
+        return not views or views[0].viewport().width() >= TRACK_HEADER_WIDTH - 4
+
+    def _mixer_header_button_rect(self, x: float, width: float = 20.0) -> QRectF:
+        y = 3.0 if self._track_height >= 40 else (self._track_height - 20.0) / 2.0
+        return QRectF(x, y, width, 20.0)
+
     def _get_source_patch_rect(self) -> QRectF:
         """The source destination and the red target badge are separate controls."""
         if self._track_type == "subtitle":
             return QRectF()
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(10.0)
         y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
         return QRectF(10.0, y, 30.0, 18.0)
 
     def _get_track_badge_rect(self) -> QRectF:
         """Return the target-track badge independently of source patching."""
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(36.0, 34.0)
         y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
         return QRectF(46.0, y, 30.0, 18.0)
 
     def _get_name_rect(self) -> QRectF:
         """Name and badge both select the destination; double-click renames."""
-        return QRectF(8.0, 27.0, TRACK_HEADER_WIDTH - 16.0, max(0.0, self._track_height - 30.0))
+        top = min(27.0, self._get_mixer_title_rect().top()) if self._shows_audio_controls() else 27.0
+        return QRectF(8.0, top, TRACK_HEADER_WIDTH - 16.0, max(0.0, self._track_height - top - 3.0))
 
     def _get_lock_button_rect(self) -> QRectF:
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(84.0)
         y = 4.0 if self._track_height >= 40 else (self._track_height - BUTTON_SIZE) / 2.0
         return QRectF(84.0, y, BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_sync_lock_button_rect(self) -> QRectF:
+        if self._has_audio_controls():
+            return QRectF() if self._audio_workspace_style else self._mixer_header_button_rect(108.0)
         rect = self._get_lock_button_rect()
         return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_solo_button_rect(self) -> QRectF:
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(132.0 if self._audio_workspace_style else 156.0)
         rect = self._get_sync_lock_button_rect()
         return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_mute_button_rect(self) -> QRectF:
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(156.0 if self._audio_workspace_style else 180.0)
         rect = self._get_solo_button_rect()
         return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
     def _get_record_button_rect(self) -> QRectF:
+        if self._has_audio_controls():
+            return self._mixer_header_button_rect(108.0 if self._audio_workspace_style else 132.0)
         rect = self._get_mute_button_rect()
         return QRectF(rect.right() + 6.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
 
@@ -7752,27 +7998,19 @@ class TrackHeaderItem(QGraphicsObject):
         )
 
     def _get_volume_slider_rect(self) -> QRectF:
-        """Get volume slider bounding rect (only for audio tracks).
+        """Get the fader hit area in the audio controls row."""
+        pan = self._get_pan_rect()
+        x = 62.0
+        return QRectF(x, pan.center().y() - 8.0, pan.left() - x - 4.0, 16.0)
 
-        In two-row layout: below the button row, if height allows.
-        In single-row layout: below buttons.
-        """
-        use_two_rows = self._track_height >= 40
-        if use_two_rows:
-            slider_y = max(30, self._track_height - 14)
-            slider_x = 112
-            slider_width = TRACK_HEADER_WIDTH - slider_x - 10
-        else:
-            slider_y = BUTTON_MARGIN + BUTTON_SIZE + 2
-            slider_x = BUTTON_MARGIN + 2
-            slider_width = TRACK_HEADER_WIDTH - 3 * BUTTON_SIZE - 3 * BUTTON_MARGIN - 10
-        slider_height = 10
-        return QRectF(
-            slider_x,
-            slider_y,
-            max(slider_width, 40),
-            slider_height
-        )
+    def _get_pan_rect(self) -> QRectF:
+        # Leave the timeline view's five-pixel track resize zone clear.
+        return QRectF(TRACK_HEADER_WIDTH - 70.0, self._track_height - 28.0, 24.0, 22.0)
+
+    def _get_mixer_title_rect(self) -> QRectF:
+        bottom = min(44.0, self._get_volume_slider_rect().top())
+        width = TRACK_HEADER_WIDTH - (100.0 if self._clip_count else 24.0)
+        return QRectF(12.0, bottom - 12.0, width, 12.0)
 
     def _get_button_at_pos(self, pos: QPointF) -> Optional[str]:
         """Hit testing uses the same rectangles as the painted controls."""
@@ -7793,9 +8031,10 @@ class TrackHeaderItem(QGraphicsObject):
             return "resize"
         if self._get_track_badge_rect().contains(pos):
             return "target"
-        if self._track_type == "audio":
-            slider = self._get_volume_slider_rect()
-            if slider.bottom() < self._track_height - 2 and slider.contains(pos):
+        if self._shows_audio_controls():
+            if self._get_pan_rect().contains(pos):
+                return "pan"
+            if self._get_volume_slider_rect().contains(pos):
                 return "volume"
         if self._get_name_rect().contains(pos):
             return "name"
@@ -7816,7 +8055,7 @@ class TrackHeaderItem(QGraphicsObject):
         use_two_rows = self._track_height >= 40
 
         # Background color
-        bg_color = QColor("#27272B") if self._audio_workspace_style else QColor(get_color("track_header_bg"))
+        bg_color = QColor("#27272B") if self._has_audio_controls() else QColor(get_color("track_header_bg"))
         if self._is_locked:
             bg_color = QColor(0x1A, 0x1A, 0x1D)
 
@@ -7866,7 +8105,7 @@ class TrackHeaderItem(QGraphicsObject):
 
         # Identity remains readable for every track, including target/locked tracks.
         # Target state is still expressed by the existing badge highlight.
-        painter.fillRect(0, 0, 3 if self._audio_workspace_style else 2, self._track_height,
+        painter.fillRect(0, 0, 3 if self._has_audio_controls() else 2, self._track_height,
                          QColor(resolve_track_color(self._track_id, self._track_color)))
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
@@ -7907,11 +8146,7 @@ class TrackHeaderItem(QGraphicsObject):
             self._draw_track_name(painter)
             self._draw_clip_count(painter)
 
-        # Volume slider for audio (if height allows)
-        if self._track_type == "audio":
-            slider_rect = self._get_volume_slider_rect()
-            if slider_rect.bottom() < self._track_height - 2:
-                self._draw_volume_slider(painter)
+        self._draw_audio_mix_controls(painter)
 
     def _paint_single_row(self, painter: QPainter) -> None:
         """Paint single-row collapsed layout: badge + buttons only."""
@@ -7919,15 +8154,27 @@ class TrackHeaderItem(QGraphicsObject):
         self._draw_track_badge(painter)
         self._draw_buttons(painter)
 
-        # Volume slider for audio (if height allows)
-        if self._track_type == "audio":
-            slider_rect = self._get_volume_slider_rect()
-            if slider_rect.bottom() < self._track_height - 2:
-                self._draw_volume_slider(painter)
+        self._draw_audio_mix_controls(painter)
+
+    def _draw_audio_mix_controls(self, painter: QPainter) -> None:
+        if self._shows_audio_controls():
+            self._draw_meter_fader(painter)
+            self._draw_pan_knob(painter)
+            self._draw_mixer_value_readouts(painter)
 
     def _draw_track_badge(self, painter: QPainter) -> None:
         """Draw track type badge (V1/A1/S1) in DaVinci reddish-brown color."""
         badge_rect = self._get_track_badge_rect()
+        if self._has_audio_controls():
+            color = C.ORANGE if self._is_target else C.TEXT_BRIGHT
+            self._draw_mixer_button_surface(painter, badge_rect, "target", color if self._is_target else None)
+            painter.setPen(QColor(color))
+            font = QFont(UI_MONO_FONT_FAMILIES)
+            font.setPixelSize(11)
+            font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(font)
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{self._badge_index + 1}")
+            return
         badge_radius = EDIT_SIZES["track_badge_radius"]  # 3
 
         # Badge background — type-specific color (DaVinci Resolve style)
@@ -7962,7 +8209,7 @@ class TrackHeaderItem(QGraphicsObject):
 
         # Badge text (white, bold, centered)
         painter.setPen(QPen(QColor(255, 255, 255)))
-        font = QFont("Arial", 9, QFont.Weight.Bold)
+        font = QFont(UI_FONT_FAMILIES, 9, QFont.Weight.Bold)
         painter.setFont(font)
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, prefix)
 
@@ -7971,23 +8218,30 @@ class TrackHeaderItem(QGraphicsObject):
         if self._track_type == "subtitle":
             return
         rect = self._get_source_patch_rect()
+        if self._has_audio_controls():
+            self._draw_mixer_icon(
+                painter, rect, "source_patch", "arrow-line-right",
+                C.MIXER_CYAN_ACCENT if self._source_patch_enabled else None,
+            )
+            return
         color = QColor(get_color("video_clip") if self._track_type == "video" else get_color("audio_clip"))
         painter.setBrush(QBrush(color.darker(145) if self._source_patch_enabled else QColor(get_color("track_header_bg"))))
         painter.setPen(QPen(color.lighter(150) if self._source_patch_enabled else TEXT_MUTED_COLOR, 0.7))
         painter.drawRoundedRect(rect, 2.0, 2.0)
         painter.setPen(QPen(TEXT_COLOR if self._source_patch_enabled else TEXT_MUTED_COLOR))
-        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.DemiBold))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "V1" if self._track_type == "video" else "A1")
 
     def _draw_track_name(self, painter: QPainter) -> None:
         """Show the actual track name, including user renames."""
         y = 29.0 if self._track_height >= 46 else 26.0
+        height = min(15.0, self._track_height - y)
         width = 90.0 if self._track_type == "audio" and self._track_height < 60 else TRACK_HEADER_WIDTH - 24.0
-        name_rect = QRectF(12.0, y, width, min(15.0, self._track_height - y))
+        name_rect = self._get_mixer_title_rect() if self._shows_audio_controls() else QRectF(12.0, y, width, height)
         if self._hover_button == "name":
             painter.fillRect(name_rect, QColor(255, 255, 255, 12))
         painter.setPen(QPen(TEXT_COLOR if not self._is_locked else TEXT_MUTED_COLOR))
-        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.DemiBold))
         text = painter.fontMetrics().elidedText(self._track_name, Qt.TextElideMode.ElideRight, int(name_rect.width()))
         painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
@@ -8002,14 +8256,27 @@ class TrackHeaderItem(QGraphicsObject):
         count_text = I18N.tr("timeline.track.clip_count", "{count} Clips", count=self._clip_count)
 
         count_rect = QRectF(12, 44, 90, 14)
+        alignment = Qt.AlignmentFlag.AlignLeft
+        if self._shows_audio_controls():
+            title = self._get_mixer_title_rect()
+            x = title.right() + 4.0
+            count_rect = QRectF(x, title.top(), TRACK_HEADER_WIDTH - x - 12.0, title.height())
+            alignment = Qt.AlignmentFlag.AlignRight
 
         painter.setPen(QPen(TEXT_MUTED_COLOR))
-        font = QFont("Arial", 8)
+        font = QFont(UI_FONT_FAMILIES, 8)
         painter.setFont(font)
-        painter.drawText(count_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, count_text)
+        if alignment == Qt.AlignmentFlag.AlignRight:
+            count_text = painter.fontMetrics().elidedText(
+                count_text, Qt.TextElideMode.ElideRight, int(count_rect.width()),
+            )
+        painter.drawText(count_rect, Qt.AlignmentFlag.AlignVCenter | alignment, count_text)
 
     def _draw_buttons(self, painter: QPainter) -> None:
         """Draw lock, solo/visibility, and mute buttons with vector icons."""
+        if self._has_audio_controls():
+            self._draw_mixer_header_buttons(painter)
+            return
         # Lock button (L - amber when active)
         self._draw_button(
             painter,
@@ -8065,12 +8332,62 @@ class TrackHeaderItem(QGraphicsObject):
                 "M",
             )
             if self._show_record_button:
-                armed = self._recording_state not in {"idle", "unpatched"}
-                self._draw_button(
-                    painter, self._get_record_button_rect(), "record",
-                    armed, QColor("#B4495A" if self._recording_state == "recording" else "#9A3947"),
-                    "R", enabled=armed or self._record_button_enabled(),
-                )
+                self._draw_record_button(painter)
+
+    def _draw_mixer_header_buttons(self, painter: QPainter) -> None:
+        lock = self._get_lock_button_rect().center()
+        painter.fillRect(QRectF(77.0, lock.y() - 5, 1, 10), QColor(C.MIXER_BTN_BORDER))
+        self._draw_lock_icon(painter, lock.x(), lock.y(), 6.5, self._is_locked or self._hover_button == "lock")
+        if not self._audio_workspace_style:
+            self._draw_button(
+                painter, self._get_sync_lock_button_rect(), "sync_lock", self._is_sync_locked,
+                QColor(get_color("track_header_bg_alt")), "<>",
+            )
+        if self._show_record_button:
+            self._draw_record_button(painter, letter_size=11)
+        self._draw_button(
+            painter, self._get_solo_button_rect(), "solo", self._is_solo, SOLO_ACTIVE_COLOR, "S", letter_size=11,
+        )
+        self._draw_button(
+            painter, self._get_mute_button_rect(), "mute", self._is_muted, MUTE_ACTIVE_COLOR, "M", letter_size=11,
+        )
+
+    def _draw_record_button(self, painter: QPainter, *, letter_size: int = 14) -> None:
+        armed = self._recording_state not in {"idle", "unpatched"}
+        color = QColor("#B4495A" if self._recording_state == "recording" else "#9A3947")
+        self._draw_button(
+            painter, self._get_record_button_rect(), "record", armed, color,
+            "R", enabled=armed or self._record_button_enabled(), letter_size=letter_size,
+        )
+
+    def _draw_mixer_button_surface(
+        self, painter: QPainter, rect: QRectF, button: str, accent: str | None,
+    ) -> None:
+        hovered = self._hover_button == button
+        background = QColor(C.BG_ACTIVE) if hovered else QColor(C.MIXER_BTN_BG)
+        border = QColor(C.BORDER_HOVER) if hovered else QColor(C.MIXER_BTN_BORDER)
+        if accent is not None:
+            background = QColor(accent)
+            background.setAlpha(38 if hovered else 25)
+            border = QColor(accent)
+            border.setAlpha(125 if hovered else 80)
+        painter.setPen(QPen(border, 1.0))
+        painter.setBrush(background)
+        painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4.0, 4.0)
+
+    def _draw_mixer_icon(
+        self, painter: QPainter, rect: QRectF, button: str, icon: str,
+        accent: str | None, *, enabled: bool = True,
+    ) -> None:
+        self._draw_mixer_button_surface(painter, rect, button, accent)
+        hovered = self._hover_button == button
+        color = (accent or (C.TEXT_PRIMARY if hovered else C.TEXT_SECONDARY)) if enabled else C.TEXT_HINT
+        self._paint_mixer_glyph(painter, rect, f"ph.{icon}", color)
+
+    def _paint_mixer_glyph(self, painter: QPainter, rect: QRectF, icon: str, color: str) -> None:
+        center = rect.center()
+        glyph = QRectF(center.x() - 7, center.y() - 7, 14, 14).toRect()
+        get_icon(icon, color).paint(painter, glyph)
 
     def _draw_button(
         self,
@@ -8082,6 +8399,7 @@ class TrackHeaderItem(QGraphicsObject):
         fallback_text: str,
         *,
         enabled: bool = True,
+        letter_size: int = 14,
     ) -> None:
         """Draw a single button with crisp vector icons."""
         # Resolve uses letter buttons for audio Solo/Mute and an auto-select glyph.
@@ -8102,9 +8420,9 @@ class TrackHeaderItem(QGraphicsObject):
                     painter.drawLine(QPointF(cx + direction * 3, cy - 3), tip)
                     painter.drawLine(tip, QPointF(cx + direction * 3, cy + 3))
                 return
-            font = QFont("Arial")
-            font.setPixelSize(14)
-            font.setWeight(QFont.Weight.Normal)
+            font = QFont(UI_FONT_FAMILIES)
+            font.setPixelSize(letter_size)
+            font.setWeight(QFont.Weight.DemiBold if self._has_audio_controls() else QFont.Weight.Normal)
             painter.setFont(font)
             color = TEXT_COLOR if is_active else QColor("#B8BDC5")
             painter.setPen(QPen(color if enabled else QColor("#767680")))
@@ -8280,47 +8598,53 @@ class TrackHeaderItem(QGraphicsObject):
         """Legacy icon key lookup — no longer used (vector icons instead)."""
         return ""
 
-    def _draw_volume_slider(self, painter: QPainter) -> None:
-        """Draw a compact audio-gain readout without a progress-bar look."""
-        slider_rect = self._get_volume_slider_rect()
+    def _draw_meter_fader(self, painter: QPainter) -> None:
+        rect = self._get_volume_slider_rect()
+        center = rect.center()
+        left, width = rect.left() + 4.0, rect.width() - 8.0
+        for level, y in zip(self._peak_db, (center.y() - 5.0, center.y() + 1.0)):
+            paint_horizontal_peak_bar(painter, QRectF(left, y, width, 4.0), level, -60.0)
 
-        # A fine baseline communicates the drag affordance without becoming a
-        # large green widget in every audio header.
-        center_y = slider_rect.center().y()
-        painter.setPen(QPen(QColor(76, 81, 91), 1))
-        painter.drawLine(
-            QPointF(slider_rect.left(), center_y),
-            QPointF(slider_rect.right(), center_y),
+        thumb_x = left + width * self._volume / 2.0
+        active = self._hover_button == "volume" or self._is_dragging_volume
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(C.TEXT_PRIMARY if active else C.TEXT_SECONDARY))
+        painter.drawRoundedRect(QRectF(thumb_x - 3.0, center.y() - 6.0, 6.0, 12.0), 2.0, 2.0)
+
+    def _draw_pan_knob(self, painter: QPainter) -> None:
+        paint_rotary_knob(
+            painter, self._get_pan_rect(), (self._pan + 1.0) / 2.0,
+            QColor(resolve_track_color(self._track_id, self._track_color)), bipolar=True,
+            highlighted=self._hover_button == "pan" or self._pan_drag is not None,
         )
 
-        fill_width = slider_rect.width() * (self._volume / 2.0)
-        fill_color = QColor(CLIP_AUDIO_COLOR.lighter(118))
-        if self._volume > 1.0:
-            fill_color = QColor(176, 101, 68)
-        if self._is_muted:
-            fill_color = QColor(82, 84, 91)
-        painter.setPen(QPen(fill_color, 2))
-        painter.drawLine(
-            QPointF(slider_rect.left(), center_y),
-            QPointF(slider_rect.left() + fill_width, center_y),
-        )
-        painter.setBrush(QBrush(fill_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawEllipse(
-            QPointF(slider_rect.left() + fill_width, center_y),
-            2.5,
-            2.5,
-        )
+    def _mixer_volume_db_text(self) -> str:
+        if not self._volume:
+            return "−∞"
+        db = round(20.0 * math.log10(self._volume), 1)
+        return f"{db:+.1f}" if db else "0.0"
 
-        vol_text = f"{int(self._volume * 100)}%"
-        painter.setPen(QPen(TEXT_MUTED_COLOR))
-        font = QFont("Arial", 8)
+    def _mixer_pan_text(self) -> str:
+        offset = round(abs(self._pan) * 100)
+        if not offset:
+            return "0%"
+        return f"{'L' if self._pan < 0 else 'R'} {offset}%"
+
+    def _get_pan_readout_rect(self) -> QRectF:
+        pan = self._get_pan_rect()
+        x = pan.right() + 3.0
+        return QRectF(x, pan.top(), TRACK_HEADER_WIDTH - x - 6.0, pan.height())
+
+    def _draw_mixer_value_readouts(self, painter: QPainter) -> None:
+        slider = self._get_volume_slider_rect()
+        gain_rect = QRectF(8.0, slider.top(), slider.left() - 12.0, slider.height())
+        font = QFont(UI_MONO_FONT_FAMILIES)
+        font.setPixelSize(9)
         painter.setFont(font)
-        painter.drawText(
-            slider_rect.adjusted(0, 2, 0, 0),
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            vol_text,
-        )
+        painter.setPen(QColor(C.TEXT_PRIMARY))
+        alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        painter.drawText(gain_rect, alignment, f"{self._mixer_volume_db_text()} dB")
+        painter.drawText(self._get_pan_readout_rect(), alignment, self._mixer_pan_text())
 
     def _draw_resize_handle(self, painter: QPainter) -> None:
         """Draw track height resize handle at bottom."""
@@ -8414,6 +8738,8 @@ class TrackHeaderItem(QGraphicsObject):
             if self._record_arm_busy:
                 return I18N.tr("mixer.record.busy", "Finish the current recording first")
             if self._recording_state == "unpatched":
+                if self._record_input_setup:
+                    return I18N.tr("mixer.record.choose_input", "Choose a recording input")
                 return I18N.tr("mixer.record.patch_first", "Assign a recording input first")
             if self._recording_state == "armed":
                 return I18N.tr("mixer.record.disarm", "Disarm track")
@@ -8421,7 +8747,16 @@ class TrackHeaderItem(QGraphicsObject):
         if button == "visibility":
             return "显示轨道" if not self._is_visible else "隐藏轨道"
         if button == "volume":
+            if self._has_audio_controls():
+                return I18N.tr(
+                    "mixer.track_header.volume", "Track volume · {db} dB · L/R peaks · double-click for 0 dB",
+                ).format(db=self._mixer_volume_db_text())
             return "轨道音量"
+        if button == "pan":
+            position = self._mixer_pan_text()
+            return I18N.tr(
+                "mixer.track_header.pan", "Stereo balance · {value} · drag to adjust, double-click to center",
+            ).format(value=position)
         if button == "resize":
             return "调整轨道高度"
         if button == "name":
@@ -8484,6 +8819,11 @@ class TrackHeaderItem(QGraphicsObject):
                 self._start_volume_drag(event)
                 event.accept()
                 return
+            elif button == "pan":
+                self._pan_drag = (pos, self._pan)
+                self.update(self._get_pan_rect())
+                event.accept()
+                return
             elif button == "resize":
                 self._start_resize(event)
                 event.accept()
@@ -8502,6 +8842,16 @@ class TrackHeaderItem(QGraphicsObject):
             pos = event.pos()
             button = self._get_button_at_pos(pos)
 
+            if button == "pan":
+                if self._pan:
+                    self.pan_changed.emit(self._track_id, 0.0)
+                event.accept()
+                return
+            if button == "volume" and self._has_audio_controls():
+                if self._volume != 1.0:
+                    self.volume_changed.emit(self._track_id, 1.0)
+                event.accept()
+                return
             if button == "name":
                 # Emit rename request（E22: 冗余的 track_double_clicked emit
                 # 已删除，rename_requested 是双击重命名的唯一活链路）
@@ -8520,6 +8870,12 @@ class TrackHeaderItem(QGraphicsObject):
             self._update_volume_drag(event)
             event.accept()
             return
+        elif self._pan_drag is not None:
+            origin, initial = self._pan_drag
+            delta = event.pos() - origin
+            self.set_pan(initial + (delta.x() - delta.y()) / 60.0)
+            event.accept()
+            return
 
         super().mouseMoveEvent(event)
 
@@ -8534,8 +8890,28 @@ class TrackHeaderItem(QGraphicsObject):
                 self._finish_volume_drag()
                 event.accept()
                 return
+            elif self._pan_drag is not None:
+                value = self._pan
+                _, initial = self._pan_drag
+                self._pan_drag = None
+                self.set_pan(initial)
+                if value != initial:
+                    self.pan_changed.emit(self._track_id, value)
+                event.accept()
+                return
 
         super().mouseReleaseEvent(event)
+
+    def sceneEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.UngrabMouse:
+            if self._pan_drag is not None:
+                _, initial = self._pan_drag
+                self._pan_drag = None
+                self.set_pan(initial)
+            if self._is_dragging_volume and self._has_audio_controls():
+                self._is_dragging_volume = False
+                self.set_volume(self._volume_drag_start)
+        return super().sceneEvent(event)
 
     # ==================== Button Actions ====================
 
@@ -8596,25 +8972,49 @@ class TrackHeaderItem(QGraphicsObject):
 
     def set_audio_workspace_style(self, enabled: bool) -> None:
         if enabled != self._audio_workspace_style:
+            if not enabled and (self._pan_drag is not None or self._is_dragging_volume):
+                self.ungrabMouse()
             self._audio_workspace_style = enabled
             self.update()
 
-    def set_recording_control(self, visible: bool, state: str, *, busy: bool = False) -> None:
-        if (visible, state, busy) != (self._show_record_button, self._recording_state, self._record_arm_busy):
+    def set_recording_control(
+        self, visible: bool, state: str, *, busy: bool = False, input_setup: bool = False,
+    ) -> None:
+        if (visible, state, busy, input_setup) != (
+            self._show_record_button, self._recording_state, self._record_arm_busy, self._record_input_setup,
+        ):
             self._show_record_button = visible
             self._recording_state = state
             self._record_arm_busy = busy
+            self._record_input_setup = input_setup
             if self._hover_button == "record":
                 self.setToolTip(self._button_tooltip("record") if visible else "")
             self.update()
 
     def _record_button_enabled(self) -> bool:
-        return not self._is_locked and not self._record_arm_busy and self._recording_state in {"idle", "armed"}
+        ready = self._recording_state in {"idle", "armed"}
+        can_setup = self._record_input_setup and self._recording_state == "unpatched"
+        return not self._is_locked and not self._record_arm_busy and (ready or can_setup)
 
     def set_volume(self, volume: float) -> None:
         """Set volume level (external call)."""
         self._volume = max(0.0, min(2.0, volume))
         self.update()
+
+    def set_pan(self, pan: float) -> None:
+        self._pan = max(-1.0, min(1.0, pan))
+        if self._has_audio_controls():
+            self.update(self._get_pan_rect().united(self._get_pan_readout_rect()))
+
+    def set_meter_peaks(self, levels: list[float] | tuple[float, ...] = ()) -> None:
+        """Update the two post-fader peaks without repainting the full header."""
+        left = levels[0] if levels else -60.0
+        right = levels[1] if len(levels) > 1 else left
+        peaks = tuple(max(-60.0, min(0.0, db)) if math.isfinite(db) else -60.0 for db in (left, right))
+        if peaks != self._peak_db:
+            self._peak_db = peaks
+            if self._shows_audio_controls():
+                self.update(self._get_volume_slider_rect())
 
     # ==================== Phase 6.2: Clip Hover Highlight ====================
 
@@ -8650,7 +9050,8 @@ class TrackHeaderItem(QGraphicsObject):
         """
         self._is_dragging_volume = True
         self._volume_drag_start = self._volume
-        self._update_volume_visual_from_pos(event.pos())
+        self._volume_drag_x = event.pos().x()
+        self.update(self._get_volume_slider_rect())
         self.grabMouse()
 
     def _update_volume_drag(self, event: Any) -> None:
@@ -8668,11 +9069,8 @@ class TrackHeaderItem(QGraphicsObject):
         committed only on mouse release via _finish_volume_drag.
         """
         slider_rect = self._get_volume_slider_rect()
-        # Calculate relative position within slider
-        rel_x = pos.x() - slider_rect.left()
-        rel_x = max(0, min(slider_rect.width(), rel_x))
-        # Convert to volume (0.0 to 2.0)
-        new_volume = (rel_x / slider_rect.width()) * 2.0
+        delta = (pos.x() - self._volume_drag_x) * 2.0 / (slider_rect.width() - 8.0)
+        new_volume = max(0.0, min(2.0, self._volume_drag_start + delta))
 
         if new_volume != self._volume:
             self._volume = new_volume
@@ -8688,6 +9086,7 @@ class TrackHeaderItem(QGraphicsObject):
         self._is_dragging_volume = False
         self.ungrabMouse()
         final_volume = self._volume
+        self.set_volume(self._volume_drag_start)
         if final_volume != self._volume_drag_start:
             self.volume_changed.emit(self._track_id, final_volume)
         logger.debug(f"Track {self._track_id} volume drag finished: {final_volume:.2f}")
@@ -8872,6 +9271,10 @@ class TrackHeaderItem(QGraphicsObject):
                 "开启：波纹/提取操作带动本轨；关闭：本轨保持位置（有意失步）",
             )
         )
+        input_action = None
+        if self._show_record_button and self._record_input_setup:
+            input_action = menu.addAction(_I18N.tr("mixer.record.input_menu", "Recording input…"))
+            input_action.setEnabled(not self._is_locked and not self._record_arm_busy)
 
         # Visibility toggle
         menu.addSeparator()
@@ -8975,6 +9378,8 @@ class TrackHeaderItem(QGraphicsObject):
             # AUD-21104: 同上——由 SetTrackSyncLockCommand 成功后的增量
             # 更新经 set_sync_locked() 回写本表头。
             self.sync_lock_changed.emit(self._track_id, sync_action.isChecked())
+        elif input_action is not None and action == input_action:
+            self.recording_input_requested.emit(self._track_id)
         elif action == visibility_action:
             self.visibility_changed.emit(self._track_id, not self._is_visible)
 
@@ -9433,7 +9838,7 @@ class TimecodeRulerItem(QGraphicsObject):
             x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
             painter.drawLine(x, 2, x, 2 + height)
 
-        font = QFont("Arial")
+        font = QFont(UI_FONT_FAMILIES)
         font.setPixelSize(10)
         painter.setFont(font)
         painter.setPen(QColor(get_color("ruler_text")))
@@ -9458,7 +9863,7 @@ class TimecodeRulerItem(QGraphicsObject):
             x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
             painter.drawLine(x, 2, x, 2 + EDIT_SIZES["ruler_medium_tick_h"])
 
-        font = QFont("Arial")
+        font = QFont(UI_FONT_FAMILIES)
         font.setPixelSize(10)
         painter.setFont(font)
         painter.setPen(QColor(get_color("ruler_text")))
@@ -10405,7 +10810,7 @@ class DragPreviewItem(QGraphicsObject):
             )
 
         painter.setPen(QPen(QColor(255, 255, 255, 235), 1))
-        painter.setFont(QFont("Arial", 8, QFont.Weight.DemiBold))
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.DemiBold))
         label = self._asset_names[0] if self._asset_names else "Transition"
         text_rect = rect.adjusted(7, 0, -7, 0)
         text = painter.fontMetrics().elidedText(
@@ -10519,7 +10924,7 @@ class DragPreviewItem(QGraphicsObject):
 
         # 文字
         painter.setPen(QPen(QColor(255, 255, 255, 230)))
-        font = QFont("Arial", 9)
+        font = QFont(UI_FONT_FAMILIES, 9)
         font.setWeight(QFont.Weight.Bold)
         painter.setFont(font)
 
@@ -10548,7 +10953,7 @@ class DragPreviewItem(QGraphicsObject):
 
         # 绘制数量文字
         painter.setPen(QPen(QColor(255, 255, 255)))
-        font = QFont("Arial", 10)
+        font = QFont(UI_FONT_FAMILIES, 10)
         font.setBold(True)
         painter.setFont(font)
         painter.drawText(QRectF(badge_x, badge_y, badge_size, badge_size),
@@ -10993,7 +11398,7 @@ class MarkerItem(QGraphicsObject):
         # C5: chapter markers carry a white "C" badge in the triangle
         if self._kind == "chapter":
             painter.setPen(QPen(QColor(255, 255, 255, 235)))
-            font = QFont("Arial", 7)
+            font = QFont(UI_FONT_FAMILIES, 7)
             font.setWeight(QFont.Weight.Bold)
             painter.setFont(font)
             painter.drawText(
@@ -11016,7 +11421,7 @@ class MarkerItem(QGraphicsObject):
 
         # Text
         painter.setPen(QPen(self.MARKER_LABEL_TEXT))
-        font = QFont("Arial", 9)
+        font = QFont(UI_FONT_FAMILIES, 9)
         font.setWeight(QFont.Weight.Bold)
         painter.setFont(font)
 

@@ -347,15 +347,16 @@ class MenuTransportGate(QObject):
         self._coordinator = coordinator
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        is_menu = isinstance(watched, QMenu)
+        if not is_menu and not _MENU_BAR_EVENT_TYPES:
+            return False
         etype = event.type()
-        if etype in (QEvent.Type.Show, QEvent.Type.ShowToParent):
-            if isinstance(watched, QMenu):
-                self._coordinator.set_menu_open(True)
-        elif etype in (QEvent.Type.Hide, QEvent.Type.HideToParent):
-            if isinstance(watched, QMenu):
-                app = QApplication.instance()
-                popup = app.activePopupWidget() if app is not None else None
-                self._coordinator.set_menu_open(popup is not None)
+        if is_menu and etype in (QEvent.Type.Show, QEvent.Type.ShowToParent):
+            self._coordinator.set_menu_open(True)
+        elif is_menu and etype in (QEvent.Type.Hide, QEvent.Type.HideToParent):
+            app = QApplication.instance()
+            popup = app.activePopupWidget() if app is not None else None
+            self._coordinator.set_menu_open(popup is not None)
         elif etype in _MENU_BAR_EVENT_TYPES:
             # 原生菜单栏事件（PyQt6 绑定可用时生效；macOS 原生下拉菜单
             # 不经 QWidget，能力范围见 BR09 完成报告声明）

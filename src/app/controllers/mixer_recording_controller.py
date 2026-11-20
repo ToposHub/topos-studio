@@ -75,6 +75,9 @@ class MixerRecordingControllerMixin:
 
     def _set_mixer_recording_workflow(self, active: bool) -> None:
         self._mixer_recording_workflow_active = active
+        view = self._edit_timeline_view()
+        if view is not None:
+            view.set_timeline_recording_enabled(active)
         panel = getattr(self, "audio_mixer_panel", None)
         if panel is not None and hasattr(panel, "set_recording_workflow_active"):
             panel.set_recording_workflow_active(active)
@@ -84,7 +87,6 @@ class MixerRecordingControllerMixin:
             self._mixer_recording_scope = None
             # _refresh_mixer_recording_controls only mirrors states while the
             # workflow is on, so retire the header indicators explicitly.
-            view = self._edit_timeline_view()
             timeline = view.get_timeline() if view is not None else None
             if view is not None and timeline is not None:
                 view.set_mixer_record_arm_busy(False)
@@ -136,20 +138,20 @@ class MixerRecordingControllerMixin:
                 active, can_record=bool(armed) and not busy, recording=recording,
             )
 
-    def _on_mixer_input_requested(self, track_id: str) -> None:
+    def _on_mixer_input_requested(self, track_id: str) -> bool:
         if not self._mixer_recording_workflow_active or getattr(self, "_mixer_timeline_recorders", None):
-            return
+            return False
         view = self._edit_timeline_view()
         timeline = view.get_timeline() if view is not None else None
         project = getattr(self, "_current_edit_project", None)
         track = timeline.get_track_by_id(track_id) if timeline is not None else None
         if project is None or track is None or track.track_type != "audio" or track.is_bus or track.is_locked:
-            return
+            return False
 
         previous = _input_patches(timeline).get(track_id)
         accepted, patch = self._choose_mixer_input(track.name or track_id, previous)
         if not accepted or patch == previous:
-            return
+            return False
         current_project = getattr(self, "_current_edit_project", None)
         current = view.get_timeline()
         track = current.get_track_by_id(track_id) if current is not None else None
@@ -158,8 +160,9 @@ class MixerRecordingControllerMixin:
                 or track is None or track.is_bus or track.is_locked
                 or not self._mixer_recording_workflow_active
                 or getattr(self, "_mixer_timeline_recorders", None)):
-            return
+            return False
         self._commit_mixer_input(view, current, track_id, patch)
+        return True
 
     def _choose_mixer_input(
         self, track_name: str, previous: _InputPatch | None,
@@ -254,13 +257,20 @@ class MixerRecordingControllerMixin:
 
     def _on_mixer_record_arm_toggled(self, track_id: str, armed: bool) -> None:
         """Workflow mode arms the patched track; legacy mode records directly."""
-        if self._mixer_recording_workflow_active:
+        panel = getattr(self, "audio_mixer_panel", None)
+        if self._mixer_recording_workflow_active and hasattr(panel, "set_recording_workflow_active"):
             self._set_mixer_track_armed(track_id, armed)
         else:
             self._legacy_mixer_record_arm(track_id, armed)
 
     def _on_mixer_timeline_record_requested(self, track_id: str) -> None:
-        self._set_mixer_track_armed(track_id, track_id not in getattr(self, "_mixer_armed_inputs", {}))
+        armed = track_id in getattr(self, "_mixer_armed_inputs", {})
+        if not armed and getattr(self, "current_page", None) == "Edit":
+            view = self._edit_timeline_view()
+            if view is not None and track_id not in _input_patches(view.get_timeline()):
+                if not self._on_mixer_input_requested(track_id):
+                    return
+        self._set_mixer_track_armed(track_id, not armed)
 
     def _set_mixer_track_armed(self, track_id: str, armed: bool) -> None:
         from src.features.edit.core.shared_recording_input import SharedRecordingInput
@@ -294,10 +304,11 @@ class MixerRecordingControllerMixin:
             source = SharedRecordingInput(patch.device_id, counts[patch.device_id])
             self._mixer_capture_inputs[patch.device_id] = source
         self._mixer_armed_inputs[track_id] = patch
-        panel = self.audio_mixer_panel
+        panel = getattr(self, "audio_mixer_panel", None)
+        meter = getattr(panel, "set_recording_input_level", None)
         source.monitor(
             track_id, patch.channels,
-            lambda dbfs: panel.set_recording_input_level(track_id, dbfs),
+            lambda dbfs: meter(track_id, dbfs) if callable(meter) else None,
             lambda message: self._on_mixer_input_error(track_id, message),
         )
         self._refresh_mixer_recording_controls()
@@ -325,7 +336,7 @@ class MixerRecordingControllerMixin:
     def _handle_mixer_record_shortcut(self, target: QObject, event: QKeyEvent) -> bool:
         if (event.key() != Qt.Key.Key_Space
                 or event.modifiers() != Qt.KeyboardModifier.ShiftModifier
-                or getattr(self, "current_page", None) != "Mixer"
+                or getattr(self, "current_page", None) not in {"Edit", "Mixer"}
                 or not self._mixer_recording_workflow_active
                 or not isinstance(target, QWidget)
                 or QApplication.activeModalWidget() is not None

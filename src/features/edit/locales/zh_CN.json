@@ -494,6 +494,19 @@
     "frame_unset": "Frame: --"
   },
   "timeline": {
+    "overlap": {
+      "enabled": "交叉淡化",
+      "power": "等功率",
+      "linear": "线性",
+      "cosine": "余弦",
+      "symmetric": "对称调节",
+      "reset": "重置曲线",
+      "edit": "编辑交叉淡化",
+      "move_audio": "移动音频片段",
+      "tooltip": "上下拖动手柄调整交叉淡化曲线，右键打开选项。",
+      "invalid": "交叉淡化需要两段音频首尾相叠。",
+      "split": "请在交叉淡化区间之外分割。"
+    },
     "linked_trim_limit": "链接片段无法按相同帧数修剪，已保留原位置。",
     "fade_duration": "淡变：{frames} 帧",
     "trim_in_hint": "修剪入点",

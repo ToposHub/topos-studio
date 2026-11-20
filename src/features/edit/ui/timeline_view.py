@@ -71,7 +71,6 @@ from PyQt6.QtGui import (
     QPen,
     QBrush,
     QFont,
-    QFontDatabase,
     QFontMetricsF,
     QWheelEvent,
     QResizeEvent,
@@ -90,6 +89,8 @@ from src.features.edit.core.timeline_v2 import (
     EditTrack,
     ClipInstance,
     TransitionInstance,
+    AudioOverlapError,
+    audio_overlap_pairs,
     TimelineMarker,
     TimelineClipboardPayload,
     SubtitleClip,
@@ -190,6 +191,7 @@ from src.features.edit.core.commands import (
     SetTrackMuteCommand,
     SetTrackSoloCommand,
     SetTrackVolumeCommand,
+    SetTrackPanCommand,
     SetTrackLockCommand,
     AddTrackCommand,
     AddSubtitleClipCommand,
@@ -222,6 +224,7 @@ from src.features.edit.core.source_patch import (
 from src.features.edit.ui.timeline_items import (
     ClipItem,
     TransitionItem,
+    paint_overlap_crossfade,
     PlayheadItem,
     TrackHeaderItem,
     TimecodeRulerItem,
@@ -259,7 +262,11 @@ from src.features.edit.ui.timeline_layout import (
 )
 from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import next_track_color, resolve_track_color
-from src.shared.ui.style_sheet import COMPACT_HORIZONTAL_SCROLLBAR_STYLE
+from src.shared.ui.style_sheet import (
+    COMPACT_HORIZONTAL_SCROLLBAR_STYLE,
+    UI_FONT_FAMILIES,
+    UI_MONO_FONT_FAMILIES,
+)
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.format_registry import is_media
 from src.features.edit.core.captions.importer import (
@@ -442,10 +449,10 @@ class _TimelineTimecodeLabel(QLabel):
 
     def __init__(self, text: str, parent: QWidget) -> None:
         super().__init__(text, parent)
-        # Match the desktop's UI typography while fixing digit positions.
+        # Match Topos typography while fixing digit positions.
         # The theme may override QLabel.font(), so paint with this font
         # explicitly rather than the label's inherited proportional metrics.
-        self._display_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        self._display_font = QFont(QApplication.font())
         self._display_font.setStyle(QFont.Style.StyleNormal)
         self._display_font.setPixelSize(22)
         self._display_font.setWeight(QFont.Weight.Medium)
@@ -816,6 +823,7 @@ class TimelineView(QGraphicsView):
     clip_open_in_source_requested = pyqtSignal(str, int)
     audio_clip_editor_requested = pyqtSignal(str)
     track_record_requested = pyqtSignal(str)
+    track_recording_input_requested = pyqtSignal(str)
     timeline_changed = pyqtSignal(object)  # TimelineSequence - emitted after command execution
     timeline_duration_extended = pyqtSignal(int)  # Runtime editable duration in frames
     project_changed = pyqtSignal(object)  # EditProject - emitted after external file import
@@ -864,6 +872,7 @@ class TimelineView(QGraphicsView):
     subtitle_clip_edit_text_requested = pyqtSignal(str, str, str)  # clip_id, track_id, new_text
     # Top-left DaVinci-like timecode panel, painted in the same view as the ruler.
     corner_timecode_clicked = pyqtSignal()
+    audio_track_heights_changed = pyqtSignal()
     # B8: global edit mode switched ("overwrite" | "insert")
     edit_mode_changed = pyqtSignal(str)
 
@@ -939,9 +948,13 @@ class TimelineView(QGraphicsView):
         self._snap_enabled = True
         self._interaction = InteractionSession()  # Interaction state machine
         self._current_drag_session: Optional[ClipDragSession] = None  # P2-2: Clip drag session
+        self._drag_crossfades: tuple[tuple[QRectF, str, tuple[float, float], bool], ...] = ()
+        self._drag_hidden_crossfades: set[str] = set()
         self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
         self._audio_only = False
+        self._timeline_recording_enabled = False
+        self._track_meter_generation = 0
         self._professional_audio_editor_available = False
         self._recording_track_states: dict[str, str] = {}
         self._recording_previews: dict[tuple[str, int], RecordingPreview] = {}
@@ -1427,6 +1440,29 @@ class TimelineView(QGraphicsView):
             self._update_clip_visibility()
         self.viewport().update()
 
+    def update_track_header_levels(self, levels: dict) -> None:
+        """Feed audio headers the same post-fader stereo peaks as the console."""
+        # Each engine packet belongs to one playback generation. Check it
+        # before clearing absent tracks, so a late packet cannot clear a new one.
+        first = next(iter(levels.values()), None)
+        generation = first.get("generation") if isinstance(first, dict) else None
+        if isinstance(generation, int) and generation < self._track_meter_generation:
+            return
+        for track_id, header in self._track_headers.items():
+            if header.track_type != "audio":
+                continue
+            payload = levels.get(track_id)
+            if isinstance(payload, dict):
+                payload = () if payload.get("silent") else payload.get("peak")
+            header.set_meter_peaks(payload if isinstance(payload, (list, tuple)) else ())
+
+    def reset_track_header_levels(self, generation: int = 0) -> None:
+        """Clear the meters on playback reset or when disconnecting their source."""
+        self._track_meter_generation = generation
+        for header in self._track_headers.values():
+            if header.track_type == "audio":
+                header.set_meter_peaks()
+
     @property
     def audio_clip_editor_available(self) -> bool:
         return self._professional_audio_editor_available
@@ -1469,6 +1505,15 @@ class TimelineView(QGraphicsView):
         if track is not None and header is not None:
             self._sync_header_recording_control(header, track)
 
+    def set_timeline_recording_enabled(self, enabled: bool) -> None:
+        """Expose recording on the active editing workspace's audio tracks."""
+        self._timeline_recording_enabled = enabled
+        if self._timeline is not None:
+            for track in self._timeline.audio_tracks:
+                header = self._track_headers.get(track.track_id)
+                if header is not None:
+                    self._sync_header_recording_control(header, track)
+
     def set_mixer_record_arm_busy(self, busy: bool) -> None:
         if self._mixer_record_arm_busy == busy:
             return
@@ -1486,7 +1531,8 @@ class TimelineView(QGraphicsView):
     def begin_recording_preview(
         self, track_id: str, generation: int, timeline_id: str, start_frame: int,
     ) -> None:
-        if (self._audio_only and self._timeline is not None and self._timeline.timeline_id == timeline_id
+        if ((self._audio_only or self._timeline_recording_enabled)
+                and self._timeline is not None and self._timeline.timeline_id == timeline_id
                 and track_id in self._track_headers):
             self._recording_previews[track_id, generation] = RecordingPreview(start_frame)
             self._layout_recording_previews()
@@ -1540,9 +1586,11 @@ class TimelineView(QGraphicsView):
 
     def _sync_header_recording_control(self, header: TrackHeaderItem, track: EditTrack) -> None:
         header.set_recording_control(
-            self._audio_only and track.track_type == "audio" and not track.is_bus,
+            (self._audio_only or self._timeline_recording_enabled)
+            and track.track_type == "audio" and not track.is_bus,
             self._recording_track_states.get(track.track_id, "unpatched"),
             busy=self._mixer_record_arm_busy,
+            input_setup=self._timeline_recording_enabled and not self._audio_only,
         )
 
     def _ordered_tracks(self) -> List[EditTrack]:
@@ -1708,6 +1756,7 @@ class TimelineView(QGraphicsView):
 
         self._configure_layout_engine()
         engine = self._layout_engine
+        audio_area = engine.area_layout().audio_area
 
         # Determine topmost track IDs for top separator line
         topmost_video_id = self._timeline.video_tracks[-1].track_id if self._timeline.video_tracks else None
@@ -1840,6 +1889,10 @@ class TimelineView(QGraphicsView):
                     # from the actual render range for non-centered modes.
                     x = engine.frame_to_x(trans_item.start_frame)
                     trans_item.setPos(x, track_top)
+                    if trans.is_overlap_crossfade:
+                        trans_item.set_overlap_lane_range(
+                            audio_area.top() - track_top, audio_area.bottom() - track_top,
+                        )
                     min_center, max_center = self._transition_center_bounds(track, trans)
                     trans_item.set_move_bounds(min_center, max_center)
 
@@ -2344,6 +2397,7 @@ class TimelineView(QGraphicsView):
                     is_sync_locked=getattr(track, "is_sync_locked", True),
                     is_visible=track.is_visible,
                     volume=track.volume,
+                    pan=track.pan,
                 )
                 self._scene.addItem(header)
                 self._track_headers[track.track_id] = header
@@ -2356,7 +2410,9 @@ class TimelineView(QGraphicsView):
                 self._configure_source_patch_header(header)
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.volume_changed.connect(self._on_track_volume_changed)
+                header.pan_changed.connect(self._on_track_pan_changed)
                 header.record_requested.connect(self.track_record_requested)
+                header.recording_input_requested.connect(self.track_recording_input_requested)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
@@ -2667,34 +2723,10 @@ class TimelineView(QGraphicsView):
                     )
                     sub_item.subtitle_clip_edit_text_requested.connect(self._on_subtitle_clip_edit_text)
 
-            # Create transition items
-            for track_index, track in enumerate(all_tracks):
+            # Transition construction is shared with incremental updates.
+            for track in all_tracks:
                 for trans in track.transitions:
-                    item = TransitionItem(
-                        trans.transition_id,
-                        track.track_id,
-                        trans.center_frame,
-                        trans.duration,
-                        self._pixels_per_frame,
-                        track_index,
-                        trans.transition_type,
-                        trans.alignment,
-                        is_track_locked=track.is_locked,  # AUD-21102
-                    )
-                    self._scene.addItem(item)
-                    self._items_map[trans.transition_id] = item
-                    item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
-
-                    # Connect transition signals
-                    item.transition_clicked.connect(self._on_transition_clicked)
-                    item.transition_delete.connect(self._on_transition_delete)
-                    # Connect trim signals
-                    item.transition_trim_left.connect(self._on_transition_trim_left)
-                    item.transition_trim_right.connect(self._on_transition_trim_right)
-                    item.trim_left_finished.connect(self._on_transition_trim_left_finished)
-                    item.trim_right_finished.connect(self._on_transition_trim_right_finished)
-                    item.transition_moved.connect(self._on_transition_moved)
-                    item.move_finished.connect(self._on_transition_move_finished)
+                    self._create_transition_item(trans)
 
             # Create marker items (Phase 5.1)
             fps = float(timeline.fps) if timeline.fps else EMPTY_TIMELINE_FPS
@@ -2772,6 +2804,8 @@ class TimelineView(QGraphicsView):
         finally:
             self._updating = False
 
+        self.audio_track_heights_changed.emit()
+
     def _clear_items(self) -> None:
         """Clear all timeline items from scene."""
         self._clear_subtitle_copy_drag_preview()
@@ -2834,6 +2868,7 @@ class TimelineView(QGraphicsView):
             is_sync_locked=getattr(track, "is_sync_locked", True),
             is_visible=track.is_visible,
             volume=track.volume,
+            pan=track.pan,
         )
         self._scene.addItem(header)
         self._track_headers[track.track_id] = header
@@ -2847,7 +2882,9 @@ class TimelineView(QGraphicsView):
         header.visibility_changed.connect(self._on_track_visibility_changed)
         if track.track_type == "audio":
             header.volume_changed.connect(self._on_track_volume_changed)
+            header.pan_changed.connect(self._on_track_pan_changed)
             header.record_requested.connect(self.track_record_requested)
+            header.recording_input_requested.connect(self.track_recording_input_requested)
         header.rename_requested.connect(self._on_track_rename_requested)
         header.delete_requested.connect(self._on_track_delete_requested)
         header.add_track_requested.connect(self._on_add_track_requested)
@@ -2894,6 +2931,7 @@ class TimelineView(QGraphicsView):
             header.set_visible(track.is_visible)
             if track.track_type == "audio":
                 header.set_volume(track.volume)
+                header.set_pan(track.pan)
 
         if self._target_track_id not in {track.track_id for track in self._timeline.video_tracks}:
             self._target_track_id = self._timeline.video_tracks[0].track_id if self._timeline.video_tracks else None
@@ -3249,6 +3287,7 @@ class TimelineView(QGraphicsView):
         self._update_scene_rect()
         self._sync_scene_cut_overlay()
         self.viewport().update()
+        self.audio_track_heights_changed.emit()
 
     def zoom_in(self) -> None:
         """Zoom in by one step."""
@@ -4971,6 +5010,8 @@ class TimelineView(QGraphicsView):
             self._layout_engine.set_track_height(track.track_id, clamped)
         self._layout_track_items()
         self.viewport().update()
+        if track_type == "audio":
+            self.audio_track_heights_changed.emit()
 
     def source_patch_track_id(self, track_type: str) -> Optional[str]:
         """Paint the same effective destination the source-edit resolver uses."""
@@ -6063,7 +6104,9 @@ class TimelineView(QGraphicsView):
             if not isinstance(item_at, TrackHeaderItem):
                 self._show_empty_area_track_menu(event.globalPos(), scene_pos)
                 event.accept()
-                return
+            else:
+                super().mousePressEvent(event)
+            return
 
         if (
             event.button() == Qt.MouseButton.LeftButton
@@ -6143,6 +6186,18 @@ class TimelineView(QGraphicsView):
                 original_start=self._playhead_frame,
             )
             return
+
+        # Clip tools never take over an audio track's header controls.
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.pos().x() < TRACK_HEADER_WIDTH
+                and self._active_tool in {EditTool.BLADE, EditTool.ZOOM}):
+            scene_pos = self.mapToScene(event.pos())
+            item = self._scene.itemAt(scene_pos, self.viewportTransform())
+            if (isinstance(item, TrackHeaderItem)
+                    and item.track_type == "audio"
+                    and item._get_button_at_pos(item.mapFromScene(scene_pos)) is not None):
+                super().mousePressEvent(event)
+                return
 
         if self._active_tool == EditTool.BLADE:
             # Blade tool: split clip at click position
@@ -6911,8 +6966,23 @@ class TimelineView(QGraphicsView):
             return
         clip = track.get_clip_at(frame)
         if clip is not None and clip.timeline_start < frame < clip.timeline_end:
+            if self._split_hits_crossfade(track, clip.clip_id, frame):
+                return
             cmd = SplitClipCommand.create(track.track_id, clip.clip_id, frame)
             self._execute_command(cmd)
+
+    def _split_hits_crossfade(self, track: EditTrack, clip_id: str, frame: int) -> bool:
+        if any(
+            transition.is_overlap_crossfade
+            and clip_id in (transition.left_clip_id, transition.right_clip_id)
+            and transition.start_frame <= frame <= transition.end_frame
+            for transition in track.transitions
+        ):
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.overlap.split", "Split outside the crossfade region.",
+            ))
+            return True
+        return False
 
     def _split_all_at_playhead(self) -> None:
         """
@@ -6956,6 +7026,8 @@ class TimelineView(QGraphicsView):
                 # Verify clip is strictly inside the frame
                 # (not at start or end, which would be invalid split)
                 if clip.timeline_start < frame < clip.timeline_end:
+                    if self._split_hits_crossfade(track, clip.clip_id, frame):
+                        return
                     clips_to_split.append((track.track_id, clip.clip_id))
 
         if not clips_to_split:
@@ -7919,6 +7991,8 @@ class TimelineView(QGraphicsView):
                         # 音量变化同步到该轨波形显示（等比缩放，不重生成）
                         self.set_track_waveform_gain_preview(
                             track_id, track_changes['volume'])
+                    if 'pan' in track_changes:
+                        header.set_pan(track_changes['pan'])
                     logger.debug(f"Incremental update: modified track {track_id}")
 
             if track_structure_changed:
@@ -8306,7 +8380,8 @@ class TimelineView(QGraphicsView):
             track_index,
             trans.transition_type,
             trans.alignment,
-            is_track_locked=bool(track.is_locked) if track is not None else False,  # AUD-21102
+            is_track_locked=bool(track.is_locked) if track is not None else False,
+            overlap_params=trans.params if trans.is_overlap_crossfade else None,
         )
 
         self._scene.addItem(item)
@@ -8315,6 +8390,7 @@ class TimelineView(QGraphicsView):
             item.setOpacity(1.0 if track.is_visible and track.is_enabled else 0.4)
 
         # Connect signals
+        item.overlap_settings_changed.connect(self._on_overlap_settings_changed)
         item.transition_clicked.connect(self._on_transition_clicked)
         item.transition_delete.connect(self._on_transition_delete)
         item.transition_trim_left.connect(self._on_transition_trim_left)
@@ -8323,6 +8399,19 @@ class TimelineView(QGraphicsView):
         item.trim_right_finished.connect(self._on_transition_trim_right_finished)
         item.transition_moved.connect(self._on_transition_moved)
         item.move_finished.connect(self._on_transition_move_finished)
+
+    def _on_overlap_settings_changed(
+        self, transition_id: str, track_id: str, kind: str, params: dict[str, Any],
+    ) -> None:
+        if self._timeline is None or self._is_track_locked(track_id):
+            return
+        command = UpdateTransitionCommand.create_params(
+            self._timeline, transition_id, track_id, params,
+        )
+        self._execute_command(replace(
+            command, label=I18N.tr("timeline.overlap.edit", "Edit Crossfade"),
+            new_transition_type=kind,
+        ))
 
     def _create_marker_item(self, marker: TimelineMarker) -> None:
         """
@@ -8878,9 +8967,81 @@ class TimelineView(QGraphicsView):
                 preview_track_id,
             )
 
+        if not session.copy_mode:
+            self._preview_drag_crossfades(session.move_group.members)
+
         # setPos() and update() already invalidate the old/new item bounds.
         # Avoid viewport().update() here: it repaints the entire timeline for
         # every mouse event and defeats the local-update policy above.
+
+    def _clear_drag_crossfades(self) -> None:
+        for rect, *_ in self._drag_crossfades:
+            self.viewport().update(self.mapFromScene(rect).boundingRect())
+        self._drag_crossfades = ()
+        for transition_id in self._drag_hidden_crossfades:
+            item = self._items_map.get(transition_id)
+            if isinstance(item, TransitionItem):
+                item.set_overlap_preview_hidden(False)
+        self._drag_hidden_crossfades.clear()
+
+    def _preview_drag_crossfades(self, members: tuple[MoveGroupMember, ...]) -> None:
+        if not self._moves_allow_crossfades(members):
+            return
+        self._clear_drag_crossfades()
+        moving_ids = {member.clip_id for member in members}
+        additions: dict[str, list[ClipInstance]] = {}
+        touched = {member.track_id for member in members}
+        for member in members:
+            track_id = member.new_track_id or member.track_id
+            if track_id.startswith("__new_"):
+                continue
+            clip = self._timeline.get_clip_by_id(member.clip_id)
+            if clip is not None:
+                touched.add(track_id)
+                additions.setdefault(track_id, []).append(replace(
+                    clip, track_id=track_id, timeline_start=max(0, member.new_start),
+                ))
+
+        settings: dict[tuple[str, str], TransitionInstance] = {}
+        for track_id in touched:
+            track = self._timeline.get_track_by_id(track_id)
+            for transition in track.transitions:
+                pair = transition.left_clip_id, transition.right_clip_id
+                if transition.is_overlap_crossfade and moving_ids.intersection(pair):
+                    settings[pair] = transition
+                    item = self._items_map.get(transition.transition_id)
+                    if isinstance(item, TransitionItem):
+                        item.set_overlap_preview_hidden(True)
+                        self._drag_hidden_crossfades.add(transition.transition_id)
+
+        previews = []
+        for track_id, moved in additions.items():
+            track = self._timeline.get_track_by_id(track_id)
+            if track is None or track.is_locked:
+                continue
+            current = [clip for clip in track.clips if clip.clip_id not in moving_ids]
+            try:
+                pairs = audio_overlap_pairs(current + moved)
+            except AudioOverlapError:
+                continue
+            for left, right in pairs:
+                pair = left.clip_id, right.clip_id
+                if not moving_ids.intersection(pair):
+                    continue
+                start = self._layout_engine.frame_to_x(right.timeline_start)
+                end = self._layout_engine.frame_to_x(left.timeline_end)
+                rect = QRectF(start, self._layout_engine.track_top(track_id),
+                              end - start, self._layout_engine.track_height(track_id) - 1)
+                transition = settings.get(pair)
+                previews.append((
+                    rect,
+                    transition.transition_type if transition else "audio:equal_power",
+                    transition.overlap_curve_adjustments if transition else (0.0, 0.0),
+                    transition is None or transition.params.get("overlap_enabled") is not False,
+                ))
+        self._drag_crossfades = tuple(previews)
+        for rect, *_ in self._drag_crossfades:
+            self.viewport().update(self.mapFromScene(rect).boundingRect())
 
     def _cache_drag_track_geometry(self, session: ClipDragSession) -> None:
         """Cache track bounds used by the current cross-track drag."""
@@ -9198,6 +9359,21 @@ class TimelineView(QGraphicsView):
             self._on_drag_finished_impl(
                 clip_id, track_id, old_start, new_start, new_track_id
             )
+        except AudioOverlapError:
+            self._current_drag_session = None
+            ids = drag_session.original_positions if drag_session is not None else (clip_id,)
+            for moved_id in ids:
+                self._revert_trim_visuals_to_model(moved_id, include_linked=False)
+                model_clip = self._timeline.get_clip_by_id(moved_id)
+                item = self._items_map.get(moved_id)
+                if model_clip is not None and isinstance(item, ClipItem):
+                    item.setPos(self._layout_engine.frame_to_x(model_clip.timeline_start),
+                                self._layout_engine.track_top(model_clip.track_id))
+            self._layout_track_items()
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.overlap.invalid",
+                "Crossfades need a tail-to-head overlap between two audio clips.",
+            ))
         finally:
             # P5c: Always clear drag session and ghosts, even on exceptions or early returns.
             # In copy mode the real items' _start_frame mirrored the ghost
@@ -9210,6 +9386,7 @@ class TimelineView(QGraphicsView):
                     if real_item and isinstance(real_item, ClipItem):
                         real_item._start_frame = orig_s
                         real_item._drag_target_track_id = ""
+            self._clear_drag_crossfades()
             self._clear_alt_copy_ghosts()
             if self._current_drag_session is not None:
                 self._current_drag_session = None
@@ -11482,7 +11659,9 @@ class TimelineView(QGraphicsView):
                 frame, clip_id, clip.timeline_start, clip.timeline_end,
             )
             return
-        self._execute_command(SplitClipCommand.create(track_id, clip_id, frame))
+        track = self._timeline.get_track_by_id(track_id)
+        if track is not None and not self._split_hits_crossfade(track, clip_id, frame):
+            self._execute_command(SplitClipCommand.create(track_id, clip_id, frame))
 
     def _on_clip_split_at_silence_requested(self, clip_id: str, track_id: str) -> None:
         """P1-4 切空不动同步：静音间隙多点切分（宏单步撤销，无 ripple）。
@@ -11526,6 +11705,9 @@ class TimelineView(QGraphicsView):
                                float(self._timeline.fps))
         if not plan.valid:
             logger.info("Gap split: %s", plan.reason)
+            return
+        track = self._timeline.get_track_by_id(track_id)
+        if track is None or any(self._split_hits_crossfade(track, clip_id, frame) for frame in plan.cuts):
             return
         commands = [SplitClipCommand.create(track_id, clip_id, frame)
                     for frame in sorted(plan.cuts, reverse=True)]
@@ -11849,6 +12031,7 @@ class TimelineView(QGraphicsView):
         # P2-2: Restore all clips from ClipDragSession if present
         if self._current_drag_session is not None:
             # Clean up Alt-drag copy ghosts if present.
+            self._clear_drag_crossfades()
             self._clear_alt_copy_ghosts()
             for clip_id, orig_start in self._current_drag_session.original_positions.items():
                 item = self._items_map.get(clip_id)
@@ -12019,10 +12202,20 @@ class TimelineView(QGraphicsView):
         if not clips_data:
             return
 
+        copied_crossfades = {
+            transition.right_clip_id: transition.to_dict()
+            for track in self._timeline.audio_tracks
+            for transition in track.transitions
+            if transition.is_overlap_crossfade
+            and transition.left_clip_id in selected_ids and transition.right_clip_id in selected_ids
+        }
         # Compute relative offsets from anchor
         for entry in clips_data:
             clip_dict = entry["clip"]
             entry["relative_start"] = clip_dict["timeline_start"] - anchor_frame
+            fade = copied_crossfades.get(clip_dict["clip_id"])
+            if fade is not None:
+                entry["overlap_crossfade"] = fade
 
         # Store in clipboard (typed payload)
         self._clipboard = TimelineClipboardPayload(
@@ -12140,30 +12333,29 @@ class TimelineView(QGraphicsView):
                 has_overlap = True
                 break
 
-        # If overlap detected, shift right to the first free slot
+        # Find a common free position for the whole batch. Advancing an entry
+        # can move a different entry into occupied space, so recheck every lane.
         effective_paste = paste_start
         if has_overlap:
-            max_shift = 0
-            for i, entry in enumerate(clips_data):
-                target_track = resolved_tracks.get(i)
-                if target_track is None:
-                    continue
-                rel_start = entry["relative_start"]
-                clip_dur = entry["clip"].get("timeline_duration", 0)
-                candidate = paste_start + rel_start
-                while (
-                    _subtitles_overlap_on_track(target_track, candidate, clip_dur)
-                    if entry.get("kind") == "subtitle"
-                    else _clips_overlap_on_track(target_track, candidate, clip_dur)
-                ):
-                    candidate += 1
-                shift = candidate - (paste_start + rel_start)
-                if shift > max_shift:
-                    max_shift = shift
-            effective_paste = paste_start + max_shift
+            while True:
+                next_paste = effective_paste
+                for index, entry in enumerate(clips_data):
+                    track = resolved_tracks.get(index)
+                    if track is None:
+                        continue
+                    relative = entry["relative_start"]
+                    start = effective_paste + relative
+                    duration = entry["clip"]["timeline_duration"]
+                    existing = track.subtitle_clips if entry.get("kind") == "subtitle" else track.clips
+                    for item in existing:
+                        if start < item.timeline_end and start + duration > item.timeline_start:
+                            next_paste = max(next_paste, item.timeline_end - relative)
+                if next_paste == effective_paste:
+                    break
+                effective_paste = next_paste
 
         commands = []
-        for i, entry in enumerate(clips_data):
+        for i, entry in sorted(enumerate(clips_data), key=lambda item: item[1]["relative_start"]):
             clip_dict = copy.deepcopy(entry["clip"])
             relative_start = entry["relative_start"]
             is_subtitle = entry.get("kind") == "subtitle"
@@ -12208,7 +12400,17 @@ class TimelineView(QGraphicsView):
                         clip_dict["linked_clip_id"] = None
 
                 clip = ClipInstance.from_dict(clip_dict)
-                cmd = AddClipCommand.create(target_track.track_id, clip)
+                fade = None
+                fade_data = entry.get("overlap_crossfade")
+                if isinstance(fade_data, dict) and target_track.track_type == "audio":
+                    copied = TransitionInstance.from_dict(fade_data)
+                    left_id = old_to_new_id.get(copied.left_clip_id)
+                    if copied.is_overlap_crossfade and left_id is not None:
+                        fade = replace(
+                            copied, transition_id=str(uuid.uuid4()), track_id=target_track.track_id,
+                            left_clip_id=left_id, right_clip_id=clip.clip_id,
+                        )
+                cmd = AddClipCommand.create(target_track.track_id, clip, overlap_crossfade=fade)
             commands.append(cmd)
             if not is_subtitle:
                 source_binding = (
@@ -14113,6 +14315,8 @@ class TimelineView(QGraphicsView):
             # Transition boundaries
             if include_transitions:
                 for trans in track.transitions:
+                    if trans.is_overlap_crossfade:
+                        continue
                     # Transition center frame
                     points.append(trans.center_frame)
                     # Transition start/end
@@ -14267,6 +14471,9 @@ class TimelineView(QGraphicsView):
             if getattr(track, 'is_locked', False):
                 return False
 
+            if allow_overwrite and track.track_type == "audio" and self._moves_allow_crossfades(group.members):
+                # The command validates the complete target-track geometry.
+                continue
             existing_clips = [c for c in track.clips if c.clip_id not in member_ids]
             for m in members:
                 clip = self._timeline.get_clip_by_id(m.clip_id)
@@ -14316,6 +14523,15 @@ class TimelineView(QGraphicsView):
         linked = self._get_reciprocal_linked_clip(clip)
         return linked.clip_id if linked is not None else None
 
+    def _moves_allow_crossfades(self, members: tuple[MoveGroupMember, ...] | list[MoveGroupMember]) -> bool:
+        if self._timeline is None:
+            return False
+        return bool(members) and all(
+            (track := self._timeline.get_track_by_id(member.track_id)) is not None
+            and track.track_type == "audio"
+            for member in members
+        )
+
     def _create_overwrite_move_command(
         self,
         members: tuple[MoveGroupMember, ...] | list[MoveGroupMember],
@@ -14336,7 +14552,12 @@ class TimelineView(QGraphicsView):
                 "new_start": member.new_start,
                 "old_start": member.old_start,
             })
-        return MoveClipsOverwriteCommand.create(moves, label=label)
+        crossfades = self._moves_allow_crossfades(members)
+        return MoveClipsOverwriteCommand.create(
+            moves,
+            label=I18N.tr("timeline.overlap.move_audio", "Move Audio Clips") if crossfades else label,
+            audio_crossfades=crossfades,
+        )
 
     def _validate_move_position(
         self,
@@ -14377,6 +14598,25 @@ class TimelineView(QGraphicsView):
 
         return True
 
+    @staticmethod
+    def _validate_audio_trim(
+        track: EditTrack, clip: ClipInstance, start: int, duration: int,
+    ) -> bool:
+        if start < 0 or duration < 1:
+            return False
+        clipped = replace(
+            clip, timeline_start=start, timeline_duration=duration,
+            fade_in_duration=min(clip.fade_in_duration, duration),
+            fade_out_duration=min(clip.fade_out_duration, duration),
+        )
+        try:
+            audio_overlap_pairs(tuple(
+                clipped if item.clip_id == clip.clip_id else item for item in track.clips
+            ))
+        except AudioOverlapError:
+            return False
+        return True
+
     def _validate_trim_left(
         self,
         clip_id: str,
@@ -14404,6 +14644,9 @@ class TimelineView(QGraphicsView):
         track = self._timeline.get_track_by_id(track_id)
         if track is None:
             return False
+
+        if track.track_type == "audio":
+            return self._validate_audio_trim(track, clip, new_start, clip.timeline_end - new_start)
 
         # Find previous clip
         prev_clip = None
@@ -14450,6 +14693,9 @@ class TimelineView(QGraphicsView):
         track = self._timeline.get_track_by_id(track_id)
         if track is None:
             return False
+
+        if track.track_type == "audio":
+            return self._validate_audio_trim(track, clip, clip.timeline_start, new_duration)
 
         new_end = clip.timeline_start + new_duration
 
@@ -14568,9 +14814,24 @@ class TimelineView(QGraphicsView):
         # Content stays continuous between tracks. Only the ruler and V/A
         # boundaries span it; individual track rules belong to the headers.
         self._paint_timeline_dividers(painter)
+        if self._drag_crossfades:
+            area = self._layout_engine.area_layout().audio_area
+            painter.save()
+            painter.setClipRect(
+                QRectF(rect.left(), area.top(), rect.width(), area.height()),
+                Qt.ClipOperation.IntersectClip,
+            )
+            for span, kind, adjustments, enabled in self._drag_crossfades:
+                if rect.intersects(span):
+                    paint_overlap_crossfade(painter, span, kind, adjustments, enabled=enabled)
+            painter.restore()
         if self._recording_previews:
             content = self.viewport().rect().adjusted(TRACK_HEADER_WIDTH, RULER_HEIGHT, 0, 0)
             exposed = rect.intersected(self.mapToScene(content).boundingRect())
+            audio_area = self._layout_engine.area_layout().audio_area
+            exposed = exposed.intersected(QRectF(
+                exposed.left(), audio_area.top(), exposed.width(), audio_area.height(),
+            ))
             painter.save()
             painter.setClipRect(exposed, Qt.ClipOperation.IntersectClip)
             for preview in self._recording_previews.values():
@@ -14644,7 +14905,7 @@ class TimelineView(QGraphicsView):
             track_top = ruler_h
             track_bottom = vp.height()
             split_y = track_top + max(0, track_bottom - track_top) // 2
-            label_font = QFont("SF Mono, Menlo, Consolas, Courier New, monospace", 12)
+            label_font = QFont(UI_MONO_FONT_FAMILIES, 12)
             label_font.setStyleHint(QFont.StyleHint.Monospace)
             label_font.setBold(True)
             painter.setFont(label_font)
@@ -14872,7 +15133,7 @@ class TimelineView(QGraphicsView):
         center_y = track_top + max(0.0, track_bottom - track_top) * 0.5
         message_rect = QRectF(center_x - 220.0, center_y - 42.0, 440.0, 84.0)
 
-        title_font = QFont("SF Pro Display, Helvetica, Arial, sans-serif", 15)
+        title_font = QFont(UI_FONT_FAMILIES, 15)
         title_font.setBold(True)
         painter.setFont(title_font)
         painter.setPen(QPen(QColor(get_color("text"))))
@@ -14882,7 +15143,7 @@ class TimelineView(QGraphicsView):
             I18N.tr("timeline.empty_title", "尚未创建时间线"),
         )
 
-        hint_font = QFont("SF Pro Display, Helvetica, Arial, sans-serif", 11)
+        hint_font = QFont(UI_FONT_FAMILIES, 11)
         painter.setFont(hint_font)
         painter.setPen(QPen(QColor(get_color("text_muted"))))
         painter.drawText(
@@ -15023,6 +15284,10 @@ class TimelineView(QGraphicsView):
         cmd = SetTrackVolumeCommand.create(track_id, volume)
         self._execute_command(cmd)
         logger.debug(f"Track {track_id} volume changed to {volume:.2f}")
+
+    def _on_track_pan_changed(self, track_id: str, pan: float) -> None:
+        if self._timeline is not None:
+            self._execute_command(SetTrackPanCommand.create(track_id, pan))
 
     def set_track_waveform_gain_preview(self, track_id: str, gain: float) -> None:
         """实时预览轨道音量对该轨波形显示的缩放（W-gain）。
@@ -15219,6 +15484,8 @@ class TimelineView(QGraphicsView):
 
         # Re-layout all tracks (engine handles cumulative positioning)
         self._layout_track_items()
+        if track.track_type == "audio":
+            self.audio_track_heights_changed.emit()
 
         logger.debug(f"Track {track_id} height changed to {new_height}")
 
@@ -15256,6 +15523,7 @@ class TimelineView(QGraphicsView):
 
         self._layout_track_items()
         self.viewport().update()
+        self.audio_track_heights_changed.emit()
 
     def reset_splitter_ratio(self) -> None:
         """Reset V/A area splitter to 50/50."""

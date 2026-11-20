@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.deliver.ui.deliver_workspace import DeliverWorkspace
+from src.shared.config.config_manager import ConfigManager
+from src.shared.ui.style_sheet import orange_tab_style
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.panel_splitter import PANEL_RULE_WIDTH, PanelSplitter
 
@@ -102,6 +104,143 @@ def test_queue_can_detach_and_return_without_rebuilding_widget(qapp):
     assert workspace.edit_preview_splitter.indexOf(workspace.batch_panel) == 1
     assert id(workspace.batch_panel) == original_panel_id
 
+    window.close()
+
+
+def test_render_queue_toggle_reclaims_preview_width_and_survives_restart(qapp, tmp_path):
+    config_path = tmp_path / "config.json"
+    window = QMainWindow()
+    window.config_manager = ConfigManager(config_path)
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    workspace.attach_batch_panel_host(window)
+    window.resize(1480, 760)
+    window.show()
+    qapp.processEvents()
+
+    action = workspace.render_queue_visibility_action
+    assert action.isCheckable() and action.isChecked()
+    toolbar_button = QToolButton()
+    toolbar_button.setDefaultAction(action)
+
+    splitter = workspace.edit_preview_splitter
+    viewer = splitter.widget(0)
+    splitter.moveSplitter(splitter.width() - 430 - splitter.handleWidth(), 1)
+    queue_width = workspace.batch_panel.width()
+    original_preview_width = viewer.width()
+    queue = workspace.controller.queue
+
+    toolbar_button.click()
+    qapp.processEvents()
+    assert not action.isChecked()
+    assert workspace.batch_panel.isHidden()
+    assert viewer.width() > original_preview_width + 300
+    assert workspace.controller.queue is queue
+    window.close()
+
+    restored_window = QMainWindow()
+    restored_window.config_manager = ConfigManager(config_path)
+    restored_workspace = DeliverWorkspace()
+    restored_window.setCentralWidget(restored_workspace)
+    restored_workspace.attach_batch_panel_host(restored_window)
+    restored_window.resize(1480, 760)
+    restored_window.show()
+    qapp.processEvents()
+
+    restored_action = restored_workspace.render_queue_visibility_action
+    assert not restored_action.isChecked()
+    assert restored_workspace.batch_panel.isHidden()
+    restored_action.trigger()
+    qapp.processEvents()
+    assert restored_workspace.batch_panel.isVisible()
+    assert restored_workspace.batch_panel.width() == pytest.approx(queue_width, abs=1)
+
+    restored_action.trigger()
+    restored_workspace.reset_render_queue_visibility()
+    qapp.processEvents()
+    assert restored_action.isChecked()
+    assert restored_workspace.batch_panel.isVisible()
+    assert restored_workspace.batch_panel.width() == pytest.approx(370, abs=1)
+    restored_window.close()
+
+
+def test_render_queue_toggle_preserves_detached_panel_and_placement(qapp):
+    window = QMainWindow()
+    window.all_docks = []
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    workspace.attach_batch_panel_host(window)
+    window.resize(1480, 760)
+    window.show()
+    qapp.processEvents()
+
+    panel = workspace.batch_panel
+    queue_width = panel.width()
+    action = workspace.render_queue_visibility_action
+    workspace.float_batch_panel()
+    floating_dock = window.all_docks[0]
+    assert floating_dock.property("toposPanelCloseAction") is action
+    assert floating_dock.widget() is panel
+    assert floating_dock.isVisible()
+    action.trigger()
+    assert floating_dock.isHidden()
+    assert not action.isChecked()
+
+    action.trigger()
+    assert floating_dock.isVisible()
+    assert action.isChecked()
+    workspace.return_batch_panel_to_deliver()
+    qapp.processEvents()
+    assert workspace.edit_preview_splitter.widget(1) is panel
+    assert panel.isVisible()
+    assert panel.width() == pytest.approx(queue_width, abs=1)
+    assert window.all_docks == []
+    window.close()
+
+
+def test_detached_queue_stays_with_deliver_when_switching_to_an_old_qt_state(qapp, tmp_path):
+    window = QMainWindow()
+    window.config_manager = ConfigManager(tmp_path / "config.json")
+    window.all_docks = []
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    workspace.attach_batch_panel_host(window)
+    window.resize(1480, 760)
+    window.show()
+    qapp.processEvents()
+    other_page_state = window.saveState()
+
+    workspace.float_batch_panel()
+    dock = window.all_docks[0]
+    dock.move(32, 64)
+    position = dock.pos()
+    deliver_state = window.saveState()
+    action = workspace.render_queue_visibility_action
+    saved_preferences = window.config_manager.config.copy()
+
+    assert window.restoreState(other_page_state)
+    workspace.set_workspace_active(False)
+    assert dock.isHidden()
+    assert action.isChecked()
+    assert window.config_manager.config == saved_preferences
+
+    assert window.restoreState(deliver_state)
+    workspace.set_workspace_active(True)
+    qapp.processEvents()
+    assert dock.isVisible()
+    assert dock.pos() == position
+    assert window.all_docks == [dock]
+    assert dock.widget() is workspace.batch_panel
+    assert window.config_manager.config == saved_preferences
+
+    action.trigger()
+    assert not action.isChecked()
+    assert dock.isHidden()
+    workspace.set_workspace_active(False)
+    assert window.restoreState(deliver_state)
+    workspace.set_workspace_active(True)
+    assert not action.isChecked()
+    assert dock.isHidden()
     window.close()
 
 
@@ -209,6 +348,7 @@ def test_video_settings_use_global_combos_and_mode_tabs(qapp):
 
     tabs = settings.findChild(QTabBar, "DeliverModeTabs")
     assert tabs is not None
+    assert tabs.styleSheet() == orange_tab_style("QTabBar#DeliverModeTabs")
     assert tabs.count() == 3
     assert [tabs.tabText(i) for i in range(tabs.count())] == ["Video", "Audio", "File"]
     assert settings._mode_stack.currentIndex() == 0

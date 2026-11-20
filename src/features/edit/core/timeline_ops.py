@@ -3641,8 +3641,10 @@ class SnapManager:
                     sub.clip_id
                 ))
 
-            # 转场边界
+            # 跨片交叉淡化的边界就是片段边缘，避免重复吸附到自身。
             for trans in track.transitions:
+                if trans.is_overlap_crossfade:
+                    continue
                 half_duration = trans.duration // 2
                 self.add_point(SnapPoint(
                     trans.center_frame - half_duration,

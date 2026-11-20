@@ -38,7 +38,7 @@ import inspect
 import logging
 import time
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -289,6 +289,8 @@ class EditPage(QWidget):
         # connection, so re-attaching a panel drops the stale panel's feed
         # instead of leaving a duplicate/leaked connection on the manager.
         self._timeline_level_connection: Optional[tuple[Any, Any]] = None
+        self._timeline_track_meter_connections: list[tuple[Any, Any]] = []
+        self._timeline_track_meter_reset: Optional[Callable[[], None]] = None
 
         # Timeline data model
         self._current_timeline: Optional[Any] = None
@@ -1149,6 +1151,10 @@ class EditPage(QWidget):
             AudioPlaybackManager instance, or None if unavailable.
         """
         if self._audio_manager is not None:
+            # Page leave disconnects the meter, but retains the cleaned-up
+            # manager so the next audio session can reuse it.
+            if self._timeline_level_connection is None and self._timeline_panel is not None:
+                self._reconnect_timeline_level_meter()
             return self._audio_manager
 
         try:
@@ -1197,15 +1203,38 @@ class EditPage(QWidget):
         signal.connect(slot)
         self._timeline_level_connection = (signal, slot)
 
+        get_view = getattr(panel, "get_timeline_view", None)
+        view = get_view() if callable(get_view) else None
+        reset = getattr(view, "reset_track_header_levels", None)
+        self._timeline_track_meter_reset = reset
+        for signal_name, slot_name in (
+            ("audio_track_levels_changed", "update_track_header_levels"),
+            ("audio_telemetry_reset", "reset_track_header_levels"),
+        ):
+            signal = getattr(manager, signal_name, None)
+            slot = getattr(view, slot_name, None)
+            if signal is not None and callable(slot):
+                signal.connect(slot)
+                self._timeline_track_meter_connections.append((signal, slot))
+
     def _disconnect_timeline_level_meter(self) -> None:
-        if self._timeline_level_connection is None:
-            return
-        signal, slot = self._timeline_level_connection
-        try:
-            signal.disconnect(slot)
-        except TypeError:
-            pass  # already disconnected (e.g. panel destroyed)
+        connections = getattr(self, "_timeline_track_meter_connections", [])
+        if self._timeline_level_connection is not None:
+            connections.append(self._timeline_level_connection)
+        for signal, slot in connections:
+            try:
+                signal.disconnect(slot)
+            except TypeError:
+                pass  # already disconnected (e.g. panel destroyed)
+        connections.clear()
         self._timeline_level_connection = None
+        reset = getattr(self, "_timeline_track_meter_reset", None)
+        self._timeline_track_meter_reset = None
+        if reset is not None:
+            try:
+                reset()
+            except RuntimeError:
+                pass  # The detached view or its scene has already been destroyed.
 
     def shutdown_audio_playback(self) -> None:
         """Fully stop and release all edit-page audio worker resources.
@@ -1860,7 +1889,7 @@ class EditPage(QWidget):
         # 实例会被引擎消费；视频转场对音频无影响，过滤后即被丢弃）。
         transitions = getattr(track, "transitions", ()) or ()
         set_audio_tr = getattr(audio_mgr, "set_audio_transitions", None)
-        if callable(set_audio_tr) and transitions:
+        if callable(set_audio_tr):
             try:
                 set_audio_tr(track_id, list(transitions))
             except Exception as e:  # noqa: BLE001
@@ -1944,6 +1973,7 @@ class EditPage(QWidget):
                     int(getattr(tr, "center_frame", 0) or 0),
                     int(getattr(tr, "duration", 0) or 0),
                     str(getattr(tr, "alignment", "centered") or "centered"),
+                    _sig_value(getattr(tr, "params", {})),
                 ))
             return tuple(entries)
 

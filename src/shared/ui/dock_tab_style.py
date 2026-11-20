@@ -12,6 +12,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QTabBar
 
 from src.shared.ui.panel_divider import install_tab_divider_overlay
+from src.shared.ui.style_sheet import orange_tab_style
 
 __all__ = [
     "DOCK_TAB_BAR_STYLE",
@@ -19,51 +20,10 @@ __all__ = [
 ]
 
 
-DOCK_TAB_BAR_STYLE = """
-QMainWindowTabBar#ToposDockTabBar, QTabBar#ToposDockTabBar {
-    background: transparent;
-    border: none;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab,
-QTabBar#ToposDockTabBar::tab {
-    background: rgb(70, 70, 77);
-    color: #bbbbbb;
-    padding: 3px 14px;
-    border: none;
-    margin: 0;
-    min-height: 18px;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab:hover,
-QTabBar#ToposDockTabBar::tab:hover {
-    background: rgb(85, 85, 91);
-    color: #bbbbbb;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab:selected,
-QTabBar#ToposDockTabBar::tab:selected {
-    background: rgb(204, 102, 0);
-    color: #ffffff;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab:first,
-QTabBar#ToposDockTabBar::tab:first {
-    border-top-left-radius: 8px;
-    border-bottom-left-radius: 8px;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab:last,
-QTabBar#ToposDockTabBar::tab:last {
-    border-top-right-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
-QMainWindowTabBar#ToposDockTabBar::tab:only-one,
-QTabBar#ToposDockTabBar::tab:only-one {
-    border-radius: 8px;
-}
-"""
+DOCK_TAB_BAR_STYLE = (
+    orange_tab_style("QMainWindowTabBar#ToposDockTabBar")
+    + orange_tab_style("QTabBar#ToposDockTabBar")
+)
 
 
 def apply_dock_tab_bar_style(tab_bar: QTabBar) -> None:

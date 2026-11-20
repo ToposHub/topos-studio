@@ -7643,11 +7643,10 @@ class FileOpsMixin:
         for page, state in self.page_layouts.items():
             if isinstance(state, QByteArray):
                 layouts_hex[page] = state.toHex().data().decode()
-        try:
-            from src.shared.feature_flags import get_effective_layout_mode
-            elm = get_effective_layout_mode(self.config_manager)
-        except Exception:
-            elm = "studio"
+        from src.shared.feature_flags import get_effective_layout_mode
+        active_layout_mode = getattr(self, "_layout_profile_mode", None)
+        elm = (active_layout_mode() if callable(active_layout_mode)
+               else get_effective_layout_mode(self.config_manager))
         stored = self.config_manager.get("page_layouts") or {}
         # Backwards compat: if stored is a legacy flat dict {page: hex}, fold
         # it under the default mode bucket before merging the current mode.
@@ -7661,12 +7660,7 @@ class FileOpsMixin:
         self.config_manager.set("current_page", self.current_page, auto_save=False)
         # Persist a work-mode-scoped current page too, so image/video each
         # remember their own last page.
-        try:
-            from src.shared.feature_flags import get_effective_layout_mode
-            elm_page = get_effective_layout_mode(self.config_manager)
-            self.config_manager.set(f"current_page_{elm_page}", self.current_page, auto_save=False)
-        except Exception:
-            pass
+        self.config_manager.set(f"current_page_{elm}", self.current_page, auto_save=False)
 
         # Save geometry and state to config.json (batch update, no auto-save)
         self.config_manager.set("window_geometry", self.saveGeometry().toHex().data().decode(), auto_save=False)
@@ -7691,11 +7685,6 @@ class FileOpsMixin:
         # each remember their own last file (and image mode never tries to
         # restore a video file on next launch).
         if self.current_file_path:
-            try:
-                from src.shared.feature_flags import get_effective_layout_mode
-                elm = get_effective_layout_mode(self.config_manager)
-            except Exception:
-                elm = "studio"
             self.config_manager.set("last_opened_file", self.current_file_path, auto_save=False)
             self.config_manager.set(f"last_opened_file_{elm}", self.current_file_path, auto_save=False)
 

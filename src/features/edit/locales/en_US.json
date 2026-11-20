@@ -494,6 +494,19 @@
     "frame_unset": "Frame: --"
   },
   "timeline": {
+    "overlap": {
+      "enabled": "Crossfade",
+      "power": "Equal Power",
+      "linear": "Linear",
+      "cosine": "Cosine",
+      "symmetric": "Symmetrical Curves",
+      "reset": "Reset Curve Shape",
+      "edit": "Edit Crossfade",
+      "move_audio": "Move Audio Clips",
+      "tooltip": "Drag a handle vertically to shape the crossfade. Right-click for options.",
+      "invalid": "Crossfades need a tail-to-head overlap between two audio clips.",
+      "split": "Split outside the crossfade region."
+    },
     "linked_trim_limit": "Linked clips cannot be trimmed by the same amount. The edit was not applied.",
     "fade_duration": "Fade: {frames} frames",
     "trim_in_hint": "Trim In",

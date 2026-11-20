@@ -5687,6 +5687,9 @@ class MediaPoolPanel(QWidget):
             self._current_bin_is_smart,
             self._search_text,
         )
+        self.btn_analysis_toggle.hide()
+        self.btn_metadata_view.hide()
+        self.thumb_slider.hide()
         if self._project is not None and self.smart_bin_tree.select_bin(
                 SMART_BIN_ALL_AUDIO, True):
             self._on_bin_selected(SMART_BIN_ALL_AUDIO, True)
@@ -5699,6 +5702,9 @@ class MediaPoolPanel(QWidget):
         if saved is None:
             return
         self._audio_workspace_saved = None
+        self.btn_analysis_toggle.show()
+        self.btn_metadata_view.show()
+        self.thumb_slider.setVisible(self._view_mode == ViewMode.GRID)
         bin_id, is_smart, search_text = saved
         if self._project is not None:
             if bin_id:
@@ -5951,7 +5957,8 @@ class MediaPoolPanel(QWidget):
                                    (self.btn_metadata_view, ViewMode.METADATA)):
                 button.setChecked(mode == target)
             self._column_grid.set_active(mode == ViewMode.GRID)
-            self.thumb_slider.setVisible(mode == ViewMode.GRID)
+            self.thumb_slider.setVisible(
+                mode == ViewMode.GRID and self._audio_workspace_saved is None)
             self.grid_delegate.metadata_mode = mode == ViewMode.METADATA
             if mode == ViewMode.METADATA:
                 self.grid_view.setViewportMargins(0, 0, 0, 0)

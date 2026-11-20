@@ -138,11 +138,12 @@ EDITING_PRESET = WorkspacePreset(
         ("dockProgramViewer", "top"),
         ("dockEditTimeline", "bottom"),
         ("dockProperties", "right"),
-        ("dockEditEffects", "right"),
+        ("dockEditEffects", "left"),
         ("dockEditInfo", "right"),
     ),
     tabify_groups=(
-        ("dockProperties", "dockEditEffects", "dockEditInfo"),
+        ("dockEditMediaPool", "dockEditEffects"),
+        ("dockProperties", "dockEditInfo"),
     ),
     focus_dock="dockProgramViewer",
     h_sizes=(

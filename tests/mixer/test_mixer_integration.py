@@ -193,7 +193,7 @@ def test_native_factory_layout_top_console_video_bottom_timeline(dock_host, qtbo
     assert timeline.width() >= console.width() + viewer.width()
     assert len({d.objectName() for d in host._audio_workspace_docks()}) == 4
     host._perform_update_all_titlebars()
-    assert all(isinstance(d.titleBarWidget(), FloatingDockTitleBar) for d in host._audio_workspace_docks())
+    assert all(d.titleBarWidget().maximumHeight() == 1 for d in host._audio_workspace_docks())
 
 
 def test_floating_redocking_and_layoutstore_round_trip(dock_host, qtbot):
@@ -202,7 +202,7 @@ def test_floating_redocking_and_layoutstore_round_trip(dock_host, qtbot):
     viewer.setFloating(True)
     qtbot.waitUntil(viewer.isFloating)
     host._save_current_layout_to_store("Mixer")
-    profile = host.layout_store.get_profile("studio", "Mixer")
+    profile = host.layout_store.get_profile(host._layout_profile_mode(), "Mixer")
     assert "mixer.viewer" in profile.visible_panels
     viewer.setFloating(False)
     host.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, viewer)
@@ -210,10 +210,16 @@ def test_floating_redocking_and_layoutstore_round_trip(dock_host, qtbot):
     qtbot.waitUntil(viewer.isFloating)
     host._sync_floating_docks()
     assert viewer in host._floating_docks
+    assert isinstance(viewer.titleBarWidget(), FloatingDockTitleBar)
     viewer.setFloating(False)
     host.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, viewer)
     host._sync_floating_docks()
-    assert isinstance(viewer.titleBarWidget(), FloatingDockTitleBar)
+    assert viewer.titleBarWidget().maximumHeight() == 1
+    action = viewer.toggleViewAction()
+    action.trigger()
+    assert viewer.isHidden()
+    action.trigger()
+    assert not viewer.isHidden()
 
 
 def test_clip_editor_tab_or_float_is_restorable_and_opt_in(dock_host, qtbot):
@@ -245,7 +251,7 @@ def test_native_reset_restores_three_panels_and_hides_optional_editor(dock_host,
     assert all(d.isVisible() for d in host._audio_workspace_docks()[:3])
     assert host.dock_audio_clip_editor.isHidden()
     assert host.dockWidgetArea(host.dock_audio_viewer) == Qt.DockWidgetArea.TopDockWidgetArea
-    profile = host.layout_store.get_profile("studio", "Mixer")
+    profile = host.layout_store.get_profile(host._layout_profile_mode(), "Mixer")
     assert set(profile.visible_panels) == {"mixer.console", "mixer.viewer", "mixer.timeline"}
 
 

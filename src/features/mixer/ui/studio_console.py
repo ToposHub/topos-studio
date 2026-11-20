@@ -330,6 +330,8 @@ class StudioAudioMixerPanel(AudioMixerPanel):
     add_bus_requested = pyqtSignal()
     recording_settings_requested = pyqtSignal()
     adr_requested = pyqtSignal()
+    output_levels_changed = pyqtSignal(list)
+    output_meter_reset = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         self._recording_inputs: dict[str, str] = {}
@@ -337,6 +339,14 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         self._recording_busy = False
         self._recording_workflow_active = False
         super().__init__(parent)
+
+    def update_master_level(self, levels: list[float]) -> None:
+        super().update_master_level(levels)
+        self.output_levels_changed.emit(levels)
+
+    def on_telemetry_reset(self, generation: int) -> None:
+        super().on_telemetry_reset(generation)
+        self.output_meter_reset.emit()
 
     def _create_strip(
         self, track_id: str, track_name: str, track_tag: str, *, is_master: bool = False,

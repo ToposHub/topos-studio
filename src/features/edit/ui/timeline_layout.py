@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # ── Default constants ───────────────────────────────────────────────────────
 
-TRACK_HEADER_WIDTH: int = EDIT_SIZES["track_header_w"]
+TRACK_HEADER_WIDTH: int = EDIT_SIZES["timeline_track_header_w"]
 RULER_HEIGHT: int = EDIT_SIZES["ruler_h"]
 TRACK_AREA_TOP: float = float(EDIT_SIZES["track_area_top"])
 TRACK_GAP: int = 2

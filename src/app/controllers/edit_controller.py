@@ -6399,7 +6399,8 @@ class EditControllerMixin:
             effect_id=effect_id,
             params_dict=params_dict,
             clip_name=clip_name,
-            parent=self.edit_properties_panel,
+            parent=self if getattr(self, "current_page", None) == "Mixer"
+            else self.edit_properties_panel,
         )
 
     def _on_edit_clip_effect_params_committed(
@@ -6661,6 +6662,10 @@ class EditControllerMixin:
         # handles undo entry + preview renderer/TimelineView sync).
         self._execute_timeline_edit_command(command, timeline)
 
+        if is_audio and getattr(self, "current_page", None) == "Mixer":
+            self._auto_focus_new_effect(clip_id, new_effect_id)
+            return
+
         # FX-H02: invalidate the clip's render cache so the viewer no
         # longer shows the pre-edit frame after this effect change.
         self._invalidate_clip_render_cache(clip_id)
@@ -6829,6 +6834,11 @@ class EditControllerMixin:
         timeline = self.edit_page._current_timeline
         clip = timeline.get_clip_by_id(clip_id)
         if clip is None:
+            return
+        if getattr(self, "current_page", None) == "Mixer":
+            effect = clip.get_effect_by_id(effect_id)
+            if effect is not None:
+                self._on_edit_effect_open_dialog_requested(clip_id, effect_id, effect.effect_type)
             return
         # If the targeted clip isn't the one currently shown in the panel,
         # rebuild the panel for it (this also picks up the new effect).
