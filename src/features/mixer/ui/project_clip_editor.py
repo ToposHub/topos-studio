@@ -1388,6 +1388,10 @@ class ProjectClipEditor(QWidget):
             self._panel.lufsNormalizeRequested.connect(self._on_lufs_normalize_requested)
             # P2-7：变速/音高预览（长度事务提交待输出映射合同）。
             self._panel.timePitchApplied.connect(self._on_time_pitch_requested)
+            # P1-3：语图右键的 heal/衰减入修复处理器；仅试听该频段走
+            # 带通试听（此前生产中信号未连接，菜单项被吞掉）。
+            self._panel.spectralRepairRequested.connect(
+                self._on_spectral_repair_requested)
             self._scroll.setWidget(self._panel)
         return self._panel
 
@@ -2162,6 +2166,108 @@ class ProjectClipEditor(QWidget):
                 label=I18N.tr("mixer.clip_editor.polarity", "Invert polarity")))
         self._commit_audio_edit(
             edit, I18N.tr("mixer.clip_editor.polarity", "Invert polarity"))
+
+    def _on_spectral_repair_requested(self, t0: float, t1: float,
+                                      f_low: float, f_high: float,
+                                      mode: str) -> None:
+        """P1-3 · 语图右键接线：heal/衰减入修复处理器，仅试听该频段。
+
+        能力门槛先行：锁轨/只读/PCM 未就绪/无选区/后端缺席均按实际
+        能力拒绝并提示（菜单项不再静默无效果）。heal 与衰减提交
+        ``spectral_repair`` 预渲染步骤（选区换算到输出域，笔迹承载
+        时间/频带范围）；``solo_band`` 只做带通试听，不入工程。
+        """
+        clip, panel = self._clip, self._panel
+        if panel is None:
+            return
+        if clip is None or self._locked:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.action_locked",
+                "Track is locked — spectral actions are disabled"))
+            return
+        if panel._raw_pcm is None or panel._pcm is None:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.pcm_required",
+                "Wait for the audio samples to load."))
+            return
+        if t1 - t0 <= 1e-6:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.selection_required",
+                "Select a time range first"))
+            return
+        if mode == "solo_band":
+            self._audition_band(t0, t1, f_low, f_high)
+            return
+        if f_high <= f_low or f_low <= 0.0:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.band_required",
+                "Select a frequency band on the spectrogram first"))
+            return
+        start, end = self._selection_output_range((t0, t1))
+        center = (start + end) // 2
+        stroke = {
+            "sample": int(center),
+            "hz": float((f_low + f_high) / 2.0),
+            "time_radius": int(max(1, (end - start) // 2)),
+            "bandwidth_oct": float(max(0.05, math.log2(f_high / f_low))),
+        }
+        step = make_step(
+            "spectral_repair", start, end, self._target_channels(),
+            mode=("heal" if mode == "heal" else "attenuate"),
+            amount_db=12.0,
+            strokes=[stroke],
+            label=I18N.tr("mixer.clip_editor.step_repair", "Spectral repair"))
+        self._commit_audio_edit(
+            append_step(clip.audio_edit, step),
+            I18N.tr("mixer.clip_editor.spectral_repair", "Spectral repair"))
+
+    def _audition_band(self, t0: float, t1: float,
+                       f_low: float, f_high: float) -> None:
+        """P1-3 · 带通试听：只听选区时段的选区频段（不入工程）。"""
+        panel = self._panel
+        if panel is None or panel._pcm is None:
+            return
+        rate = panel._pcm_rate
+        pcm = panel._pcm
+        if pcm.shape[1] > 60 * rate:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.band_preview_too_long",
+                "Band preview supports clips up to 60 s"))
+            return
+        try:
+            from scipy.signal import butter, sosfiltfilt
+        except ImportError:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.loudness_unavailable",
+                "Loudness backend unavailable for this format"))
+            return
+        nyquist = rate / 2.0
+        lo = max(10.0, min(f_low, nyquist * 0.95))
+        hi = max(lo * 1.01, min(f_high, nyquist * 0.99))
+        try:
+            sos = butter(4, [lo, hi], btype="band", fs=rate, output="sos")
+            filtered = sosfiltfilt(sos, pcm.astype(np.float64), axis=1)
+        except ValueError:
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.band_required",
+                "Select a frequency band on the spectrogram first"))
+            return
+        filtered = np.ascontiguousarray(filtered, dtype=np.float32)
+        # 选区之外静音：只听该时段的该频段。
+        s0 = int(round(max(0.0, t0) * rate))
+        s1 = int(round(min(panel._duration, t1) * rate))
+        mask = np.zeros(filtered.shape[1], dtype=np.float32)
+        edge = min(480, max(1, (s1 - s0) // 8))
+        mask[max(0, s0 - edge):s1] = 1.0
+        if s0 > 0:
+            mask[max(0, s0 - edge):s0] = np.linspace(
+                0.0, 1.0, min(edge, s0), dtype=np.float32)
+        filtered = filtered * mask[None, :]
+        panel._audition.load(filtered, rate)
+        if not panel._audition.play(max(0, s0)):
+            panel.info_label.setText(I18N.tr(
+                "mixer.clip_editor.no_audio_device",
+                "No audio device available for audition"))
 
     def _pcm_range(self, t0: float, t1: float) -> tuple[int, int]:
         """显示秒 → 原始 PCM 半开样本区间（PCM 与显示域同比例）。"""
