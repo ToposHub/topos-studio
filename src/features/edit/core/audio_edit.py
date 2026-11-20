@@ -1012,6 +1012,8 @@ def render_to_step_insertion(
                     float(params.get("reduction_db", 12.0)),
                     nfft=int(params.get("nfft", 2048)),
                     link_stereo=bool(params.get("link_stereo", True)),
+                    # P1-1 · 预渲染分支消费请求的声道（未选通道不变）。
+                    channels=params.get("channels") or None,
                     progress=_progress,
                 )
             elif processor_id == "time_stretch":
@@ -1031,6 +1033,8 @@ def render_to_step_insertion(
                     mode=str(params.get("mode", "attenuate")),
                     nfft=int(params.get("nfft", 2048)),
                     link_stereo=bool(params.get("link_stereo", True)),
+                    # P1-1 · 预渲染分支消费请求的声道（未选通道不变）。
+                    channels=params.get("channels") or None,
                     progress=progress,
                 )
             else:
@@ -1183,6 +1187,8 @@ def render_pre_render_steps(
                 float(params.get("reduction_db", 12.0)),
                 nfft=int(params.get("nfft", 2048)),
                 link_stereo=bool(params.get("link_stereo", True)),
+                # P1-1 · 预渲染分支消费请求的声道（未选通道不变）。
+                channels=params.get("channels") or None,
                 progress=_progress,
             )
         elif processor_id == "time_stretch":
@@ -1202,6 +1208,8 @@ def render_pre_render_steps(
                 mode=str(params.get("mode", "attenuate")),
                 nfft=int(params.get("nfft", 2048)),
                 link_stereo=bool(params.get("link_stereo", True)),
+                # P1-1 · 插入点基准同样只写目标通道。
+                channels=params.get("channels") or None,
                 progress=progress,
             )
         else:  # 注册表扩张时漏接的实现——显式失败而非静默跳过

@@ -23,7 +23,7 @@ bypass, same policy as the denoise backend).
 from __future__ import annotations
 
 import math
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
@@ -136,6 +136,23 @@ def build_repair_mask(
     return mask
 
 
+def _resolve_working_channels(
+    channel_count: int, channels: Optional[Sequence[int]] = None,
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """P1-1 · 解析目标声道（None=全部）；返回 (工作 PCM 行, 回写行)。
+
+    ``channels`` 为 None/空 → 全部声道（回写行 None=整组复用）。非法
+    项（越界/非整数）被剔除；全剔除时工作行为空。
+    """
+    if channels is None:
+        rows = np.arange(channel_count)
+        return rows, None
+    valid = sorted({int(ch) for ch in channels
+                    if isinstance(ch, (int, np.integer))
+                    and 0 <= int(ch) < channel_count})
+    return np.asarray(valid, dtype=np.int64), np.asarray(valid, dtype=np.int64)
+
+
 def repair_spectral(
     pcm: np.ndarray,
     sample_rate: int,
@@ -146,12 +163,17 @@ def repair_spectral(
     mode: str = "attenuate",
     nfft: int = 2048,
     link_stereo: bool = True,
+    channels: Optional[Sequence[int]] = None,
     progress: Optional[Callable[[float], Any]] = None,
 ) -> np.ndarray:
     """频谱修复（attenuate / heal）；只有 target 内变化，两侧 5 ms 干湿过渡。
 
     ``strokes``: ``{sample, hz, time_radius, bandwidth_oct}``（绝对样本域）。
     ``target``: 半开样本区间。掩码按绝对样本位置构建——分块与整段一致。
+
+    P1-1 · 声道域：``channels`` 限定目标通道（None=全部）——计算只在
+    目标通道上进行，**未选通道逐样本不变**（左右相同的输入只修左时
+    右声道不再被连带改写）。
     """
     if not _SCIPY_AVAILABLE:
         raise RuntimeError("SciPy DSP backend unavailable for spectral repair")
@@ -168,8 +190,36 @@ def repair_spectral(
         raise ValueError("Invalid target range")
     if not strokes:
         return pcm.copy()
+    work_rows, write_rows = _resolve_working_channels(pcm.shape[0], channels)
+    if work_rows.size == 0:
+        return pcm.copy()  # 无合法目标声道：恒等返回
+    result = _repair_spectral_channels(
+        np.ascontiguousarray(pcm[work_rows]), sample_rate, strokes, target,
+        amount_db=amount_db, mode=mode, nfft=nfft, link_stereo=link_stereo,
+        progress=progress)
+    if write_rows is None:
+        return result
+    out = pcm.copy()
+    out[write_rows] = result
+    return out
+
+
+def _repair_spectral_channels(
+    pcm: np.ndarray,
+    sample_rate: int,
+    strokes: list[dict],
+    target: tuple[int, int],
+    *,
+    amount_db: float = 24.0,
+    mode: str = "attenuate",
+    nfft: int = 2048,
+    link_stereo: bool = True,
+    progress: Optional[Callable[[float], Any]] = None,
+) -> np.ndarray:
+    """repair_spectral 的逐声道实现（输入已是目标声道子组）。"""
     if mode == "attenuate" and amount_db == 0.0:
         return pcm.copy()  # 0 dB 衰减 = 逐样本旁路（不做 STFT 往返）
+    lo, hi = target
     if progress is not None:
         progress(0.0)
 
