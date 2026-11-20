@@ -73,6 +73,8 @@ from src.shared.ui.rotary_knob_style import paint_rotary_knob
 from src.shared.ui.style_sheet import C, UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import resolve_track_color
+from src.features.edit.core.audio_dsp import fade_curve_factor
+from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
 from src.features.edit.core.audio_waveform import (
     WaveformData,
     WaveformExtractor,
@@ -692,7 +694,9 @@ class ClipItem(QGraphicsObject):
         flag_color: Optional[str] = None,  # W05: clip colored flag
         waveform_show_channels: bool = False,
         is_enabled: bool = True,  # Clip enabled/disabled state
-        parent: Optional[QGraphicsItem] = None
+        parent: Optional[QGraphicsItem] = None,
+        *,
+        fade_curves: tuple[str | None, str | None] = (None, None),
     ) -> None:
         super().__init__(parent)
 
@@ -825,6 +829,11 @@ class ClipItem(QGraphicsObject):
         self._final_new_end: int = 0  # Final new end frame for ripple trim right
 
         # Phase 1.2: Fade in/out state
+        self._fade_curves = fade_curves
+        self._stereo_fade_display = False
+        self._fade_curve_drag_end: str | None = None
+        self._fade_curve_drag_height = 1.0
+        self._fade_curve_preview: str | None = None
         self._fade_in_duration = fade_in_duration
         self._fade_out_duration = fade_out_duration
         self._fade_in_duration, self._fade_out_duration = self._clamp_fade_pair(
@@ -1911,6 +1920,7 @@ class ClipItem(QGraphicsObject):
             self._draw_disabled_pattern(painter, clip_rect)
             painter.restore()
 
+        self._stereo_fade_display = False
         # Draw waveform for every readable audio clip.  ``is_medium`` means
         # width < 90px, so using it here accidentally suppressed waveforms on
         # the wide clips where users most expect to see them.
@@ -2178,8 +2188,15 @@ class ClipItem(QGraphicsObject):
 
         # Resolve exposes tabs on the hovered clip, independently of linked
         # selection; an authored ramp remains visible away from the pointer.
-        show_fade_in_handle = fade_in_duration > 0 or getattr(self, "_pointer_inside", False) or self._hover_fade_handle == "fade_in"
-        show_fade_out_handle = fade_out_duration > 0 or getattr(self, "_pointer_inside", False) or self._hover_fade_handle == "fade_out"
+        audio = self._is_audio_track()
+        show_fade_in_handle = (
+            (fade_in_duration > 0 and not audio) or self._pointer_inside
+            or self._hover_fade_handle == "fade_in" or self._drag_mode == "fade_in"
+        )
+        show_fade_out_handle = (
+            (fade_out_duration > 0 and not audio) or self._pointer_inside
+            or self._hover_fade_handle == "fade_out" or self._drag_mode == "fade_out"
+        )
 
         if show_fade_in_handle:
             fade_in_x, _ = self._fade_handle_position(clip_rect, "in")
@@ -2266,6 +2283,74 @@ class ClipItem(QGraphicsObject):
         preferred = "in" if pos.x() < midpoint else "out"
         return min(candidates, key=lambda candidate: (candidate[0], candidate[1] != preferred))[1]
 
+    def _audio_fade_bands(self, rect: QRectF) -> tuple[QRectF, ...]:
+        top = rect.top() + 1.0
+        bottom = max(top + 1.0, rect.bottom() - 19.0)
+        if self._stereo_fade_display and rect.height() > 36:
+            split = rect.top() + 6.0 + (rect.height() - 28.0) / 2.0
+            return (
+                QRectF(rect.left(), top, rect.width(), split - top),
+                QRectF(rect.left(), split, rect.width(), bottom - split),
+            )
+        return (QRectF(rect.left(), top, rect.width(), bottom - top),)
+
+    def _audio_fade_curve(self, end: str) -> str:
+        if self._fade_curve_drag_end == end and self._fade_curve_preview is not None:
+            return self._fade_curve_preview
+        return self._fade_curves[0 if end == "in" else 1] or "equal_power"
+
+    def _fade_curve_handle_points(self, end: str) -> tuple[QPointF, ...]:
+        duration = self._fade_in_duration if end == "in" else self._fade_out_duration
+        width = self._fade_visual_width(duration)
+        if duration <= 0 or width < 24 or self._track_height < 38:
+            return ()
+        x = width / 2 if end == "in" else self._width - width / 2
+        gain = fade_curve_factor(self._audio_fade_curve(end), 0.5)
+        return tuple(
+            QPointF(x, band.bottom() - band.height() * gain)
+            for band in self._audio_fade_bands(QRectF(0, 0, self._width, self._track_height))
+        )
+
+    def _fade_curve_handle_at(self, pos: QPointF) -> str | None:
+        if (self._is_track_locked or self._retime_controls_visible
+                or self._width < MIN_CLIP_WIDTH_FOR_FADE_HANDLES or not self._is_audio_track()):
+            return None
+        for end in ("in", "out"):
+            for point in self._fade_curve_handle_points(end):
+                if abs(point.x() - pos.x()) <= 5.5 and abs(point.y() - pos.y()) <= 5.5:
+                    return end
+        return None
+
+    def _draw_audio_fade(self, painter: QPainter, rect: QRectF, width: float, end: str) -> None:
+        curve = self._audio_fade_curve(end)
+        direction = 1 if end == "in" else -1
+        edge = rect.left() if end == "in" else rect.right()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(9, 12, 18, 115))
+        steps = max(8, min(48, math.ceil(width)))
+        for band in self._audio_fade_bands(rect):
+            mask = QPainterPath()
+            mask.moveTo(edge, band.top())
+            mask.lineTo(edge, band.bottom())
+            for sample in range(1, steps + 1):
+                progress = sample / steps
+                mask.lineTo(
+                    edge + direction * width * progress,
+                    band.bottom() - band.height() * fade_curve_factor(curve, progress),
+                )
+            mask.closeSubpath()
+            painter.drawPath(mask)
+
+        drag_end = self._fade_curve_drag_end
+        if self._pointer_inside or drag_end == end:
+            painter.setPen(QPen(QColor(13, 17, 23), 1.0))
+            painter.setBrush(QColor(TEXT_COLOR))
+            for point in self._fade_curve_handle_points(end):
+                painter.drawEllipse(point, 3.0, 3.0)
+        painter.restore()
+
     def _draw_fade_overlay(
         self,
         painter: QPainter,
@@ -2283,6 +2368,10 @@ class ClipItem(QGraphicsObject):
             fade_type: 'in' or 'out'
         """
         if fade_width <= 0:
+            return
+
+        if self._is_audio_track():
+            self._draw_audio_fade(painter, clip_rect, fade_width, fade_type)
             return
 
         painter.save()
@@ -3074,6 +3163,8 @@ class ClipItem(QGraphicsObject):
                 self._waveform_show_channels
                 and waveform_data.channels >= 2
             )
+
+        self._stereo_fade_display = is_stereo
 
         # Include source range, geometry and track height. QPainterPath stores
         # absolute Y coordinates; omitting height made waveform shapes stay at
@@ -4692,6 +4783,11 @@ class ClipItem(QGraphicsObject):
             new_tooltip = I18N.tr("edit.retime_menu.drag_hint", "Drag to change speed")
             new_cursor = edit_cursor("trim_right")
 
+        elif self._fade_curve_handle_at(pos) is not None and self._fade_handle_at(pos) is None:
+            new_edge = new_fade = None
+            new_tooltip = I18N.tr("timeline.fade_shape_drag", "Drag vertically to shape the fade")
+            new_cursor = Qt.CursorShape.SizeVerCursor
+
         elif self._fade_handle_at(pos) is not None:
             incoming = self._fade_handle_at(pos) == "in"
             new_edge = new_fade = "fade_in" if incoming else "fade_out"
@@ -4780,7 +4876,7 @@ class ClipItem(QGraphicsObject):
         lock_mode = {"ripple_left": "ripple_trim_left", "ripple_right": "ripple_trim_right"}.get(new_edge, new_edge or "move")
         if self._active_tool == EditTool.RATE_STRETCH and new_edge in {"left", "right"}:
             lock_mode = f"rate_stretch_{new_edge}"
-        if (new_fade is None and self._active_tool not in {EditTool.BLADE, EditTool.HAND, EditTool.ZOOM}
+        if (new_fade is None and new_cursor != Qt.CursorShape.SizeVerCursor and self._active_tool not in {EditTool.BLADE, EditTool.HAND, EditTool.ZOOM}
                 and self._position_lock_blocks(lock_mode)):
             new_cursor = Qt.CursorShape.ForbiddenCursor
             new_tooltip = I18N.tr("timeline.position_locked", "Position Lock is enabled")
@@ -4941,6 +5037,15 @@ class ClipItem(QGraphicsObject):
             elif fade_handle == "out":
                 self._drag_mode = "fade_out"
                 self._drag_start_pos = event.scenePos()
+            elif (curve_end := self._fade_curve_handle_at(pos)) is not None:
+                self._drag_mode = "fade_curve"
+                self._fade_curve_drag_end = curve_end
+                self._fade_curve_preview = None
+                bands = self._audio_fade_bands(QRectF(0, 0, self._width, self._track_height))
+                points = self._fade_curve_handle_points(curve_end)
+                band_index = min(range(len(points)), key=lambda index: abs(points[index].y() - pos.y()))
+                self._fade_curve_drag_height = bands[band_index].height()
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
             elif self._active_tool == EditTool.TRIM:
                 self._drag_mode = self._smart_trim_mode_at(pos)
                 self._slip_delta = 0
@@ -5908,6 +6013,16 @@ class ClipItem(QGraphicsObject):
                     self._last_move_emit = emit_key
                     self.clip_moved.emit(self._clip_id, self._track_id, new_start, scene_y)
 
+            elif self._drag_mode == "fade_curve" and self._fade_curve_drag_end is not None:
+                end = self._fade_curve_drag_end
+                shape = self._fade_curves[0 if end == "in" else 1] or "equal_power"
+                offset = delta.y() / self._fade_curve_drag_height
+                self._fade_curve_preview = (
+                    fade_curve_from_midpoint(fade_curve_factor(shape, 0.5) - offset)
+                    if delta.y() != 0 else None
+                )
+                self.update()
+
             elif self._drag_mode == "fade_in":
                 # Phase 1.2: Adjust fade in duration
                 # Positive delta increases fade (drag right), negative decreases (drag left)
@@ -6068,6 +6183,12 @@ class ClipItem(QGraphicsObject):
                         self._start_frame,
                         new_track_id  # P5: May be a __new_* pseudo-track or existing track_id
                     )
+
+            elif self._drag_mode == "fade_curve":
+                end, curve = self._fade_curve_drag_end, self._fade_curve_preview
+                self._fade_curve_drag_end = self._fade_curve_preview = None
+                if was_dragging and end is not None and curve is not None:
+                    self.fade_end_curve_requested.emit(self._clip_id, self._track_id, end, curve)
 
             elif self._drag_mode == "fade_in":
                 # Phase 1.2: Emit fade finished signal if fade changed
@@ -6239,6 +6360,7 @@ class ClipItem(QGraphicsObject):
         None 不再发任何 finished 命令信号），并结束修剪预览。view 负责
         恢复 linked/multi/ghost 等跨对象状态。
         """
+        self._fade_curve_drag_end = self._fade_curve_preview = None
         self._is_dragging = False
         self._retime_menu_pending_x = None
         self._drag_pending = False
@@ -6537,6 +6659,10 @@ class ClipItem(QGraphicsObject):
         self._source_duration = clip.source_duration
 
         # Update fade in/out
+        self._fade_curves = (
+            getattr(clip, "effective_fade_curve_in", None),
+            getattr(clip, "effective_fade_curve_out", None),
+        )
         self._fade_in_duration = clip.fade_in_duration
         self._fade_out_duration = clip.fade_out_duration
 

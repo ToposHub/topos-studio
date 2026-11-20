@@ -456,3 +456,39 @@ def test_narrow_clip_hover_and_press_agree(qtbot: Any, tool: EditTool, target: s
     mode_prefix = {EditTool.SELECT: "trim_", EditTool.RIPPLE: "ripple_trim_", EditTool.ROLL: "roll_trim_"}[tool]
     assert item._drag_mode == ("move" if target == "body" else mode_prefix + target)
     QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+
+@pytest.mark.parametrize("end", ["in", "out"])
+def test_audio_fade_shape_handle_drags_independently_and_undoes(qtbot: Any, end: str) -> None:
+    from src.features.edit.core.fade_curve_spec import fade_power
+
+    view = _view(qtbot)
+    timeline = view.get_timeline()
+    audio = timeline.get_clip_by_id("a0")
+    authored = replace(audio, fade_in_duration=25, fade_out_duration=25)
+    view.load_timeline(timeline.with_clip_updated(authored))
+    view.set_track_height_for_type("audio", 100)
+    item = view._items_map["a0"]
+    local, = item._fade_curve_handle_points(end)
+    press = view.mapFromScene(item.mapToScene(local))
+    target = press + QPoint(0, 16)
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), target, 10)
+    assert item._fade_curve_preview is not None
+    QTest.keyClick(view, Qt.Key.Key_Escape)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+    assert item._fade_curve_preview is None
+    assert not view._command_stack._undo_stack
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), target, 10)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+    updated = view.get_timeline().get_clip_by_id("a0")
+    assert fade_power(getattr(updated, f"fade_curve_{end}")) is not None
+    other_end = "out" if end == "in" else "in"
+    assert getattr(updated, f"fade_curve_{other_end}") is None
+    assert (updated.fade_in_duration, updated.fade_out_duration) == (25, 25)
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    assert view.get_timeline().get_clip_by_id("a0").to_dict() == authored.to_dict()

@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
 # R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
+from src.features.edit.core.fade_curve_spec import is_fade_curve
 from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
 from src.features.edit.core.clip_params import (
     ClipBlendMode,
@@ -484,11 +485,8 @@ class ClipInstance:
         # 同一白名单。
         for _curve_field in ("fade_curve", "fade_curve_in", "fade_curve_out"):
             _curve = getattr(self, _curve_field)
-            if _curve is not None and _curve not in (
-                    "linear", "equal_power", "smooth"):
-                raise ValueError(
-                    f"{_curve_field} must be linear|equal_power|smooth or "
-                    f"None: {_curve!r}")
+            if _curve is not None and not is_fade_curve(_curve):
+                raise ValueError(f"Invalid {_curve_field}: {_curve!r}")
         # fade duration cannot exceed clip duration
         if self.fade_in_duration > self.timeline_duration:
             raise ValueError(f"fade_in_duration ({self.fade_in_duration}) exceeds clip duration ({self.timeline_duration})")
@@ -1073,11 +1071,8 @@ class ClipInstance:
         "未支持原值 + legacy 降级渲染"状态；``raw_unknown=None`` 表示
         用户显式写（清空原值）。
         """
-        if curve is not None and curve not in (
-                "linear", "equal_power", "smooth"):
-            raise ValueError(
-                f"fade_curve must be linear|equal_power|smooth or None: "
-                f"{curve!r}")
+        if curve is not None and not is_fade_curve(curve):
+            raise ValueError(f"Invalid fade_curve: {curve!r}")
         clip = replace(self, fade_curve=curve)
         extras = {
             key: value for key, value in self._extra_fields.items()
@@ -1122,11 +1117,8 @@ class ClipInstance:
         """R09：单端完整状态恢复（undo/加载路径；另一端不受影响）。"""
         if end not in ("in", "out"):
             raise ValueError(f"end must be 'in' or 'out': {end!r}")
-        if curve is not None and curve not in (
-                "linear", "equal_power", "smooth"):
-            raise ValueError(
-                f"fade_curve_{end} must be linear|equal_power|smooth or "
-                f"None: {curve!r}")
+        if curve is not None and not is_fade_curve(curve):
+            raise ValueError(f"Invalid fade_curve_{end}: {curve!r}")
         field_name = f"fade_curve_{end}"
         clip = replace(self, **{field_name: curve})
         extras = {
@@ -1736,16 +1728,13 @@ class ClipInstance:
             # 不让坏字段阻断整个工程加载。R09：两端独立字段同策略。
             fade_curve=(
                 data.get("fade_curve")
-                if data.get("fade_curve") in (
-                    "linear", "equal_power", "smooth") else None),
+                if is_fade_curve(data.get("fade_curve")) else None),
             fade_curve_in=(
                 data.get("fade_curve_in")
-                if data.get("fade_curve_in") in (
-                    "linear", "equal_power", "smooth") else None),
+                if is_fade_curve(data.get("fade_curve_in")) else None),
             fade_curve_out=(
                 data.get("fade_curve_out")
-                if data.get("fade_curve_out") in (
-                    "linear", "equal_power", "smooth") else None),
+                if is_fade_curve(data.get("fade_curve_out")) else None),
             # F3.3：采样级字段（缺省=旧工程；负值/非 int 防御回退默认，
             # 不静默舍入语义——非法载荷回退 0/None 并保持可检测）
             audio_sample_offset=_int_or_default(
@@ -1856,8 +1845,7 @@ class ClipInstance:
         # R09：两端独立字段同策略。
         for _curve_key in ("fade_curve", "fade_curve_in", "fade_curve_out"):
             raw_curve = data.get(_curve_key)
-            if raw_curve is None or raw_curve in (
-                    "linear", "equal_power", "smooth"):
+            if raw_curve is None or is_fade_curve(raw_curve):
                 extras.pop(_curve_key, None)
             else:
                 logger.warning(

@@ -508,6 +508,7 @@
       "split": "请在交叉淡化区间之外分割。"
     },
     "linked_trim_limit": "链接片段无法按相同帧数修剪，已保留原位置。",
+    "fade_shape_drag": "上下拖动以调整淡化曲线弧度",
     "fade_duration": "淡变：{frames} 帧",
     "trim_in_hint": "修剪入点",
     "trim_out_hint": "修剪出点",

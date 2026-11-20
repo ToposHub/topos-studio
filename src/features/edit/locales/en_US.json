@@ -508,6 +508,7 @@
       "split": "Split outside the crossfade region."
     },
     "linked_trim_limit": "Linked clips cannot be trimmed by the same amount. The edit was not applied.",
+    "fade_shape_drag": "Drag vertically to shape the fade",
     "fade_duration": "Fade: {frames} frames",
     "trim_in_hint": "Trim In",
     "trim_out_hint": "Trim Out",

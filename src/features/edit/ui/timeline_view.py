@@ -2518,6 +2518,7 @@ class TimelineView(QGraphicsView):
                         effects=clip.effects,
                         fade_in_duration=clip.fade_in_duration,
                         fade_out_duration=clip.fade_out_duration,
+                        fade_curves=(clip.effective_fade_curve_in, clip.effective_fade_curve_out),
                         speed=clip.speed if isinstance(clip.speed, (int, float)) else clip.speed.speed,
                         retime_points=(
                             tuple((point.source_offset, point.speed) for point in clip.speed.speed_points)
@@ -4368,6 +4369,8 @@ class TimelineView(QGraphicsView):
                 color_shared=item._color_shared,
                 fade_in_duration=getattr(item, '_fade_in_duration', 0),
                 fade_out_duration=getattr(item, '_fade_out_duration', 0),
+                fade_curves=item._fade_curves,
+                waveform_show_channels=item._waveform_show_channels,
                 speed=getattr(item, '_speed', 1.0),
                 opacity=item._opacity,
                 effects=item._effects,
@@ -7654,6 +7657,10 @@ class TimelineView(QGraphicsView):
         if old_clip.fade_out_duration != new_clip.fade_out_duration:
             return True
 
+        if (old_clip.effective_fade_curve_in != new_clip.effective_fade_curve_in
+                or old_clip.effective_fade_curve_out != new_clip.effective_fade_curve_out):
+            return True
+
         # Check opacity
         if hasattr(old_clip, 'opacity') and hasattr(new_clip, 'opacity'):
             if old_clip.opacity != new_clip.opacity:
@@ -8088,6 +8095,7 @@ class TimelineView(QGraphicsView):
             fps=asset_fps,
             fade_in_duration=clip.fade_in_duration,
             fade_out_duration=clip.fade_out_duration,
+            fade_curves=(clip.effective_fade_curve_in, clip.effective_fade_curve_out),
             speed=clip.speed if isinstance(clip.speed, (int, float)) else clip.speed.speed,
             retime_points=(
                 tuple((point.source_offset, point.speed) for point in clip.speed.speed_points)
@@ -11941,6 +11949,7 @@ class TimelineView(QGraphicsView):
         "trim_right": InteractionState.TRIMMING_RIGHT,
         "fade_in": InteractionState.DRAGGING_FADE_IN,
         "fade_out": InteractionState.DRAGGING_FADE_OUT,
+        "fade_curve": InteractionState.DRAGGING_FADE_IN,
         "slip": InteractionState.SLIPPING,
         "slide": InteractionState.SLIDING,
         "ripple_trim_left": InteractionState.RIPPLE_TRIMMING_LEFT,

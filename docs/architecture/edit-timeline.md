@@ -110,6 +110,11 @@ Mixer 的普通音轨分别绑定输入设备和通道。轨头和通道条的 R
 
 **帧映射**：`ClipInstance.timeline_to_source_frame()` 是播放/擦洗/导出三路共用的唯一换算入口，内部依次处理：冻结帧短路 → Motion Graphic 虚拟素材 span 映射 → 变速点（SpeedParams）→ 有理数精确映射（`timeline_frame_mapper.map_frame`，需 fps 元数据）→ 旧公式回退。
 
+片段的头尾淡化曲线分别存于 `fade_curve_in` 与 `fade_curve_out`。
+弧度手柄写入 `power_v1:<exponent>`，由时间线和 DSP 共用同一指数包络。
+没有自定义弧度的片段继续沿用已存预设或默认曲线。旧版会保留未识别的
+原始曲线值供往返保存，播放时按其原有回退处理。
+
 ### 2.2 with_* 工厂模式的三种实现（重点）
 
 修改 frozen 实例有三种并存方式，**这是改动时最容易踩坑的地方**：
