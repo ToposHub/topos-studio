@@ -162,8 +162,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
         self._noise_profile: Any = None
         self._denoise_preview: tuple[tuple[int, int], tuple[int, int], float, int] | None = None
-        # P2-7：变速/音高预览（改长度的事务提交需输出长度映射，后续批次）。
-        self._timepitch_pcm: np.ndarray | None = None
+        # P2-7：变速/音高预览——P1-1/P1-2 起 DSP 在预览 worker 内计算
+        # （请求快照 (lo, hi, ratio_pct, semitones, preserve)，可取消/
+        # 替换），UI 线程不再同步做 retime/pitch。
+        self._timepitch_request: tuple | None = None
         self._audition = ClipAuditionSession(self)
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
@@ -180,7 +182,6 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.info_label = _PanelStatusForwarder(self)
         # §6.2：待提交的变速/音高参数（预览时记录；提交按钮消费）。
         self._pending_timepitch: tuple | None = None
-        self._timepitch_base_duration: float | None = None
         self._setup_timepitch_actions()
         # §5 画笔：挂起的频谱修复笔迹（数据域载荷；修复按钮/H 键消费）。
         self._pending_repair: dict | None = None
@@ -346,8 +347,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._raw_pcm = pcm
         self._on_edit_channel_selected(-1)
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
-        self._timepitch_pcm = None
-        self._timepitch_base_duration = None
+        self._timepitch_request = None
         self._denoise_preview = None
         self.set_pending_timepitch(None)
         self._preview_generation += 1  # 旧片段在途预览全部作废
@@ -382,8 +382,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._audition.clear()
         self._pcm = None
         self._raw_pcm = None
-        self._timepitch_pcm = None
-        self._timepitch_base_duration = None
+        self._timepitch_request = None
         self._denoise_preview = None
         self._pending_repair = None
         self.set_noise_profile(None)
@@ -598,7 +597,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         key = (
             self._preview_spec_key, steps_signature(edit) if edit else (),
             self._denoise_preview, fft, generation,
-            id(self._timepitch_pcm),
+            self._timepitch_request,
             self._clip_gain_fade,
         )
         # 深拷贝编辑字典：后台计算期间工程命令可能替换模型对象。
@@ -610,7 +609,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             "duration": duration,
             "edit": _copy.deepcopy(edit) if edit is not None else None,
             "denoise_preview": self._denoise_preview,
-            "timepitch_pcm": self._timepitch_pcm,
+            "timepitch_request": self._timepitch_request,
             "fft": fft,
             "bypass": self.btn_bypass.isChecked(),
             "clip_gain_fade": self._clip_gain_fade,
@@ -659,16 +658,55 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             edited, inputs["rate"], nfft=inputs["fft"],
             time_bins=320, freq_bins=96)
         report = self._measure_cleanliness(edited, inputs["rate"])
+        # 显示时长保持**时间线域**（inputs["duration"]）——PCM 域长度与
+        # 时间线时长不一致时（源提前耗尽），选区秒→输出域的分数映射
+        # 必须与 _output_total_samples 同域。变速预览例外：按合同长度
+        # 估算（round(N·100/ratio)），发布时更新画布。
+        request = inputs.get("timepitch_request")
+        if request is not None:
+            lo, hi, ratio_pct, _st, _p = request
+            raw_len = inputs["raw"].shape[1]
+            lo, hi = max(0, int(lo)), min(raw_len, max(0, int(hi)))
+            preview_samples = (lo + int(round((hi - lo) * 100.0
+                                              / max(1e-6, float(ratio_pct))))
+                               + raw_len - hi)
+            duration = preview_samples / max(1, inputs["rate"])
+        else:
+            duration = inputs["duration"]
         return ClipPreviewResult(
             key=inputs["key"], edited=edited, sample_rate=inputs["rate"],
-            duration=inputs["duration"], mins=mins, maxs=maxs, rmss=rmss,
+            duration=duration,
+            mins=mins, maxs=maxs, rmss=rmss,
             spectrogram=spectrogram, report=report)
 
     def _compute_base_pcm(self, inputs: dict) -> np.ndarray | None:
-        """基底（后台线程）：优先沿用预渲染缓存，缺席再本地烘焙。"""
+        """基底（后台线程）：变速/变调 → 预渲染缓存 → 本地烘焙 → 降噪预览。
+
+        P1-1/P1-2 · 变速/变调的 retime/pitch DSP 在本 worker 内计算
+        （请求快照驱动；新请求经 generation 取消旧发布）。
+        """
         raw = inputs["raw"]
-        if inputs["timepitch_pcm"] is not None:
-            return inputs["timepitch_pcm"]
+        request = inputs.get("timepitch_request")
+        if request is not None:
+            from src.features.edit.core.audio_timepitch import (
+                pitch_shift, retime_nopreserve, retime_preserve,
+            )
+            lo, hi, ratio_pct, semitones, preserve = request
+            lo, hi = max(0, int(lo)), min(raw.shape[1], max(0, int(hi)))
+            if hi > lo:
+                segment = raw[:, lo:hi]
+                try:
+                    if abs(semitones) > 1e-6:
+                        segment = pitch_shift(segment, inputs["rate"], float(semitones))
+                    if abs(ratio_pct - 100.0) > 1e-6:
+                        segment = (retime_preserve if preserve
+                                   else retime_nopreserve)(
+                            segment, inputs["rate"], float(ratio_pct))
+                    return np.ascontiguousarray(np.concatenate(
+                        [raw[:, :lo], segment, raw[:, hi:]], axis=1),
+                        dtype=np.float32)
+                except Exception as exc:  # noqa: BLE001 - DSP 失败回落原声
+                    self._note_preview_failure(str(exc))
         edit = inputs["edit"]
         if edit is None or inputs["bypass"] or not requires_pre_render(edit):
             base = raw
@@ -821,22 +859,20 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._denoise_preview = None
         self._refresh_stack_preview()
 
-    def set_timepitch_preview(self, pcm: np.ndarray) -> None:
-        """P2-7：变速/音高后的 PCM 作为预览基底（时长随之变化）。"""
-        if self._timepitch_pcm is None:
-            self._timepitch_base_duration = self._duration
-        self._timepitch_pcm = pcm
-        self._duration = max(0.01, pcm.shape[1] / self._pcm_rate)
+    def set_timepitch_request(self, request: tuple | None) -> None:
+        """P1-1/P1-2 · 变速/变调预览请求（DSP 在 worker 内计算）。
+
+        ``request``: ``(lo, hi, ratio_pct, semitones, preserve)`` 选区与
+        参数快照（None=取消预览）。时长变化由发布的结果携带——
+        ``load_audio_data`` 依 result.duration 更新画布与 ``_duration``。
+        """
+        if self._timepitch_request == request:
+            return
+        self._timepitch_request = request
         self._refresh_stack_preview()
 
     def clear_timepitch_preview(self) -> None:
-        if self._timepitch_pcm is None:
-            return
-        self._timepitch_pcm = None
-        if self._timepitch_base_duration is not None:
-            self._duration = self._timepitch_base_duration
-        self._timepitch_base_duration = None
-        self._refresh_stack_preview()
+        self.set_timepitch_request(None)
 
     def current_fft_size(self) -> int:
         try:
@@ -2585,37 +2621,31 @@ class ProjectClipEditor(QWidget):
     def _on_time_pitch_requested(self, t0: float, t1: float, ratio_pct: float,
                                  pitch_semitones: float, preserve: bool,
                                  _algo: str) -> None:
-        """P2-7：选区变速/音高——预览态（选区两侧上下文保持原样拼接）。"""
+        """P2-7/P1-1：选区变速/音高——预览请求快照（worker 内计算）。
+
+        UI 线程不做 retime/pitch DSP；预览请求（选区/速率/音高/保音高）
+        与待提交参数共用同一份快照，经预览 worker 的 generation 机制可
+        取消/替换。时长按合同长度估算提示，实际长度随发布结果更新。
+        """
         panel = self._panel
         if panel is None or panel._raw_pcm is None:
             return
-        from src.features.edit.core.audio_timepitch import (
-            pitch_shift, retime_nopreserve, retime_preserve,
-        )
         raw = panel._raw_pcm
         rate = panel._pcm_rate
         duration = max(1e-9, raw.shape[1] / rate)
         lo = int(round(max(0.0, t0) / duration * raw.shape[1]))
         hi = int(round(min(duration, t1) / duration * raw.shape[1]))
         lo, hi = max(0, lo), min(raw.shape[1], max(lo + 1, hi))
-        segment = raw[:, lo:hi]
-        try:
-            if abs(pitch_semitones) > 1e-6:
-                segment = pitch_shift(segment, rate, float(pitch_semitones))
-            if abs(ratio_pct - 100.0) > 1e-6:
-                segment = (retime_preserve if preserve else retime_nopreserve)(
-                    segment, rate, float(ratio_pct))
-        except ValueError as exc:
-            panel.info_label.setText(str(exc))
-            return
-        preview = np.concatenate([raw[:, :lo], segment, raw[:, hi:]], axis=1)
-        panel.set_timepitch_preview(np.ascontiguousarray(preview, dtype=np.float32))
+        request = (lo, hi, float(ratio_pct), float(pitch_semitones), bool(preserve))
+        panel.set_timepitch_request(request)
         # §6.2：预览参数即待提交参数（选区/速率/音高在 raw 域）。
-        panel.set_pending_timepitch(
-            (lo, hi, float(ratio_pct), float(pitch_semitones), bool(preserve)))
+        panel.set_pending_timepitch(request)
+        # 合同长度估算（round(N·100/ratio)），不阻塞 UI。
+        segment_out = int(round((hi - lo) * 100.0 / max(1e-6, float(ratio_pct))))
+        preview_seconds = (lo + segment_out + raw.shape[1] - hi) / rate
         panel.info_label.setText(I18N.tr(
-            "mixer.clip_editor.timepitch_preview_applied",
-            f"Preview: {preview.shape[1] / rate:.3f} s "
+            "mixer.clip_editor.timepitch_preview_requested",
+            f"Preview computing: ~{preview_seconds:.3f} s "
             f"(was {duration:.3f} s) — commit with the length transaction"))
 
     def _on_gain_requested(self, value: float) -> None:
