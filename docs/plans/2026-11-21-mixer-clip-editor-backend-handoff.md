@@ -152,3 +152,21 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q \
 ```
 
 本轮执行记录为 232 项混音、PCM 与时长聚焦回归通过，143 项离线处理与交付回归通过，最后一轮 214 项增益、淡化、实时播放及导出回归通过。各组存在重叠。三段 MP3 的素材测试分别跑通。待开发验收应补本文件列出的重复标准化、跨率多声道、显式零的三端对拍和真实设备场景。
+
+## 六、2026-11-21 后端实施执行记录（fix-ui 批次）
+
+本节记录按上表逐项实施的结果。各组定向回归在实施后重跑：混音/PCM/时长
+组 264 项、离线处理与交付组 158 项、新增与关联组 191 项全部通过（组间
+存在重叠；`QT_QPA_PLATFORM=offscreen`）。
+
+| 编号 | 已实施 | 验收测试 | 遗留 |
+| --- | --- | --- | --- |
+| P0-1 | 稳定操作身份（`normalize_peak`/`loudness_match`）；测量基准改为渲染到目标步骤插入点（`render_to_step_insertion`，替换时移除旧系数、inline 区间经改长度步骤逆折回）；测量与复测乘候选步骤的 unity 增益包络（3 ms 干湿过渡不污染落点）；替换时必写新系数（≈0 dB 也写，防旧远端增益残留）；旧工程无 operation 的 normalize / "Loudness match" range_gain 迁移识别并沿用 step ID；提交后同一渲染路径复测并回报实测 LUFS/dBTP/峰值 | `tests/mixer/test_repeat_normalization_baseline.py`（13 项：恒定/正弦 −6→−3→−12 落点 ≤0.15 dBFS、LUFS 改目标 ≤0.2 LU、迁移、三操作并存、插入点基准、选区逆映射） | 响度测量仍在 UI 线程同步执行（并入 P1-2 后续：移入可取消作业） |
+| P0-2 | >2ch 逐声道独立 mono resampler（不再共用状态实例——串音 0.281/短缺 4458 样本根因）；EOF `resample(None)` 冲刷延迟尾（44.1→48/96→48/48→44.1/同率 1 s 均为精确目标样本数）；新增 quad(4.0) 布局与 ITU 折混系数；`ClipAudioRenderSpec` 携带绑定/patch 选道并进 cache_key；取样 worker 与静音切分传 `channel_map` | `tests/edit/test_multichannel_resample_isolation.py`（12 项） | >256 MiB 容器的分块读取（预算驱动）仍按 300 s 上限整读 |
+| P0-3 | `apply_clip_fade` 单点换算参考域→消费域（20 ms → 882/960/1920；显式 0 各率保持关闭）；编辑器预览/试听消费片段级 gain/fade（同一 `apply_clip_fade`，栈→fade→gain）；预览键携带 gain/fade 快照；模型 `effective_fade_in/out_frames`；画布有效淡化 ≥1 帧防消失；帧域写回清同端采样覆盖（混合字段不串改）；采样域片段上的拖拽经帧→样本换算提交（单步撤销） | `tests/edit/test_clip_fade_shared_consumption.py`（14 项） | 20 ms 预设的重新开放待产品确认（画布/时基已就绪） |
+| P0-4 | 分块供块（2048 帧粒度 + 120 ms 有界设备缓冲）；FIFO 只前进实际写入帧（短写残留续写）；块记录映射设备消费时钟→PCM 位置（跨跳区/回绕精确）；跳选区在供块层完成（选区内容不进设备）；`load()` 热替换保留位置与播放状态（A/B 不打断）；监听矩阵下一块即时生效；循环供块层回绕不重建缓冲 | `tests/mixer/test_clip_audition_chunked.py`（10 项，确定性伪设备） | 变速后 A/B 的变长映射（依赖 P1-1 坐标分层后续） |
+| P1-1 | 频谱修复/降噪 `channels` 参数：先解析合法声道、只写目标通道（复现案：仅选左声道时右声道逐样本不变）；两处预渲染调用消费 step 的 channels | `tests/edit/test_spectral_channel_scope.py`（6 项） | 源样本/栈/时间线/设备四层坐标对象的显式分层（`plan_clip_length_change` 仍是权威入口，本批未重构） |
+| P1-1/P1-2 | 变速/变调预览 DSP 移入预览 worker（请求快照驱动，generation 可取消/替换；UI 线程不再做 retime/pitch）；预览与提交共用同一快照；显示时长保持时间线域（PCM 短于时间线时长时选区映射不漂移） | `tests/mixer/test_preview_reuse_and_timepitch_worker.py`、`tests/mixer/test_project_workspace.py` timepitch 用例 | 独立变调与磁带模式的算法菜单仍未放出（按计划仅实现并验证后开放） |
+| P1-2 | 预览键重构为 (内容键, fft, generation)：FFT 换档复用已发布 edited PCM，只重算频谱（不重跑基底/栈、不打断设备会话）；复用缓存在 attach/detach 失效 | `tests/mixer/test_preview_reuse_and_timepitch_worker.py` | 响度/标准化候选、底噪采集移入可取消作业；缓存字节上限 |
+| P1-3 | 语图右键接线：heal/attenuate 提交 `spectral_repair` 步骤（笔迹承载选区时间与频带）；solo_band 带通试听（不入工程、选区外门控、≤60 s）；锁轨/无选区/PCM 未就绪/后端缺席按能力拒绝并提示 | `tests/mixer/test_spectral_context_wiring.py`（5 项） | 声道头/标记/快捷键的进一步对照（与全局播放/删除/撤销的按键冲突扫描） |
+| P2-1 | 本节执行记录；三组定向回归全量通过 | 见本节开头 | 真实素材保存重开、异机率成片/Stem 对拍、macOS/Windows 物理设备验收（需实机，见原 §P2-1） |
