@@ -123,6 +123,16 @@ PROCESSORS: dict[str, dict[str, Any]] = {
             "region or heal it from neighbouring frames (pre-rendered)."
         ),
     },
+    # FX-20（2026-11-21 计划）：固定音程双声（长度保持，预渲染）。
+    "doubler": {
+        "algorithm_version": 1,
+        "length_preserving": True,
+        "pre_render": True,
+        "description": (
+            "Fixed-interval doubled voices (pitch/detune/delay/pan/gain "
+            "per voice, length preserving, pre-rendered)."
+        ),
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 # 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
@@ -1047,6 +1057,19 @@ def render_to_step_insertion(
                     progress=progress, cancel_check=cancel_check)
             elif processor_id == "delete_range":
                 out = _render_delete_range_step(out, params, sample_rate)
+            elif processor_id == "doubler":
+                from src.features.edit.core.audio_effects.doubler import (
+                    doubles_from_params,
+                    render_doubler,
+                )
+                out = render_doubler(
+                    out,
+                    sample_rate,
+                    doubles_from_params(params),
+                    dry_gain_db=float(params.get("dry_gain_db", 0.0)),
+                    wet_mix_pct=float(params.get("wet_mix_pct", 100.0)),
+                    output_gain_db=float(params.get("output_gain_db", 0.0)),
+                )
             elif processor_id == "spectral_repair":
                 from src.features.edit.core.audio_repair import repair_spectral
                 out = repair_spectral(
