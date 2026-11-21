@@ -122,3 +122,64 @@ class TestDeClick:
         cleaned, handled = remove_clicks(pcm, RATE)
         assert handled == []
         np.testing.assert_array_equal(cleaned, pcm)
+
+
+class TestFX07:
+    """FX-07（2026-11-21 计划）：衰减受限 hum、region 写回、坐标修复。"""
+
+    def test_hum_reduction_limited(self) -> None:
+        """reduction_db 上限：目标频点保留 10^(−red/20) 幅度。"""
+        from src.features.edit.core.de_click_dehum import remove_hum
+        t = np.arange(2 * RATE) / RATE
+        clean = 0.2 * np.sin(2 * np.pi * 220.0 * t)
+        hum = 0.15 * np.sin(2 * np.pi * 50.0 * t) + \
+            0.08 * np.sin(2 * np.pi * 100.0 * t)
+        dirty = (clean + hum)[None, :].astype(np.float32)
+
+        def amp(pcm, hz):
+            w = pcm[0, RATE // 4:] * np.hanning(pcm.shape[-1] - RATE // 4)
+            return 2 * abs(np.fft.rfft(w)[hz]) / w.size
+
+        out = remove_hum(dirty, RATE, base_hz=50.0, reduction_db=48.0)
+        reduction = 20 * np.log10(amp(dirty, 50) / max(amp(out, 50), 1e-12))
+        assert reduction >= 20.0
+        loss = 20 * np.log10(amp(dirty, 220) / max(amp(out, 220), 1e-12))
+        assert loss <= 0.5
+        capped = remove_hum(dirty, RATE, base_hz=50.0, reduction_db=20.0)
+        retained = amp(capped, 50) / max(amp(dirty, 50), 1e-12)
+        assert retained == pytest.approx(10 ** (-20.0 / 20.0), abs=0.02)
+
+    def test_region_write_back(self) -> None:
+        """region 写回：选区外逐样本一致，选区内与全段处理一致。"""
+        from src.features.edit.core.de_click_dehum import remove_hum
+        t = np.arange(2 * RATE) / RATE
+        dirty = (0.2 * np.sin(2 * np.pi * 220.0 * t)
+                 + 0.15 * np.sin(2 * np.pi * 50.0 * t)
+                 )[None, :].astype(np.float32)
+        kwargs = dict(base_hz=50.0, reduction_db=48.0)
+        region = remove_hum(dirty, RATE, region=(1000, 5000), **kwargs)
+        full = remove_hum(dirty, RATE, **kwargs)
+        np.testing.assert_array_equal(region[:, :1000], dirty[:, :1000])
+        np.testing.assert_array_equal(region[:, 5000:], dirty[:, 5000:])
+        np.testing.assert_array_equal(region[:, 1000:5000],
+                                      full[:, 1000:5000])
+
+    def test_ramp_clicks_detected_and_repaired(self) -> None:
+        """斜坡六点污染：≥9/10 命中率口径（此处 6/6）、修复误差极小。"""
+        from src.features.edit.core.de_click_dehum import detect_clicks, \
+            remove_clicks
+        ref = np.linspace(-0.15, 0.15, RATE, dtype=np.float32)
+        pcm = np.stack([ref, ref]).copy()
+        positions = (2000, 8000, 20000, 30000, 40000, 45000)
+        for pos in positions:
+            pcm[0, pos:pos + 6] += 0.8
+            pcm[1, pos:pos + 6] += 0.5
+        candidates = detect_clicks(pcm, RATE, threshold_sigma=8.0)
+        hits = [c.position for c in candidates]
+        hit_count = sum(1 for p in positions
+                        if any(abs(h - p) <= 2 for h in hits))
+        assert hit_count == len(positions)
+        fixed, _ = remove_clicks(pcm, RATE, candidates=candidates)
+        for pos in positions:
+            err = float(np.max(np.abs(fixed[1, pos:pos + 6] - ref[pos:pos + 6])))
+            assert err < 0.05

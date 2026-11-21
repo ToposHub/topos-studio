@@ -81,12 +81,21 @@ def remove_hum(
     auto_detect: bool = True,
     drift_hz: float = 0.6,
     q: float = 30.0,
+    reduction_db: float = 48.0,
+    region: Optional[Tuple[int, int]] = None,
 ) -> np.ndarray:
     """窄 notch 移除哼声及谐波（零相位 filtfilt——不引入相位偏移）。
 
     ``base_hz`` 为 None 且 auto_detect 时先检测基频（检测不到按 50）；
     ``drift_hz`` 容差内用实测 PSD 峰跟随频漂（电网 50.02/59.94 等）。
     有用频带 ≤0.5 dB 扰动由窄带高 Q 保证。
+
+    FX-07（2026-11-21 计划）：
+    - ``reduction_db``（0..48）：湿声衰减受限——完全 notch 后与原声
+      按 ``(1−k)·notched + k·original`` 混合（k = 10^(−red/20)），目标
+      频点保留 k 幅度、其余频点增益中性；
+    - ``region=(start, end)``：短选区借**整段**上下文滤波，最后只写回
+      目标区间（半开区间；选区外逐样本与输入一致）。
     """
     if not _SCIPY or pcm is None or pcm.ndim != 2 or pcm.shape[-1] == 0:
         return pcm
@@ -96,7 +105,7 @@ def remove_hum(
     if base_hz is None:
         base_hz = 50.0
     freqs, psd = welch(mono, fs=sample_rate, nperseg=min(16384, mono.size))
-    out = pcm
+    out = pcm.astype(np.float32)
     nyquist = sample_rate / 2.0
     for harmonic in harmonics:
         target = base_hz * harmonic
@@ -113,8 +122,20 @@ def remove_hum(
             continue
         sos = butter(2, [low, high], btype="bandstop", fs=sample_rate,
                      output="sos")
-        out = sosfiltfilt(sos, out, axis=-1).astype(np.float32)
-    return np.ascontiguousarray(out, dtype=np.float32)
+        try:
+            out = sosfiltfilt(sos, out, axis=-1).astype(np.float32)
+        except ValueError:
+            # 信号短于滤波器填充需求：跳过该谐波（诊断由调用方负责）。
+            continue
+    k = 10.0 ** (float(np.clip(reduction_db, 0.0, 48.0)) / -20.0)
+    wet = (1.0 - k) * out + k * pcm.astype(np.float32)
+    if region is not None:
+        lo = int(max(0, region[0]))
+        hi = int(min(pcm.shape[-1], region[1]))
+        result = pcm.astype(np.float32).copy()
+        result[:, lo:hi] = wet[:, lo:hi]
+        return np.ascontiguousarray(result, dtype=np.float32)
+    return np.ascontiguousarray(wet, dtype=np.float32)
 
 
 # 语义别名（detect_hum_base 的简短名）。
@@ -161,13 +182,17 @@ def detect_clicks(
     abs_res = np.abs(residual).max(axis=0)
 
     win = max(64, int(0.2 * sample_rate))
-    # 滑窗 MAD（中位绝对差的滑窗近似：块中位数）。
+    # 滑窗 MAD（中位绝对差的滑窗近似：块中位数）。数字净音（合成
+    # 斜坡等）MAD→0：加信号尺度下限，避免阈值塌到 0 把全文件连成
+    # 一个超限区（FX-07 修复）。
     mad = np.empty_like(abs_res)
     for start in range(0, abs_res.shape[0], win):
         end = min(abs_res.shape[0], start + win)
         segment = abs_res[start:end]
         med = np.median(segment)
         mad[start:end] = np.median(np.abs(segment - med)) + 1e-12
+    signal_scale = float(np.median(np.abs(pcm))) + 1e-9
+    mad = np.maximum(mad, 1e-4 * signal_scale)
 
     exceed = abs_res > threshold_sigma * mad
     # 宽带包络（10 ms 滑动 |mono| 均值）：鼓点/爆破音的持续宽带事件
@@ -211,23 +236,31 @@ def detect_clicks(
 def _interpolate_repair(
     pcm: np.ndarray, start: int, end: int,
 ) -> np.ndarray:
-    """短区间双侧三次插值（边界钳制；不修改输入）。"""
+    """短区间双侧插值（边界钳制；不修改输入）。
+
+    FX-07 坐标修复：左右上下文取自**严格区间外**（lo 左侧 / hi 右侧
+    同一绝对样本轴），上下文不足时按可用量收缩（窗贴左/贴右合法）；
+    可用上下文不足 4 点时区间置零（保守回退）。
+    """
     out = pcm.copy()
     lo = max(0, start)
     hi = min(pcm.shape[-1], end)
     if hi <= lo:
         return out
-    margin = max(4, hi - lo)
+    gap = hi - lo
+    margin = max(4, gap)
     left = pcm[:, max(0, lo - margin):lo]
     right = pcm[:, hi:min(pcm.shape[-1], hi + margin)]
     for ch in range(pcm.shape[0]):
+        # 绝对样本轴：左上下文 = [lo−L, lo)，右上下文 = [hi, hi+R)。
         src_x = np.concatenate([
-            np.arange(left.shape[-1]), hi - lo + np.arange(right.shape[-1])])
+            np.arange(left.shape[-1]),
+            gap + np.arange(right.shape[-1])])
         src_y = np.concatenate([left[ch], right[ch]])
-        if src_x.size < 4:
+        if src_x.size < 2:
             out[ch, lo:hi] = 0.0
             continue
-        dst_x = left.shape[-1] + np.arange(hi - lo)
+        dst_x = left.shape[-1] + np.arange(gap)
         out[ch, lo:hi] = np.interp(dst_x, src_x, src_y)
     return out
 
