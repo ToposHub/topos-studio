@@ -4053,22 +4053,31 @@ class BusCompParams:
         )
 
 
-def _default_multiband_bands() -> tuple[dict[str, float], ...]:
+def _default_multiband_bands() -> tuple[dict[str, Any], ...]:
     return (
         {"threshold_db": -20.0, "ratio": 2.0, "release_ms": 220.0, "makeup_db": 0.0},
         {"threshold_db": -24.0, "ratio": 2.5, "release_ms": 150.0, "makeup_db": 0.0},
+        {"threshold_db": -22.0, "ratio": 2.0, "release_ms": 180.0, "makeup_db": 0.0},
         {"threshold_db": -22.0, "ratio": 2.0, "release_ms": 180.0, "makeup_db": 0.0},
     )
 
 
 @dataclass(frozen=True)
 class MultibandCompParams:
-    """三段 Multiband 压缩：减法互补分频 + 每段独立包络。"""
+    """多段压缩（FX-04）：减法互补分频 + 每段独立包络。
+
+    2026-11-21 计划：段数 2/3/4（crossovers 升序、长度 = 段数−1，
+    非法交叉点报错）；``makeup_db``（旧默认键）→ ``makeup_gain``
+    （CompressorEffect 读键）的别名在参数入口集中归一。
+    """
     crossover_low: float = 180.0
     crossover_high: float = 4200.0
+    crossover_top: float = 9000.0
     band_low: dict[str, float] | None = None
     band_mid: dict[str, float] | None = None
     band_high: dict[str, float] | None = None
+    band_extra: dict[str, float] | None = None
+    band_count: int = 3
     attack_ms: float = 10.0
     enabled: bool = True
 
@@ -4076,16 +4085,22 @@ class MultibandCompParams:
     def default() -> "MultibandCompParams":
         return MultibandCompParams()
 
-    def _bands(self) -> tuple[dict[str, float], ...]:
+    def _crossovers(self) -> tuple[float, ...]:
+        points = (self.crossover_low, self.crossover_high, self.crossover_top)
+        return tuple(points[:max(1, min(self.band_count, 4) - 1)])
+
+    def _bands(self) -> tuple[dict[str, Any], ...]:
         defaults = _default_multiband_bands()
+        fields = (self.band_low, self.band_mid, self.band_high,
+                  self.band_extra)
+        count = max(2, min(self.band_count, 4))
         return tuple(
             dict(band) if isinstance(band, dict) else dict(default)
-            for band, default in zip(
-                (self.band_low, self.band_mid, self.band_high), defaults))
+            for band, default in zip(fields[:count], defaults))
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "crossovers": [self.crossover_low, self.crossover_high],
+            "crossovers": list(self._crossovers()),
             "bands": [dict(b) for b in self._bands()],
             "attack_ms": self.attack_ms, "enabled": self.enabled,
         }
@@ -4093,23 +4108,40 @@ class MultibandCompParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "MultibandCompParams":
         crossovers = data.get("crossovers")
-        if (not isinstance(crossovers, (list, tuple)) or len(crossovers) != 2):
+        if not isinstance(crossovers, (list, tuple)) or not crossovers:
             crossovers = (180.0, 4200.0)
+        crossovers = [float(freq) for freq in crossovers[:3]]
+        for lo, hi in zip(crossovers, crossovers[1:]):
+            if hi <= lo:
+                # 非法交叉点报错（FX-04 计划合同）。
+                raise ValueError(
+                    f"multiband crossovers must strictly ascend: {crossovers}")
+        band_count = len(crossovers) + 1
         bands = data.get("bands")
-        if not isinstance(bands, (list, tuple)) or len(bands) != 3:
+        if not isinstance(bands, (list, tuple)) or len(bands) != band_count:
             bands = _default_multiband_bands()
         band_fields = []
         for band in bands:
-            band_fields.append(dict(band) if isinstance(band, dict) else {})
-        while len(band_fields) < 3:
+            normalized = dict(band) if isinstance(band, dict) else {}
+            # 别名归一（参数入口集中）：makeup_db → makeup_gain。
+            if "makeup_gain" not in normalized and "makeup_db" in normalized:
+                normalized["makeup_gain"] = normalized.pop("makeup_db")
+            band_fields.append(normalized)
+        while len(band_fields) < band_count:
             band_fields.append({})
+        fields = [band_fields[index] if index < len(band_fields) else None
+                  for index in range(4)]
+        if band_count < 4:
+            fields[3] = None
         return MultibandCompParams(
-            crossover_low=_params_f("crossover_low", dict(data),
-                                    float(crossovers[0])),
-            crossover_high=_params_f("crossover_high", dict(data),
-                                     float(crossovers[1])),
-            band_low=band_fields[0], band_mid=band_fields[1],
-            band_high=band_fields[2],
+            crossover_low=float(crossovers[0]),
+            crossover_high=(float(crossovers[1]) if len(crossovers) > 1
+                            else 4200.0),
+            crossover_top=(float(crossovers[2]) if len(crossovers) > 2
+                           else 9000.0),
+            band_low=fields[0], band_mid=fields[1],
+            band_high=fields[2], band_extra=fields[3],
+            band_count=band_count,
             attack_ms=_params_f("attack_ms", data, 10.0),
             enabled=bool(data.get("enabled", True)),
         )

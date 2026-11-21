@@ -35,7 +35,7 @@ class TestLR4Crossover:
         rng = np.random.default_rng(5)
         sig = (0.4 * rng.standard_normal(RATE)).astype(np.float32)
         pcm = np.stack([sig, sig])
-        section = _LR4Section(180.0, RATE, 2)
+        section = _LR4Section(180.0, RATE)
         low, high = section.split(pcm)
         summed = low + high
         # 跳过滤波器建立期。
@@ -47,9 +47,9 @@ class TestLR4Crossover:
         rng = np.random.default_rng(6)
         pcm = np.stack(
             [(0.3 * rng.standard_normal(RATE)).astype(np.float32)] * 2)
-        section = _LR4Section(180.0, RATE, 2)
+        section = _LR4Section(180.0, RATE)
         low_a, high_a = section.split(pcm)
-        section2 = _LR4Section(180.0, RATE, 2)
+        section2 = _LR4Section(180.0, RATE)
         lows, highs = [], []
         for start in range(0, RATE, 7771):
             lo, hi = section2.split(pcm[:, start:start + 7771])
@@ -142,3 +142,99 @@ class TestBusComp:
         pcm = np.stack([_tone(440.0, 0.5)] * 2)
         out = chain.process(pcm.copy())
         assert out.shape == pcm.shape
+
+
+class TestMultibandFX04:
+    """FX-04（2026-11-21 计划）：N 段、通道自适应、旋钮复用、别名。"""
+
+    FLAT = {"threshold_db": 0.0, "ratio": 1.0, "attack_ms": 1.0,
+            "release_ms": 10.0, "makeup_gain": 0.0}
+
+    def _effect(self, crossovers, bands):
+        fx = MultibandCompressorEffect(RATE)
+        fx.set_params({"crossovers": list(crossovers),
+                       "bands": [dict(b) for b in bands]})
+        return fx
+
+    @pytest.mark.parametrize("channels", [1, 2, 6])
+    def test_flat_reconstruction_channels(self, channels) -> None:
+        """mono/stereo/6ch：全平段重构精确（FX-04 合同 ≤1e-6）。"""
+        rng = np.random.default_rng(3)
+        x = (rng.uniform(-0.3, 0.3, (channels, 8000))).astype(np.float32)
+        fx = self._effect([180.0, 4200.0], [self.FLAT] * 3)
+        out = fx.process(x.copy())
+        np.testing.assert_allclose(out, x, rtol=0, atol=1e-6)
+
+    @pytest.mark.parametrize("count,crossovers", [
+        (2, [300.0]), (3, [180.0, 4200.0]), (4, [150.0, 3000.0, 9000.0])])
+    def test_flat_reconstruction_band_counts(self, count, crossovers) -> None:
+        """2/3/4 段：全平段重构精确。"""
+        rng = np.random.default_rng(4)
+        x = (rng.uniform(-0.3, 0.3, (2, 8000))).astype(np.float32)
+        fx = self._effect(crossovers, [self.FLAT] * count)
+        out = fx.process(x.copy())
+        np.testing.assert_allclose(out, x, rtol=0, atol=1e-6)
+        assert fx.collect_telemetry()["band_count"] == count
+
+    def test_knob_change_reuses_band_comps(self) -> None:
+        """拓扑不变时旋钮提交复用 CompressorEffect 包络（不重建）。"""
+        rng = np.random.default_rng(3)
+        x = (rng.uniform(-0.3, 0.3, (2, 4000))).astype(np.float32)
+        fx = self._effect([180.0, 4200.0], [dict(self.FLAT,
+                                                 threshold_db=-24.0)] * 3)
+        fx.process(x.copy())
+        identity = id(fx._band_comps[1])
+        fx.set_params({"bands": [dict(self.FLAT, threshold_db=-24.0,
+                                      release_ms=120.0)] * 3})
+        assert id(fx._band_comps[1]) == identity
+
+    def test_makeup_db_alias_applies(self) -> None:
+        """makeup_db（旧默认键）→ makeup_gain 别名：稳态 +6 dB。"""
+        rng = np.random.default_rng(5)
+        x = (rng.uniform(-0.3, 0.3, (2, 8000))).astype(np.float32)
+        # 旧格式（仅 makeup_db，无 makeup_gain）——别名应生效。
+        compressed = {"threshold_db": -24.0, "ratio": 2.0,
+                      "attack_ms": 1.0, "release_ms": 10.0,
+                      "makeup_db": 0.0}
+        y0 = self._effect([180.0, 4200.0],
+                          [compressed] * 3).process(x.copy())
+        y6 = self._effect([180.0, 4200.0],
+                          [dict(compressed, makeup_db=6.0)] * 3
+                          ).process(x.copy())
+        rms0 = float(np.sqrt(np.mean(y0[:, 2000:].astype(np.float64) ** 2)))
+        rms6 = float(np.sqrt(np.mean(y6[:, 2000:].astype(np.float64) ** 2)))
+        assert rms6 / rms0 == pytest.approx(2.0, rel=0.05)
+
+    def test_mute_band_zeroed(self) -> None:
+        """mute 段归零；其余段照常重构。"""
+        rng = np.random.default_rng(6)
+        x = (rng.uniform(-0.3, 0.3, (2, 8000))).astype(np.float32)
+        y_all = self._effect([180.0, 4200.0],
+                             [self.FLAT] * 3).process(x.copy())
+        y_mute = self._effect([180.0, 4200.0],
+                              [self.FLAT,
+                               dict(self.FLAT, mute=True),
+                               self.FLAT]).process(x.copy())
+        assert float(np.max(np.abs(y_mute - y_all))) > 0.01
+
+    def test_model_rejects_non_ascending_crossovers(self) -> None:
+        """非法交叉点报错（计划合同）。"""
+        from src.features.edit.core.timeline_v2 import MultibandCompParams
+        with pytest.raises(ValueError):
+            MultibandCompParams.from_dict({"crossovers": [5000.0, 200.0]})
+
+    def test_model_band_count_round_trip(self) -> None:
+        """2/3/4 段模型往返；makeup_db → makeup_gain 归一。"""
+        from src.features.edit.core.timeline_v2 import MultibandCompParams
+        for count, crossovers in ((2, [250.0]), (3, [180.0, 4200.0]),
+                                  (4, [150.0, 3000.0, 9000.0])):
+            params = MultibandCompParams.from_dict(
+                {"crossovers": crossovers,
+                 "bands": [{} for _ in range(count)]})
+            restored = MultibandCompParams.from_dict(params.to_dict())
+            assert restored.band_count == count
+            assert len(restored.to_dict()["bands"]) == count
+        aliased = MultibandCompParams.from_dict(
+            {"crossovers": [180.0, 4200.0],
+             "bands": [{"makeup_db": 6.0}, {}, {}]})
+        assert aliased.band_low["makeup_gain"] == 6.0
