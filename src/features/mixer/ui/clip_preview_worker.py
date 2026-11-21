@@ -23,6 +23,7 @@ from PyQt6.QtCore import QMutex, QThread, pyqtSignal
 import numpy as np
 
 logger = logging.getLogger(__name__)
+_active_workers: set[ClipPreviewWorker] = set()
 
 
 @dataclass
@@ -38,6 +39,7 @@ class ClipPreviewResult:
     rmss: np.ndarray
     spectrogram: list
     report: dict = field(default_factory=dict)
+    length_maps: tuple[tuple[int, int, int], ...] = ()
 
 
 class ClipPreviewWorker(QThread):
@@ -46,11 +48,12 @@ class ClipPreviewWorker(QThread):
     preview_ready = pyqtSignal(object)          # ClipPreviewResult
     preview_failed = pyqtSignal(tuple, str)     # key, error
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
+    def __init__(self) -> None:
+        super().__init__()
+        self.finished.connect(self._release)
         self._mutex = QMutex()
         self._key: Optional[tuple] = None
-        self._job: Optional[Callable[[], ClipPreviewResult]] = None
+        self._job: Callable[[Callable[[], bool]], object] | None = None
         self._inflight_key: Optional[tuple] = None
         self._generation = 0
         self._stopped = False
@@ -59,6 +62,9 @@ class ClipPreviewWorker(QThread):
     # ── 主线程接口 ────────────────────────────────────────────────
     def submit(self, key: tuple, job: Callable[[], ClipPreviewResult]) -> None:
         """提交一个预览任务；与在途任务同 key 时合并（不重复计算）。"""
+        self.submit_cancellable(key, lambda _cancelled: job())
+
+    def submit_cancellable(self, key: tuple, job: Callable[[Callable[[], bool]], object]) -> None:
         self._mutex.lock()
         try:
             if self._stopped:
@@ -72,7 +78,22 @@ class ClipPreviewWorker(QThread):
             self._mutex.unlock()
         self._wakeup.set()
         if not self.isRunning():
+            _active_workers.add(self)
             self.start()
+
+    def cancel(self) -> None:
+        """Discard the queued request and signal cancellation to running work."""
+        self._mutex.lock()
+        try:
+            self._generation += 1
+            self._key = None
+            self._job = None
+            self._inflight_key = None
+        finally:
+            self._mutex.unlock()
+
+    def _release(self) -> None:
+        _active_workers.discard(self)
 
     def finish(self) -> None:
         """协作停止（编辑器关闭；在途结果不再发布）。"""
@@ -106,11 +127,20 @@ class ClipPreviewWorker(QThread):
                     break
                 result = None
                 error = None
+
+                def cancelled() -> bool:
+                    self._mutex.lock()
+                    try:
+                        return self._stopped or generation != self._generation
+                    finally:
+                        self._mutex.unlock()
+
                 try:
-                    result = job()
+                    if not cancelled():
+                        result = job(cancelled)
                 except Exception as exc:  # noqa: BLE001 - 失败上报并清理
-                    logger.warning("clip preview job failed: %s", exc,
-                                   exc_info=True)
+                    if not cancelled():
+                        logger.warning("clip audio job failed: %s", exc, exc_info=True)
                     error = str(exc)
                 finally:
                     self._mutex.lock()

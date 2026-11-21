@@ -83,6 +83,28 @@ class TestFftReusesEditedPcm:
 
 
 class TestTimepitchRequestSnapshot:
+    def test_draft_uses_committed_stack_order_and_maps_bypass(self, qapp) -> None:
+        from src.features.edit.core.audio_edit import (
+            make_step, new_audio_edit, remap_audio_edit_for_length_steps, render_audio_edit_full,
+        )
+        from src.features.mixer.ui.clip_analysis import ClipAuditionCoordinates, make_timepitch_draft
+
+        editor, panel = _panel_with_pcm(qapp)
+        stack = new_audio_edit([make_step("range_gain", 12000, 60000, (0,), gain_db=-6.0)])
+        panel.set_stack_editable_hint(True)
+        panel.sync_audio_edit(stack)
+        editor._on_time_pitch_requested(0.5, 1.5, 200.0, 0.0, False, "")
+        request = panel._timepitch_request
+        candidate, step = make_timepitch_draft(stack, request, panel._raw_pcm.shape[1], (0, 1))
+        committed, _ = remap_audio_edit_for_length_steps(candidate, [step])
+        expected = render_audio_edit_full(panel._raw_pcm, committed)
+        np.testing.assert_array_equal(panel._pcm, expected)
+        assert not panel.canvas.project_edits_enabled
+        assert panel._audition_coordinates.map_to(ClipAuditionCoordinates(), 36000) == 48000
+        panel.btn_bypass.setChecked(True)
+        assert panel._duration == pytest.approx(2.0)
+        np.testing.assert_array_equal(panel._pcm, panel._raw_pcm)
+
     def test_request_snapshot_drives_preview_and_pending(self, qapp) -> None:
         editor, panel = _panel_with_pcm(qapp)
         editor._on_time_pitch_requested(0.5, 1.5, 200.0, 0.0, False, "")

@@ -136,6 +136,16 @@ def test_tampered_meta_is_miss(tmp_path):
     assert PcmRenderCache(tmp_path).lookup(_spec()) is None
 
 
+def test_missing_meta_does_not_delete_inflight_pcm_archive(tmp_path):
+    cache = PcmRenderCache(tmp_path)
+    spec = _spec()
+    cache.store(spec, _pcm())
+    archive = tmp_path / f"{spec.key}.npz"
+    (tmp_path / f"{spec.key}.json").unlink()
+    assert PcmRenderCache(tmp_path).lookup(spec) is None
+    assert archive.is_file()
+
+
 # ----------------------------------------------------------------------
 # 并发去重 / 后台构建 / 监听
 # ----------------------------------------------------------------------
@@ -241,6 +251,68 @@ def test_memory_lru_evicts_oldest_unprotected(tmp_path):
     cache.store(_spec(samples=400), _pcm(samples=400))
     # 磁盘条目仍可重建（回收只是内存驱逐）。
     assert cache.lookup(spec_b) is not None
+
+
+def test_memory_byte_limit_reloads_from_disk_without_evicting_pinned_entries(tmp_path):
+    small, fits, oversized = _spec(samples=50), _spec(samples=75), _spec(samples=150)
+    cache = PcmRenderCache(tmp_path, memory_capacity=4, memory_max_bytes=800)
+    with cache.protect(small):
+        cache.store(small, _pcm(samples=50))
+        cache.store(fits, _pcm(samples=75))
+        assert set(cache._memory) == {small.key}
+        assert cache._memory_bytes == 400
+        np.testing.assert_array_equal(cache.lookup(fits), _pcm(samples=75))
+    np.testing.assert_array_equal(cache.lookup(fits), _pcm(samples=75))
+    assert set(cache._memory) == {fits.key}
+    assert cache._memory_bytes == 600
+
+    cache.store(oversized, _pcm(samples=150))
+    np.testing.assert_array_equal(cache.lookup(oversized), _pcm(samples=150))
+    assert set(cache._memory) == {fits.key}
+    assert cache._memory_bytes == 600
+
+
+def test_memory_only_oversize_result_remains_available_to_existing_waiters():
+    spec = _spec(samples=100)
+    cache = PcmRenderCache(memory_max_bytes=400)
+    pcm = _pcm(samples=100)
+    assert not cache.can_store(spec)
+    assert not cache.spawn_build(spec, lambda: pytest.fail("cannot cache this result"))
+
+    started = threading.Event()
+    waiter_entered = threading.Event()
+    release = threading.Event()
+    values: list[np.ndarray] = []
+
+    def build() -> np.ndarray:
+        started.set()
+        assert release.wait(2.0)
+        return pcm
+
+    def use_builder() -> None:
+        values.append(cache.get_or_build(spec, build))
+
+    owner = threading.Thread(target=use_builder)
+    owner.start()
+    assert started.wait(2.0)
+    # Force overlap at the actual wait instead of sleep-based scheduling.
+    wait = cache._inflight[spec.key].event.wait
+
+    def mark_wait() -> bool:
+        waiter_entered.set()
+        return wait(2.0)
+
+    cache._inflight[spec.key].event.wait = mark_wait
+    waiter = threading.Thread(target=use_builder)
+    waiter.start()
+    try:
+        assert waiter_entered.wait(2.0)
+    finally:
+        release.set()
+        owner.join(2.0)
+        waiter.join(2.0)
+    assert len(values) == 2 and all(value is pcm for value in values)
+    assert cache.lookup(spec) is None and cache._memory_bytes == 0
 
 
 def test_trim_disk_respects_protection(tmp_path):

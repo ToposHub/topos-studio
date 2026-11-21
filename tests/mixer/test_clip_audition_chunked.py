@@ -34,6 +34,8 @@ class FakeDevice:
         self.stream = bytearray()   # 设备已接受的全部字节
         self.buffer = bytearray()   # 待消费
         self.consumed_frames = 0
+        self.paused = False
+        self.stopped = False
 
     # -- QAudioSink / QIODevice 表面 ------------------------------------
     def start(self):
@@ -43,13 +45,13 @@ class FakeDevice:
         pass
 
     def stop(self) -> None:
-        pass
+        self.stopped = True
 
     def suspend(self) -> None:
-        pass
+        self.paused = True
 
     def resume(self) -> None:
-        pass
+        self.paused = False
 
     def bytesFree(self) -> int:
         return max(0, self.capacity - len(self.buffer))
@@ -67,6 +69,10 @@ class FakeDevice:
 
     def state(self):
         from PyQt6.QtMultimedia import QAudio
+        if self.stopped:
+            return QAudio.State.StoppedState
+        if self.paused:
+            return QAudio.State.SuspendedState
         if self.buffer:
             return QAudio.State.ActiveState
         return QAudio.State.IdleState
@@ -121,7 +127,9 @@ class TestChunkedFeeding:
             session._feed()
         got = device.frames()
         want = np.ascontiguousarray(pcm.T)
-        np.testing.assert_allclose(got[:150], want[:150], atol=1e-6)
+        np.testing.assert_array_equal(got, want)
+        device.consume(153)
+        assert session.position() == 153
         session.stop()
 
     def test_chunk_size_bounded(self, qtbot, monkeypatch) -> None:
@@ -146,8 +154,36 @@ class TestChunkedFeeding:
         max_chunk_frames = max(writes) // 8
         assert max_chunk_frames <= ClipAuditionSession._CHUNK_FRAMES
         # 挂起态字节总量不超过设备容量（有界传输队列）。
-        assert len(device.buffer) <= device.capacity
+        assert len(device.buffer) == int(RATE * session._MAX_BUFFER_SECONDS) * device.frame_bytes
         session.stop()
+
+    def test_underrun_during_short_write_waits_for_remaining_frames(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        device = FakeDevice(RATE, 2, capacity_frames=200)
+        _install(monkeypatch, device)
+        pcm = _ramp(200)
+        original_write = device.write
+        room = 8 * 51
+
+        def stalled_write(data: bytes) -> int:
+            return original_write(data[:max(0, room - len(device.stream))])
+
+        device.write = stalled_write
+        session = ClipAuditionSession()
+        session.load(pcm, RATE)
+        assert session.play(0)
+        device.consume(51)
+        session._tick()
+        assert session.is_playing
+        assert session.position() == 51
+
+        device.write = original_write
+        session._tick()
+        np.testing.assert_array_equal(device.frames(), pcm.T)
+        device.consume(149)
+        session._tick()
+        assert not session.is_playing
 
     def test_monitor_switch_applies_to_next_chunk(self, qtbot, monkeypatch) -> None:
         """播放中切 L 监听静音：下一块立即置零，之前的块不受影响。"""
@@ -239,6 +275,23 @@ class TestSkipSelection:
         np.testing.assert_allclose(got[50], pcm[:, 51], atol=1e-6)
         session.stop()
 
+    def test_stop_sample_limits_bytes_sent_to_device(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        pcm = _ramp(2000)
+        device = FakeDevice(RATE, 2)
+        _install(monkeypatch, device)
+        session = ClipAuditionSession()
+        session.load(pcm, RATE)
+        session.set_skip_range(301, 701)
+        assert session.play(100, end_sample=1001)
+        expected = np.concatenate([pcm[:, 100:301], pcm[:, 701:1001]], axis=1)
+        np.testing.assert_array_equal(device.frames(), expected.T)
+        device.consume(expected.shape[1])
+        session._tick()
+        assert not session.is_playing
+        assert session.return_sample() == 100
+
 
 class TestHotSwapAndLoop:
     def test_load_keeps_position_and_playing(self, qtbot, monkeypatch) -> None:
@@ -246,9 +299,7 @@ class TestHotSwapAndLoop:
         from src.features.mixer.ui.clip_audition import ClipAuditionSession
 
         pcm_a = _ramp(RATE)
-        pcm_b = np.stack([
-            np.full(RATE, 0.75, dtype=np.float32),
-            np.full(RATE, -0.75, dtype=np.float32)])
+        pcm_b = -pcm_a
         device = FakeDevice(RATE, 2, capacity_frames=2048)
         _install(monkeypatch, device)
         session = ClipAuditionSession()
@@ -263,11 +314,44 @@ class TestHotSwapAndLoop:
         assert session.position() == pytest.approx(position, abs=1)
         session._feed()
         after = device.frames()
-        # 切换前已入队的陈旧尾部（≤ 设备缓冲 2048 帧）之后进入新源：
-        # 设备流第 2048 帧起为常数 0.75/-0.75（新 PCM）。
-        assert after.shape[0] > 2048
-        assert np.all(after[2048:] == np.float32(0.75) * np.array(
-            [1.0, -1.0], dtype=np.float32))
+        # 已入队尾部按原坐标播完，新 PCM 自第 2048 帧接上。
+        assert after.shape[0] == 3072
+        np.testing.assert_array_equal(after[:2048], pcm_a[:, :2048].T)
+        fade_end = 2048 + round(RATE * session._SWAP_FADE_SECONDS)
+        ratio = np.linspace(0.0, 1.0, fade_end - 2048, dtype=np.float32)
+        blend = pcm_a[:, 2048:fade_end] * (1.0 - ratio) + pcm_b[:, 2048:fade_end] * ratio
+        np.testing.assert_array_equal(after[2048:fade_end], blend.T)
+        np.testing.assert_array_equal(after[fade_end:], pcm_b[:, fade_end:3072].T)
+        for frames in (250, 800):
+            device.consume(frames)
+            assert session.position() == device.consumed_frames
+        session.stop()
+
+    def test_load_preserves_partially_accepted_frame(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        pcm_a = _ramp(25)
+        pcm_b = -pcm_a
+        device = FakeDevice(RATE, 2)
+        original_write = device.write
+
+        def stalled_write(data: bytes) -> int:
+            return original_write(data[:max(0, 5 - len(device.stream))])
+
+        device.write = stalled_write
+        _install(monkeypatch, device)
+        session = ClipAuditionSession()
+        session.load(pcm_a, RATE)
+        assert session.play(0)
+        session.load(pcm_b, RATE)
+        assert len(device.stream) == 5
+        device.write = original_write
+        session._feed()
+        blend = pcm_a[:, 1:] * np.linspace(1.0, -1.0, 24, dtype=np.float32)
+        expected = np.concatenate([pcm_a[:, :1], blend], axis=1)
+        np.testing.assert_allclose(device.frames(), expected.T, atol=1e-7)
+        device.consume(13)
+        assert session.position() == 13
         session.stop()
 
     def test_load_shorter_than_position_stops(self, qtbot, monkeypatch) -> None:
@@ -308,6 +392,44 @@ class TestHotSwapAndLoop:
         np.testing.assert_allclose(got[2000:2500], got[0:500], atol=1e-6)
         session.stop()
 
+    def test_loop_and_skip_wrap_around_skipped_tail(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        pcm = _ramp(2000)
+        device = FakeDevice(RATE, 2, capacity_frames=512)
+        _install(monkeypatch, device)
+        session = ClipAuditionSession()
+        session.load(pcm, RATE)
+        session.set_loop(True, 0, 1000)
+        session.set_skip_range(500, 1200)
+        assert session.play(400)
+        np.testing.assert_array_equal(device.frames(), np.concatenate(
+            (pcm[:, 400:500], pcm[:, :412]), axis=1).T)
+        device.consume(103)
+        assert session.position() == 3
+        session.stop()
+
+    def test_whole_clip_loop_covers_new_pcm_length(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        first = _ramp(200)
+        longer = _ramp(300)
+        device = FakeDevice(RATE, 2, capacity_frames=100)
+        _install(monkeypatch, device)
+        session = ClipAuditionSession()
+        session.load(first, RATE)
+        session.set_loop(True)
+        assert session.play(50)
+        session.load(longer, RATE)
+        for _ in range(3):
+            device.consume(100)
+            session._feed()
+        ratio = np.linspace(0.0, 1.0, 50, dtype=np.float32)
+        blend = first[:, 150:] * (1.0 - ratio) + longer[:, 150:200] * ratio
+        expected = np.concatenate((first[:, 50:150], blend, longer[:, 200:], longer[:, :150]), axis=1)
+        np.testing.assert_array_equal(device.frames(), expected.T)
+        session.stop()
+
     def test_stop_returns_to_play_origin(self, qtbot, monkeypatch) -> None:
         from src.features.mixer.ui.clip_audition import ClipAuditionSession
 
@@ -323,3 +445,47 @@ class TestHotSwapAndLoop:
         session.stop()
         assert not session.is_playing
         assert session.return_sample() == 1200
+
+    def test_mapped_load_preserves_pause_and_maps_stop_position(self, qtbot, monkeypatch) -> None:
+        from PyQt6 import QtMultimedia
+
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        first = FakeDevice(RATE, 2, capacity_frames=100)
+        second = FakeDevice(RATE, 2, capacity_frames=100)
+        devices = iter((first, second))
+        monkeypatch.setattr(QtMultimedia, "QAudioSink", lambda _fmt: next(devices))
+        session = ClipAuditionSession()
+        session.load(_ramp(2000), RATE)
+        assert session.play(200)
+        first.consume(50)
+        session.pause()
+        session._tick()
+        assert session.is_paused
+        assert session.position() == 250
+        assert len(first.frames()) == 100
+        longer = _ramp(4000)
+        session.load(longer, RATE, position_map=lambda index: index * 2)
+        assert session.is_playing and session.is_paused
+        assert session.position() == 500
+        assert second.paused and not second.stream
+        session.resume()
+        np.testing.assert_array_equal(second.frames(), longer[:, 500:600].T)
+        session.stop()
+        assert session.return_sample() == 400
+
+    def test_device_loss_releases_sink_and_emits_failure_once(self, qtbot, monkeypatch) -> None:
+        from src.features.mixer.ui.clip_audition import ClipAuditionSession
+
+        device = FakeDevice(RATE, 2, capacity_frames=100)
+        _install(monkeypatch, device)
+        session = ClipAuditionSession()
+        session.load(_ramp(2000), RATE)
+        assert session.play(100)
+        device.stopped = True
+        with qtbot.waitSignal(session.device_failed, timeout=1000):
+            session._tick()
+        assert session.return_sample() == 100
+        assert not session.is_playing
+        assert session._sink is None
+        assert not session._timer.isActive()

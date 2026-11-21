@@ -54,6 +54,33 @@ def _editor_with_clip(qapp, pcm=None, locked=False):
 
 
 class TestSpectralContextMenuWiring:
+    def test_canvas_right_click_reaches_spectral_menu(self, qapp, qtbot, monkeypatch) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QMenu
+
+        editor, panel, committed, _messages = _editor_with_clip(qapp)
+        qtbot.addWidget(editor)
+        editor._empty.hide()
+        editor._scroll.show()
+        editor.resize(1320, 700)
+        panel.set_stack_editable_hint(True)
+        panel._refresh_stack_preview()
+        panel.btn_spectral.setChecked(True)
+        panel.canvas.setSelection(0.5, 1.0, 1800.0, 2200.0)
+        panel.canvas._is_2d_spectral_sel = True
+        editor.show()
+
+        def choose_attenuation(menu: QMenu, *_args: object) -> None:
+            action = next(action for action in menu.actions() if "-12 dB" in action.text())
+            assert action.isEnabled()
+            action.trigger()
+
+        monkeypatch.setattr(QMenu, "exec", choose_attenuation)
+        _, spectrum, _ = panel.canvas._wave_and_spec_rects()
+        qtbot.mouseClick(panel.canvas, Qt.MouseButton.RightButton, pos=spectrum.center().toPoint())
+        assert len(committed) == 1
+        assert committed[0][0]["steps"][0]["params"]["mode"] == "attenuate"
+
     def test_heal_commits_spectral_repair_step(self, qapp) -> None:
         editor, panel, committed, _messages = _editor_with_clip(qapp)
         editor._on_spectral_repair_requested(0.5, 1.0, 1800.0, 2200.0, "heal")
@@ -67,7 +94,7 @@ class TestSpectralContextMenuWiring:
         assert params["start"] == 24000 and params["end"] == 48000
         stroke = params["strokes"][0]
         assert stroke["sample"] == 36000
-        assert stroke["hz"] == pytest.approx(2000.0)
+        assert stroke["hz"] == pytest.approx((1800.0 * 2200.0) ** 0.5)
         assert stroke["time_radius"] == 12000
 
     def test_attenuate_commits_attenuate_mode(self, qapp) -> None:
@@ -103,9 +130,12 @@ class TestSpectralContextMenuWiring:
         editor._on_spectral_repair_requested(
             0.5, 1.0, 1800.0, 2200.0, "solo_band")
         assert committed == []  # 不入工程
-        assert loaded and played == [24000]
+        assert loaded and played == [0]
         filtered = loaded[0][0]
-        # 选区外（含 480 样本起坡前）静音、选区内有声（带通后的 2 kHz）。
-        assert float(np.abs(filtered[:, :23500]).max()) == pytest.approx(
-            0.0, abs=1e-6)
-        assert float(np.abs(filtered[:, 30000:40000]).max()) > 0.01
+        assert panel._band_preview[0] == 24000
+        assert filtered.shape[1] == 24000
+        assert not np.any(filtered[:, (0, -1)])
+        assert float(np.abs(filtered[:, 5000:15000]).max()) > 0.01
+        panel._on_audition_playing_changed(False)
+        assert panel._band_preview is None
+        assert loaded[-1][0] is panel._pcm

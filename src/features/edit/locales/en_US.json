@@ -510,6 +510,7 @@
     "linked_trim_limit": "Linked clips cannot be trimmed by the same amount. The edit was not applied.",
     "fade_shape_drag": "Drag vertically to shape the fade",
     "fade_duration": "Fade: {frames} frames",
+    "fade_duration_ms": "Fade: {ms} ms",
     "trim_in_hint": "Trim In",
     "trim_out_hint": "Trim Out",
     "close_keyframe_tray": "Close Keyframe Tray",

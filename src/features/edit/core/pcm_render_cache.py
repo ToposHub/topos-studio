@@ -41,11 +41,12 @@ from src.features.edit.core.clip_pcm import decode_audio_range, source_fingerpri
 
 logger = logging.getLogger(__name__)
 
-PCM_RENDER_CACHE_SCHEMA_VERSION = 3
+PCM_RENDER_CACHE_SCHEMA_VERSION = 4
 # 与 ClipPcmProvider 同一护栏：单次预渲染的时长上限（内存 + 构建时间）。
 MAX_PRE_RENDER_SECONDS = 300.0
-# 内存 LRU 条目数（4 份立体声 5 分钟 ≈ 460 MB，与 PCM 取样层一致）。
+# 内存 LRU 同时限制条数与常驻 PCM 字节数。
 MEMORY_CACHE_CAPACITY = 4
+MEMORY_CACHE_MAX_BYTES = 256 * 1024 * 1024
 # 磁盘回收护栏（条数 + 总字节；savez_compressed 的 float32 音频通常再省一半）。
 DISK_CACHE_MAX_ENTRIES = 64
 DISK_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024
@@ -156,6 +157,7 @@ class _Inflight:
     def __init__(self) -> None:
         self.event = threading.Event()
         self.error: Optional[BaseException] = None
+        self.pcm: Optional[np.ndarray] = None
 
 
 class PcmRenderCache:
@@ -166,11 +168,13 @@ class PcmRenderCache:
         root: Optional[Path] = None,
         *,
         memory_capacity: int = MEMORY_CACHE_CAPACITY,
+        memory_max_bytes: int = MEMORY_CACHE_MAX_BYTES,
         disk_max_entries: int = DISK_CACHE_MAX_ENTRIES,
         disk_max_bytes: int = DISK_CACHE_MAX_BYTES,
     ) -> None:
         self._root = Path(root) if root is not None else None
         self._memory_capacity = max(0, int(memory_capacity))
+        self._memory_max_bytes = max(0, int(memory_max_bytes))
         self._disk_max_entries = max(0, int(disk_max_entries))
         self._disk_max_bytes = max(0, int(disk_max_bytes))
         self._lock = threading.RLock()
@@ -178,6 +182,7 @@ class PcmRenderCache:
         self._inflight: dict[str, _Inflight] = {}
         self._memory: dict[str, np.ndarray] = {}
         self._memory_order: list[str] = []
+        self._memory_bytes = 0
         self._protected: dict[str, int] = {}
         self._listeners: list[Callable[[str], None]] = []
 
@@ -214,6 +219,14 @@ class PcmRenderCache:
     # ------------------------------------------------------------------
     def has(self, spec: PreRenderSpec) -> bool:
         return self.lookup(spec) is not None
+
+    def can_store(self, spec: PreRenderSpec) -> bool:
+        """Whether at least one enabled tier can retain the result."""
+        if self._root is not None and self._disk_max_entries > 0 and self._disk_max_bytes > 0:
+            return True
+        nbytes = spec.channel_count * spec.expected_output_samples * np.dtype(np.float32).itemsize
+        with self._lock:
+            return self._has_memory_room_locked(spec.key, nbytes)
 
     def lookup(self, spec: PreRenderSpec) -> Optional[np.ndarray]:
         """命中返回整段 planar float32；未命中/校验失败返回 None。"""
@@ -267,22 +280,25 @@ class PcmRenderCache:
                 entry = _Inflight()
                 self._inflight[key] = entry
         if not owner:
+            if entry.pcm is not None:
+                return entry.pcm
             entry.event.wait()
-            cached = self.lookup(spec)
-            if cached is not None:
-                return cached
             if entry.error is not None:
                 raise RuntimeError(
                     f"pre-render {key} failed in a concurrent build"
                 ) from entry.error
+            if entry.pcm is not None:
+                return entry.pcm
             raise RuntimeError(f"pre-render {key} vanished after concurrent build")
         try:
             cached = self.lookup(spec)  # 双检：等待期间可能已有并发写入
             if cached is not None:
+                entry.pcm = cached
                 return cached
             pcm = builder_factory()
             self._validate_payload(spec, pcm)
             self.store(spec, pcm)
+            entry.pcm = pcm
             self._notify(key)
             return pcm
         except BaseException as exc:  # noqa: BLE001 - 供等待方重试/诊断
@@ -313,9 +329,11 @@ class PcmRenderCache:
         spec: PreRenderSpec,
         builder_factory: Callable[[], np.ndarray],
     ) -> bool:
-        """在守护线程中构建；返回 False 表示已在构建或已命中（无需重复）。"""
+        """构建可留存的成品；已有任务或无可用缓存层时返回 False。"""
         if self.has(spec):
             return True
+        if not self.can_store(spec):
+            return False
         key = spec.key
         with self._inflight_lock:
             if key in self._inflight:
@@ -325,11 +343,12 @@ class PcmRenderCache:
 
         def _run() -> None:
             try:
-                cached = self.lookup(spec)
-                if cached is None:
+                entry.pcm = self.lookup(spec)
+                if entry.pcm is None:
                     pcm = builder_factory()
                     self._validate_payload(spec, pcm)
                     self.store(spec, pcm)
+                    entry.pcm = pcm
                     self._notify(key)
             except BaseException as exc:  # noqa: BLE001
                 entry.error = exc
@@ -363,7 +382,8 @@ class PcmRenderCache:
         try:
             np.savez_compressed(tmp_data, pcm=pcm)
             # 落盘前回读校验：损坏负载绝不能原子替换进缓存。
-            self._validate_payload(spec, np.load(tmp_data)["pcm"])
+            with np.load(tmp_data) as payload:
+                self._validate_payload(spec, payload["pcm"])
             with open(tmp_meta, "w", encoding="utf-8") as handle:
                 json.dump({
                     "schema": PCM_RENDER_CACHE_SCHEMA_VERSION,
@@ -433,6 +453,7 @@ class PcmRenderCache:
         with self._lock:
             self._memory.clear()
             self._memory_order.clear()
+            self._memory_bytes = 0
         if remove_files and self._root is not None:
             try:
                 for path in self._root.glob("*.npz"):
@@ -454,18 +475,28 @@ class PcmRenderCache:
             except Exception:  # noqa: BLE001 - 监听者故障不影响缓存
                 logger.exception("pre-render listener failed")
 
+    def _has_memory_room_locked(self, key: str, nbytes: int) -> bool:
+        protected = [self._memory[k] for k in self._memory_order
+                     if k != key and self._protected.get(k, 0) > 0]
+        return (len(protected) < self._memory_capacity
+                and sum(item.nbytes for item in protected) + nbytes <= self._memory_max_bytes)
+
     def _remember(self, key: str, pcm: np.ndarray) -> None:
         with self._lock:
-            self._memory[key] = pcm
-            self._touch_memory_locked(key)
-            while len(self._memory_order) > self._memory_capacity:
-                # 全部被 protect 时允许超额驻留（保护期结束后下次写入回收）。
-                evict = next((k for k in self._memory_order
-                              if self._protected.get(k, 0) <= 0), None)
-                if evict is None:
-                    break
+            if not self._has_memory_room_locked(key, pcm.nbytes):
+                return
+            previous = self._memory.pop(key, None)
+            if previous is not None:
+                self._memory_order.remove(key)
+                self._memory_bytes -= previous.nbytes
+            while self._memory_order and (len(self._memory_order) >= self._memory_capacity
+                                          or self._memory_bytes + pcm.nbytes > self._memory_max_bytes):
+                evict = next(k for k in self._memory_order if self._protected.get(k, 0) <= 0)
                 self._memory_order.remove(evict)
-                self._memory.pop(evict, None)
+                self._memory_bytes -= self._memory.pop(evict).nbytes
+            self._memory[key] = pcm
+            self._memory_bytes += pcm.nbytes
+            self._touch_memory_locked(key)
 
     def _touch_memory_locked(self, key: str) -> None:
         if key in self._memory_order:
@@ -500,8 +531,13 @@ class PcmRenderCache:
                         or pcm.shape[1] != spec.expected_output_samples):
                     raise ValueError("payload mismatch")
                 result = np.ascontiguousarray(pcm, dtype=np.float32)
-            os.utime(data_path)  # LRU 触碰
+            try:
+                os.utime(data_path)
+            except OSError:
+                pass  # Read-only cache directories can still serve valid PCM.
             return result
+        except FileNotFoundError:
+            return None  # A writer may have published only one half of the pair.
         except (OSError, ValueError, KeyError) as exc:
             logger.debug("pre-render cache miss/corrupt for %s: %s", spec.key, exc)
             # 损坏条目按未命中处理并清掉，避免每次都重读坏文件。
@@ -658,8 +694,7 @@ def build_pre_render_plan(
             sample_rate=working_rate, source_fingerprint="",
             steps=tuple(steps), blocked_reason="audio source unavailable",
             diagnostics=("audio source unavailable",))
-    from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
-    max_samples = int(AUDIO_REFERENCE_SAMPLE_RATE * MAX_PRE_RENDER_SECONDS)
+    max_samples = int(spec.sample_rate * MAX_PRE_RENDER_SECONDS)
     diagnostics: list[str] = []
     blocked: Optional[str] = None
     if spec.sample_count > max_samples:
@@ -677,17 +712,6 @@ def build_pre_render_plan(
         reason = "retimed clips cannot use pre-rendered processors yet"
         blocked = blocked or reason
         diagnostics.append(reason)
-    # P0 · 源 patch 先后顺序：构建时生效的选道进入计划与缓存键——
-    # 基底内容与实时路径（patch → 栈）一致；patch 变化强制重建。
-    patch_map: tuple = ()
-    try:
-        from src.features.edit.core.source_patch import patch_for_asset
-        overrides = getattr(project, "source_patch_overrides", None) or {}
-        patch = patch_for_asset(overrides, str(getattr(clip, "asset_id", "")))
-        if patch.audio_enabled and patch.audio_channel_map:
-            patch_map = tuple(tuple(pair) for pair in patch.audio_channel_map)
-    except Exception:  # noqa: BLE001 - patch 解析失败按直通（键仍稳定）
-        patch_map = ()
     return PreRenderBuildPlan(
         source_path=spec.source_path,
         start_sample=spec.start_sample,
@@ -698,11 +722,11 @@ def build_pre_render_plan(
         reverse=spec.reverse,
         # decode_audio_range 的容器布局：mono / >2ch 经 BS.775 矩阵折到
         # stereo（P0 起 LFE 策略显式、系数与交付 downmix 同源）。
-        expected_channels=1 if spec.channel_count == 1 else 2,
+        expected_channels=spec.processing_channel_count,
         blocked_reason=blocked,
         diagnostics=tuple(diagnostics),
         channel_layout=str(getattr(spec, "channel_layout", "") or ""),
-        source_channel_map=patch_map,
+        source_channel_map=spec.source_channel_map,
         source_channel_count=int(getattr(spec, "channel_count", 0) or 0),
     )
 

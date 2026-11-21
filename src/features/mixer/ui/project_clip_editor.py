@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -19,13 +20,15 @@ from src.features.edit.core.audio_waveform import (
     WaveformData, WaveformExtractor, get_cached_waveform, is_waveform_pending,
 )
 from src.features.edit.core.clip_pcm import (
-    ClipPcmProvider, ClipPcmResult, compute_spectrogram, compute_waveform_stats,
+    ClipAudioRenderSpec, ClipPcmProvider, ClipPcmResult, compute_spectrogram, compute_waveform_stats,
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
 from src.features.edit.core.audio_edit import (
-    LENGTH_CHANGING_PROCESSORS, append_step, canvas_markers_from,
+    LENGTH_CHANGING_PROCESSORS, OPERATION_LOUDNESS_MATCH, OPERATION_NORMALIZE_PEAK,
+    append_step, canvas_markers_from, copy_audio_edit,
     canvas_points_from_envelope, clear_steps, envelope_from_canvas_points, envelope_nodes,
     make_step, marker_list, markers_from_canvas, output_length_after_steps, remove_step,
+    remap_audio_edit_for_length_steps, render_audio_edit_full, time_stretch_output_length,
     replace_processor_step, replace_step_enabled, requires_pre_render,
     set_envelope, set_markers, steps_signature, suffix_audio_edit,
 )
@@ -35,6 +38,10 @@ from src.features.mixer.effects.panels.clip_editor import ProcessStepRow, Studio
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
 
+from .clip_analysis import (
+    ClipAuditionCoordinates, GainMeasurementRequest, GainMeasurementResult,
+    build_band_preview, make_timepitch_draft, measure_gain_edit, render_native_clip_pcm,
+)
 from .clip_audition import ClipAuditionSession
 from .clip_preview_worker import ClipPreviewResult, ClipPreviewWorker
 from .workspace_style import PANEL_QSS
@@ -95,6 +102,7 @@ class _StatusLabel(QLabel):
 
 class _TimelineClipPanel(StudioAudioClipEditor):
     gain_requested = pyqtSignal(float)
+    microfade_requested = pyqtSignal()
     selection_gain_requested = pyqtSignal(float, float, float, int)
     # P0-3：清空处理栈走工程命令（原型本地清空在生产行程外）。
     stack_clear_requested = pyqtSignal()
@@ -131,7 +139,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.canvas._env_enabled = False
         self.canvas._magnetic_snap = False
         self.canvas.selection_gain_editable = False
-        self.canvas.apply_envelope_to_waveform = False  # 工程包络已包含在处理后 PCM 中。
+        self.canvas.waveform_includes_processing = True
+        self.canvas._env_curve_mode = "linear"
         self.canvas.previewGainChanged.disconnect(self._on_preview_gain_changed)
         self.gain_knob._min = -48.0
         self.gain_knob._max = 12.0
@@ -160,8 +169,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._preview_failure_note = ""
         # P1-2 · FFT 独立换档的内容复用缓存（键 = 内容键；PCM 只在内容
         # 变化时重算，FFT 换档只重算频谱）。
-        self._last_edited_key: tuple | None = None
-        self._last_edited_pcm: np.ndarray | None = None
+        self._last_preview: ClipPreviewResult | None = None
+        self._audition_coordinates = ClipAuditionCoordinates()
         self._preview_offline = False
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
         self._noise_profile: Any = None
@@ -171,14 +180,21 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # 替换），UI 线程不再同步做 retime/pitch。基准时长在进入预览
         # 时记录、清除时恢复。
         self._timepitch_request: tuple | None = None
+        self._validated_timepitch: tuple | None = None
         self._timepitch_base_duration: float | None = None
         self._audition = ClipAuditionSession(self)
+        self._band_preview: tuple[int, np.ndarray] | None = None
+        self._pending_audition_seek: float | None = None
         self._audition.position_changed.connect(self._on_audition_position)
         self._audition.playing_changed.connect(self._on_audition_playing_changed)
+        self._audition.device_failed.connect(self._show_device_failure)
         self._zero_snap_armed = False
         self._suppress_zero_snap = False
         self._stack_editable_hint = False
         self.canvas.selectionChanged.connect(self._on_pcm_selection_zero_snap)
+        self.canvas.selectionDragFinished.connect(self._finish_selection_drag)
+        self.canvas.playheadDragFinished.connect(self._finish_audition_seek)
+        self.minimap.playheadDragFinished.connect(self._finish_audition_seek)
         # 原型的磁性吸附（播放头/标记）与 PCM 过零吸附互补，两者都随开关。
         self.btn_snap_zero.toggled.connect(self._on_zero_snap_toggled)
         # A/B 旁路只切换试听与机架的显示状态。
@@ -228,7 +244,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pending_timepitch = pending
         has_preview = pending is not None
         self._timepitch_commit_button.setEnabled(
-            has_preview and self._pcm is not None and self._stack_editable_hint)
+            has_preview and pending == self._validated_timepitch
+            and self._pcm is not None and self._stack_editable_hint)
         self._timepitch_discard_button.setVisible(has_preview)
         self._timepitch_summary.setVisible(has_preview)
         if pending is not None:
@@ -238,6 +255,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             self._timepitch_summary.setText(I18N.tr(
                 "mixer.clip_editor.timepitch_draft", "Preview · {rate:.1f}% · {pitch:+.1f} st"
             ).format(rate=ratio, pitch=pitch))
+        self.canvas.project_edits_enabled = (
+            self._stack_editable_hint and self._pcm is not None and not has_preview)
+        self._update_stack_actions()
         self._refresh_selection_gain()
 
     def _discard_timepitch_preview(self) -> None:
@@ -272,6 +292,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _trigger_quick_heal(self) -> None:
         """修复按钮/H 键：优先消费挂起笔迹；否则用频谱选区合成修复载荷。"""
+        if not self.canvas.project_edits_enabled:
+            return
         payload = self._pending_repair
         if payload is None:
             t0, t1, f_low, f_high = self.canvas.getSelection()
@@ -331,14 +353,26 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def _setup_shortcuts(self) -> None:
         for key, callback in (
             (QKeySequence.StandardKey.SelectAll, self.canvas.selectAll),
-            (Qt.Key.Key_Escape, self.canvas.clearSelection),
+            (Qt.Key.Key_Escape, self._clear_selection_or_cancel_fade_curve),
             (Qt.Key.Key_E, self._zoom_to_selection),
             (Qt.Key.Key_Space, self._toggle_play),
             (QKeySequence("Ctrl+Space"), self._toggle_skip_play),
+            (Qt.Key.Key_M, lambda: self.canvas.addMarker() if self.canvas.project_edits_enabled else None),
+            (Qt.Key.Key_A, self.btn_tool_select.click),
+            (Qt.Key.Key_V, self.btn_tool_envelope.click),
+            (Qt.Key.Key_B, self.btn_tool_brush.click),
+            (Qt.Key.Key_H, self._trigger_quick_heal),
+            (Qt.Key.Key_Z, self.btn_snap_zero.click),
+            (Qt.Key.Key_Delete, self._delete_selection_or_node),
+            (Qt.Key.Key_Backspace, self._delete_selection_or_node),
         ):
-            shortcut = QShortcut(QKeySequence(key), self)
-            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut = QShortcut(QKeySequence(key), self.canvas)
+            shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             shortcut.activated.connect(callback)
+
+    def _delete_selection_or_node(self) -> None:
+        if self.canvas.project_edits_enabled:
+            super()._delete_selection_or_node()
 
     # ------------------------------------------------------------------
     # PCM 试听（P0-2 §2.3）
@@ -354,13 +388,15 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._on_edit_channel_selected(-1)
         self._pcm_rate = int(sample_rate) if sample_rate > 0 else AUDIO_REFERENCE_SAMPLE_RATE
         self._timepitch_request = None
+        self._validated_timepitch = None
         self._timepitch_base_duration = None
         self._denoise_preview = None
-        self._last_edited_key = None
-        self._last_edited_pcm = None
+        self._last_preview = None
+        self._audition_coordinates = ClipAuditionCoordinates()
         self.set_pending_timepitch(None)
         self._preview_generation += 1  # 旧片段在途预览全部作废
-        if self._model_audio_edit is None:
+        gain_fade = self._clip_gain_fade
+        if self._model_audio_edit is None and (gain_fade is None or not any(gain_fade[:5])):
             self._audition.load(pcm, sample_rate)
         else:
             self._audition.clear()
@@ -368,6 +404,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._skip_selection_mode = False
         self._update_audition_button(False)
         self._set_pcm_tools_enabled(True)
+        self.btn_play.setEnabled(self._audition.has_audio())
         self.set_stack_editable(self._stack_editable_hint)
 
     def _set_pcm_tools_enabled(self, available: bool) -> None:
@@ -388,14 +425,21 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def detach_pcm(self) -> None:
         """Release samples and audition controls before loading a new audio range."""
+        self._pending_audition_seek = None
         self._audition.clear()
+        self.canvas._ch_muted[:] = [False, False]
+        self._audition.set_monitor(muted=(), solo=())
+        if self._preview_worker is not None:
+            self._preview_worker.cancel()
         self._pcm = None
         self._raw_pcm = None
+        self.btn_bypass.setChecked(False)
         self._timepitch_request = None
+        self._validated_timepitch = None
         self._timepitch_base_duration = None
         self._denoise_preview = None
-        self._last_edited_key = None
-        self._last_edited_pcm = None
+        self._last_preview = None
+        self._audition_coordinates = ClipAuditionCoordinates()
         self._pending_repair = None
         self.set_noise_profile(None)
         self._preview_generation += 1  # 在途预览作废，旧回调不误写
@@ -409,9 +453,17 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def set_stack_editable(self, editable: bool) -> None:
         """有可编辑时间线片段时启用处理栈相关控件（源监视模式禁用）。"""
         active = editable and self._pcm is not None
+        self.canvas.project_edits_enabled = active and self._pending_timepitch is None
+        self.canvas.channel_monitor_enabled = self._pcm is not None
         if not active and self.canvas._tool_mode in {"envelope", "brush"}:
             self._set_tool_mode("select")
-        for widget in (self.btn_bypass, self.btn_tool_envelope, self.btn_tool_brush,
+        self.set_pending_timepitch(self._pending_timepitch)
+
+    def _update_stack_actions(self) -> None:
+        active = self.canvas.project_edits_enabled
+        self.btn_bypass.setEnabled(self._pcm is not None and (
+            self._model_audio_edit is not None or self._pending_timepitch is not None))
+        for widget in (self.btn_tool_envelope, self.btn_tool_brush, self.btn_env_reset,
                        self.btn_apply_lufs, self.target_lufs_pill, self.tp_ceil_pill,
                        *self._lufs_preset_btns.values(), *self._selection_edit_buttons):
             widget.setEnabled(active)
@@ -420,8 +472,6 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             row = self.stack_list_layout.itemAt(index).widget()
             if isinstance(row, ProcessStepRow):
                 row.setEnabled(active)
-        # 变速预览与选区增益使用不同的时间域。
-        self.set_pending_timepitch(self._pending_timepitch)
 
     def _refresh_selection_gain(self) -> None:
         self.canvas.selection_gain_editable = (
@@ -439,18 +489,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         """处理栈机架由工程模型驱动（命令提交后刷新；P0-3 §控件映射）。"""
         if audio_edit == self._model_audio_edit:
             return  # 任何时间线编辑都会走 sync_clip——栈没变不重绘/不打断选区
+        self._validated_timepitch = None
         self._model_audio_edit = audio_edit
-        # P1-4：包络节点装载到画布（模型 → 视图，域转换与提交互逆）。
-        nodes = envelope_nodes(audio_edit)
-        self.canvas._env_enabled = self.canvas._tool_mode == "envelope" or bool(nodes)
-        self.canvas._env_points = canvas_points_from_envelope(
-            nodes, self._duration,
-            output_total_samples or max(1, int(round(self._duration * self._pcm_rate))))
-        # P1-5：标记点装载（局部样本 → 显示秒）；随片段几何变化重映射。
-        self.canvas._markers = canvas_markers_from(
-            marker_list(audio_edit), self._duration,
-            output_total_samples or max(1, int(round(self._duration * self._pcm_rate))))
-        self.canvas.update()
+        self._project_overlays(ClipAuditionCoordinates.from_edit(audio_edit), output_total_samples)
         # P1-5：工程级反极性按 channel mask 步骤驱动画布的 Ø 状态。
         polarity_channels = set()
         for step in (audio_edit or {}).get("steps", []) or []:
@@ -539,6 +580,23 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._stack_editable_hint = editable
         self.set_stack_editable(editable)
 
+    def _project_overlays(self, coordinates: ClipAuditionCoordinates,
+                          output_total_samples: int | None = None) -> None:
+        edit = self._model_audio_edit
+        origin = ClipAuditionCoordinates.from_edit(edit)
+        nodes = envelope_nodes(edit)
+        markers = marker_list(edit)
+        if origin != coordinates:
+            nodes = [{**node, "local_sample": origin.map_to(coordinates, node["local_sample"])}
+                     for node in nodes]
+            markers = [{**marker, "local_sample": origin.map_to(coordinates, marker["local_sample"])}
+                       for marker in markers]
+        total = output_total_samples or max(1, round(self._duration * self._pcm_rate))
+        self.canvas._env_enabled = self.canvas._tool_mode == "envelope" or bool(nodes)
+        self.canvas._env_points = canvas_points_from_envelope(nodes, self._duration, total)
+        self.canvas._markers = canvas_markers_from(markers, self._duration, total)
+        self.canvas._invalidate_cache()
+
     def _effective_audio_edit(self) -> dict | None:
         """A/B 全局旁路是临时监听状态，不改工程。"""
         if self._model_audio_edit is None or self.btn_bypass.isChecked():
@@ -558,26 +616,25 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             return
         self._preview_request_key = inputs["key"]
         self._preview_failure_note = ""
-        if getattr(self, "_preview_offline", False):
-            self._publish_preview(self._compute_preview(inputs))
+        key = inputs["key"]
+        if self._preview_offline:
+            try:
+                self._publish_preview(self._compute_preview(inputs))
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._on_preview_failed(key, str(exc))
             return
         worker = self._ensure_preview_worker()
-        if worker is None:
-            self._publish_preview(self._compute_preview(inputs))
-            return
-        key = inputs["key"]
-        worker.submit(key, lambda: self._compute_preview(inputs))
+        worker.submit_cancellable(
+            key, lambda cancelled: self._compute_preview({**inputs, "cancelled": cancelled}))
 
-    def _ensure_preview_worker(self) -> ClipPreviewWorker | None:
-        worker = getattr(self, "_preview_worker", None)
+    def _ensure_preview_worker(self) -> ClipPreviewWorker:
+        worker = self._preview_worker
         if worker is None:
-            try:
-                worker = ClipPreviewWorker()
-                worker.preview_ready.connect(self._on_preview_ready)
-                worker.preview_failed.connect(self._on_preview_failed)
-                self._preview_worker = worker
-            except Exception:  # noqa: BLE001 - 无线程环境回退同步
-                return None
+            worker = ClipPreviewWorker()
+            worker.preview_ready.connect(self._on_preview_ready)
+            worker.preview_failed.connect(self._on_preview_failed)
+            self.destroyed.connect(worker.finish)
+            self._preview_worker = worker
         return worker
 
     def shutdown_preview(self) -> None:
@@ -586,6 +643,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if worker is not None:
             worker.finish()
             self._preview_worker = None
+        self._preview_generation += 1
+        self._preview_request_key = None
 
     def set_clip_gain_fade(self, snapshot: tuple | None) -> None:
         """P0-3 · 片段级 gain/fade 快照（模型 → 预览/试听消费）。
@@ -602,164 +661,106 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         raw = self._raw_pcm
         if raw is None:
             return None
+        bypass = self.btn_bypass.isChecked()
         edit = self._effective_audio_edit()
-        duration = self._duration
-        fft = self.current_fft_size()
-        generation = self._preview_generation
+        request = None if bypass else self._timepitch_request
+        denoise = None if bypass else self._denoise_preview
+        duration = self._timepitch_base_duration or self._duration
+        if bypass and ClipAuditionCoordinates.from_edit(self._model_audio_edit).maps:
+            duration = raw.shape[1] / self._pcm_rate
         content_key = (
-            self._preview_spec_key, steps_signature(edit) if edit else (),
-            self._denoise_preview, self._timepitch_request,
-            self._clip_gain_fade,
+            self._preview_spec_key, steps_signature(edit), denoise, request,
+            self._clip_gain_fade, duration, bypass,
         )
-        key = (content_key, fft, generation)
-        # 深拷贝编辑字典：后台计算期间工程命令可能替换模型对象。
-        import copy as _copy
+        previous = self._last_preview
+        reuse = previous if previous is not None and previous.key[0] == content_key else None
+        plan = self._pre_render_plan_for_preview() if requires_pre_render(edit) and reuse is None else None
         return {
-            "key": key,
-            "raw": raw,
-            "rate": self._pcm_rate,
-            "duration": duration,
-            "edit": _copy.deepcopy(edit) if edit is not None else None,
-            "denoise_preview": self._denoise_preview,
-            "timepitch_request": self._timepitch_request,
-            "fft": fft,
-            "bypass": self.btn_bypass.isChecked(),
-            "clip_gain_fade": self._clip_gain_fade,
-            # P1-2 · FFT 独立换档：内容键未变时复用上一轮 edited PCM，
-            # 只重算频谱/波形统计（不重跑基底与处理栈，不打断会话）。
-            "reuse_edited": (self._last_edited_pcm
-                             if content_key == self._last_edited_key
-                             else None),
+            "key": (content_key, self.current_fft_size(), self._preview_generation),
+            "raw": raw, "rate": self._pcm_rate, "duration": duration,
+            "edit": copy_audio_edit(edit), "denoise_preview": denoise,
+            "timepitch_request": request, "fft": self.current_fft_size(),
+            "clip_gain_fade": self._clip_gain_fade, "plan": plan, "reuse": reuse,
         }
 
-    def _compute_preview(self, inputs: dict) -> ClipPreviewResult:
-        """纯计算（后台线程安全）：基底 → 后缀栈 → 片段 gain/fade → 波形/频谱/计量。"""
+    def _compute_preview(self, inputs: dict) -> ClipPreviewResult | None:
         from src.features.edit.core.audio_edit import apply_audio_edit_to_pcm
         from src.features.edit.core.audio_dsp import apply_clip_fade
 
-        reused = inputs.get("reuse_edited")
+        cancelled = inputs.get("cancelled", lambda: False)
+        duration = inputs["duration"]
+        rate = inputs["rate"]
+        reused = inputs["reuse"]
         if reused is not None:
-            edited = reused
+            if cancelled():
+                return None
+            spectrogram = compute_spectrogram(
+                reused.edited, rate, nfft=inputs["fft"], time_bins=320, freq_bins=96,
+                cancel_check=cancelled)
+            if cancelled():
+                return None
+            return ClipPreviewResult(
+                inputs["key"], reused.edited, rate, reused.duration,
+                reused.mins, reused.maxs, reused.rmss, spectrogram, reused.report, reused.length_maps)
+        edit = inputs["edit"]
+        request = inputs["timepitch_request"]
+        if request is not None:
+            raw = inputs["raw"]
+            edit, step = make_timepitch_draft(edit, request, raw.shape[1], tuple(range(raw.shape[0])))
+            edit, _warnings = remap_audio_edit_for_length_steps(edit, [step])
+            edited = render_audio_edit_full(raw, edit, sample_rate=rate, cancel_check=cancelled)
+            duration = edited.shape[1] / rate
         else:
             base = self._compute_base_pcm(inputs)
-            if base is None:
-                base = inputs["raw"]
-            edit = inputs["edit"]
-            if edit is not None and not inputs["bypass"]:
-                # P0-3 前缀语义：基底已含截至最后预渲染步骤的全部前缀（含
-                # 混排 inline），这里只应用后缀——inline 不再双重应用。
-                edited = apply_audio_edit_to_pcm(
-                    base, suffix_audio_edit(edit), sample_rate=inputs["rate"])
-            else:
-                edited = base
-            # P0-3 · 片段级 gain/fade 与播放/成片/Stem 同一消费路径
-            # （apply_clip_fade 共享曲线规格与绝对片段样本位置；采样域字段
-            # 按 48k 参考域传入，函数内部换算消费率）。顺序与实时路径一致：
-            # 处理栈 → fade → gain。
-            gain_fade = inputs.get("clip_gain_fade")
-            if gain_fade is not None:
-                (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
-                 curve_in, curve_out, fps, duration_frames) = gain_fade
-                if fin_frames or fout_frames or fin_samples or fout_samples:
-                    try:
-                        edited = apply_clip_fade(
-                            edited, 0, int(duration_frames), 0,
-                            int(fin_frames), int(fout_frames), float(fps),
-                            float(inputs["rate"]),
-                            fade_in_samples_override=fin_samples,
-                            fade_out_samples_override=fout_samples,
-                            fade_curve_in=curve_in, fade_curve_out=curve_out)
-                    except Exception:  # noqa: BLE001 - 淡化失败保持栈结果
-                        self._note_preview_failure("clip fade preview failed")
-                if abs(float(gain_db or 0.0)) > 1e-9:
-                    edited = edited * (10.0 ** (float(gain_db) / 20.0))
+            edited = apply_audio_edit_to_pcm(base, suffix_audio_edit(edit), sample_rate=rate) if edit else base
+        if cancelled():
+            return None
+        gain_fade = inputs["clip_gain_fade"]
+        if gain_fade is not None:
+            (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
+             curve_in, curve_out, fps, duration_frames) = gain_fade
+            if request is not None or not math.isclose(duration, duration_frames / fps):
+                duration_frames = duration * fps
+            edited = apply_clip_fade(
+                edited, 0, duration_frames, 0, fin_frames, fout_frames, fps, rate,
+                fade_in_samples_override=fin_samples, fade_out_samples_override=fout_samples,
+                fade_curve_in=curve_in, fade_curve_out=curve_out)
+            if abs(gain_db) > 1e-9:
+                edited = edited * (10.0 ** (gain_db / 20.0))
         bins = min(8192, max(64, edited.shape[1] // 64))
         mins, maxs, rmss = compute_waveform_stats(edited, bins)
+        if cancelled():
+            return None
         spectrogram = compute_spectrogram(
-            edited, inputs["rate"], nfft=inputs["fft"],
-            time_bins=320, freq_bins=96)
-        report = self._measure_cleanliness(edited, inputs["rate"])
-        # 显示时长保持**时间线域**（inputs["duration"]）——PCM 域长度与
-        # 时间线时长不一致时（源提前耗尽），选区秒→输出域的分数映射
-        # 必须与 _output_total_samples 同域。变速预览例外：按合同长度
-        # 估算（round(N·100/ratio)），发布时更新画布。
-        request = inputs.get("timepitch_request")
-        if request is not None:
-            lo, hi, ratio_pct, _st, _p = request
-            raw_len = inputs["raw"].shape[1]
-            lo, hi = max(0, int(lo)), min(raw_len, max(0, int(hi)))
-            preview_samples = (lo + int(round((hi - lo) * 100.0
-                                              / max(1e-6, float(ratio_pct))))
-                               + raw_len - hi)
-            duration = preview_samples / max(1, inputs["rate"])
-        else:
-            duration = inputs["duration"]
+            edited, rate, nfft=inputs["fft"], time_bins=320, freq_bins=96,
+            cancel_check=cancelled)
+        if cancelled():
+            return None
         return ClipPreviewResult(
-            key=inputs["key"], edited=edited, sample_rate=inputs["rate"],
-            duration=duration,
-            mins=mins, maxs=maxs, rmss=rmss,
-            spectrogram=spectrogram, report=report)
+            inputs["key"], edited, rate, duration, mins, maxs, rmss, spectrogram,
+            self._measure_cleanliness(edited, rate), ClipAuditionCoordinates.from_edit(edit).maps)
 
-    def _compute_base_pcm(self, inputs: dict) -> np.ndarray | None:
-        """基底（后台线程）：变速/变调 → 预渲染缓存 → 本地烘焙 → 降噪预览。
+    def _compute_base_pcm(self, inputs: dict) -> np.ndarray:
+        from src.features.edit.core.audio_edit import render_pre_render_steps
 
-        P1-1/P1-2 · 变速/变调的 retime/pitch DSP 在本 worker 内计算
-        （请求快照驱动；新请求经 generation 取消旧发布）。
-        """
         raw = inputs["raw"]
-        request = inputs.get("timepitch_request")
-        if request is not None:
-            from src.features.edit.core.audio_timepitch import (
-                pitch_shift, retime_nopreserve, retime_preserve,
-            )
-            lo, hi, ratio_pct, semitones, preserve = request
-            lo, hi = max(0, int(lo)), min(raw.shape[1], max(0, int(hi)))
-            if hi > lo:
-                segment = raw[:, lo:hi]
-                try:
-                    if abs(semitones) > 1e-6:
-                        segment = pitch_shift(segment, inputs["rate"], float(semitones))
-                    if abs(ratio_pct - 100.0) > 1e-6:
-                        segment = (retime_preserve if preserve
-                                   else retime_nopreserve)(
-                            segment, inputs["rate"], float(ratio_pct))
-                    return np.ascontiguousarray(np.concatenate(
-                        [raw[:, :lo], segment, raw[:, hi:]], axis=1),
-                        dtype=np.float32)
-                except Exception as exc:  # noqa: BLE001 - DSP 失败回落原声
-                    self._note_preview_failure(str(exc))
         edit = inputs["edit"]
-        if edit is None or inputs["bypass"] or not requires_pre_render(edit):
-            base = raw
-        else:
-            base = None
-            plan = getattr(self, "_pre_render_plan_for_preview", lambda: None)()
-            if plan is not None:
-                try:
-                    base = plan.lookup_cached()
-                except Exception:  # noqa: BLE001 - 缓存读失败走本地烘焙
-                    base = None
-            if base is None:
-                from src.features.edit.core.audio_edit import render_pre_render_steps
-                try:
-                    base = render_pre_render_steps(
-                        raw, edit, sample_rate=inputs["rate"])
-                except Exception as exc:  # noqa: BLE001 - 烘焙失败保持原声
-                    base = raw
-                    self._note_preview_failure(str(exc))
-            if base is None:
-                base = raw
-        if inputs["denoise_preview"] is None:
+        plan = inputs["plan"]
+        cancelled = inputs.get("cancelled", lambda: False)
+        if plan is not None and plan.blocked_reason:
+            raise ValueError(plan.blocked_reason)
+        base = plan.lookup_cached() if plan is not None else None
+        if base is None:
+            base = (render_pre_render_steps(raw, edit, sample_rate=inputs["rate"], cancel_check=cancelled)
+                    if requires_pre_render(edit) else raw)
+        if inputs["denoise_preview"] is None or cancelled():
             return base
         from src.features.edit.core.audio_denoise import denoise_spectral_subtraction
+
         noise_range, target_range, reduction_db, nfft = inputs["denoise_preview"]
-        try:
-            return denoise_spectral_subtraction(
-                base, inputs["rate"], noise_range, target_range,
-                reduction_db, nfft=nfft)
-        except Exception as exc:  # noqa: BLE001 - 预览失败保持原声
-            self._note_preview_failure(str(exc))
-            return base
+        return denoise_spectral_subtraction(
+            base, inputs["rate"], noise_range, target_range, reduction_db, nfft=nfft,
+            progress=lambda _done: not cancelled())
 
     @staticmethod
     def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:
@@ -818,22 +819,41 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def _publish_preview(self, result: ClipPreviewResult | None) -> None:
         if result is None:
             return
-        self._pcm = result.edited
-        # P1-2 · 内容复用缓存：记录本轮内容键（FFT 换档复用 edited）。
-        if result.key and isinstance(result.key[0], tuple):
-            self._last_edited_key = result.key[0]
-            self._last_edited_pcm = result.edited
+        previous = self._last_preview
+        self._last_preview = result
+        coordinates = ClipAuditionCoordinates(result.length_maps)
+        prior_coordinates = self._audition_coordinates
         preserve_view = math.isclose(result.duration, self.canvas._duration)
         playhead = self._playhead
-        self._audition.load(result.edited, result.sample_rate)
+        if previous is None or previous.edited is not result.edited:
+            if self._band_preview is not None:
+                self._audition.stop()
+            if coordinates != prior_coordinates:
+                self._audition.load(
+                    result.edited, result.sample_rate,
+                    position_map=lambda sample: prior_coordinates.map_to(coordinates, sample))
+                playhead = prior_coordinates.map_to(coordinates, round(playhead * self._pcm_rate)) / self._pcm_rate
+            else:
+                self._audition.load(result.edited, result.sample_rate)
+        self._pcm = result.edited
+        self.btn_play.setEnabled(self._audition.has_audio())
+        self._audition_coordinates = coordinates
         fade_times = (self.canvas._fade_in_sec, self.canvas._fade_out_sec)
         self.load_audio_data(
             result.sample_rate, result.duration, result.mins, result.maxs,
             result.rmss, result.spectrogram, clip_name=self._clip_name,
             cleanliness_report=result.report or {}, preserve_edit_view=preserve_view)
         self.canvas._fade_in_sec, self.canvas._fade_out_sec = fade_times
-        if preserve_view:
-            self.update_playhead(playhead)
+        if not preserve_view or coordinates != prior_coordinates:
+            self._project_overlays(coordinates)
+        self.update_playhead(playhead)
+        if self._timepitch_request is not None and not self.btn_bypass.isChecked():
+            if self._validated_timepitch != self._timepitch_request:
+                self.set_status_message(I18N.tr(
+                    "mixer.clip_editor.timepitch_ready", "Speed and pitch preview ready · {duration:.3f} s"
+                ).format(duration=result.duration))
+            self._validated_timepitch = self._timepitch_request
+            self.set_pending_timepitch(self._pending_timepitch)
         peak_db = (result.report or {}).get("peak_db")
         self.peak_val_lbl.setText(
             f"{peak_db:+.1f} dBFS" if isinstance(peak_db, (int, float)) else "—")
@@ -871,6 +891,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             self.noise_status_lbl.setToolTip("")
 
     def _emit_capture_noise(self) -> None:
+        if not self.canvas._sel_t1 > self.canvas._sel_t0 >= 0.0:
+            self.set_status_message(I18N.tr(
+                "mixer.clip_editor.noise_selection_required", "Select a section of background noise first"))
+            return
         self.noisePrintCaptured.emit(*self.canvas.getSelection()[:2])
 
     def set_denoise_preview(self, noise_range: tuple[int, int],
@@ -901,6 +925,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             self._duration = self._timepitch_base_duration
             self._timepitch_base_duration = None
         self._timepitch_request = request
+        self._validated_timepitch = None
+        self.set_pending_timepitch(request)
         self._refresh_stack_preview()
 
     def clear_timepitch_preview(self) -> None:
@@ -918,11 +944,16 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         return int(round(head * rate))
 
     def _toggle_play(self) -> None:
-        if self._pcm is None:
+        if self._pcm is None or not self._audition.has_audio():
             return
         if self._audition.is_playing:
-            self._audition.stop()
+            if self._audition.is_paused:
+                self._audition.resume()
+            else:
+                self._audition.pause()
+            self._update_audition_button(self._audition.is_playing and not self._audition.is_paused)
             return
+        self._restore_band_preview()
         self._audition.set_skip_range(None)
         t0, t1, _, _ = self.canvas.getSelection()
         start = self._audition_start_sample()
@@ -934,15 +965,18 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._update_audition_loop()
         if not self._audition.play(start):
             self._update_audition_button(False)
-            self.info_label.setText(I18N.tr(
-                "mixer.clip_editor.no_audio_device", "No audio device available for audition"))
+            self._show_device_failure()
+
+    def _show_device_failure(self) -> None:
+        self.set_status_message(I18N.tr(
+            "mixer.clip_editor.no_audio_device", "No audio device available for audition"))
 
     def _toggle_loop(self, checked: bool) -> None:
         super()._toggle_loop(checked)
         self._update_audition_loop()
 
     def _update_audition_loop(self) -> None:
-        if self._pcm is None or self._skip_selection_mode:
+        if self._pcm is None or self._skip_selection_mode or self._band_preview is not None:
             return
         t0, t1, _, _ = self.canvas.getSelection()
         if t1 > t0:
@@ -952,6 +986,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             self._audition.set_loop(self._is_looping)
 
     def _stop_playback(self) -> None:
+        self._pending_audition_seek = None
         # 停止回到开始试听的游标（会话负责回到 return_sample）。
         self._skip_selection_mode = False
         self._audition.set_skip_range(None)
@@ -965,10 +1000,13 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         选区内容不进设备缓冲，与旧的事后 seek 不同，选区开头不会先送
         入设备再跳；播放头经块记录映射直接落在选区后。
         """
-        if self._pcm is None:
+        if self._pcm is None or not self._audition.has_audio():
             return
+        if self._band_preview is not None:
+            self._audition.stop()
+            self._restore_band_preview()
         t0, t1, _, _ = self.canvas.getSelection()
-        if t1 - t0 <= 0.01:
+        if not self.canvas._sel_t1 > self.canvas._sel_t0 >= 0.0 or t1 - t0 <= 0.01:
             self._toggle_play()
             return
         rate = self._pcm_rate
@@ -977,7 +1015,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         s0, s1 = int(round(t0 * rate)), int(round(t1 * rate))
         self._audition.set_loop(False)
         self._audition.set_skip_range(s0, s1)
-        if not self._audition.play(start):
+        if not self._audition.play(start, end_sample=s1 + round(1.2 * rate)):
             self._skip_selection_mode = False
             self._audition.set_skip_range(None)
 
@@ -988,45 +1026,47 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if not playing:
             self._skip_selection_mode = False
             self._audition.set_skip_range(None)
-            if self._pcm is not None:
-                self.update_playhead(self._audition.return_sample() / self._pcm_rate)
+            if self._pcm is not None and self._pending_audition_seek is None:
+                offset = self._band_preview[0] if self._band_preview is not None else 0
+                self.update_playhead((self._audition.return_sample() + offset) / self._pcm_rate)
+            self._restore_band_preview()
             self.update_output_meter(-60.0, -60.0)
 
     def _update_audition_button(self, playing: bool) -> None:
         self.btn_play.setChecked(playing)
-        text = (I18N.tr("mixer.clip_editor.stop_audition", "Stop audition") if playing
+        text = (I18N.tr("mixer.clip_editor.pause_audition", "Pause") if playing
                 else I18N.tr("mixer.clip_editor.play", "Play"))
-        self.btn_play.setText("■" if playing else f"▶ {text}")
+        self.btn_play.setText("❚❚" if playing else f"▶ {text}")
         self.btn_play.setAccessibleName(text)
 
     def _on_audition_position(self, sample: int) -> None:
         if not self._audition.is_playing or self._pcm is None:
             return
+        if self._pending_audition_seek is not None:
+            self._update_pcm_meters(sample)
+            return
         rate = self._pcm_rate
-        sec = sample / rate
-        if self._skip_selection_mode:
-            # P0-4 · 跳过已在供块层完成（选区内容不进设备）；这里只
-            # 负责越过选区尾 1.2 s 后的收尾停止。
-            t0, t1, _, _ = self.canvas.getSelection()
-            if t1 - t0 > 0.01:
-                if sample >= min(self._pcm.shape[1], int(round((t1 + 1.2) * rate))):
-                    self._audition.stop()
-                    return
-        # 播放头超出右视口时平滑翻页跟随（与原型一致）。
-        span = self.canvas._view_end - self.canvas._view_start
-        if span < self._duration and sec > self.canvas._view_end:
+        offset = self._band_preview[0] if self._band_preview is not None else 0
+        sec = (sample + offset) / rate
+        start, end = self.canvas._view_start, self.canvas._view_end
+        span = end - start
+        # Follow only when playback crosses the visible edge, so navigation can
+        # inspect an earlier section while audio continues outside the viewport.
+        if (start <= self._playhead <= end < sec and not self.minimap._drag_mode
+                and not self.canvas._drag_mode and abs(self.canvas._pan_vel_sec) <= 1e-4):
             new_start = min(self._duration - span, sec - span * 0.15)
             self._sync_viewport(max(0.0, new_start), max(0.0, new_start) + span)
         self.update_playhead(sec)
         self._update_pcm_meters(sample)
 
     def _update_pcm_meters(self, sample: int) -> None:
-        if self._pcm is None or self._pcm.shape[1] == 0:
+        pcm = self._band_preview[1] if self._band_preview is not None else self._pcm
+        if pcm is None or pcm.shape[1] == 0:
             return
         half = max(1, int(round(0.012 * self._pcm_rate)))
         lo = max(0, sample - half)
-        hi = min(self._pcm.shape[1], sample + half)
-        window = self._pcm[:, lo:hi]
+        hi = min(pcm.shape[1], sample + half)
+        window = pcm[:, lo:hi]
         levels = []
         for ch in (0, min(1, window.shape[0] - 1)):
             if ch >= window.shape[0] or self.canvas._ch_muted[min(ch, len(self.canvas._ch_muted) - 1)]:
@@ -1040,20 +1080,58 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _on_canvas_playhead_moved(self, sec: float) -> None:
         super()._on_canvas_playhead_moved(sec)
-        if self._audition.is_playing:
-            self._audition.seek(int(round(sec * self._pcm_rate)))
+        self._request_audition_seek(
+            sec, dragging=self.canvas.is_selecting() or self.canvas._drag_mode == "playhead")
+
+    def start_band_preview(self, start: int, pcm: np.ndarray) -> bool:
+        self._audition.stop()
+        self._audition.load(pcm, self._pcm_rate)
+        self._audition.set_skip_range(None)
+        self._audition.set_loop(False)
+        self._band_preview = (start, pcm)
+        if self._audition.play(0):
+            return True
+        self._restore_band_preview()
+        return False
+
+    def _restore_band_preview(self) -> None:
+        if self._band_preview is None:
+            return
+        self._band_preview = None
+        if self._pcm is not None:
+            self._audition.load(self._pcm, self._pcm_rate)
 
     def _on_minimap_playhead_moved(self, sec: float) -> None:
         super()._on_minimap_playhead_moved(sec)
+        self._request_audition_seek(sec, dragging=self.minimap._drag_mode == "playhead")
+
+    def _request_audition_seek(self, sec: float, *, dragging: bool) -> None:
+        if dragging:
+            if self._audition.is_playing or self._pending_audition_seek is not None:
+                # The visual cursor follows the mouse. Reopen the audio buffer only
+                # for the settled position, since device start/stop can block the UI.
+                self._pending_audition_seek = sec
+            return
+        self._pending_audition_seek = None
         if self._audition.is_playing:
-            self._audition.seek(int(round(sec * self._pcm_rate)))
+            offset = self._band_preview[0] if self._band_preview is not None else 0
+            self._audition.seek(round(sec * self._pcm_rate) - offset)
+
+    def _finish_audition_seek(self) -> None:
+        if self._pending_audition_seek is not None:
+            self._request_audition_seek(self._pending_audition_seek, dragging=False)
 
     # ------------------------------------------------------------------
     # 过零吸附（P0-2 §2.4）
     # ------------------------------------------------------------------
-    def _on_pcm_selection_zero_snap(self, t0: float, t1: float, _fl: float, _fh: float) -> None:
+    def _finish_selection_drag(self) -> None:
+        self._on_pcm_selection_zero_snap(*self.canvas.getSelection())
+        if self._is_looping:
+            self._update_audition_loop()
+
+    def _on_pcm_selection_zero_snap(self, t0: float, t1: float, fl: float, fh: float) -> None:
         if (not self._zero_snap_armed or self._pcm is None
-                or self._suppress_zero_snap or t1 - t0 <= 0.0):
+                or self._suppress_zero_snap or self.canvas.is_selecting() or t1 - t0 <= 0.0):
             return
         rate = self._pcm_rate
         total = self._pcm.shape[1]
@@ -1067,7 +1145,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if (abs(snapped0 - t0) > 1e-9 or abs(snapped1 - t1) > 1e-9) and snapped1 - snapped0 > 1e-9:
             self._suppress_zero_snap = True
             try:
-                self.canvas.setSelection(snapped0, snapped1)
+                self.canvas.setSelection(
+                    snapped0, snapped1, fl, fh, spectral=self.canvas._is_2d_spectral_sel)
             finally:
                 self._suppress_zero_snap = False
 
@@ -1075,7 +1154,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         unavailable = I18N.tr("mixer.clip_editor.unavailable", "This tool requires an audio processing backend.")
         self.btn_spectral.setChecked(False)
         self.btn_snap_zero.setChecked(False)
-        self.fade_preset_buttons[0.02].hide()
+        self.btn_env_smooth.hide()
+        self.fade_preset_buttons[0.02].setText(I18N.tr("mixer.clip_editor.microfade", "20 ms"))
         self.btn_apply_lufs.setText(I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
         buttons_by_text = {
             "应用至选区", "重置", "人声", "流媒体", "广播", "电影",
@@ -1158,7 +1238,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if locked:
             self._pending_fade = None
             self.canvas.cancel_fade_drag()
-        for control in (self.fi_pill, self.fo_pill, self.fade_preset_buttons[0.0],
+        for control in (self.fi_pill, self.fo_pill, *self.fade_preset_buttons.values(),
                         *self._fade_curve_btns.values()):
             control.setEnabled(self._fade_editable)
         self.canvas._fade_in_sec = fade_in
@@ -1236,23 +1316,15 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._on_fade_changed(fi, fo)
 
     def _apply_symmetric_fade(self, seconds: float) -> None:
-        if self._fade_editable:
+        if not self._fade_editable:
+            return
+        if seconds == 0.02:
+            self.microfade_requested.emit()
+        else:
             super()._apply_symmetric_fade(seconds)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self.canvas and isinstance(event, QMouseEvent):
-            if event.type() == QEvent.Type.MouseButtonPress:
-                if event.button() == Qt.MouseButton.RightButton:
-                    return True
-                if event.button() == Qt.MouseButton.LeftButton:
-                    pos = event.position()
-                    wave, _, _ = self.canvas._wave_and_spec_rects()
-                    if self._fade_editable and (
-                        self.canvas._fade_tab_at(pos, wave) or self.canvas._fade_curve_point_at(pos, wave)
-                    ):
-                        return False
-                    if pos.x() < self.canvas._ml:
-                        return True
             if (event.type() == QEvent.Type.MouseButtonRelease
                     and event.button() == Qt.MouseButton.LeftButton and self._pending_fade is not None):
                 fade, self._pending_fade = self._pending_fade, None
@@ -1292,6 +1364,12 @@ class ProjectClipEditor(QWidget):
         self._project: EditProject | None = None
         self._project_id: str | None = None
         self._panel: _TimelineClipPanel | None = None
+        self._analysis_worker: ClipPreviewWorker | None = None
+        self._analysis_sequence = 0
+        self._analysis_callback: Callable[[object], None] | None = None
+        self._pcm_callback: Callable[[ClipPcmResult], None] | None = None
+        self._native_pcm_worker: ClipPreviewWorker | None = None
+        self._native_pcm_serial = 0
         self._extractor: WaveformExtractor | None = None
         # P0-2：PCM 取样的代际标识与最近一次结果（频谱重算复用）。
         self._pcm_provider: ClipPcmProvider | None = None
@@ -1355,6 +1433,7 @@ class ProjectClipEditor(QWidget):
             self._panel.btn_timeline.clicked.connect(self.timeline_requested.emit)
             self._panel.btn_tab.clicked.connect(self.tab_requested.emit)
             self._panel.gain_requested.connect(self._on_gain_requested)
+            self._panel.microfade_requested.connect(self._on_microfade_requested)
             self._panel.selection_gain_requested.connect(self._on_selection_gain_requested)
             self._panel.fadeApplied.connect(self._on_fade_requested)
             self._panel.fadeCurveChanged.connect(self._on_fade_curve_requested)
@@ -1490,7 +1569,8 @@ class ProjectClipEditor(QWidget):
         self._project = project
         source_changed = self._set_source(asset, project)
         self._title.setText(asset.display_name)
-        if source_changed:
+        spec = self._resolve_pcm_spec()
+        if source_changed or (spec is not None and spec.cache_key() != self._pcm_spec_key):
             self._request_waveform()
             self._sync_gain_fade()
 
@@ -1511,15 +1591,18 @@ class ProjectClipEditor(QWidget):
         previous = self._clip
         old_fps, self._fps = self._fps, float(timeline.fps)
         self._sample_rate = timeline.sample_rate
+        if previous is not clip or self._locked != track.is_locked:
+            self._cancel_analysis()
         self._clip = clip
         self._locked = track.is_locked
         geometry_changed = (
             self._source_changed
             or old_fps != self._fps
             or (previous.source_start, previous.source_duration, previous.timeline_duration,
-                previous.source_sample_offset, previous.is_reverse_playback()) != (
+                previous.source_sample_offset, previous.audio_sample_offset, previous.speed,
+                previous.freeze_source_frame) != (
                 clip.source_start, clip.source_duration, clip.timeline_duration,
-                clip.source_sample_offset, clip.is_reverse_playback(),
+                clip.source_sample_offset, clip.audio_sample_offset, clip.speed, clip.freeze_source_frame,
             )
         )
         if geometry_changed:
@@ -1533,6 +1616,8 @@ class ProjectClipEditor(QWidget):
                 output_total_samples=self._output_total_samples())
 
     def reset(self) -> None:
+        self._cancel_analysis()
+        self._cancel_pcm_request()
         self._clip = None
         self._timeline = None
         self._timeline_id = None
@@ -1567,6 +1652,7 @@ class ProjectClipEditor(QWidget):
             self.redo_requested.emit()
 
     def hideEvent(self, event: QHideEvent) -> None:
+        self._cancel_analysis()
         if self._panel is not None:
             self._panel._pending_fade = None
             self._panel.canvas.cancel_fade_drag()
@@ -1579,9 +1665,19 @@ class ProjectClipEditor(QWidget):
         """P0 · 关闭编辑器：结束预览 worker（可结束，在途结果不发布）。"""
         if self._panel is not None:
             self._panel.shutdown_preview()
+        self._cancel_analysis()
+        self._cancel_pcm_request()
+        if self._analysis_worker is not None:
+            self._analysis_worker.finish()
+            self._analysis_worker = None
+        if self._native_pcm_worker is not None:
+            self._native_pcm_worker.finish()
+            self._native_pcm_worker = None
         super().closeEvent(event)
 
     def _request_waveform(self) -> None:
+        self._cancel_analysis()
+        self._cancel_pcm_request()
         asset = self._asset
         if asset is None or self._panel is None:
             return
@@ -1610,34 +1706,73 @@ class ProjectClipEditor(QWidget):
         # P0-2：真实 PCM（波形/RMS/频谱/试听共用同一数据源）。
         self._request_pcm()
 
-    def _request_pcm(self) -> None:
-        asset, panel = self._asset, self._panel
-        if asset is None or panel is None or self._pcm_provider is None:
-            return
+    def _resolve_pcm_spec(self) -> ClipAudioRenderSpec | None:
+        asset = self._asset
+        if asset is None:
+            return None
         clip = self._clip
         if clip is not None and self._timeline is not None:
             source_asset = self._project.assets.get(clip.asset_id) if self._project is not None else None
-            spec = resolve_clip_audio_spec(
-                self._project, self._timeline, clip, source_asset or asset)
-        else:
-            spec = resolve_asset_audio_spec(self._project, asset)
-        if spec is None:
+            return resolve_clip_audio_spec(self._project, self._timeline, clip, source_asset or asset)
+        return resolve_asset_audio_spec(self._project, asset)
+
+    def _cancel_pcm_request(self) -> None:
+        self._native_pcm_serial += 1
+        if self._native_pcm_worker is not None:
+            self._native_pcm_worker.cancel()
+        callback, self._pcm_callback = self._pcm_callback, None
+        if callback is not None and self._pcm_provider is not None and self._pcm_spec_key is not None:
+            self._pcm_provider.cancel_request(self._pcm_spec_key, callback)
+
+    def _request_pcm(self) -> None:
+        from src.features.edit.core.audio_retime import needs_retime
+
+        spec = self._resolve_pcm_spec()
+        panel = self._panel
+        if spec is None or panel is None or self._pcm_provider is None:
             return
-        self._pcm_spec_key = spec.cache_key()
-        if self._panel is not None:
-            self._panel._preview_spec_key = self._pcm_spec_key
-            self._panel._pre_render_plan_for_preview = self._build_preview_plan
+        key = self._pcm_spec_key = spec.cache_key()
+        panel._preview_spec_key = key
+        panel._pre_render_plan_for_preview = self._build_preview_plan
+        clip, project = self._clip, self._project
+        if clip is not None and clip.freeze_source_frame is not None:
+            self._on_pcm_failed(key, I18N.tr("mixer.clip_editor.frozen_audio", "Frozen clip has no audio playback."))
+            return
+        if clip is not None and project is not None and needs_retime(clip):
+            fps, rate = self._fps, spec.sample_rate
+            request_key = (self._native_pcm_serial, key)
+            if self._native_pcm_worker is None:
+                self._native_pcm_worker = ClipPreviewWorker()
+                self._native_pcm_worker.preview_ready.connect(self._on_native_pcm_ready)
+                self._native_pcm_worker.preview_failed.connect(self._on_native_pcm_failed)
+                self.destroyed.connect(self._native_pcm_worker.finish)
+            self._native_pcm_worker.submit_cancellable(
+                request_key,
+                lambda cancelled: (request_key, rate, render_native_clip_pcm(
+                    project, clip, fps, rate, cancelled)))
+            return
 
         def on_pcm(result: ClipPcmResult) -> None:
-            # 结果返回前校验代际：切片段/重连/撤销后旧结果不得覆盖新窗口。
-            if result.spec_key == self._pcm_spec_key:
+            if self._pcm_callback is on_pcm and result.spec_key == self._pcm_spec_key:
+                self._pcm_callback = None
                 self._apply_pcm(result)
 
+        self._pcm_callback = on_pcm
         self._pcm_provider.request(spec, on_pcm)
+
+    def _on_native_pcm_ready(self, payload: tuple) -> None:
+        key, rate, pcm = payload
+        if pcm is not None and key == (self._native_pcm_serial, self._pcm_spec_key):
+            self._apply_pcm(ClipPcmResult(key[1], pcm, rate, pcm.shape[0]))
+
+    def _on_native_pcm_failed(self, key: tuple, error: str) -> None:
+        if key == (self._native_pcm_serial, self._pcm_spec_key):
+            self._on_pcm_failed(key[1], error)
 
     def _on_pcm_failed(self, key: tuple, error: str) -> None:
         if key != self._pcm_spec_key or self._pcm_applied:
             return
+        self._pcm_callback = None
         self._pcm_load_failed = True
         message = I18N.tr("mixer.clip_editor.pcm_failed", "Audio samples could not be loaded.")
         self._status.setText(f"{message} {error}" if error else message)
@@ -1682,17 +1817,13 @@ class ProjectClipEditor(QWidget):
         panel._duration = max(0.01, duration)
         panel._preview_spec_key = self._pcm_spec_key
         panel._pre_render_plan_for_preview = self._build_preview_plan
-        panel.attach_pcm(pcm, rate)
-        # 源监视模式（无工程栈）：预览是恒等计算——同步发布（读数即时），
-        # 有栈时仍走 worker。
-        if panel._model_audio_edit is None:
-            panel._preview_offline = True
-            panel._refresh_stack_preview()
-            panel._preview_offline = False
-        else:
-            panel._refresh_stack_preview()
-        panel.update_playhead(0.0)
         self._sync_gain_fade()
+        if self._clip is not None:
+            panel.set_stack_editable_hint(not self._locked)
+            panel.sync_audio_edit(self._clip.audio_edit, self._output_total_samples())
+        panel.attach_pcm(pcm, rate)
+        panel.update_playhead(0.0)
+        panel._refresh_stack_preview()
 
     def _on_fft_size_changed(self, _size: int) -> None:
         panel = self._panel
@@ -1850,10 +1981,10 @@ class ProjectClipEditor(QWidget):
             return (0, 1)
         t0, t1 = panel.canvas.getSelection()[:2] if selection is None else selection
         output_total = self._output_total_samples()
-        frac0 = max(0.0, min(1.0, t0 / panel._duration))
-        frac1 = max(0.0, min(1.0, t1 / panel._duration))
-        start = min(output_total - 1, int(round(frac0 * output_total)))
-        end = int(round(frac1 * output_total))
+        target = ClipAuditionCoordinates.from_edit(self._clip.audio_edit if self._clip else None)
+        origin = panel._audition_coordinates
+        start = max(0, min(output_total - 1, origin.map_to(target, round(t0 * AUDIO_REFERENCE_SAMPLE_RATE))))
+        end = max(0, min(output_total, origin.map_to(target, round(t1 * AUDIO_REFERENCE_SAMPLE_RATE))))
         return (start, max(start + 1, end))
 
     def _target_channels(self) -> tuple[int, ...]:
@@ -1871,7 +2002,7 @@ class ProjectClipEditor(QWidget):
         self.audio_edit_committed.emit(clip.clip_id, audio_edit, label)
 
     def _on_silence_requested(self, t0: float, t1: float) -> None:
-        start, end = self._selection_output_range()
+        start, end = self._selection_output_range((t0, t1))
         step = make_step(
             "mute", start=start, end=end, channels=self._target_channels(),
             label=I18N.tr("mixer.clip_editor.step_mute", "Silence"))
@@ -1886,171 +2017,127 @@ class ProjectClipEditor(QWidget):
             I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"),
         )
 
-    def _prepare_measurement(self, processor_id: str, operation: str,
-                             start: int, end: int,
-                             channels: tuple[int, ...]) -> dict | None:
-        """P0-1 · 解析测量上下文：插入点、选区折算与被替换步骤。
-
-        返回 dict（insertion_index / sel_start / sel_end / replace_index /
-        migrated_edit），预渲染后端缺席时置 ``error`` 信息键由调用方提示。
-        """
-        clip, panel = self._clip, self._panel
-        if clip is None or panel is None or panel._raw_pcm is None:
-            return None
-        from src.features.edit.core.audio_edit import (
-            find_measurement_step_index,
-            map_selection_to_insertion,
-            tag_legacy_measurement_operations,
-        )
-        migrated = tag_legacy_measurement_operations(
-            clip.audio_edit, legacy_labels=self._measurement_labels())
-        replace_index = find_measurement_step_index(
-            migrated, processor_id=processor_id, operation=operation,
-            start=start, end=end, channels=channels,
-            legacy_labels=self._measurement_labels())
-        sel_start, sel_end = map_selection_to_insertion(
-            migrated, start, end, replace_index)
-        step_count = len((migrated or {}).get("steps", []) or []) if isinstance(migrated, dict) else 0
-        return {
-            "migrated_edit": migrated,
-            "replace_index": replace_index,
-            "insertion_index": replace_index,
-            "sel_start": sel_start,
-            "sel_end": sel_end,
-            # 替换语义：已有同身份步骤时必须写入新系数（哪怕 ≈0），
-            # 否则旧的远端增益会残留；只有新增时才允许"已在目标"跳过。
-            "replacing": replace_index < step_count,
-        }
-
-    def _render_measurement_baseline(self, context: dict) -> np.ndarray | None:
-        """插入点基准 PCM；预渲染后端缺席/渲染失败返回 None（调用方提示）。"""
+    def _submit_analysis(
+        self, job: Callable[[Callable[[], bool]], object],
+        publish: Callable[[Any], None], *, current: Callable[[], bool] | None = None,
+    ) -> None:
         panel = self._panel
-        if panel is None or panel._raw_pcm is None:
-            return None
-        from src.features.edit.core.audio_edit import render_to_step_insertion
-        try:
-            return render_to_step_insertion(
-                panel._raw_pcm, context["migrated_edit"],
-                insertion_index=context["insertion_index"],
-                sample_rate=panel._pcm_rate)
-        except Exception:  # noqa: BLE001 - 后端缺席/解码失败均按不可测量提示
-            return None
+        if panel is None:
+            return
+        self._analysis_sequence += 1
+        key = (self._analysis_sequence,)
+        generation = panel._preview_generation
+        clip = self._clip
 
-    def _verify_candidate_measurement(self, candidate_edit: dict,
-                                      start: int, end: int,
-                                      channels: tuple[int, ...]) -> np.ndarray | None:
-        """P0-1 · 用同一渲染路径重建候选栈后的选区 PCM（复测/回报用）。
+        def apply_result(result: object) -> None:
+            if (result is not None and panel._preview_generation == generation
+                    and self._clip is clip and (current is None or current())):
+                publish(result)
 
-        读数与测量基准同语义：乘候选步骤的 unity 包络——边缘 3 ms 是
-        防爆音干湿过渡带，逐样本回退到原始电平，不参与目标读数。
-        """
-        panel = self._panel
-        if panel is None or panel._raw_pcm is None:
-            return None
-        from src.features.edit.core.audio_edit import (
-            render_audio_edit_full, selection_measurement_envelope,
-        )
-        try:
-            full = render_audio_edit_full(
-                panel._raw_pcm, candidate_edit, sample_rate=panel._pcm_rate)
-        except Exception:  # noqa: BLE001 - 复测失败只影响回报精度
-            return None
-        lo = max(0, min(start, full.shape[1]))
-        hi = max(lo, min(end, full.shape[1]))
-        if hi <= lo:
-            return None
-        usable = [c for c in channels if c < full.shape[0]]
-        if not usable:
-            return None
-        segment = full[usable, lo:hi] if len(usable) < full.shape[0] else full[:, lo:hi]
-        env = selection_measurement_envelope(
-            full.shape[1], start, end, sample_rate=panel._pcm_rate)
-        if env is not None:
-            segment = segment * env[lo:hi][None, :]
-        return segment
+        if panel._preview_offline:
+            try:
+                apply_result(job(lambda: False))
+            except (RuntimeError, ValueError, OSError) as exc:
+                self._report_analysis_failure(str(exc))
+            return
+        if self._analysis_worker is None:
+            worker = ClipPreviewWorker()
+            worker.preview_ready.connect(self._finish_analysis)
+            worker.preview_failed.connect(self._fail_analysis)
+            self.destroyed.connect(worker.finish)
+            self._analysis_worker = worker
+        self._analysis_callback = apply_result
+        self._analysis_worker.submit_cancellable(key, lambda cancelled: (key, job(cancelled)))
+
+    def _finish_analysis(self, payload: tuple) -> None:
+        key, result = payload
+        if key != (self._analysis_sequence,):
+            return
+        publish = self._analysis_callback
+        self._analysis_callback = None
+        if publish is not None:
+            publish(result)
+
+    def _fail_analysis(self, key: tuple, error: str) -> None:
+        if key == (self._analysis_sequence,):
+            self._analysis_callback = None
+            self._report_analysis_failure(error)
+
+    def _report_analysis_failure(self, error: str) -> None:
+        self._status.setText(I18N.tr(
+            "mixer.clip_editor.analysis_failed", "Audio analysis failed · {error}"
+        ).format(error=error))
+
+    def _cancel_analysis(self) -> None:
+        self._analysis_sequence += 1
+        self._analysis_callback = None
+        if self._analysis_worker is not None:
+            self._analysis_worker.cancel()
 
     def _on_normalize_requested(self, t0: float, t1: float, target_db: float) -> None:
-        """P0-1 · Normalize：对**步骤插入点**的数据测量，替换同身份旧系数。
+        self._measure_selection(t0, t1, target_db, None)
 
-        基准 = 按机架序渲染到目标步骤插入点的 PCM（替换时移除本次要
-        替换的增益，不叠加）；提交后用同一渲染路径复测实际峰值并回报。
-        静音无解提示；允许实际衰减或提升；同身份（处理器+操作+区间+
-        声道）重复提交替换不叠加；旧工程无 operation 的步骤按迁移规则
-        识别并沿用 step ID 与排序。
-        """
-        panel = self._panel
-        if panel is None or panel._raw_pcm is None or self._clip is None:
+    def _measure_selection(self, t0: float, t1: float, target: float,
+                           ceiling: float | None) -> None:
+        panel, clip = self._panel, self._clip
+        if panel is None or clip is None or self._locked or panel._raw_pcm is None:
             return
-        from src.features.edit.core.audio_edit import (
-            OPERATION_NORMALIZE_PEAK,
-            upsert_step,
-        )
+        if not all(map(math.isfinite, (t0, t1, target))) or t1 <= t0:
+            return
+        if ceiling is not None and not math.isfinite(ceiling):
+            return
+        loudness = ceiling is not None
         start, end = self._selection_output_range((t0, t1))
-        channels = self._target_channels()
-        context = self._prepare_measurement(
-            "normalize", OPERATION_NORMALIZE_PEAK, start, end, channels)
-        if context is None:
+        request = GainMeasurementRequest(
+            panel._raw_pcm, panel._pcm_rate, copy_audio_edit(clip.audio_edit),
+            self._target_channels(), start, end, target, ceiling,
+            "range_gain" if loudness else "normalize",
+            OPERATION_LOUDNESS_MATCH if loudness else OPERATION_NORMALIZE_PEAK,
+            (I18N.tr("mixer.clip_editor.step_loudness", "Loudness match") if loudness else
+             I18N.tr("mixer.clip_editor.step_normalize", "Normalize")),
+            self._measurement_labels())
+        panel.set_status_message(I18N.tr("mixer.clip_editor.measuring", "Measuring selection…"))
+        self._submit_analysis(
+            lambda cancelled: measure_gain_edit(request, cancelled),
+            lambda result: self._apply_gain_measurement(request, result),
+            current=lambda: not self._locked and clip.audio_edit == request.audio_edit)
+
+    def _apply_gain_measurement(self, request: GainMeasurementRequest,
+                                result: GainMeasurementResult) -> None:
+        panel = self._panel
+        if panel is None or self._locked:
             return
-        baseline = self._render_measurement_baseline(context)
-        if baseline is None:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.measurement_unavailable",
-                "Cannot measure this selection (render backend unavailable)"))
-            return
-        lo = max(0, min(context["sel_start"], baseline.shape[1]))
-        hi = max(lo, min(context["sel_end"], baseline.shape[1]))
-        usable = [c for c in channels if c < baseline.shape[0]]
-        if hi <= lo or not usable:
-            return
-        from src.features.edit.core.audio_edit import (
-            selection_measurement_envelope,
-        )
-        env = selection_measurement_envelope(
-            baseline.shape[1], context["sel_start"], context["sel_end"],
-            sample_rate=panel._pcm_rate)
-        window = np.abs(baseline[usable, lo:hi])
-        if env is not None:
-            window = window * env[lo:hi][None, :]
-        peak = float(window.max()) if window.size else 0.0
-        if peak <= 1e-6:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.no_signal", "No signal to normalize"))
-            return
-        import math as _math
-        gain_db = target_db - 20.0 * _math.log10(peak)
-        if abs(gain_db) < 0.05 and not context["replacing"]:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.already_normalized",
-                f"Selection already peaks at {target_db:+.1f} dBFS"))
-            return
-        step = make_step(
-            "normalize", start=start, end=end, channels=channels,
-            gain_db=round(gain_db, 2),
-            operation=OPERATION_NORMALIZE_PEAK,
-            label=I18N.tr("mixer.clip_editor.step_normalize", "Normalize"))
-        candidate = upsert_step(context["migrated_edit"], step)
-        # 复测：同一渲染路径重建候选栈，回报实际落点（非线性后级会改写
-        # 插入点目标，此处按最终输出读数呈现）。
-        achieved_db: float | None = None
-        segment = self._verify_candidate_measurement(
-            candidate, start, end, channels)
-        if segment is not None and segment.size:
-            peak_after = float(np.abs(segment).max())
-            if peak_after > 1e-9:
-                achieved_db = 20.0 * _math.log10(peak_after)
-        self._commit_audio_edit(
-            candidate,
-            I18N.tr("mixer.clip_editor.normalize_selection", "Normalize selection"))
-        if achieved_db is not None:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.normalize_measured",
-                "Measured {achieved:+.1f} dBFS after normalize (target {target:+.1f})"
-            ).format(achieved=achieved_db, target=target_db))
+        if result.status == "ready":
+            if request.true_peak_ceiling is None:
+                label = I18N.tr("mixer.clip_editor.normalize_selection", "Normalize selection")
+                message = I18N.tr(
+                    "mixer.clip_editor.normalize_measured",
+                    "Measured {achieved:+.1f} dBFS after normalize (target {target:+.1f})"
+                ).format(achieved=result.peak_or_lufs, target=request.target)
+            else:
+                label = I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness")
+                message = I18N.tr(
+                    "mixer.clip_editor.loudness_measured",
+                    "Measured {lufs:+.1f} LUFS / {tp:+.1f} dBTP after match (target {target:+.1f} LUFS)"
+                ).format(lufs=result.peak_or_lufs, tp=result.true_peak, target=request.target)
+            self._commit_audio_edit(result.edit, label)
+        elif result.status == "ceiling_not_met":
+            message = I18N.tr(
+                "mixer.clip_editor.ceiling_not_met",
+                "True peak remains above {ceiling:+.1f} dBTP after the rack. No gain applied."
+            ).format(ceiling=request.true_peak_ceiling)
+        elif result.status == "too_short":
+            message = I18N.tr("mixer.clip_editor.selection_too_short",
+                              "Select at least 400 ms for a loudness measurement")
+        elif result.status == "unchanged":
+            message = I18N.tr("mixer.clip_editor.measurement_unchanged",
+                              "No gain change needed for this selection")
+        elif result.status == "no_signal":
+            message = I18N.tr("mixer.clip_editor.no_signal", "No signal to normalize")
         else:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.normalize_submitted",
-                "Peak normalization requested · target {target:+.1f} dBFS"
-            ).format(target=target_db))
+            message = I18N.tr("mixer.clip_editor.measurement_unavailable",
+                              "Cannot measure this selection (render backend unavailable)")
+        panel.set_status_message(message)
 
     def _on_stack_step_toggled(self, step_id: str, enabled: bool) -> None:
         if self._clip is None or self._clip.audio_edit is None:
@@ -2180,11 +2267,6 @@ class ProjectClipEditor(QWidget):
         clip, panel = self._clip, self._panel
         if panel is None:
             return
-        if clip is None or self._locked:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.action_locked",
-                "Track is locked — spectral actions are disabled"))
-            return
         if panel._raw_pcm is None or panel._pcm is None:
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.pcm_required",
@@ -2198,6 +2280,11 @@ class ProjectClipEditor(QWidget):
         if mode == "solo_band":
             self._audition_band(t0, t1, f_low, f_high)
             return
+        if clip is None or self._locked or not self._can_append_pre_render():
+            if self._locked:
+                panel.set_status_message(I18N.tr(
+                    "mixer.clip_editor.action_locked", "Track is locked"))
+            return
         if f_high <= f_low or f_low <= 0.0:
             panel.info_label.setText(I18N.tr(
                 "mixer.clip_editor.band_required",
@@ -2207,9 +2294,9 @@ class ProjectClipEditor(QWidget):
         center = (start + end) // 2
         stroke = {
             "sample": int(center),
-            "hz": float((f_low + f_high) / 2.0),
+            "hz": math.sqrt(f_low * f_high),
             "time_radius": int(max(1, (end - start) // 2)),
-            "bandwidth_oct": float(max(0.05, math.log2(f_high / f_low))),
+            "bandwidth_oct": max(0.05, 0.5 * math.log2(f_high / f_low)),
         }
         step = make_step(
             "spectral_repair", start, end, self._target_channels(),
@@ -2221,53 +2308,31 @@ class ProjectClipEditor(QWidget):
             append_step(clip.audio_edit, step),
             I18N.tr("mixer.clip_editor.spectral_repair", "Spectral repair"))
 
-    def _audition_band(self, t0: float, t1: float,
-                       f_low: float, f_high: float) -> None:
-        """P1-3 · 带通试听：只听选区时段的选区频段（不入工程）。"""
+    def _audition_band(self, t0: float, t1: float, f_low: float, f_high: float) -> None:
         panel = self._panel
         if panel is None or panel._pcm is None:
             return
-        rate = panel._pcm_rate
-        pcm = panel._pcm
-        if pcm.shape[1] > 60 * rate:
-            panel.info_label.setText(I18N.tr(
+        rate, pcm = panel._pcm_rate, panel._pcm
+        start = max(0, round(t0 * rate))
+        end = min(pcm.shape[1], round(t1 * rate))
+        if end - start > 60 * rate:
+            panel.set_status_message(I18N.tr(
                 "mixer.clip_editor.band_preview_too_long",
-                "Band preview supports clips up to 60 s"))
+                "Select up to 60 seconds for band preview"))
             return
-        try:
-            from scipy.signal import butter, sosfiltfilt
-        except ImportError:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.loudness_unavailable",
-                "Loudness backend unavailable for this format"))
+        if end <= start or not 0.0 < f_low < f_high < rate / 2.0:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.band_required", "Select a frequency band on the spectrogram first"))
             return
-        nyquist = rate / 2.0
-        lo = max(10.0, min(f_low, nyquist * 0.95))
-        hi = max(lo * 1.01, min(f_high, nyquist * 0.99))
-        try:
-            sos = butter(4, [lo, hi], btype="band", fs=rate, output="sos")
-            filtered = sosfiltfilt(sos, pcm.astype(np.float64), axis=1)
-        except ValueError:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.band_required",
-                "Select a frequency band on the spectrogram first"))
-            return
-        filtered = np.ascontiguousarray(filtered, dtype=np.float32)
-        # 选区之外静音：只听该时段的该频段。
-        s0 = int(round(max(0.0, t0) * rate))
-        s1 = int(round(min(panel._duration, t1) * rate))
-        mask = np.zeros(filtered.shape[1], dtype=np.float32)
-        edge = min(480, max(1, (s1 - s0) // 8))
-        mask[max(0, s0 - edge):s1] = 1.0
-        if s0 > 0:
-            mask[max(0, s0 - edge):s0] = np.linspace(
-                0.0, 1.0, min(edge, s0), dtype=np.float32)
-        filtered = filtered * mask[None, :]
-        panel._audition.load(filtered, rate)
-        if not panel._audition.play(max(0, s0)):
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.no_audio_device",
-                "No audio device available for audition"))
+
+        def publish(filtered: np.ndarray) -> None:
+            if not panel.start_band_preview(start, filtered):
+                panel._show_device_failure()
+
+        self._submit_analysis(
+            lambda cancelled: None if cancelled() else build_band_preview(
+                pcm, rate, start, end, f_low, f_high),
+            publish, current=lambda: panel._pcm is pcm)
 
     def _pcm_range(self, t0: float, t1: float) -> tuple[int, int]:
         """显示秒 → 原始 PCM 半开样本区间（PCM 与显示域同比例）。"""
@@ -2275,36 +2340,42 @@ class ProjectClipEditor(QWidget):
         if panel is None or panel._raw_pcm is None or panel._duration <= 0.0:
             return (0, 0)
         total = panel._raw_pcm.shape[1]
-        lo = int(round(max(0.0, t0) / panel._duration * total))
-        hi = int(round(min(panel._duration, t1) / panel._duration * total))
-        return (lo, max(lo + 1, hi))
+        source = ClipAuditionCoordinates()
+        origin = panel._audition_coordinates
+        lo = max(0, min(total, origin.map_to(source, round(t0 * panel._pcm_rate))))
+        hi = max(lo, min(total, origin.map_to(source, round(t1 * panel._pcm_rate))))
+        return (lo, hi)
 
     def _on_noise_print_captured(self, t0: float, t1: float) -> None:
-        """P1-6：锁定纯噪声区间的中位数功率谱（后续 DSP 用同一签名校验）。"""
-        from src.features.edit.core.audio_denoise import (
-            capture_noise_profile, pcm_signature, scipy_available,
-        )
+        from src.features.edit.core.audio_denoise import capture_noise_profile, scipy_available
+
         panel = self._panel
         if panel is None or panel._raw_pcm is None:
             return
         if not scipy_available():
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.denoise_unavailable",
-                "Denoise requires the SciPy DSP backend"))
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.denoise_unavailable", "Denoise requires the SciPy DSP backend"))
+            return
+        if panel._pending_timepitch is not None:
             return
         lo, hi = self._pcm_range(t0, t1)
-        try:
-            profile = capture_noise_profile(
-                panel._raw_pcm, panel._pcm_rate, lo, hi,
-                nfft=panel.current_fft_size() if panel.current_fft_size() in (512, 1024, 2048, 4096) else 2048,
-                reduction_db=float(panel.denoise_knob.value()),
-            )
-        except ValueError as exc:
-            panel.info_label.setText(str(exc))
-            return
-        panel.set_noise_profile(profile)
-        panel.noise_status_lbl.setText(I18N.tr(
-            "mixer.clip_editor.noise_captured", f"● Captured {(hi - lo) / panel._pcm_rate:.2f} s"))
+        raw, rate = panel._raw_pcm, panel._pcm_rate
+        fft = panel.current_fft_size()
+        nfft = fft if fft in (512, 1024, 2048, 4096) else 2048
+        reduction = float(panel.denoise_knob.value())
+
+        def publish(profile: object) -> None:
+            panel.set_noise_profile(profile)
+            panel.noise_status_lbl.setText(I18N.tr(
+                "mixer.clip_editor.noise_captured", "Captured {duration:.2f} s"
+            ).format(duration=(hi - lo) / rate))
+            panel.set_status_message(panel.noise_status_lbl.text())
+
+        panel.set_status_message(I18N.tr("mixer.clip_editor.capturing_noise", "Capturing noise profile…"))
+        self._submit_analysis(
+            lambda cancelled: None if cancelled() else capture_noise_profile(
+                raw, rate, lo, hi, nfft=nfft, reduction_db=reduction),
+            publish)
 
     def _on_denoise_requested(self, t0: float, t1: float, reduction_db: float) -> None:
         """P1-6 + §3.3：谱减降噪——可编辑片段直接入栈（预渲染缓存承载）。
@@ -2344,10 +2415,8 @@ class ProjectClipEditor(QWidget):
             return
         # 与 build_pre_render_plan 同一阻断清单：变速片段的缓存基底与
         # 播放块域错位，入栈会永不生效——保持预览态并说明原因。
-        speed = getattr(clip, "effective_speed", None)
-        speed = float(speed() if callable(speed)
-                      else (speed if speed is not None else 1.0))
-        if abs(speed - 1.0) > 1e-9:
+        from src.features.edit.core.audio_retime import needs_retime
+        if needs_retime(clip):
             panel.set_denoise_preview(
                 (profile.noise_start, profile.noise_end), (lo, hi),
                 float(reduction_db), nfft=profile.nfft)
@@ -2356,15 +2425,14 @@ class ProjectClipEditor(QWidget):
                 "Retime/pitch commit lands with the length transaction — "
                 "denoise stays preview-only on this clip"))
             return
-        start, end = self._selection_output_range()
-        # 噪声采集区间与选区同在片段输出样本域（raw PCM 与输出域同比例）。
-        noise_start, noise_end = self._raw_to_output_range(
-            profile.noise_start, profile.noise_end)
+        if not self._can_append_pre_render():
+            return
+        start, end = self._selection_output_range((t0, t1))
         step = make_step(
             "spectral_denoise", start=start, end=end,
             channels=self._target_channels(),
             reduction_db=round(float(reduction_db), 2),
-            noise_start=noise_start, noise_end=noise_end,
+            noise_start=profile.noise_start, noise_end=profile.noise_end,
             nfft=int(profile.nfft), link_stereo=True,
             label=I18N.tr("mixer.clip_editor.step_denoise", "Denoise"))
         panel.clear_denoise_preview()
@@ -2380,10 +2448,10 @@ class ProjectClipEditor(QWidget):
         panel = self._panel
         if panel is None or panel._raw_pcm is None or panel._raw_pcm.shape[1] <= 0:
             return (max(0, raw_lo), max(raw_lo + 1, raw_hi))
-        output_total = self._output_total_samples()
-        scale = output_total / panel._raw_pcm.shape[1]
-        lo = int(round(raw_lo * scale))
-        hi = int(round(raw_hi * scale))
+        source = ClipAuditionCoordinates()
+        target = ClipAuditionCoordinates.from_edit(self._clip.audio_edit if self._clip else None)
+        lo = source.map_to(target, raw_lo)
+        hi = source.map_to(target, raw_hi)
         return (lo, max(lo + 1, hi))
 
     # ------------------------------------------------------------------
@@ -2393,18 +2461,38 @@ class ProjectClipEditor(QWidget):
         edit = self._clip.audio_edit if self._clip is not None else None
         return any(
             isinstance(step, dict)
+            and step.get("enabled", True)
             and step.get("processor_id") in LENGTH_CHANGING_PROCESSORS
             for step in (edit or {}).get("steps", []) or [])
+
+    def _can_append_pre_render(self) -> bool:
+        from src.features.edit.core.audio_denoise import scipy_available
+        from src.features.edit.core.audio_retime import needs_retime
+
+        clip, panel = self._clip, self._panel
+        if clip is None or panel is None or self._locked or panel._raw_pcm is None:
+            return False
+        if panel._pending_timepitch is not None:
+            return False
+        if not scipy_available():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.repair_unavailable",
+                "Spectral repair requires the SciPy DSP backend"))
+            return False
+        if needs_retime(clip) or self._has_length_step():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.pre_render_after_retime",
+                "Apply this process before changing the clip speed or length."))
+            return False
+        return True
 
     def _guard_length_commit(self) -> bool:
         """改长度提交的公共前置（片段/锁定/域兼容/既有改长度步骤）。"""
         clip, panel = self._clip, self._panel
         if clip is None or self._locked or panel is None or panel._raw_pcm is None:
             return False
-        speed = getattr(clip, "effective_speed", None)
-        speed = float(speed() if callable(speed)
-                      else (speed if speed is not None else 1.0))
-        if abs(speed - 1.0) > 1e-9:
+        from src.features.edit.core.audio_retime import needs_retime
+        if needs_retime(clip):
             panel.set_status_message(I18N.tr(
                 "mixer.clip_editor.length_native_retime",
                 "This clip already uses native retiming — clear its speed "
@@ -2503,7 +2591,6 @@ class ProjectClipEditor(QWidget):
     def _on_time_pitch_commit_requested(self) -> None:
         """§6.2：把预览的变速/音高作为 time_stretch 步骤提交。"""
         from src.features.edit.core.audio_denoise import scipy_available
-        from src.features.edit.core.audio_edit import time_stretch_output_length
         clip, panel = self._clip, self._panel
         if clip is None or panel is None:
             return
@@ -2520,23 +2607,12 @@ class ProjectClipEditor(QWidget):
                 "mixer.clip_editor.denoise_unavailable",
                 "Denoise requires the SciPy DSP backend"))
             return
-        lo, hi, ratio_pct, semitones, preserve = pending
-        old_total = self._output_total_samples()
-        # output_length 是“本步骤后的定义域长度”（§3 映射合同）。
-        segment_out = time_stretch_output_length(hi - lo, ratio_pct)
-        output_length = old_total - (hi - lo) + segment_out
-        step = make_step(
-            "time_stretch", start=lo, end=hi, channels=self._target_channels(),
-            ratio_pct=round(float(ratio_pct), 2),
-            pitch_semitones=round(float(semitones), 2),
-            preserve_pitch=bool(preserve),
-            output_length=int(output_length),
-            label=I18N.tr("mixer.clip_editor.step_timepitch",
-                          "Speed / pitch"))
-        self._commit_length_change(
-            append_step(clip.audio_edit, step),
-            I18N.tr("mixer.clip_editor.commit_timepitch",
-                    "Commit speed & pitch"))
+        if pending != panel._validated_timepitch:
+            return
+        candidate, _ = make_timepitch_draft(
+            clip.audio_edit, pending, self._output_total_samples(), self._target_channels())
+        self._commit_length_change(candidate, I18N.tr(
+            "mixer.clip_editor.commit_timepitch", "Commit speed & pitch"))
 
     def _on_delete_requested(self, t0: float, t1: float) -> None:
         """§3 控件映射：删除选区 —— delete_range 步骤 + 改长度事务。"""
@@ -2545,7 +2621,9 @@ class ProjectClipEditor(QWidget):
             return
         if not self._guard_length_commit():
             return
-        start, end = self._selection_output_range()
+        if panel._pending_timepitch is not None:
+            return
+        start, end = self._selection_output_range((t0, t1))
         total = self._output_total_samples()
         if start <= 0 and end >= total:
             panel.set_status_message(I18N.tr(
@@ -2565,6 +2643,8 @@ class ProjectClipEditor(QWidget):
         from src.features.edit.core.audio_repair import scipy_available
         clip, panel = self._clip, self._panel
         if clip is None or self._locked or panel is None or panel._raw_pcm is None:
+            return
+        if not self._can_append_pre_render():
             return
         if not scipy_available():
             panel.set_status_message(I18N.tr(
@@ -2620,7 +2700,9 @@ class ProjectClipEditor(QWidget):
             return
         if not self._guard_length_commit():
             return
-        start, end = self._selection_output_range()
+        if panel._pending_timepitch is not None:
+            return
+        start, end = self._selection_output_range((t0, t1))
         total = self._output_total_samples()
         if start <= 0 and end >= total:
             panel.set_status_message(I18N.tr(
@@ -2648,113 +2730,7 @@ class ProjectClipEditor(QWidget):
 
     def _on_lufs_normalize_requested(self, t0: float, t1: float,
                                      target_lufs: float, tp_ceiling: float) -> None:
-        """P0-1 · BS.1770 实测响度匹配（插入点基准/声道/同一选区）。
-
-        测量基于**步骤插入点**的渲染基准（替换时移除本次要替换的旧
-        增益，不叠加）与目标声道；允许实际衰减或提升（−10 LUFS 素材
-        对 −23 LUFS 目标应衰减）；升益受 dBTP 上限钳制；静音无解提示；
-        同身份重复提交**替换**不叠加；写入后按候选栈同一渲染路径复测
-        目标与 dBTP 并回报实测值。
-        """
-        clip, panel = self._clip, self._panel
-        if clip is None or self._locked or panel is None or panel._raw_pcm is None:
-            return
-        from src.features.edit.core.audio_edit import (
-            OPERATION_LOUDNESS_MATCH,
-            upsert_step,
-        )
-        from src.features.edit.core.loudness_analyzer import analyze_loudness
-        rate = panel._pcm_rate
-        start, end = self._selection_output_range((t0, t1))
-        channels = self._target_channels()
-        context = self._prepare_measurement(
-            "range_gain", OPERATION_LOUDNESS_MATCH, start, end, channels)
-        if context is None:
-            return
-        baseline = self._render_measurement_baseline(context)
-        if baseline is None:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.measurement_unavailable",
-                "Cannot measure this selection (render backend unavailable)"))
-            return
-        usable = [c for c in channels if c < baseline.shape[0]]
-        if not usable:
-            return
-        lo = max(0, min(context["sel_start"], baseline.shape[1]))
-        hi = max(lo, min(context["sel_end"], baseline.shape[1]))
-        if hi - lo < int(0.4 * rate):
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.selection_too_short",
-                "Select at least 400 ms for a loudness measurement"))
-            return
-        segment = baseline[usable, lo:hi] if len(usable) < baseline.shape[0] else baseline[:, lo:hi]
-        from src.features.edit.core.audio_edit import (
-            selection_measurement_envelope,
-        )
-        env = selection_measurement_envelope(
-            baseline.shape[1], context["sel_start"], context["sel_end"],
-            sample_rate=panel._pcm_rate)
-        if env is not None:
-            segment = segment * env[lo:hi][None, :]
-        report = analyze_loudness(np.ascontiguousarray(segment), float(rate))
-        if not getattr(report, "backend_available", False):
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.loudness_unavailable",
-                "Loudness backend unavailable for this format"))
-            return
-        integrated = float(report.integrated_lufs)
-        true_peak = float(report.true_peak_dbtp)
-        if not math.isfinite(integrated) or integrated <= -70.0:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.no_signal",
-                "No signal to normalize"))
-            return
-        gain = target_lufs - integrated
-        if gain > 0.0:
-            # 升益受 dBTP 上限钳制（基准的 true peak + gain ≤ 上限）；
-            # 衰减不受限（压低峰值只会更安全）。
-            gain = min(gain, tp_ceiling - true_peak)
-        if abs(gain) < 0.05 and not context["replacing"]:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.loudness_capped",
-                f"Already at {integrated:+.1f} LUFS / {true_peak:+.1f} dBTP — "
-                f"peak-limited, no gain applied"))
-            return
-        step = make_step(
-            "range_gain", start, end, channels,
-            gain_db=round(gain, 2),
-            operation=OPERATION_LOUDNESS_MATCH,
-            label=I18N.tr("mixer.clip_editor.step_loudness", "Loudness match"))
-        candidate = upsert_step(context["migrated_edit"], step)
-        # 复测：候选栈同一渲染路径重建后实测 LUFS/dBTP，回报实际落点。
-        achieved_lufs: float | None = None
-        achieved_tp: float | None = None
-        verify_segment = self._verify_candidate_measurement(
-            candidate, start, end, channels)
-        if verify_segment is not None and verify_segment.shape[1] >= int(0.4 * rate):
-            verify_report = analyze_loudness(
-                np.ascontiguousarray(verify_segment), float(rate))
-            if getattr(verify_report, "backend_available", False):
-                candidate_lufs = float(verify_report.integrated_lufs)
-                if math.isfinite(candidate_lufs) and candidate_lufs > -70.0:
-                    achieved_lufs = candidate_lufs
-                    achieved_tp = float(verify_report.true_peak_dbtp)
-        self._commit_audio_edit(
-            candidate,
-            I18N.tr("mixer.clip_editor.match_loudness", "Match target loudness"))
-        if achieved_lufs is not None:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.loudness_measured",
-                "Measured {lufs:+.1f} LUFS / {tp:+.1f} dBTP after match "
-                "(target {target:+.1f} LUFS)"
-            ).format(lufs=achieved_lufs,
-                     tp=achieved_tp if achieved_tp is not None else 0.0,
-                     target=target_lufs))
-        else:
-            panel.info_label.setText(I18N.tr(
-                "mixer.clip_editor.loudness_submitted",
-                "Loudness match requested · target {target:+.1f} LUFS"
-            ).format(target=target_lufs))
+        self._measure_selection(t0, t1, target_lufs, tp_ceiling)
 
     def _on_time_pitch_requested(self, t0: float, t1: float, ratio_pct: float,
                                  pitch_semitones: float, preserve: bool,
@@ -2768,23 +2744,31 @@ class ProjectClipEditor(QWidget):
         panel = self._panel
         if panel is None or panel._raw_pcm is None:
             return
+        if (not all(map(math.isfinite, (t0, t1, ratio_pct, pitch_semitones)))
+                or t1 <= t0 or not 50.0 <= ratio_pct <= 200.0
+                or not -12.0 <= pitch_semitones <= 12.0):
+            return
+        if self._has_length_step():
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.length_step_exists",
+                "Undo or disable the existing length-changing step first."))
+            return
         raw = panel._raw_pcm
         rate = panel._pcm_rate
-        duration = max(1e-9, raw.shape[1] / rate)
-        lo = int(round(max(0.0, t0) / duration * raw.shape[1]))
-        hi = int(round(min(duration, t1) / duration * raw.shape[1]))
-        lo, hi = max(0, lo), min(raw.shape[1], max(lo + 1, hi))
+        duration = raw.shape[1] / rate
+        lo, hi = self._pcm_range(t0, t1)
+        if hi <= lo:
+            return
         request = (lo, hi, float(ratio_pct), float(pitch_semitones), bool(preserve))
-        panel.set_timepitch_request(request)
-        # §6.2：预览参数即待提交参数（选区/速率/音高在 raw 域）。
-        panel.set_pending_timepitch(request)
-        # 合同长度估算（round(N·100/ratio)），不阻塞 UI。
-        segment_out = int(round((hi - lo) * 100.0 / max(1e-6, float(ratio_pct))))
+        if panel.btn_bypass.isChecked():
+            panel.btn_bypass.setChecked(False)
+        segment_out = time_stretch_output_length(hi - lo, ratio_pct)
         preview_seconds = (lo + segment_out + raw.shape[1] - hi) / rate
-        panel.info_label.setText(I18N.tr(
+        panel.set_status_message(I18N.tr(
             "mixer.clip_editor.timepitch_preview_requested",
-            f"Preview computing: ~{preview_seconds:.3f} s "
-            f"(was {duration:.3f} s) — commit with the length transaction"))
+            "Preparing preview · {preview:.3f} s (was {original:.3f} s)"
+        ).format(preview=preview_seconds, original=duration))
+        panel.set_timepitch_request(request)
 
     def _on_gain_requested(self, value: float) -> None:
         if self._clip is not None and not self._locked and value != self._clip.audio_gain_db:
@@ -2805,6 +2789,16 @@ class ProjectClipEditor(QWidget):
         step = make_step("range_gain", start, end, channels, gain_db=gain_db, label=label,
                          operation="selection_gain")
         self._commit_audio_edit(append_step(clip.audio_edit, step), label)
+
+    def _on_microfade_requested(self) -> None:
+        clip = self._clip
+        if clip is None or self._locked:
+            return
+        clock = TimelineSampleClock(self._fps)
+        each = min(960, int(clock.frame_start_sample(clip.timeline_duration)) // 2)
+        if (clip.fade_in_samples, clip.fade_out_samples) != (each, each):
+            self.sample_fade_committed.emit(clip.clip_id, each, each)
+        self._sync_gain_fade()
 
     def _on_fade_requested(self, fade_in: float, fade_out: float) -> None:
         clip = self._clip

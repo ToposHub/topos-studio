@@ -292,6 +292,32 @@ class TestAud33508ConvertedMapBackpressure:
 # =============================================================================
 
 class TestAud33509ChannelLayoutSingleSource:
+    def test_mov_pcm_writes_continuous_timestamps(self, out_path: str) -> None:
+        enc = FFmpegVideoEncoder(out_path, _tiny_config())
+        message_level = av.logging.get_level()
+        av.logging.set_level(av.logging.WARNING)
+        try:
+            with av.logging.Capture() as messages:
+                enc.open()
+                try:
+                    enc.add_audio_stream(codec="pcm_s24le", sample_rate=96000, channels=2)
+                    enc.encode_frame(_rgb_frame(0))
+                    enc.write_audio_samples(np.zeros((2, 1500), dtype=np.float32), 96000)
+                    enc.write_audio_samples(np.ones((2, 1101), dtype=np.float32) * 0.25, 96000)
+                finally:
+                    enc.close()
+        finally:
+            av.logging.set_level(message_level)
+
+        assert not any("Timestamps are unset" in message for _, _, message in messages)
+        with av.open(out_path) as container:
+            frames = list(container.decode(audio=0))
+        expected_pts = 0
+        for frame in frames:
+            assert frame.pts == expected_pts
+            expected_pts += frame.samples
+        assert expected_pts == 2601
+
     def test_six_channels_stream_and_frame_share_layout(self, out_path: str) -> None:
         """6ch：流/帧同用 '5.1'（修复前帧侧为 '6c'）。端到端回读 6 声道。
 

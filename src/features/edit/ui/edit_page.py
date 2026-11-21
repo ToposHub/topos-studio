@@ -50,6 +50,8 @@ from PyQt6.QtCore import pyqtSignal, QObject, QTimer
 
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.audio_edit import steps_signature
+from src.features.edit.core.audio_sync import resolve_audio_source
+from src.features.edit.core.clip_pcm import resolve_source_channel_map
 from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.source_patch import patch_for_asset
 
@@ -1626,7 +1628,6 @@ class EditPage(QWidget):
                 # source_start；预览/导出/Stem 同一 resolve 口径）
                 from src.features.edit.core.audio_sync import (
                     bound_audio_frame,
-                    resolve_audio_source,
                 )
                 audio_path_str, audio_offset = resolve_audio_source(
                     project, asset)
@@ -1677,13 +1678,7 @@ class EditPage(QWidget):
                     fade_in_frames=clip_fade_in,
                     fade_out_frames=clip_fade_out,
                     gain_db=float(getattr(clip, "audio_gain_db", 0.0) or 0.0),
-                    # W07：测试替身/旧会话工程可能没有源补丁覆盖表——
-                    # 缺席按默认补丁（getattr 防御，同 timeline_view 修法）
-                    source_channel_map=patch_for_asset(
-                        getattr(project, 'source_patch_overrides', None)
-                        or {},
-                        clip.asset_id,
-                    ).audio_channel_map,
+                    source_channel_map=resolve_source_channel_map(project, asset) or None,
                     preserve_pitch=clip_preserve_pitch,
                     fade_in_samples=getattr(clip, "fade_in_samples", None),
                     fade_out_samples=getattr(clip, "fade_out_samples", None),
@@ -1982,7 +1977,8 @@ class EditPage(QWidget):
             clip_entries: list[tuple[Any, ...]] = []
             for clip in getattr(track, "clips", ()):
                 asset = getattr(project, "assets", {}).get(getattr(clip, "asset_id", ""))
-                asset_path = str(getattr(asset, "path", "")) if asset is not None else ""
+                asset_path, audio_offset = resolve_audio_source(project, asset)
+                channel_map = resolve_source_channel_map(project, asset)
                 asset_fps = float(getattr(asset, "fps", 0.0) or 0.0) if asset is not None else 0.0
                 # P-clip-FX: 纳入该 clip 的 audio 效果（effect_type + 有序参数），
                 # 任一参数变化都会触发重新同步到音频引擎。视频效果不影响音频，
@@ -2012,15 +2008,22 @@ class EditPage(QWidget):
                 clip_entries.append((
                     getattr(clip, "clip_id", ""),
                     getattr(clip, "asset_id", ""),
-                    asset_path,
+                    str(asset_path),
+                    audio_offset,
+                    channel_map,
                     asset_fps,
                     int(getattr(clip, "source_start", 0) or 0),
                     int(getattr(clip, "timeline_start", 0) or 0),
                     int(getattr(clip, "timeline_duration", 0) or 0),
                     bool(getattr(clip, "is_enabled", True)),
                     speed_sig,
+                    float(getattr(clip, "audio_gain_db", 0.0) or 0.0),
                     int(getattr(clip, "fade_in_duration", 0) or 0),
                     int(getattr(clip, "fade_out_duration", 0) or 0),
+                    getattr(clip, "fade_in_samples", None),
+                    getattr(clip, "fade_out_samples", None),
+                    int(getattr(clip, "audio_sample_offset", 0) or 0),
+                    int(getattr(clip, "source_sample_offset", 0) or 0),
                     getattr(clip, "effective_fade_curve_in", None),
                     getattr(clip, "effective_fade_curve_out", None),
                     tuple(fx_sig),
@@ -2119,6 +2122,8 @@ class EditPage(QWidget):
         spec = plan.spec()
         if cache.has(spec):
             return ("ready", spec.key)
+        if not cache.can_store(spec):
+            return ("uncached", spec.key)
         cache.spawn_build(spec, plan.builder())
         self._ensure_pre_render_bridge()
         return ("pending", spec.key)
@@ -3472,9 +3477,6 @@ class EditPage(QWidget):
             _audio_path = None
             _audio_offset = 0.0
             if project is not None:
-                from src.features.edit.core.audio_sync import (
-                    resolve_audio_source,
-                )
                 _audio_path, _audio_offset = resolve_audio_source(
                     project, asset)
                 # F4.1 顺手修复（与 F3.4 source_patch_overrides 同类）：
@@ -3487,12 +3489,7 @@ class EditPage(QWidget):
             )
             self._source_viewer.open_asset(
                 asset,
-                # F4.1 顺手修复：duck-typed 工程无 source_patch_overrides
-                # 时回退无映射（与成片导出 getattr 防御同口径）
-                source_channel_map=patch_for_asset(
-                    getattr(project, "source_patch_overrides", None) or {},
-                    asset.asset_id,
-                ).audio_channel_map if project is not None else None,
+                source_channel_map=resolve_source_channel_map(project, asset) or None,
                 audio_source_path=_audio_path,
                 audio_offset_seconds=_audio_offset,
                 # R09：解释覆盖帧率随打开传入（监视器时基与时间线一致）

@@ -24,23 +24,29 @@ import logging
 import math
 import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Callable, Optional
+from fractions import Fraction
+from itertools import chain
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 import numpy as np
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, QMutex
+from PyQt6.QtCore import QCoreApplication, QObject, QThread, pyqtSignal
 
 from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame, resolve_audio_source
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 
+if TYPE_CHECKING:
+    import av
+    from src.features.edit.core.project import EditProject, MediaAsset
+
 logger = logging.getLogger(__name__)
 
-# 与 TakeAuditionPlayer 一致的护栏：单次取样的上限（内存与 UI 停留时间）。
+# 源监视器首次打开时的时长，以及各层独立的字节上限。
 MAX_CLIP_PCM_SECONDS = 300.0
-MAX_CLIP_PCM_SAMPLES = int(AUDIO_REFERENCE_SAMPLE_RATE * MAX_CLIP_PCM_SECONDS)
-MAX_CLIP_PCM_FILE_BYTES = 256 * 1024 * 1024
-# LRU：同一时间段内打开的片段数很有限，4 份立体声 5 分钟 ≈ 460 MB 上限。
+MAX_DECODED_PCM_BYTES = 256 * 1024 * 1024
 PCM_CACHE_CAPACITY = 4
+PCM_CACHE_MAX_BYTES = 128 * 1024 * 1024
 # 过零吸附：两声道绝对幅值和低于该值的符号变化都视为干净过零，
 # 干净候选之间按"离原游标最近"决胜（P0-2 §2.4）。
 ZERO_CROSSING_AMPLITUDE = 0.05
@@ -69,17 +75,25 @@ class ClipAudioRenderSpec:
     # P0-2 · 生效的源选道（绑定优先，其次工程 patch；()=直通）。
     # 进入 cache_key：patch/绑定切换后旧结果不得复用。
     source_channel_map: tuple = ()
+    source_asset_id: str = ""
 
     @property
     def sample_count(self) -> int:
         return max(0, self.end_sample - self.start_sample)
+
+    @property
+    def processing_channel_count(self) -> int:
+        channel_map = self.source_channel_map
+        if channel_map and all(0 <= src < self.channel_count for src, _dst in channel_map):
+            return min(2, len(channel_map))
+        return min(2, self.channel_count)
 
     def cache_key(self) -> tuple:
         """结果缓存的稳定标识：源指纹 + 精确范围 + 速率/声道/选道。"""
         return (
             self.source_fingerprint, self.sample_rate, self.channel_count,
             self.start_sample, self.end_sample, self.reverse,
-            self.source_channel_map,
+            self.source_channel_map, self.channel_layout, self.source_asset_id,
         )
 
 
@@ -95,10 +109,13 @@ class ClipPcmResult:
 
 
 def source_fingerprint(path: str) -> str:
-    """路径 + mtime + size 的指纹（与波形缓存同一套身份假设）。"""
+    """区分同路径上的文件替换和原地修改。"""
     try:
         stat = os.stat(path)
-        raw = f"{os.path.abspath(path)}:{stat.st_mtime_ns}:{stat.st_size}"
+        raw = (
+            f"{os.path.abspath(path)}:{stat.st_dev}:{stat.st_ino}:"
+            f"{stat.st_mtime_ns}:{stat.st_ctime_ns}:{stat.st_size}"
+        )
     except OSError:
         raw = f"{os.path.abspath(path)}::"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -116,7 +133,16 @@ def _audio_channel_layout(asset) -> Optional[str]:
     return layout if isinstance(layout, str) and layout else None
 
 
-def resolve_source_channel_map(project, asset) -> tuple:
+def _bound_source_asset(project: EditProject | None, asset: MediaAsset | None) -> MediaAsset | None:
+    binding = binding_for_asset(
+        getattr(project, "audio_sync_bindings", None) or {}, getattr(asset, "asset_id", ""))
+    if binding is None:
+        return None
+    source = (getattr(project, "assets", None) or {}).get(binding.wav_asset_id)
+    return source if getattr(source, "path", None) else None
+
+
+def resolve_source_channel_map(project: EditProject | None, asset: MediaAsset | None) -> tuple:
     """P0-2 · 素材生效的源选道：绑定优先，其次工程 patch 覆盖。
 
     绑定的 ``audio_channel_map`` 只在绑定实际切换音频源（外录 WAV）时
@@ -125,22 +151,17 @@ def resolve_source_channel_map(project, asset) -> tuple:
     一解析顺序——片段取样与渲染基底共享同一通道域。返回
     ``((src, dst), ...)``；无选道 = ``()``（直通）。
     """
+    from src.features.edit.core.source_patch import patch_for_asset
+
     asset_id = str(getattr(asset, "asset_id", ""))
-    try:
-        binding = binding_for_asset(
-            getattr(project, "audio_sync_bindings", None) or {}, asset_id)
-        if binding is not None and binding.audio_channel_map:
-            return tuple(tuple(pair) for pair in binding.audio_channel_map)
-    except Exception:  # noqa: BLE001 - 绑定解析失败按直通（键仍稳定）
-        pass
-    try:
-        from src.features.edit.core.source_patch import patch_for_asset
-        overrides = getattr(project, "source_patch_overrides", None) or {}
-        patch = patch_for_asset(overrides, asset_id)
-        if patch.audio_enabled and patch.audio_channel_map:
-            return tuple(tuple(pair) for pair in patch.audio_channel_map)
-    except Exception:  # noqa: BLE001 - patch 解析失败按直通（键仍稳定）
-        pass
+    binding = binding_for_asset(
+        getattr(project, "audio_sync_bindings", None) or {}, asset_id)
+    if (binding is not None and binding.audio_channel_map
+            and _bound_source_asset(project, asset) is not None):
+        return tuple(binding.audio_channel_map)
+    patch = patch_for_asset(getattr(project, "source_patch_overrides", None) or {}, asset_id)
+    if patch.audio_enabled and patch.audio_channel_map:
+        return tuple(patch.audio_channel_map)
     return ()
 
 
@@ -154,7 +175,7 @@ def resolve_clip_audio_spec(
     语义（与 ProjectClipEditor 的波形映射同一条数学路径），保证波形、
     频谱、试听共用同一坐标系。
     """
-    if project is None or timeline is None or clip is None or asset is None:
+    if project is None or timeline is None or clip is None or asset is None or working_rate <= 0:
         return None
     path, offset = resolve_audio_source(project, asset)
     if not path:
@@ -166,10 +187,13 @@ def resolve_clip_audio_spec(
     if not isinstance(source_fps, (int, float)) or not math.isfinite(source_fps) or source_fps <= 0.0:
         source_fps = timeline_fps
     start_frame = bound_audio_frame(clip.source_start, offset, source_fps)
-    start_sec = start_frame / source_fps + (clip.source_sample_offset or 0) / AUDIO_REFERENCE_SAMPLE_RATE
-    end_sec = (start_frame + max(0, clip.source_duration)) / source_fps
-    start_sample = max(0, round(start_sec * working_rate))
-    end_sample = max(start_sample, round(end_sec * working_rate))
+    clock = TimelineSampleClock(Fraction(str(source_fps)).limit_denominator(1_000_000), working_rate)
+    source_offset = Fraction((clip.source_sample_offset or 0) * working_rate,
+                             AUDIO_REFERENCE_SAMPLE_RATE)
+    start_sample = max(0, round(clock.frame_start_sample(start_frame) + source_offset))
+    end_sample = max(start_sample, round(
+        clock.frame_start_sample(start_frame + max(0, clip.source_duration))))
+    source_asset = _bound_source_asset(project, asset) or asset
     return ClipAudioRenderSpec(
         project_id=str(getattr(project, "project_id", "") or ""),
         timeline_id=str(timeline.timeline_id),
@@ -179,14 +203,15 @@ def resolve_clip_audio_spec(
         source_path=path,
         source_fingerprint=source_fingerprint(path),
         sample_rate=working_rate,
-        channel_count=_audio_channel_count(asset),
-        channel_layout=_audio_channel_layout(asset),
+        channel_count=_audio_channel_count(source_asset),
+        channel_layout=_audio_channel_layout(source_asset),
         start_sample=start_sample,
         end_sample=end_sample,
         reverse=bool(clip.is_reverse_playback()),
         offset_seconds=offset,
         display_duration=clip.timeline_duration / timeline_fps,
         source_channel_map=resolve_source_channel_map(project, asset),
+        source_asset_id=str(source_asset.asset_id),
     )
 
 
@@ -194,19 +219,17 @@ def resolve_asset_audio_spec(
     project, asset, *,
     working_rate: int = AUDIO_REFERENCE_SAMPLE_RATE,
 ) -> Optional[ClipAudioRenderSpec]:
-    """源监视模式：整段音频素材（无时间线裁剪）。"""
-    if asset is None:
+    """源监视模式：从音频起点取样，最多五分钟。"""
+    if asset is None or working_rate <= 0:
         return None
     path, offset = resolve_audio_source(project, asset)
     if not path:
         return None
-    duration = getattr(asset, "duration_seconds", None)
-    total = (
-        int(round(duration * working_rate))
-        if isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0
-        else MAX_CLIP_PCM_SAMPLES
-    )
-    total = max(0, min(total, MAX_CLIP_PCM_SAMPLES))
+    source_asset = _bound_source_asset(project, asset) or asset
+    duration = getattr(source_asset, "duration_seconds", None)
+    if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
+        duration = MAX_CLIP_PCM_SECONDS
+    total = round(min(duration, MAX_CLIP_PCM_SECONDS) * working_rate)
     return ClipAudioRenderSpec(
         project_id=str(getattr(project, "project_id", "") or "") if project is not None else "",
         timeline_id="",
@@ -216,15 +239,63 @@ def resolve_asset_audio_spec(
         source_path=path,
         source_fingerprint=source_fingerprint(path),
         sample_rate=working_rate,
-        channel_count=_audio_channel_count(asset),
-        channel_layout=_audio_channel_layout(asset),
-        start_sample=max(0, round(offset * working_rate)) if offset < 0 else 0,
+        channel_count=_audio_channel_count(source_asset),
+        channel_layout=_audio_channel_layout(source_asset),
+        start_sample=0,
         end_sample=total,
         reverse=False,
         offset_seconds=offset,
         display_duration=total / working_rate,
         source_channel_map=resolve_source_channel_map(project, asset),
+        source_asset_id=str(source_asset.asset_id),
     )
+
+
+def _decode_window_frames(
+    container: av.container.InputContainer, stream: av.AudioStream,
+    start_sample: int, sample_rate: int,
+) -> tuple[Iterator[av.AudioFrame], int]:
+    """Seek only for sample-addressable PCM WAV, preserving resampler phase.
+
+    Start far enough before the window to prime the filter. Align the seek
+    offset to the smallest source period corresponding to an integer number
+    of output samples, so separately requested adjacent windows join exactly.
+    """
+    import av
+
+    source_rate = stream.codec_context.sample_rate or 0
+    if (container.format.name == "wav" and (stream.codec_context.name or "").startswith("pcm_")
+            and source_rate > 0 and stream.time_base == Fraction(1, source_rate)
+            and not stream.start_time):
+        phase_period = source_rate // math.gcd(source_rate, sample_rate)
+        target_in = start_sample * source_rate // sample_rate
+        # swresample's interpolation history is in input samples.
+        preroll = 4096 * max(1, (source_rate + sample_rate - 1) // sample_rate)
+        seek_in = max(0, target_in - preroll) // phase_period * phase_period
+        if seek_in > 0:
+            try:
+                container.seek(seek_in, stream=stream)
+                frames = container.decode(stream)
+                first = next(frames)
+                if first.pts == seek_in and first.time_base == stream.time_base:
+                    return chain((first,), frames), seek_in * sample_rate // source_rate
+            except (av.error.FFmpegError, StopIteration):
+                pass
+            container.seek(0, stream=stream)
+    return container.decode(stream), 0
+
+
+def _pcm_frame_to_float(frame: av.AudioFrame) -> np.ndarray:
+    """Unpack a decoded frame, including left-aligned 24-bit samples in s32."""
+    data = frame.to_ndarray()
+    channels = len(frame.layout.channels)
+    if not frame.format.is_planar:
+        data = data.reshape(-1, channels).T
+    if np.issubdtype(data.dtype, np.integer):
+        info = np.iinfo(data.dtype)
+        midpoint = np.float32(1 << (info.bits - 1))
+        return (data.astype(np.float32) - (midpoint if info.min == 0 else 0)) / midpoint
+    return data.astype(np.float32, copy=False)
 
 
 def decode_audio_range(
@@ -236,200 +307,110 @@ def decode_audio_range(
     cancel_check: Optional[Callable[[], bool]] = None,
     channel_map: Optional[tuple] = None,
 ) -> Optional[np.ndarray]:
-    """解码源域 ``[start, end)`` 为工作采样率平面 float32。
+    """Decode a half-open range as planar float32, clipped to available audio.
 
-    P0 · 声道域合同（2026-11-19 计划）：解码保留源布局与通道名——
-    >2ch 不再由 PyAV 重采样器 naive 混成立体声，Nch 解出后先做可选的
-    源 patch 选道（``channel_map``，Nch 域——poly WAV 逐声道选择），
-    再经标准 BS.775 矩阵折到 ≤2ch 工作域（LFE 默认排除）。Clip Editor
-    取样、预渲染缓存与波形共用本路径（同一通道域）。
-
-    与 WaveformExtractorWorker 相同的 PyAV 管线：seek 到入点，重采样到
-    目标速率（fltp），按精确采样数裁剪 preroll/尾部。协作式取消——取消
-    返回 None。容器句柄 try/finally 关闭。
+    Source maps operate in the original channel domain before downmixing.
+    Individual mono resamplers preserve independent channels for multichannel
+    sources, including WAV files without a declared channel mask. The budget
+    applies to the requested decoded PCM, independent of container size.
     """
     import av
 
-    if end_sample <= start_sample or sample_rate <= 0:
-        return None
+    from src.features.edit.core.channel_layout import adapt_channels
+    from src.features.edit.core.source_patch import SourcePatchSpec
+
+    start_sample = max(0, start_sample)
     wanted = end_sample - start_sample
-    try:
-        if os.path.getsize(path) > MAX_CLIP_PCM_FILE_BYTES:
-            logger.warning("clip pcm rejected (file too large): %s", path)
-            return None
-    except OSError:
+    if wanted <= 0 or sample_rate <= 0 or (cancel_check is not None and cancel_check()):
         return None
 
-    container = None
     try:
-        container = av.open(path)
-        stream = next((s for s in container.streams if s.type == "audio"), None)
-        if stream is None:
-            return None
-        # 注：不做 container.seek——WAV 等容器的 seek 精度与 resampler 状态
-        # 会引入样本漂移；片段取样受 300 s 上限约束，从头解码并精确跳过
-        # preroll 更可靠（脉冲位置容差 1 sample 的验收依赖这一点）。
-        resampler = None
-        # P0-2 · >2ch 逐声道独立 mono resampler：swresample 是有状态的
-        # （FIR 历史 + 小数采样累加器）——共用单实例会把前一声道的滤波
-        # 尾泄漏进后续声道（串音），率转换下逐声道输出长度还会不等长
-        # （np.stack 失败 → 整帧被吞 → 输出短缺）。每声道一个实例、喂
-        # 等长 mono 输入，输出逐样本独立且等长（见 AUD：44.1k 4ch 只给
-        # CH1 0.25 时右声道串漏 0.281 / 只收 4458 样本）。
-        channel_resamplers: list = []
-        source_channels = 0
-        blocks: list[np.ndarray] = []
-        collected = 0
-        # 先丢到入点前的 preroll，再收满所需采样。
-        skip = start_sample
-
-        def _resampled_ndarrays(result) -> list[np.ndarray]:
-            """resample() 结果（帧或帧列表）→ 平面 float32 数组列表。"""
-            if result is None:
-                return []
-            frames = result if isinstance(result, (list, tuple)) else [result]
-            arrays = []
-            for out in frames:
-                data = out.to_ndarray()
-                if data.ndim == 1:
-                    data = data.reshape(1, -1)
-                arrays.append(data.astype(np.float32, copy=False))
-            return arrays
-
-        def _feed(data_list: list[np.ndarray]) -> bool:
-            """块入账（跳过 preroll / 收满即停）；返回是否已收满。"""
-            nonlocal skip, collected
-            for data in data_list:
-                if cancel_check is not None and cancel_check():
-                    return True
-                if data.ndim == 1:
-                    data = data.reshape(1, -1)
-                if skip > 0:
-                    if data.shape[1] <= skip:
-                        skip -= data.shape[1]
-                        continue
-                    data = data[:, skip:]
-                    skip = 0
-                blocks.append(data.astype(np.float32, copy=False))
-                collected += data.shape[1]
-                if collected >= wanted:
-                    return True
-            return collected >= wanted
-
-        for frame in container.decode(stream):
-            if cancel_check is not None and cancel_check():
+        with av.open(path) as container:
+            stream = next(iter(container.streams.audio), None)
+            if stream is None:
                 return None
-            if resampler is None and not channel_resamplers:
-                source_channels = len(frame.layout.channels)
-                # P0：保留源布局解码（>2ch 不在重采样阶段 naive 混声）；
-                # 工作域折叠在解码完成后走我们的 BS.775 矩阵。无名多声道
-                # 布局（无 channel mask 的 WAV）会让 PyAV 重采样器崩溃——
-                # >2ch 一律逐声道以 mono 重采样（声道数无关、率精确）。
-                if source_channels <= 2:
-                    resampler = av.AudioResampler(
-                        format="fltp",
-                        layout="mono" if source_channels == 1 else "stereo",
-                        rate=sample_rate)
-                else:
-                    channel_resamplers = [
-                        av.AudioResampler(
-                            format="fltp", layout="mono", rate=sample_rate)
-                        for _ in range(source_channels)
-                    ]
-            if resampler is not None:
-                try:
-                    if _feed(_resampled_ndarrays(resampler.resample(frame))):
+            frames, decoded_start = _decode_window_frames(container, stream, start_sample, sample_rate)
+            skip = start_sample - decoded_start
+            patch = SourcePatchSpec(audio_channel_map=tuple(channel_map)) if channel_map else None
+            direct_resampler: av.AudioResampler | None = None
+            mono_resamplers: list[av.AudioResampler] = []
+            pcm: np.ndarray | None = None
+            collected = 0
+
+            def feed(data: np.ndarray) -> bool:
+                nonlocal skip, collected, pcm
+                dropped = min(skip, data.shape[1])
+                skip -= dropped
+                data = data[:, dropped:dropped + wanted - collected]
+                if data.shape[1] == 0:
+                    return False
+                if patch is not None:
+                    data = patch.select_channels(data)
+                if data.shape[0] > 2:
+                    data = adapt_channels(data, 2)
+                channels, length = data.shape
+                if pcm is None:
+                    if wanted * channels * np.dtype(np.float32).itemsize > MAX_DECODED_PCM_BYTES:
+                        raise ValueError("Requested audio window exceeds decoded PCM byte budget")
+                    pcm = np.empty((channels, wanted), dtype=np.float32)
+                pcm[:, collected:collected + length] = data
+                collected += length
+                return collected == wanted
+
+            def resample_mono(
+                resampler: av.AudioResampler, row: np.ndarray | None, rate: int,
+            ) -> np.ndarray:
+                mono = None
+                if row is not None:
+                    mono = av.AudioFrame.from_ndarray(
+                        np.ascontiguousarray(row).reshape(1, -1), format="fltp", layout="mono")
+                    mono.sample_rate = rate
+                parts = resampler.resample(mono)
+                if not parts:
+                    return np.empty(0, dtype=np.float32)
+                return np.concatenate([part.to_ndarray()[0] for part in parts])
+
+            def feed_multichannel(raw: np.ndarray | None, rate: int) -> bool:
+                rows = [
+                    resample_mono(resampler, raw[index] if raw is not None else None, rate)
+                    for index, resampler in enumerate(mono_resamplers)
+                ]
+                # Independent instances see the same number of samples. A
+                # discrepancy is a decode failure, not permission to shift channels.
+                return feed(np.stack(rows))
+
+            for frame in frames:
+                if cancel_check is not None and cancel_check():
+                    return None
+                if direct_resampler is None and not mono_resamplers:
+                    channels = len(frame.layout.channels)
+                    if channels <= 2:
+                        direct_resampler = av.AudioResampler(
+                            format="fltp", layout="mono" if channels == 1 else "stereo",
+                            rate=sample_rate)
+                    else:
+                        mono_resamplers = [
+                            av.AudioResampler(format="fltp", layout="mono", rate=sample_rate)
+                            for _ in range(channels)
+                        ]
+                if direct_resampler is not None:
+                    if any(feed(out.to_ndarray()) for out in direct_resampler.resample(frame)):
                         break
-                except Exception:  # noqa: BLE001 - 个别帧重采样失败时跳过
-                    continue
+                elif feed_multichannel(_pcm_frame_to_float(frame), frame.sample_rate or sample_rate):
+                    break
             else:
-                # >2ch：packed → (chs, n) float32，逐声道独立 mono 重采样。
-                try:
-                    raw = frame.to_ndarray()
-                except Exception:  # noqa: BLE001
-                    continue
-                if raw.ndim == 1:
-                    raw = raw.reshape(1, -1)
-                if raw.dtype != np.float32:
-                    raw = raw.astype(np.float32) / 32768.0
-                if raw.shape[0] == 1:
-                    raw = raw.reshape(-1, source_channels).T
-                per_channel: list[np.ndarray] = []
-                try:
-                    for ch in range(source_channels):
-                        mono_row = np.ascontiguousarray(
-                            raw[ch], dtype=np.float32).reshape(1, -1)
-                        mono_frame = av.AudioFrame.from_ndarray(
-                            mono_row, format="fltp", layout="mono")
-                        mono_frame.sample_rate = frame.sample_rate or sample_rate
-                        parts = _resampled_ndarrays(
-                            channel_resamplers[ch].resample(mono_frame))
-                        if not parts:
-                            continue
-                        per_channel.append(np.concatenate(parts, axis=1)[0])
-                    if not per_channel:
-                        continue
-                    # 独立实例喂等长输入时逐声道输出等长；防御性对齐到
-                    # 最短通道（个别后端差异宁可裁掉尾部也不丢整帧）。
-                    width = min(part.shape[0] for part in per_channel)
-                    if any(part.shape[0] != width for part in per_channel):
-                        logger.warning(
-                            "clip pcm multichannel resample length mismatch "
-                            "for %s (trimmed to %d)", path, width)
-                        per_channel = [part[:width] for part in per_channel]
-                    if _feed([np.stack(per_channel)]):
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-        else:
-            # 解码自然耗尽仍未收满 → 冲刷重采样器内部延迟块（swresample
-            # 的 FIR 尾部），保留最后几个样本（EOF 语义）。
-            tails: list[np.ndarray] = []
-            try:
-                if resampler is not None:
-                    tails = _resampled_ndarrays(resampler.resample(None))
-                elif channel_resamplers:
-                    per_channel = []
-                    for channel_resampler in channel_resamplers:
-                        parts = _resampled_ndarrays(
-                            channel_resampler.resample(None))
-                        if not parts:
-                            continue
-                        per_channel.append(np.concatenate(parts, axis=1)[0])
-                    if per_channel:
-                        width = min(part.shape[0] for part in per_channel)
-                        per_channel = [part[:width] for part in per_channel]
-                        tails = [np.stack(per_channel)]
-            except Exception:  # noqa: BLE001 - 冲刷失败按已有块交付
-                tails = []
-            if tails:
-                _feed(tails)
-        if cancel_check is not None and cancel_check():
-            return None
-        if not blocks:
-            return None
-        pcm = np.concatenate(blocks, axis=1)[:, :wanted]
-        if pcm.shape[1] == 0:
-            return None
-        # P0 · 声道域：Nch 域源 patch 选道（选不出=直通）→ BS.775 矩阵
-        # 折到 ≤2ch 工作域（LFE 默认排除）。
-        if channel_map:
-            from src.features.edit.core.source_patch import SourcePatchSpec
-            pcm = SourcePatchSpec(
-                audio_channel_map=tuple(channel_map)).select_channels(pcm)
-        if pcm.shape[0] > 2:
-            from src.features.edit.core.channel_layout import adapt_channels
-            pcm = adapt_channels(pcm, 2)
-        return np.ascontiguousarray(pcm, dtype=np.float32)
-    except Exception as exc:  # noqa: BLE001 - 解码失败按“无 PCM”上报
+                if direct_resampler is not None:
+                    for out in direct_resampler.resample(None):
+                        if feed(out.to_ndarray()):
+                            break
+                elif mono_resamplers:
+                    feed_multichannel(None, sample_rate)
+            if pcm is None or (cancel_check is not None and cancel_check()):
+                return None
+            return pcm if collected == wanted else pcm[:, :collected].copy()
+    except (av.error.FFmpegError, OSError, ValueError) as exc:
         logger.warning("clip pcm decode failed for %s: %s", path, exc)
         return None
-    finally:
-        if container is not None:
-            try:
-                container.close()
-            except Exception:  # noqa: BLE001
-                logger.debug("clip pcm container close failed", exc_info=True)
 
 
 def compute_waveform_stats(
@@ -477,6 +458,7 @@ def compute_spectrogram(
     time_bins: int = 256,
     freq_bins: int = 96,
     db_floor: float = -96.0,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> list[list[float]]:
     """Hann STFT → 对数频率行、归一化 0-1 的 [time][freq] 矩阵。
 
@@ -487,49 +469,36 @@ def compute_spectrogram(
     nfft = max(256, 1 << int(max(8, math.log2(nfft))))
     hop = max(1, nfft // 4)
     window = np.hanning(nfft)
-    data = pcm.astype(np.float64, copy=False)
-    # 每声道独立 STFT 后功率相加——与声道间相位无关，反极性不抵消。
-    frames = max(1, 1 + (data.shape[1] - nfft) // hop) if data.shape[1] >= nfft else 1
-    power = np.zeros((frames, nfft // 2 + 1), dtype=np.float64)
-    for ch in range(data.shape[0]):
-        x = data[ch]
-        if x.size < nfft:
-            x = np.pad(x, (0, nfft - x.size))
-        for i in range(frames):
-            seg = x[i * hop:i * hop + nfft] * window
-            power[i] += np.abs(np.fft.rfft(seg)) ** 2
-    # 时间轴聚到 time_bins 桶
-    if frames > time_bins:
-        edges = np.linspace(0, frames, time_bins + 1).astype(np.int64)
-        edges = np.unique(np.maximum.accumulate(edges))
-        cols = np.maximum(1, len(edges) - 1)
-        aggregated = np.empty((cols, power.shape[1]), dtype=np.float64)
-        for i in range(cols):
-            aggregated[i] = power[edges[i]:max(edges[i] + 1, edges[i + 1])].max(axis=0)
-    else:
-        aggregated = power
-        cols = frames
+    if pcm.shape[1] < nfft:
+        pcm = np.pad(pcm, ((0, 0), (0, nfft - pcm.shape[1])))
+    windows = np.lib.stride_tricks.sliding_window_view(pcm, nfft, axis=1)[:, ::hop]
+    frames = windows.shape[1]
+    cols = min(frames, max(1, time_bins))
+    edges = np.linspace(0, frames, cols + 1).astype(np.int64)
+    aggregated = np.zeros((cols, nfft // 2 + 1), dtype=np.float64)
+    # Only materialize a small batch of windowed samples at a time. Summing
+    # power before each bin's peak reduction prevents antiphase cancellation.
+    batch_size = 64
+    for col, (start, end) in enumerate(zip(edges[:-1], edges[1:])):
+        for position in range(start, end, batch_size):
+            if cancel_check is not None and cancel_check():
+                return []
+            batch = windows[:, position:min(position + batch_size, end)] * window
+            energy = np.square(np.abs(np.fft.rfft(batch, axis=-1))).sum(axis=0)
+            np.maximum(aggregated[col], energy.max(axis=0), out=aggregated[col])
     db = 10.0 * np.log10(np.maximum(aggregated, 1e-18))
     nyquist = sample_rate * 0.5
     f_min, f_max = 20.0, max(1000.0, nyquist)
-    log_span = math.log10(f_max / f_min)
     fft_freqs = np.fft.rfftfreq(nfft, d=1.0 / max(1, sample_rate))
-    matrix: list[list[float]] = []
     norm = 1.0 / (-db_floor)
-    for col in range(cols):
-        row = [0.0] * freq_bins
-        for b in range(freq_bins):
-            lo = f_min * (f_max / f_min) ** (b / freq_bins)
-            hi = f_min * (f_max / f_min) ** ((b + 1) / freq_bins)
-            mask = (fft_freqs >= lo) & (fft_freqs < hi) if b else (fft_freqs >= 0) & (fft_freqs < hi)
-            if not mask.any():
-                # 高于 Nyquist 的行（f_max 被钳到 1k 的极端情况）置 0
-                row[b] = 0.0
-                continue
-            value = float(db[col][mask].max())
-            row[b] = max(0.0, min(1.0, value * norm))
-        matrix.append(row)
-    return matrix
+    matrix = np.zeros((cols, freq_bins), dtype=np.float64)
+    for band in range(freq_bins):
+        lo = f_min * (f_max / f_min) ** (band / freq_bins) if band else 0.0
+        hi = f_min * (f_max / f_min) ** ((band + 1) / freq_bins)
+        mask = (fft_freqs >= lo) & (fft_freqs < hi)
+        if mask.any():
+            matrix[:, band] = np.clip(db[:, mask].max(axis=1) * norm, 0.0, 1.0)
+    return matrix.tolist()
 
 
 def find_zero_crossing(
@@ -574,90 +543,82 @@ def find_zero_crossing(
 
 
 class _ClipPcmWorker(QThread):
-    """后台解码一个 spec；同一 worker 串行处理最新请求（旧请求协作取消）。"""
+    """Decode the latest request and cooperatively cancel superseded work."""
 
-    finished_pcm = pyqtSignal(object)  # ClipPcmResult | None（携带 spec_key）
-    failed = pyqtSignal(tuple, str)    # spec_key, error
+    finished_pcm = pyqtSignal(int, object)
+    failed = pyqtSignal(int, tuple, str)
 
-    def __init__(self, parent: QObject | None = None) -> None:
-        super().__init__(parent)
-        self._mutex = QMutex()
-        self._spec: Optional[ClipAudioRenderSpec] = None
-        self._generation = 0
-        self._canceled = False
-        self._wakeup = threading.Event()
+    def __init__(self) -> None:
+        super().__init__()
+        self._condition = threading.Condition()
+        self._job: tuple[int, ClipAudioRenderSpec] | None = None
+        self._request_id: int | None = None
+        self._stopping = False
 
-    def submit(self, spec: ClipAudioRenderSpec) -> None:
-        self._mutex.lock()
-        try:
-            self._generation += 1
-            self._canceled = True  # 掐掉在途任务
-            self._spec = spec
-        finally:
-            self._mutex.unlock()
-        self._wakeup.set()
+    def submit(self, request_id: int, spec: ClipAudioRenderSpec) -> None:
+        with self._condition:
+            self._request_id = request_id
+            self._job = (request_id, spec)
+            self._condition.notify()
         if not self.isRunning():
             self.start()
 
     def cancel_all(self) -> None:
-        self._mutex.lock()
-        try:
-            self._generation += 1
-            self._canceled = True
-            self._spec = None
-        finally:
-            self._mutex.unlock()
+        with self._condition:
+            self._request_id = None
+            self._job = None
 
-    def run(self) -> None:  # noqa: D102 - QThread 入口
+    def stop(self) -> None:
+        with self._condition:
+            self._stopping = True
+            self._request_id = None
+            self._job = None
+            self._condition.notify()
+
+    def run(self) -> None:
         while True:
-            self._wakeup.wait()
-            self._wakeup.clear()
-            self._mutex.lock()
-            generation = self._generation
-            self._canceled = False
-            spec = self._spec
-            self._spec = None
-            self._mutex.unlock()
-            if spec is None:
-                continue
+            with self._condition:
+                self._condition.wait_for(lambda: self._stopping or self._job is not None)
+                if self._stopping:
+                    return
+                request_id, spec = self._job
+                self._job = None
+
             def canceled() -> bool:
-                self._mutex.lock()
-                try:
-                    return self._canceled or self._generation != generation
-                finally:
-                    self._mutex.unlock()
+                with self._condition:
+                    return self._request_id != request_id
+
             try:
                 pcm = decode_audio_range(
                     spec.source_path, spec.start_sample, spec.end_sample,
                     spec.sample_rate, cancel_check=canceled,
-                    # P0-2 · 片段取样与预渲染基底同一通道域：spec 携带
-                    # 绑定/patch 选道，decode 在完整 Nch 域先选道再降混。
                     channel_map=spec.source_channel_map or None,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - worker boundary, report the failure
                 if not canceled():
-                    self.failed.emit(spec.cache_key(), str(exc))
+                    self.failed.emit(request_id, spec.cache_key(), str(exc))
                 continue
             if canceled():
                 continue
             if pcm is None:
-                self.failed.emit(spec.cache_key(), "")
+                self.failed.emit(request_id, spec.cache_key(), "")
                 continue
             if spec.reverse:
-                pcm = pcm[:, ::-1]
-            self.finished_pcm.emit(ClipPcmResult(
+                pcm = np.ascontiguousarray(pcm[:, ::-1])
+            channels = int(pcm.shape[0])
+            self.finished_pcm.emit(request_id, ClipPcmResult(
                 spec_key=spec.cache_key(),
                 pcm=pcm,
                 sample_rate=spec.sample_rate,
-                channel_count=int(pcm.shape[0]),
-                channel_layout=spec.channel_layout,
+                channel_count=channels,
+                channel_layout="mono" if channels == 1 else "stereo",
             ))
 
 
 class ClipPcmProvider(QObject):
-    """单例：spec → PCM 的请求/缓存层（原子发布 + LRU + 代际校验）。"""
+    """Deliver the newest PCM request and cache by both count and byte size."""
 
-    pcm_ready = pyqtSignal(object)     # ClipPcmResult
+    pcm_ready = pyqtSignal(object)
     pcm_failed = pyqtSignal(tuple, str)
 
     _instance: "ClipPcmProvider | None" = None
@@ -665,59 +626,111 @@ class ClipPcmProvider(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._cache: dict[tuple, ClipPcmResult] = {}
-        self._cache_order: list[tuple] = []
+        self._cache: OrderedDict[tuple, ClipPcmResult] = OrderedDict()
+        self._cache_bytes = 0
         self._worker = _ClipPcmWorker()
         self._worker.finished_pcm.connect(self._on_worker_pcm)
         self._worker.failed.connect(self._on_worker_failed)
         self._pending: dict[tuple, list[Callable[[ClipPcmResult], None]]] = {}
-        self._done_once: set[tuple] = set()
+        self._request_id = 0
+        self._active_key: tuple | None = None
+        self._closed = False
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.shutdown)
 
     @classmethod
     def instance(cls) -> "ClipPcmProvider":
         with cls._instance_lock:
-            if cls._instance is None:
+            if cls._instance is None or cls._instance._closed:
                 cls._instance = ClipPcmProvider()
             return cls._instance
 
     def get_cached(self, spec: ClipAudioRenderSpec) -> Optional[ClipPcmResult]:
-        return self._cache.get(spec.cache_key())
+        key = spec.cache_key()
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+        return cached
 
     def request(
         self, spec: ClipAudioRenderSpec,
         callback: Optional[Callable[[ClipPcmResult], None]] = None,
     ) -> bool:
-        """请求一个 spec 的 PCM；命中缓存立即（同步）回调。"""
+        """Start a request, delivering cache hits inline as before."""
+        if self._closed:
+            raise RuntimeError("Clip PCM provider is shut down")
         key = spec.cache_key()
-        cached = self._cache.get(key)
+        cached = self.get_cached(spec)
         if cached is not None:
+            self.cancel_request(self._active_key)
             if callback is not None:
                 callback(cached)
             return True
+        if key != self._active_key:
+            self._pending.clear()
+            self._request_id += 1
+            self._active_key = key
+            self._worker.submit(self._request_id, spec)
         if callback is not None:
             self._pending.setdefault(key, []).append(callback)
-        self._worker.submit(spec)
         return False
 
-    def shutdown(self) -> None:
+    def cancel_request(
+        self, key: tuple | None,
+        callback: Callable[[ClipPcmResult], None] | None = None,
+    ) -> None:
+        """Release one callback, or cancel the entire current request by key."""
+        if key is None or self._active_key != key:
+            return
+        if callback is not None:
+            callbacks = self._pending.get(key, ())
+            if callback not in callbacks:
+                return
+            remaining = [registered for registered in callbacks if registered != callback]
+            if remaining:
+                self._pending[key] = remaining
+                return
+        self._active_key = None
+        self._pending.pop(key, None)
         self._worker.cancel_all()
-        self._worker.wait(200)
 
-    # ------------------------------------------------------------------
-    def _on_worker_failed(self, key: tuple, error: str) -> None:
+    def shutdown(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._pending.clear()
+        self._active_key = None
+        self._cache.clear()
+        self._cache_bytes = 0
+        self._worker.stop()
+        if not self._worker.wait(1000):
+            logger.warning("clip PCM decode worker has not stopped")
+
+    def _on_worker_failed(self, request_id: int, key: tuple, error: str) -> None:
+        if request_id != self._request_id or key != self._active_key:
+            return
+        self._active_key = None
         self._pending.pop(key, None)
         self.pcm_failed.emit(key, error)
 
-    def _on_worker_pcm(self, result: ClipPcmResult) -> None:
+    def _on_worker_pcm(self, request_id: int, result: ClipPcmResult) -> None:
         key = result.spec_key
-        self._cache[key] = result
-        self._cache_order.append(key)
-        while len(self._cache_order) > PCM_CACHE_CAPACITY:
-            self._cache.pop(self._cache_order.pop(0), None)
-        callbacks = self._pending.pop(key, [])
+        if request_id != self._request_id or key != self._active_key:
+            return
+        self._active_key = None
+        nbytes = result.pcm.nbytes
+        if nbytes <= PCM_CACHE_MAX_BYTES:
+            while self._cache and (len(self._cache) >= PCM_CACHE_CAPACITY
+                                   or self._cache_bytes + nbytes > PCM_CACHE_MAX_BYTES):
+                _, evicted = self._cache.popitem(last=False)
+                self._cache_bytes -= evicted.pcm.nbytes
+            self._cache[key] = result
+            self._cache_bytes += nbytes
+        callbacks = self._pending.pop(key, ())
         for callback in callbacks:
             try:
                 callback(result)
-            except Exception:  # noqa: BLE001
-                logger.exception("clip pcm callback failed")
+            except Exception:  # noqa: BLE001 - callback failures must not suppress other clients
+                logger.exception("clip PCM callback failed")
         self.pcm_ready.emit(result)
