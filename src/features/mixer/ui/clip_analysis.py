@@ -25,8 +25,54 @@ from src.features.edit.core.audio_edit import (
 )
 
 if TYPE_CHECKING:
+    from src.features.edit.core.effect_instance import EffectInstance
     from src.features.edit.core.project import EditProject
     from src.features.edit.core.timeline_v2 import ClipInstance
+
+
+def render_clip_effects(
+    pcm: np.ndarray, sample_rate: int, effects: tuple[EffectInstance, ...],
+    first_frame: int, fps: float, cancelled: Callable[[], bool],
+) -> np.ndarray:
+    """Render the clip insert chain for audition at the clip's original length."""
+    from src.features.edit.core.audio_dsp import EffectChain
+    from src.features.edit.core.audio_retime import animated_fx_sampler, clip_fx_entries
+    from src.features.edit.core.sample_time import TimelineSampleClock
+
+    sampler = animated_fx_sampler(effects)
+    chain = EffectChain(sample_rate)
+    chain.set_params(sampler(first_frame) if sampler else clip_fx_entries(effects))
+    if not chain.is_active and sampler is None:
+        return pcm
+
+    clock = TimelineSampleClock(fps, sample_rate)
+    frame_origin = int(clock.frame_start_sample(first_frame))
+    length = pcm.shape[1]
+    # Flush the algorithmic delay before cropping to the audition range.
+    latency = chain.latency_samples()
+    output = np.empty_like(pcm)
+    start = 0
+    frame = first_frame
+    while start < length + latency:
+        if cancelled():
+            return pcm
+        if sampler is None:
+            end = start + 4096
+        else:
+            end = max(start + 1, int(clock.frame_start_sample(frame + 1)) - frame_origin)
+            if frame != first_frame:
+                chain.set_params(sampler(frame))
+            frame += 1
+        end = min(end, length + latency)
+        block = pcm[:, start:end].copy()
+        if end > length:
+            block = np.pad(block, ((0, 0), (0, end - max(start, length))))
+        processed = chain.process(block)
+        keep = max(start, latency)
+        if end > keep:
+            output[:, keep - latency:end - latency] = processed[:, keep - start:]
+        start = end
+    return output
 
 
 @dataclass(frozen=True)

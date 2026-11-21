@@ -54,6 +54,44 @@ def _editor_with_clip(qapp, pcm=None, locked=False):
 
 
 class TestSpectralContextMenuWiring:
+    def test_moved_commands_use_the_current_selection(self, qapp, qtbot, monkeypatch) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QMenu
+
+        editor, panel, _committed, _messages = _editor_with_clip(qapp)
+        qtbot.addWidget(editor)
+        editor._empty.hide()
+        editor._scroll.show()
+        editor.resize(1180, 600)
+        panel.set_stack_editable_hint(True)
+        editor.show()
+
+        panel.normalizeRequested.disconnect()
+        panel.noisePrintCaptured.disconnect()
+        normalized, captured = [], []
+        panel.normalizeRequested.connect(lambda *args: normalized.append(args))
+        panel.noisePrintCaptured.connect(lambda *args: captured.append(args))
+        expect_selection = False
+
+        def choose(menu: QMenu, *_args: object) -> None:
+            for command in (panel.action_normalize, panel.action_capture_noise):
+                entry = next(action for action in menu.actions() if action.text() == command.text())
+                if not expect_selection:
+                    assert not entry.isEnabled()
+                else:
+                    assert entry is command and entry.isEnabled()
+                    entry.trigger()
+
+        monkeypatch.setattr(QMenu, "exec", choose)
+        qtbot.mouseClick(panel.btn_more, Qt.MouseButton.LeftButton)
+        assert not normalized and not captured
+        panel.canvas.setSelection(0.25, 0.75)
+        expect_selection = True
+        wave, _, _ = panel.canvas._wave_and_spec_rects()
+        qtbot.mouseClick(panel.canvas, Qt.MouseButton.RightButton, pos=wave.center().toPoint())
+        assert normalized == [(0.25, 0.75, -1.0)]
+        assert captured == [(0.25, 0.75)]
+
     def test_canvas_right_click_reaches_spectral_menu(self, qapp, qtbot, monkeypatch) -> None:
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QMenu

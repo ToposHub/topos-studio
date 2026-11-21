@@ -74,10 +74,29 @@ def _tr(suffix: str, default: str) -> str:
     return I18N.tr(f"mixer.effects_browser.{suffix}", default)
 
 
-def _effect_name(effect: EffectDefinition) -> str:
+def audio_effect_name(effect: EffectDefinition) -> str:
     effect_type = effect.effect_type
     name = I18N.tr(_NAME_KEYS.get(effect_type, f"audio.fx.{effect_type}"), effect.name)
     return I18N.tr(f"audio.fx.name.{effect_type}", name)
+
+
+def audio_effect_groups(
+    *, include_track_effects: bool = False,
+) -> Iterable[tuple[str, str, list[EffectDefinition]]]:
+    # Spatial Panner is a track parameter. The old noise_gate ID aliases expander.
+    supported = AUDIO_MIXER_EFFECT_TYPES - {"noise_gate"}
+    if include_track_effects:
+        supported |= {"spatial_panner"}
+    effects = {
+        effect.effect_type: effect
+        for effect in get_effect_registry().get_effects_by_category("audio")
+        if effect.effect_type in supported
+    }
+    for key, group_name, effect_types in _GROUPS:
+        ordered = effect_types if key != "other" else tuple(sorted(effects))
+        entries = [effects.pop(effect_type) for effect_type in ordered if effect_type in effects]
+        if entries:
+            yield _tr(f"group.{key}", group_name), group_name, entries
 
 
 class _MixerEffectsTree(QTreeWidget):
@@ -157,23 +176,8 @@ class MixerEffectsPanel(QWidget):
             self._filter(self.search.text())
 
     def _populate(self) -> None:
-        # The production registry and clip-attachment capability are shared
-        # with Edit. Browsing should not trigger the DSP engine's cold import.
-        # Spatial Panner uses the timeline's track-parameter command rather
-        # than an audio DSP insert. The old noise_gate ID aliases expander.
-        supported = (AUDIO_MIXER_EFFECT_TYPES - {"noise_gate"}) | {"spatial_panner"}
-        effects = {
-            effect.effect_type: effect
-            for effect in get_effect_registry().get_effects_by_category("audio")
-            if effect.effect_type in supported
-        }
         row_icon = icon_fx(C.TEXT_HINT)
-        for key, group_name, effect_types in _GROUPS:
-            ordered = effect_types if key != "other" else tuple(sorted(effects))
-            entries = [effects.pop(effect_type) for effect_type in ordered if effect_type in effects]
-            if not entries:
-                continue
-            label = _tr(f"group.{key}", group_name)
+        for label, group_name, entries in audio_effect_groups(include_track_effects=True):
             heading = QTreeWidgetItem(self.tree, [label])
             heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
             heading.setForeground(0, QColor(C.TEXT_SECONDARY))
@@ -183,7 +187,7 @@ class MixerEffectsPanel(QWidget):
             heading.setSizeHint(0, QSize(0, 25))
             for effect in entries:
                 effect_type = effect.effect_type
-                name = _effect_name(effect)
+                name = audio_effect_name(effect)
                 item = QTreeWidgetItem(heading, [name])
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable |
                               Qt.ItemFlag.ItemIsDragEnabled)

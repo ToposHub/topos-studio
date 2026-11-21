@@ -3188,7 +3188,8 @@
   },
   "dock": {
     "float": "浮动",
-    "dock": "停靠"
+    "dock": "停靠",
+    "close": "关闭面板"
   },
   "fps_indicator": {
     "tooltip": "实时预览帧率"

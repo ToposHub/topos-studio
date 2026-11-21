@@ -5,6 +5,7 @@ drifting away from the standard dock menu used by the main window.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Optional
 
 from PyQt6.QtWidgets import QDockWidget, QMenu, QWidget
@@ -22,7 +23,9 @@ def find_parent_dock(widget: Optional[QWidget]) -> Optional[QDockWidget]:
     return None
 
 
-def add_dock_management_actions(menu: QMenu, dock: QDockWidget) -> None:
+def add_dock_management_actions(
+    menu: QMenu, dock: QDockWidget, *, toggle_floating: Callable[[], None] | None = None,
+) -> None:
     """Append the standard Float/Dock and Close actions to ``menu``."""
     float_action = menu.addAction(
         I18N.tr("dock.float", "Float")
@@ -30,7 +33,7 @@ def add_dock_management_actions(menu: QMenu, dock: QDockWidget) -> None:
         else I18N.tr("dock.dock", "Dock")
     )
     float_action.triggered.connect(
-        lambda: dock.setFloating(not dock.isFloating())
+        toggle_floating if toggle_floating is not None else lambda: dock.setFloating(not dock.isFloating())
     )
 
     close_action = menu.addAction(I18N.tr("dock.close", "Close"))

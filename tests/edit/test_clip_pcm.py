@@ -420,7 +420,7 @@ class TestProjectClipEditorPcm:
         editor.show()
         editor.open_source(asset, project=project)
         panel = editor._panel
-        qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=15000)
+        qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=15000)
         assert panel._pcm.shape == (2, 48000)
         # 播放/循环/频谱/FFT/过零吸附控件随 PCM 可用而启用。
         for widget in (panel.btn_play, panel.btn_loop, panel.btn_snap_zero,
@@ -428,8 +428,9 @@ class TestProjectClipEditorPcm:
             assert widget.isEnabled()
         # RMS 真实读数 + 频谱矩阵已装载。
         assert panel.rms_val_lbl.text() not in ("—", "")
-        assert panel.canvas._spec_matrix and panel.canvas._spec_matrix[0]
-        assert max(max(row) for row in panel.canvas._spec_matrix) > 0.3
+        pixels = panel.canvas._spectrogram.pixels
+        assert pixels.shape[0] == 2
+        assert pixels.max() > 0.3 * 255
         # 过零吸附：440 Hz → 半周期 ~54.5 样本处过零。
         panel.btn_snap_zero.setChecked(True)
         panel.canvas.setSelection(0.0015, 0.0090)  # 72 → 432 样本

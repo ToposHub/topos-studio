@@ -8,10 +8,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from PyQt6.QtCore import QEvent, QObject, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QResizeEvent, QShortcut
+from PyQt6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QShortcut, QShowEvent
 from PyQt6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QCheckBox, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QVBoxLayout, QWidget,
 )
 
@@ -19,8 +19,9 @@ from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_fra
 from src.features.edit.core.audio_waveform import (
     WaveformData, WaveformExtractor, get_cached_waveform, is_waveform_pending,
 )
+from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.clip_pcm import (
-    ClipAudioRenderSpec, ClipPcmProvider, ClipPcmResult, compute_spectrogram, compute_waveform_stats,
+    ClipAudioRenderSpec, ClipPcmProvider, ClipPcmResult, compute_waveform_stats,
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
 )
 from src.features.edit.core.audio_edit import (
@@ -34,15 +35,21 @@ from src.features.edit.core.audio_edit import (
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.edit.core.fade_curve_spec import is_fade_curve
-from src.features.mixer.effects.panels.clip_editor import ProcessStepRow, StudioAudioClipEditor
+from src.features.mixer.effects.panels.clip_editor import (
+    ClipEditorElidedLabel, ProcessStepRow, StudioAudioClipEditor,
+)
+from src.features.mixer.spectrogram import Spectrogram, analyze_spectrogram
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
+from src.shared.ui.dock_context_menu import add_dock_management_actions, find_parent_dock
 
 from .clip_analysis import (
     ClipAuditionCoordinates, GainMeasurementRequest, GainMeasurementResult,
     build_band_preview, make_timepitch_draft, measure_gain_edit, render_native_clip_pcm,
+    render_clip_effects,
 )
 from .clip_audition import ClipAuditionSession
+from .clip_effect_rack import ClipEffectRack
 from .clip_preview_worker import ClipPreviewResult, ClipPreviewWorker
 from .workspace_style import PANEL_QSS
 
@@ -60,44 +67,13 @@ class _PanelStatusForwarder:
         self._panel.noise_status_lbl.setToolTip(text)
 
 if TYPE_CHECKING:
+    from src.features.edit.core.effect_instance import EffectInstance
     from src.features.edit.core.project import EditProject, MediaAsset
     from src.features.edit.core.timeline_v2 import ClipInstance, TimelineSequence
 
 
 _FADE_CURVES = {"Linear": "linear", "S-Curve": "smooth", "Log": "equal_power"}
 _DISPLAY_FADE_CURVES = {"linear": "Linear", "smooth": "S-Curve", "equal_power": "Equal Power"}
-
-
-class _StatusLabel(QLabel):
-    """Keep long filenames and status messages on one accessible line."""
-
-    def __init__(self, elide: Qt.TextElideMode) -> None:
-        super().__init__()
-        self._full_text = ""
-        self._elide = elide
-        self.setTextFormat(Qt.TextFormat.PlainText)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-
-    def setText(self, text: str) -> None:
-        self._full_text = text
-        self.setAccessibleName(text)
-        self.setToolTip(text)
-        self._refresh_text()
-        self.updateGeometry()
-
-    def sizeHint(self) -> QSize:
-        metrics = self.fontMetrics()
-        return QSize(metrics.horizontalAdvance(self._full_text) + 2, metrics.height())
-
-    def minimumSizeHint(self) -> QSize:
-        return QSize(0, self.fontMetrics().height())
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self._refresh_text()
-
-    def _refresh_text(self) -> None:
-        super().setText(self.fontMetrics().elidedText(self._full_text, self._elide, self.width()))
 
 
 class _TimelineClipPanel(StudioAudioClipEditor):
@@ -121,14 +97,12 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_timeline.setIconSize(QSize(14, 14))
         self.btn_timeline.setCursor(Qt.CursorShape.PointingHandCursor)
         self._transport_layout.insertWidget(0, self.btn_timeline)
-        self.btn_tab = QPushButton(I18N.tr("mixer.clip_editor.tab", "Dock with timeline"))
-        self.btn_tab.setObjectName("GroupBtn")
-        self.btn_tab.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab.hide()
-        self._transport_layout.insertWidget(self._transport_layout.indexOf(self.btn_loop) + 1, self.btn_tab)
-        # Let the scroll area use the toolbar's minimum width so labels stay readable.
-        # The inspector already scrolls independently. Keep the waveform in
-        # view when the editor shares a short dock with the audio timeline.
+        self.effect_rack = ClipEffectRack()
+        self.tools_panel.insertTab(
+            self.tools_panel.indexOf(self.process_stack_tab),
+            self.effect_rack, I18N.tr("mixer.clip_editor.rack.tab", "Effects"))
+        self.effect_rack.reveal_requested.connect(self._show_effect_rack)
+        # Fit the dock around the canvas. The toolbar and tools scroll independently.
         self.setMinimumSize(0, 0)
         self.canvas.setMinimumHeight(142)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -159,6 +133,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # (gain_db, fade_in_frames, fade_out_frames, fade_in_samples,
         #  fade_out_samples, curve_in, curve_out, fps, timeline_duration)。
         self._clip_gain_fade: tuple | None = None
+        self._clip_fx: tuple[tuple[EffectInstance, ...], int, float] | None = None
+        self._clip_fx_revision = 0
         # P0 · 预览 worker 状态：代际（旧发布丢弃）、spec 键、缓存计划
         # 钩子（外层注入）、失败留痕、离线模式（测试同步计算）。
         self._preview_generation = 0
@@ -170,6 +146,15 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         # P1-2 · FFT 独立换档的内容复用缓存（键 = 内容键；PCM 只在内容
         # 变化时重算，FFT 换档只重算频谱）。
         self._last_preview: ClipPreviewResult | None = None
+        self._spectrum_detail_worker: ClipPreviewWorker | None = None
+        self._spectrum_detail_key: tuple | None = None
+        self._spectrum_detail_timer = QTimer(self)
+        self._spectrum_detail_timer.setSingleShot(True)
+        self._spectrum_detail_timer.setInterval(85)
+        self._spectrum_detail_timer.timeout.connect(self._request_spectrum_detail)
+        self.canvas.spectralViewportChanged.connect(self._schedule_spectrum_detail)
+        self.btn_spectral.toggled.connect(self._schedule_spectrum_detail)
+        self.fftSizeChanged.connect(self._refresh_stack_preview)
         self._audition_coordinates = ClipAuditionCoordinates()
         self._preview_offline = False
         # P1-6：噪声特征与降噪预览（试听态；入栈需预渲染缓存，后续批次）。
@@ -213,6 +198,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._rebuild_process_stack_ui()
         self.set_stack_editable(self._stack_editable_hint)
         self._refresh_stack_preview()
+
+    def _show_effect_rack(self) -> None:
+        self.tools_panel.setCurrentWidget(self.effect_rack)
+        self.btn_tools_panel.setChecked(True)
 
     def set_status_message(self, text: str) -> None:
         hook = self._status_hook
@@ -323,7 +312,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._timepitch_button.setToolTip(I18N.tr(
             "mixer.clip_editor.timepitch_preview_tip", "Audition the settings for the selection or the whole clip"))
         layout = self._timepitch_button.parentWidget().layout()
-        self._timepitch_summary = QLabel()
+        self._timepitch_summary = ClipEditorElidedLabel()
         self._timepitch_summary.setStyleSheet("color: #8BCBD4; font-size: 10px; border: none;")
         layout.addWidget(self._timepitch_summary)
         actions = QHBoxLayout()
@@ -383,6 +372,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         P0：有工程处理栈时试听装载**处理后**数据（由预览发布驱动），
         不再用源 PCM 当栈处理结果——重开静音/降噪栈首次试听即正确。
         """
+        self._cancel_spectrum_detail()
         self._pcm = pcm
         self._raw_pcm = pcm
         self._on_edit_channel_selected(-1)
@@ -396,7 +386,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.set_pending_timepitch(None)
         self._preview_generation += 1  # 旧片段在途预览全部作废
         gain_fade = self._clip_gain_fade
-        if self._model_audio_edit is None and (gain_fade is None or not any(gain_fade[:5])):
+        if (self._model_audio_edit is None and self._clip_fx is None
+                and (gain_fade is None or not any(gain_fade[:5]))):
             self._audition.load(pcm, sample_rate)
         else:
             self._audition.clear()
@@ -410,7 +401,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def _set_pcm_tools_enabled(self, available: bool) -> None:
         unavailable = I18N.tr("mixer.clip_editor.pcm_required", "Wait for the audio samples to load.")
         for widget in (self.btn_play, self._stop_button, self.btn_loop, self.btn_snap_zero,
-                       self.btn_spectral, self.fft_combo, self.btn_noise_print, self.btn_denoise,
+                       self.btn_spectral, self.fft_combo, self.action_capture_noise, self.btn_denoise,
                        self.denoise_knob, self.denoise_pill, self.stretch_knob, self.pitch_knob,
                        self.pitch_pill, self.stretch_ratio_pill, self.target_dur_pill,
                        self.time_pitch_reset_button, self.preserve_pitch_sw, self._timepitch_button):
@@ -420,6 +411,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if available:
             self.btn_play.setToolTip(I18N.tr("mixer.clip_editor.play_audition", "Start or stop clip audition (Space)"))
             self.btn_loop.setToolTip(I18N.tr("mixer.clip_editor.loop_audition", "Loop the selection, or the whole clip"))
+            self.btn_spectral.setToolTip(I18N.tr(
+                "mixer.clip_editor.spectrogram_tip", "Show or hide the spectrogram (time, frequency, and level)"))
             self._timepitch_button.setToolTip(I18N.tr(
                 "mixer.clip_editor.timepitch_preview_tip", "Audition the settings for the selection or the whole clip"))
 
@@ -431,6 +424,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._audition.set_monitor(muted=(), solo=())
         if self._preview_worker is not None:
             self._preview_worker.cancel()
+        self._cancel_spectrum_detail()
+        self.canvas.setSpectrogram(None)
+        self.canvas.setWaveformSamples(None)
         self._pcm = None
         self._raw_pcm = None
         self.btn_bypass.setChecked(False)
@@ -461,8 +457,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _update_stack_actions(self) -> None:
         active = self.canvas.project_edits_enabled
+        self.action_normalize.setEnabled(active)
         self.btn_bypass.setEnabled(self._pcm is not None and (
-            self._model_audio_edit is not None or self._pending_timepitch is not None))
+            self._model_audio_edit is not None or self._pending_timepitch is not None
+            or self._clip_fx is not None))
         for widget in (self.btn_tool_envelope, self.btn_tool_brush, self.btn_env_reset,
                        self.btn_apply_lufs, self.target_lufs_pill, self.tp_ceil_pill,
                        *self._lufs_preset_btns.values(), *self._selection_edit_buttons):
@@ -643,8 +641,86 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if worker is not None:
             worker.finish()
             self._preview_worker = None
+        self._cancel_spectrum_detail()
+        if self._spectrum_detail_worker is not None:
+            self._spectrum_detail_worker.finish()
+            self._spectrum_detail_worker = None
         self._preview_generation += 1
         self._preview_request_key = None
+
+    def _schedule_spectrum_detail(self) -> None:
+        if self.btn_spectral.isChecked() and self._last_preview is not None:
+            self._spectrum_detail_timer.start()
+        else:
+            self._cancel_spectrum_detail()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._schedule_spectrum_detail()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._cancel_spectrum_detail()
+        super().hideEvent(event)
+
+    def _cancel_spectrum_detail(self) -> None:
+        self._spectrum_detail_timer.stop()
+        self._spectrum_detail_key = None
+        if self._spectrum_detail_worker is not None:
+            self._spectrum_detail_worker.cancel()
+
+    def _request_spectrum_detail(self) -> None:
+        preview = self._last_preview
+        if preview is None or not isinstance(preview.spectrogram, Spectrogram) or not self.canvas.isVisible():
+            return
+        overview = preview.spectrogram
+        canvas = self.canvas
+        samples_per_second = overview.total_samples / preview.duration
+        start = math.floor(canvas._view_start * samples_per_second)
+        end = math.ceil(canvas._view_end * samples_per_second)
+        span = end - start
+        target_hop = max(min(256, overview.nfft // 4), span / max(1.0, canvas._body_rect().width()))
+        detail = canvas._detail_spectrogram
+        if (overview.samples_per_column <= target_hop * 1.25
+                or (detail is not None and detail.start_sample <= start and end <= detail.end_sample
+                    and detail.samples_per_column <= target_hop * 1.25)):
+            return
+        padding = math.ceil(span * 0.25)
+        start = max(0, start - padding)
+        end = min(overview.total_samples, end + padding)
+        columns = min(4096, math.ceil((end - start) / target_hop))
+        key = (overview, start, end, columns)
+        if key == self._spectrum_detail_key:
+            return
+        self._spectrum_detail_key = key
+        worker = self._spectrum_detail_worker
+        if worker is None:
+            worker = ClipPreviewWorker()
+            worker.preview_ready.connect(self._publish_spectrum_detail)
+            worker.preview_failed.connect(self._on_spectrum_detail_failed)
+            self.destroyed.connect(worker.finish)
+            self._spectrum_detail_worker = worker
+
+        def build(cancelled: Callable[[], bool]) -> tuple | None:
+            result = analyze_spectrogram(preview.edited, preview.sample_rate, nfft=overview.nfft,
+                                         start=start, end=end, columns=columns, cancelled=cancelled)
+            return (key, result) if result is not None else None
+
+        worker.submit_cancellable(key, build)
+
+    def _publish_spectrum_detail(self, completed: tuple) -> None:
+        key, detail = completed
+        preview = self._last_preview
+        if key == self._spectrum_detail_key and preview is not None and key[0] is preview.spectrogram:
+            sample_scale = detail.total_samples / preview.duration
+            if (detail.start_sample <= self.canvas._view_start * sample_scale
+                    and self.canvas._view_end * sample_scale <= detail.end_sample):
+                self.canvas.setDetailedSpectrogram(detail)
+            else:
+                self._spectrum_detail_key = None
+
+    def _on_spectrum_detail_failed(self, key: tuple, _message: str) -> None:
+        if key == self._spectrum_detail_key:
+            self._spectrum_detail_key = None
 
     def set_clip_gain_fade(self, snapshot: tuple | None) -> None:
         """P0-3 · 片段级 gain/fade 快照（模型 → 预览/试听消费）。
@@ -655,6 +731,25 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if self._clip_gain_fade == snapshot:
             return
         self._clip_gain_fade = snapshot
+        self._refresh_stack_preview()
+
+    def set_clip_effects(self, clip: ClipInstance | None, fps: float) -> None:
+        effects = tuple(
+            effect for effect in clip.effects
+            if effect.effect_type in AUDIO_MIXER_EFFECT_TYPES and effect.is_enabled
+        ) if clip is not None else ()
+        snapshot = (effects, clip.timeline_start, fps) if clip is not None and effects else None
+        previous = self._clip_fx
+        if previous is None and snapshot is None:
+            return
+        # EffectInstance equality compares IDs. Parameter edits replace the instance.
+        if (previous is not None and snapshot is not None and previous[1:] == snapshot[1:]
+                and len(previous[0]) == len(effects)
+                and all(old is new for old, new in zip(previous[0], effects))):
+            return
+        self._clip_fx = snapshot
+        self._clip_fx_revision += 1
+        self._update_stack_actions()
         self._refresh_stack_preview()
 
     def _collect_preview_inputs(self) -> dict | None:
@@ -669,8 +764,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if bypass and ClipAuditionCoordinates.from_edit(self._model_audio_edit).maps:
             duration = raw.shape[1] / self._pcm_rate
         content_key = (
+            # Keep the effects snapshot in the job, and only its revision in the key.
             self._preview_spec_key, steps_signature(edit), denoise, request,
             self._clip_gain_fade, duration, bypass,
+            self._clip_fx_revision if self._clip_fx is not None and not bypass else None,
         )
         previous = self._last_preview
         reuse = previous if previous is not None and previous.key[0] == content_key else None
@@ -680,7 +777,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             "raw": raw, "rate": self._pcm_rate, "duration": duration,
             "edit": copy_audio_edit(edit), "denoise_preview": denoise,
             "timepitch_request": request, "fft": self.current_fft_size(),
-            "clip_gain_fade": self._clip_gain_fade, "plan": plan, "reuse": reuse,
+            "clip_gain_fade": self._clip_gain_fade,
+            "clip_fx": None if bypass else self._clip_fx,
+            "plan": plan, "reuse": reuse,
         }
 
     def _compute_preview(self, inputs: dict) -> ClipPreviewResult | None:
@@ -694,9 +793,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         if reused is not None:
             if cancelled():
                 return None
-            spectrogram = compute_spectrogram(
-                reused.edited, rate, nfft=inputs["fft"], time_bins=320, freq_bins=96,
-                cancel_check=cancelled)
+            spectrogram = (reused.spectrogram if reused.key[1] == inputs["fft"] else analyze_spectrogram(
+                reused.edited, rate, nfft=inputs["fft"], columns=4096, cancelled=cancelled))
             if cancelled():
                 return None
             return ClipPreviewResult(
@@ -727,13 +825,16 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 fade_curve_in=curve_in, fade_curve_out=curve_out)
             if abs(gain_db) > 1e-9:
                 edited = edited * (10.0 ** (gain_db / 20.0))
+        if inputs["clip_fx"] is not None:
+            effects, first_frame, fps = inputs["clip_fx"]
+            edited = render_clip_effects(edited, rate, effects, first_frame, fps, cancelled)
+            if cancelled():
+                return None
         bins = min(8192, max(64, edited.shape[1] // 64))
         mins, maxs, rmss = compute_waveform_stats(edited, bins)
         if cancelled():
             return None
-        spectrogram = compute_spectrogram(
-            edited, rate, nfft=inputs["fft"], time_bins=320, freq_bins=96,
-            cancel_check=cancelled)
+        spectrogram = analyze_spectrogram(edited, rate, nfft=inputs["fft"], columns=4096, cancelled=cancelled)
         if cancelled():
             return None
         return ClipPreviewResult(
@@ -821,6 +922,14 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             return
         previous = self._last_preview
         self._last_preview = result
+        if (previous is not None and previous.key[0] == result.key[0]
+                and previous.edited is result.edited and previous.duration == result.duration):
+            if previous.spectrogram is not result.spectrogram:
+                self._cancel_spectrum_detail()
+                self.canvas.setSpectrogram(result.spectrogram)
+                self._schedule_spectrum_detail()
+            return
+        self._cancel_spectrum_detail()
         coordinates = ClipAuditionCoordinates(result.length_maps)
         prior_coordinates = self._audition_coordinates
         preserve_view = math.isclose(result.duration, self.canvas._duration)
@@ -836,6 +945,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             else:
                 self._audition.load(result.edited, result.sample_rate)
         self._pcm = result.edited
+        self.canvas.setWaveformSamples(result.edited)
         self.btn_play.setEnabled(self._audition.has_audio())
         self._audition_coordinates = coordinates
         fade_times = (self.canvas._fade_in_sec, self.canvas._fade_out_sec)
@@ -844,6 +954,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             result.rmss, result.spectrogram, clip_name=self._clip_name,
             cleanliness_report=result.report or {}, preserve_edit_view=preserve_view)
         self.canvas._fade_in_sec, self.canvas._fade_out_sec = fade_times
+        self._schedule_spectrum_detail()
         if not preserve_view or coordinates != prior_coordinates:
             self._project_overlays(coordinates)
         self.update_playhead(playhead)
@@ -883,9 +994,6 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def set_noise_profile(self, profile: Any) -> None:
         self._noise_profile = profile
         self._has_noise_print = profile is not None
-        self.btn_noise_print.setProperty("captured", self._has_noise_print)
-        self.btn_noise_print.style().unpolish(self.btn_noise_print)
-        self.btn_noise_print.style().polish(self.btn_noise_print)
         if profile is None:
             self.noise_status_lbl.setText(I18N.tr("mixer.clip_editor.no_noise_print", "No noise print"))
             self.noise_status_lbl.setToolTip("")
@@ -1124,12 +1232,15 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     # ------------------------------------------------------------------
     # 过零吸附（P0-2 §2.4）
     # ------------------------------------------------------------------
-    def _finish_selection_drag(self) -> None:
-        self._on_pcm_selection_zero_snap(*self.canvas.getSelection())
+    def _finish_selection_drag(self, fixed_edge: float | None) -> None:
+        if self.canvas._sel_t1 > self.canvas._sel_t0 >= 0.0:
+            self._on_pcm_selection_zero_snap(*self.canvas.getSelection(), fixed_edge=fixed_edge)
         if self._is_looping:
             self._update_audition_loop()
 
-    def _on_pcm_selection_zero_snap(self, t0: float, t1: float, fl: float, fh: float) -> None:
+    def _on_pcm_selection_zero_snap(
+        self, t0: float, t1: float, fl: float, fh: float, *, fixed_edge: float | None = None,
+    ) -> None:
         if (not self._zero_snap_armed or self._pcm is None
                 or self._suppress_zero_snap or self.canvas.is_selecting() or t1 - t0 <= 0.0):
             return
@@ -1138,8 +1249,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         tol = max(1, int(round(0.003 * rate)))
         s0 = max(0, min(total - 1, int(round(t0 * rate))))
         s1 = max(s0 + 1, min(total, int(round(t1 * rate))))
-        n0 = find_zero_crossing(self._pcm, s0, tolerance_samples=tol, bounds=(0, total))
-        n1 = find_zero_crossing(self._pcm, s1 - 1, tolerance_samples=tol, bounds=(0, total))
+        n0 = (find_zero_crossing(self._pcm, s0, tolerance_samples=tol, bounds=(0, total))
+              if t0 != fixed_edge else None)
+        n1 = (find_zero_crossing(self._pcm, s1 - 1, tolerance_samples=tol, bounds=(0, total))
+              if t1 != fixed_edge else None)
         snapped0 = n0 / rate if n0 is not None else t0
         snapped1 = n1 / rate if n1 is not None else t1
         if (abs(snapped0 - t0) > 1e-9 or abs(snapped1 - t1) > 1e-9) and snapped1 - snapped0 > 1e-9:
@@ -1162,7 +1275,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         }
         widgets = (
             self.btn_play, self.btn_loop, self.btn_tool_brush, self.btn_tool_envelope,
-            self.btn_snap_zero, self.btn_spectral, self.btn_noise_print, self.btn_denoise,
+            self.btn_snap_zero, self.btn_spectral, self.btn_denoise,
             self.btn_bypass, self.btn_env_smooth, self.btn_env_reset, self.btn_apply_lufs,
             self.btn_clear_stack, self.spec_boost_pill, self.spec_boost_knob, self.denoise_pill,
             self.denoise_knob, self.fft_combo, self.preserve_pitch_sw, self.stretch_ratio_pill, self.target_dur_pill,
@@ -1173,6 +1286,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         for widget in widgets:
             widget.setEnabled(False)
             widget.setToolTip(unavailable)
+        self.action_capture_noise.setEnabled(False)
+        self.action_normalize.setEnabled(False)
         self._apply_gain_button: QPushButton | None = None
         self._history_buttons: list[QPushButton] = []
         # P0-3：选区处理（静音/标准化）随 PCM 与时间线片段可用性启用。
@@ -1184,7 +1299,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             elif button.text() in buttons_by_text:
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
-            elif button.text() in ("静音", "标准化", "裁剪", "删除", "修复"):
+            elif button.text() in ("静音", "删除", "修复"):
                 self._selection_edit_buttons.append(button)
                 button.setEnabled(False)
                 button.setToolTip(unavailable)
@@ -1346,6 +1461,12 @@ class ProjectClipEditor(QWidget):
     audio_edit_committed = pyqtSignal(str, object, str)
     # §6.2：改长度事务（计划已通过冲突检查；控制器构建项目/序列命令）。
     length_change_committed = pyqtSignal(str, object, str)
+    effect_add_requested = pyqtSignal(str, str)
+    effect_settings_requested = pyqtSignal(str, str, str)
+    effect_enabled_changed = pyqtSignal(str, str, bool)
+    effect_reorder_requested = pyqtSignal(str, str, int)
+    effect_remove_requested = pyqtSignal(str, str)
+    float_requested = pyqtSignal()
     tab_requested = pyqtSignal()
     timeline_requested = pyqtSignal()
     undo_requested = pyqtSignal()
@@ -1385,16 +1506,17 @@ class ProjectClipEditor(QWidget):
         self._fps = 24.0
         self._sample_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._locked = False
+        self._tabbed_with_timeline = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self._title = _StatusLabel(Qt.TextElideMode.ElideMiddle)
+        self._title = ClipEditorElidedLabel(Qt.TextElideMode.ElideMiddle)
         self._title.setObjectName("ClipEditorTitle")
         self._title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._title.setMaximumWidth(300)
         self._title.setStyleSheet("color: #E2E2E8; font-size: 10px; font-weight: 600; border: none;")
-        self._status = _StatusLabel(Qt.TextElideMode.ElideRight)
+        self._status = ClipEditorElidedLabel()
         self._status.setObjectName("ClipEditorStatus")
         self._status.setStyleSheet("color: #AAABB5; font-size: 10px; border: none;")
         self._empty = QLabel(I18N.tr(
@@ -1415,8 +1537,28 @@ class ProjectClipEditor(QWidget):
         return self._clip.clip_id if self._clip is not None else None
 
     def set_dock_mode(self, *, tabbed: bool) -> None:
-        if self._panel is not None:
-            self._panel.btn_tab.setVisible(not tabbed)
+        self._tabbed_with_timeline = tabbed
+
+    def show_unified_context_menu(self, global_pos: QPoint) -> None:
+        if self._panel is not None and not self._scroll.isHidden():
+            self._panel.canvas.show_context_menu(global_pos)
+            return
+        menu = QMenu(self)
+        self._append_dock_menu_actions(menu)
+        if menu.actions():
+            menu.exec(global_pos)
+        menu.deleteLater()
+
+    def _append_dock_menu_actions(self, menu: QMenu) -> None:
+        dock = find_parent_dock(self)
+        if dock is None:
+            return
+        if menu.actions():
+            menu.addSeparator()
+        if not dock.isFloating() and not self._tabbed_with_timeline:
+            menu.addAction(I18N.tr("mixer.clip_editor.tab", "Dock with timeline"), self.tab_requested.emit)
+        toggle_floating = self.tab_requested.emit if dock.isFloating() else self.float_requested.emit
+        add_dock_management_actions(menu, dock, toggle_floating=toggle_floating)
 
     def focus_waveform(self) -> None:
         if self._panel is not None and not self._scroll.isHidden():
@@ -1431,7 +1573,14 @@ class ProjectClipEditor(QWidget):
             status_layout.insertWidget(selection_index, self._title)
             self._panel._status_hook = self._status.setText
             self._panel.btn_timeline.clicked.connect(self.timeline_requested.emit)
-            self._panel.btn_tab.clicked.connect(self.tab_requested.emit)
+            rack = self._panel.effect_rack
+            rack.add_requested.connect(self.effect_add_requested.emit)
+            rack.settings_requested.connect(self.effect_settings_requested.emit)
+            rack.enabled_changed.connect(self.effect_enabled_changed.emit)
+            rack.reorder_requested.connect(self.effect_reorder_requested.emit)
+            rack.remove_requested.connect(self.effect_remove_requested.emit)
+            self._panel.canvas.populateContextMenu.connect(rack.add_to_context_menu)
+            self._panel.canvas.populateContextMenu.connect(self._append_dock_menu_actions)
             self._panel.gain_requested.connect(self._on_gain_requested)
             self._panel.microfade_requested.connect(self._on_microfade_requested)
             self._panel.selection_gain_requested.connect(self._on_selection_gain_requested)
@@ -1440,7 +1589,6 @@ class ProjectClipEditor(QWidget):
             self._panel.canvas.fadeCurveCommitted.connect(self._on_fade_end_curve_requested)
             self._panel.undoRequested.connect(self._on_undo_requested)
             self._panel.redoRequested.connect(self._on_redo_requested)
-            self._panel.fftSizeChanged.connect(self._on_fft_size_changed)
             self._panel._audition.playing_changed.connect(self.audition_active_changed.emit)
             # P0-3 控件映射：静音/标准化生成步骤；机架旁路/删除/清空走命令。
             self._panel.silenceRequested.connect(self._on_silence_requested)
@@ -1504,6 +1652,7 @@ class ProjectClipEditor(QWidget):
         self._prepare_source(asset, project)
         self._request_waveform()
         self._sync_gain_fade()
+        self._sync_effect_rack()
 
     def _prepare_source(
         self, asset: MediaAsset, project: EditProject | None, waveform_asset_id: str | None = None,
@@ -1609,11 +1758,17 @@ class ProjectClipEditor(QWidget):
             self._source_changed = False
             self._request_waveform()
         self._sync_gain_fade()
+        self._sync_effect_rack()
         if self._panel is not None:
             self._panel.set_stack_editable_hint(not self._locked)
             self._panel.sync_audio_edit(
                 self._clip.audio_edit if self._clip is not None else None,
                 output_total_samples=self._output_total_samples())
+
+    def _sync_effect_rack(self) -> None:
+        if self._panel is not None:
+            self._panel.effect_rack.set_clip(self._clip, editable=not self._locked)
+            self._panel.set_clip_effects(self._clip, self._fps)
 
     def reset(self) -> None:
         self._cancel_analysis()
@@ -1637,6 +1792,7 @@ class ProjectClipEditor(QWidget):
             self._panel.canvas._drag_mode = ""
             self._panel.canvas._physics_timer.stop()
             self._panel.detach_pcm()
+            self._sync_effect_rack()
         self._scroll.hide()
         self._title.setText("")
         self._title.hide()
@@ -1818,24 +1974,13 @@ class ProjectClipEditor(QWidget):
         panel._preview_spec_key = self._pcm_spec_key
         panel._pre_render_plan_for_preview = self._build_preview_plan
         self._sync_gain_fade()
+        self._sync_effect_rack()
         if self._clip is not None:
             panel.set_stack_editable_hint(not self._locked)
             panel.sync_audio_edit(self._clip.audio_edit, self._output_total_samples())
         panel.attach_pcm(pcm, rate)
         panel.update_playhead(0.0)
         panel._refresh_stack_preview()
-
-    def _on_fft_size_changed(self, _size: int) -> None:
-        panel = self._panel
-        if panel is None or not self._pcm_applied or panel._pcm is None:
-            return
-        canvas = panel.canvas
-        spectrogram = compute_spectrogram(
-            panel._pcm, panel._pcm_rate,
-            nfft=panel.current_fft_size(), time_bins=320, freq_bins=96)
-        canvas.loadAudioData(
-            panel._sample_rate, panel._duration, canvas._peaks_min, canvas._peaks_max,
-            canvas._rms, spectrogram, preserve_edit_view=True)
 
     @staticmethod
     def _measure_cleanliness(pcm: np.ndarray, rate: int) -> dict:

@@ -114,6 +114,12 @@ def glyph_icon(kind: str, color: str = "#B9BFCE", size: int = 14) -> QIcon:
         path.lineTo(size * 0.20, c)
         path.lineTo(size * 0.42, size * 0.64)
         p.drawPath(path)
+    elif kind == "panel-right":
+        p.drawRoundedRect(QRectF(size * 0.12, size * 0.19, size * 0.76, size * 0.62), 1.2, 1.2)
+        p.drawLine(QPointF(size * 0.61, size * 0.20), QPointF(size * 0.61, size * 0.80))
+    elif kind == "power":
+        p.drawArc(QRectF(size * 0.18, size * 0.23, size * 0.64, size * 0.64), 135 * 16, 270 * 16)
+        p.drawLine(QPointF(c, size * 0.10), QPointF(c, size * 0.49))
     else:
         # 未知 kind：画一个圆点占位，避免静默空白
         p.drawEllipse(QPointF(c, c), size * 0.22, size * 0.22)

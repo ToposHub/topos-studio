@@ -94,7 +94,7 @@ class FloatingDockTitleBar(QWidget):
     可抓取的拖拽区域——既无法移动浮动窗口，也无法拖到边缘重新停靠。
 
     本类提供一个有真实高度的标题栏：拖动它即可移动浮动窗口并触发边缘停靠
-    判定（QDockWidget 会接管自定义 titlebar 上的鼠标拖拽），右侧附带关闭按钮。
+    判定（QDockWidget 会接管自定义 titlebar 上的鼠标拖拽）。
     """
 
     def __init__(self, dock: QDockWidget) -> None:
@@ -116,16 +116,17 @@ class FloatingDockTitleBar(QWidget):
         layout.addWidget(self._title_label)
         layout.addStretch(1)
 
-        close_btn = QToolButton(self)
-        close_btn.setText("×")
-        close_btn.setFixedSize(20, 20)
-        close_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        close_btn.setStyleSheet(
-            "QToolButton { color: #999; border: none; background: transparent; }"
-            "QToolButton:hover { color: #fff; background: #c42b1c; }"
-        )
-        close_btn.clicked.connect(self._close_dock)
-        layout.addWidget(close_btn)
+        if dock.objectName() != "dockAudioClipEditor":
+            close_btn = QToolButton(self)
+            close_btn.setText("×")
+            close_btn.setFixedSize(20, 20)
+            close_btn.setCursor(Qt.CursorShape.ArrowCursor)
+            close_btn.setStyleSheet(
+                "QToolButton { color: #999; border: none; background: transparent; }"
+                "QToolButton:hover { color: #fff; background: #c42b1c; }"
+            )
+            close_btn.clicked.connect(self._close_dock)
+            layout.addWidget(close_btn)
 
         # 标题随 dock 窗口标题同步
         dock.windowTitleChanged.connect(self._title_label.setText)
@@ -1445,8 +1446,14 @@ class DockLayoutMixin:
         panel.audio_edit_committed.connect(self._commit_mixer_clip_audio_edit)
         # §6.2：改长度提交走项目/序列事务（一次撤销还原长度与后移）。
         panel.length_change_committed.connect(self._commit_mixer_clip_length_change)
+        panel.effect_add_requested.connect(self._on_edit_effect_add_requested)
+        panel.effect_settings_requested.connect(self._on_edit_effect_open_dialog_requested)
+        panel.effect_enabled_changed.connect(self._on_edit_effect_enabled_changed)
+        panel.effect_reorder_requested.connect(self._on_edit_effect_reorder_requested)
+        panel.effect_remove_requested.connect(self._on_edit_effect_remove_requested)
         panel.undo_requested.connect(view.undo)
         panel.redo_requested.connect(view.redo)
+        panel.float_requested.connect(lambda: self._show_project_audio_clip_editor("floating"))
         panel.tab_requested.connect(self._tab_project_audio_clip_editor)
         panel.timeline_requested.connect(self._raise_mixer_audio_timeline)
         self._audio_clip_editor_placed = False
@@ -1529,7 +1536,7 @@ class DockLayoutMixin:
             self.switch_to_page("Mixer")
         return self.current_page == "Mixer"
 
-    def _show_project_audio_clip_editor(self, placement: Literal["clip", "source", "tabbed"]) -> None:
+    def _show_project_audio_clip_editor(self, placement: Literal["clip", "source", "tabbed", "floating"]) -> None:
         dock = self.dock_audio_clip_editor
         self._opening_audio_clip_editor = True
         try:
@@ -1537,6 +1544,8 @@ class DockLayoutMixin:
                               or self.tabifiedDockWidgets(dock))
             if placement == "tabbed" or (placement == "clip" and first_open):
                 self._dock_project_audio_clip_editor_with_timeline()
+            elif placement == "floating":
+                dock.setFloating(True)
             elif placement == "source" and first_open:
                 dock.setFloating(True)
                 dock.resize(1220, 780)
@@ -3042,8 +3051,9 @@ class DockLayoutMixin:
 
         Provides Float/Dock toggle and Close actions.
         """
-        if dock.objectName() == "dockEditEffects":
-            panel = getattr(self, "edit_effects_panel", None)
+        if dock.objectName() in ("dockEditEffects", "dockAudioClipEditor"):
+            panel = (getattr(self, "edit_effects_panel", None) if dock.objectName() == "dockEditEffects"
+                     else dock.widget())
             show_menu = getattr(panel, "show_unified_context_menu", None)
             if callable(show_menu):
                 show_menu(dock.mapToGlobal(pos))

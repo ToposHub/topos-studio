@@ -1583,6 +1583,7 @@ class RemoveEffectCommand:
         clip_id: Clip ID to remove effect from
         effect_id: Effect ID to remove
         _removed_effect: Removed effect instance (for undo)
+        _removed_index: Original position in the effect stack (for undo)
     """
 
     command_id: str
@@ -1590,7 +1591,8 @@ class RemoveEffectCommand:
     track_id: str
     clip_id: str
     effect_id: str
-    _removed_effect: EffectInstance | None = None
+    _removed_effect: EffectInstance | dict[str, Any] | None = None
+    _removed_index: int | None = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         """
@@ -1618,6 +1620,8 @@ class RemoveEffectCommand:
         removed_effect = clip.get_effect_by_id(self.effect_id)
         if removed_effect is None:
             raise ValueError(f"Effect not found: {self.effect_id}")
+        removed_index = next(index for index, effect in enumerate(clip.effects)
+                             if effect is removed_effect)
 
         # Remove effect from clip
         updated_clip = clip.with_effect_removed(self.effect_id)
@@ -1625,6 +1629,8 @@ class RemoveEffectCommand:
         # Update track and timeline
         new_track = track.with_clip_updated(updated_clip)
         new_timeline = timeline.with_track_updated(new_track)
+        object.__setattr__(self, "_removed_effect", removed_effect)
+        object.__setattr__(self, "_removed_index", removed_index)
 
         logger.debug(
             f"RemoveEffectCommand applied: {self.effect_id} from clip {self.clip_id}"
@@ -1653,8 +1659,13 @@ class RemoveEffectCommand:
         if clip is None:
             raise ValueError(f"Clip not found: {self.clip_id}")
 
-        # Add effect back
-        updated_clip = clip.with_effect_added(self._removed_effect)
+        effects = list(clip.effects)
+        index = self._removed_index
+        if index is None:
+            index = (self._removed_effect.get("order", 0) if isinstance(self._removed_effect, dict)
+                     else self._removed_effect.order)
+        effects.insert(index, self._removed_effect)
+        updated_clip = clip.with_effects(tuple(effects))
         new_track = track.with_clip_updated(updated_clip)
         new_timeline = timeline.with_track_updated(new_track)
 
@@ -1663,6 +1674,7 @@ class RemoveEffectCommand:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize command."""
+        removed = self._removed_effect
         return {
             "command_id": self.command_id,
             "command_type": "RemoveEffectCommand",
@@ -1670,7 +1682,8 @@ class RemoveEffectCommand:
             "track_id": self.track_id,
             "clip_id": self.clip_id,
             "effect_id": self.effect_id,
-            "removed_effect": self._removed_effect.to_dict() if self._removed_effect else None,
+            "removed_effect": removed.to_dict() if isinstance(removed, EffectInstance) else removed,
+            "removed_index": self._removed_index,
         }
 
     @staticmethod
@@ -1686,6 +1699,7 @@ class RemoveEffectCommand:
             clip_id=data.get("clip_id", ""),
             effect_id=data.get("effect_id", ""),
             _removed_effect=removed_effect,
+            _removed_index=data.get("removed_index"),
         )
 
     @staticmethod
