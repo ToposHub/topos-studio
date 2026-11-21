@@ -4238,32 +4238,56 @@ class ConvolutionReverbParams:
 
 @dataclass(frozen=True)
 class TransientDesignerParams:
-    """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。"""
+    """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。
+
+    FX-17（2026-11-21 计划）：新版前端百分比字段——``db = 0.12 × pct``
+    （±100% → ±12 dB）；给了 pct 键 → DSP 走新版支路（逐声道包络 +
+    反相安全聚合 + mix/output_gain_db），否则旧 dB 音色冻结不动。
+    """
     attack_db: float = 6.0
     sustain_db: float = 0.0
     attack_ms: float = 8.0
     sustain_ms: float = 80.0
     enabled: bool = True
+    attack_pct: float | None = None
+    sustain_pct: float | None = None
+    mix: float = 1.0
+    output_gain_db: float = 0.0
 
     @staticmethod
     def default() -> "TransientDesignerParams":
         return TransientDesignerParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "attack_db": self.attack_db, "sustain_db": self.sustain_db,
             "attack_ms": self.attack_ms, "sustain_ms": self.sustain_ms,
             "enabled": self.enabled,
         }
+        if self.attack_pct is not None:
+            data["attack_pct"] = self.attack_pct
+        if self.sustain_pct is not None:
+            data["sustain_pct"] = self.sustain_pct
+        data["mix"] = self.mix
+        data["output_gain_db"] = self.output_gain_db
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TransientDesignerParams":
+        def _pct(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+
         return TransientDesignerParams(
             attack_db=_params_f("attack_db", data, 6.0),
             sustain_db=_params_f("sustain_db", data, 0.0),
             attack_ms=_params_f("attack_ms", data, 8.0),
             sustain_ms=_params_f("sustain_ms", data, 80.0),
             enabled=bool(data.get("enabled", True)),
+            attack_pct=_pct("attack_pct"),
+            sustain_pct=_pct("sustain_pct"),
+            mix=_params_f("mix", data, 1.0),
+            output_gain_db=_params_f("output_gain_db", data, 0.0),
         )
 
 

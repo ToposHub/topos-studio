@@ -45,8 +45,18 @@ class _Lfo:
 # 瞬态塑形
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: 新版百分比 → dB 映射（±100% → ±12 dB；FX-17 计划推荐曲线）。
+PCT_TO_DB = 0.12
+
+
 class TransientDesignerEffect(AudioEffect):
-    """差分包络瞬态塑形（attack 增益独立于 sustain）。"""
+    """差分包络瞬态塑形（attack 增益独立于 sustain）。
+
+    FX-17（2026-11-21 计划）：给了 ``attack_pct``/``sustain_pct`` 键 →
+    新版支路（逐声道快/慢包络，聚合取各声道绝对包络最大——反相立体
+    声不抵消；mix 干湿、output_gain_db 收尾）；否则旧 dB 音色冻结
+    （声道平均检测语义保持）。
+    """
 
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
@@ -55,6 +65,9 @@ class TransientDesignerEffect(AudioEffect):
                               "sustain_ms": 80.0}
         self._fast_env = 0.0
         self._slow_env = 0.0
+        # 新版支路：每声道快/慢包络状态。
+        self._fast_env_ch: Optional[np.ndarray] = None
+        self._slow_env_ch: Optional[np.ndarray] = None
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -70,6 +83,8 @@ class TransientDesignerEffect(AudioEffect):
     def reset_state(self) -> None:
         self._fast_env = 0.0
         self._slow_env = 0.0
+        self._fast_env_ch = None
+        self._slow_env_ch = None
 
     @property
     def is_active(self) -> bool:
@@ -87,6 +102,58 @@ class TransientDesignerEffect(AudioEffect):
         n = samples.shape[-1]
         if n == 0:
             return samples
+        if ("attack_pct" in self._params or "sustain_pct" in self._params):
+            processed = self._process_percent(samples)
+        else:
+            processed = self._process_legacy(samples)
+        mix = float(np.clip(self._params.get("mix", 1.0), 0.0, 1.0))
+        out = (samples.astype(np.float64) * (1.0 - mix)
+               + processed.astype(np.float64) * mix)
+        out *= 10.0 ** (float(self._params.get("output_gain_db", 0.0)) / 20.0)
+        return np.ascontiguousarray(out.astype(np.float32), dtype=np.float32)
+
+    def _process_percent(self, samples: np.ndarray) -> np.ndarray:
+        """新版支路：逐声道快/慢包络，聚合取各声道绝对包络最大。"""
+        n = samples.shape[-1]
+        channels = samples.shape[0]
+        attack_ms = max(0.5, float(self._params.get("attack_ms", 8.0)))
+        sustain_ms = max(10.0, float(self._params.get("sustain_ms", 80.0)))
+        a_fast = float(np.exp(-1.0 / (attack_ms * self._sample_rate / 1000.0)))
+        a_slow = float(np.exp(-1.0 / (sustain_ms * self._sample_rate / 1000.0)))
+        attack_db = PCT_TO_DB * float(np.clip(
+            float(self._params.get("attack_pct", 0.0)), -100.0, 100.0))
+        sustain_db = PCT_TO_DB * float(np.clip(
+            float(self._params.get("sustain_pct", 0.0)), -100.0, 100.0))
+        attack_gain = 10.0 ** (attack_db / 20.0)
+        sustain_gain = 10.0 ** (sustain_db / 20.0)
+
+        if (self._fast_env_ch is None
+                or self._fast_env_ch.shape != (channels,)):
+            self._fast_env_ch = np.zeros(channels, dtype=np.float64)
+            self._slow_env_ch = np.zeros(channels, dtype=np.float64)
+        abs_in = np.abs(samples.astype(np.float64))
+        gains = np.empty(n, dtype=np.float32)
+        fast_ch = self._fast_env_ch
+        slow_ch = self._slow_env_ch
+        for i in range(n):
+            for ch in range(channels):
+                value = abs_in[ch, i]
+                fast_ch[ch] = (a_fast * fast_ch[ch]
+                               + (1.0 - a_fast) * value)
+                slow_ch[ch] = (a_slow * slow_ch[ch]
+                               + (1.0 - a_slow) * value)
+            # 反相安全聚合：各声道绝对包络取最大。
+            fast = float(np.max(fast_ch))
+            slow = float(np.max(slow_ch))
+            ratio_db = 20.0 * np.log10(max(fast, 1e-9) / max(slow, 1e-9))
+            weight = float(np.clip((ratio_db - 3.0) / 6.0, 0.0, 1.0))
+            gains[i] = (sustain_gain * (1.0 - weight)
+                        + attack_gain * weight)
+        return np.ascontiguousarray(
+            samples * gains[np.newaxis, :], dtype=np.float32)
+
+    def _process_legacy(self, samples: np.ndarray) -> np.ndarray:
+        n = samples.shape[-1]
         attack_ms = max(0.5, float(self._params.get("attack_ms", 8.0)))
         sustain_ms = max(10.0, float(self._params.get("sustain_ms", 80.0)))
         a_fast = float(np.exp(-1.0 / (attack_ms * self._sample_rate / 1000.0)))
