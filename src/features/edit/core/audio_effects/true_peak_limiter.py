@@ -4,15 +4,19 @@
 ``MasterLimiter`` 保持旧工程语义不变：
 
 - 有状态 4× 多相 FIR 过采样（``scipy.resample_poly`` 内置抗混叠原型
-  滤波）测 True Peak（BS.1770 家族的采样间峰值）；
-- lookahead 延迟线（attack 区间的增益前瞻）+ 平滑 release（一极）；
-  链接/独立通道增益（linked=True 单增益取全声道最大）。保形流式
-  合同下，块端 lookahead 窗缺未来上下文——边界增益按窗口前缀近似
-  （≤ 上限语义不受影响：任意块长下 True Peak 均被压至上限之下）；
-- 声明 group delay（lookahead + FIR 群延迟）→ ``latency_samples()``
-  接 PDC（EffectChain.latency_samples 聚合，图级最迟路径对齐）；
-- Dither 是最终 PCM 量化选项（导出器责任），不写入本浮点效果器；
-- 旁路原样返回（音量不变）；重采样后上限由 dBTP 检测路径复核。
+  滤波）测 True Peak（BS.1770 家族的采样间峰值）；FIR 跨块上下文按
+  过采样因子推导、逐声道分配——分块与整段的检测逐位一致；
+- 逐声道一致过采样相位测样本间峰；链接 = 各声道峰值的上界
+  （max，不做声道平均——反相输入不抵消）；独立 = 声道各自检测；
+- lookahead：对原始目标做 O(N) 后向最小窗（``minimum_filter1d``，
+  窗 [i-L, i]），配合 L 样本输出延迟构成标准前视限幅；跨块保存
+  **原始**目标尾（非平滑后值——旧实现存滤波值会逐块复合加深衰减）；
+- 链接模式全声道共享一个 release 状态；独立模式每声道独立状态数组
+  （旧实现折叠为单一最小值，声道间串增益）；
+- 声明 group delay（lookahead；实测过采样 FIR 无净输入域群延迟）
+  → ``latency_samples()`` 接 PDC；
+- Dither 是最终 PCM 量化选项（交付层责任），不写入本浮点效果器；
+- 旁路原样返回（音量不变）；上限由 dBTP 检测路径独立复核。
 """
 from __future__ import annotations
 
@@ -23,7 +27,8 @@ import numpy as np
 from src.features.edit.core.audio_dsp import AudioEffect
 
 try:  # pragma: no cover - 环境探测
-    from scipy.signal import resample_poly
+    from scipy.ndimage import minimum_filter1d
+    from scipy.signal import firwin, upfirdn
     _SCIPY = True
 except ImportError:  # pragma: no cover
     _SCIPY = False
@@ -38,6 +43,41 @@ DEFAULTS = {
     "linked": True,
 }
 
+# 流式 4× 过采样原型（与 scipy.resample_poly(up,1) 同设计：81 阶
+# kaiser 5.0 低通，f_c = 1/up 相对上采样 Nyquist）——``resample_poly``
+# 的输出长度/对齐依赖输入总长，分块结果不保形；改用固定原型 +
+# overlap-save 历史，跨块与整段逐位一致。对称 FIR 群延迟 = 40 上采样
+# tap = D=10 输入样本：桶 b 需要流输入 [b-2D, b] → 检测历史取 2D，
+# 峰值序列滞后 D 完整产出；增益窗口以 R[k-L..k] 覆盖真实峰位，
+# 输出延迟取 lookahead + D，``latency_samples`` 据实声明。
+_FIR_TAPS: Optional[np.ndarray] = None
+_FIR_GROUP_DELAY = 10          # 输入样本域（= 40 上采样 tap / OVERSAMPLE）
+_FIR_HISTORY = 2 * _FIR_GROUP_DELAY  # 检测流历史深度（桶有效性需 2D）
+
+
+def _prototype_taps() -> np.ndarray:
+    global _FIR_TAPS
+    if _FIR_TAPS is None:
+        taps = firwin(
+            2 * 10 * OVERSAMPLE + 1, 1.0 / OVERSAMPLE,
+            window=("kaiser", 5.0))
+        # 内插器增益：每个多相行和须为 1（等价 resample_poly 的 h×up）。
+        _FIR_TAPS = (taps * OVERSAMPLE).astype(np.float64)
+    return _FIR_TAPS
+
+
+def _sliding_min(values: np.ndarray, window: int) -> np.ndarray:
+    """后向最小窗：``out[i] = min(values[max(0, i-window+1) .. i])``。
+
+    O(N)（``minimum_filter1d``）；``window=1`` 恒等。左侧越界以 +inf
+    填充（等价"无历史峰约束"）。
+    """
+    if window <= 1:
+        return values
+    origin = window - 1 - window // 2
+    return minimum_filter1d(
+        values, size=window, origin=origin, mode="constant", cval=np.inf)
+
 
 class TruePeakLimiterEffect(AudioEffect):
     """True Peak 限幅器（4× 过采样 + lookahead + 平滑 release）。"""
@@ -45,15 +85,19 @@ class TruePeakLimiterEffect(AudioEffect):
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
         self._params: dict = dict(DEFAULTS)
-        self._gain_state = 1.0           # release 平滑后的当前增益
-        self._delay_line: Optional[np.ndarray] = None  # (ch, lookahead)
-        # 过采样 FIR 跨块上下文（overlap-save：块前接前块尾，输出丢弃
-        # 上下文段——分块与整段的过采样峰值逐位一致）。
-        self._fir_context: Optional[np.ndarray] = None  # (ch, ctx)
-        # lookahead 滑窗的目标尾（跨块连续）。
-        self._target_tail: Optional[np.ndarray] = None
+        # release 平滑后的当前增益（链接=单值；独立=每声道）。
+        self._gain_state = 1.0
+        self._gain_states: Optional[np.ndarray] = None
+        self._delay_line: Optional[np.ndarray] = None  # (ch, lookahead+D)
+        # 过采样 FIR 跨块上下文（overlap-save：块前接 2D 历史；分块与
+        # 整段的过采样峰值逐位一致）。
+        self._fir_context: Optional[np.ndarray] = None  # (ch, 2D)
+        # 峰值序列 R 的滚动尾（min 窗前缀；R[k] = 输入 k 的真实峰，
+        # 检测滞后 D 完整产出）与目标尾（跨块连续；首块为 1.0）。
+        self._raw_tail: Optional[np.ndarray] = None
         self._last_true_peak_dbtp = -120.0
         self._last_reduction_db = 0.0
+        self._last_output_peak_dbfs = -120.0
 
     # ── 参数与状态 ────────────────────────────────────────────────
     def set_params(self, params: object,
@@ -69,9 +113,10 @@ class TruePeakLimiterEffect(AudioEffect):
 
     def reset_state(self) -> None:
         self._gain_state = 1.0
+        self._gain_states = None
         self._delay_line = None
         self._fir_context = None
-        self._target_tail = None
+        self._raw_tail = None
         self._last_reduction_db = 0.0
 
     @property
@@ -85,17 +130,15 @@ class TruePeakLimiterEffect(AudioEffect):
             release_ms * self._sample_rate / 1000.0))
 
     def latency_samples(self) -> int:
-        """group delay = lookahead（PDC 消费）。
+        """总延迟 = lookahead + 检测 FIR 群延迟 D（PDC 消费）。
 
-        修前声明额外加了 FIR 群延迟项（``_FIR_GROUP_DELAY_OUT`` 经验常数）：
-        实测 ``resample_poly`` 内部做零相位对齐（单位脉冲经 4× 上采样峰
-        恰落 ``index*OVERSAMPLE``），过采样 FIR 无净输入域群延迟——多声明
-        的 3 样本使挂链轨相对其它轨整体多延迟 3 样本（0.06 ms，对齐验收
-        可测）。以实测为准：声明 = lookahead。
+        对称内插 FIR 需 ±D 未来上下文：峰值序列滞后 D 完整产出，增益窗
+        ``min(R[t-L..t])`` 恰覆盖"播放样本 + 后续 L 样本"，音频延迟取
+        L + D 才能让被播放样本的峰进入自身增益窗（声明据实）。
         """
         lookahead = int(self._params.get("lookahead_ms", 5.0)
                         * self._sample_rate / 1000.0)
-        return int(lookahead)
+        return int(lookahead) + _FIR_GROUP_DELAY
 
     # ── 处理 ──────────────────────────────────────────────────────
     def _target_gain(self, peak: float) -> float:
@@ -119,107 +162,126 @@ class TruePeakLimiterEffect(AudioEffect):
         linked = bool(self._params.get("linked", True))
         channels = samples.shape[0]
 
-        out = np.empty_like(samples)
-        # 过采样测 True Peak（多相 FIR + 跨块上下文；声道独立测量）。
-        ctx_len = 32
-        ctx = self._fir_context
-        if ctx is None or ctx.shape[0] != channels or ctx.shape[1] != ctx_len:
-            ctx = np.zeros((channels, ctx_len), dtype=np.float32)
-        with_context = np.concatenate([ctx, samples], axis=1)
-        self._fir_context = np.ascontiguousarray(
-            with_context[:, -ctx_len:], dtype=np.float32)
-
-        def _upsample(channel_data: np.ndarray, ctx_data: np.ndarray) -> np.ndarray:
-            up_all = resample_poly(
-                np.concatenate([ctx_data, channel_data]), OVERSAMPLE, 1)
-            # 丢弃上下文对应的输出（resample_poly 长度 = 4·(ctx+n)）。
-            return up_all[ctx_len * OVERSAMPLE:ctx_len * OVERSAMPLE
-                          + channel_data.shape[0] * OVERSAMPLE]
-
-        if linked:
-            mono = samples.mean(axis=0) if channels > 1 else samples[0]
-            mono_ctx = ctx.mean(axis=0) if channels > 1 else ctx[0]
-            up = _upsample(mono, mono_ctx)
+        # 过采样测 True Peak（固定原型 + 2D overlap-save 历史；逐声道
+        # 一致相位——峰值序列 R[k] = 输入 k 的真峰，滞后 D 完整产出）。
+        hist = self._fir_context
+        if hist is None or hist.shape != (channels, _FIR_HISTORY):
+            hist = np.zeros((channels, _FIR_HISTORY), dtype=np.float32)
+        taps = _prototype_taps()
+        # 逐声道峰值桶；链接取各声道峰值上界（max）——反相不抵消。
+        per_channel = np.zeros((channels, n), dtype=np.float64)
+        offset = _FIR_HISTORY * OVERSAMPLE  # 桶 b 从流索引 b-D 开始（b≥2D）
+        for ch in range(channels):
+            stream = np.concatenate([hist[ch], samples[ch]])
+            up_full = upfirdn(taps, stream, up=OVERSAMPLE)
+            up = up_full[offset:offset + n * OVERSAMPLE]
             padded = np.pad(np.abs(up), (0, OVERSAMPLE))
-            peaks = padded[:n * OVERSAMPLE].reshape(
+            per_channel[ch] = padded[:n * OVERSAMPLE].reshape(
                 n, OVERSAMPLE).max(axis=1)
+        self._fir_context = np.ascontiguousarray(
+            np.concatenate([hist, samples], axis=1)[:, -_FIR_HISTORY:],
+            dtype=np.float32)
+        peaks = per_channel.max(axis=0) if linked else per_channel
+
+        # 原始目标增益（前视 min 窗只作用于应用值，不回写检测值）。
+        if linked:
+            raw_target = np.array(
+                [self._target_gain(float(p)) for p in peaks],
+                dtype=np.float64)
         else:
-            peaks = np.zeros((channels, n), dtype=np.float64)
+            raw_target = np.empty((channels, n), dtype=np.float64)
             for ch in range(channels):
-                up = _upsample(samples[ch], ctx[ch])
-                padded = np.pad(np.abs(up), (0, OVERSAMPLE))
-                peaks[ch] = padded[:n * OVERSAMPLE].reshape(
-                    n, OVERSAMPLE).max(axis=1)
+                raw_target[ch] = [self._target_gain(float(p))
+                                  for p in per_channel[ch]]
 
-        # 目标增益（lookahead 前瞻：窗口内最小目标增益作用于当前样本）。
-        target = np.ones(n if linked else (channels, n), dtype=np.float64)
-        peak_arr = peaks if linked else peaks
-        for idx in range(n):
-            if linked:
-                target[idx] = self._target_gain(float(peak_arr[idx]))
-            else:
-                for ch in range(channels):
-                    target[ch, idx] = self._target_gain(
-                        float(peak_arr[ch, idx]))
         if lookahead > 0:
-            # 前瞻：当前样本使用 [i, i+lookahead] 的最小目标增益（滑动
-            # 最小窗；前缀接上一块的目标尾——跨块连续，首块为 1.0）。
-            from numpy.lib.stride_tricks import sliding_window_view
-            if self._target_tail is None or self._target_tail.shape != (
-                    channels, lookahead):
-                self._target_tail = np.ones((channels, lookahead),
-                                            dtype=np.float64)
+            # 前视：应用值 = 峰值序列 R 上的后向最小窗 [t-L, t]——覆盖
+            # "播放样本（t−L−D）+ 后续 L 样本"；跨块接 R 的**原始**尾
+            # （首块为 1.0；不存平滑后值，避免逐块复合加深衰减）。
+            rows = (1 if linked else channels)
+            if self._raw_tail is None or self._raw_tail.shape != (
+                    rows, lookahead):
+                self._raw_tail = np.ones((rows, lookahead), dtype=np.float64)
             if linked:
-                window = sliding_window_view(
-                    np.concatenate([self._target_tail[0], target]),
-                    lookahead + 1)
-                target = window.min(axis=1)[:n]
-                self._target_tail[:, :] = target[-lookahead:]
+                stream = np.concatenate([self._raw_tail[0], raw_target])
+                applied = _sliding_min(
+                    stream, lookahead + 1)[lookahead:].reshape(1, n)
+                self._raw_tail[0] = raw_target[-lookahead:] if n >= lookahead \
+                    else np.concatenate(
+                        [self._raw_tail[0, n:], raw_target])
             else:
+                applied = np.empty((channels, n), dtype=np.float64)
                 for ch in range(channels):
-                    window = sliding_window_view(
-                        np.concatenate([self._target_tail[ch], target[ch]]),
-                        lookahead + 1)
-                    target[ch] = window.min(axis=1)[:n]
-                    self._target_tail[ch, :] = target[ch][-lookahead:]
+                    stream = np.concatenate(
+                        [self._raw_tail[ch], raw_target[ch]])
+                    applied[ch] = _sliding_min(
+                        stream, lookahead + 1)[lookahead:]
+                    self._raw_tail[ch] = (
+                        raw_target[ch, -lookahead:] if n >= lookahead
+                        else np.concatenate(
+                            [self._raw_tail[ch, n:], raw_target[ch]]))
+        else:
+            applied = (raw_target.reshape(1, n) if linked else raw_target)
 
-        # release 平滑（增益回升慢，下降即时）+ 延迟线对齐 lookahead。
-        if self._delay_line is None or self._delay_line.shape != (
-                channels, max(1, lookahead)):
-            self._delay_line = np.zeros(
-                (channels, max(1, lookahead)), dtype=np.float32)
-        delayed = np.concatenate(
-            [self._delay_line, samples], axis=1)[:, :n]
-        self._delay_line = np.concatenate(
-            [self._delay_line, samples], axis=1)[:, n:n + max(1, lookahead)]
-        if lookahead <= 0:
+        # 输出延迟线对齐 lookahead + 检测群延迟 D（块间连续）。
+        total_delay = lookahead + _FIR_GROUP_DELAY
+        if total_delay > 0:
+            if self._delay_line is None or self._delay_line.shape != (
+                    channels, total_delay):
+                self._delay_line = np.zeros(
+                    (channels, total_delay), dtype=np.float32)
+            stream = np.concatenate([self._delay_line, samples], axis=1)
+            delayed = stream[:, :n].copy()
+            self._delay_line = np.ascontiguousarray(
+                stream[:, n:n + total_delay], dtype=np.float32)
+        else:
             delayed = samples
 
+        # release 平滑（下降即时、回升一极）；链接共享单状态，独立逐声道。
+        n_rows = 1 if linked else channels
+        if linked:
+            states = np.full(n_rows, self._gain_state, dtype=np.float64)
+        else:
+            if self._gain_states is None or self._gain_states.shape != (
+                    channels,):
+                self._gain_states = np.full(
+                    channels, self._gain_state, dtype=np.float64)
+            states = self._gain_states.copy()
         gains = np.empty((channels, n), dtype=np.float32)
-        states = np.full(channels, self._gain_state, dtype=np.float64)
         for idx in range(n):
             for ch in range(channels):
-                g = float(target[idx]) if linked else float(target[ch, idx])
-                if g < states[ch]:
-                    states[ch] = g  # attack：即时下降
+                row = 0 if linked else ch
+                g = float(applied[row, idx]) if linked else float(
+                    applied[ch, idx])
+                if g < states[row]:
+                    states[row] = g  # attack：即时下降
                 else:
-                    states[ch] = (release_coeff * states[ch]
-                                  + (1 - release_coeff) * g)
-                gains[ch, idx] = states[ch]
-        self._gain_state = float(np.min(states))
+                    states[row] = (release_coeff * states[row]
+                                   + (1 - release_coeff) * g)
+                gains[ch, idx] = states[row]
+        if linked:
+            self._gain_state = float(states[0])
+            self._gain_states = None
+        else:
+            self._gain_states = states
+            self._gain_state = float(np.min(states))
 
-        peak_linear = float(np.max(peaks)) if linked else float(
-            np.max(peaks))
+        peak_linear = float(np.max(peaks)) if peaks.size else 0.0
         self._last_true_peak_dbtp = (
             20.0 * np.log10(max(peak_linear, 1e-9)))
+        # 遥测 GR = 最深衰减（独立模式取各声道最小增益）。
         self._last_reduction_db = (
             20.0 * np.log10(max(self._gain_state, 1e-9)))
-        return np.ascontiguousarray(delayed * gains, dtype=np.float32)
+        result = np.ascontiguousarray(delayed * gains, dtype=np.float32)
+        out_peak = float(np.max(np.abs(result))) if result.size else 0.0
+        self._last_output_peak_dbfs = 20.0 * np.log10(max(out_peak, 1e-9))
+        return result
 
     # ── 遥测（dBTP 独立复核路径共用读数） ──────────────────────────
     def collect_telemetry(self) -> dict:
         return {
             "true_peak_dbtp": round(self._last_true_peak_dbtp, 3),
+            "output_peak_dbfs": round(self._last_output_peak_dbfs, 3),
             "gain_reduction_db": round(-self._last_reduction_db, 3),
             "ceiling_dbtp": float(self._params.get("ceiling_dbtp", -1.0)),
             "latency_samples": self.latency_samples(),

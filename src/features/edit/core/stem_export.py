@@ -36,6 +36,7 @@ import logging
 import math
 import os
 
+from src.features.edit.core import delivery_dither
 from src.features.edit.core.interchange import frames_to_samples
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -1039,11 +1040,13 @@ class _StemWavWriter:
         sample_rate: int = 48000,
         channels: int = 2,
         bit_depth: int = 24,
+        dither: "Optional[delivery_dither.DitherSettings]" = None,
     ) -> None:
         self._path = path
         self._sample_rate = int(sample_rate)
         self._samples_written = 0
         self._bit_depth = int(bit_depth)
+        self._dither = dither
         self._ok = True
         self._container = None
         self._stream = None
@@ -1084,11 +1087,17 @@ class _StemWavWriter:
         return self._ok and self._container is not None
 
     def write(self, block: np.ndarray) -> None:
-        """写入一块 PCM (channels, n) float32（自动 clip 到 [-1, 1]）。"""
+        """写入一块 PCM (channels, n) float32（自动 clip 到 [-1, 1]）。
+
+        配置了交付 dither（FX-23）时：整数位深先在 Python 侧完成
+        TPDF dither + 最终 1 LSB 量化（编码器收到的已是网格值）。
+        """
         if not self.usable or block.size == 0:
             return
         if block.ndim == 1:
             block = block.reshape(1, -1)
+        if self._dither is not None:
+            block = self._dither.apply(block)
         # fltp 格式输入（float planar），编码器负责量化
         clipped = np.clip(block, -1.0, 1.0).astype(np.float32)
         frame = self._av.AudioFrame.from_ndarray(
