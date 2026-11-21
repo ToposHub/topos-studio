@@ -35,6 +35,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -787,6 +788,7 @@ class FFmpegVideoEncoder:
         # AUD-33509：add_audio_stream 推导出的声道布局名单一真相，
         # write_audio_samples 帧布局复用（流/帧同源，不二度推导）
         self._audio_layout_name: Optional[str] = None
+        self._audio_written_duration = Fraction(0)
         self._frame_count: int = 0
         self._is_open: bool = False
         self._last_pts: int = 0
@@ -2366,6 +2368,7 @@ class FFmpegVideoEncoder:
         # 无音频导出，不会中断导出本身。
         self._audio_stream.layout = layout_name
         self._audio_layout_name = layout_name
+        self._audio_written_duration = Fraction(0)
 
         if bitrate:
             # AUD-33505：键名必须是 'b'（AVCodecContext AVOption 正名）。
@@ -2433,6 +2436,7 @@ class FFmpegVideoEncoder:
         # 分块写入以避免内存问题
         block_size = 1024
         total_samples = samples.shape[1]
+        time_base = Fraction(1, sample_rate)
         offset = 0
 
         while offset < total_samples:
@@ -2441,10 +2445,13 @@ class FFmpegVideoEncoder:
 
             av_frame = av.AudioFrame.from_ndarray(block, format='fltp', layout=layout)
             av_frame.sample_rate = sample_rate
+            av_frame.time_base = time_base
+            av_frame.pts = round(self._audio_written_duration / time_base)
 
             for packet in self._audio_stream.encode(av_frame):
                 self._container.mux(packet)
 
+            self._audio_written_duration += (end - offset) * time_base
             offset = end
 
     def close(self) -> None:

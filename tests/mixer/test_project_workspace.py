@@ -1223,6 +1223,7 @@ def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_pa
     # 采集 [0.05, 0.95) s 的纯噪声 → 降噪入栈选区 [1.0, 4.0) s。
     panel.canvas.setSelection(0.05, 0.95)
     panel.noisePrintCaptured.emit(0.05, 0.95)
+    qtbot.waitUntil(lambda: panel._noise_profile is not None, timeout=10000)
     assert panel._noise_profile is not None and panel._noise_profile.is_valid
     panel.canvas.setSelection(1.0, 4.0)
     panel.denoiseRequested.emit(1.0, 4.0, 12.0)
@@ -1301,6 +1302,44 @@ def test_clip_editor_canvas_selection_gain_commits_to_target_channel(project_hos
     qtbot.waitUntil(lambda: np.array_equal(panel._pcm, raw), timeout=10000)
 
 
+def test_clip_editor_native_retime_and_sample_microfade(project_host, qtbot, tmp_path) -> None:
+    import numpy as np
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    path = tmp_path / "retime.wav"
+    source = (0.3 * np.sin(2 * np.pi * 440 * np.arange(240000) / 48000) * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as wav:
+        wav.setparams((2, 2, 48000, 0, "NONE", "not compressed"))
+        wav.writeframes(np.column_stack((source, source)).tobytes())
+    asset = MediaAsset(
+        "audio", str(path), "audio", "Native retime",
+        {"audio_info": {"sample_rate": 48000, "channels": 2},
+         "duration_seconds": 5.0, "fps": 24.0},
+    )
+    host._current_edit_project = EditProject("project", "Retime", assets={"audio": asset})
+    host.show_mixer()
+    sequence = view.get_timeline()
+    track = sequence.audio_tracks[0]
+    clip = track.clips[0].with_speed(2.0)
+    sequence = sequence.with_track_updated(track.with_clip_updated(clip))
+    view.load_timeline(sequence)
+    host.sync_timeline(sequence)
+    host._open_project_audio_clip_editor(clip.clip_id)
+    panel = host.dock_audio_clip_editor.widget()._panel
+    qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=10000)
+    assert panel._pcm.shape == (2, 120000)
+    region = panel._pcm[0, 24000:72000]
+    assert int(np.argmax(np.abs(np.fft.rfft(region)))) == 880
+
+    panel.fade_preset_buttons[0.02].click()
+    updated = view.get_timeline().get_clip_by_id(clip.clip_id)
+    assert (updated.fade_in_samples, updated.fade_out_samples) == (960, 960)
+    qtbot.waitUntil(lambda: abs(panel._pcm[0, 5]) < abs(panel._raw_pcm[0, 5]) * 0.2)
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip.clip_id).fade_in_samples is None
+
+
 def test_clip_editor_timepitch_commit_changes_length_and_undoes(
         project_host, qtbot, tmp_path, monkeypatch) -> None:
     """§6.2：变速预览 → 提交（gap 模式）→ 片段变短 + 步骤入栈 → 一次撤销。"""
@@ -1346,7 +1385,7 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     panel._timepitch_button.click()
     qtbot.waitUntil(lambda: panel._timepitch_request is not None, timeout=10000)
     assert panel._pending_timepitch is not None
-    assert panel._timepitch_commit_button.isEnabled()
+    qtbot.waitUntil(panel._timepitch_commit_button.isEnabled, timeout=10000)
     assert not panel._timepitch_discard_button.isHidden()
     revision = view.get_timeline().revision
     panel._timepitch_discard_button.click()
@@ -1357,6 +1396,7 @@ def test_clip_editor_timepitch_commit_changes_length_and_undoes(
     panel.canvas.setSelection(1.0, 4.0)
     panel.stretch_knob.setValue(150.0, emit=False)
     panel._timepitch_button.click()
+    qtbot.waitUntil(panel._timepitch_commit_button.isEnabled, timeout=10000)
 
     # 提交：改长度事务一次落库（片段时长 + audio_edit time_stretch）。
     panel._timepitch_commit_button.click()

@@ -86,6 +86,21 @@ def _two_clip_track(**kw):
     return EditTrack(**defaults)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("audio_gain_db", -6.0),
+    ("fade_in_samples", 0),  # Explicit zero must differ from inherited frame fade.
+    ("fade_out_samples", 960),
+    ("audio_sample_offset", 120),
+    ("source_sample_offset", 120),
+])
+def test_clip_sample_changes_invalidate_live_audio_graph(edit_page, field: str, value: int | float) -> None:
+    from dataclasses import replace
+
+    original = _base_track(clips=(_clip(fade_in_duration=3, fade_out_duration=2),))
+    changed = replace(original, clips=(replace(original.clips[0], **{field: value}),))
+    assert _sig(edit_page, (original,)) != _sig(edit_page, (changed,))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 轨道级字段：每个字段变化都应改变签名
 # ─────────────────────────────────────────────────────────────────────────────

@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -175,6 +177,58 @@ def _project(wav: Path, spec: SourcePatchSpec | None) -> EditProject:
 
 
 class TestExportHonoursChannelMap:
+    def test_bound_polywav_map_is_shared_by_editor_stem_export_and_graph(
+        self, tmp_path: Path,
+    ) -> None:
+        from src.features.edit.core.audio_edit import make_step, new_audio_edit
+        from src.features.edit.core.audio_sync import AudioSyncBinding
+        from src.features.edit.core.clip_pcm import decode_audio_range, resolve_clip_audio_spec
+        from src.features.edit.core.pcm_render_cache import build_pre_render_plan
+        from src.features.edit.ui.edit_page import EditPage
+
+        camera_path = _write_wav(tmp_path / "camera.wav", np.zeros((2, SR), dtype=np.float32))
+        external_path = _dc_wav(tmp_path / "poly.wav")
+        camera = MediaAsset("camera", str(camera_path), "video", "Camera", {"fps": FPS})
+        external = MediaAsset("poly", str(external_path), "audio", "Poly", {
+            "audio_info": {"channels": 6, "channel_layout": "5.1", "sample_rate": SR},
+        })
+        patch = SourcePatchSpec(audio_channel_map=((0, 0), (0, 1)))
+        channel_map = ((3, 0), (1, 1))
+        binding = AudioSyncBinding("poly", audio_channel_map=channel_map)
+        project = EditProject(
+            "p", "P", assets={"camera": camera, "poly": external},
+            source_patch_overrides={"camera": patch}, audio_sync_bindings={"camera": binding})
+        seq = _audio_timeline("camera", duration=FPS)
+        track, clip = seq.audio_tracks[0], seq.audio_tracks[0].clips[0]
+        spec = resolve_clip_audio_spec(project, seq, clip, camera)
+        assert spec is not None and spec.source_channel_map == channel_map
+        assert spec.source_asset_id == "poly" and spec.channel_count == 6
+        raw = decode_audio_range(spec.source_path, spec.start_sample, spec.end_sample, SR,
+                                 channel_map=spec.source_channel_map)
+
+        edit = new_audio_edit([make_step(
+            "spectral_denoise", 0, SR, (0, 1), noise_start=0, noise_end=SR // 2, reduction_db=0.0)])
+        plan = build_pre_render_plan(project, seq, replace(clip, audio_edit=edit), camera)
+        assert plan is not None and plan.source_channel_map == channel_map
+        assert plan.source_channel_count == 6 and plan.expected_channels == 2
+
+        decode, close = create_clip_decode_fn(project, float(FPS), SR)
+        try:
+            stem_block = decode(track, clip, 0, float(FPS), 480)
+        finally:
+            close()
+        config = TimelineExportConfig(output_path=str(tmp_path / "out.mov"), audio_channels=2)
+        master = TimelineExporter(project, seq, Mock())._render_audio_master(0, FPS, config, encoder=Mock())
+        for pcm in (raw, stem_block, master):
+            assert pcm is not None and pcm.shape[0] == 2
+            np.testing.assert_allclose(np.mean(pcm, axis=1), [DC_AMPS[3], DC_AMPS[1]], atol=0.01)
+
+        page = SimpleNamespace(_pre_render_signature_state=lambda *_: ())
+        changed = replace(project, audio_sync_bindings={
+            "camera": replace(binding, audio_channel_map=((1, 0), (3, 1)))})
+        assert EditPage._build_audio_timeline_signature(page, (track,), project, FPS) != (
+            EditPage._build_audio_timeline_signature(page, (track,), changed, FPS))
+
     def test_master_render_selects_channel(self, tmp_path) -> None:
         """成片 _render_audio_master：映射生效时只剩源声道 3 的电平。"""
         wav = _dc_wav(tmp_path / "dc6.wav")

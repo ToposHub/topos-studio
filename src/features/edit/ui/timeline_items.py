@@ -75,6 +75,7 @@ from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import resolve_track_color
 from src.features.edit.core.audio_dsp import fade_curve_factor
 from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
+from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
 from src.features.edit.ui.fade_overlay import (
     FADE_HANDLE_HEIGHT, FADE_HANDLE_HIT_HEIGHT, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_SIZE,
     paint_fade_curve_point, paint_fade_ramp, paint_fade_tab,
@@ -605,9 +606,9 @@ class ClipItem(QGraphicsObject):
     make_local_grade_copy_requested = pyqtSignal(str, str)  # clip_id, track_id
     open_in_color_requested = pyqtSignal(str, str, str)  # clip_id, track_id, stack_id
     # Phase 1.2: Fade in/out signals
-    fade_in_changed = pyqtSignal(str, str, int)  # clip_id, track_id, new_fade_in (live preview)
-    fade_out_changed = pyqtSignal(str, str, int)  # clip_id, track_id, new_fade_out (live preview)
-    fade_finished = pyqtSignal(str, str, int, int, int, int)  # clip_id, track_id, old_fade_in, old_fade_out, new_fade_in, new_fade_out
+    fade_in_changed = pyqtSignal(str, str, float)  # clip_id, track_id, new_fade_in (live preview)
+    fade_out_changed = pyqtSignal(str, str, float)  # clip_id, track_id, new_fade_out (live preview)
+    fade_finished = pyqtSignal(str, str, float, float, float, float)  # clip_id, track_id, old in/out, new in/out
     # Phase 6.1: Linked group hover signal (for group highlight sync)
     linked_group_hovered = pyqtSignal(str, str, bool)  # clip_id, linked_clip_id, is_hovered
     # Phase 6.2: Track highlight request signal
@@ -678,8 +679,8 @@ class ClipItem(QGraphicsObject):
         fps: float = 24.0,  # Frame rate for time conversion (P8)
         color_stack_id: Optional[str] = None,  # P9.1: Color stack reference ID
         color_shared: bool = False,  # P9.1: Whether using shared asset grade
-        fade_in_duration: int = 0,  # Phase 1.2: Fade in duration (frames)
-        fade_out_duration: int = 0,  # Phase 1.2: Fade out duration (frames)
+        fade_in_duration: float = 0,  # Fade in duration (effective frames)
+        fade_out_duration: float = 0,  # Fade out duration (effective frames)
         # Phase 2: 片段徽章和标记属性
         speed: float = 1.0,  # Phase 2.2: 播放速度倍率
         retime_points: tuple[tuple[int, float], ...] = (),
@@ -693,6 +694,8 @@ class ClipItem(QGraphicsObject):
         parent: Optional[QGraphicsItem] = None,
         *,
         fade_curves: tuple[str | None, str | None] = (None, None),
+        sample_fade: bool = False,
+        timeline_fps: float | None = None,
     ) -> None:
         super().__init__(parent)
 
@@ -832,19 +835,16 @@ class ClipItem(QGraphicsObject):
         self._fade_curve_drag_end: str | None = None
         self._fade_curve_drag_height = 1.0
         self._fade_curve_preview: str | None = None
-        # P0-3 · 有效淡化消费：采样域字段（48k 参考）经时间线帧率换算，
-        # 正值至少显示 1 帧（960 样本/20 ms 在 24 fps ≈ 0.5 帧，整数帧
-        # 取整会消失）。``_timeline_fps`` 由视图在创建后写入（构造缺省
-        # 用资产 fps 近似，仅影响换算精度不影响有无）。
-        self._timeline_fps: float = float(fps or 24.0)
+        self._timeline_fps = float(timeline_fps or fps or 24.0)
+        self._sample_fade = sample_fade
         self._fade_in_duration = fade_in_duration
         self._fade_out_duration = fade_out_duration
         self._fade_in_duration, self._fade_out_duration = self._clamp_fade_pair(
             self._fade_in_duration,
             self._fade_out_duration,
         )
-        self._original_fade_in: int = 0  # Original fade in for undo
-        self._original_fade_out: int = 0  # Original fade out for undo
+        self._original_fade_in: float = 0
+        self._original_fade_out: float = 0
         self._hover_fade_handle: Optional[str] = None  # 'fade_in' or 'fade_out' when hovering
         self._selected_edit_edge: Optional[str] = None
 
@@ -1408,28 +1408,30 @@ class ClipItem(QGraphicsObject):
 
     # Phase 1.2: Fade in/out properties
     @property
-    def fade_in_duration(self) -> int:
+    def fade_in_duration(self) -> float:
         """Get fade in duration in frames."""
         return self._fade_in_duration
 
     @property
-    def fade_out_duration(self) -> int:
+    def fade_out_duration(self) -> float:
         """Get fade out duration in frames."""
         return self._fade_out_duration
 
-    @staticmethod
-    def _effective_fade_display_frames(value: float) -> int:
-        """有效淡化长度的显示帧数：正值至少 1 帧（极短淡化不取整消失）。"""
-        if value <= 0.0:
-            return 0
-        return max(1, int(math.ceil(value)))
-
-    def _clamp_fade_pair(self, fade_in: int, fade_out: int) -> tuple[int, int]:
+    def _clamp_fade_pair(self, fade_in: float, fade_out: float) -> tuple[float, float]:
         """Keep the two fade ramps within the clip without crossing."""
-        duration = max(0, int(self._duration_frames))
-        clamped_in = max(0, min(int(fade_in), duration))
-        clamped_out = max(0, min(int(fade_out), duration - clamped_in))
+        duration = self._duration_frames
+        clamped_in = max(0, min(fade_in, duration))
+        clamped_out = max(0, min(fade_out, duration - clamped_in))
         return clamped_in, clamped_out
+
+    def _fade_drag_length(self, original: float, delta_x: float, maximum: float) -> float:
+        delta_frames = delta_x / self._pixels_per_frame
+        if self._sample_fade:
+            samples_per_frame = AUDIO_REFERENCE_SAMPLE_RATE / self._timeline_fps
+            length = round((original + delta_frames) * samples_per_frame) / samples_per_frame
+        else:
+            length = original + int(delta_frames)
+        return max(0.0, min(length, maximum))
 
     def set_fade_in_duration(self, duration: int) -> None:
         """Set fade in duration (for live preview during drag)."""
@@ -2224,9 +2226,13 @@ class ClipItem(QGraphicsObject):
             incoming = self._drag_mode == "fade_in"
             duration = fade_in_duration if incoming else fade_out_duration
             original = self._original_fade_in if incoming else self._original_fade_out
-            fps = max(1, round(getattr(self, "_timeline_display_fps", self._fps)))
-            delta = duration - original
-            text = f"{delta:+d}f   {duration // fps:02d}:{duration % fps:02d}"
+            if self._sample_fade:
+                scale = 1000.0 / self._timeline_fps
+                text = f"{(duration - original) * scale:+.1f} ms   {duration * scale:.1f} ms"
+            else:
+                fps = max(1, round(self._timeline_fps))
+                frames = int(duration)
+                text = f"{frames - int(original):+d}f   {frames // fps:02d}:{frames % fps:02d}"
             painter.save()
             painter.setFont(QFont(UI_FONT_FAMILIES, 8))
             width = min(max(0.0, self._width - 4.0), painter.fontMetrics().horizontalAdvance(text) + 12.0)
@@ -2237,11 +2243,11 @@ class ClipItem(QGraphicsObject):
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
             painter.restore()
 
-    def _fade_visual_width(self, duration: int) -> float:
-        """Return the on-screen width for a fade, leaving room for handles."""
+    def _fade_visual_width(self, duration: float) -> float:
+        """Return the visual fade length at the current timeline scale."""
         max_width = max(0.0, self._width - float(FADE_HANDLE_SIZE + 6))
         raw_width = max(0.0, float(duration) * self._pixels_per_frame)
-        if duration > 0:
+        if duration > 0 and not self._sample_fade:
             # Keep a one-frame fade visible and grabbable at normal zoom.
             raw_width = max(raw_width, FADE_HANDLE_SIZE / 2.0 + 1.0)
         return min(max_width, raw_width)
@@ -4723,7 +4729,13 @@ class ClipItem(QGraphicsObject):
             incoming = self._fade_handle_at(pos) == "in"
             new_edge = new_fade = "fade_in" if incoming else "fade_out"
             duration = self._fade_in_duration if incoming else self._fade_out_duration
-            new_tooltip = I18N.tr("timeline.fade_duration", "Fade: {frames} frames", frames=duration)
+            if self._sample_fade:
+                new_tooltip = I18N.tr(
+                    "timeline.fade_duration_ms", "Fade: {ms} ms",
+                    ms=f"{duration * 1000.0 / self._timeline_fps:.2f}",
+                )
+            else:
+                new_tooltip = I18N.tr("timeline.fade_duration", "Fade: {frames} frames", frames=int(duration))
             new_cursor = edit_cursor("fade")
 
         elif self._active_tool == EditTool.TRIM:
@@ -5960,13 +5972,8 @@ class ClipItem(QGraphicsObject):
                 # Phase 1.2: Adjust fade in duration
                 # Positive delta increases fade (drag right), negative decreases (drag left)
                 max_fade_in = max(0, self._duration_frames - self._fade_out_duration)
-                new_fade_in = max(0, min(
-                    self._original_fade_in + delta_frames,
-                    max_fade_in,
-                ))
-                # Mouse events can arrive several times for the same frame.
-                # Avoid emitting/repainting when the visible value did not
-                # change; this is especially noticeable at high zoom levels.
+                new_fade_in = self._fade_drag_length(
+                    self._original_fade_in, delta.x(), max_fade_in)
                 if new_fade_in != self._fade_in_duration:
                     self._fade_in_duration = new_fade_in
                     self.fade_in_changed.emit(self._clip_id, self._track_id, new_fade_in)
@@ -5976,10 +5983,8 @@ class ClipItem(QGraphicsObject):
                 # Phase 1.2: Adjust fade out duration
                 # Negative delta increases fade (drag left), positive decreases (drag right)
                 max_fade_out = max(0, self._duration_frames - self._fade_in_duration)
-                new_fade_out = max(0, min(
-                    self._original_fade_out - delta_frames,
-                    max_fade_out,
-                ))
+                new_fade_out = self._fade_drag_length(
+                    self._original_fade_out, -delta.x(), max_fade_out)
                 if new_fade_out != self._fade_out_duration:
                     self._fade_out_duration = new_fade_out
                     self.fade_out_changed.emit(self._clip_id, self._track_id, new_fade_out)
@@ -6596,11 +6601,11 @@ class ClipItem(QGraphicsObject):
             getattr(clip, "effective_fade_curve_in", None),
             getattr(clip, "effective_fade_curve_out", None),
         )
-        # P0-3 · 有效长度（采样域优先，48k 参考率换算；正值 ≥1 帧防消失）。
-        self._fade_in_duration = self._effective_fade_display_frames(
-            clip.effective_fade_in_frames(self._timeline_fps))
-        self._fade_out_duration = self._effective_fade_display_frames(
-            clip.effective_fade_out_frames(self._timeline_fps))
+        self._sample_fade = clip.fade_in_samples is not None or clip.fade_out_samples is not None
+        self._fade_in_duration, self._fade_out_duration = self._clamp_fade_pair(
+            clip.effective_fade_in_frames(self._timeline_fps),
+            clip.effective_fade_out_frames(self._timeline_fps),
+        )
 
         # Update visual properties
         self._opacity = clip.opacity if hasattr(clip, 'opacity') else 1.0

@@ -92,6 +92,56 @@ def _capture_status(panel) -> list[str]:
 
 
 class TestRepeatedNormalize:
+    def test_uses_rack_index_when_earlier_steps_are_bypassed(self, qapp) -> None:
+        from src.features.edit.core.audio_edit import make_step, new_audio_edit
+
+        pcm = _tone(0.25)
+        editor, panel, committed = _editor_with_clip(qapp, pcm)
+        steps = [
+            make_step("range_gain", 0, 2 * RATE, (0, 1), gain_db=12.0, enabled=False),
+            make_step("normalize", 0, 2 * RATE, (0, 1), gain_db=6.0),
+        ]
+        _apply_stack(editor, new_audio_edit(steps))
+        editor._on_normalize_requested(0.0, 2.0, -3.0)
+        candidate = committed[0][0]
+        assert candidate["steps"][0] == steps[0]
+        assert candidate["steps"][1]["step_id"] == steps[1]["step_id"]
+        assert _peak_db(_render(pcm, candidate)) == pytest.approx(-3.0, abs=0.15)
+
+    def test_new_request_cancels_analysis_before_it_can_write(self, qapp, qtbot, monkeypatch) -> None:
+        import threading
+
+        from src.features.mixer.ui import project_clip_editor
+
+        editor, panel, committed = _editor_with_clip(qapp, _tone(0.25))
+        qtbot.addWidget(editor)
+        panel._preview_offline = False
+        entered = threading.Event()
+        cancellation_seen = threading.Event()
+        original = project_clip_editor.measure_gain_edit
+
+        def wait_on_first(request, cancelled):
+            if request.target == -6.0:
+                assert threading.current_thread() is not threading.main_thread()
+                entered.set()
+                while not cancelled():
+                    cancellation_seen.wait(0.01)
+                cancellation_seen.set()
+                return None
+            return original(request, cancelled)
+
+        monkeypatch.setattr(project_clip_editor, "measure_gain_edit", wait_on_first)
+        try:
+            editor._on_normalize_requested(0.0, 2.0, -6.0)
+            assert entered.wait(2.0)
+            editor._on_normalize_requested(0.0, 2.0, -3.0)
+            qtbot.waitUntil(lambda: bool(committed), timeout=5000)
+            assert cancellation_seen.is_set()
+            assert len(committed) == 1
+            assert _peak_db(_render(panel._raw_pcm, committed[0][0])) == pytest.approx(-3.0, abs=0.15)
+        finally:
+            editor.close()
+
     def test_constant_retargets_exactly(self, qapp) -> None:
         """恒定 0.25 依次 −6→−3→−12 dBFS：每次落点误差 ≤0.15 dBFS。"""
         pcm = _constant(0.25)

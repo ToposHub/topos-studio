@@ -138,11 +138,14 @@ class TestSpecChannelMap:
         patch = SourcePatchSpec(
             audio_enabled=True, audio_channel_map=((1, 0), (1, 1)))
         project = SimpleNamespace(
+            assets={"w": SimpleNamespace(path="/bound.wav")},
             audio_sync_bindings={"a": binding},
             source_patch_overrides={"a": patch},
         )
         asset = SimpleNamespace(asset_id="a")
         assert resolve_source_channel_map(project, asset) == ((3, 0), (3, 1))
+        project.assets.clear()
+        assert resolve_source_channel_map(project, asset) == ((1, 0), (1, 1))
 
     def test_resolve_patch_without_binding(self) -> None:
         from src.features.edit.core.source_patch import SourcePatchSpec

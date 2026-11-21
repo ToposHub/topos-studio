@@ -2531,11 +2531,11 @@ class TimelineView(QGraphicsView):
                         waveform_asset_id=waveform_asset_id,
                         fps=asset_fps,
                         effects=clip.effects,
-                        fade_in_duration=self._effective_fade_display_frames(
-                            clip, "in"),
-                        fade_out_duration=self._effective_fade_display_frames(
-                            clip, "out"),
+                        fade_in_duration=clip.effective_fade_in_frames(float(self._timeline.fps)),
+                        fade_out_duration=clip.effective_fade_out_frames(float(self._timeline.fps)),
                         fade_curves=(clip.effective_fade_curve_in, clip.effective_fade_curve_out),
+                        sample_fade=clip.fade_in_samples is not None or clip.fade_out_samples is not None,
+                        timeline_fps=float(self._timeline.fps),
                         speed=clip.speed if isinstance(clip.speed, (int, float)) else clip.speed.speed,
                         retime_points=(
                             tuple((point.source_offset, point.speed) for point in clip.speed.speed_points)
@@ -2553,7 +2553,6 @@ class TimelineView(QGraphicsView):
                     )
                     self._scene.addItem(item)
                     self._items_map[clip.clip_id] = item
-                    item._timeline_fps = float(self._timeline.fps)
                     self._configure_clip_presentation(item)
                     # 轨道音量驱动的波形显示缩放（W-gain: 视觉联动）
                     item.set_waveform_gain(getattr(track, 'volume', 1.0))
@@ -4389,6 +4388,8 @@ class TimelineView(QGraphicsView):
                 fade_in_duration=getattr(item, '_fade_in_duration', 0),
                 fade_out_duration=getattr(item, '_fade_out_duration', 0),
                 fade_curves=item._fade_curves,
+                sample_fade=item._sample_fade,
+                timeline_fps=item._timeline_fps,
                 waveform_show_channels=item._waveform_show_channels,
                 speed=getattr(item, '_speed', 1.0),
                 opacity=item._opacity,
@@ -7675,6 +7676,9 @@ class TimelineView(QGraphicsView):
             return True
         if old_clip.fade_out_duration != new_clip.fade_out_duration:
             return True
+        if (old_clip.fade_in_samples != new_clip.fade_in_samples
+                or old_clip.fade_out_samples != new_clip.fade_out_samples):
+            return True
 
         if (old_clip.effective_fade_curve_in != new_clip.effective_fade_curve_in
                 or old_clip.effective_fade_curve_out != new_clip.effective_fade_curve_out):
@@ -8112,9 +8116,11 @@ class TimelineView(QGraphicsView):
             asset_path=asset_path,
             waveform_asset_id=waveform_asset_id,
             fps=asset_fps,
-            fade_in_duration=self._effective_fade_display_frames(clip, "in"),
-            fade_out_duration=self._effective_fade_display_frames(clip, "out"),
+            fade_in_duration=clip.effective_fade_in_frames(float(self._timeline.fps)),
+            fade_out_duration=clip.effective_fade_out_frames(float(self._timeline.fps)),
             fade_curves=(clip.effective_fade_curve_in, clip.effective_fade_curve_out),
+            sample_fade=clip.fade_in_samples is not None or clip.fade_out_samples is not None,
+            timeline_fps=float(self._timeline.fps),
             speed=clip.speed if isinstance(clip.speed, (int, float)) else clip.speed.speed,
             retime_points=(
                 tuple((point.source_offset, point.speed) for point in clip.speed.speed_points)
@@ -8129,7 +8135,6 @@ class TimelineView(QGraphicsView):
             flag_color=getattr(clip, "flag_color", None),
             waveform_show_channels=getattr(clip, "waveform_show_channels", False),
         )
-        item._timeline_fps = float(self._timeline.fps)
 
         # Set visual properties
         if hasattr(clip, 'opacity'):
@@ -14024,7 +14029,7 @@ class TimelineView(QGraphicsView):
         self._commit_retime_params(
             clip, updated, f"Set speed ramp {easing} at {source_offset}")
 
-    def _on_fade_in_preview(self, clip_id: str, track_id: str, new_fade_in: int) -> None:
+    def _on_fade_in_preview(self, clip_id: str, track_id: str, new_fade_in: float) -> None:
         """Keep fade preview local while the pointer is moving.
 
         ``ClipItem`` updates its own geometry before emitting this signal.
@@ -14034,52 +14039,45 @@ class TimelineView(QGraphicsView):
         """
         _ = (clip_id, track_id, new_fade_in)
 
-    def _on_fade_out_preview(self, clip_id: str, track_id: str, new_fade_out: int) -> None:
+    def _on_fade_out_preview(self, clip_id: str, track_id: str, new_fade_out: float) -> None:
         """Keep fade preview local while the pointer is moving."""
         _ = (clip_id, track_id, new_fade_out)
 
-    def _effective_fade_display_frames(self, clip, which: str) -> int:
-        """P0-3 · 有效淡化长度（显示帧；采样域优先，正值 ≥1 帧防消失）。"""
-        try:
-            value = getattr(
-                clip, f"effective_fade_{which}_frames")(float(self._timeline.fps))
-        except (AttributeError, TypeError, ValueError):
-            value = float(getattr(clip, f"fade_{which}_duration", 0) or 0)
-        if value <= 0.0:
-            return 0
-        return max(1, int(math.ceil(value)))
-
     def _on_fade_finished(
         self, clip_id: str, track_id: str,
-        old_fade_in: int, old_fade_out: int,
-        new_fade_in: int, new_fade_out: int,
+        old_fade_in: float, old_fade_out: float,
+        new_fade_in: float, new_fade_out: float,
     ) -> None:
-        """Fade drag finished — commit via command stack for undo support.
+        """Commit only the edited edges and retain the clip's sample precision."""
+        track = self._timeline.get_track_by_id(track_id) if self._timeline else None
+        if track is None or track.is_locked:
+            return
+        clip = track.get_clip_by_id(clip_id)
+        if clip is None:
+            return
+        if clip.fade_in_samples is not None or clip.fade_out_samples is not None:
+            from src.features.edit.core.commands import UpdateClipSampleFieldsCommand
+            from src.features.edit.core.sample_time import TimelineSampleClock
 
-        P0-3 · 域感知写回：该端采样域字段生效时，拖拽结果换算回 48k
-        参考样本提交（UpdateClipSampleFieldsCommand），否则走帧域命令
-        （with_fade_* 清采样覆盖）——两类字段互不串改，另一端不动。
-        """
-        clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
-        in_samples_domain = (clip is not None
-                             and clip.fade_in_samples is not None)
-        out_samples_domain = (clip is not None
-                              and clip.fade_out_samples is not None)
-        if in_samples_domain or out_samples_domain:
-            from src.features.edit.core.commands import (
-                UpdateClipSampleFieldsCommand,
-            )
-            from src.features.edit.core.sample_time import (
-                AUDIO_REFERENCE_SAMPLE_RATE,
-            )
-            fps = max(1e-9, float(self._timeline.fps))
-            fields: dict = {}
-            if in_samples_domain and new_fade_in != old_fade_in:
-                fields["fade_in_samples"] = max(
-                    0, int(round(new_fade_in / fps * AUDIO_REFERENCE_SAMPLE_RATE)))
-            if out_samples_domain and new_fade_out != old_fade_out:
-                fields["fade_out_samples"] = max(
-                    0, int(round(new_fade_out / fps * AUDIO_REFERENCE_SAMPLE_RATE)))
+            clock = TimelineSampleClock(self._timeline.fps)
+            current_in = (clip.fade_in_samples if clip.fade_in_samples is not None
+                          else clock.frame_start_sample(clip.fade_in_duration))
+            current_out = (clip.fade_out_samples if clip.fade_out_samples is not None
+                           else clock.frame_start_sample(clip.fade_out_duration))
+            duration = clock.frame_start_sample(clip.timeline_duration)
+            fields: dict[str, int] = {}
+            if new_fade_in != old_fade_in:
+                limit = min(600 * clock.sample_rate, int(duration - current_out))
+                requested = round(new_fade_in * float(clock.samples_per_frame))
+                proposed = max(0, min(limit, requested))
+                if proposed != current_in:
+                    fields["fade_in_samples"] = proposed
+            if new_fade_out != old_fade_out:
+                limit = min(600 * clock.sample_rate, int(duration - fields.get("fade_in_samples", current_in)))
+                requested = round(new_fade_out * float(clock.samples_per_frame))
+                proposed = max(0, min(limit, requested))
+                if proposed != current_out:
+                    fields["fade_out_samples"] = proposed
             if not fields:
                 return
             cmd = UpdateClipSampleFieldsCommand.create(
@@ -14090,10 +14088,10 @@ class TimelineView(QGraphicsView):
             cmd = ChangeClipFadeCommand.create(
                 track_id=track_id,
                 clip_id=clip_id,
-                new_fade_in=new_fade_in,
-                new_fade_out=new_fade_out,
-                old_fade_in=old_fade_in,
-                old_fade_out=old_fade_out,
+                new_fade_in=int(new_fade_in),
+                new_fade_out=int(new_fade_out),
+                old_fade_in=int(old_fade_in),
+                old_fade_out=int(old_fade_out),
             )
         try:
             self._execute_command(cmd)

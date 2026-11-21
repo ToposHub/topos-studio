@@ -4703,6 +4703,11 @@ class TimelineExporter:
                         else:
                             _audio_offset = 0.0
 
+                        from src.features.edit.core.clip_pcm import resolve_source_channel_map
+                        from src.features.edit.core.source_patch import SourcePatchSpec
+                        source_patch = SourcePatchSpec(
+                            audio_channel_map=resolve_source_channel_map(self._project, asset))
+
                         # 创建或复用 decoder（绑定源独立缓存键防串音）
                         _decoder_key = (
                             clip.asset_id, asset_path) if _binding \
@@ -4907,16 +4912,13 @@ class TimelineExporter:
                                 samples = _clip_skip_gate.feed(samples)
                                 if samples.shape[-1] == 0:
                                     continue
-                                # R04（第七轮审计）：解码器返回短块（AAC 帧
-                                # 粒度/音频流先于视频结束）时补零到精确块长。
-                                # 旧的 += 广播异常会被外层 except 捕获后跳过
-                                # 整个 clip 余下音频——成片从首个短块起整段
-                                # 静音仍标 done。
-                                samples = np.pad(
-                                    samples,
-                                    ((0, 0),
-                                     (0, out_end - out_start - samples.shape[-1])),
-                                )
+                                # Resampled blocks can be shorter or longer than
+                                # the exact timeline window by a few samples.
+                                samples = samples[:, :block_len]
+                                if samples.shape[-1] < block_len:
+                                    samples = np.pad(
+                                        samples, ((0, 0), (0, block_len - samples.shape[-1])),
+                                    )
                             actual = min(samples.shape[-1], out_end - out_start)
 
                             # D04：动画 FX 参数按当前帧求值更新链（静态链不更新）。
@@ -4944,9 +4946,6 @@ class TimelineExporter:
                                 from src.features.edit.core.channel_layout import (
                                     adapt_samples_for_delivery,
                                 )
-                                from src.features.edit.core.source_patch import (
-                                    patch_for_asset,
-                                )
                                 if samples.ndim == 1:
                                     samples = np.broadcast_to(
                                         samples.reshape(1, -1),
@@ -4957,24 +4956,16 @@ class TimelineExporter:
                                 # 生效（解码声道数与映射基线不符）时留警告并直通。
                                 _src_layout = getattr(decoder, "source_layout", None)
                                 _payload = samples[:, :actual]
-                                # F3.4 修复：getattr 防御——duck-typed 工程
-                                # （测试替身/旧版工程对象）无 source_patch_overrides
-                                # 时此前直接 AttributeError，外层 except 吞掉后
-                                # 整 clip 静音（stems 全静且彼此相等）。
-                                _patch = patch_for_asset(
-                                    getattr(self._project,
-                                            "source_patch_overrides", None) or {},
-                                    clip.asset_id)
-                                _selected = _patch.select_channels(_payload)
+                                _selected = source_patch.select_channels(_payload)
                                 if _selected is not _payload:
                                     _payload = _selected
                                     # 选道后的布局是自定义的，不能再声明容器布局
                                     _src_layout = None
-                                elif _patch.audio_channel_map:
+                                elif source_patch.audio_channel_map:
                                     logger.warning(
                                         "clip %s source patch map %s skipped: "
                                         "decoded %d channels",
-                                        clip.clip_id, _patch.audio_channel_map,
+                                        clip.clip_id, source_patch.audio_channel_map,
                                         _payload.shape[0])
                                 samples = adapt_samples_for_delivery(
                                     _payload, channels,

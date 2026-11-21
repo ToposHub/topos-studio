@@ -9,15 +9,16 @@
 - 统一信号链：片段编辑器预览/试听消费片段级 gain/fade（同一
   ``apply_clip_fade`` 路径）——恒定 0.25 素材 −6 dB + 0.25 s 线性淡入
   时，起点为 0、淡入中点约 0.06265；
-- 画布统一：有效淡化长度（采样域优先）在 24/23.976/29.97 fps 下不以
-  整数帧取整消失；帧域写回清同端采样覆盖（两类字段不串改），拖拽在
-  采样域片段上写回采样。
+- 画布统一：按有效长度画出采样域淡化，20 ms 可见且不膨胀为一帧。
+  混合域片段拖动任一端时以样本提交，保留另一端的值。
 """
 from __future__ import annotations
 
 import sys
+import wave
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -25,7 +26,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.features.edit.core.audio_dsp import apply_clip_fade
-from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.edit.core.timeline_v2 import ClipInstance
 
 pytestmark = pytest.mark.edit_core
@@ -95,6 +96,55 @@ class TestReferenceDomainRateConversion:
         assert float(np.abs(out[:, :960]).max()) == pytest.approx(0.0, abs=1e-6)
         mid = 960 + 19200 // 2
         assert float(out[0, mid]) == pytest.approx(0.25, abs=1e-3)
+
+
+def test_delivery_trims_resampler_overrun_before_mixing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.core.audio_playback import AudioDecoder
+    from src.features.edit.core.interchange import frames_to_samples
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.stem_export import StemSpec, StemType, create_clip_decode_fn, render_stem_pcm
+    from src.features.edit.core.timeline_export import TimelineExportConfig, TimelineExporter
+    from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+    from src.shared.media.metadata import Rational
+
+    path = tmp_path / "source.wav"
+    with wave.open(str(path), "wb") as output:
+        output.setparams((2, 2, 44100, 0, "NONE", "not compressed"))
+        output.writeframes(np.zeros((44100, 2), dtype="<i2").tobytes())
+
+    def decode_block(_decoder: AudioDecoder, _frame: int, _fps: float, samples: int) -> np.ndarray:
+        block = np.full((2, samples + 1), 0.25, dtype=np.float32)
+        block[:, -1] = 0.9  # Resampler's trailing sample belongs outside this frame window.
+        return block
+
+    monkeypatch.setattr(AudioDecoder, "decode_samples_for_frame", decode_block)
+    asset = MediaAsset("source", str(path), "audio", "Source", {})
+    project = EditProject("project", "Project", assets={asset.asset_id: asset})
+    clip = ClipInstance("clip", asset.asset_id, "a1", 0, 6, 0, 6,
+                        fade_in_samples=960, fade_out_samples=960, fade_curve="linear")
+    sequence = TimelineSequence(
+        "timeline", "Timeline", fps=Rational(30000, 1001),
+        audio_tracks=(EditTrack("a1", "Audio", "audio", 0, clips=(clip,)),),
+    )
+    rate = 96000
+    exporter = TimelineExporter(project, sequence, Mock())
+    master = exporter._render_audio_master(
+        0, 6, TimelineExportConfig(output_path=str(tmp_path / "master.mov"), audio_sample_rate=rate),
+        encoder=Mock(),
+    )
+    decode, close = create_clip_decode_fn(project, float(sequence.fps), rate)
+    try:
+        stem = render_stem_pcm(
+            sequence, StemSpec(StemType.MASTER, "Master", (), include_master=True),
+            rate, decode_clip_fn=decode,
+        )
+    finally:
+        close()
+    assert master.shape == stem.shape == (2, frames_to_samples(6, sequence.fps, rate))
+    np.testing.assert_array_equal(master, stem)
+    assert master[0, 0] == 0.0
+    assert np.max(master) == pytest.approx(0.25)
+    assert np.all(master[:, 1920:-1920] == 0.25)
 
 
 class TestModelEffectiveFade:
@@ -191,14 +241,60 @@ class TestEditorPreviewConsumesGainFade:
 
 
 class TestCanvasEffectiveFade:
-    def test_display_frames_min_one(self) -> None:
-        """极短淡化（<1 帧）显示至少 1 帧，0 保持 0。"""
-        from src.features.edit.ui.timeline_items import ClipItem
+    @pytest.mark.parametrize("fps_num,fps_den", [(24, 1), (24000, 1001), (30000, 1001)])
+    def test_sample_fields_refresh_and_drag_at_subframe_zoom(self, qtbot, fps_num: int, fps_den: int) -> None:
+        from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt
+        from PyQt6.QtTest import QTest
 
-        assert ClipItem._effective_fade_display_frames(0.0) == 0
-        assert ClipItem._effective_fade_display_frames(-1.0) == 0
-        assert ClipItem._effective_fade_display_frames(0.48) == 1
-        assert ClipItem._effective_fade_display_frames(12.0) == 12
+        from src.features.edit.core.commands import UpdateClipSampleFieldsCommand
+        from src.features.edit.core.timeline_v2 import EditTrack, TimelineSequence
+        from src.features.edit.ui.timeline_view import TimelineView
+        from src.shared.media.metadata import Rational
+
+        fps = Rational(fps_num, fps_den)
+        clip = ClipInstance(
+            "c1", "a1", "a1", 0, 6, 0, 6, fade_out_duration=1,
+            fade_curve_in="linear", fade_curve_out="smooth",
+        )
+        track = EditTrack("a1", "Audio", "audio", 0, clips=(clip,))
+        seq = TimelineSequence("tl", "Timeline", fps=fps, audio_tracks=(track,))
+        view = TimelineView()
+        qtbot.addWidget(view)
+        view.resize(1100, 440)
+        view.set_audio_only(True)
+        view.load_timeline(seq)
+        view.set_zoom(80.0)
+        view.show()
+        item = view._items_map["c1"]
+
+        # Model change from the Mixer updates the existing timeline item.
+        view.execute_command(UpdateClipSampleFieldsCommand.create("a1", clip, fade_in_samples=960))
+        assert view._items_map["c1"] is item
+        assert item.fade_in_duration == pytest.approx(0.02 * float(fps))
+        assert item._fade_visual_width(item.fade_in_duration) == pytest.approx(
+            0.02 * float(fps) * item._pixels_per_frame)
+
+        # Dragging the legacy frame-backed end of a mixed clip saves a
+        # subframe sample value without affecting the first end or its curve.
+        rect = QRectF(0, 0, item._width, item._track_height)
+        x, y = item._fade_handle_position(rect, "out")
+        press = view.mapFromScene(item.mapToScene(QPointF(x, y)))
+        delta_px = 12
+        release = press - QPoint(delta_px, 0)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+        QTest.mouseMove(view.viewport(), release, 10)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=release)
+        after = view.get_timeline().get_clip_by_id("c1")
+        clock = TimelineSampleClock(fps)
+        assert after.fade_out_samples == round(
+            (1.0 + delta_px / item._pixels_per_frame) * float(clock.samples_per_frame))
+        assert after.fade_in_samples == 960
+        assert (after.fade_curve_in, after.fade_curve_out) == ("linear", "smooth")
+        view.undo()
+        before = view.get_timeline().get_clip_by_id("c1")
+        assert (before.fade_in_samples, before.fade_out_samples, before.fade_out_duration) == (960, None, 1)
+        view.redo()
+        assert view.get_timeline().get_clip_by_id("c1").fade_out_samples == after.fade_out_samples
 
     def test_fade_drag_on_samples_domain_clip_commits_samples(self) -> None:
         """采样域片段上的时间线拖拽经帧→样本换算提交（undo 一次恢复）。"""

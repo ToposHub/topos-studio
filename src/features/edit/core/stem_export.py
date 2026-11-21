@@ -679,7 +679,7 @@ def _iter_stem_pcm_chunks(
                     if samples is None:
                         continue
 
-                actual = min(samples.shape[-1],
+                actual = min(samples.shape[-1], block_len,
                              (total_samples + preroll_samples) - out_start)
                 if actual <= 0:
                     continue
@@ -1465,15 +1465,14 @@ def create_clip_decode_fn(
 
         # F2.1 · Source Patching：素材级源声道映射（保调/retime/直读三条
         # 返回路径统一经此选道，与成片导出/预览同语义）。无映射时恒等。
-        from src.features.edit.core.source_patch import patch_for_asset
+        from src.features.edit.core.clip_pcm import resolve_source_channel_map
+        from src.features.edit.core.source_patch import SourcePatchSpec
+        patch = SourcePatchSpec(audio_channel_map=resolve_source_channel_map(project, asset))
 
         def _select_source_channels(
                 samples: Optional[np.ndarray]) -> Optional[np.ndarray]:
             if samples is None:
                 return None
-            patch = patch_for_asset(
-                getattr(project, "source_patch_overrides", None),
-                clip.asset_id)
             return patch.select_channels(samples)
 
         def _apply_sample_gate(

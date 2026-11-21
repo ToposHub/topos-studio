@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Callable
 from fractions import Fraction
 from typing import Any, Optional
 
@@ -579,6 +580,24 @@ def _step_segment_output(processor_id: str, params: dict) -> int:
     return 0  # delete_range
 
 
+def _map_processing_range(
+    params: dict, map_range: Callable[[int, int], tuple[int, int]],
+) -> bool:
+    """Move the output-domain range and keep insertion-domain DSP anchors.
+
+    Captured noise intervals and brush strokes refer to the samples seen by
+    that processor, before any later speed or length changes. Older projects
+    already store those anchors in that domain.
+    """
+    lo, hi = params.get("start"), params.get("end")
+    if isinstance(lo, int) and isinstance(hi, int) and hi > lo:
+        lo, hi = map_range(lo, hi)
+        if hi <= lo:
+            return False
+        params["start"], params["end"] = lo, hi
+    return True
+
+
 def remap_audio_edit_for_length_steps(
     audio_edit: Any, length_steps: list[dict],
 ) -> tuple[Any, list[str]]:
@@ -613,15 +632,9 @@ def remap_audio_edit_for_length_steps(
             kept_steps.append(step)
             continue
         params = step.get("params", {})
-        start, end = params.get("start"), params.get("end")
-        if isinstance(start, int) and isinstance(end, int):
-            new_start, new_end = _shift(start), _shift(end)
-            if new_end <= new_start:
-                warnings.append(
-                    f"step {step.get('step_id')} collapsed inside an edit and "
-                    "was removed")
-                continue
-            params["start"], params["end"] = new_start, new_end
+        if isinstance(params, dict) and not _map_processing_range(params, lambda lo, hi: (_shift(lo), _shift(hi))):
+            warnings.append(f"step {step.get('step_id')} collapsed inside an edit and was removed")
+            continue
         kept_steps.append(step)
     updated["steps"] = kept_steps
     if updated.get("envelope"):
@@ -661,7 +674,7 @@ def unmap_audio_edit_for_removed_length_steps(
     warnings: list[str] = []
     updated = copy.deepcopy(audio_edit)
 
-    def _unmap_position(position: int, step: dict) -> "int | None":
+    def _unmap_position(position: int, step: dict) -> int:
         params = step.get("params", {}) if isinstance(
             step.get("params"), dict) else {}
         start, end = int(params.get("start", 0)), int(params.get("end", 0))
@@ -684,15 +697,11 @@ def unmap_audio_edit_for_removed_length_steps(
                 continue
             e_params = (existing.get("params", {})
                         if isinstance(existing.get("params"), dict) else {})
-            s2, e2 = e_params.get("start"), e_params.get("end")
-            if isinstance(s2, int) and isinstance(e2, int) and e2 > s2:
-                new_s, new_e = _unmap_position(s2, step), _unmap_position(e2, step)
-                if new_e <= new_s:
-                    warnings.append(
-                        f"step {existing.get('step_id')} collapsed when the "
-                        f"{processor} step was removed and was dropped")
-                    continue
-                e_params["start"], e_params["end"] = new_s, new_e
+            if not _map_processing_range(
+                e_params, lambda lo, hi: (_unmap_position(lo, step), _unmap_position(hi, step)),
+            ):
+                warnings.append(f"step {existing.get('step_id')} collapsed when the {processor} step was removed")
+                continue
             kept_steps.append(existing)
         updated["steps"] = kept_steps
         if updated.get("envelope"):
@@ -962,6 +971,12 @@ def map_selection_to_insertion(
     return _invert_range_through_maps(int(start), int(end), maps)
 
 
+def length_step_sample_maps(audio_edit: Any) -> tuple[tuple[int, int, int], ...]:
+    """Enabled length steps as (input start, input end, output length)."""
+    steps = (audio_edit.get("steps", []) or []) if isinstance(audio_edit, dict) else []
+    return tuple(_enabled_length_maps(steps, 0))
+
+
 def render_to_step_insertion(
     pcm: np.ndarray,
     audio_edit: Any,
@@ -981,19 +996,29 @@ def render_to_step_insertion(
     """
     if not isinstance(audio_edit, dict):
         return pcm
-    steps = [s for s in (audio_edit.get("steps", []) or [])
-             if isinstance(s, dict) and s.get("enabled", True)]
-    steps = steps[:max(0, int(insertion_index))]
-    if not steps:
+    steps = audio_edit.get("steps", []) or []
+    prefix = steps[:max(0, int(insertion_index))]
+    if not prefix:
         return pcm
     from src.features.edit.core.audio_denoise import (
         denoise_spectral_subtraction, scipy_available,
     )
     out = pcm
-    for index, step in enumerate(steps):
+    for index, step in enumerate(prefix):
+        if cancel_check is not None and cancel_check():
+            return out
+        if not isinstance(step, dict) or not step.get("enabled", True):
+            continue
         processor_id = step.get("processor_id")
         params = step.get("params", {}) if isinstance(
             step.get("params"), dict) else {}
+        length_maps = _enabled_length_maps(steps, index + 1)
+        if length_maps and processor_id not in LENGTH_CHANGING_PROCESSORS:
+            params = dict(params)
+            if not _map_processing_range(
+                params, lambda lo, hi: _invert_range_through_maps(lo, hi, length_maps),
+            ):
+                continue
         if processor_id in PRE_RENDER_PROCESSORS:
             if not scipy_available():
                 raise RuntimeError(
@@ -1043,14 +1068,7 @@ def render_to_step_insertion(
             continue
         if processor_id not in KNOWN_PROCESSOR_IDS:
             continue  # 未知处理器：保持原样（上游 validate 负责阻断）
-        # inline 步骤：最终输出域区间 → 当前域（经后续全部改长度步骤）。
-        mapped = dict(step)
-        m_params = dict(params)
-        start, end = params.get("start", 0), params.get("end", 0)
-        if isinstance(start, int) and isinstance(end, int):
-            m_params["start"], m_params["end"] = _invert_range_through_maps(
-                start, end, _enabled_length_maps(steps, index + 1))
-        mapped["params"] = m_params
+        mapped = {**step, "params": params}
         temp = {"version": AUDIO_EDIT_SCHEMA_VERSION,
                 "processing_rate": PROCESSING_RATE, "steps": [mapped]}
         out = apply_clip_audio_edit(out, 0, temp, sample_rate=sample_rate)
@@ -1118,104 +1136,12 @@ def render_pre_render_steps(
     「试听 == 播放 == 导出」合同。``progress``: Callable[[float], None]；
     ``cancel_check``: Callable[[], bool]。
     """
-    steps = render_prefix_steps(audio_edit)
-    if not steps:
+    index = last_pre_render_step_index(audio_edit)
+    if index < 0:
         return pcm
-    from src.features.edit.core.audio_denoise import (
-        denoise_spectral_subtraction, scipy_available,
-    )
-    if not scipy_available():
-        raise RuntimeError("SciPy DSP backend unavailable for pre-render steps")
-
-    def _later_length_maps(index: int) -> list[tuple[int, int, int]]:
-        """index 之后（含跨步骤）的改长度 forward map，按机架序。"""
-        maps: list[tuple[int, int, int]] = []
-        for later in steps[index + 1:]:
-            p = later.get("params", {}) if isinstance(
-                later.get("params"), dict) else {}
-            pid = later.get("processor_id")
-            if pid == "time_stretch":
-                s, e = int(p.get("start", 0)), int(p.get("end", 0))
-                maps.append((s, e, _time_stretch_output_length(
-                    max(0, e - s), float(p.get("ratio_pct", 100.0)))))
-            elif pid == "delete_range":
-                maps.append((int(p.get("start", 0)), int(p.get("end", 0)), 0))
-        return maps
-
-    def _invert_range(start: int, end: int,
-                      maps: list[tuple[int, int, int]]) -> tuple[int, int]:
-        """最终域区间 → 当前域区间（经后续改长度步骤逆映射，反向逐个）。"""
-        lo, hi = Fraction(int(start)), Fraction(int(end))
-        for s, e, seg in reversed(maps):
-            lo = invert_position_through_step(lo, s, e, seg)
-            hi = invert_position_through_step(hi, s, e, seg)
-        return max(0, math.floor(lo)), math.ceil(hi)
-
-    out = pcm
-    for index, step in enumerate(steps):
-        processor_id = step.get("processor_id")
-        params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
-        if processor_id in LENGTH_CHANGING_PROCESSORS or processor_id in (
-                "spectral_denoise", "spectral_repair"):
-            pass  # 预渲染处理器：下方分支处理
-        else:
-            # P0 · 前缀里的 inline 步骤：按机架序整段应用（域折算后）。
-            mapped = dict(step)
-            m_params = dict(params)
-            start, end = params.get("start", 0), params.get("end", 0)
-            if isinstance(start, int) and isinstance(end, int):
-                m_params["start"], m_params["end"] = _invert_range(
-                    start, end, _later_length_maps(index))
-            mapped["params"] = m_params
-            temp = {"version": AUDIO_EDIT_SCHEMA_VERSION,
-                    "processing_rate": PROCESSING_RATE, "steps": [mapped]}
-            out = apply_clip_audio_edit(out, 0, temp, sample_rate=sample_rate)
-            if cancel_check is not None and cancel_check():
-                return pcm
-            continue
-        if processor_id == "spectral_denoise":
-            def _progress(fraction: float, _params=params) -> bool:
-                if progress is not None:
-                    progress(float(fraction))
-                return not (cancel_check is not None and cancel_check())
-
-            out = denoise_spectral_subtraction(
-                out,
-                sample_rate,
-                (int(params.get("noise_start", 0)), int(params.get("noise_end", 0))),
-                (int(params.get("start", 0)), int(params.get("end", 0))),
-                float(params.get("reduction_db", 12.0)),
-                nfft=int(params.get("nfft", 2048)),
-                link_stereo=bool(params.get("link_stereo", True)),
-                # P1-1 · 预渲染分支消费请求的声道（未选通道不变）。
-                channels=params.get("channels") or None,
-                progress=_progress,
-            )
-        elif processor_id == "time_stretch":
-            out = _render_time_stretch_step(
-                out, params, sample_rate,
-                progress=progress, cancel_check=cancel_check)
-        elif processor_id == "delete_range":
-            out = _render_delete_range_step(out, params, sample_rate)
-        elif processor_id == "spectral_repair":
-            from src.features.edit.core.audio_repair import repair_spectral
-            out = repair_spectral(
-                out,
-                sample_rate,
-                list(params.get("strokes", []) or []),
-                (int(params.get("start", 0)), int(params.get("end", 0))),
-                amount_db=float(params.get("amount_db", 24.0)),
-                mode=str(params.get("mode", "attenuate")),
-                nfft=int(params.get("nfft", 2048)),
-                link_stereo=bool(params.get("link_stereo", True)),
-                # P1-1 · 插入点基准同样只写目标通道。
-                channels=params.get("channels") or None,
-                progress=progress,
-            )
-        else:  # 注册表扩张时漏接的实现——显式失败而非静默跳过
-            raise RuntimeError(
-                f"pre-render processor {processor_id!r} has no renderer")
-    return out
+    return render_to_step_insertion(
+        pcm, audio_edit, insertion_index=index + 1, sample_rate=sample_rate,
+        progress=progress, cancel_check=cancel_check)
 
 
 def _render_time_stretch_step(

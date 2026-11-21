@@ -8,7 +8,11 @@
 from __future__ import annotations
 
 import math
+import struct
+import threading
 import wave
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -22,6 +26,7 @@ from src.features.edit.core.clip_pcm import (
     find_zero_crossing,
     resolve_asset_audio_spec,
     resolve_clip_audio_spec,
+    source_fingerprint,
 )
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
@@ -75,8 +80,8 @@ class TestResolveSpec:
         assert spec.end_sample == 120000
         assert spec.sample_rate == 48000 and spec.channel_count == 2
         assert not spec.reverse
-        assert spec.cache_key() == (
-            spec.source_fingerprint, 48000, 2, 24000, 120000, False, ())
+        assert spec.cache_key() == replace(spec, revision=2).cache_key()
+        assert spec.cache_key() != replace(spec, channel_layout="stereo").cache_key()
 
     def test_source_sample_offset_and_nonzero_fps(self, tmp_path) -> None:
         from src.features.edit.core.clip_params import SpeedParams
@@ -111,6 +116,67 @@ class TestResolveSpec:
 
 
 class TestDecodeRange:
+    def test_relinked_file_at_same_path_invalidates_fingerprint(self, tmp_path: Path) -> None:
+        import os
+
+        path = tmp_path / "source.wav"
+        replacement = tmp_path / "replacement.wav"
+        path.write_bytes(b"one")
+        stat = path.stat()
+        original = source_fingerprint(str(path))
+        replacement.write_bytes(b"two")
+        os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        replacement.replace(path)
+        assert path.stat().st_mtime_ns == stat.st_mtime_ns
+        assert source_fingerprint(str(path)) != original
+
+    @pytest.mark.parametrize("source_rate,output_rate", [(44100, 48000), (48000, 44100), (48000, 48000)])
+    def test_adjacent_seek_windows_match_sequential_decode(
+        self, tmp_path: Path, source_rate: int, output_rate: int,
+    ) -> None:
+        pcm = np.random.default_rng(87).uniform(-0.8, 0.8, (2, 3 * source_rate)).astype(np.float32)
+        path = write_wav(tmp_path / "seek.wav", pcm, source_rate)
+        entire = decode_audio_range(path, 0, 3 * output_rate, output_rate)
+        cut_a, cut_b, cut_c = output_rate + 13, output_rate * 2 - 11, output_rate * 3
+        first = decode_audio_range(path, cut_a, cut_b, output_rate)
+        second = decode_audio_range(path, cut_b, cut_c, output_rate)
+        assert entire is not None and first is not None and second is not None
+        np.testing.assert_array_equal(np.concatenate((first, second), axis=1), entire[:, cut_a:cut_c])
+
+    def test_large_wav_tail_uses_a_bounded_seek(self, tmp_path: Path) -> None:
+        path = tmp_path / "large.wav"
+        rate = 48000
+        count = 140_000_000
+        with path.open("wb") as wav:
+            wav.write(struct.pack(
+                "<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + count * 2, b"WAVE", b"fmt ",
+                16, 1, 1, rate, rate * 2, 2, 16, b"data", count * 2))
+            wav.truncate(44 + count * 2)
+            wav.seek(44 + (count - 500) * 2)
+            wav.write(struct.pack("<h", 24576))
+        checks = 0
+
+        def should_cancel() -> bool:
+            nonlocal checks
+            checks += 1
+            return checks > 16
+
+        result = decode_audio_range(str(path), count - 1000, count, rate, cancel_check=should_cancel)
+        assert result is not None and result.shape == (1, 1000)
+        assert result[0, 500] == pytest.approx(0.75)
+        assert np.count_nonzero(result) == 1
+
+    def test_24_bit_polywav_keeps_fractional_sample_amplitude(self, tmp_path: Path) -> None:
+        samples = np.zeros((48000, 4), dtype="<i4")
+        samples[:, 1] = 1 << 22
+        path = tmp_path / "poly24.wav"
+        with wave.open(str(path), "wb") as wav:
+            wav.setparams((4, 3, 48000, 0, "NONE", ""))
+            wav.writeframes(samples.view(np.uint8).reshape(-1, 4)[:, :3].tobytes())
+        result = decode_audio_range(str(path), 271, 1028, 48000, channel_map=((1, 0),))
+        assert result is not None and result.shape == (1, 757)
+        np.testing.assert_array_equal(result, np.full((1, 757), 0.5, dtype=np.float32))
+
     def test_impulse_lands_within_one_sample_at_48k(self, tmp_path) -> None:
         n = 48000
         pcm = np.zeros((2, n), dtype=np.float32)
@@ -142,6 +208,28 @@ class TestDecodeRange:
 
 
 class TestVisualization:
+    def test_spectrogram_batches_preserve_time_bin_peaks(self) -> None:
+        rate, nfft = 48000, 1024
+        pcm = np.random.default_rng(52).normal(0.0, 0.01, (2, rate)).astype(np.float32)
+        frames = 1 + (pcm.shape[1] - nfft) // (nfft // 4)
+        full = np.asarray(compute_spectrogram(pcm, rate, nfft=nfft, time_bins=frames))
+        edges = np.linspace(0, frames, 18).astype(np.int64)
+        reference = np.stack([full[lo:hi].max(axis=0) for lo, hi in zip(edges[:-1], edges[1:])])
+        downsampled = compute_spectrogram(pcm, rate, nfft=nfft, time_bins=17)
+        np.testing.assert_allclose(downsampled, reference, atol=1e-12)
+
+    def test_cancel_spectrogram_before_publishing_partial_data(self) -> None:
+        pcm = np.zeros((2, 48000), dtype=np.float32)
+        batches = 0
+
+        def should_cancel() -> bool:
+            nonlocal batches
+            batches += 1
+            return batches == 3
+
+        assert compute_spectrogram(pcm, 48000, cancel_check=should_cancel) == []
+        assert batches == 3
+
     def test_waveform_stats_of_sine(self) -> None:
         rate = 48000
         t = np.arange(rate, dtype=np.float32) / rate
@@ -211,6 +299,68 @@ class TestZeroCrossing:
 
 
 class TestProvider:
+    @staticmethod
+    def _spec(name: str) -> ClipAudioRenderSpec:
+        return ClipAudioRenderSpec(
+            "project", "timeline", "clip", 1, name, name, name,
+            48000, 1, "mono", 0, 16, False)
+
+    def test_latest_request_releases_callbacks_and_coalesces_same_key(
+        self, qtbot, monkeypatch,
+    ) -> None:
+        from src.features.edit.core import clip_pcm
+
+        started = threading.Event()
+        release = threading.Event()
+        keys: list[str] = []
+        completed: list[str] = []
+
+        def decode(path, *_args, cancel_check, **_kwargs):
+            keys.append(path)
+            if path == "old":
+                started.set()
+                release.wait(3)
+                assert cancel_check()
+            return np.zeros((1, 16), dtype=np.float32)
+
+        monkeypatch.setattr(clip_pcm, "decode_audio_range", decode)
+        provider = ClipPcmProvider()
+        try:
+            provider.request(self._spec("old"), lambda result: completed.append("old"))
+            assert started.wait(1)
+            provider.request(self._spec("new"), lambda result: completed.append("new"))
+            provider.request(self._spec("new"), lambda result: completed.append("duplicate"))
+            release.set()
+            qtbot.waitUntil(lambda: len(completed) == 2)
+            assert keys == ["old", "new"]
+            assert completed == ["new", "duplicate"]
+            assert provider._pending == {}
+        finally:
+            release.set()
+            provider.shutdown()
+        assert not provider._worker.isRunning()
+
+    def test_cache_evicts_by_bytes_and_refreshes_on_access(self, qtbot, monkeypatch) -> None:
+        from src.features.edit.core import clip_pcm
+
+        monkeypatch.setattr(clip_pcm, "PCM_CACHE_MAX_BYTES", 128)
+        monkeypatch.setattr(clip_pcm, "decode_audio_range",
+                            lambda *_args, **_kwargs: np.zeros((1, 16), dtype=np.float32))
+        provider = ClipPcmProvider()
+        try:
+            for name in ("first", "second", "third"):
+                if name == "third":
+                    assert provider.get_cached(self._spec("first")) is not None
+                results: list = []
+                provider.request(self._spec(name), results.append)
+                qtbot.waitUntil(lambda: bool(results))
+            assert provider.get_cached(self._spec("first")) is not None
+            assert provider.get_cached(self._spec("second")) is None
+            assert provider.get_cached(self._spec("third")) is not None
+            assert provider._cache_bytes == 128
+        finally:
+            provider.shutdown()
+
     def test_request_decodes_and_caches(self, qtbot, tmp_path) -> None:
         ClipPcmProvider._instance = None
         pcm = np.zeros((2, 48000), dtype=np.float32)
@@ -270,7 +420,7 @@ class TestProjectClipEditorPcm:
         editor.show()
         editor.open_source(asset, project=project)
         panel = editor._panel
-        qtbot.waitUntil(lambda: panel._pcm is not None, timeout=15000)
+        qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=15000)
         assert panel._pcm.shape == (2, 48000)
         # 播放/循环/频谱/FFT/过零吸附控件随 PCM 可用而启用。
         for widget in (panel.btn_play, panel.btn_loop, panel.btn_snap_zero,
@@ -324,8 +474,13 @@ class TestProjectClipEditorPcm:
         received = bytearray()
 
         class Sink:
+            drained = False
+
             def __init__(self, _format: QtMultimedia.QAudioFormat) -> None:
                 pass
+
+            def setBufferSize(self, size: int) -> None:
+                assert size > 0
 
             def start(self) -> Sink:
                 return self
@@ -337,7 +492,7 @@ class TestProjectClipEditorPcm:
                 return 16
 
             def processedUSecs(self) -> int:
-                return 0
+                return len(expected) // 8 * 1_000_000 // 48000 if self.drained else 0
 
             def write(self, chunk: bytes) -> int:
                 written = min(len(chunk), 4)
@@ -345,7 +500,7 @@ class TestProjectClipEditorPcm:
                 return written
 
             def state(self) -> QtMultimedia.QAudio.State:
-                return (QtMultimedia.QAudio.State.IdleState if len(received) == len(expected)
+                return (QtMultimedia.QAudio.State.IdleState if self.drained
                         else QtMultimedia.QAudio.State.ActiveState)
 
         monkeypatch.setattr(QtMultimedia, "QAudioSink", Sink)
@@ -355,6 +510,11 @@ class TestProjectClipEditorPcm:
         for _ in range(20):
             session._tick()
         assert bytes(received) == expected
+        assert session.is_playing
+        assert session.position() == 2
+        assert session._sink is not None
+        session._sink.drained = True
+        session._tick()
         assert not session.is_playing
         assert session.position() == 2
         session.clear()
