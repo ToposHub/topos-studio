@@ -50,8 +50,9 @@ class TestResolveExportChannels:
         assert resolve_export_channels(2, "mono") == 1
 
     def test_unknown_layout_raises(self):
-        with pytest.raises(ValueError):
-            resolve_export_channels(2, "quad")
+        # quad 已是可识别布局（QUAD 4 声道——布局支持扩展后）：
+        # 显式布局优先，返回其声道数。
+        assert resolve_export_channels(2, "quad") == 4
         with pytest.raises(ValueError):
             resolve_export_channels(2, "nonsense")
 
@@ -90,10 +91,17 @@ class TestAdaptSamplesForDelivery:
         inferred = adapt_samples_for_delivery(samples, 2, src_layout=None)
         np.testing.assert_allclose(explicit, inferred, atol=1e-6)
 
-    def test_unknown_layout_truncates_with_warning(self, caplog):
-        """4 声道非标准布局：回退截断 + 必须留警告日志（不静默）。"""
+    def test_quad_layout_uses_standard_downmix(self):
+        """4 声道 = QUAD 标准布局：走标准下混矩阵（布局支持扩展后）。"""
         samples = np.ones((4, 8), dtype=np.float32)
-        with caplog.at_level("WARNING", logger="src.features.edit.core.channel_layout"):
+        out = adapt_samples_for_delivery(samples, 2, context="clip test-clip")
+        assert out.shape == (2, 8)
+
+    def test_truly_unknown_count_truncates_with_warning(self, caplog):
+        """非标准声道数（3ch）：回退截断 + 必须留警告日志（不静默）。"""
+        samples = np.ones((3, 8), dtype=np.float32)
+        with caplog.at_level("WARNING",
+                             logger="src.features.edit.core.channel_layout"):
             out = adapt_samples_for_delivery(
                 samples, 2, context="clip test-clip"
             )

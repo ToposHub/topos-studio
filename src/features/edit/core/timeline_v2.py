@@ -5231,11 +5231,17 @@ class EditTrack:
         """
         return self._rebuild(caption_metadata=metadata)
 
+    #: Bus 布局允许集（MX-15 能力矩阵：bus_routing 仅 stereo/5.1/7.1）。
+    _BUS_LAYOUT_ALLOWED = ("stereo", "5.1", "7.1")
+
     def bus_channel_layout(self) -> "ChannelLayout":
         """Bus 的声道布局（非法/未声明回退 stereo；仅 is_bus 有意义）。"""
         from src.features.edit.core.channel_layout import ChannelLayout
+        normalized = str(self.bus_layout or "stereo").strip().lower()
+        if normalized not in self._BUS_LAYOUT_ALLOWED:
+            return ChannelLayout.STEREO
         try:
-            return ChannelLayout.from_av_layout_name(str(self.bus_layout))
+            return ChannelLayout.from_av_layout_name(normalized)
         except ValueError:
             return ChannelLayout.STEREO
 
@@ -5243,7 +5249,11 @@ class EditTrack:
         """P2：设置 Bus 声道布局（"stereo"/"5.1"/"7.1"；非法值拒绝）。"""
         from src.features.edit.core.channel_layout import ChannelLayout
         normalized = str(layout or "stereo").strip().lower()
-        # 显式拒绝高度布局（与 MX-15 能力矩阵一致）
+        # 允许集限制（MX-15 能力矩阵：高度布局与 quad 等显式拒绝）
+        if normalized not in self._BUS_LAYOUT_ALLOWED:
+            raise ValueError(
+                f"unsupported bus layout {layout!r}: allowed "
+                f"{self._BUS_LAYOUT_ALLOWED} (MX-15 capability matrix)")
         ChannelLayout.from_av_layout_name(normalized)
         return self._rebuild(bus_layout=normalized)
 
