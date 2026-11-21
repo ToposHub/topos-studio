@@ -155,7 +155,18 @@
       "timepitch_draft": "试听预览 · {rate:.1f}% · {pitch:+.1f} 半音",
       "length_stack_change": "此处理步骤会改变片段时长。请使用时间线的撤销来恢复之前的编辑。",
       "independent_audio": "仅编辑音频（链接视频保持原位）",
-      "independent_audio_tip": "确认改变音频长度时保留链接视频的位置。"
+      "independent_audio_tip": "确认改变音频长度时保留链接视频的位置。",
+      "de_click": "去点击",
+      "de_hum": "去嗡声（自动）",
+      "pitch_correction": "音高校正（C大调）",
+      "doubler": "加倍和声",
+      "offline_processors": "选区处理",
+      "processor_preview": "试听处理结果",
+      "processor_delta": "试听差分",
+      "processor_apply": "应用至处理栈",
+      "processor_commit": "应用选区处理",
+      "processor_working": "正在处理选区…",
+      "preview_device_unavailable": "音频输出不可用"
     },
     "routing": {
       "output": "轨道输出",

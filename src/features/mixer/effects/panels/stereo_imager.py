@@ -1713,6 +1713,15 @@ class StudioStereoImagerWidget(QWidget):
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
 
+    def use_processor_controls(self) -> None:
+        self.mm_slope_btns["24dB"].hide()
+        self.mm_slope_btns["Ellip"].hide()
+        button = QPushButton("6dB", self)
+        button.setCheckable(True)
+        button.clicked.connect(lambda: self._on_mm_slope_changed("6dB"))
+        self.mm_slope_btns["12dB"].parentWidget().layout().addWidget(button)
+        self.mm_slope_btns["6dB"] = button
+
     def get_state(self) -> dict:
         return copy.deepcopy(self._st())
 

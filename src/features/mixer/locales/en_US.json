@@ -155,7 +155,18 @@
       "timepitch_draft": "Preview · {rate:.1f}% · {pitch:+.1f} st",
       "length_stack_change": "This step changes the clip length. Use timeline Undo to restore the previous edit.",
       "independent_audio": "Independent audio edit (linked video stays put)",
-      "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length."
+      "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length.",
+      "de_click": "De-click",
+      "de_hum": "De-hum (automatic)",
+      "pitch_correction": "Pitch correction (C major)",
+      "doubler": "Doubler",
+      "offline_processors": "Selection processing",
+      "processor_preview": "Audition processed",
+      "processor_delta": "Audition difference",
+      "processor_apply": "Apply to stack",
+      "processor_commit": "Apply selection processing",
+      "processor_working": "Processing selection…",
+      "preview_device_unavailable": "Audio output is unavailable"
     },
     "routing": {
       "output": "Output routing",

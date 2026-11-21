@@ -2318,7 +2318,7 @@ class StudioModulationTrioWidget(QWidget):
             card.c_rate.set_control_range(0.01, 20.0, "0.01", "20.0")
             card.c_depth.setToolTip("Controls modulation sweep depth")
         for card in (self.flanger_card, self.phaser_card):
-            card.c_feedback.set_control_range(0.0, 95.0, "0%", "95%")
+            card.c_feedback.set_control_range(-95.0, 95.0, "-95%", "95%")
         self.chorus_card.c_delay.set_control_range(0.5, 40.0, "0.5", "40.0")
         self.flanger_card.c_manual.set_control_range(0.5, 40.0, "0.5", "40.0")
         if effect_type == "phaser":
@@ -2337,8 +2337,8 @@ class StudioModulationTrioWidget(QWidget):
             self.chorus_card._add_voices(COLORS["chorus"])
             self.flanger_card._add_voices(COLORS["flanger"])
             feedback = KnobParameterCell(
-                I18N.tr("audio.fx.feedback", "Feedback"), 0.0, 95.0, 0.0, COLORS["chorus"],
-                "0", "%", "95", format_pct, parse_numeric,
+                I18N.tr("audio.fx.feedback", "Feedback"), -95.0, 95.0, 0.0, COLORS["chorus"],
+                "-95", "%", "95", format_pct, parse_numeric,
             )
             feedback.valueChanged.connect(self._on_chorus_feedback)
             self.chorus_card._chorus_mix_row.addWidget(feedback, 1)
@@ -2370,9 +2370,7 @@ class StudioModulationTrioWidget(QWidget):
 
     def _configure_phaser_stages(self) -> None:
         card = self.phaser_card
-        for stage in (6, 8):
-            card.stage_btns.pop(stage).hide()
-        for stage in (1, 3):
+        for stage in (1, 3, 5, 7, 9, 10, 11, 12):
             button = QPushButton(str(stage), card)
             button.setCheckable(True)
             button.setFixedSize(22, 19)

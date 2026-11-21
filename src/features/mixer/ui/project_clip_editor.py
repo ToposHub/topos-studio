@@ -520,6 +520,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     "mixer.clip_editor.step_delete_range", "Delete range"),
                 "spectral_repair": I18N.tr(
                     "mixer.clip_editor.step_repair", "Spectral repair"),
+                "de_click": I18N.tr("mixer.clip_editor.de_click", "De-click"),
+                "de_hum": I18N.tr("mixer.clip_editor.de_hum", "De-hum (automatic)"),
+                "pitch_correction": I18N.tr(
+                    "mixer.clip_editor.pitch_correction", "Pitch correction (C major)"),
+                "doubler": I18N.tr("mixer.clip_editor.doubler", "Doubler"),
             }.get(processor, processor)
             gain_db = params.get("gain_db")
             if processor == "spectral_denoise":
@@ -551,6 +556,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     f"{str(params.get('mode', 'attenuate'))} · "
                     + I18N.tr(
                         "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            elif processor in {"de_click", "de_hum", "pitch_correction", "doubler"}:
+                detail = (f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                          + I18N.tr("mixer.clip_editor.step_pre_render", "pre-rendered"))
             else:
                 detail = (
                     f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
@@ -1583,6 +1591,7 @@ class ProjectClipEditor(QWidget):
             rack.remove_requested.connect(self.effect_remove_requested.emit)
             self._panel.canvas.populateContextMenu.connect(rack.add_to_context_menu)
             self._panel.canvas.populateContextMenu.connect(self._append_dock_menu_actions)
+            self._panel.canvas.populateContextMenu.connect(self._append_offline_processor_actions)
             self._panel.gain_requested.connect(self._on_gain_requested)
             self._panel.microfade_requested.connect(self._on_microfade_requested)
             self._panel.selection_gain_requested.connect(self._on_selection_gain_requested)
@@ -2136,6 +2145,86 @@ class ProjectClipEditor(QWidget):
 
     def _target_channels(self) -> tuple[int, ...]:
         return tuple(range(min(2, self._pcm_channel_count())))
+
+    def _append_offline_processor_actions(self, menu: QMenu) -> None:
+        """Expose length-preserving processors through the clip transaction path."""
+        panel = self._panel
+        active = bool(panel is not None and self._clip is not None and not self._locked
+                      and panel._raw_pcm is not None and panel.canvas.project_edits_enabled)
+        processors = (
+            ("de_click", I18N.tr("mixer.clip_editor.de_click", "De-click")),
+            ("de_hum", I18N.tr("mixer.clip_editor.de_hum", "De-hum (automatic)")),
+            ("pitch_correction", I18N.tr("mixer.clip_editor.pitch_correction", "Pitch correction (C major)")),
+            ("doubler", I18N.tr("mixer.clip_editor.doubler", "Doubler")),
+        )
+        root = menu.addMenu(I18N.tr("mixer.clip_editor.offline_processors", "Selection processing"))
+        root.setEnabled(active)
+        for processor_id, label in processors:
+            submenu = root.addMenu(label)
+            for mode, text in (
+                ("preview", I18N.tr("mixer.clip_editor.processor_preview", "Audition processed")),
+                ("delta", I18N.tr("mixer.clip_editor.processor_delta", "Audition difference")),
+                ("apply", I18N.tr("mixer.clip_editor.processor_apply", "Apply to stack")),
+            ):
+                submenu.addAction(text, lambda _checked=False, pid=processor_id, action=mode:
+                                   self._on_offline_processor_requested(pid, action))
+
+    def _on_offline_processor_requested(self, processor_id: str, mode: str) -> None:
+        """Analyze on the cancellable worker; stale previews cannot commit edits."""
+        panel, clip = self._panel, self._clip
+        if (panel is None or clip is None or self._locked or panel._raw_pcm is None
+                or not self._can_append_pre_render()):
+            return
+        selection = panel.canvas.getSelection()[:2]
+        if selection[1] <= selection[0]:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.selection_required", "Select a time range first"))
+            return
+        from src.features.edit.core.audio_edit import validate_audio_edit
+
+        start, end = self._selection_output_range()
+        selected = panel.canvas._edit_channel
+        channels = ((selected,) if selected >= 0 else tuple(range(self._pcm_channel_count())))
+        options: dict[str, Any] = {}
+        if processor_id == "doubler":
+            options["voices"] = [
+                {"voice_id": "left", "detune_cents": -6.0, "delay_ms": 12.0, "pan_pct": -100.0},
+                {"voice_id": "right", "detune_cents": 6.0, "delay_ms": 19.0, "pan_pct": 100.0},
+            ]
+        step = make_step(processor_id, start, end, channels, **options)
+        candidate = append_step(clip.audio_edit, step)
+        errors = validate_audio_edit(candidate, clip_output_samples=self._output_total_samples(),
+                                     channel_count=self._pcm_channel_count())
+        if errors:
+            self._report_analysis_failure("; ".join(errors))
+            return
+        raw, rate = panel._raw_pcm, panel._pcm_rate
+        previous = copy_audio_edit(clip.audio_edit)
+
+        def compute(cancelled: Callable[[], bool]) -> np.ndarray | None:
+            wet = render_audio_edit_full(raw, candidate, sample_rate=rate, cancel_check=cancelled)
+            if cancelled():
+                return None
+            if mode == "delta":
+                dry = render_audio_edit_full(raw, previous, sample_rate=rate, cancel_check=cancelled)
+                return None if cancelled() else dry - wet
+            return wet
+
+        def current() -> bool:
+            return (not self._locked and panel._raw_pcm is raw
+                    and self._selection_output_range() == (start, end)
+                    and panel.canvas._edit_channel == selected)
+
+        def publish(pcm: np.ndarray) -> None:
+            if mode == "apply":
+                self._commit_audio_edit(candidate, I18N.tr(
+                    "mixer.clip_editor.processor_commit", "Apply selection processing"))
+            elif not panel.start_band_preview(0, pcm):
+                panel.set_status_message(I18N.tr(
+                    "mixer.clip_editor.preview_device_unavailable", "Audio output is unavailable"))
+
+        panel.set_status_message(I18N.tr("mixer.clip_editor.processor_working", "Processing selection…"))
+        self._submit_analysis(compute, publish, current=current)
 
     def _pcm_channel_count(self) -> int:
         if self._panel is not None and self._panel._raw_pcm is not None:

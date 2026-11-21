@@ -118,3 +118,42 @@ class DitherSettings:
             pcm, self.bit_depth, seed=self.seed, shape=self.shape,
             dither_silence=self.dither_silence)
         return quantize_to_bit_depth(dithered, self.bit_depth)
+
+
+class DeliveryQuantizer:
+    """One final quantizer per output stream, independent of encoder chunking.
+
+    Each channel owns a random stream; drawing pairs per sample preserves the
+    noise timeline across arbitrarily sized blocks and prevents repeated noise
+    every time the WAV writer receives a block.
+    """
+
+    def __init__(self, settings: DitherSettings, bit_depth: int) -> None:
+        if settings.enabled and bit_depth in SUPPORTED_BIT_DEPTHS:
+            if settings.bit_depth != bit_depth:
+                raise ValueError("Dither bit depth must match the output codec")
+            if settings.shape != "tpdf":
+                raise ValueError(f"Unsupported dither shape: {settings.shape!r}")
+        self._settings = DitherSettings.from_dict(settings.to_dict())
+        self._bit_depth = int(bit_depth)
+        self._rngs: Optional[list] = None
+
+    def apply(self, pcm: np.ndarray) -> np.ndarray:
+        data = np.asarray(pcm, dtype=np.float32)
+        if self._bit_depth not in SUPPORTED_BIT_DEPTHS:
+            return data
+        if not self._settings.enabled:
+            return quantize_to_bit_depth(data, self._bit_depth)
+        if data.ndim != 2:
+            raise ValueError("Delivery PCM must have shape (channels, samples)")
+        if self._rngs is None:
+            seeds = np.random.SeedSequence(self._settings.seed).spawn(data.shape[0])
+            self._rngs = [np.random.default_rng(seed) for seed in seeds]
+        if len(self._rngs) != data.shape[0]:
+            raise ValueError("Delivery channel count changed within a stream")
+        noise = np.stack([rng.uniform(-0.5, 0.5, (data.shape[1], 2)).sum(axis=1)
+                          for rng in self._rngs])
+        if not self._settings.dither_silence:
+            noise = np.where(data == 0.0, 0.0, noise)
+        result = data.astype(np.float64) + noise * 2.0 ** -(self._bit_depth - 1)
+        return quantize_to_bit_depth(result, self._bit_depth)

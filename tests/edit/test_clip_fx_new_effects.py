@@ -313,7 +313,7 @@ class TestControllerPreview:
         assert len(engine) == 1
         cid, entries, track_id = engine[0]
         assert (cid, track_id) == ("clip_x", "T1")
-        assert entries == [("de_esser", preview, True)]
+        assert entries == [("de_esser", preview, True, "fx_x", 5)]
 
     def test_preview_only_replaces_target_effect(self):
         """多效果链：仅目标实例参数被替换，其余保持模型值。"""
@@ -332,7 +332,7 @@ class TestControllerPreview:
         bind("clip_x", "fx_y", preview)
         entries = engine[0][1]
         assert entries[0][0] == "de_esser" and entries[0][2] is True
-        assert entries[1] == ("phaser", preview, True)
+        assert entries[1] == ("phaser", preview, True, "fx_y", 5)
         # 预览 phaser 的 rate 只在引擎，模型未动
         assert extra.params["rate_hz"] != 2.0
 
@@ -349,7 +349,7 @@ class TestControllerPreview:
         host._on_edit_clip_effect_preview("clip_x", "fx_x", {**params, "threshold_dbfs": -25.0})
         host._on_edit_clip_effect_preview_finished("clip_x", "fx_x")
         assert len(engine) == 2
-        assert engine[-1] == ("clip_x", [("de_esser", params, True)], "T1")
+        assert engine[-1] == ("clip_x", [("de_esser", params, True, "fx_x", 5)], "T1")
 
     def test_cancel_rolls_back_panel_bypass_in_the_engine(self, qtbot: QtBot) -> None:
         host, applied, engine = self._host()
@@ -363,11 +363,11 @@ class TestControllerPreview:
         assert dialog is not None
         with qtbot.waitSignal(manager.clip_effect_preview, timeout=1000):
             qtbot.mouseClick(dialog.panel.power_switch, Qt.MouseButton.LeftButton)
-        assert engine[-1] == ("clip_x", [("de_esser", {**params, "enabled": False}, False)], "T1")
+        assert engine[-1] == ("clip_x", [("de_esser", {**params, "enabled": False}, False, "fx_x", 5)], "T1")
 
         buttons = dialog.findChild(QDialogButtonBox)
         qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
-        assert engine[-1] == ("clip_x", [("de_esser", params, True)], "T1")
+        assert engine[-1] == ("clip_x", [("de_esser", params, True, "fx_x", 5)], "T1")
         assert applied == []
 
     def test_preview_preserves_other_animated_controls_and_cancel_restores_the_edited_lane(

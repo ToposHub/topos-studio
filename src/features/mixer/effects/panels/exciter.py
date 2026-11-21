@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QInputDialog
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import QSignalBlocker, Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont
@@ -2427,6 +2427,23 @@ class StudioExciterWidget(QWidget):
         self._refresh_all_views()
         self._emit_solo_list()
         self.stateChanged.emit(self.get_state())
+
+    def use_processor_controls(self) -> None:
+        for count, button in self._band_count_btns.items():
+            button.setEnabled(count == 2)
+        self.btn_auto_gain.hide()
+        with QSignalBlocker(self.os_combo):
+            self.os_combo.clear()
+            self.os_combo.addItems(["1x Off", "2x"])
+        for card in self.band_cards:
+            with QSignalBlocker(card.mode_combo):
+                card.mode_combo.clear()
+                card.mode_combo.addItems(["Even", "Odd"])
+            for control in (card.c_harmonics, card.c_bias, card.c_output, card.btn_solo, card.btn_mute):
+                control.hide()
+        for bank in self._banks.values():
+            bank["band_count"] = 2
+        self._refresh_all_views()
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._current_state())

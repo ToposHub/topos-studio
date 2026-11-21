@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import OrderedDict
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -55,9 +55,11 @@ except ImportError:  # pragma: no cover
 #     从未实现，迁移为 Stereo，声音不变）
 #   - MX-04: 同轨多 clip 先求和、轨 DSP 一次处理（重叠 clip 区间声音改变
 #     ——这是缺陷修复而非回归）
-ALGORITHM_VERSION = 4
+ALGORITHM_VERSION = 5
 
 ALGORITHM_CHANGELOG = {
+    5: "FX-11/18/23：卷积实测延迟、调制读头及反馈状态、逐声道真峰前视修正；"
+       "v0–v4 保持历史内核，显式升级后启用修正版。",
     1: "初始版本（CW-A1）",
     2: "EQ 斜率/Shelf Q、Expander 斜率/Gate 状态机、压缩检测域、Make Up "
        "位置、SC Listen、Panner 矩阵、Reverb 阻尼热更新、Delay 输入矩阵、"
@@ -3945,8 +3947,10 @@ class EffectChain:
     process 支持按 instance_id 的侧链检源透传（压缩器外部检源）。
     """
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *,
+                 realtime_resources: bool = False) -> None:
         self._sample_rate = float(sample_rate)
+        self._realtime_resources = realtime_resources
         # 有序 effect 实例列表 + 每个的 enabled 标志 + instance_id
         self._effects: list = []  # list[AudioEffect]
         self._enabled_flags: list = []  # list[bool]
@@ -3955,10 +3959,23 @@ class EffectChain:
         self._last_entries: Optional[list] = None
         # MX-02: 本块按实例 tap（process 时采样；tap_levels() 读取）
         self._tap_levels: dict = {}
-        # R09: {effect_index: group_post_gain_db}——panel="dynamics" 组的
-        # 组后 Make Up（在该组最后一个成员处理完后应用）。组内压缩器的
-        # makeup_gain 已在 set_params 时清零，增益不在 Limiter 前施加。
+        self._spectrum_taps: dict = {}
         self._group_post_gain_db: dict = {}
+
+    def set_spectrum_metering(self, enabled: bool) -> None:
+        """Subscribe to bounded per-instance PCM windows only while requested."""
+        if not enabled:
+            for tap in self._spectrum_taps.values():
+                tap.clear()
+            self._spectrum_taps.clear()
+            return
+        from src.features.edit.core.audio_effects.spectrum_tap import InstanceSpectrumTap
+        active = set(self._instance_ids) - {""}
+        for iid in set(self._spectrum_taps) - active:
+            self._spectrum_taps.pop(iid).clear()
+        for iid in active:
+            if iid not in self._spectrum_taps:
+                self._spectrum_taps[iid] = InstanceSpectrumTap(self._sample_rate)
 
     def set_params(self, entries: Optional[list], sample_rate: Optional[float] = None) -> None:
         """更新效果器链。
@@ -3970,11 +3987,17 @@ class EffectChain:
             sample_rate: 可选新采样率，变化时重置所有效果器状态。
         """
         if sample_rate is not None and sample_rate != self._sample_rate:
+            self.set_spectrum_metering(False)
             self._sample_rate = float(sample_rate)
 
         self._last_entries = list(entries) if entries else None
 
         if not entries:
+            self.set_spectrum_metering(False)
+            for instance in self._effects:
+                release = getattr(instance, "release_resources", None)
+                if callable(release):
+                    release()
             self._effects = []
             self._enabled_flags = []
             self._instance_ids = []
@@ -4034,6 +4057,10 @@ class EffectChain:
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
+                if self._realtime_resources:
+                    prepare_async = getattr(instance, "enable_async_resources", None)
+                    if callable(prepare_async):
+                        prepare_async()
             inst_params = params
             _post_makeup_db = 0.0
             if (panel == "dynamics" and effect_type == "compressor"
@@ -4067,6 +4094,11 @@ class EffectChain:
                 self._group_post_gain_db[j] = \
                     self._group_post_gain_db.get(j, 0.0) + db
 
+        for (old_instance, _flag, _iid), reused in zip(old_pool, used):
+            if not reused:
+                release = getattr(old_instance, "release_resources", None)
+                if callable(release):
+                    release()
         self._effects = new_effects
         self._enabled_flags = new_flags
         self._instance_ids = new_ids
@@ -4106,6 +4138,8 @@ class EffectChain:
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             etype = getattr(inst, "effect_type", "")
             if not (enabled and inst.is_active):
+                if iid in self._spectrum_taps:
+                    self._spectrum_taps[iid].clear()
                 if iid:
                     # MX-02: 旁路实例直通语义（无过期 GR，UI 表归零）
                     self._tap_levels[iid] = {
@@ -4113,18 +4147,24 @@ class EffectChain:
                         "out_db": -100.0, "gr_db": 0.0, "sc_db": -100.0,
                         "bypassed": True,
                     }
+                    if etype == "convolution_reverb":
+                        self._tap_levels[iid]["analysis"] = inst.collect_telemetry()
                 continue
+            spectrum_input = out
             in_peak = float(np.max(np.abs(out))) if out.size else 0.0
             in_db = max(-100.0, 20.0 * float(np.log10(max(in_peak, 1e-9))))
             sc_buf = None
             # DynamicsEffect 内部含压缩器：侧链缓冲透传给其内部 comp
-            if isinstance(inst, (CompressorEffect, DynamicsEffect)) and sidechain_by_id:
-                sc = sidechain_by_id.get(iid) if iid else None
+            if (isinstance(inst, (CompressorEffect, DynamicsEffect))
+                    or etype in {"dynamic_eq", "transient_designer"}):
+                sc = sidechain_by_id.get(iid) if iid and sidechain_by_id else None
                 if sc is not None and isinstance(sc, np.ndarray) and sc.size:
                     sc_buf = sc
                 out = inst.process(out, sidechain=sc)
             else:
                 out = inst.process(out)
+            if iid in self._spectrum_taps:
+                self._spectrum_taps[iid].push(spectrum_input, out)
             out_peak = float(np.max(np.abs(out))) if out.size else 0.0
             out_db = max(-100.0, 20.0 * float(np.log10(max(out_peak, 1e-9))))
             if iid:
@@ -4161,7 +4201,9 @@ class EffectChain:
         未启用/旁路实例也在列（直通语义 + bypassed 标记），消费者可区分
         "真实读数" 与 "旁路归零"。process 未运行过时为空 dict。
         """
-        return self._tap_levels
+        return {iid: (tap | {"spectrum": self._spectrum_taps[iid].snapshot()}
+                      if iid in self._spectrum_taps else dict(tap))
+                for iid, tap in self._tap_levels.items()}
 
     def collect_gain_reduction(self) -> dict:
         """收集链内各实例的块内最大增益衰减（正 dB）。
@@ -4233,6 +4275,8 @@ class EffectChain:
 
     def reset_state(self) -> None:
         """重置所有效果器状态。"""
+        for tap in self._spectrum_taps.values():
+            tap.clear()
         for inst in self._effects:
             inst.reset_state()
 

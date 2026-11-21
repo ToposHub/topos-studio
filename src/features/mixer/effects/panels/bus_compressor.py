@@ -1850,8 +1850,6 @@ class StudioBusCompWidget(QWidget):
         self._knob_row.insertStretch(0)
         self._knob_row.addStretch()
         self.c_sc_hpf.valueChanged.connect(lambda v: self._set_param("sc_hpf", round(v, 1)))
-        for cell in (self.c_thresh, self.c_ratio, self.c_attack, self.c_release, self.c_makeup, self.c_mix):
-            cell.hide()
         for button in (self.btn_auto_rel, self.btn_ext_sc, self.btn_sc_listen, self.btn_auto_gain):
             button.hide()
         self.bus_graph.setEnabled(False)
@@ -1877,14 +1875,8 @@ class StudioBusCompWidget(QWidget):
         st = self._current_state()
         en = bool(st["enabled"])
         is_api = (st["topology"] == "API 2500")
-        main_accent = COLORS["amber"] if is_api else COLORS["cyan"]
         templates = getattr(self, "_processor_templates", None)
-        if templates is not None:
-            template = templates["mx_glue" if is_api else "dx_glue"]
-            st.update(threshold=template["threshold_db"], ratio=template["ratio"],
-                      attack=template["attack_ms"], release=template["release_ms"] / 1000.0,
-                      makeup=template.get("makeup_gain", 0.0), mix=template["mix"],
-                      processor_knee=template["knee"] * 0.24)
+        main_accent = COLORS["amber"] if is_api else COLORS["cyan"]
 
         self.power_switch.setAccentColor(main_accent)
         self.power_switch.setChecked(en)

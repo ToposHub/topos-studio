@@ -2664,10 +2664,10 @@ class StudioDynamicEQWidget(QWidget):
     def use_processor_controls(self) -> None:
         self._processor_mode = True
         self.eq_graph._processor_controls = True
-        self.band_cards[3].use_processor_controls()
+        for card in self.band_cards:
+            card.use_processor_controls()
         self.ext_sc_btn.hide()
         self.sc_listen_btn.hide()
-        self.sc_source_combo.hide()
         self.phase_combo.hide()
         self.master_strip.setEnabled(False)
         for index, card in enumerate(self.band_cards):
@@ -2677,7 +2677,7 @@ class StudioDynamicEQWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
-        if self._processor_mode:
+        if self._processor_mode and not getattr(self, "_processor_multiband", False):
             for index, band in enumerate(st["bands"]):
                 band["enabled"] = index == 3
             band = st["bands"][3]
@@ -2685,6 +2685,9 @@ class StudioDynamicEQWidget(QWidget):
             band.setdefault("max_boost", 0.0)
             band.setdefault("threshold_slope", 0.5)
             self._selected_band = 3
+        if self._processor_mode:
+            for i, card in enumerate(self.band_cards):
+                card.setVisible(i == self._selected_band)
         self._update_top_bar_styles()
         self.power_switch.setChecked(st["enabled"])
 
@@ -2760,6 +2763,8 @@ class StudioDynamicEQWidget(QWidget):
         self._selected_band = idx
         for i, card in enumerate(self.band_cards):
             card.setSelected(i == idx)
+            if self._processor_mode:
+                card.setVisible(i == idx)
         self.eq_graph.setSelectedNode(idx)
 
     def _on_band_card_changed(self, band_index: int, band_data: dict):

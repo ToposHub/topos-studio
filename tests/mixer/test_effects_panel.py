@@ -10,7 +10,7 @@ from pytestqt.qtbot import QtBot
 
 from src.features.edit.core.effect_registry import get_effect_registry_health
 from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
-from src.features.mixer.effects.panels.exciter import StudioExciterWidget
+from src.features.mixer.effects.panels.doubler import StudioDoublerWidget
 from src.features.mixer.ui.effects_panel import MixerEffectsPanel, _PANEL_ROLE
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
 
@@ -55,14 +55,14 @@ def test_pending_panels_open_locally_without_inserting_audio(browser: MixerEffec
         for row in range(group.childCount())
         if (item := group.child(row)).data(0, _PANEL_ROLE)
     }
-    assert set(panels) == {"clip_editor", "declick_dehum", "pitch_correction", "exciter", "subharmonic", "doubler"}
+    assert set(panels) == {"clip_editor", "declick_dehum", "pitch_correction", "doubler"}
     for item in panels.values():
         assert not browser.tree.mimeData([item]).hasFormat(MIME_TYPE_EFFECT)
     with qtbot.assertNotEmitted(browser.effect_activated):
-        browser._activate(panels["exciter"], 0)
-    instance = browser._panel_instances["exciter"]
+        browser._activate(panels["doubler"], 0)
+    instance = browser._panel_instances["doubler"]
     dialog = browser._panel_windows.window_for(instance)
-    assert dialog is not None and isinstance(dialog.panel, StudioExciterWidget)
+    assert dialog is not None and isinstance(dialog.panel, StudioDoublerWidget)
     browser.pause_panel_windows()
     assert not dialog.isVisible()
     with qtbot.waitSignal(browser.effect_activated) as tool:

@@ -1967,6 +1967,8 @@ class AudioMixer:
         """开/关频谱仪计算（EQ 对话框打开状态驱动，线程安全）。"""
         with QMutexLocker(self._mutex):
             self._spectrum_metering_enabled = bool(enabled)
+            for chain in (*self._effect_chains.values(), *self._clip_effect_chains.values()):
+                chain.set_spectrum_metering(enabled)
             if not enabled:
                 self._spectrum_windows.clear()
                 self._spectrum_write.clear()
@@ -2182,14 +2184,18 @@ class AudioMixer:
             # W7: 同时清理 EQ 滤波器
             self._eq_filters.pop(track_id, None)
             # W26: 清理 FX 机架效果器链
-            self._effect_chains.pop(track_id, None)
+            removed_chain = self._effect_chains.pop(track_id, None)
+            if removed_chain is not None:
+                removed_chain.set_params(None)
             # P-clip-FX: 清理该 track 下所有 clip 的 per-clip 链
             # （用 _clip_to_track 反查该 track 的 clip_id 集合）
             clip_ids_to_remove = [
                 cid for cid, tid in self._clip_to_track.items() if tid == track_id
             ]
             for cid in clip_ids_to_remove:
-                self._clip_effect_chains.pop(cid, None)
+                removed_chain = self._clip_effect_chains.pop(cid, None)
+                if removed_chain is not None:
+                    removed_chain.set_params(None)
                 self._clip_effect_samplers.pop(cid, None)
                 self._clip_end_frames.pop(cid, None)
                 self._clip_track_of.pop(cid, None)
@@ -2269,7 +2275,9 @@ class AudioMixer:
                     self._solo_count = max(0, self._solo_count - 1)
                 del self._tracks[track_id]
             self._eq_filters.pop(track_id, None)
-            self._effect_chains.pop(track_id, None)
+            removed_chain = self._effect_chains.pop(track_id, None)
+            if removed_chain is not None:
+                removed_chain.set_params(None)
             self._lufs_meters.pop(track_id, None)
             self._automation.pop(track_id, None)
             self._track_routing.pop(track_id, None)
@@ -2520,6 +2528,23 @@ class AudioMixer:
         """实时监听的总补偿延迟（轨级 + Bus 级；Master 链不产生相对错位）。"""
         return self._pdc_track_max + self._pdc_bus_max
 
+    def _refresh_resource_latencies_locked(self) -> None:
+        """Publish ready resource plans before computing block compensation."""
+        signature = []
+        for scope, chains in (("track", self._effect_chains), ("clip", self._clip_effect_chains)):
+            for key, chain in chains.items():
+                chain.is_active  # Poll prepared resources at this block boundary.
+                latency = chain.latency_samples()
+                signature.append((scope, key, latency))
+                if scope == "clip":
+                    self._clip_chain_lat[key] = latency
+        current = tuple(signature)
+        if current != getattr(self, "_resource_latency_signature", None):
+            self._resource_latency_signature = current
+            for tid in set(self._clip_to_track.values()):
+                self._recompute_clip_lat_max_locked(tid)
+            self._recompute_pdc_locked()
+
     def _advance_pdc_line(self, node_id: str, channels: int, num_samples: int) -> None:
         """节点本块被跳过（mute/solo/禁用/无输入块喂零）时也推进延迟线（喂零）。
 
@@ -2637,7 +2662,7 @@ class AudioMixer:
         entries = chain_params.to_dsp_entries() if chain_params is not None else None
         with QMutexLocker(self._mutex):
             if track_id not in self._effect_chains:
-                self._effect_chains[track_id] = EffectChain(self._sample_rate)
+                self._effect_chains[track_id] = EffectChain(self._sample_rate, realtime_resources=True)
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
             # H09：Freeze 捕获资产（注册表存在且实例引用资产 → 装载）
             if chain_params is not None and self._freeze_registry:
@@ -2682,7 +2707,7 @@ class AudioMixer:
         with QMutexLocker(self._mutex):
             chain = self._effect_chains.get(MASTER_BUS_KEY)
             if chain is None:
-                chain = EffectChain(self._sample_rate)
+                chain = EffectChain(self._sample_rate, realtime_resources=True)
                 self._effect_chains[MASTER_BUS_KEY] = chain
             chain.set_params(entries, sample_rate=self._sample_rate)
             # H09：Master 链的 Freeze 资产装载（与轨级同语义）
@@ -2729,7 +2754,9 @@ class AudioMixer:
                 self._clip_to_track[clip_id] = track_id
             if not entries:
                 # 清空：直接移除缓存的链（下次该 clip 无效果处理）
-                self._clip_effect_chains.pop(clip_id, None)
+                removed_chain = self._clip_effect_chains.pop(clip_id, None)
+                if removed_chain is not None:
+                    removed_chain.set_params(None)
                 self._clip_effect_samplers.pop(clip_id, None)
                 self._clip_chain_lat.pop(clip_id, None)
                 self._clip_pdc_lines.pop(clip_id, None)
@@ -2738,7 +2765,7 @@ class AudioMixer:
                     self._recompute_pdc_locked()
                 return
             if clip_id not in self._clip_effect_chains:
-                self._clip_effect_chains[clip_id] = EffectChain(self._sample_rate)
+                self._clip_effect_chains[clip_id] = EffectChain(self._sample_rate, realtime_resources=True)
             self._clip_effect_chains[clip_id].set_params(entries, sample_rate=self._sample_rate)
             # P0 · Clip FX PDC：记录链延迟并重算轨级补偿量。
             try:
@@ -3019,6 +3046,7 @@ class AudioMixer:
                     )
                     self._solo_closure_cache = audible_solo
 
+            self._refresh_resource_latencies_locked()
             # 输出缓冲区（Master）
             output = np.zeros((output_channels, num_samples), dtype=np.float32)
             # 每轨电平（线性振幅），按 track_id 累计
@@ -3501,6 +3529,7 @@ class AudioMixer:
                         if raw_map:
                             cur_n = samples.shape[-1]
                             sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
+                    track_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     samples = track_chain.process(samples, sidechain_by_id=sc_map)
 
                 # mute 门控在链输出端（自动化切点同时门控 EQ/FX 尾音泄漏）
@@ -3769,6 +3798,7 @@ class AudioMixer:
                             cur_n = bus_samples.shape[-1]
                             bus_sc_map = {iid: buf[:, :cur_n]
                                           for iid, buf in raw_map.items()}
+                    bus_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     bus_samples = bus_chain.process(
                         bus_samples, sidechain_by_id=bus_sc_map)
                 # P0 · PDC（实时监听）：Bus 输出端延迟线，对齐同级最迟链
@@ -3939,6 +3969,7 @@ class AudioMixer:
                         cur_n = output.shape[-1]
                         master_sc_map = {iid: buf[:, :cur_n]
                                          for iid, buf in raw_map.items()}
+                master_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                 output = master_chain.process(
                     output, sidechain_by_id=master_sc_map)
 

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -45,7 +46,11 @@ def detect_hum_base(
     返回 50.0 / 60.0 / None（无可信峰）。安静窗 = 短时能量最低分位的
     分析窗（语音活跃段不参与，避免把基频误判成哼声）。
     """
-    mono = pcm.mean(axis=0) if pcm.ndim > 1 else pcm
+    if not _SCIPY:
+        return None
+    # Select by power rather than averaging opposite-polarity channels.
+    mono = (pcm[int(np.argmax(np.sum(pcm.astype(np.float64) ** 2, axis=1)))]
+            if pcm.ndim > 1 else pcm)
     win = int(0.1 * sample_rate)
     if mono.shape[0] < win * 4:
         return None
@@ -83,6 +88,7 @@ def remove_hum(
     q: float = 30.0,
     reduction_db: float = 48.0,
     region: Optional[Tuple[int, int]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
     """窄 notch 移除哼声及谐波（零相位 filtfilt——不引入相位偏移）。
 
@@ -99,15 +105,17 @@ def remove_hum(
     """
     if not _SCIPY or pcm is None or pcm.ndim != 2 or pcm.shape[-1] == 0:
         return pcm
-    mono = pcm.mean(axis=0)
+    mono = pcm[int(np.argmax(np.sum(pcm.astype(np.float64) ** 2, axis=1)))]
     if base_hz is None:
         base_hz = detect_hum(pcm, sample_rate) if auto_detect else 50.0
     if base_hz is None:
-        base_hz = 50.0
+        return pcm  # Auto mode must not remove an unconfirmed frequency.
     freqs, psd = welch(mono, fs=sample_rate, nperseg=min(16384, mono.size))
     out = pcm.astype(np.float32)
     nyquist = sample_rate / 2.0
     for harmonic in harmonics:
+        if cancel_check is not None and cancel_check():
+            return pcm
         target = base_hz * harmonic
         if target >= nyquist * 0.95:
             break
@@ -197,7 +205,7 @@ def detect_clicks(
     exceed = abs_res > threshold_sigma * mad
     # 宽带包络（10 ms 滑动 |mono| 均值）：鼓点/爆破音的持续宽带事件
     # 显著抬高包络；6 样本点击几乎不动包络——以此 veto 保护辅音与鼓点。
-    mono_abs = np.abs(pcm.mean(axis=0)).astype(np.float64)
+    mono_abs = np.abs(pcm).max(axis=0).astype(np.float64)
     env_win = max(8, int(0.01 * sample_rate))
     env_kernel = np.ones(env_win, dtype=np.float64) / env_win
     broadband_env = np.convolve(mono_abs, env_kernel, mode="same")
@@ -254,13 +262,13 @@ def _interpolate_repair(
     for ch in range(pcm.shape[0]):
         # 绝对样本轴：左上下文 = [lo−L, lo)，右上下文 = [hi, hi+R)。
         src_x = np.concatenate([
-            np.arange(left.shape[-1]),
-            gap + np.arange(right.shape[-1])])
+            np.arange(lo - left.shape[-1], lo),
+            np.arange(hi, hi + right.shape[-1])])
         src_y = np.concatenate([left[ch], right[ch]])
         if src_x.size < 2:
             out[ch, lo:hi] = 0.0
             continue
-        dst_x = left.shape[-1] + np.arange(gap)
+        dst_x = np.arange(lo, hi)
         out[ch, lo:hi] = np.interp(dst_x, src_x, src_y)
     return out
 
@@ -271,6 +279,7 @@ def remove_clicks(
     *,
     candidates: Optional[List[ClickCandidate]] = None,
     spectral_fallback_ms: float = 25.0,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[np.ndarray, List[ClickCandidate]]:
     """移除点击：短区间双侧插值；长缺失转频谱修复。
 
@@ -282,24 +291,36 @@ def remove_clicks(
         candidates = detect_clicks(pcm, sample_rate)
     if not candidates or pcm is None:
         return pcm, []
-    out = pcm
+    out = pcm.copy()
     handled: List[ClickCandidate] = []
     spectral_threshold = int(spectral_fallback_ms * sample_rate / 1000.0)
-    for candidate in candidates:
+    # Merge overlapping windows before taking context from the original input.
+    windows: list[tuple[int, int, list[ClickCandidate]]] = []
+    for candidate in sorted(candidates, key=lambda c: c.position - max(4, c.width)):
         half = max(4, candidate.width)
-        lo = candidate.position - half
-        hi = candidate.position + half
+        lo, hi = max(0, candidate.position - half), min(pcm.shape[-1], candidate.position + half)
+        if windows and lo <= windows[-1][1]:
+            previous_lo, previous_hi, group = windows[-1]
+            windows[-1] = (previous_lo, max(previous_hi, hi), [*group, candidate])
+        else:
+            windows.append((lo, hi, [candidate]))
+    for lo, hi, group in windows:
+        if cancel_check is not None and cancel_check():
+            return pcm, []
+        if hi <= lo or lo == 0 or hi == pcm.shape[-1]:
+            continue  # No bilateral context: preserve audio and omit from handled.
         if hi - lo > spectral_threshold:
             from src.features.edit.core.audio_repair import repair_spectral
-            try:
-                out = repair_spectral(
-                    out, sample_rate, [],
-                    (max(0, lo), min(out.shape[-1], hi)),
-                    amount_db=24.0, mode="attenuate")
-                handled.append(candidate)
-            except Exception:  # noqa: BLE001 - 频谱修复缺席保持原样
-                continue
+            high_hz = sample_rate * 0.45
+            low_hz = min(20.0, high_hz / 2.0)
+            repaired = repair_spectral(
+                pcm, sample_rate,
+                [{"sample": (lo + hi) // 2, "hz": float(np.sqrt(low_hz * high_hz)),
+                  "time_radius": max(1, (hi - lo) // 2),
+                  "bandwidth_oct": float(np.log2(high_hz / low_hz))}],
+                (lo, hi), amount_db=24.0, mode="heal")
         else:
-            out = _interpolate_repair(out, max(0, lo), hi)
-            handled.append(candidate)
+            repaired = _interpolate_repair(pcm, lo, hi)
+        out[:, lo:hi] = repaired[:, lo:hi]
+        handled.extend(group)
     return out, handled

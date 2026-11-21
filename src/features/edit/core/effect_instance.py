@@ -309,6 +309,8 @@ class EffectInstance:
     is_enabled: bool = True
     order: int = 0
     plugin_identity: Optional[dict[str, Any]] = None  # FX-M07: stable plugin identity snapshot
+    # None is a newly created instance; deserialization supplies 0 for old files.
+    algorithm_version: Optional[int] = None
     # DESK-04A：未来 schema 未知键保留（load→save 不丢）
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -316,7 +318,7 @@ class EffectInstance:
     # legacy 迁移（intensity）发生在 params 内层字典，不产生顶层迁移键
     _KNOWN_KEYS: ClassVar[frozenset[str]] = frozenset({
         "effect_id", "effect_type", "params", "animated_params",
-        "is_enabled", "order", "plugin_identity",
+        "is_enabled", "order", "plugin_identity", "algorithm_version",
     })
 
     def with_animated_params_remapped(self, anchor: int, ratio) -> "EffectInstance":
@@ -368,6 +370,14 @@ class EffectInstance:
 
     def __post_init__(self) -> None:
         """Validate effect parameters."""
+        if self.algorithm_version is None:
+            from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
+            from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+            object.__setattr__(self, "algorithm_version",
+                               ALGORITHM_VERSION if self.effect_type in AUDIO_MIXER_EFFECT_TYPES else 0)
+        elif (not isinstance(self.algorithm_version, int)
+              or isinstance(self.algorithm_version, bool) or self.algorithm_version < 0):
+            raise ValueError("algorithm_version must be a nonnegative integer")
         if not self.effect_id:
             raise ValueError("effect_id cannot be empty")
         if not self.effect_type:
@@ -446,6 +456,7 @@ class EffectInstance:
 
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=new_animated,
@@ -480,6 +491,7 @@ class EffectInstance:
 
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=new_animated,
@@ -510,6 +522,7 @@ class EffectInstance:
 
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=new_animated,
@@ -535,6 +548,7 @@ class EffectInstance:
         new_params[param_name] = value
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=new_params,
             animated_params=self.animated_params,
@@ -555,6 +569,7 @@ class EffectInstance:
         """
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=params,
             animated_params=self.animated_params,
@@ -575,6 +590,7 @@ class EffectInstance:
         """
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=self.animated_params,
@@ -593,6 +609,7 @@ class EffectInstance:
         """
         return EffectInstance(
             effect_id=effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=self.animated_params,
@@ -613,6 +630,7 @@ class EffectInstance:
         """
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=self.animated_params,
@@ -635,6 +653,7 @@ class EffectInstance:
         """
         return EffectInstance(
             effect_id=self.effect_id,
+            algorithm_version=self.algorithm_version,
             effect_type=self.effect_type,
             params=self.params,
             animated_params=self.animated_params,
@@ -667,6 +686,8 @@ class EffectInstance:
         # FX-M07: include plugin identity only when present (backward compat)
         if self.plugin_identity is not None:
             result["plugin_identity"] = self.plugin_identity
+        if self.algorithm_version:
+            result["algorithm_version"] = self.algorithm_version
         # DESK-04A：未知键原样回写
         result.update(self._extra_fields)
         return result
@@ -720,6 +741,7 @@ class EffectInstance:
             is_enabled=data.get("is_enabled", True),
             order=data.get("order", 0),
             plugin_identity=data.get("plugin_identity", None),  # FX-M07
+            algorithm_version=data.get("algorithm_version", 0),
             _extra_fields=split_extras(data, EffectInstance._KNOWN_KEYS),
         )
 

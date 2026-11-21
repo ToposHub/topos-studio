@@ -45,6 +45,7 @@ class BusCompEffect(AudioEffect):
         self._apply_template()
         self._hpf_sos = None
         self._hpf_state = None
+        self._hpf_key: Optional[tuple] = None
 
     def _apply_template(self) -> None:
         """模板值 + 显式连续字段覆盖（FX-05：旋钮提交与模板解耦）。
@@ -79,10 +80,13 @@ class BusCompEffect(AudioEffect):
         self._apply_template()
         hpf = float(np.clip(self._params.get("sc_hpf_hz", 120.0),
                             0.0, self._sample_rate * 0.45))
-        self._hpf_sos = (butter(2, hpf, btype="highpass",
-                                fs=self._sample_rate, output="sos")
-                         if hpf > 0.0 else None)
-        self._hpf_state = None
+        hpf_key = (hpf, self._sample_rate)
+        if hpf_key != self._hpf_key:
+            self._hpf_sos = (butter(2, hpf, btype="highpass",
+                                    fs=self._sample_rate, output="sos")
+                             if hpf > 0.0 and _SCIPY else None)
+            self._hpf_state = None
+            self._hpf_key = hpf_key
 
     def reset_state(self) -> None:
         self._comp.reset_state()

@@ -204,7 +204,6 @@ class MultibandSaturationEffect(AudioEffect):
         # 过采样档位立即生效（latency_samples 在首块前就要正确）；
         # 滤波系数与历史缓冲在首块（声道数已知）时重建。
         self._oversampling = self._oversampling_of(self._params)
-        self._crossover_key = ()  # 强制下次 _rebuild 应用新系数
         self._rebuild()
 
     def reset_state(self) -> None:

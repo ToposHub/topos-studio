@@ -160,7 +160,7 @@ class TestTruePeakLimiter:
         from src.features.edit.core.audio_dsp import EffectChain
         chain = EffectChain(float(RATE))
         chain.set_params([("true_peak_limiter",
-                           {"ceiling_dbtp": CEILING}, True)])
+                           {"ceiling_dbtp": CEILING}, True, "limiter", 5)])
         assert chain.latency_samples() == fx.latency_samples()
 
     def test_tail_and_reset(self) -> None:

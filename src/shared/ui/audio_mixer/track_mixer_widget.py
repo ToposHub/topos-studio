@@ -2254,7 +2254,15 @@ class TrackMixerWidget(QWidget):
 
         for dialog in self._iter_eq_dialogs():
             panel = getattr(dialog, "panel", dialog)
-            if silent or spectrum:
+            instance_tap = taps.get(getattr(dialog, "_instance_id", "")) or {}
+            measured = instance_tap.get("spectrum") or {}
+            if silent or instance_tap.get("bypassed"):
+                panel.update_spectrum([], [])
+            elif measured:
+                panel.update_spectrum(measured.get("freqs", []), measured.get("output_db", []))
+            elif not instance_tap and spectrum:
+                # The dedicated channel-strip EQ has a track tap rather than
+                # an insert-chain ID. Insert windows wait for their own tap.
                 panel.update_spectrum(freqs, db)
             if silent and hasattr(panel, "reset_peak_hold"):
                 panel.reset_peak_hold()
@@ -2287,6 +2295,8 @@ class TrackMixerWidget(QWidget):
             detector = -100.0 if silent or tap.get("bypassed") else detectors.get(instance_id, -100.0)
             panel = getattr(dialog, "panel", dialog)
 
+            if kind == "convolution_reverb" and hasattr(dialog, "update_resource_status"):
+                dialog.update_resource_status(tap.get("analysis") or {})
             if kind in ("compressor", "expander", "noise_gate", "limiter", "dynamics"):
                 if hasattr(panel, "update_meters"):
                     panel.update_meters(

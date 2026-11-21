@@ -1046,7 +1046,8 @@ class _StemWavWriter:
         self._sample_rate = int(sample_rate)
         self._samples_written = 0
         self._bit_depth = int(bit_depth)
-        self._dither = dither
+        self._dither = (delivery_dither.DeliveryQuantizer(dither, self._bit_depth)
+                        if dither is not None else None)
         self._ok = True
         self._container = None
         self._stream = None
@@ -1062,7 +1063,10 @@ class _StemWavWriter:
         self._av = av
 
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        codec = "pcm_s24le" if bit_depth == 24 else "pcm_s16le"
+        codecs = {16: "pcm_s16le", 24: "pcm_s24le", 32: "pcm_f32le"}
+        if self._bit_depth not in codecs:
+            raise ValueError("Stem WAV bit depth must be 16, 24 or 32 (float)")
+        codec = codecs[self._bit_depth]
         # AM-08 阶段 4.1：用标准 ChannelLayout 推断 PyAV layout（替代 ad-hoc 字符串）。
         from src.features.edit.core.channel_layout import ChannelLayout
         try:
@@ -1099,7 +1103,8 @@ class _StemWavWriter:
         if self._dither is not None:
             block = self._dither.apply(block)
         # fltp 格式输入（float planar），编码器负责量化
-        clipped = np.clip(block, -1.0, 1.0).astype(np.float32)
+        clipped = (block.astype(np.float32) if self._bit_depth == 32 else
+                   np.clip(block, -1.0, 1.0).astype(np.float32))
         frame = self._av.AudioFrame.from_ndarray(
             clipped, format="fltp", layout=self._layout)
         frame.sample_rate = self._sample_rate
@@ -1137,6 +1142,7 @@ def write_stem_wav(
     samples: np.ndarray,
     sample_rate: int = 48000,
     bit_depth: int = 24,
+    dither: Optional[delivery_dither.DitherSettings] = None,
 ) -> bool:
     """将 stem PCM 写入 WAV 文件（PCM s16le/s24le）。
 
@@ -1156,13 +1162,13 @@ def write_stem_wav(
         samples = samples.reshape(1, -1)
     writer = _StemWavWriter(
         path, sample_rate=sample_rate, channels=int(samples.shape[0]),
-        bit_depth=bit_depth)
+        bit_depth=bit_depth, dither=dither)
     if not writer.usable:
         return False
     try:
         # 分块写入（避免一次性大内存）
         n = samples.shape[1]
-        clipped = np.clip(samples, -1.0, 1.0).astype(np.float32)
+        clipped = samples.astype(np.float32)
         chunk = 8192
         for i in range(0, n, chunk):
             writer.write(clipped[:, i:i + chunk])
@@ -1213,6 +1219,7 @@ def export_all_stems(
     asset_lookup: Optional[Callable] = None,
     pre_render_base_fn: Optional[Callable] = None,
     frame_range: Optional[Tuple[int, int]] = None,
+    dither: Optional[delivery_dither.DitherSettings] = None,
 ) -> StemExportResult:
     """导出工程的全部 stem（AM-10 阶段 3.5 顶层入口）。
 
@@ -1281,7 +1288,7 @@ def export_all_stems(
                 continue
             writer = _StemWavWriter(
                 path, sample_rate=sample_rate, channels=channels,
-                bit_depth=bit_depth)
+                bit_depth=bit_depth, dither=dither)
             if not writer.usable:
                 result.stems.append((spec.name, False))
                 continue

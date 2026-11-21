@@ -117,14 +117,14 @@ class TestTremoloAutoPan:
 
 
 class TestChorusFlangerPhaser:
-    def test_chorus_widens_and_tail_zero_without_feedback(self) -> None:
+    def test_chorus_widens_and_preserves_first_echo_without_feedback(self) -> None:
         t = np.arange(RATE) / RATE
         pcm = np.stack([(0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)] * 2)
         fx = ChorusFlangerEffect(RATE)
         fx.set_params({"mode": "chorus", "feedback": 0.0, "mix": 0.5})
         out = fx.process(pcm.copy())
         assert out.shape == pcm.shape
-        assert fx.tail_estimate_samples() == 0
+        assert fx.tail_estimate_samples() >= round((18.0 + 3.0) * RATE / 1000.0)
 
     def test_flanger_feedback_tail_budgeted(self) -> None:
         fx = ChorusFlangerEffect(RATE)

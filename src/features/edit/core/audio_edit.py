@@ -143,6 +143,14 @@ PROCESSORS: dict[str, dict[str, Any]] = {
             "quantization, stable-note time-preserving rendering."
         ),
     },
+    "de_click": {
+        "algorithm_version": 1, "length_preserving": True, "pre_render": True,
+        "description": "Offline click repair in a selected sample range and channels.",
+    },
+    "de_hum": {
+        "algorithm_version": 1, "length_preserving": True, "pre_render": True,
+        "description": "Offline zero-phase hum removal in a selected range and channels.",
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 # 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
@@ -293,7 +301,8 @@ def validate_audio_edit(
         gain_db = params.get("gain_db")
         if (processor_id not in ("mute", "channel_polarity", "spectral_denoise",
                                  "time_stretch", "delete_range",
-                                 "spectral_repair")
+                                 "spectral_repair", "pitch_correction", "doubler",
+                                 "de_click", "de_hum")
                 and not isinstance(gain_db, (int, float))):
             diagnostics.append(f"{where}: gain_db must be numeric for {processor_id}")
         if processor_id in PRE_RENDER_PROCESSORS:
@@ -380,6 +389,47 @@ def _validate_pre_render_step(
 ) -> list[str]:
     """预渲染处理器的逐条诊断（值域/区间/映射一致性/依赖 SciPy）。"""
     diagnostics: list[str] = []
+    if processor_id in {"pitch_correction", "doubler", "de_click", "de_hum"}:
+        ranges = {
+            "pitch_correction": {"ref_a4_hz": (440.0, 400.0, 480.0),
+                                 "strength": (100.0, 0.0, 100.0), "retune_ms": (45.0, 0.0, 400.0)},
+            "doubler": {"dry_gain_db": (0.0, -120.0, 6.0),
+                        "wet_mix_pct": (100.0, 0.0, 100.0), "output_gain_db": (0.0, -24.0, 24.0)},
+            "de_click": {"click_threshold_sigma": (8.0, 2.0, 30.0),
+                         "click_max_width_ms": (2.5, 0.1, 25.0)},
+            "de_hum": {"hum_q": (30.0, 1.0, 1000.0), "hum_drift_hz": (0.6, 0.0, 5.0),
+                       "hum_reduction_db": (48.0, 0.0, 48.0)},
+        }
+        for key, (default, low, high) in ranges[processor_id].items():
+            value = params.get(key, default)
+            if not isinstance(value, (int, float)) or not low <= value <= high:
+                diagnostics.append(f"{where}: {key} must be within [{low}, {high}]")
+        if processor_id == "pitch_correction":
+            notes = params.get("scale_notes", (0, 2, 4, 5, 7, 9, 11))
+            if (not isinstance(notes, (list, tuple)) or not notes
+                    or any(not isinstance(n, int) or not 0 <= n <= 11 for n in notes)):
+                diagnostics.append(f"{where}: scale_notes must contain pitch classes [0, 11]")
+        elif processor_id == "de_hum":
+            if params.get("hum_base_mode", "auto") not in {"auto", "50", "60"}:
+                diagnostics.append(f"{where}: hum_base_mode must be auto, 50 or 60")
+            harmonics = params.get("hum_harmonics", list(range(1, 9)))
+            if (not isinstance(harmonics, (list, tuple)) or not harmonics
+                    or any(not isinstance(h, int) or not 1 <= h <= 16 for h in harmonics)):
+                diagnostics.append(f"{where}: hum_harmonics must contain harmonics [1, 16]")
+        elif processor_id == "doubler":
+            voices = params.get("voices", [])
+            if not isinstance(voices, list) or not 1 <= len(voices) <= 4:
+                diagnostics.append(f"{where}: doubler requires 1 to 4 voices")
+            else:
+                for voice in voices:
+                    if not isinstance(voice, dict):
+                        diagnostics.append(f"{where}: voice must be a dict")
+                        continue
+                    interval, detune = voice.get("interval_st", 0.0), voice.get("detune_cents", 0.0)
+                    if (not isinstance(interval, (int, float)) or not isinstance(detune, (int, float))
+                            or not -24.0 <= interval + detune / 100.0 <= 24.0):
+                        diagnostics.append(f"{where}: voice interval+detune must be within [±24]")
+        return diagnostics
     if processor_id == "time_stretch":
         ratio_pct = params.get("ratio_pct")
         if (not isinstance(ratio_pct, (int, float))
@@ -997,6 +1047,61 @@ def length_step_sample_maps(audio_edit: Any) -> tuple[tuple[int, int, int], ...]
     return tuple(_enabled_length_maps(steps, 0))
 
 
+def _render_selected_offline_step(
+    pcm: np.ndarray, params: dict, sample_rate: int, processor_id: str,
+    cancel_check: Callable[[], bool] | None = None,
+) -> np.ndarray:
+    """Render offline DSP with context, writing only the selected channels/range."""
+    start = max(0, int(params.get("start", 0)))
+    end = min(pcm.shape[-1], int(params.get("end", 0)))
+    channels = list(dict.fromkeys(params.get("channels", range(pcm.shape[0]))))
+    if end <= start or not channels:
+        return pcm
+    if any(not isinstance(ch, int) or not 0 <= ch < pcm.shape[0] for ch in channels):
+        raise ValueError("offline processor channel index out of range")
+    original = pcm[channels].copy()
+    if processor_id == "pitch_correction":
+        from src.features.edit.core.audio_effects.pitch_correction import render_pitch_correction
+        wet = original.copy()
+        wet[:, start:end] = render_pitch_correction(
+            original[:, start:end], sample_rate,
+            ref_a4_hz=float(params.get("ref_a4_hz", 440.0)),
+            strength=float(params.get("strength", 100.0)),
+            retune_ms=float(params.get("retune_ms", 45.0)),
+            scale_notes=tuple(params.get("scale_notes", (0, 2, 4, 5, 7, 9, 11))),
+            bypass_notes=tuple(params.get("bypass_notes") or ()), cancel_check=cancel_check)
+    elif processor_id == "doubler":
+        from src.features.edit.core.audio_effects.doubler import doubles_from_params, render_doubler
+        wet = original.copy()
+        wet[:, start:end] = render_doubler(
+            original[:, start:end], sample_rate, doubles_from_params(params),
+            dry_gain_db=float(params.get("dry_gain_db", 0.0)),
+            wet_mix_pct=float(params.get("wet_mix_pct", 100.0)),
+            output_gain_db=float(params.get("output_gain_db", 0.0)), cancel_check=cancel_check)
+    elif processor_id == "de_hum":
+        from src.features.edit.core.de_click_dehum import remove_hum
+        mode = params.get("hum_base_mode", "auto")
+        wet = remove_hum(
+            original, sample_rate, base_hz=None if mode == "auto" else float(mode),
+            auto_detect=mode == "auto", harmonics=params.get("hum_harmonics", tuple(range(1, 9))),
+            q=float(params.get("hum_q", 30.0)), drift_hz=float(params.get("hum_drift_hz", 0.6)),
+            reduction_db=float(params.get("hum_reduction_db", 48.0)), region=(start, end),
+            cancel_check=cancel_check)
+    else:
+        from src.features.edit.core.de_click_dehum import detect_clicks, remove_clicks
+        candidates = detect_clicks(
+            original, sample_rate, threshold_sigma=float(params.get("click_threshold_sigma", 8.0)),
+            max_width=max(4, round(float(params.get("click_max_width_ms", 2.5)) * sample_rate / 2000.0)))
+        wet, _ = remove_clicks(
+            original, sample_rate, candidates=[c for c in candidates if start <= c.position < end],
+            cancel_check=cancel_check)
+    if cancel_check is not None and cancel_check():
+        return pcm
+    result = pcm.copy()
+    result[channels, start:end] = wet[:, start:end]
+    return np.ascontiguousarray(result, dtype=np.float32)
+
+
 def render_to_step_insertion(
     pcm: np.ndarray,
     audio_edit: Any,
@@ -1040,6 +1145,18 @@ def render_to_step_insertion(
             ):
                 continue
         if processor_id in PRE_RENDER_PROCESSORS:
+            # All persisted time anchors use the 48 kHz reference clock. Convert
+            # once at the common DSP boundary, including noise/brush context.
+            if sample_rate != PROCESSING_RATE:
+                params = copy.deepcopy(params)
+                for key in ("start", "end", "noise_start", "noise_end", "output_length"):
+                    if isinstance(params.get(key), int):
+                        params[key] = reference_position_to_rate(params[key], sample_rate)
+                for stroke in params.get("strokes", []) or []:
+                    if isinstance(stroke, dict):
+                        for key in ("sample", "time_radius"):
+                            if isinstance(stroke.get(key), (int, float)):
+                                stroke[key] = reference_position_to_rate(round(stroke[key]), sample_rate)
             if not scipy_available():
                 raise RuntimeError(
                     "SciPy DSP backend unavailable for pre-render steps")
@@ -1067,29 +1184,9 @@ def render_to_step_insertion(
                     progress=progress, cancel_check=cancel_check)
             elif processor_id == "delete_range":
                 out = _render_delete_range_step(out, params, sample_rate)
-            elif processor_id == "pitch_correction":
-                from src.features.edit.core.audio_effects.pitch_correction                     import render_pitch_correction
-                out = render_pitch_correction(
-                    out,
-                    sample_rate,
-                    ref_a4_hz=float(params.get("ref_a4_hz", 440.0)),
-                    strength=float(params.get("strength", 100.0)),
-                    retune_ms=float(params.get("retune_ms", 45.0)),
-                    bypass_notes=tuple(params.get("bypass_notes") or ()),
-                )
-            elif processor_id == "doubler":
-                from src.features.edit.core.audio_effects.doubler import (
-                    doubles_from_params,
-                    render_doubler,
-                )
-                out = render_doubler(
-                    out,
-                    sample_rate,
-                    doubles_from_params(params),
-                    dry_gain_db=float(params.get("dry_gain_db", 0.0)),
-                    wet_mix_pct=float(params.get("wet_mix_pct", 100.0)),
-                    output_gain_db=float(params.get("output_gain_db", 0.0)),
-                )
+            elif processor_id in {"pitch_correction", "doubler", "de_click", "de_hum"}:
+                out = _render_selected_offline_step(
+                    out, params, sample_rate, processor_id, cancel_check)
             elif processor_id == "spectral_repair":
                 from src.features.edit.core.audio_repair import repair_spectral
                 out = repair_spectral(

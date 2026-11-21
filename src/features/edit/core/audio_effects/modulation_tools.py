@@ -92,6 +92,10 @@ class TransientDesignerEffect(AudioEffect):
         # 新版支路：每声道快/慢包络状态。
         self._fast_env_ch: Optional[np.ndarray] = None
         self._slow_env_ch: Optional[np.ndarray] = None
+        self._sidechain_status = "internal"
+        self._sc_filter_key = None
+        self._sc_sos = None
+        self._sc_zi = None
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -109,6 +113,7 @@ class TransientDesignerEffect(AudioEffect):
         self._slow_env = 0.0
         self._fast_env_ch = None
         self._slow_env_ch = None
+        self._sc_zi = None
 
     @property
     def is_active(self) -> bool:
@@ -120,14 +125,44 @@ class TransientDesignerEffect(AudioEffect):
     def latency_samples(self) -> int:
         return 0
 
-    def process(self, samples: np.ndarray) -> np.ndarray:
+    @property
+    def sc_source(self) -> str:
+        from .sidechain import detector_source_id
+        return detector_source_id(self._params)
+
+    def collect_telemetry(self) -> dict:
+        return {"sidechain_source_id": self.sc_source, "sidechain_status": self._sidechain_status}
+
+    def process(self, samples: np.ndarray,
+                sidechain: Optional[np.ndarray] = None) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
             return samples
         n = samples.shape[-1]
         if n == 0:
             return samples
+        from .sidechain import detector_input
+        detector, self._sidechain_status = detector_input(samples, sidechain, self.sc_source)
+        if any(key in self._params for key in ("sc_hpf_hz", "sc_lpf_hz", "sc_listen")):
+            from scipy.signal import butter, sosfilt
+            hpf = float(np.clip(self._params.get("sc_hpf_hz", 0.), 0., self._sample_rate * .45))
+            lpf = float(np.clip(self._params.get("sc_lpf_hz", 0.), 0., self._sample_rate * .45))
+            order = int(np.clip(self._params.get("sc_filter_slope_db_oct", 12), 6, 24)) // 6
+            key = (hpf, lpf, order, self._sample_rate, detector.shape[0])
+            if key != self._sc_filter_key:
+                sections = []
+                if hpf > 0:
+                    sections.extend(butter(order, hpf, btype="highpass", fs=self._sample_rate, output="sos"))
+                if lpf > 0:
+                    sections.extend(butter(order, lpf, btype="lowpass", fs=self._sample_rate, output="sos"))
+                self._sc_sos = np.asarray(sections) if sections else None
+                self._sc_zi = (np.zeros((len(sections), detector.shape[0], 2)) if sections else None)
+                self._sc_filter_key = key
+            if self._sc_sos is not None:
+                detector, self._sc_zi = sosfilt(self._sc_sos, detector, axis=-1, zi=self._sc_zi)
+            if self._params.get("sc_listen", False):
+                return np.broadcast_to(detector.mean(axis=0), samples.shape).astype(np.float32).copy()
         if ("attack_pct" in self._params or "sustain_pct" in self._params):
-            processed = self._process_percent(samples)
+            processed = self._process_percent(samples, detector)
         else:
             processed = self._process_legacy(samples)
         mix = float(np.clip(self._params.get("mix", 1.0), 0.0, 1.0))
@@ -136,10 +171,12 @@ class TransientDesignerEffect(AudioEffect):
         out *= 10.0 ** (float(self._params.get("output_gain_db", 0.0)) / 20.0)
         return np.ascontiguousarray(out.astype(np.float32), dtype=np.float32)
 
-    def _process_percent(self, samples: np.ndarray) -> np.ndarray:
+    def _process_percent(self, samples: np.ndarray,
+                         detector: Optional[np.ndarray] = None) -> np.ndarray:
         """新版支路：逐声道快/慢包络，聚合取各声道绝对包络最大。"""
         n = samples.shape[-1]
-        channels = samples.shape[0]
+        detector = samples if detector is None else detector
+        channels = detector.shape[0]
         attack_ms = max(0.5, float(self._params.get("attack_ms", 8.0)))
         sustain_ms = max(10.0, float(self._params.get("sustain_ms", 80.0)))
         a_fast = float(np.exp(-1.0 / (attack_ms * self._sample_rate / 1000.0)))
@@ -155,7 +192,7 @@ class TransientDesignerEffect(AudioEffect):
                 or self._fast_env_ch.shape != (channels,)):
             self._fast_env_ch = np.zeros(channels, dtype=np.float64)
             self._slow_env_ch = np.zeros(channels, dtype=np.float64)
-        abs_in = np.abs(samples.astype(np.float64))
+        abs_in = np.abs(detector.astype(np.float64))
         gains = np.empty(n, dtype=np.float32)
         fast_ch = self._fast_env_ch
         slow_ch = self._slow_env_ch
@@ -222,12 +259,15 @@ class TremoloAutoPanEffect(AudioEffect):
         self._phase_pos_end = 0
         self._phase_rate: Optional[float] = None
         self._lfo = _Lfo(4.0)
+        self._smooth_state: Optional[np.ndarray] = None
+        self._last_phase = 0.0
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
+            self.reset_state()
         merged = dict(self._params)
         if isinstance(params, dict):
             merged.update(params)
@@ -241,6 +281,8 @@ class TremoloAutoPanEffect(AudioEffect):
         self._phase_pos_base = 0
         self._phase_pos_end = 0
         self._phase_rate = None
+        self._smooth_state = None
+        self._last_phase = 0.0
 
     @property
     def is_active(self) -> bool:
@@ -261,10 +303,10 @@ class TremoloAutoPanEffect(AudioEffect):
         depth = float(np.clip(self._params.get("depth", 0.7), 0.0, 1.0))
         mode = str(self._params.get("mode", "tremolo"))
         waveform = str(self._params.get("waveform", "") or "")
-        if waveform and waveform != "sine":
+        if waveform:
             return self._process_waveform(samples, waveform, mode, depth)
         lfo = self._lfo.advance(n, self._sample_rate)
-        if mode == "auto_pan" and samples.shape[0] >= 2:
+        if mode in ("auto_pan", "dual") and samples.shape[0] >= 2:
             pan = depth * lfo
             left_gain = np.sqrt(0.5 * (1.0 - pan))
             right_gain = np.sqrt(0.5 * (1.0 + pan))
@@ -276,6 +318,10 @@ class TremoloAutoPanEffect(AudioEffect):
         return np.ascontiguousarray(
             samples * amplitude[np.newaxis, :], dtype=np.float32)
 
+    def collect_telemetry(self) -> dict:
+        return {"phase_cycles": self._last_phase, "mode": self._params.get("mode", "tremolo"),
+                "bpm_source": "manual" if self._params.get("sync", False) else "free"}
+
     # ── FX-19：波形扩展（绝对样本相位积分——跨块位精确） ────────
     _WAVEFORMS = ("triangle", "square", "saw_up", "saw_down", "random")
 
@@ -286,6 +332,14 @@ class TremoloAutoPanEffect(AudioEffect):
         确定性）。square/saw 平滑与占空比待后续批次（现输出纯形状）。"""
         n = samples.shape[-1]
         rate = float(np.clip(self._params.get("rate_hz", 4.0), 0.01, 50.0))
+        if self._params.get("sync", False):
+            division = str(self._params.get("sync_div", "1/4"))
+            suffix = division[-1] if division[-1:] in ("D", "T") else ""
+            base = division[:-1] if suffix else division
+            beats = {"1/1": 4., "1/2": 2., "1/4": 1., "1/8": .5,
+                     "1/16": .25, "1/32": .125}.get(base, 1.)
+            beats *= 1.5 if suffix == "D" else (2 / 3 if suffix == "T" else 1.)
+            rate = float(np.clip(self._params.get("bpm", 120.), 20., 300.)) / 60 / beats
         seed = int(self._params.get("random_seed", 0))
         # 相位基准（rate 变化点重置——相位连续）。
         if self._phase_base is None or self._phase_rate != rate:
@@ -295,7 +349,7 @@ class TremoloAutoPanEffect(AudioEffect):
                                        - self._phase_pos_base) * self._phase_rate
                                     / self._sample_rate)
             else:
-                self._phase_base = 0.0
+                self._phase_base = self._lfo.phase / (2 * np.pi)
             self._phase_pos_base = self._phase_pos_end
             self._phase_rate = rate
         s = np.arange(self._phase_pos_end,
@@ -304,18 +358,34 @@ class TremoloAutoPanEffect(AudioEffect):
                       * rate / self._sample_rate, 1.0)
         cycle = np.floor(self._phase_base + (s - self._phase_pos_base)
                          * rate / self._sample_rate).astype(np.int64)
-        values = _waveform_values(waveform, frac, cycle, seed)
-        if mode == "auto_pan" and samples.shape[0] >= 2:
-            pan = depth * values
+        duty = float(np.clip(self._params.get("duty_cycle_pct", 50.), 1., 99.)) / 100
+        values = (np.where(frac < duty, 1., -1.) if waveform == "square" else
+                  _waveform_values(waveform, frac, cycle, seed))
+        smooth_ms = float(np.clip(self._params.get("smooth_ms", 0.), 0., 100.))
+        if smooth_ms > 0:
+            from scipy.signal import lfilter
+            coefficient = np.exp(-1 / (smooth_ms * self._sample_rate / 1000))
+            initial = self._smooth_state if self._smooth_state is not None else np.array([values[0] * coefficient])
+            values, self._smooth_state = lfilter([1 - coefficient], [1, -coefficient], values, zi=initial)
+        else:
+            self._smooth_state = None
+        if mode in ("auto_pan", "dual") and samples.shape[0] >= 2:
+            pan = np.clip(float(self._params.get("pan_center_pct", 0.)) / 100
+                          + depth * float(self._params.get("pan_width_pct", 100.)) / 100 * values, -1., 1.)
             left_gain = np.sqrt(0.5 * (1.0 - pan))
             right_gain = np.sqrt(0.5 * (1.0 + pan))
             out = samples.copy()
             out[0] *= left_gain
             out[1] *= right_gain
+            if mode == "dual":
+                amplitude = 1.0 - depth * (0.5 - 0.5 * values)
+                out *= amplitude[np.newaxis, :]
         else:
             amplitude = 1.0 - depth * (0.5 - 0.5 * values)
             out = samples * amplitude[np.newaxis, :]
         self._phase_pos_end += n
+        self._last_phase = float((self._phase_base + (self._phase_pos_end - self._phase_pos_base) * rate / self._sample_rate) % 1)
+        self._lfo.phase = self._last_phase * 2 * np.pi
         return np.ascontiguousarray(out, dtype=np.float32)
 
 
@@ -362,7 +432,8 @@ class ChorusFlangerEffect(AudioEffect):
                    algorithm_version: Optional[int] = None) -> None:
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
-            self.reset_state()
+            self._rebuild_line()
+            self._lfo.reset()
         merged = dict(self._params)
         if isinstance(params, dict):
             merged.update(params)
@@ -383,12 +454,11 @@ class ChorusFlangerEffect(AudioEffect):
         # （修正旧实现的 −6 目标与 −60 dB 注释不一致。）
         fb = abs(float(np.clip(self._params.get("feedback", 0.0),
                                -0.95, 0.95)))
-        if fb <= 0.0:
-            return 0
-        cycles = max(1.0, -60.0 / (20.0 * np.log10(max(fb, 1e-6))))
-        base_ms = float(self._params.get("base_ms", 18.0))
-        tail = int(cycles * base_ms * self._sample_rate / 1000.0)
-        return min(int(self._sample_rate), tail)
+        cycles = (1 if fb <= 0.0 else
+                  1 + int(np.ceil(-60.0 / (20.0 * np.log10(max(fb, 1e-6))))))
+        max_ms = (float(np.clip(self._params.get("base_ms", 18.), .5, self._BASE_MS_MAX))
+                  + float(np.clip(self._params.get("depth_ms", 3.), 0., self._DEPTH_MS_MAX)))
+        return int(np.ceil(cycles * max_ms * self._sample_rate / 1000.0)) + 1
 
     def latency_samples(self) -> int:
         # 调制延迟是效果本体（干湿内部对齐），非算法实现延迟。

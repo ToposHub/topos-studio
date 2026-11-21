@@ -1719,8 +1719,7 @@ class StudioDeEsserWidget(QWidget):
 
     def use_processor_controls(self) -> None:
         self.graph._processor_controls = True
-        self._demo_detector_section.hide()
-        self._demo_output_section.hide()
+
         self._mode_column.root_lay.addStretch(1)
         self.btn_sidechain.setText("Wide-Band")
         self.ratio_input = QDoubleSpinBox(self)
@@ -1746,9 +1745,6 @@ class StudioDeEsserWidget(QWidget):
         self._updating = True
         st = self._current_state()
         en = bool(st["enabled"])
-        if hasattr(self, "ratio_input"):
-            st["filter_shape"] = "Bandpass"
-            st["output_gain"] = 0.0
 
         self._update_ab_and_listen_styles()
         self.power_switch.setChecked(en)

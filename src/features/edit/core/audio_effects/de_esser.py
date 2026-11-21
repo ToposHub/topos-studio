@@ -85,15 +85,26 @@ class DeEsserEffect(AudioEffect):
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
-        if sample_rate is not None and sample_rate != self._sample_rate:
+        rate_changed = sample_rate is not None and sample_rate != self._sample_rate
+        if rate_changed:
             self._sample_rate = float(sample_rate)
             self.reset_state()
         merged = dict(self._params)
         if isinstance(params, dict):
             merged.update(params)
+        old = self._params
+        if not rate_changed and merged == old and self._bp_ba is not None:
+            return
         self._params = merged
         self._rebuild_filters()
-        self.reset_state()
+        # Parameter/automation updates retain the envelope and lookahead PCM.
+        # Only a changed detector topology invalidates its filter histories.
+        if rate_changed or any(merged.get(key) != old.get(key)
+                               for key in ("frequency", "q", "detector_shape")):
+            self._bp_state = None
+            self._v2_bp_state = None
+            self._v2_delayed_bp_state = None
+            self._v2_detector_key = None
 
     def reset_state(self) -> None:
         self._env = 0.0

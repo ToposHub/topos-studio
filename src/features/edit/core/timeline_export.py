@@ -502,6 +502,8 @@ class TimelineExportConfig:
     # P1-09：显式音频布局（"stereo"/"5.1(side)"/"7.1"…）。设置后是导出声道数
     # 的单一真相（覆盖 audio_channels）；未知布局名在导出入口显式报错。
     audio_channel_layout: str = ""
+    # Final integer PCM quantization only. Floating-point/AAC paths bypass it.
+    audio_dither: Optional[dict] = None
     # v1.6 M-B8：stems 追加音轨声明（空 = 单音轨行为逐字节不变）。
     # 仅 topos MOV 容器生效；编码器不支持时整体降级单轨并记录警告。
     # R04：导出尾音模式——False（默认）= 严格选区（输出长度 = 选区帧数，
@@ -3247,7 +3249,7 @@ class TimelineExporter:
             if audio_pcm is not None and has_audio and not self._cancel_requested:
                 try:
                     self._encoder.write_audio_samples(
-                        audio_pcm, config.audio_sample_rate,
+                        self._quantize_audio_delivery(audio_pcm, config), config.audio_sample_rate,
                     )
                     logger.info("Audio export complete (parallel render)")
                 except Exception as e:
@@ -4065,7 +4067,7 @@ class TimelineExporter:
         if audio_pcm is None:
             return
         try:
-            encoder.write_audio_samples(audio_pcm, config.audio_sample_rate)
+            encoder.write_audio_samples(self._quantize_audio_delivery(audio_pcm, config), config.audio_sample_rate)
             logger.info("Direct TOPOS delivery: audio written")
             # v1.6 M-B8：主混音落轨 0 后，各角色母带串行写追加轨
             self._write_stem_tracks(config, encoder)
@@ -4084,10 +4086,23 @@ class TimelineExporter:
         if output is None or self._encoder is None:
             return
         try:
-            self._encoder.write_audio_samples(output, config.audio_sample_rate)
+            self._encoder.write_audio_samples(
+                self._quantize_audio_delivery(output, config), config.audio_sample_rate)
             logger.info("Audio export complete")
         except Exception as e:
             logger.warning(f"Failed to write audio: {e}")
+
+    @staticmethod
+    def _quantize_audio_delivery(pcm: "np.ndarray", config: TimelineExportConfig,
+                                 codec: Optional[str] = None) -> "np.ndarray":
+        """Quantize once after mix/normalization, immediately before encoding."""
+        depth = {"pcm_s16le": 16, "pcm_s24le": 24}.get(codec or config.audio_codec)
+        settings = getattr(config, "audio_dither", None)
+        if depth is None or settings is None:
+            return pcm
+        from src.features.edit.core.delivery_dither import DitherSettings, DeliveryQuantizer
+        parsed = DitherSettings.from_dict(settings)
+        return DeliveryQuantizer(parsed, depth).apply(pcm)
 
     def _join_audio_render_thread(self) -> None:
         """汇合后台音频渲染线程（正常/取消/异常路径都必须调用，防泄漏）。"""
@@ -5427,7 +5442,7 @@ class TimelineExporter:
             if pcm is None:
                 continue
             try:
-                write(idx, pcm, config.audio_sample_rate)
+                write(idx, self._quantize_audio_delivery(pcm, config, stem.codec), config.audio_sample_rate)
                 logger.info("Stem 轨已写入：'%s' → 容器追加轨 %d",
                             stem.name or stem.stem_group, idx)
             except Exception as e:

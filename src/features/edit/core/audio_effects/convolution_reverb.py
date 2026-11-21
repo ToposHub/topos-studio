@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
+import time
+import wave
 from collections import OrderedDict, deque
-from dataclasses import dataclass, replace
-from typing import Deque, Dict, List, Optional, Tuple
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -67,10 +71,13 @@ class IrResource:
                    label=str(data.get("label", "") or ""))
 
 
-def _sha256_of(path: str, chunk: int = 1 << 20) -> str:
+def _sha256_of(path: str, chunk: int = 1 << 20,
+               cancel_check: Optional[Callable[[], bool]] = None) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         while True:
+            if cancel_check is not None and cancel_check():
+                raise CancelledError()
             block = fh.read(chunk)
             if not block:
                 break
@@ -86,6 +93,7 @@ def load_ir(
     trim_silence_db: float = -60.0,
     edge_fade_ms: float = 4.0,
     max_seconds: float = 8.0,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[np.ndarray, IrResource]:
     """装载 IR：指纹校验域 + 重采样 + 裁切 + 规范化 + 端点加窗。
 
@@ -93,26 +101,41 @@ def load_ir(
     """
     import wave
 
+    if sample_rate <= 0 or not np.isfinite(max_seconds) or max_seconds <= 0:
+        raise ValueError("IR sample rate and duration must be positive")
+    if cancel_check is not None and cancel_check():
+        raise CancelledError()
     with wave.open(path, "rb") as wav:
         ir_rate = wav.getframerate()
         channels = wav.getnchannels()
         width = wav.getsampwidth()
-        frames = wav.getnframes()
-        raw = wav.readframes(frames)
+        frames = min(wav.getnframes(), int(np.ceil(max_seconds * ir_rate)))
+        if channels not in (1, 2, 4) or frames <= 0:
+            raise ValueError("IR must contain nonempty mono, stereo or four-path PCM")
+        chunks = []
+        for start in range(0, frames, 65536):
+            if cancel_check is not None and cancel_check():
+                raise CancelledError()
+            chunks.append(wav.readframes(min(65536, frames - start)))
+        raw = b"".join(chunks)
     if width == 2:
         data = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
     elif width == 4:
         data = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+    elif width == 3:
+        packed = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.int32)
+        signed = packed[:, 0] | (packed[:, 1] << 8) | (packed[:, 2] << 16)
+        signed = (signed ^ 0x800000) - 0x800000
+        data = signed.astype(np.float32) / 8388608.0
     else:
         raise ValueError(f"unsupported IR sample width: {width}")
     data = data.reshape(-1, channels).T  # (channels, n)
 
     # 统一重采样到会话率。
     if ir_rate != sample_rate:
-        if data.shape[1] > 8:
-            data = np.stack([
-                resample_poly(data[ch], sample_rate, ir_rate)
-                for ch in range(data.shape[0])]).astype(np.float32)
+        if not _SCIPY:
+            raise ValueError("IR resampling requires scipy")
+        data = resample_poly(data, sample_rate, ir_rate, axis=-1).astype(np.float32)
         ir_rate = sample_rate
 
     # 时长护栏。
@@ -144,7 +167,7 @@ def load_ir(
         data = data * (10.0 ** (normalize_peak_db / 20.0) / peak)
 
     resource = IrResource(
-        uri=path, sha256=_sha256_of(path), sample_rate=ir_rate,
+        uri=path, sha256=_sha256_of(path, cancel_check=cancel_check), sample_rate=ir_rate,
         channels=channels, samples=int(data.shape[1]))
     return np.ascontiguousarray(data, dtype=np.float32), resource
 
@@ -354,6 +377,50 @@ class PartitionedConvolver:
 #: 解码后的 IR 缓存（键含内容指纹；同文件多实例/试听共用，容量有界）。
 _IR_CACHE: "OrderedDict[tuple, Tuple[np.ndarray, IrResource]]" = OrderedDict()
 _IR_CACHE_MAX = 8
+_IR_CACHE_LOCK = threading.Lock()
+_IR_WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="topos-ir")
+
+
+def _cached_ir(path: str, rate: int, true_stereo: bool,
+               cancel_check: Optional[Callable[[], bool]] = None
+               ) -> Tuple[tuple, np.ndarray, IrResource]:
+    """Read and validate on the preparation thread, never the device callback."""
+    key = (path, _ir_fingerprint(path), rate, true_stereo)
+    with _IR_CACHE_LOCK:
+        cached = _IR_CACHE.get(key)
+        if cached is not None:
+            _IR_CACHE.move_to_end(key)
+    if cached is None:
+        cached = load_ir(path, rate, cancel_check=cancel_check)
+        if key[1] != _ir_fingerprint(path):
+            raise ValueError("IR changed while it was being prepared; retry loading")
+        with _IR_CACHE_LOCK:
+            _IR_CACHE[key] = cached
+            while len(_IR_CACHE) > _IR_CACHE_MAX:
+                _IR_CACHE.popitem(last=False)
+    return key, cached[0], cached[1]
+
+
+def _prepare_ir(path: str, rate: int, true_stereo: bool,
+                previous_key: Optional[tuple], cancelled: threading.Event,
+                algorithm_version: Optional[int]
+                ) -> tuple:
+    key = (path, _ir_fingerprint(path), rate, true_stereo, algorithm_version)
+    if key == previous_key:
+        return key, None
+    try:
+        _cache_key, ir, resource = _cached_ir(path, rate, true_stereo, cancelled.is_set)
+    except (OSError, ValueError, EOFError, wave.Error) as exc:
+        return key, exc
+    if cancelled.is_set():
+        raise CancelledError()
+    prepared = ConvolutionReverbEffect(rate)
+    prepared._algorithm_version = algorithm_version
+    prepared._install_decoded_ir(ir, true_stereo)
+    prepared._resource = resource
+    if cancelled.is_set():
+        raise CancelledError()
+    return key, prepared
 
 
 def _ir_fingerprint(path: str) -> Tuple[int, int]:
@@ -372,6 +439,7 @@ class ConvolutionReverbEffect(AudioEffect):
         super().__init__(sample_rate)
         self._params: dict = {"enabled": True, "wet": 0.35, "dry": 1.0,
                               "true_stereo": False}
+        self._algorithm_version: Optional[int] = None
         self._mono_ir: Optional[np.ndarray] = None
         self._stereo_ir: Optional[np.ndarray] = None
         # true stereo：{"LL": ir, "LR": ir, "RL": ir, "RR": ir}
@@ -385,6 +453,88 @@ class ConvolutionReverbEffect(AudioEffect):
         self._loaded_ir_key: Optional[tuple] = None
         # 确认失败的键：资源指纹变化前不逐块重试（避免每块读盘）。
         self._failed_ir_key: Optional[tuple] = None
+        self._resource: Optional[IrResource] = None
+        self._async_resources = False
+        self._request_key: Optional[tuple] = None
+        self._prepare_future: Optional[Future] = None
+        self._prepare_cancel = threading.Event()
+        self._next_probe = 0.0
+        self._resource_status = "empty"
+        self._resource_error = ""
+
+    def enable_async_resources(self) -> None:
+        """Realtime hosts prepare files and FFT kernels outside the mixer lock."""
+        self._async_resources = True
+
+    def release_resources(self) -> None:
+        """Invalidate pending work when an instance is removed or replaced."""
+        self._prepare_cancel.set()
+        if self._prepare_future is not None:
+            self._prepare_future.cancel()
+        self._prepare_future = None
+        self._request_key = None
+
+    def _poll_preparation(self) -> None:
+        future = self._prepare_future
+        if future is None or not future.done():
+            return
+        self._prepare_future = None
+        try:
+            key, prepared = future.result()
+        except CancelledError:
+            return
+        except (OSError, ValueError, EOFError, wave.Error) as exc:
+            self._unload_ir()
+            self._loaded_ir_key = None
+            self._resource_status = "failed"
+            self._resource_error = str(exc) or type(exc).__name__
+            return
+        if prepared is not None:
+            if isinstance(prepared, Exception):
+                self._unload_ir()
+                self._loaded_ir_key = None
+                self._failed_ir_key = key
+                self._resource_status = "failed"
+                self._resource_error = str(prepared) or type(prepared).__name__
+                return
+            # The worker owns this fresh stream until this atomic block-boundary
+            # handoff. Nothing allocates a kernel or reads a file here.
+            for name in ("_mono_ir", "_stereo_ir", "_matrix_ir", "_matrix_convs",
+                         "_conv", "_latency", "_resource"):
+                setattr(self, name, getattr(prepared, name))
+        elif key == self._failed_ir_key:
+            return
+        self._loaded_ir_key = key
+        self._failed_ir_key = None
+        self._resource_status = "ready"
+        self._resource_error = ""
+
+    def _request_preparation(self, path: str, true_stereo: bool) -> None:
+        request = (path, int(self._sample_rate), true_stereo, self._algorithm_version)
+        if request != self._request_key:
+            self.release_resources()
+            self._unload_ir()
+            self._loaded_ir_key = None
+            self._failed_ir_key = None
+            self._request_key = request
+            self._next_probe = 0.0
+        self._poll_preparation()
+        now = time.monotonic()
+        if self._prepare_future is None and now >= self._next_probe:
+            self._prepare_cancel = threading.Event()
+            self._prepare_future = _IR_WORKERS.submit(
+                _prepare_ir, path, int(self._sample_rate), true_stereo,
+                self._loaded_ir_key or self._failed_ir_key,
+                self._prepare_cancel, self._algorithm_version)
+            self._next_probe = now + 1.0
+            if self._loaded_ir_key is None:
+                self._resource_status = "preparing"
+
+    def collect_telemetry(self) -> dict:
+        return {"resource_status": self._resource_status,
+                "resource_error": self._resource_error,
+                "ir_samples": self._resource.samples if self._resource else 0,
+                "ir_sha256": self._resource.sha256 if self._resource else ""}
 
     def _unload_ir(self) -> None:
         """停用全部 IR kernel 并清历史（清空/确认失败后的直通状态）。"""
@@ -394,6 +544,7 @@ class ConvolutionReverbEffect(AudioEffect):
         self._matrix_convs = {}
         self._conv = None
         self._latency = 0
+        self._resource = None
 
     def set_ir(self, ir: np.ndarray, *, true_stereo: bool = False,
                matrix: Optional[Dict[str, np.ndarray]] = None) -> None:
@@ -417,16 +568,20 @@ class ConvolutionReverbEffect(AudioEffect):
         self._rebuild_conv()
 
     def _rebuild_conv(self) -> None:
+        conv_class = PartitionedConvolver
+        if self._algorithm_version is not None and self._algorithm_version <= 4:
+            from .legacy_v4.convolution_reverb import PartitionedConvolver as LegacyConvolver
+            conv_class = LegacyConvolver
         if self._matrix_ir:
             # 四路径：out_L = LL⊛xL + LR⊛xR；out_R = RL⊛xL + RR⊛xR。
             self._matrix_convs = {
-                key: PartitionedConvolver(np.asarray(kernel, dtype=np.float32))
+                key: conv_class(np.asarray(kernel, dtype=np.float32))
                 for key, kernel in self._matrix_ir.items()}
             self._conv = None
         elif self._stereo_ir is not None:
-            self._conv = PartitionedConvolver(self._stereo_ir)
+            self._conv = conv_class(self._stereo_ir)
         elif self._mono_ir is not None:
-            self._conv = PartitionedConvolver(self._mono_ir)
+            self._conv = conv_class(self._mono_ir)
         else:
             self._conv = None
         if self._matrix_convs:
@@ -437,6 +592,8 @@ class ConvolutionReverbEffect(AudioEffect):
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
+        version_changed = self._algorithm_version != algorithm_version
+        self._algorithm_version = algorithm_version
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
         merged = dict(self._params)
@@ -448,9 +605,19 @@ class ConvolutionReverbEffect(AudioEffect):
         # 自动化路径逐块触发，必须保持廉价（stat + 键比较）。
         ir_path = str(merged.get("ir_path", "") or "")
         true_stereo = bool(merged.get("true_stereo", False))
+        if self._async_resources:
+            if ir_path:
+                self._request_preparation(ir_path, true_stereo)
+            elif self._request_key is not None:
+                self.release_resources()
+                self._unload_ir()
+                self._loaded_ir_key = None
+                self._resource_status = "empty"
+                self._resource_error = ""
+            return
         if ir_path:
             key = (ir_path, _ir_fingerprint(ir_path),
-                   int(self._sample_rate), true_stereo)
+                   int(self._sample_rate), true_stereo, algorithm_version)
             if key == self._loaded_ir_key:
                 return
             if key != self._failed_ir_key:
@@ -461,26 +628,36 @@ class ConvolutionReverbEffect(AudioEffect):
             self._loaded_ir_key = None
             self._failed_ir_key = None
             self._unload_ir()
+            self._resource_status = "empty"
+            self._resource_error = ""
+        elif version_changed:
+            self._rebuild_conv()
 
     def _attempt_ir_load(self, ir_path: str, key: tuple,
                          true_stereo: bool) -> None:
         try:
-            cached = _IR_CACHE.get(key)
-            if cached is None:
-                cached = load_ir(ir_path, int(self._sample_rate))
-                _IR_CACHE[key] = cached
-                while len(_IR_CACHE) > _IR_CACHE_MAX:
-                    _IR_CACHE.popitem(last=False)
-            ir, _resource = cached
-        except Exception as exc:  # noqa: BLE001 — 坏 IR 不阻断混音
+            _cache_key, ir, resource = _cached_ir(ir_path, int(self._sample_rate), true_stereo)
+        except (OSError, ValueError, EOFError, wave.Error) as exc:
             logger.warning("convolution reverb: IR load failed for %s: %s",
                            ir_path, exc)
             # 确认失败：停用旧 kernel、清历史；同键不再逐块重试。
             self._loaded_ir_key = None
             self._failed_ir_key = key
             self._unload_ir()
+            self._resource_status = "failed"
+            self._resource_error = str(exc)
             return
         self._failed_ir_key = None
+        self._install_decoded_ir(ir, true_stereo)
+        self._resource = resource
+        self._loaded_ir_key = key
+        self._resource_status = "ready"
+        self._resource_error = ""
+
+    def _install_decoded_ir(self, ir: np.ndarray, true_stereo: bool) -> None:
+        if self._algorithm_version is not None and self._algorithm_version <= 4:
+            self.set_ir(ir, true_stereo=true_stereo)
+            return
         if true_stereo and ir.shape[0] == 4:
             # 四路 WAV：按文件声道序显式 LL/LR/RL/RR（第一字母=输出）。
             self.set_ir(ir[0:1].copy(), true_stereo=True, matrix={
@@ -492,7 +669,6 @@ class ConvolutionReverbEffect(AudioEffect):
             self.set_ir(ir, true_stereo=False)
         else:
             self.set_ir(ir, true_stereo=true_stereo)
-        self._loaded_ir_key = key
 
     def reset_state(self) -> None:
         if self._conv is not None:
@@ -502,6 +678,10 @@ class ConvolutionReverbEffect(AudioEffect):
 
     @property
     def is_active(self) -> bool:
+        if self._async_resources:
+            path = str(self._params.get("ir_path", "") or "")
+            if path:
+                self._request_preparation(path, bool(self._params.get("true_stereo", False)))
         return (bool(self._params.get("enabled", True))
                 and (self._conv is not None or bool(self._matrix_convs)))
 

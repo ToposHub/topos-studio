@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -35,6 +36,7 @@ class DoublerVoice:
     pan_pct: float = 0.0
     gain_db: float = 0.0
     mute: bool = False
+    enabled: bool = True
 
 
 def _equal_power_pan(pan_pct: float) -> Tuple[float, float]:
@@ -52,21 +54,24 @@ def render_doubler(
     dry_gain_db: float = 0.0,
     wet_mix_pct: float = 100.0,
     output_gain_db: float = 0.0,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
     """固定音程双声渲染（长度保持；不修改输入）。
 
     返回 (channels, n) float32：``dry·dry_gain + Σvoice·wet_mix``；
-    mono 输入按单声道干声 + 立体声声部组（宽化仅在 stereo 输出）。
+    mono 声部保持单声道参照增益；立体声声像仅作用于 L/R，多声道其余通道保持布局。
     """
     if pcm is None or pcm.ndim != 2 or pcm.shape[-1] == 0:
         return pcm
     n = pcm.shape[-1]
     mono_input = pcm.shape[0] == 1
-    out_channels = 1 if mono_input else 2
+    out_channels = pcm.shape[0]
     wet_level = float(np.clip(wet_mix_pct, 0.0, 100.0)) / 100.0
     total = np.zeros((out_channels, n), dtype=np.float64)
     for voice in voices:
-        if voice.mute:
+        if cancel_check is not None and cancel_check():
+            return pcm
+        if voice.mute or not voice.enabled:
             continue
         semitones = float(voice.interval_st) + float(voice.detune_cents) / 100.0
         if not (SUPPORTED_SEMITONES[0] <= semitones <= SUPPORTED_SEMITONES[1]):
@@ -94,11 +99,14 @@ def render_doubler(
         pan_l, pan_r = _equal_power_pan(voice.pan_pct)
         gain = 10.0 ** (float(np.clip(voice.gain_db, -60.0, 6.0)) / 20.0)
         if mono_input:
-            total[0] += shifted[0] * pan_l * gain * (1.0 / max(pan_l + pan_r, 1e-9))
+            # Pan/width require stereo; mono voices retain their reference gain.
+            total[0] += shifted[0] * gain
         else:
             total[0] += shifted[0] * pan_l * gain
-            total[1] += shifted[0] * pan_r * gain
-    dry_gain = 10.0 ** (float(np.clip(dry_gain_db, -60.0, 6.0)) / 20.0)
+            total[1] += shifted[1] * pan_r * gain
+            if out_channels > 2:
+                total[2:] += shifted[2:] * gain
+    dry_gain = 10.0 ** (float(np.clip(dry_gain_db, -120.0, 6.0)) / 20.0)
     if mono_input:
         result = np.stack([
             pcm[0].astype(np.float64) * dry_gain + total[0] * wet_level])
@@ -123,5 +131,6 @@ def doubles_from_params(params: dict) -> List[DoublerVoice]:
             pan_pct=float(item.get("pan_pct", 0.0)),
             gain_db=float(item.get("gain_db", 0.0)),
             mute=bool(item.get("mute", False)),
+            enabled=bool(item.get("enabled", True)),
         ))
     return voices

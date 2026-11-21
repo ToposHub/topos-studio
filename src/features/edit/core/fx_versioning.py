@@ -59,6 +59,10 @@ LEGACY_ALGORITHM_MAX = 2
 EFFECT_VERSION_BOUNDARIES: dict[str, int] = {
     "strip_eq": 2,   # v2 有独立精确渲染路径（区别于 v≤1 legacy）
     "delay": 3,      # v≤3 直接切换（legacy 渲染路径）
+    "convolution_reverb": 4,
+    "true_peak_limiter": 4,
+    "chorus_flanger": 4,
+    "phaser": 4,
 }
 
 #: schema 变更记录（新版本追加条目，不回填改写历史条目）。
@@ -102,11 +106,24 @@ def algorithm_compat_bucket(algorithm_version: Any,
         return "current"
     if effect_type == "delay":
         return "legacy" if v <= 3 else "current"
+    if effect_type in {"convolution_reverb", "true_peak_limiter",
+                       "chorus_flanger", "phaser"}:
+        return "legacy" if v <= 4 else "current"
     return "legacy" if v <= LEGACY_ALGORITHM_MAX else "current"
 
 
 def _legacy_bucket_reason(effect_type: str, v: int) -> str:
     """legacy/v2 桶的诊断说明（渲染语义 + 历史边界，不静默）。"""
+    if effect_type in {"convolution_reverb", "true_peak_limiter",
+                       "chorus_flanger", "phaser"}:
+        warning = {
+            "convolution_reverb": "historical convolution timing and IR mapping",
+            "true_peak_limiter": "historical detector/linking; true-peak ceiling is not guaranteed",
+            "chorus_flanger": "historical modulation read-head timing",
+            "phaser": "historical block-local feedback",
+        }[effect_type]
+        return (f"v{v} preserves pre-v5 PCM: {warning}; "
+                "explicitly upgrade the instance to v5 for corrected DSP")
     if effect_type == "strip_eq":
         if v <= 1:
             if v == 0:

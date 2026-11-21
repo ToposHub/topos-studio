@@ -41,6 +41,7 @@ import uuid
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from fractions import Fraction
+    from src.features.edit.core.channel_layout import ChannelLayout
 
 logger = logging.getLogger(__name__)
 
@@ -4050,6 +4051,7 @@ def _params_f(key: str, data: dict, default: float) -> float:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class DeEsserParams:
     """De-Esser（齿音消除）：band-pass 检测 + 流式 RMS 包络。"""
     threshold_dbfs: float = -32.0
@@ -4062,25 +4064,51 @@ class DeEsserParams:
     mode: str = "split"  # "wide" | "split"（减法互补）
     listen: bool = False
     enabled: bool = True
+    # Missing keys retain the historical DSP branch. Only an explicitly
+    # configured v2 control opts into the new detector/lookahead contract.
+    detector_shape: str | None = None
+    lookahead_ms: float | None = None
+    output_gain_db: float | None = None
 
     @staticmethod
     def default() -> "DeEsserParams":
         return DeEsserParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "threshold_dbfs": self.threshold_dbfs, "ratio": self.ratio,
             "frequency": self.frequency, "q": self.q,
             "attack_ms": self.attack_ms, "release_ms": self.release_ms,
             "max_reduction_db": self.max_reduction_db, "mode": self.mode,
             "listen": self.listen, "enabled": self.enabled,
         }
+        for key in ("detector_shape", "lookahead_ms", "output_gain_db"):
+            value = getattr(self, key)
+            if value is not None:
+                data[key] = value
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "DeEsserParams":
+        import math
+
         mode = str(data.get("mode", "split") or "split")
         if mode not in ("wide", "split"):
             mode = "split"
+        shape = data.get("detector_shape")
+        if shape is not None and shape not in ("bandpass", "high_shelf"):
+            shape = "bandpass"
+
+        def _optional_number(
+            key: str, default: float, low: float, high: float,
+        ) -> float | None:
+            if data.get(key) is None:
+                return None
+            value = _params_f(key, data, default)
+            if not math.isfinite(value):
+                value = default
+            return min(high, max(low, value))
+
         return DeEsserParams(
             threshold_dbfs=_params_f("threshold_dbfs", data, -32.0),
             ratio=_params_f("ratio", data, 4.0),
@@ -4092,6 +4120,9 @@ class DeEsserParams:
             mode=mode,
             listen=bool(data.get("listen", False)),
             enabled=bool(data.get("enabled", True)),
+            detector_shape=shape,
+            lookahead_ms=_optional_number("lookahead_ms", 0.0, 0.0, 20.0),
+            output_gain_db=_optional_number("output_gain_db", 0.0, -60.0, 24.0),
         )
 
 
@@ -4128,6 +4159,7 @@ class TruePeakLimiterParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class DynamicEqParams:
     """Dynamic EQ：StripEQ Bell × 阈值驱动的动态增益（关闭动态==EQ）。"""
     frequency: float = 3000.0
@@ -4163,16 +4195,22 @@ class DynamicEqParams:
 
     @staticmethod
     def _normalize_band(band: Any) -> dict[str, Any]:
-        data = dict(band) if isinstance(band, dict) else {}
+        import copy
+        import math
+
+        data = copy.deepcopy(band) if isinstance(band, dict) else {}
 
         def _num(key: str, default: float) -> float:
             try:
-                return float(data.get(key, default))
+                value = float(data.get(key, default))
             except (TypeError, ValueError):
                 return default
+            return value if math.isfinite(value) else default
 
         return {
+            **data,
             "enabled": bool(data.get("enabled", True)),
+            "dynamic_enabled": bool(data.get("dynamic_enabled", True)),
             "frequency_hz": _num("frequency_hz", 3000.0),
             "q": _num("q", 1.4),
             "static_gain_db": _num("static_gain_db", 0.0),
@@ -4207,6 +4245,7 @@ class DynamicEqParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class BusCompParams:
     """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。
 
@@ -4276,6 +4315,7 @@ def _default_multiband_bands() -> tuple[dict[str, Any], ...]:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class MultibandCompParams:
     """多段压缩（FX-04）：减法互补分频 + 每段独立包络。
 
@@ -4308,7 +4348,9 @@ class MultibandCompParams:
                   self.band_extra)
         count = max(2, min(self.band_count, 4))
         return tuple(
-            dict(band) if isinstance(band, dict) else dict(default)
+            (dict(band) if isinstance(band, dict) else
+             {("makeup_gain" if key == "makeup_db" else key): value
+              for key, value in default.items()})
             for band, default in zip(fields[:count], defaults))
 
     def to_dict(self) -> dict[str, Any]:
@@ -4323,7 +4365,12 @@ class MultibandCompParams:
         crossovers = data.get("crossovers")
         if not isinstance(crossovers, (list, tuple)) or not crossovers:
             crossovers = (180.0, 4200.0)
-        crossovers = [float(freq) for freq in crossovers[:3]]
+        import math
+        if len(crossovers) > 3:
+            raise ValueError("multiband supports at most three crossovers")
+        crossovers = [float(freq) for freq in crossovers]
+        if any(not math.isfinite(freq) or freq <= 0 for freq in crossovers):
+            raise ValueError("multiband crossovers must be finite and positive")
         for lo, hi in zip(crossovers, crossovers[1:]):
             if hi <= lo:
                 # 非法交叉点报错（FX-04 计划合同）。
@@ -4361,6 +4408,7 @@ class MultibandCompParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ConvolutionReverbParams:
     """卷积混响：分区 FFT 卷积；IR 经 ir_path 装载（UI 文件选择/序列化）。"""
     ir_path: str = ""
@@ -4391,6 +4439,7 @@ class ConvolutionReverbParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class TransientDesignerParams:
     """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。
 
@@ -4446,6 +4495,7 @@ class TransientDesignerParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class TremoloAutoPanParams:
     """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。
 
@@ -4481,7 +4531,7 @@ class TremoloAutoPanParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TremoloAutoPanParams":
         mode = str(data.get("mode", "tremolo") or "tremolo")
-        if mode not in ("tremolo", "auto_pan"):
+        if mode not in ("tremolo", "auto_pan", "dual"):
             mode = "tremolo"
         waveform = str(data.get("waveform", "") or "")
         if waveform not in ("", *TremoloAutoPanParams._WAVEFORMS):
@@ -4502,6 +4552,7 @@ class TremoloAutoPanParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ChorusFlangerParams:
     """Chorus / Flanger：相位连续调制延迟线 + 反馈尾音预算。"""
     mode: str = "chorus"  # "chorus" | "flanger"
@@ -4548,6 +4599,7 @@ class ChorusFlangerParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class PhaserParams:
     """Phaser：全通级联 + 相位连续 LFO 扫频。"""
     rate_hz: float = 0.5
