@@ -786,6 +786,15 @@ class FileOpsMixin:
         return True
 
     def open_file(self) -> None:
+        if self.current_page == "Mixer":
+            # The project-backed Mixer uses the media pool's audio-aware
+            # chooser and async import, rather than the standalone Color viewer.
+            pool = getattr(self, "media_pool_panel", None)
+            if pool is not None:
+                pool._on_import_clicked()
+            else:
+                logger.warning("Cannot open Mixer media: Media Pool is unavailable")
+            return
         last_path = (self.config_manager.get("default_open_directory")
                      or self.config_manager.get("last_path") or "")
         # 添加视频格式支持
@@ -797,6 +806,13 @@ class FileOpsMixin:
 
     def _open_media_path(self, path: str) -> None:
         """Open media, reusing its own project when one already exists."""
+        if self.current_page == "Mixer":
+            pool = getattr(self, "media_pool_panel", None)
+            if pool is not None:
+                pool._import_files([path])
+            else:
+                logger.warning("Cannot import Mixer media: Media Pool is unavailable")
+            return
         if _is_video_file(path):
             if self.current_page in ("Color", "Library"):
                 self._reject_standalone_video_for_color(path)

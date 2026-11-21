@@ -171,6 +171,26 @@ from src.shared.media.format_registry import (
 )
 
 
+def _media_import_name_filters() -> list[str]:
+    """Build Qt glob filters from the shared supported-format registry."""
+    all_extensions = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS | SUBTITLE_EXTENSIONS
+    groups = (
+        ("all", "All media files", all_extensions),
+        ("video", "Video files", VIDEO_EXTENSIONS),
+        ("image", "Image files", IMAGE_EXTENSIONS),
+        ("audio", "Audio files", AUDIO_EXTENSIONS),
+        ("subtitle", "Subtitle files", SUBTITLE_EXTENSIONS),
+    )
+    filters: list[str] = []
+    for kind, fallback, extensions in groups:
+        # Translate only the label: older filter_* translations contain fixed
+        # extension lists and must not replace the registry's actual patterns.
+        label = I18N.tr(f"edit.media_pool.import_filter_label_{kind}", fallback)
+        patterns = " ".join(f"*{extension}" for extension in sorted(extensions))
+        filters.append(f"{label} ({patterns})")
+    return filters
+
+
 # ================================================================
 # MIME Types for Drag and Drop
 # ================================================================
@@ -7130,25 +7150,7 @@ class MediaPoolPanel(QWidget):
         # 获取顶层窗口作为父级
         parent_widget = self._get_top_level_widget()
 
-        # 构建文件过滤器
-        # NOTE: VIDEO/IMAGE/AUDIO_EXTENSIONS are frozenset (use | for union, not +)
-        video_exts = " ".join(sorted(VIDEO_EXTENSIONS))
-        image_exts = " ".join(sorted(IMAGE_EXTENSIONS))
-        audio_exts = " ".join(sorted(AUDIO_EXTENSIONS))
-        subtitle_exts = " ".join(sorted(SUBTITLE_EXTENSIONS))
-        all_exts = " ".join(sorted(
-            VIDEO_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS | SUBTITLE_EXTENSIONS
-        ))
-
-        video_filter = I18N.tr("edit.media_pool.filter_video", f"Video files ({video_exts})")
-        image_filter = I18N.tr("edit.media_pool.filter_image", f"Image files ({image_exts})")
-        audio_filter = I18N.tr("edit.media_pool.filter_audio", f"Audio files ({audio_exts})")
-        subtitle_filter = I18N.tr(
-            "edit.media_pool.filter_subtitle", f"Subtitle files ({subtitle_exts})"
-        )
-        all_filter = I18N.tr("edit.media_pool.filter_all", f"All media files ({all_exts})")
-
-        filters = [all_filter, video_filter, image_filter, audio_filter, subtitle_filter]
+        filters = _media_import_name_filters()
 
         # 打开文件选择对话框
         files, _ = QFileDialog.getOpenFileNames(

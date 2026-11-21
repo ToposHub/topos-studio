@@ -1,0 +1,733 @@
+{
+  "date": "2026-11-22",
+  "environment": {
+    "platform": "Darwin",
+    "architecture": "x86_64",
+    "python": "3.12.14"
+  },
+  "source": {
+    "path": "tests/test_videos/2K_h264.mp4",
+    "sha256": "3d420027cb4b6afcff11e5cc7b3510ddbb019de732ee403d21f6f40b3f1af04f",
+    "bytes": 52513775,
+    "video_codec": "h264",
+    "width": 1920,
+    "height": 1080,
+    "fps": 25.0,
+    "audio_codec": "aac",
+    "sample_rate": 48000,
+    "channels": 2,
+    "duration_seconds": 62.89066666666667
+  },
+  "audio_path": "ProductionEffectDialog -> TrackEffectInstance serialization -> EffectChainParams -> AudioDecoder (PyAV AAC) -> AudioMixer (track/bus/master)",
+  "excerpt": {
+    "source_start_frame": 125,
+    "fps": 25,
+    "start_seconds": 5.0,
+    "duration_seconds": 1.2,
+    "sample_rate": 48000,
+    "channels": 2,
+    "block_samples": 1920,
+    "blocks": 30
+  },
+  "coverage": {
+    "insert_types": 24,
+    "targets": [
+      "track",
+      "bus",
+      "master"
+    ],
+    "insert_render_cases": 72,
+    "spatial_panner_track_bus_cases": 2,
+    "selected_offline_tool_cases": 4,
+    "focused_suite_passed": 206
+  },
+  "convolution_ir": "Generated mono PCM WAV with taps at 0 ms and 50 ms; real source audio remains the supplied MP4. This does not validate room-library quality.",
+  "native_ui_observed": [
+    "Studio launched; independent QA project created",
+    "Mixer workspace entered (Mode: Mixer / production docks observed)",
+    "Mixer Open Media imported supplied MP4 into the project media pool after routing fix",
+    "Spatial Panner window opened; Master has no connected pan/panner model/audio path, now disabled by a focused regression"
+  ],
+  "not_verified": [
+    "Per-effect native timeline playback and every knob gesture",
+    "Physical audio device output, subjective sound quality or equal-loudness listening",
+    "Long recordings, underrun endurance, Windows or a second device",
+    "Pending design panels are not realtime inserts; four offline processors tested separately"
+  ],
+  "results": [
+    {
+      "effect_type": "strip_eq",
+      "target": "track",
+      "delta_rms": 0.008178908052899302,
+      "output_peak": 0.03995893895626068,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "expander",
+      "target": "track",
+      "delta_rms": 0.013348800167155832,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "noise_gate",
+      "target": "track",
+      "delta_rms": 0.013456100942106582,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "compressor",
+      "target": "track",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "limiter",
+      "target": "track",
+      "delta_rms": 0.00762223281979067,
+      "output_peak": 0.031625937670469284,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamics",
+      "target": "track",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "reverb",
+      "target": "track",
+      "delta_rms": 0.011855633488242768,
+      "output_peak": 0.038670871406793594,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "delay",
+      "target": "track",
+      "delta_rms": 0.016954905174826344,
+      "output_peak": 0.06869186460971832,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "saturation",
+      "target": "track",
+      "delta_rms": 0.32258367525654813,
+      "output_peak": 0.769345223903656,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "imager",
+      "target": "track",
+      "delta_rms": 0.008800897528346993,
+      "output_peak": 0.03960190713405609,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "voice_changer",
+      "target": "track",
+      "delta_rms": 0.02055979485267604,
+      "output_peak": 0.06283366680145264,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "spectral_mangler",
+      "target": "track",
+      "delta_rms": 0.013080518031967232,
+      "output_peak": 0.0711742639541626,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "exciter",
+      "target": "track",
+      "delta_rms": 0.008178704397376805,
+      "output_peak": 0.03976374492049217,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "subharmonic",
+      "target": "track",
+      "delta_rms": 0.013117399718323099,
+      "output_peak": 0.015945713967084885,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "de_esser",
+      "target": "track",
+      "delta_rms": 0.0088158028286509,
+      "output_peak": 0.04132257401943207,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "true_peak_limiter",
+      "target": "track",
+      "delta_rms": 0.022090957843782563,
+      "output_peak": 0.07972856611013412,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamic_eq",
+      "target": "track",
+      "delta_rms": 0.0055928011565293066,
+      "output_peak": 0.07576439529657364,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "bus_comp",
+      "target": "track",
+      "delta_rms": 0.004785565292745136,
+      "output_peak": 0.051993370056152344,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "multiband_comp",
+      "target": "track",
+      "delta_rms": 0.005595166483334398,
+      "output_peak": 0.07039111852645874,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "convolution_reverb",
+      "target": "track",
+      "delta_rms": 0.005679334017528061,
+      "output_peak": 0.08406629413366318,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "transient_designer",
+      "target": "track",
+      "delta_rms": 0.007980672030947216,
+      "output_peak": 0.04482555016875267,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "tremolo_auto_pan",
+      "target": "track",
+      "delta_rms": 0.00925597855504046,
+      "output_peak": 0.07804271578788757,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "chorus_flanger",
+      "target": "track",
+      "delta_rms": 0.017154430331762692,
+      "output_peak": 0.04748160392045975,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "phaser",
+      "target": "track",
+      "delta_rms": 0.020970147343254874,
+      "output_peak": 0.060806628316640854,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "strip_eq",
+      "target": "bus",
+      "delta_rms": 0.008178908052899302,
+      "output_peak": 0.03995893895626068,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "expander",
+      "target": "bus",
+      "delta_rms": 0.013348800167155832,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "noise_gate",
+      "target": "bus",
+      "delta_rms": 0.013456100942106582,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "compressor",
+      "target": "bus",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "limiter",
+      "target": "bus",
+      "delta_rms": 0.00762223281979067,
+      "output_peak": 0.031625937670469284,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamics",
+      "target": "bus",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "reverb",
+      "target": "bus",
+      "delta_rms": 0.011855633488242768,
+      "output_peak": 0.038670871406793594,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "delay",
+      "target": "bus",
+      "delta_rms": 0.016954905174826344,
+      "output_peak": 0.06869186460971832,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "saturation",
+      "target": "bus",
+      "delta_rms": 0.32258367525654813,
+      "output_peak": 0.769345223903656,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "imager",
+      "target": "bus",
+      "delta_rms": 0.008800897528346993,
+      "output_peak": 0.03960190713405609,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "voice_changer",
+      "target": "bus",
+      "delta_rms": 0.02055979485267604,
+      "output_peak": 0.06283366680145264,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "spectral_mangler",
+      "target": "bus",
+      "delta_rms": 0.013080518031967232,
+      "output_peak": 0.0711742639541626,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "exciter",
+      "target": "bus",
+      "delta_rms": 0.008178704397376805,
+      "output_peak": 0.03976374492049217,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "subharmonic",
+      "target": "bus",
+      "delta_rms": 0.013117399718323099,
+      "output_peak": 0.015945713967084885,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "de_esser",
+      "target": "bus",
+      "delta_rms": 0.0088158028286509,
+      "output_peak": 0.04132257401943207,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "true_peak_limiter",
+      "target": "bus",
+      "delta_rms": 0.022090957843782563,
+      "output_peak": 0.07972856611013412,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamic_eq",
+      "target": "bus",
+      "delta_rms": 0.0055928011565293066,
+      "output_peak": 0.07576439529657364,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "bus_comp",
+      "target": "bus",
+      "delta_rms": 0.004785565292745136,
+      "output_peak": 0.051993370056152344,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "multiband_comp",
+      "target": "bus",
+      "delta_rms": 0.005595166483334398,
+      "output_peak": 0.07039111852645874,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "convolution_reverb",
+      "target": "bus",
+      "delta_rms": 0.005679334017528061,
+      "output_peak": 0.08406629413366318,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "transient_designer",
+      "target": "bus",
+      "delta_rms": 0.007980672030947216,
+      "output_peak": 0.04482555016875267,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "tremolo_auto_pan",
+      "target": "bus",
+      "delta_rms": 0.00925597855504046,
+      "output_peak": 0.07804271578788757,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "chorus_flanger",
+      "target": "bus",
+      "delta_rms": 0.017154430331762692,
+      "output_peak": 0.04748160392045975,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "phaser",
+      "target": "bus",
+      "delta_rms": 0.020970147343254874,
+      "output_peak": 0.060806628316640854,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "strip_eq",
+      "target": "master",
+      "delta_rms": 0.008178908052899302,
+      "output_peak": 0.03995893895626068,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "expander",
+      "target": "master",
+      "delta_rms": 0.013348800167155832,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "noise_gate",
+      "target": "master",
+      "delta_rms": 0.013456100942106582,
+      "output_peak": 0.05398024618625641,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "compressor",
+      "target": "master",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "limiter",
+      "target": "master",
+      "delta_rms": 0.00762223281979067,
+      "output_peak": 0.031625937670469284,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamics",
+      "target": "master",
+      "delta_rms": 0.008740329038293918,
+      "output_peak": 0.03270657733082771,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "reverb",
+      "target": "master",
+      "delta_rms": 0.011855633488242768,
+      "output_peak": 0.038670871406793594,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "delay",
+      "target": "master",
+      "delta_rms": 0.016954905174826344,
+      "output_peak": 0.06869186460971832,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "saturation",
+      "target": "master",
+      "delta_rms": 0.32258367525654813,
+      "output_peak": 0.769345223903656,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "imager",
+      "target": "master",
+      "delta_rms": 0.008800897528346993,
+      "output_peak": 0.03960190713405609,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "voice_changer",
+      "target": "master",
+      "delta_rms": 0.02055979485267604,
+      "output_peak": 0.06283366680145264,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "spectral_mangler",
+      "target": "master",
+      "delta_rms": 0.013080518031967232,
+      "output_peak": 0.0711742639541626,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "exciter",
+      "target": "master",
+      "delta_rms": 0.008178704397376805,
+      "output_peak": 0.03976374492049217,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "subharmonic",
+      "target": "master",
+      "delta_rms": 0.013117399718323099,
+      "output_peak": 0.015945713967084885,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "de_esser",
+      "target": "master",
+      "delta_rms": 0.0088158028286509,
+      "output_peak": 0.04132257401943207,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "true_peak_limiter",
+      "target": "master",
+      "delta_rms": 0.022090957843782563,
+      "output_peak": 0.07972856611013412,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "dynamic_eq",
+      "target": "master",
+      "delta_rms": 0.0055928011565293066,
+      "output_peak": 0.07576439529657364,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "bus_comp",
+      "target": "master",
+      "delta_rms": 0.004785565292745136,
+      "output_peak": 0.051993370056152344,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "multiband_comp",
+      "target": "master",
+      "delta_rms": 0.005595166483334398,
+      "output_peak": 0.07039111852645874,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "convolution_reverb",
+      "target": "master",
+      "delta_rms": 0.005679334017528061,
+      "output_peak": 0.08406629413366318,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "transient_designer",
+      "target": "master",
+      "delta_rms": 0.007980672030947216,
+      "output_peak": 0.04482555016875267,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "tremolo_auto_pan",
+      "target": "master",
+      "delta_rms": 0.00925597855504046,
+      "output_peak": 0.07804271578788757,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "chorus_flanger",
+      "target": "master",
+      "delta_rms": 0.017154430331762692,
+      "output_peak": 0.04748160392045975,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    },
+    {
+      "effect_type": "phaser",
+      "target": "master",
+      "delta_rms": 0.020970147343254874,
+      "output_peak": 0.060806628316640854,
+      "bypass_max_error": 0.0,
+      "samples_per_channel": 57600,
+      "status": "passed"
+    }
+  ],
+  "verification": {
+    "focused": {
+      "total": 206,
+      "passed": 206,
+      "duration_seconds": 77.0
+    },
+    "expanded_initial": {
+      "total": 603,
+      "passed": 601,
+      "failed": 2,
+      "teardown_errors": 1,
+      "cause": "Two menu expectations omitted the previously registered Other Audio Effects group (Exciter/Subharmonic); teardown repeated the same Qt callback assertion."
+    },
+    "workspace_after_expectation_fix": {
+      "total": 45,
+      "passed": 45,
+      "duration_seconds": 45.13
+    },
+    "unresolved_known_failures": 0,
+    "static_checks": [
+      "New test files: Ruff F/E9",
+      "Changed Python files: compileall",
+      "git diff --check"
+    ],
+    "single_expanded_clean_rerun": false
+  }
+}

@@ -138,7 +138,16 @@ def _effect_display_name(effect_type: str) -> str:
                                   "Chorus / Flanger"),
         "phaser": I18N.tr("audio.fx.name.phaser", "Phaser"),
     }
-    return names.get(effect_type, effect_type)
+    if effect_type in names:
+        return names[effect_type]
+    # Newly registered processors use their catalog label in the rack too.
+    # Falling back to the internal ID made Exciter/Subharmonic look different
+    # from the same entries in Add Effect and the audio-effects browser.
+    from src.features.edit.core.effect_registry import get_effect_definition
+
+    definition = get_effect_definition(effect_type)
+    fallback = definition.name if definition is not None else effect_type
+    return I18N.tr(f"audio.fx.name.{effect_type}", fallback)
 
 
 # P1（2026-11-19 计划第三阶段 #1-#7）：通用表驱动参数对话框覆盖的类型
@@ -653,6 +662,16 @@ class TrackMixerWidget(QWidget):
         self._panner_expand_btn.clicked.connect(self._open_panner_dialog)
         label_layout.addWidget(self._panner_expand_btn)
         layout.addLayout(label_layout)
+
+        if self._is_master:
+            # The project and playback graph have pan/panner state for tracks
+            # and buses only. Master edits otherwise appear to apply locally
+            # without reaching either commands or audio processing.
+            widget.setEnabled(False)
+            widget.setToolTip(I18N.tr(
+                "audio.mixer.panner_track_bus_only",
+                "Spatial panning is available on audio tracks and buses.",
+            ))
 
         return widget
 
@@ -1230,7 +1249,7 @@ class TrackMixerWidget(QWidget):
             panel = getattr(inst, "panel", "fx")
             if panel != "fx" and not (panel == "eq" and self._show_eq_insert_in_rack()):
                 continue
-            short = EFFECT_SHORT_NAMES.get(inst.effect_type, inst.effect_type)
+            short = EFFECT_SHORT_NAMES.get(inst.effect_type) or _effect_display_name(inst.effect_type)
             p_enabled = inst.enabled and bool(inst.params.get("enabled", True))
             label = short  # 旁路不加方括号，仅用灰色区分
             item = QListWidgetItem(label)
@@ -1426,6 +1445,12 @@ class TrackMixerWidget(QWidget):
                 action = category.addAction(audio_effect_name(effect))
                 action.setData(effect_type)
                 if effect_type == "spatial_panner":
+                    action.setEnabled(not self._is_master)
+                    if self._is_master:
+                        action.setToolTip(I18N.tr(
+                            "audio.mixer.panner_track_bus_only",
+                            "Spatial panning is available on audio tracks and buses.",
+                        ))
                     action.triggered.connect(self._add_spatial_panner)
                 else:
                     action.triggered.connect(lambda checked=False, et=effect_type: self._effect_add(et))
@@ -1496,6 +1521,8 @@ class TrackMixerWidget(QWidget):
         controller 聚合 MacroCommand 持久化），随后打开完整声像器对话框
         供微调。已启用时不重复提交，直接打开面板。
         """
+        if self._is_master:
+            return
         from src.features.edit.core.timeline_v2 import SpatialPannerParams
         already = bool(self._panner) and bool(self._panner.get("enabled", True))
         if not already:
@@ -2157,6 +2184,8 @@ class TrackMixerWidget(QWidget):
 
     def _open_panner_dialog(self) -> None:
         """Edit the channel's pan and spatial panner in the new panel."""
+        if self._is_master:
+            return
         from src.features.mixer.effects.production_dialog import ProductionEffectDialog
 
         if self._panner_dialog is not None and self._panner_dialog.isVisible():

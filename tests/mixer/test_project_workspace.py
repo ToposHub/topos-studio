@@ -1970,6 +1970,7 @@ def test_insert_menu_categorizes_effects_and_commits_to_the_channel(
         ("space", "Space & Time", ("reverb", "convolution_reverb", "delay", "imager", "spatial_panner")),
         ("modulation", "Modulation", ("tremolo_auto_pan", "chorus_flanger", "phaser")),
         ("tone", "Tone & Voice", ("saturation", "voice_changer", "spectral_mangler")),
+        ("other", "Other Audio Effects", ("exciter", "subharmonic")),
     )
 
     def select_effects(menu: QMenu, _position: QPoint) -> None:
@@ -1985,6 +1986,7 @@ def test_insert_menu_categorizes_effects_and_commits_to_the_channel(
             actions = categories[title].actions()
             assert tuple(action.data() for action in actions) == expected_ids
             by_id.update((action.data(), action) for action in actions)
+        assert by_id["spatial_panner"].isEnabled() is not use_master_context_menu
         by_id["voice_changer"].trigger()
         by_id["spectral_mangler"].trigger()
 
