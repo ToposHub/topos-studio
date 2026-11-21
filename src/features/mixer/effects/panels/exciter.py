@@ -6,7 +6,7 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与默认参数配置（与 Dyamics-UI / multiband_comp_ui 保持同一视觉规范）
@@ -1257,9 +1258,9 @@ class ExciterBandCard(QFrame):
         h_lay.addStretch()
 
         # 谐波发生算法模型选择
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFixedWidth(74)
-        self.mode_combo.setFixedHeight(20)
+        self.mode_combo = ChevronComboBox()
+        self.mode_combo.setFixedWidth(90)
+        self.mode_combo.setFixedHeight(24)
         self.mode_combo.addItems(["Aural", "Tube", "Tape", "Triode"])
         self.mode_combo.setToolTip("选择谐波生成拓扑：Aural(经典高频激励) / Tube(偶次电子管) / Tape(磁带饱和) / Triode(三极管)")
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
@@ -1861,7 +1862,7 @@ class StudioExciterWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(190)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1908,8 +1909,8 @@ class StudioExciterWidget(QWidget):
         os_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         tb_lay.addWidget(os_lbl)
 
-        self.os_combo = QComboBox()
-        self.os_combo.setFixedWidth(78)
+        self.os_combo = ChevronComboBox()
+        self.os_combo.setFixedWidth(100)
         self.os_combo.addItems(["1x Off", "2x", "4x HQ", "8x Ultra"])
         self.os_combo.setToolTip("非线性谐波抗混叠过采样倍率（抑制高频镜像混叠）")
         self.os_combo.currentTextChanged.connect(self._on_os_changed)

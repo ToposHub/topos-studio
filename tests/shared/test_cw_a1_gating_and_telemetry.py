@@ -263,12 +263,14 @@ class TestCompositeDynamicsUnit:
         dlg._panel._on_drag_released()
         assert got and got[0][0] == "clip1" and isinstance(got[0][1], DynamicsParams)
 
-    def test_clip_dynamics_registered_in_adapter(self) -> None:
-        from src.features.edit.ui.clip_audio_effect_dialog_adapter import (
-            _ensure_dialog_registry,
-        )
-        assert "dynamics" in _ensure_dialog_registry()
+    def test_clip_dynamics_registered_in_adapter(self, qapp) -> None:
+        from src.features.edit.ui.clip_audio_effect_dialog_adapter import ClipAudioEffectDialogManager
+        from src.features.mixer.effects.panels.dynamics import StudioDynamicsWidget
 
+        manager = ClipAudioEffectDialogManager()
+        dialog = manager.open_dialog("dynamics", "clip", "fx", {})
+        assert isinstance(dialog.panel, StudioDynamicsWidget)
+        manager.close_all()
 
     def test_spectrum_flows_from_mixer(self):
         """频谱端到端：开频谱门控 → mix_samples → collect_spectra 出 bins。"""

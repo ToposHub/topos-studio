@@ -82,6 +82,8 @@ def create_panel(effect_id: str, owner_name: str = "", parent: QWidget | None = 
     panel = panel_class(owner_name or "Mixer", parent=parent)
     if not isinstance(panel, QWidget):
         raise TypeError(f"{descriptor.panel_class} is not a QWidget")
+    from .panel_style import style_reference_panel
+    style_reference_panel(panel)
     return panel
 
 

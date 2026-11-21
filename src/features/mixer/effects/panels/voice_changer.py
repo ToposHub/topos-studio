@@ -6,13 +6,15 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -1091,16 +1093,18 @@ class ProVoiceVisualizerWidget(QWidget):
         f_val = st["formant"]["shift"] if (enabled and st["formant"]["enabled"]) else 0.0
         p_val = st["pitch"]["semitones"] if (enabled and st["pitch"]["enabled"]) else 0.0
         hud_str = (
-            f"Formant {f_val:+.1f} st  •  Pitch {p_val:+.1f} st  •  "
-            f"F0: {int(self._f0_in_hz)}→{int(self._f0_out_hz)}Hz ({freq_to_note(self._f0_out_hz)})  •  "
-            f"Clarity {int(self._clarity_pct)}%"
+            f"F {f_val:+.1f}st · P {p_val:+.1f}st · "
+            f"F0 {int(self._f0_in_hz)}→{int(self._f0_out_hz)}Hz ({freq_to_note(self._f0_out_hz)}) · "
+            f"CLR {int(self._clarity_pct)}%"
         )
-        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, 355, 19)
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        max_width = int(self._btn_in_rect.left() - plot.left() - 16)
+        hud_str = p.fontMetrics().elidedText(hud_str, Qt.TextElideMode.ElideRight, max_width - 12)
+        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, p.fontMetrics().horizontalAdvance(hud_str) + 12, 19)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(QColor("#28D8F0") if self._dragging_puck else QColor("#C6CCD8"))
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_str)
 
         p.restore()
@@ -1615,9 +1619,9 @@ class VocoderCard(QFrame):
         h_lay.addStretch()
 
         # Carrier 载波波形选择器
-        self.carrier_combo = QComboBox()
-        self.carrier_combo.setFixedSize(78, 21)
+        self.carrier_combo = ChevronComboBox()
         self.carrier_combo.addItems(["Saw", "Pulse", "Choir", "Noise"])
+        self.carrier_combo.setFixedWidth(self.carrier_combo.sizeHint().width())
         self.carrier_combo.currentTextChanged.connect(self._on_carrier)
         h_lay.addWidget(self.carrier_combo)
         root.addWidget(header)
@@ -1706,9 +1710,6 @@ class VocoderCard(QFrame):
         )
         self.carrier_combo.setEnabled(en)
         self.carrier_combo.setCurrentText(self._data["carrier"])
-        self.carrier_combo.setStyleSheet(
-            "" if en else "QComboBox { color: #6E6E76; border-color: #26262A; }"
-        )
 
         self.c_bands.setValue(self._data["bands"])
         self.c_carrier_hz.setValue(self._data["carrier_hz"])
@@ -2023,7 +2024,7 @@ class StudioVoiceChangerWidget(QWidget):
         del_preset_btn.clicked.connect(self._delete_current_preset)
         tb_lay.addWidget(del_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(210)
         self._builtin_preset_names = set(self._presets.keys())
         self.preset_combo.addItems(list(self._presets.keys()))
@@ -2184,7 +2185,7 @@ class StudioVoiceChangerWidget(QWidget):
         cards_row.addWidget(self.pitch_card, 1)
         cards_row.addWidget(self.vocoder_card, 1)
 
-        main_lay.addLayout(cards_row, 4)
+        main_lay.addLayout(cards_row)
 
     def _build_meter_column(self, header_text: str) -> QVBoxLayout:
         col = QVBoxLayout()

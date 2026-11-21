@@ -61,7 +61,8 @@ def test_dynamics_rack_switch_restores_power_without_changing_modules(
     strip = dynamics_strip
     strip._open_dynamics_panel()
     dialog = strip._dynamics_dialog
-    dialog._on_power_toggled(False)
+    dialog.panel.power_switch.setChecked(False, emit=True)
+    dialog.apply()
     committed = []
     previewed = []
     strip.track_effects_committed.connect(lambda *args: committed.append(args))
@@ -69,15 +70,14 @@ def test_dynamics_rack_switch_restores_power_without_changing_modules(
     strip._effect_bypass_dynamics()
     assert all(inst.enabled for inst in strip._effect_chain.effects)
     assert [inst.params["enabled"] for inst in strip._effect_chain.effects] == [False, True, False]
-    assert dialog._panel_state()["enabled"] is True
-    assert dialog.get_chain() == strip._effect_chain
+    assert dialog.panel.get_state()["enabled"] is True
     assert len(committed) == 1
     assert previewed == []
     assert strip._effect_list.item(0).data(Qt.ItemDataRole.UserRole + 2) is True
     strip._effect_bypass_dynamics()
     assert not any(inst.enabled for inst in strip._effect_chain.effects)
     assert [inst.params["enabled"] for inst in strip._effect_chain.effects] == [False, True, False]
-    assert dialog._panel_state()["enabled"] is False
+    assert dialog.panel.get_state()["enabled"] is False
     assert strip._effect_list.item(0).data(Qt.ItemDataRole.UserRole + 2) is False
     assert len(committed) == 2
 

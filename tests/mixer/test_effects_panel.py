@@ -10,7 +10,8 @@ from pytestqt.qtbot import QtBot
 
 from src.features.edit.core.effect_registry import get_effect_registry_health
 from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
-from src.features.mixer.ui.effects_panel import MixerEffectsPanel
+from src.features.mixer.effects.panels.exciter import StudioExciterWidget
+from src.features.mixer.ui.effects_panel import MixerEffectsPanel, _PANEL_ROLE
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
 
 
@@ -20,7 +21,8 @@ def _effects(browser: MixerEffectsPanel) -> dict[str, QTreeWidgetItem]:
         group = browser.tree.topLevelItem(index)
         for row in range(group.childCount()):
             item = group.child(row)
-            items[item.data(0, Qt.ItemDataRole.UserRole)] = item
+            if effect_id := item.data(0, Qt.ItemDataRole.UserRole):
+                items[effect_id] = item
     return items
 
 
@@ -33,7 +35,7 @@ def browser(qtbot: QtBot) -> MixerEffectsPanel:
     return panel
 
 
-def test_lists_only_supported_audio_effects_and_uses_project_mime(browser: MixerEffectsPanel) -> None:
+def test_lists_supported_audio_inserts_and_uses_project_mime(browser: MixerEffectsPanel) -> None:
     items = _effects(browser)
     native = {state.effect_type for state in get_effect_registry_health().effects if state.ok}
     assert set(items) == (native - {"noise_gate"}) | {"spatial_panner"}
@@ -43,6 +45,29 @@ def test_lists_only_supported_audio_effects_and_uses_project_mime(browser: Mixer
     assert payload.hasFormat(MIME_TYPE_EFFECT)
     assert bytes(payload.data(MIME_TYPE_EFFECT)) == b"convolution_reverb"
     assert not browser.tree.mimeData([effect.parent()]).formats()
+
+
+def test_pending_panels_open_locally_without_inserting_audio(browser: MixerEffectsPanel, qtbot: QtBot) -> None:
+    panels = {
+        item.data(0, _PANEL_ROLE): item
+        for index in range(browser.tree.topLevelItemCount())
+        for group in [browser.tree.topLevelItem(index)]
+        for row in range(group.childCount())
+        if (item := group.child(row)).data(0, _PANEL_ROLE)
+    }
+    assert set(panels) == {"clip_editor", "declick_dehum", "pitch_correction", "exciter", "subharmonic", "doubler"}
+    for item in panels.values():
+        assert not browser.tree.mimeData([item]).hasFormat(MIME_TYPE_EFFECT)
+    with qtbot.assertNotEmitted(browser.effect_activated):
+        browser._activate(panels["exciter"], 0)
+    instance = browser._panel_instances["exciter"]
+    dialog = browser._panel_windows.window_for(instance)
+    assert dialog is not None and isinstance(dialog.panel, StudioExciterWidget)
+    browser.pause_panel_windows()
+    assert not dialog.isVisible()
+    with qtbot.waitSignal(browser.effect_activated) as tool:
+        browser._activate(panels["clip_editor"], 0)
+    assert tool.args == ["clip_editor"]
 
 
 def test_search_hides_unmatched_effects_and_restores_collapsed_groups(browser: MixerEffectsPanel) -> None:

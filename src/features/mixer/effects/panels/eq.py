@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import sys
 import math
 import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+from src.features.mixer.effects.panel_glyphs import GlyphComboBox
 
 
 # =====================================================================
@@ -216,78 +221,25 @@ class PowerToggleSwitch(QWidget):
 # =====================================================================
 # 4. 控件：矢量滤波器形状选择器
 # =====================================================================
-class FilterShapeSelector(QPushButton):
+class FilterShapeSelector(GlyphComboBox):
     shapeChanged = pyqtSignal(str)
 
-    def __init__(self, options: list[str], current: str, accent_color: str, parent=None):
-        super().__init__(parent)
-        self._options = options
-        self._current = current
-        self._accent = QColor(accent_color)
-        self._active = True
-        self.setFixedSize(50, 22)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clicked.connect(self._open_menu)
+    def __init__(self, options: list[str], current: str, accent_color: str, parent: QWidget | None = None) -> None:
+        super().__init__(options, current, accent_color, draw_filter_glyph, parent, icon_only=True)
+        self.setAccessibleName("Filter shape")
+        self.setFixedWidth(66)
+        self.currentIndexChanged.connect(self._on_shape_selected)
 
-    def setCurrentShape(self, shape: str):
-        if shape in self._options and self._current != shape:
-            self._current = shape
-            self.update()
+    def setCurrentShape(self, shape: str) -> None:
+        self.set_choice(shape)
 
-    def setBandActive(self, active: bool):
-        self._active = active
-        self.update()
+    def setBandActive(self, active: bool) -> None:
+        self.set_glyph_active(active)
 
-    def _open_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1D1D21;
-                border: 1px solid #141416;
-                border-radius: 4px;
-                padding: 4px;
-                color: #DCDCE2;
-                font-size: 11px;
-            }
-            QMenu::item {
-                padding: 5px 16px;
-                border-radius: 3px;
-            }
-            QMenu::item:selected {
-                background-color: #35353D;
-                color: #FFFFFF;
-            }
-        """)
-        for opt in self._options:
-            act = menu.addAction(opt)
-            act.triggered.connect(lambda checked=False, o=opt: self._select(o))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+    def _on_shape_selected(self, index: int) -> None:
+        if index >= 0:
+            self.shapeChanged.emit(self.itemData(index))
 
-    def _select(self, shape: str):
-        if self._current != shape:
-            self._current = shape
-            self.update()
-            self.shapeChanged.emit(shape)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        bg = QColor("#151518") if self._active else QColor("#1B1B1E")
-        p.setPen(QPen(QColor("#101012"), 1.0))
-        p.setBrush(bg)
-        p.drawRoundedRect(rect, 3.0, 3.0)
-
-        glyph_color = self._accent if self._active else QColor("#6E6E76")
-        glyph_rect = QRectF(4, 2, self.width() - 16, self.height() - 4)
-        draw_filter_glyph(p, glyph_rect, self._current, glyph_color)
-
-        ax = self.width() - 8.5
-        ay = self.height() / 2.0 - 1.2
-        p.setPen(QPen(QColor("#9A9AA2"), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(ax - 2.3, ay), QPointF(ax, ay + 2.5))
-        p.drawLine(QPointF(ax, ay + 2.5), QPointF(ax + 2.3, ay))
 
 
 # =====================================================================
@@ -541,6 +493,9 @@ class ProEQGraphWidget(QWidget):
         self._eq_enabled = True
         self._eq_voicing = "Clean"
         self._master_gain = 0.0
+        self._sample_rate = 48000.0
+        self._response_calculator: Callable[[dict, float, float, str], float] | None = None
+        self._response_cache: dict[tuple, dict[float, float]] = {}
 
         self._show_spectrum = True
         self._show_peak_hold = True
@@ -592,7 +547,25 @@ class ProEQGraphWidget(QWidget):
         self._spec_peak = peak_db if peak_db is not None else post_db
         self.update()
 
+    def has_spectrum(self) -> bool:
+        return bool(len(self._spec_post))
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        if self._sample_rate != sample_rate:
+            self._response_cache.clear()
+        self._sample_rate = sample_rate
+        self.update()
+
+    def set_response_calculator(
+        self, response_calculator: Callable[[dict, float, float, str], float],
+    ) -> None:
+        self._response_calculator = response_calculator
+        self._response_cache.clear()
+        self.update()
+
     def setState(self, bands: list[dict], eq_enabled: bool, eq_voicing: str, master_gain: float):
+        if self._eq_voicing != eq_voicing:
+            self._response_cache.clear()
         self._bands = bands
         self._eq_enabled = eq_enabled
         self._eq_voicing = eq_voicing
@@ -635,6 +608,16 @@ class ProEQGraphWidget(QWidget):
     def _band_magnitude_db(self, band: dict, freq: float) -> float:
         if not band["enabled"]:
             return 0.0
+        if self._response_calculator is not None:
+            key = tuple(band.get(field) for field in ("filter_type", "freq", "gain", "q", "slope"))
+            values = self._response_cache.get(key)
+            if values is None:
+                if len(self._response_cache) >= 32:
+                    self._response_cache.clear()
+                values = self._response_cache[key] = {}
+            if freq not in values:
+                values[freq] = self._response_calculator(band, freq, self._sample_rate, self._eq_voicing)
+            return values[freq]
 
         ftype = band["filter_type"]
         f0 = max(10.0, float(band["freq"]))
@@ -654,7 +637,7 @@ class ProEQGraphWidget(QWidget):
             mag_sq = 1.0 / (1.0 + (ratio ** (2 * order)))
             return 10.0 * math.log10(max(1e-12, mag_sq))
 
-        fs = 48000.0
+        fs = self._sample_rate
         w0 = 2.0 * math.pi * f0 / fs
         cos_w0 = math.cos(w0)
         sin_w0 = math.sin(w0)
@@ -709,8 +692,10 @@ class ProEQGraphWidget(QWidget):
         if not self._eq_enabled:
             return 0.0
         total = self._master_gain
+        solo = any(band["enabled"] and band.get("solo", False) for band in self._bands)
         for b in self._bands:
-            total += self._band_magnitude_db(b, freq)
+            if not solo or b.get("solo", False):
+                total += self._band_magnitude_db(b, freq)
         return total
 
     def _node_pos(self, band: dict, plot: QRectF) -> QPointF:
@@ -853,6 +838,7 @@ class ProEQGraphWidget(QWidget):
         plot = self._plot_rect()
 
         # 1. 纯平 #1D1D20 中性深灰底（与编辑器波形面板一致）
+        p.fillRect(self.rect(), QColor("#27272B"))
         p.fillRect(plot, QColor("#1D1D20"))
 
         # 2. 水平刻度线
@@ -1264,8 +1250,8 @@ class ProBandCard(QFrame):
         header = QWidget()
         header.setFixedHeight(36)
         h_lay = QHBoxLayout(header)
-        h_lay.setContentsMargins(7, 6, 7, 5)
-        h_lay.setSpacing(4)
+        h_lay.setContentsMargins(4, 6, 4, 5)
+        h_lay.setSpacing(3)
 
         self.band_btn = QPushButton(f"Band {self._data['index']}")
         self.band_btn.setCheckable(True)
@@ -1277,7 +1263,7 @@ class ProBandCard(QFrame):
         # 新增：单频段 Solo 扫频监听按钮
         self.solo_btn = QPushButton("S")
         self.solo_btn.setCheckable(True)
-        self.solo_btn.setFixedSize(22, 22)
+        self.solo_btn.setFixedSize(19, 22)
         self.solo_btn.setToolTip("独奏监听当前频段 (Solo Band)")
         self.solo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.solo_btn.setStyleSheet("""
@@ -1824,7 +1810,7 @@ class StudioParametricEQWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1876,9 +1862,9 @@ class StudioParametricEQWidget(QWidget):
         v_lbl.setStyleSheet("color: #9A9AA2; font-size: 11px; font-weight: 600;")
         tb_lay.addWidget(v_lbl)
 
-        self.voicing_combo = QComboBox()
-        self.voicing_combo.setFixedWidth(84)
+        self.voicing_combo = ChevronComboBox()
         self.voicing_combo.addItems(["Clean", "British", "Warm", "Punch"])
+        self.voicing_combo.setFixedWidth(self.voicing_combo.sizeHint().width())
         self.voicing_combo.currentTextChanged.connect(self._on_voicing_changed)
         tb_lay.addWidget(self.voicing_combo)
 
@@ -1940,7 +1926,7 @@ class StudioParametricEQWidget(QWidget):
             cards_row.addWidget(card, 1)
             self.band_cards.append(card)
 
-        main_lay.addLayout(cards_row, 4)
+        main_lay.addLayout(cards_row)
 
     # -----------------------------------------------------------------
     # 状态管理与联动逻辑

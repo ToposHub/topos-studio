@@ -1092,6 +1092,121 @@ def orange_tab_style(selector: str) -> str:
     )
 
 
+GLOBAL_SPINBOX_STYLE = """/* ============================================
+   === 数值输入框 ===
+   ============================================
+*/
+
+/* SpinBox 和 DoubleSpinBox */
+QSpinBox, QDoubleSpinBox {
+    background-color: #27272b;   /* 输入框背景 */
+    border: 1px solid #3a3a3a;   /* 边框 */
+    border-radius: 4px;          /* 圆角 */
+    padding: 2px 6px;            /* 内边距 */
+    min-height: 20px;            /* 固定高度（含边框共 22px） */
+    color: #E0E0E0;              /* 文字颜色 */
+    font-size: 11px;             /* 字号 */
+    selection-background-color: #ff8800;  /* 选中文字背景 */
+}
+
+QSpinBox:hover, QDoubleSpinBox:hover {
+    border: 1px solid #4a4a4a;   /* 悬停边框变亮 */
+    background-color: #2e2e33;
+}
+
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #ff8800;   /* 聚焦时显示主题橙色边框 */
+}
+
+/* 隐藏上下调节按钮 */
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    width: 0px;                  /* 设为0隐藏按钮 */
+}
+
+"""
+
+GLOBAL_LINE_EDIT_STYLE = """/* ============================================
+   === 文本输入框 ===
+   ============================================
+*/
+
+QLineEdit {
+    background-color: #27272b;   /* 输入框背景（与 SpinBox 一致） */
+    border: 1px solid #3a3a3a;   /* 边框 */
+    border-radius: 4px;          /* 圆角 */
+    padding: 4px 8px;            /* 内边距 */
+    color: #E0E0E0;              /* 文字颜色 */
+    font-size: 11px;             /* 字号 */
+    selection-background-color: #ff8800;  /* 选中文字背景 */
+}
+
+QLineEdit:hover {
+    border: 1px solid #4a4a4a;   /* 悬停边框变亮 */
+}
+
+QLineEdit:focus {
+    border: 1px solid #ff8800;   /* 聚焦时橙色边框 */
+}
+
+"""
+
+GLOBAL_COMBOBOX_STYLE = """/* ============================================
+   === 下拉组合框 ===
+   ============================================
+*/
+
+QComboBox {
+    background-color: #252529;   /* 背景色 */
+    border: 1px solid #3a3a3a;   /* 边框 */
+    border-radius: 4px;          /* 圆角 */
+    padding: 4px 8px;            /* 内边距 */
+    color: #E0E0E0;              /* 文字颜色 */
+    font-size: 12px;
+    min-height: 22px;            /* 最小高度 */
+}
+
+QComboBox:hover {
+    border: 1px solid #4a4a4a;
+    background-color: #2a2a2a;
+}
+
+QComboBox:focus, QComboBox:on {
+    border: 1px solid #ff8800;   /* 聚焦/展开时橙色边框 */
+}
+
+/* 下拉按钮区域 */
+QComboBox::drop-down {
+    border: none;
+    width: 20px;                 /* 下拉按钮宽度 */
+    background: transparent;     /* 透明背景，去除分隔线 */
+    subcontrol-origin: padding;  /* 从内边距区域开始 */
+    subcontrol-position: right;  /* 定位在右侧 */
+}
+
+/* 下拉箭头（使用CSS绘制三角形） */
+QComboBox::down-arrow {
+    image: none;                 /* 不使用图片 */
+    /* 用边框模拟三角形箭头 */
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #888888;  /* 箭头颜色 */
+    margin-right: 5px;
+}
+
+/* 下拉列表 */
+QComboBox QAbstractItemView {
+    background-color: rgba(39, 39, 43, 240);
+    border: 1px solid rgba(80, 80, 80, 200);
+    border-radius: 4px;
+    selection-background-color: rgba(255, 136, 0, 180);
+    selection-color: #ffffff;
+    outline: none;
+    padding: 4px 0px;
+}
+
+"""
+
 DARK_THEME = """
 /* ============================================
    Topos Color - 全局暗色主题样式表
@@ -1229,14 +1344,14 @@ QPushButton:pressed {
 }
 
 /* === 应用按钮（主要操作按钮）=== */
-QPushButton#gradingApplyBtn {
+QPushButton#gradingApplyBtn, QPushButton#EffectWindowApply {
     background-color: #cc6600;   /* 主题橙色背景 */
     color: white;                /* 白色文字 */
     font-weight: bold;           /* 粗体 */
     border: none;
 }
 
-QPushButton#gradingApplyBtn:hover {
+QPushButton#gradingApplyBtn:hover, QPushButton#EffectWindowApply:hover {
     background-color: #e67300;   /* 悬停时更亮 */
 }
 
@@ -1405,116 +1520,7 @@ QSlider::handle:vertical:pressed {
     background: #cc6600;         /* 按下时更深的橙色 */
 }
 
-/* ============================================
-   === 数值输入框 ===
-   ============================================
-*/
-
-/* SpinBox 和 DoubleSpinBox */
-QSpinBox, QDoubleSpinBox {
-    background-color: #27272b;   /* 输入框背景 */
-    border: 1px solid #3a3a3a;   /* 边框 */
-    border-radius: 4px;          /* 圆角 */
-    padding: 2px 6px;            /* 内边距 */
-    min-height: 20px;            /* 固定高度（含边框共 22px） */
-    color: #E0E0E0;              /* 文字颜色 */
-    font-size: 11px;             /* 字号 */
-    selection-background-color: #ff8800;  /* 选中文字背景 */
-}
-
-QSpinBox:hover, QDoubleSpinBox:hover {
-    border: 1px solid #4a4a4a;   /* 悬停边框变亮 */
-    background-color: #2e2e33;
-}
-
-QSpinBox:focus, QDoubleSpinBox:focus {
-    border: 1px solid #ff8800;   /* 聚焦时显示主题橙色边框 */
-}
-
-/* 隐藏上下调节按钮 */
-QSpinBox::up-button, QSpinBox::down-button,
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-    width: 0px;                  /* 设为0隐藏按钮 */
-}
-
-/* ============================================
-   === 文本输入框 ===
-   ============================================
-*/
-
-QLineEdit {
-    background-color: #27272b;   /* 输入框背景（与 SpinBox 一致） */
-    border: 1px solid #3a3a3a;   /* 边框 */
-    border-radius: 4px;          /* 圆角 */
-    padding: 4px 8px;            /* 内边距 */
-    color: #E0E0E0;              /* 文字颜色 */
-    font-size: 11px;             /* 字号 */
-    selection-background-color: #ff8800;  /* 选中文字背景 */
-}
-
-QLineEdit:hover {
-    border: 1px solid #4a4a4a;   /* 悬停边框变亮 */
-}
-
-QLineEdit:focus {
-    border: 1px solid #ff8800;   /* 聚焦时橙色边框 */
-}
-
-/* ============================================
-   === 下拉组合框 ===
-   ============================================
-*/
-
-QComboBox {
-    background-color: #252529;   /* 背景色 */
-    border: 1px solid #3a3a3a;   /* 边框 */
-    border-radius: 4px;          /* 圆角 */
-    padding: 4px 8px;            /* 内边距 */
-    color: #E0E0E0;              /* 文字颜色 */
-    font-size: 12px;
-    min-height: 22px;            /* 最小高度 */
-}
-
-QComboBox:hover {
-    border: 1px solid #4a4a4a;
-    background-color: #2a2a2a;
-}
-
-QComboBox:focus, QComboBox:on {
-    border: 1px solid #ff8800;   /* 聚焦/展开时橙色边框 */
-}
-
-/* 下拉按钮区域 */
-QComboBox::drop-down {
-    border: none;
-    width: 20px;                 /* 下拉按钮宽度 */
-    background: transparent;     /* 透明背景，去除分隔线 */
-    subcontrol-origin: padding;  /* 从内边距区域开始 */
-    subcontrol-position: right;  /* 定位在右侧 */
-}
-
-/* 下拉箭头（使用CSS绘制三角形） */
-QComboBox::down-arrow {
-    image: none;                 /* 不使用图片 */
-    /* 用边框模拟三角形箭头 */
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid #888888;  /* 箭头颜色 */
-    margin-right: 5px;
-}
-
-/* 下拉列表 */
-QComboBox QAbstractItemView {
-    background-color: rgba(39, 39, 43, 240);
-    border: 1px solid rgba(80, 80, 80, 200);
-    border-radius: 4px;
-    selection-background-color: rgba(255, 136, 0, 180);
-    selection-color: #ffffff;
-    outline: none;
-    padding: 4px 0px;
-}
-
-/* ============================================
+""" + GLOBAL_SPINBOX_STYLE + GLOBAL_LINE_EDIT_STYLE + GLOBAL_COMBOBOX_STYLE + """/* ============================================
    === 复选框 ===
    ============================================
 */

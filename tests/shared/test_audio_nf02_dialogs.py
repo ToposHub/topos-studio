@@ -187,9 +187,8 @@ class TestMixerIntegration:
         # 提交路径（守卫 + 链更新）
         commits: list = []
         w.track_effects_committed.connect(lambda tid, c: commits.append(c))
-        dlg.set_current_params(VoiceChangerParams(
-            pitch_semitones=6.0).to_dict())
-        dlg._emit_commit()
+        dlg.panel.pitch_card.c_semi.knob.setValue(6.0, emit=True)
+        dlg.apply()
         assert commits and commits[-1].effects[-1].params["pitch_semitones"] == 6.0
 
     def test_external_backfill_reaches_dialog(self, qapp):
@@ -208,23 +207,21 @@ class TestMixerIntegration:
             TrackEffectInstance(effect_type="spectral_mangler",
                                 instance_id=inst.instance_id,
                                 params=new_params),)))
-        state = dlg._widget.get_state()
+        state = dlg.panel.get_state()
         assert state["routing"] == "Grain → Ring → Dist"
         assert state["grain"]["enabled"] is True
 
-    def test_clip_registry_uses_real_dialogs(self):
-        from src.features.edit.ui.clip_audio_effect_dialog_adapter import (
-            _ensure_dialog_registry,
-        )
-        from src.shared.ui.audio_mixer.voice_changer_dialog import (
-            VoiceChangerDialog,
-        )
-        from src.shared.ui.audio_mixer.spectral_mangler_dialog import (
-            SpectralManglerDialog,
-        )
-        reg = _ensure_dialog_registry()
-        assert reg["voice_changer"][0] is VoiceChangerDialog
-        assert reg["spectral_mangler"][0] is SpectralManglerDialog
+    def test_clip_registry_uses_the_same_designs(self, qapp):
+        from src.features.edit.ui.clip_audio_effect_dialog_adapter import ClipAudioEffectDialogManager
+        from src.features.mixer.effects.panels.spectral_mangler import StudioSpectralManglerWidget
+        from src.features.mixer.effects.panels.voice_changer import StudioVoiceChangerWidget
+
+        manager = ClipAudioEffectDialogManager()
+        voice = manager.open_dialog("voice_changer", "clip", "voice", {})
+        spectral = manager.open_dialog("spectral_mangler", "clip", "spectral", {})
+        assert isinstance(voice.panel, StudioVoiceChangerWidget)
+        assert isinstance(spectral.panel, StudioSpectralManglerWidget)
+        manager.close_all()
 
 
 if __name__ == "__main__":

@@ -833,6 +833,11 @@
       "width": {
         "type": "number"
       },
+      "pan": {
+        "type": "number",
+        "minimum": -100,
+        "maximum": 100
+      },
       "mid_gain": {
         "type": "number"
       },
@@ -869,6 +874,11 @@
       },
       "global_drive": {
         "type": "number"
+      },
+      "drive": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
       },
       "mix": {
         "type": "number"

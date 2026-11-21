@@ -5,13 +5,15 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QInputDialog
+    QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -568,7 +570,7 @@ class AcousticRoomCard(QFrame):
         self._last_pos = QPointF()
         self._handles_pos: dict[str, QPointF] = {}
 
-        self.setMinimumSize(305, 255)
+        self.setMinimumSize(274, 220)
         self.setMouseTracking(True)
         self._apply_style()
 
@@ -848,7 +850,7 @@ class ImpulseResponseGraphWidget(QWidget):
         self._mb = 22.0
 
         # 最小宽度保证两侧刻度标签（-200ms / 4000ms）不被裁切或挤压
-        self.setMinimumSize(540, 255)
+        self.setMinimumSize(430, 220)
         self.setMouseTracking(True)
 
     def setState(self, params: dict, enabled: bool = True):
@@ -888,6 +890,7 @@ class ImpulseResponseGraphWidget(QWidget):
         plot = self._plot_rect()
 
         # 1. 深邃夜空渐变底色（与 EQ-UI.py 完全一致）
+        p.fillRect(self.rect(), QColor("#27272B"))
         bg_grad = QLinearGradient(plot.topLeft(), plot.bottomLeft())
         bg_grad.setColorAt(0.0, QColor("#1D1D20"))
         bg_grad.setColorAt(1.0, QColor("#1D1D20"))
@@ -1093,20 +1096,19 @@ class ImpulseResponseGraphWidget(QWidget):
             cur_ms = x_to_ms(mx)
             amp_ratio = max(1e-4, 1.0 - (my - plot.top()) / plot.height())
             amp_db = 20.0 * math.log10(amp_ratio)
-            hud_str = f"Time: {cur_ms:+.0f} ms   •   Level: {amp_db:.1f} dB"
-            hud_w = 195
+            hud_str = f"Time {cur_ms:+.0f} ms  ·  Level {amp_db:.1f} dB"
             hud_col = QColor("#28D8F0")
         else:
-            hud_str = f"RT60: {rt60 / 1000.0:.2f}s  •  Pre-Delay: {pre_delay:+.0f}ms  •  Dist: {dist_delay_ms:.1f}ms"
-            hud_w = 248
+            hud_str = f"RT60 {rt60 / 1000.0:.2f}s  ·  Pre {pre_delay:+.0f}ms  ·  Dist {dist_delay_ms:.1f}ms"
             hud_col = QColor("#B4B4BE")
 
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        hud_w = p.fontMetrics().horizontalAdvance(hud_str) + 12
         hud_rect = QRectF(plot.left() + 8, plot.top() + 8, hud_w, 19)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(hud_col)
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_str)
 
         p.restore()
@@ -1356,7 +1358,7 @@ class StudioAcousticReverbWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1572,7 +1574,7 @@ class StudioAcousticReverbWidget(QWidget):
         cards_row.addWidget(card_tone, 23)
         cards_row.addWidget(card_out, 26)
 
-        main_lay.addLayout(cards_row, 48)
+        main_lay.addLayout(cards_row)
 
     def _add_ctrl(self, key: str, title: str, min_v: float, max_v: float, def_v: float, unit: str, **kwargs) -> KnobControlUnit:
         ctrl = KnobControlUnit(key, title, min_v, max_v, def_v, unit, **kwargs)

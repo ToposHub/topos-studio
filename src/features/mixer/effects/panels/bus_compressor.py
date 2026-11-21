@@ -7,13 +7,16 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -665,13 +668,13 @@ class AnalogGainReductionMeter(QWidget):
             self._active = active
             self.update()
 
-    def setTopology(self, topology: str):
+    def setTopology(self, topology: str, label: str | None = None) -> None:
         if topology == "API 2500":
             self._accent = QColor(COLORS["amber"])
-            self._topology_label = "API 2500 THRUST"
+            self._topology_label = label or "API 2500 THRUST"
         else:
             self._accent = QColor(COLORS["cyan"])
-            self._topology_label = "SSL G-SERIES BUS"
+            self._topology_label = label or "SSL G-SERIES BUS"
         self.update()
 
     def setGainReduction(self, gr_db: float):
@@ -952,7 +955,7 @@ class BusTransferGraphWidget(QWidget):
         thresh = st["threshold"]
         ratio = max(1.01, st["ratio"])
         mix = st["mix"] / 100.0
-        knee_db = 8.0 if st["topology"] == "SSL G-Glue" else 4.5
+        knee_db = st.get("processor_knee", 8.0 if st["topology"] == "SSL G-Glue" else 4.5)
 
         d = in_db - thresh
         if 2.0 * d < -knee_db:
@@ -963,7 +966,10 @@ class BusTransferGraphWidget(QWidget):
             y_comp = thresh + d / ratio
 
         y_wet = y_comp + st["makeup"]
-        y = (1.0 - mix) * in_db + mix * y_wet
+        if "processor_knee" in st:
+            y = 20.0 * math.log10((1.0 - mix) * 10.0 ** (in_db / 20.0) + mix * 10.0 ** (y_wet / 20.0))
+        else:
+            y = (1.0 - mix) * in_db + mix * y_wet
         return max(-48.0, min(12.0, y))
 
     def _hit_test(self, pos: QPointF, plot: QRectF) -> str:
@@ -1579,7 +1585,7 @@ class StudioBusCompWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(225)
         self._populate_grouped_presets()
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1812,6 +1818,7 @@ class StudioBusCompWidget(QWidget):
         ):
             knobs_row.addWidget(cell, 1)
 
+        self._knob_row = knobs_row
         deck_lay.addLayout(knobs_row, 1)
         main_lay.addWidget(bottom_card, 4)
 
@@ -1823,6 +1830,32 @@ class StudioBusCompWidget(QWidget):
         self.c_makeup.valueChanged.connect(lambda v: self._set_param("makeup", round(v, 1)))
         self.c_mix.valueChanged.connect(lambda v: self._set_param("mix", round(v, 0)))
         self.c_sc_hpf.valueChanged.connect(lambda v: self._set_param("sc_hpf", int(v)))
+
+    def use_processor_controls(self) -> None:
+        from src.features.edit.core.audio_effects.bus_multiband import BUS_COMP_TEMPLATES
+
+        self._processor_templates = BUS_COMP_TEMPLATES
+        self.btn_ssl.setText("DX Glue")
+        self.btn_api.setText("MX Glue")
+        sidechain_hpf = ContinuousKnobCell(
+            I18N.tr("audio.fx.sc_hpf_hz", "SC HPF"), 0.0, 500.0, 120.0, COLORS["sc"],
+            "Off", "Hz", "500", lambda v: f"{v:.1f} Hz", parse_float_safe,
+        )
+        old = self.c_sc_hpf
+        self._knob_row.replaceWidget(old, sidechain_hpf)
+        old.hide()
+        old.deleteLater()
+        self.c_sc_hpf = sidechain_hpf
+        self.c_sc_hpf.setMaximumWidth(135)
+        self._knob_row.insertStretch(0)
+        self._knob_row.addStretch()
+        self.c_sc_hpf.valueChanged.connect(lambda v: self._set_param("sc_hpf", round(v, 1)))
+        for cell in (self.c_thresh, self.c_ratio, self.c_attack, self.c_release, self.c_makeup, self.c_mix):
+            cell.hide()
+        for button in (self.btn_auto_rel, self.btn_ext_sc, self.btn_sc_listen, self.btn_auto_gain):
+            button.hide()
+        self.bus_graph.setEnabled(False)
+        self._refresh_all_views()
 
     def _build_meter_column(self, header_text: str) -> QVBoxLayout:
         col = QVBoxLayout()
@@ -1845,6 +1878,13 @@ class StudioBusCompWidget(QWidget):
         en = bool(st["enabled"])
         is_api = (st["topology"] == "API 2500")
         main_accent = COLORS["amber"] if is_api else COLORS["cyan"]
+        templates = getattr(self, "_processor_templates", None)
+        if templates is not None:
+            template = templates["mx_glue" if is_api else "dx_glue"]
+            st.update(threshold=template["threshold_db"], ratio=template["ratio"],
+                      attack=template["attack_ms"], release=template["release_ms"] / 1000.0,
+                      makeup=template.get("makeup_gain", 0.0), mix=template["mix"],
+                      processor_knee=template["knee"] * 0.24)
 
         self.power_switch.setAccentColor(main_accent)
         self.power_switch.setChecked(en)
@@ -1945,7 +1985,8 @@ class StudioBusCompWidget(QWidget):
         self.btn_ext_sc.setStyleSheet(_toggle_btn_css(COLORS["sc"]))
         self.btn_sc_listen.setStyleSheet(_toggle_btn_css("#E8B838"))
 
-        self.vu_meter.setTopology(st["topology"])
+        label = ("MX GLUE" if is_api else "DX GLUE") if templates is not None else None
+        self.vu_meter.setTopology(st["topology"], label)
         self.vu_meter.setActive(en)
         self.bus_graph.setState(st)
 

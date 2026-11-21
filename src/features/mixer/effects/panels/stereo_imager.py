@@ -7,14 +7,16 @@ import random
 from collections import deque
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy,
-    QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QSizePolicy,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -59,6 +61,7 @@ def default_imager_state() -> dict:
     return {
         "enabled": True,
         "width": 100.0,               # 0.0% (Mono) ~ 100.0% (Original) ~ 200.0% (Super Wide)
+        "pan": 0.0,                   # -100.0 (Left) ~ 0.0 (Center) ~ 100.0 (Right)
         "mid_gain": 0.0,              # -12.0 ~ +12.0 dB
         "side_gain": 0.0,             # -12.0 ~ +12.0 dB
         "mono_maker_on": True,        # 低频单声道化开关
@@ -1102,7 +1105,7 @@ class StudioStereoImagerWidget(QWidget):
         add_btn.clicked.connect(self._save_new_preset)
         tb.addWidget(add_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1179,13 +1182,13 @@ class StudioStereoImagerWidget(QWidget):
         bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(0)
 
-        # === 模块 1: STEREO WIDTH (M/S 宽度收放) ===
+        # === 模块 1: STEREO WIDTH & PAN ===
         self.cell_width = ImagerModuleCell(PALETTE["cyan"])
         w_lay = QVBoxLayout(self.cell_width)
         w_lay.setContentsMargins(10, 6, 10, 6)
         w_lay.setSpacing(4)
 
-        w_hdr = QLabel("STEREO WIDTH")
+        w_hdr = QLabel("STEREO WIDTH & PAN")
         w_hdr.setFixedHeight(22)
         w_hdr.setStyleSheet(f"color: {PALETTE['cyan']}; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;")
         w_lay.addWidget(w_hdr)
@@ -1195,8 +1198,17 @@ class StudioStereoImagerWidget(QWidget):
         self.pill_width = EditableValuePill("100%", PALETTE["cyan"], width=64)
         self.pill_width.valueEdited.connect(self._on_width_text)
 
+        self.knob_pan = ProRotaryKnob(-100.0, 100.0, 0.0, 0.0, PALETTE["cyan"], mode="bipolar", diameter=38)
+        self.knob_pan.valueChanged.connect(self._on_pan_changed)
+        self.pill_pan = EditableValuePill("0%", PALETTE["cyan"], width=64)
+        self.pill_pan.valueEdited.connect(self._on_pan_text)
+
+        width_controls = QHBoxLayout()
+        width_controls.setSpacing(6)
+        width_controls.addLayout(self._make_knob_cell("Width %", self.knob_width, self.pill_width, ("0%", "100%", "200%")), 1)
+        width_controls.addLayout(self._make_knob_cell("Pan", self.knob_pan, self.pill_pan, ("L", "C", "R")), 1)
         w_lay.addStretch(1)
-        w_lay.addLayout(self._make_knob_cell("Width %", self.knob_width, self.pill_width, ("0%", "100%", "200%")))
+        w_lay.addLayout(width_controls)
         w_lay.addStretch(1)
 
         # 快捷宽度预设按钮
@@ -1447,6 +1459,12 @@ class StudioStereoImagerWidget(QWidget):
         for val, btn in self.width_preset_btns.items():
             btn.setChecked(abs(st["width"] - val) < 0.5)
 
+        pan = st.get("pan", 0.0)
+        self.knob_pan.setValue(pan)
+        self.knob_pan.setControlActive(en)
+        self.pill_pan.setText(f"{pan:+.1f}%" if pan else "0%")
+        self.pill_pan.setControlActive(en)
+
         # 2. Mid / Side Gain
         self.cell_ms.setCellActive(en)
         self.knob_mid.setValue(st["mid_gain"])
@@ -1542,6 +1560,19 @@ class StudioStereoImagerWidget(QWidget):
             self._on_width_changed(v)
         except ValueError:
             pass
+
+    def _on_pan_changed(self, value: float) -> None:
+        self._st()["pan"] = round(value, 1)
+        self._refresh_all_views()
+        self.stateChanged.emit(self.get_state())
+
+    def _on_pan_text(self, text: str) -> None:
+        try:
+            value = float(text.strip().removesuffix("%"))
+        except ValueError:
+            return
+        if math.isfinite(value):
+            self._on_pan_changed(max(-100.0, min(100.0, value)))
 
     def _on_mid_gain_changed(self, val: float):
         self._st()["mid_gain"] = round(val, 1)

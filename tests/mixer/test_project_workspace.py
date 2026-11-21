@@ -28,7 +28,7 @@ from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.app.ui.workspace_panel_bar import DockTabAction
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
-from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, SaturationParams, TimelineSequence
+from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
 from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel, ViewMode
@@ -1020,7 +1020,8 @@ def test_clip_effect_rack_targets_open_clip_and_updates_audition(
     assert view.get_timeline().get_clip_by_id(sibling.clip_id).effects == ()
     dialogs = host._get_clip_audio_effect_dialog_manager()
     dialog = dialogs._dialogs[clip.clip_id, saturation.effect_id]
-    dialog.saturation_committed.emit(clip.clip_id, SaturationParams(drive=65.0))
+    dialog.panel.global_tape_panel.g_drive_knob.setValue(65.0, emit=True)
+    dialog.apply()
     assert current_effects()[0].params["drive"] == 65.0
     assert editor._clip.effects[0].params == current_effects()[0].params
     assert panel._clip_fx is not None and panel._clip_fx[0][0].params["drive"] == 65.0
@@ -1955,15 +1956,51 @@ def test_effect_panel_applies_spatial_panner_to_audio_track_only(project_host) -
     assert not view.get_timeline().audio_tracks[0].panner
 
 
-def test_insert_menu_exposes_existing_sound_design_effects(project_host) -> None:
-    strip = project_host.audio_mixer_panel._track_mixers["audio-track"]
-    menu = QMenu(strip)
-    strip._populate_add_effect_menu(menu)
-    by_id = {action.data(): action for action in menu.actions()}
-    for effect_id in ("voice_changer", "spectral_mangler"):
-        by_id[effect_id].trigger()
-    track = project_host.timeline_panel.timeline_view.get_timeline().audio_tracks[0]
-    assert [effect.effect_type for effect in track.effect_chain.effects] == ["voice_changer", "spectral_mangler"]
+@pytest.mark.parametrize("use_master_context_menu", [False, True])
+def test_insert_menu_categorizes_effects_and_commits_to_the_channel(
+    project_host: ProjectHost, monkeypatch: pytest.MonkeyPatch, use_master_context_menu: bool,
+) -> None:
+    mixer = project_host.audio_mixer_panel
+    strip = mixer._master_mixer if use_master_context_menu else mixer._track_mixers["audio-track"]
+    groups = (
+        ("eq", "EQ & Cleanup", ("strip_eq", "dynamic_eq", "de_esser")),
+        ("dynamics", "Dynamics & Transients", (
+            "dynamics", "true_peak_limiter", "bus_comp", "multiband_comp", "transient_designer",
+        )),
+        ("space", "Space & Time", ("reverb", "convolution_reverb", "delay", "imager", "spatial_panner")),
+        ("modulation", "Modulation", ("tremolo_auto_pan", "chorus_flanger", "phaser")),
+        ("tone", "Tone & Voice", ("saturation", "voice_changer", "spectral_mangler")),
+    )
+
+    def select_effects(menu: QMenu, _position: QPoint) -> None:
+        if use_master_context_menu:
+            add_label = "+ " + I18N.tr("audio.fx.add", "Add Effect")
+            menu = next(action.menu() for action in menu.actions() if action.text() == add_label)
+        categories = {action.text(): action.menu() for action in menu.actions()}
+        titles = [I18N.tr(f"mixer.effects_browser.group.{key}", label) for key, label, _ in groups]
+        assert list(categories) == titles
+
+        by_id = {}
+        for title, (_, _, expected_ids) in zip(titles, groups):
+            actions = categories[title].actions()
+            assert tuple(action.data() for action in actions) == expected_ids
+            by_id.update((action.data(), action) for action in actions)
+        by_id["voice_changer"].trigger()
+        by_id["spectral_mangler"].trigger()
+
+    monkeypatch.setattr(QMenu, "exec", select_effects)
+    if use_master_context_menu:
+        strip._on_effect_list_context_menu(QPoint(0, 0))
+    else:
+        strip._add_effect_btn.click()
+    view = project_host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    chain = timeline.master_effect_chain if use_master_context_menu else timeline.audio_tracks[0].effect_chain
+    assert [effect.effect_type for effect in chain.effects] == ["voice_changer", "spectral_mangler"]
+    view.undo()
+    timeline = view.get_timeline()
+    chain = timeline.master_effect_chain if use_master_context_menu else timeline.audio_tracks[0].effect_chain
+    assert [effect.effect_type for effect in chain.effects] == ["voice_changer"]
 
 
 def test_mixer_recording_settings_menu_updates_settings_chain(project_host, monkeypatch) -> None:

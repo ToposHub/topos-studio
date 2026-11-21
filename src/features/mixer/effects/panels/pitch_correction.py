@@ -5,7 +5,7 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QInputDialog, QMenu
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -13,6 +13,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与音高声学常量（统一 Fairlight 深色哑光视觉规范）
@@ -1762,14 +1763,14 @@ class KeyScaleCard(QFrame):
         h_lay.addWidget(self.title_lbl)
         h_lay.addStretch()
 
-        self.root_combo = QComboBox()
-        self.root_combo.setFixedSize(46, 21)
+        self.root_combo = ChevronComboBox()
+        self.root_combo.setFixedSize(66, 24)
         self.root_combo.addItems(NOTE_NAMES)
         self.root_combo.currentTextChanged.connect(self._on_root_changed)
         h_lay.addWidget(self.root_combo)
 
-        self.scale_combo = QComboBox()
-        self.scale_combo.setFixedSize(118, 21)
+        self.scale_combo = ChevronComboBox()
+        self.scale_combo.setFixedSize(152, 24)
         self.scale_combo.addItems(list(SCALE_PATTERNS.keys()))
         self.scale_combo.currentTextChanged.connect(self._on_scale_changed)
         h_lay.addWidget(self.scale_combo)
@@ -2332,7 +2333,7 @@ class StudioPitchCorrectionWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(210)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -2378,16 +2379,16 @@ class StudioPitchCorrectionWidget(QWidget):
         tb_lay.addSpacing(10)
 
         # 修音引擎模式切换 (Transparent / Hard Tune / Graph Edit)
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFixedWidth(102)
+        self.mode_combo = ChevronComboBox()
+        self.mode_combo.setFixedWidth(120)
         self.mode_combo.addItems(["Transparent", "Hard Tune", "Graph Edit"])
         self.mode_combo.setToolTip("选择修音引擎算法：自然隐形 / 零延迟电音 / 曲线锚点手修")
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         tb_lay.addWidget(self.mode_combo)
 
         # 人声音域范围 (Voice Type)
-        self.voice_combo = QComboBox()
-        self.voice_combo.setFixedWidth(128)
+        self.voice_combo = ChevronComboBox()
+        self.voice_combo.setFixedWidth(150)
         self.voice_combo.addItems(list(VOICE_TYPES.keys()))
         self.voice_combo.setToolTip("设置人声音域检测范围，防止八度误判")
         self.voice_combo.currentTextChanged.connect(self._on_voice_type_changed)

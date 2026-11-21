@@ -1,214 +1,259 @@
-"""十款新 rack FX 的 Clip FX 插槽适配验收（2026-11-20 收口批次）。
-
-状态报告遗留项「十款新 FX 的 Clip FX 插槽适配（clip 级对话框）」：
-
-- 注册表：``_ensure_fx_dialog_param_types`` 恰好十款，与 mixer 专用
-  对话框表联合覆盖全部 ``AUDIO_MIXER_EFFECT_TYPES``（互斥不重叠）；
-- open_dialog：十款逐一弹出通用表驱动 ``FxParamDialog``（标题带 i18n
-  效果名 + 片段名），缓存复用，损坏参数降级默认（AUD-19720 同语义）；
-- 归一化：打开前经 ParamsClass ``from_dict → to_dict``（缺键补默认、
-  multiband crossovers 列表 ↔ UI 扁平键往返）；
-- 信号回路：FxParamDialog 回传 dict——committed 直落既有 MacroCommand
-  落库路径；preview 实时直送引擎（不落模型/不入撤销栈）；关窗回滚；
-- 控制器：预览 entries 与 ``audio_retime.clip_fx_entries`` 同过滤/排序/
-  启用口径，仅按 effect_id 精确替换目标实例参数；
-- 引擎后端：``AudioMixer.set_clip_effects`` 十款逐一处理音频无异常
-  （EffectChain 适配器路径，clip 级 DSP 后端健全）。
-"""
+"""Clip rack panels, project editing signals, and audio processing regressions."""
 from __future__ import annotations
 
-import os
-import sys
-import types
-from pathlib import Path
+import logging
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QSignalSpy
+from PyQt6.QtWidgets import QDialogButtonBox, QWidget
+from pytestqt.qtbot import QtBot
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.timeline_v2 import (
     ClipInstance,
     EditTrack,
     TimelineSequence,
+    _ensure_effect_param_registry,
 )
-from src.features.edit.ui.clip_audio_effect_dialog_adapter import (
-    ClipAudioEffectDialogManager,
-    _ensure_dialog_registry,
-    _ensure_fx_dialog_param_types,
-)
+from src.features.edit.ui.clip_audio_effect_dialog_adapter import ClipAudioEffectDialogManager
+from src.features.mixer.effects.catalog import get_effect
 
 pytestmark = pytest.mark.edit_core
 FPS = 25
 
-_TEN_FX = (
-    "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
-    "multiband_comp", "convolution_reverb", "transient_designer",
-    "tremolo_auto_pan", "chorus_flanger", "phaser",
-)
+_RACK_PANELS = {
+    "de_esser": "deesser",
+    "true_peak_limiter": "true_peak_limiter",
+    "dynamic_eq": "dynamic_eq",
+    "bus_comp": "bus_compressor",
+    "multiband_comp": "multiband_compressor",
+    "convolution_reverb": "convolution_reverb",
+    "transient_designer": "transient_designer",
+    "tremolo_auto_pan": "tremolo_autopan",
+    "chorus_flanger": "modulation",
+    "phaser": "modulation",
+}
+_TEN_FX = tuple(_RACK_PANELS)
 
 
-def _default_params(effect_type: str) -> dict:
-    return _ensure_fx_dialog_param_types()[effect_type].default().to_dict()
+def _default_params(effect_type: str) -> dict[str, Any]:
+    return _ensure_effect_param_registry()[effect_type].default().to_dict()
 
 
-class TestFxDialogRegistry:
-    def test_exactly_ten_new_types(self):
-        fx_types = _ensure_fx_dialog_param_types()
-        assert set(fx_types) == set(_TEN_FX)
-        # 与 mixer 专用对话框表互斥，联合覆盖全部 audio 类型
-        mixer_types = set(_ensure_dialog_registry())
-        assert mixer_types & set(fx_types) == set()
-        assert mixer_types | set(fx_types) == set(AUDIO_MIXER_EFFECT_TYPES)
-
-    def test_params_classes_have_roundtrip(self):
-        for effect_type, params_cls in _ensure_fx_dialog_param_types().items():
-            assert params_cls.default().to_dict(), effect_type
-            rt = params_cls.from_dict(params_cls.default().to_dict())
-            assert rt.to_dict() == params_cls.default().to_dict(), effect_type
+def test_params_classes_have_roundtrip() -> None:
+    registry = _ensure_effect_param_registry()
+    for effect_type in _TEN_FX:
+        params = _default_params(effect_type)
+        assert params
+        assert registry[effect_type].from_dict(params).to_dict() == params
 
 
 class TestOpenDialog:
-    def test_all_ten_open_fx_param_dialog(self, qapp):
-        from src.shared.ui.audio_mixer.fx_rack_dialogs import FxParamDialog
-        mgr = ClipAudioEffectDialogManager()
-        for index, effect_type in enumerate(_TEN_FX):
-            dialog = mgr.open_dialog(
-                effect_type, f"clip_{index}", f"fx_{index}",
-                _default_params(effect_type), "DIALOG CLIP",
-            )
-            assert isinstance(dialog, FxParamDialog), effect_type
-            assert dialog.isVisible(), effect_type
-            assert dialog.fx_effect_type == effect_type
-            # 标题：i18n 效果名 · 片段名
-            assert "DIALOG CLIP" in dialog.windowTitle(), effect_type
-            dialog.close()
+    @pytest.mark.parametrize(("effect_type", "panel_id"), _RACK_PANELS.items())
+    def test_opens_supplied_effect_panel(self, qtbot: QtBot, effect_type: str, panel_id: str) -> None:
+        manager = ClipAudioEffectDialogManager()
+        dialog = manager.open_dialog(effect_type, "clip_1", "fx_1", _default_params(effect_type), "DIALOG CLIP")
 
-    def test_open_caches_dialog_per_clip_effect(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        params = _default_params("de_esser")
-        d1 = mgr.open_dialog("de_esser", "clip_a", "fx_a", params)
-        d2 = mgr.open_dialog("de_esser", "clip_a", "fx_a", params)
-        assert d1 is d2
-        other = mgr.open_dialog("de_esser", "clip_a", "fx_b", params)
-        assert other is not d1
-        mgr.close_all()
-
-    def test_partial_dict_uses_defaults(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        dialog = mgr.open_dialog(
-            "de_esser", "clip_p", "fx_p", {"threshold_dbfs": -40.0})
         assert dialog is not None
-        # 缺键补默认
-        assert dialog._params["threshold_dbfs"] == -40.0
-        assert dialog._params["ratio"] == pytest.approx(4.0)
-        assert dialog._params["mode"] == "split"
+        descriptor = get_effect(panel_id)
+        assert type(dialog.panel).__module__ == descriptor.panel_module
+        assert type(dialog.panel).__name__ == descriptor.panel_class
+        assert dialog.isVisible()
+        assert "DIALOG CLIP" in dialog.windowTitle()
         dialog.close()
 
-    def test_multiband_crossovers_list_to_flat_keys(self, qapp):
-        """DSP crossovers 列表 → UI 扁平键；提交合回列表（roundtrip）。"""
-        mgr = ClipAudioEffectDialogManager()
+    def test_open_caches_dialog_per_clip_effect(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("de_esser")
+        first = manager.open_dialog("de_esser", "clip_a", "fx_a", params)
+        assert first is not None
+        assert manager.open_dialog("de_esser", "clip_a", "fx_a", params) is first
+        assert manager.open_dialog("de_esser", "clip_a", "fx_b", params) is not first
+        manager.close_all()
+
+    def test_partial_dict_uses_defaults(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        dialog = manager.open_dialog("de_esser", "clip_p", "fx_p", {"threshold_dbfs": -40.0})
+
+        assert dialog is not None
+        assert dialog.panel.get_state()["threshold"] == -40.0
+        assert dialog.panel.get_state()["mode"] == "split"
+        assert dialog.panel.ratio_input.value() == pytest.approx(4.0)
+        dialog.close()
+
+    def test_multiband_edit_roundtrips_crossover_array(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
         params = _default_params("multiband_comp")
-        dialog = mgr.open_dialog("multiband_comp", "clip_m", "fx_m", params)
-        assert "crossovers" not in dialog._params
-        assert dialog._params["crossover_low"] == pytest.approx(
-            params["crossovers"][0])
-        assert dialog._params["crossover_high"] == pytest.approx(
-            params["crossovers"][1])
-        merged = dialog.current_params()
-        assert merged["crossovers"] == params["crossovers"]
+        dialog = manager.open_dialog("multiband_comp", "clip_m", "fx_m", params)
+
+        assert dialog is not None
+        assert dialog.panel.get_state()["crossovers"][:2] == params["crossovers"]
+        # This signal is emitted by dragging the crossover on the supplied graph.
+        dialog.panel.mb_graph.crossoverDragged.emit(0, 275.0)
+        buttons = dialog.findChild(QDialogButtonBox)
+        with qtbot.waitSignal(manager.clip_effect_params_committed) as commit:
+            qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Apply), Qt.MouseButton.LeftButton)
+        assert commit.args == ["clip_m", "fx_m", {**params, "crossovers": [275.0, params["crossovers"][1]]}, None]
         dialog.close()
 
-    def test_corrupt_params_fall_back_with_warning(self, qapp, caplog):
-        """from_dict 失败 → 默认参数打开 + 警告日志（AUD-19720 同语义）。"""
-        mgr = ClipAudioEffectDialogManager()
-        original = _ensure_fx_dialog_param_types()["phaser"].from_dict
-
-        def _boom(_data):
+    def test_corrupt_params_fall_back_with_warning(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        def fail_parse(_params: dict[str, Any]) -> Any:
             raise ValueError("corrupt")
 
-        import logging
+        params_class = _ensure_effect_param_registry()["phaser"]
+        monkeypatch.setattr(params_class, "from_dict", staticmethod(fail_parse))
+        manager = ClipAudioEffectDialogManager()
         with caplog.at_level(logging.WARNING):
-            try:
-                _ensure_fx_dialog_param_types()[
-                    "phaser"].from_dict = staticmethod(_boom)
-                dialog = mgr.open_dialog(
-                    "phaser", "clip_c", "fx_c", {"garbage": object()})
-            finally:
-                _ensure_fx_dialog_param_types()["phaser"].from_dict = original
-        assert dialog is not None
-        assert any("failed to parse" in rec.message for rec in caplog.records)
-        dialog.close()
+            dialog = manager.open_dialog("phaser", "clip_c", "fx_c", {"garbage": object()})
 
-    def test_non_mixer_effect_still_returns_none(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        assert mgr.open_dialog(
-            "blur", "clip_v", "fx_v", {"radius": 4.0}) is None
+        assert dialog is not None
+        assert dialog.panel.get_state()["phaser"]["rate"] == _default_params("phaser")["rate_hz"]
+        assert "Audio effect phaser has invalid panel parameters" in caplog.text
+        dialog.close()
 
 
 class TestSignalRoundTrip:
-    def test_commit_emits_dict_payload(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        received: list = []
-        mgr.clip_effect_params_committed.connect(
-            lambda cid, eid, p: received.append((cid, eid, p)))
-        dialog = mgr.open_dialog(
-            "de_esser", "clip_1", "fx_1", _default_params("de_esser"))
-        dialog._params["threshold_dbfs"] = -36.0
-        dialog._emit(True)
-        assert len(received) == 1
-        cid, eid, payload = received[0]
-        assert (cid, eid) == ("clip_1", "fx_1")
-        assert payload["threshold_dbfs"] == -36.0
-        assert payload["mode"] == "split"
+    @pytest.mark.parametrize(("effect_type", "edit", "expected"), [
+        ("de_esser", lambda panel: panel.ratio_input.setValue(6.5), {"ratio": 6.5}),
+        ("true_peak_limiter", lambda panel: panel.engine_card.stereo_link_button.click(), {"linked": False}),
+        ("dynamic_eq", lambda panel: panel.band_cards[3].c_range.knob.setValue(-16.0, emit=True),
+         {"max_cut_db": 16.0}),
+        ("dynamic_eq", lambda panel: panel.band_cards[3].c_boost.knob.setValue(5.0, emit=True),
+         {"max_boost_db": 5.0}),
+        ("dynamic_eq", lambda panel: panel.band_cards[3].c_threshold_slope.knob.setValue(0.75, emit=True),
+         {"slope": 0.75}),
+        ("bus_comp", lambda panel: panel.btn_api.click(), {"template": "mx_glue"}),
+        ("bus_comp", lambda panel: panel.c_sc_hpf.knob.setValue(237.0, emit=True), {"sc_hpf_hz": 237.0}),
+        ("convolution_reverb", lambda panel: panel._controls["dry_level"].setValue(65.0, emit=True), {"dry": 0.65}),
+        ("transient_designer", lambda panel: panel.transient_card.c_attack.knob.setValue(-50.0, emit=True),
+         {"attack_db": -6.0}),
+        ("transient_designer", lambda panel: panel.transient_card.c_sustain.knob.setValue(50.0, emit=True),
+         {"sustain_db": 6.0}),
+        ("transient_designer", lambda panel: panel.transient_card.c_attack_time.knob.setValue(17.0, emit=True),
+         {"attack_ms": 17.0}),
+        ("chorus_flanger", lambda panel: panel.chorus_card.c_depth.knob.setValue(50.0, emit=True), {"depth_ms": 5.0}),
+        ("chorus_flanger", lambda panel: panel.chorus_card.c_voices.knob.setValue(3.0, emit=True), {"voices": 3}),
+        ("chorus_flanger", lambda panel: panel.chorus_card.c_processor_feedback.knob.setValue(40.0, emit=True),
+         {"feedback": 0.4}),
+        ("phaser", lambda panel: panel.phaser_card.stage_btns[3].click(), {"stages": 3}),
+        ("phaser", lambda panel: panel.phaser_card.c_depth.knob.setValue(60.0, emit=True), {"sweep_octaves": 3.2}),
+        ("saturation", lambda panel: panel.global_tape_panel.g_drive_knob.setValue(37.5, emit=True), {"drive": 37.5}),
+        ("imager", lambda panel: panel.knob_pan.setValue(-40.0, emit=True), {"pan": -40.0}),
+    ])
+    def test_native_control_previews_and_commits_existing_processor_parameter(
+        self, qtbot: QtBot, effect_type: str, edit: Callable[[QWidget], None], expected: dict[str, Any],
+    ) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = {**_default_params(effect_type), "custom_metadata": {"source": "older project"}}
+        dialog = manager.open_dialog(effect_type, "clip_native", "fx_native", params)
+        assert dialog is not None
+        expected_params = params | {
+            key: pytest.approx(value) if isinstance(value, float) else value
+            for key, value in expected.items()
+        }
+        try:
+            with qtbot.waitSignal(manager.clip_effect_preview, timeout=1000) as preview:
+                edit(dialog.panel)
+            with qtbot.waitSignal(manager.clip_effect_params_committed) as commit:
+                dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Apply).click()
+            assert preview.args == ["clip_native", "fx_native", expected_params, None]
+            assert commit.args == ["clip_native", "fx_native", expected_params, None]
+            assert dialog.current_params() == expected_params
+        finally:
+            dialog.close()
+
+    def test_modulation_mode_switch_keeps_edits_and_connects_flanger_card(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("chorus_flanger")
+        dialog = manager.open_dialog("chorus_flanger", "clip_native", "fx_native", params)
+        assert dialog is not None
+        try:
+            dialog.panel.chorus_card.c_rate.knob.setValue(2.0, emit=True)
+            dialog.panel.mode_btns["Flanger"].click()
+            assert not dialog.panel.chorus_card.isVisible()
+            assert dialog.panel.flanger_card.isVisible()
+            dialog.panel.flanger_card.c_depth.knob.setValue(62.0, emit=True)
+            assert dialog.current_params() == params | {"mode": "flanger", "rate_hz": 2.0, "depth_ms": 6.2}
+            dialog.panel.mode_btns["Chorus"].click()
+            assert dialog.panel.chorus_card.isVisible()
+            assert dialog.current_params() == params | {"rate_hz": 2.0, "depth_ms": 6.2}
+        finally:
+            dialog.close()
+
+    def test_multiband_native_gain_preserves_legacy_metadata(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("multiband_comp")
+        params["bands"][0].update(makeup_db=4.0, knee_db=12.0)
+        dialog = manager.open_dialog("multiband_comp", "clip_native", "fx_native", params)
+        assert dialog is not None
+        try:
+            state = dialog.panel.get_state()
+            assert state["band_count"] == 3
+            assert state["bands"][0]["makeup"] == 0.0
+            assert state["bands"][0]["knee"] == 30.0
+            assert dialog.current_params() == params
+            dialog.panel.band_cards[0].c_makeup.knob.setValue(22.0, emit=True)
+            expected_bands = [params["bands"][0] | {"makeup_gain": 22.0}, *params["bands"][1:]]
+            assert dialog.current_params() == params | {"bands": expected_bands}
+        finally:
+            dialog.close()
+
+    def test_multiband_canonical_crossovers_take_precedence_over_legacy_aliases(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("multiband_comp") | {
+            "crossovers": [220.0, 4000.0], "crossover_low": 155.0, "crossover_high": 1950.0,
+        }
+        dialog = manager.open_dialog("multiband_comp", "clip_native", "fx_native", params)
+        assert dialog is not None
+        try:
+            assert dialog.panel.get_state()["crossovers"][:2] == [220.0, 4000.0]
+            dialog.panel.mb_graph.crossoverDragged.emit(0, 275.0)
+            saved = params | {"crossovers": [275.0, 4000.0]}
+            assert dialog.current_params() == saved
+            dialog.apply()
+            assert dialog.panel.get_state()["crossovers"][:2] == saved["crossovers"]
+        finally:
+            dialog.close()
+
+    def test_commit_emits_production_params_for_knob_edit(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("de_esser")
+        dialog = manager.open_dialog("de_esser", "clip_1", "fx_1", params)
+
+        assert dialog is not None
+        dialog.panel.thresh_knob.setValue(-36.0, emit=True)
+        buttons = dialog.findChild(QDialogButtonBox)
+        with qtbot.waitSignal(manager.clip_effect_params_committed) as commit:
+            qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Apply), Qt.MouseButton.LeftButton)
+        assert commit.args == ["clip_1", "fx_1", {**params, "threshold_dbfs": -36.0}, None]
         dialog.close()
 
-    def test_commit_accepts_dict_from_mixer_dialog_branch_too(self, qapp):
-        """_on_committed 对 dict 与 dataclass 回传双兼容。"""
-        from src.features.edit.core.timeline_v2 import ReverbParams
-        mgr = ClipAudioEffectDialogManager()
-        received: list = []
-        mgr.clip_effect_params_committed.connect(
-            lambda cid, eid, p: received.append((cid, eid, p)))
-        dialog = mgr.open_dialog(
-            "reverb", "clip_2", "fx_2", ReverbParams.default().to_dict())
-        # 旧契约：*Params dataclass
-        dialog.reverb_committed.emit("clip_2", ReverbParams(dry_wet=77.0))
-        assert received[-1][2]["dry_wet"] == 77.0
-        # 新契约：已归一 dict（FxParamDialog 路径）
-        mgr._on_committed("clip_2", "fx_2", {"dry_wet": 33.0})
-        assert received[-1][2] == {"dry_wet": 33.0}
-        dialog.close()
+    def test_cancel_discards_limiter_preview_and_releases_window(self, qtbot: QtBot) -> None:
+        manager = ClipAudioEffectDialogManager()
+        params = _default_params("true_peak_limiter")
+        dialog = manager.open_dialog("true_peak_limiter", "clip_3", "fx_3", params)
 
-    def test_preview_signal_live_payload(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        previews: list = []
-        mgr.clip_effect_preview.connect(
-            lambda cid, eid, p: previews.append((cid, eid, p)))
-        dialog = mgr.open_dialog(
-            "true_peak_limiter", "clip_3", "fx_3",
-            _default_params("true_peak_limiter"))
-        dialog._params["ceiling_dbtp"] = -3.0
-        dialog._emit(False)
-        assert previews and previews[0][2]["ceiling_dbtp"] == -3.0
-        assert not mgr._dialogs or True
-        dialog.close()
+        assert dialog is not None
+        commits = QSignalSpy(manager.clip_effect_params_committed)
+        with qtbot.waitSignal(manager.clip_effect_preview, timeout=1000) as preview:
+            dialog.panel.gain_lufs_card.c_ceiling.knob.setValue(-3.0, emit=True)
+        assert preview.args == ["clip_3", "fx_3", {**params, "ceiling_dbtp": -3.0}, None]
 
-    def test_close_emits_preview_finished_and_clears_cache(self, qapp):
-        mgr = ClipAudioEffectDialogManager()
-        finished: list = []
-        mgr.clip_effect_preview_finished.connect(
-            lambda cid, eid: finished.append((cid, eid)))
-        dialog = mgr.open_dialog(
-            "phaser", "clip_4", "fx_4", _default_params("phaser"))
-        key = ("clip_4", "fx_4")
-        assert key in mgr._dialogs
-        dialog.close()
-        assert finished == [("clip_4", "fx_4")]
-        assert key not in mgr._dialogs
+        buttons = dialog.findChild(QDialogButtonBox)
+        with qtbot.waitSignal(manager.clip_effect_preview_finished) as finished:
+            qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
+        assert finished.args == ["clip_3", "fx_3"]
+        assert len(commits) == 0
+        reopened = manager.open_dialog("true_peak_limiter", "clip_3", "fx_3", params)
+        assert reopened is not None and reopened is not dialog
+        assert reopened.panel.get_state()["ceiling"] == params["ceiling_dbtp"]
+        reopened.close()
 
 
 # ── 控制器 ────────────────────────────────────────────────────────────
@@ -232,26 +277,29 @@ def _clip_with_fx(effect_type: str, params: dict | None = None,
 class TestControllerPreview:
     """预览直送引擎：模型不动、撤销栈不动、目标实例参数精确替换。"""
 
-    def _host(self, seq=None):
+    def _host(self, seq: TimelineSequence | None = None) -> tuple[Any, list, list]:
+        from src.app.controllers.edit_controller import EditControllerMixin
+
         if seq is None:
             seq, _clip, _fx = _clip_with_fx("de_esser")
         applied: list = []
         engine: list = []
-        mgr = SimpleNamespace(
-            set_clip_effects=(
-                lambda cid, entries, track_id=None: engine.append(
-                    (cid, list(entries), track_id))),
-        )
-        host = SimpleNamespace(
-            edit_page=SimpleNamespace(_current_timeline=seq),
-            _execute_timeline_edit_command=(
-                lambda cmd, tl: applied.append(cmd)),
-            _resync_audio_after_effect_change=lambda: None,
-            _get_mixer_audio_manager=lambda: mgr,
-        )
-        from src.app.controllers.edit_controller import EditControllerMixin
-        host._clip_fx_preview_entries = (
-            EditControllerMixin._clip_fx_preview_entries.__get__(host))
+        samplers: list[Callable[[int], list] | None] = []
+
+        def set_clip_fx(
+            clip_id: str, entries: list | None, track_id: str | None = None,
+            animated_sampler: Callable[[int], list] | None = None,
+        ) -> None:
+            engine.append((clip_id, list(entries) if entries is not None else None, track_id))
+            samplers.append(animated_sampler)
+
+        mgr = SimpleNamespace(set_clip_effects=set_clip_fx)
+        host = EditControllerMixin()
+        host.edit_page = SimpleNamespace(_current_timeline=seq)
+        host._execute_timeline_edit_command = lambda cmd, tl: applied.append(cmd)
+        host._resync_audio_after_effect_change = lambda: None
+        host._get_mixer_audio_manager = lambda: mgr
+        host.audition_samplers = samplers
         return host, applied, engine
 
     def test_preview_updates_engine_without_model_change(self):
@@ -296,37 +344,70 @@ class TestControllerPreview:
         bind("clip_x", "fx_x", {})  # 不抛即通过
 
     def test_preview_finished_reverts_to_model(self):
-        from src.app.controllers.edit_controller import EditControllerMixin
         host, _applied, engine = self._host()
-        bind = EditControllerMixin._on_edit_clip_effect_preview_finished.__get__(host)
-        bind("clip_x", "fx_x")
-        assert len(engine) == 1
-        entries = engine[0][1]
-        # 模型全量条目（无预览覆盖）：params 为模型值、enabled=True
-        assert entries[0] == ("de_esser", _default_params("de_esser"), True)
+        params = _default_params("de_esser")
+        host._on_edit_clip_effect_preview("clip_x", "fx_x", {**params, "threshold_dbfs": -25.0})
+        host._on_edit_clip_effect_preview_finished("clip_x", "fx_x")
+        assert len(engine) == 2
+        assert engine[-1] == ("clip_x", [("de_esser", params, True)], "T1")
+
+    def test_cancel_rolls_back_panel_bypass_in_the_engine(self, qtbot: QtBot) -> None:
+        host, applied, engine = self._host()
+        manager = ClipAudioEffectDialogManager()
+        host._clip_audio_fx_dialog_mgr = manager
+        manager.clip_effect_preview.connect(host._on_edit_clip_effect_preview)
+        manager.clip_effect_preview_finished.connect(host._on_edit_clip_effect_preview_finished)
+        params = _default_params("de_esser")
+        dialog = manager.open_dialog("de_esser", "clip_x", "fx_x", params, enabled=True)
+
+        assert dialog is not None
+        with qtbot.waitSignal(manager.clip_effect_preview, timeout=1000):
+            qtbot.mouseClick(dialog.panel.power_switch, Qt.MouseButton.LeftButton)
+        assert engine[-1] == ("clip_x", [("de_esser", {**params, "enabled": False}, False)], "T1")
+
+        buttons = dialog.findChild(QDialogButtonBox)
+        qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
+        assert engine[-1] == ("clip_x", [("de_esser", params, True)], "T1")
+        assert applied == []
+
+    def test_preview_preserves_other_animated_controls_and_cancel_restores_the_edited_lane(
+        self, qtbot: QtBot,
+    ) -> None:
+        seq, clip, effect = _clip_with_fx("de_esser")
+        effect = effect.with_keyframe_added("threshold_dbfs", 10, -23.0, min_value=-60.0, max_value=0.0)
+        effect = effect.with_keyframe_added("ratio", 10, 7.0, min_value=1.0, max_value=20.0)
+        object.__setattr__(clip, "effects", (effect,))
+        host, applied, _engine = self._host(seq)
+        manager = ClipAudioEffectDialogManager()
+        host._clip_audio_fx_dialog_mgr = manager
+        manager.clip_effect_preview.connect(host._on_edit_clip_effect_preview)
+        manager.clip_effect_preview_finished.connect(host._on_edit_clip_effect_preview_finished)
+        dialog = manager.open_dialog("de_esser", "clip_x", "fx_x", dict(effect.params))
+
+        assert dialog is not None
+        with qtbot.waitSignal(manager.clip_effect_preview, timeout=1000):
+            dialog.panel.thresh_knob.setValue(-37.0, emit=True)
+        sampler = host.audition_samplers[-1]
+        assert sampler is not None
+        assert sampler(10)[0][1]["threshold_dbfs"] == -37.0
+        assert sampler(10)[0][1]["ratio"] == 7.0
+
+        buttons = dialog.findChild(QDialogButtonBox)
+        qtbot.mouseClick(buttons.button(QDialogButtonBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
+        restored = host.audition_samplers[-1]
+        assert restored is not None
+        assert restored(10)[0][1]["threshold_dbfs"] == -23.0
+        assert restored(10)[0][1]["ratio"] == 7.0
+        assert applied == []
 
     def test_preview_finished_empty_chain_clears(self):
         """无 audio 效果的 clip 关窗 → entries 空 → None 清链。"""
-        from src.app.controllers.edit_controller import EditControllerMixin
-        seq, _clip, _fx = _clip_with_fx("de_esser")
-        clip = seq.audio_tracks[0].clips[0]
+        seq, clip, _fx = _clip_with_fx("de_esser")
+        host, _applied, engine = self._host(seq)
+        host._on_edit_clip_effect_preview("clip_x", "fx_x", _default_params("de_esser"))
         object.__setattr__(clip, "effects", ())
-        applied: list = []
-        engine: list = []
-        mgr = SimpleNamespace(
-            set_clip_effects=(
-                lambda cid, entries, track_id=None: engine.append(
-                    (cid, entries, track_id))))
-        host = SimpleNamespace(
-            edit_page=SimpleNamespace(_current_timeline=seq),
-            _get_mixer_audio_manager=lambda: mgr,
-        )
-        from src.app.controllers.edit_controller import EditControllerMixin
-        host._clip_fx_preview_entries = (
-            EditControllerMixin._clip_fx_preview_entries.__get__(host))
-        bind = EditControllerMixin._on_edit_clip_effect_preview_finished.__get__(host)
-        bind("clip_x", "fx_x")
-        assert engine and engine[0][1] is None
+        host._on_edit_clip_effect_preview_finished("clip_x", "fx_x")
+        assert engine[-1] == ("clip_x", None, "T1")
 
 
 class TestControllerCommit:

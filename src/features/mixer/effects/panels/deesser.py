@@ -5,14 +5,18 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QInputDialog, QMenu, QDoubleSpinBox
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QSignalBlocker
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+from ..panel_glyphs import GlyphComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与声学常量 (与 EQ-UI 保持一致)
@@ -20,7 +24,7 @@ from PyQt6.QtGui import (
 FREQ_MIN = 20.0
 FREQ_MAX = 20000.0
 
-DETECTOR_FREQ_MIN = 2000.0
+DETECTOR_FREQ_MIN = 1000.0
 DETECTOR_FREQ_MAX = 16000.0
 
 UI_FONT_CSS = "'Helvetica Neue', 'PingFang SC'"
@@ -164,80 +168,20 @@ class PowerToggleSwitch(QWidget):
         p.drawEllipse(QPointF(cx, cy), r, r)
 
 
-class DetectorShapeSelector(QPushButton):
+class DetectorShapeSelector(GlyphComboBox):
     shapeChanged = pyqtSignal(str)
 
-    def __init__(self, options: list[str], current: str, accent_color: str = ACCENT_AMBER, parent=None):
-        super().__init__(parent)
-        self._options = options
-        self._current = current
-        self._accent = QColor(accent_color)
-        self._active = True
-        self.setFixedHeight(22)
-        self.setMinimumWidth(96)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clicked.connect(self._open_menu)
+    def __init__(self, options: list[str], current: str, accent_color: str = ACCENT_AMBER, parent: QWidget | None = None) -> None:
+        super().__init__(options, current, accent_color, draw_detector_glyph, parent)
+        self.setAccessibleName("Detector shape")
+        self.setMinimumWidth(124)
+        self.currentTextChanged.connect(self.shapeChanged)
 
-    def setCurrentShape(self, shape: str):
-        if shape in self._options and self._current != shape:
-            self._current = shape
-            self.update()
+    def setCurrentShape(self, shape: str) -> None:
+        self.set_choice(shape)
 
-    def setActive(self, active: bool):
-        self._active = active
-        self.update()
-
-    def _open_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1D1D21;
-                border: 1px solid #141416;
-                border-radius: 4px;
-                padding: 4px;
-                color: #DCDCE2;
-                font-size: 11px;
-            }
-            QMenu::item { padding: 5px 16px; border-radius: 3px; }
-            QMenu::item:selected { background-color: #35353D; color: #FFFFFF; }
-        """)
-        for opt in self._options:
-            act = menu.addAction(opt)
-            act.triggered.connect(lambda checked=False, o=opt: self._select(o))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
-
-    def _select(self, shape: str):
-        if self._current != shape:
-            self._current = shape
-            self.update()
-            self.shapeChanged.emit(shape)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        bg = QColor("#151518") if self._active else QColor("#1B1B1E")
-        p.setPen(QPen(QColor("#101012"), 1.0))
-        p.setBrush(bg)
-        p.drawRoundedRect(rect, 3.0, 3.0)
-
-        glyph_color = self._accent if self._active else QColor("#6E6E76")
-        glyph_rect = QRectF(4, 2, 24, self.height() - 4)
-        draw_detector_glyph(p, glyph_rect, self._current, glyph_color)
-
-        p.setPen(QColor("#DCDCE2") if self._active else QColor("#6E6E76"))
-        font = QFont(MONO_FONT_FAM, 8)
-        font.setWeight(QFont.Weight.Bold)
-        p.setFont(font)
-        text_rect = QRectF(28, 0, self.width() - 42, self.height())
-        p.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._current)
-
-        ax = self.width() - 8.5
-        ay = self.height() / 2.0 - 1.2
-        p.setPen(QPen(QColor("#9A9AA2"), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(ax - 2.3, ay), QPointF(ax, ay + 2.5))
-        p.drawLine(QPointF(ax, ay + 2.5), QPointF(ax + 2.3, ay))
+    def setActive(self, active: bool) -> None:
+        self.setEnabled(active)
 
 
 class EditableValuePill(QWidget):
@@ -470,6 +414,7 @@ class DeEsserGraphWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_deesser_state()
+        self._processor_controls = False
         self._current_gr_db = 0.0   # 实时衰减量 (负数，例如 -5.4 dB)
         self._current_sc_db = -36.0 # 实时侧链检测电平
 
@@ -628,15 +573,15 @@ class DeEsserGraphWidget(QWidget):
         act_split = menu.addAction("Mode: Split-Band (分频式)")
         act_split.triggered.connect(lambda: self.modeToggleRequested.emit("split"))
 
-        act_sc = menu.addAction("Mode: Sidechain (侧链式)")
+        act_sc = menu.addAction("Mode: Wide-Band" if self._processor_controls else "Mode: Sidechain (侧链式)")
         act_sc.triggered.connect(lambda: self.modeToggleRequested.emit("sidechain"))
 
-        menu.addSeparator()
-        act_bp = menu.addAction("Detector: Bandpass (钟形带通)")
-        act_bp.triggered.connect(lambda: self.shapeToggleRequested.emit("Bandpass"))
-
-        act_hs = menu.addAction("Detector: High Shelf (高架式)")
-        act_hs.triggered.connect(lambda: self.shapeToggleRequested.emit("High Shelf"))
+        if not self._processor_controls:
+            menu.addSeparator()
+            act_bp = menu.addAction("Detector: Bandpass (钟形带通)")
+            act_bp.triggered.connect(lambda: self.shapeToggleRequested.emit("Bandpass"))
+            act_hs = menu.addAction("Detector: High Shelf (高架式)")
+            act_hs.triggered.connect(lambda: self.shapeToggleRequested.emit("High Shelf"))
 
         menu.addSeparator()
         act_listen = menu.addAction("Toggle Listen Sidechain (监听齿音)")
@@ -1314,7 +1259,7 @@ class StudioDeEsserWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(195)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1447,6 +1392,7 @@ class StudioDeEsserWidget(QWidget):
         mode_btn_row.addWidget(self.btn_sidechain, 1)
         mode_lay.addLayout(mode_btn_row)
         cell_mode.root_lay.addWidget(mode_sec)
+        self._mode_column = cell_mode
 
         det_sec = QWidget()
         cell_mode.register_divider_above(det_sec)
@@ -1485,6 +1431,7 @@ class StudioDeEsserWidget(QWidget):
 
         det_lay.addStretch()
         cell_mode.root_lay.addWidget(det_sec, 1)
+        self._demo_detector_section = det_sec
         bottom_row.addWidget(cell_mode, 1)
 
         # === 栏 2：目标频段与带宽 (SIBILANCE BAND) ===
@@ -1511,7 +1458,7 @@ class StudioDeEsserWidget(QWidget):
         self.freq_knob = ProRotaryKnob(DETECTOR_FREQ_MIN, DETECTOR_FREQ_MAX, 6800.0, 6800.0, ACCENT_AMBER, mode="log")
         self.freq_knob.valueChanged.connect(self._on_freq_changed)
         f_hints = QHBoxLayout()
-        for t in ("2.0K", "16.0K"):
+        for t in ("1.0K", "16.0K"):
             lbl = QLabel(t)
             lbl.setObjectName("RangeHint")
             f_hints.addWidget(lbl)
@@ -1557,10 +1504,10 @@ class StudioDeEsserWidget(QWidget):
 
         q_right = QVBoxLayout()
         q_right.setSpacing(1)
-        self.q_knob = ProRotaryKnob(0.5, 8.0, 2.2, 2.2, ACCENT_AMBER, mode="linear")
+        self.q_knob = ProRotaryKnob(0.3, 12.0, 2.2, 2.2, ACCENT_AMBER, mode="linear")
         self.q_knob.valueChanged.connect(self._on_q_changed)
         q_hints = QHBoxLayout()
-        for t in ("0.5", "8.0"):
+        for t in ("0.3", "12.0"):
             lbl = QLabel(t)
             lbl.setObjectName("RangeHint")
             q_hints.addWidget(lbl)
@@ -1622,6 +1569,7 @@ class StudioDeEsserWidget(QWidget):
         rng_left.addWidget(rng_title)
         rng_left.addWidget(self.range_pill)
         rng_left.addStretch()
+        self._depth_controls = rng_left
 
         rng_right = QVBoxLayout()
         rng_right.setSpacing(1)
@@ -1656,7 +1604,7 @@ class StudioDeEsserWidget(QWidget):
         atk_lbl = QLabel("Attack (ms)")
         atk_lbl.setObjectName("ParamTitle")
         atk_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.attack_knob = ProRotaryKnob(0.1, 20.0, 1.5, 1.5, ACCENT_GREEN, mode="log")
+        self.attack_knob = ProRotaryKnob(0.05, 50.0, 1.5, 1.5, ACCENT_GREEN, mode="log")
         self.attack_knob.valueChanged.connect(self._on_attack_changed)
         self.attack_pill = EditableValuePill("1.5", ACCENT_GREEN, width=54)
         self.attack_pill.valueEdited.connect(self._on_attack_text)
@@ -1670,7 +1618,7 @@ class StudioDeEsserWidget(QWidget):
         rel_lbl = QLabel("Release (ms)")
         rel_lbl.setObjectName("ParamTitle")
         rel_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.release_knob = ProRotaryKnob(10.0, 300.0, 65.0, 65.0, ACCENT_GREEN, mode="log")
+        self.release_knob = ProRotaryKnob(1.0, 500.0, 65.0, 65.0, ACCENT_GREEN, mode="log")
         self.release_knob.valueChanged.connect(self._on_release_changed)
         self.release_pill = EditableValuePill("65", ACCENT_GREEN, width=54)
         self.release_pill.valueEdited.connect(self._on_release_text)
@@ -1713,6 +1661,7 @@ class StudioDeEsserWidget(QWidget):
         out_lay.addStretch()
         out_lay.addLayout(out_right)
         cell_time.root_lay.addWidget(out_sec, 1)
+        self._demo_output_section = out_sec
 
         bottom_row.addWidget(cell_time, 1)
         main_lay.addLayout(bottom_row, 4)
@@ -1768,10 +1717,38 @@ class StudioDeEsserWidget(QWidget):
             }}
         """)
 
+    def use_processor_controls(self) -> None:
+        self.graph._processor_controls = True
+        self._demo_detector_section.hide()
+        self._demo_output_section.hide()
+        self._mode_column.root_lay.addStretch(1)
+        self.btn_sidechain.setText("Wide-Band")
+        self.ratio_input = QDoubleSpinBox(self)
+        self.ratio_input.setRange(1.0, 12.0)
+        self.ratio_input.setDecimals(2)
+        self.ratio_input.setSingleStep(0.1)
+        self.ratio_input.setSuffix(":1")
+        self.ratio_input.setKeyboardTracking(False)
+        ratio_label = QLabel(I18N.tr("audio.fx.ratio", "Ratio"), self)
+        ratio_label.setObjectName("ParamTitle")
+        self._depth_controls.insertWidget(2, ratio_label)
+        self._depth_controls.insertWidget(3, self.ratio_input)
+        self.ratio_input.valueChanged.connect(self._on_ratio_changed)
+        self._refresh_all_views()
+
+    def _on_ratio_changed(self, ratio: float) -> None:
+        if self._updating:
+            return
+        self._current_state()["ratio"] = ratio
+        self.stateChanged.emit(self.get_state())
+
     def _refresh_all_views(self):
         self._updating = True
         st = self._current_state()
         en = bool(st["enabled"])
+        if hasattr(self, "ratio_input"):
+            st["filter_shape"] = "Bandpass"
+            st["output_gain"] = 0.0
 
         self._update_ab_and_listen_styles()
         self.power_switch.setChecked(en)
@@ -1811,11 +1788,15 @@ class StudioDeEsserWidget(QWidget):
         self.range_knob.setActive(en)
         self.range_pill.setText(f"{st['range']:.1f}")
         self.range_pill.setActive(en)
+        ratio_input = getattr(self, "ratio_input", None)
+        if ratio_input is not None:
+            with QSignalBlocker(ratio_input):
+                ratio_input.setValue(st.get("ratio", 4.0))
 
         # Timing & Output
         self.attack_knob.setValue(st["attack"])
         self.attack_knob.setActive(en)
-        self.attack_pill.setText(f"{st['attack']:.1f}")
+        self.attack_pill.setText(f"{st['attack']:.2f}")
         self.attack_pill.setActive(en)
 
         self.release_knob.setValue(st["release"])
@@ -1880,7 +1861,7 @@ class StudioDeEsserWidget(QWidget):
         self._on_freq_changed(val)
 
     def _on_q_changed(self, q: float):
-        val = max(0.5, min(8.0, round(q, 1)))
+        val = max(0.3, min(12.0, round(q, 1)))
         self._current_state()["q"] = val
         self._commit_change(self.qChanged, val)
 
@@ -1913,7 +1894,7 @@ class StudioDeEsserWidget(QWidget):
             pass
 
     def _on_attack_changed(self, atk: float):
-        val = max(0.1, min(20.0, round(atk, 1)))
+        val = max(0.05, min(50.0, round(atk, 2)))
         self._current_state()["attack"] = val
         self._commit_change(self.attackChanged, val)
 
@@ -1924,7 +1905,7 @@ class StudioDeEsserWidget(QWidget):
             pass
 
     def _on_release_changed(self, rel: float):
-        val = max(10.0, min(300.0, round(rel, 1)))
+        val = max(1.0, min(500.0, round(rel, 1)))
         self._current_state()["release"] = val
         self._commit_change(self.releaseChanged, val)
 
@@ -2036,7 +2017,7 @@ class StudioDeEsserWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def get_state(self) -> dict:
-        return copy.deepcopy(self._current_state())
+        return {"ratio": 4.0, **copy.deepcopy(self._current_state())}
 
     def set_state(self, state: dict):
         self._banks[self._active_bank] = {**default_deesser_state(), **copy.deepcopy(state)}

@@ -555,6 +555,16 @@ class EditControllerMixin:
                 return
             self._current_timeline_sequences[timeline_id] = full_sequence
 
+        previous = getattr(self.edit_page, "_current_timeline", None)
+        if getattr(previous, "timeline_id", None) != timeline_id:
+            mixer = getattr(self, "audio_mixer_panel", None)
+            close_effects = getattr(mixer, "close_effect_editors", None)
+            if callable(close_effects):
+                close_effects()
+            clip_dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
+            if clip_dialogs is not None:
+                clip_dialogs.close_all()
+
         # Reuse existing renderer if possible (avoids GPU thread crash on 2nd timeline)
         if self.timeline_preview_renderer is not None:
             # Update the renderer before EditPage requests the new playhead
@@ -3223,8 +3233,9 @@ class EditControllerMixin:
         if not isinstance(payload, dict):
             return
         pan = max(-1.0, min(1.0, float(payload.get("pan", 0.0))))
-        # §3.1: 自动化录制采集 pan
-        self._record_fader_sample(track_id, "pan", pan, fader_down=True)
+        # Cancelling the window restores playback without writing automation.
+        if not payload.get("_preview_rollback"):
+            self._record_fader_sample(track_id, "pan", pan, fader_down=True)
         mgr = self._get_mixer_audio_manager()
         if mgr is not None:
             try:
@@ -6353,31 +6364,18 @@ class EditControllerMixin:
             mgr.clip_effect_params_committed.connect(
                 self._on_edit_clip_effect_params_committed
             )
-            # 十款新 rack FX（FxParamDialog 分支）：拖动预览实时生效 +
-            # 关窗回滚引擎链（预览不落模型、不入撤销栈）
-            if hasattr(mgr, "clip_effect_preview"):
-                mgr.clip_effect_preview.connect(
-                    self._on_edit_clip_effect_preview
-                )
-                mgr.clip_effect_preview_finished.connect(
-                    self._on_edit_clip_effect_preview_finished
-                )
+            mgr.clip_effect_preview.connect(self._on_edit_clip_effect_preview)
+            mgr.clip_effect_preview_finished.connect(self._on_edit_clip_effect_preview_finished)
+            display_changed = getattr(self.edit_page, "timeline_display_changed", None)
+            if display_changed is not None:
+                display_changed.connect(mgr.sync_timeline)
             self._clip_audio_fx_dialog_mgr = mgr
         return mgr
 
     def _on_edit_effect_open_dialog_requested(
         self, clip_id: str, effect_id: str, effect_type: str,
     ) -> None:
-        """P-clip-FX: 「打开面板」按钮 → 打开 clip-level audio 效果独立对话框。
-
-        复用 mixer 的 8 个 dialog（StripEQDialog / ReverbDialog / ...），
-        通过 ClipAudioEffectDialogManager 适配 clip-level 的 dict 参数表示。
-
-        Args:
-            clip_id: 片段 ID
-            effect_id: 效果实例 ID
-            effect_type: mixer audio effect_type（strip_eq/reverb/...）
-        """
+        """Open the same effect design from the Mixer rack and Edit Inspector."""
         logger.debug(f"_on_edit_effect_open_dialog_requested: {clip_id}/{effect_id} ({effect_type})")
 
         if not hasattr(self, 'edit_page') or not self.edit_page._current_timeline:
@@ -6391,8 +6389,11 @@ class EditControllerMixin:
             return
 
         effect = clip.get_effect_by_id(effect_id)
-        if effect is None:
+        if effect is None or effect.effect_type != effect_type:
             logger.warning(f"Effect not found: {effect_id}")
+            return
+        track = timeline.get_track_by_id(clip.track_id)
+        if track is None or track.is_locked:
             return
 
         params_dict = dict(getattr(effect, "params", {}) or {})
@@ -6400,6 +6401,7 @@ class EditControllerMixin:
         clip_name = getattr(clip, "name", "") or clip_id
 
         mgr = self._get_clip_audio_effect_dialog_manager()
+        mgr.sync_timeline(timeline)
         mgr.open_dialog(
             effect_type=effect_type,
             clip_id=clip_id,
@@ -6408,10 +6410,12 @@ class EditControllerMixin:
             clip_name=clip_name,
             parent=self if getattr(self, "current_page", None) == "Mixer"
             else self.edit_properties_panel,
+            enabled=effect.is_enabled,
         )
 
     def _on_edit_clip_effect_params_committed(
         self, clip_id: str, effect_id: str, full_params: dict,
+        enabled: bool | None = None,
     ) -> None:
         """P-clip-FX: dialog committed → 批量更新 clip 效果参数（单步撤销）。
 
@@ -6439,6 +6443,9 @@ class EditControllerMixin:
             return
 
         track_id = clip.track_id
+        track = timeline.get_track_by_id(track_id)
+        if track is None or track.is_locked:
+            return
         old_params = dict(getattr(effect, "params", {}) or {})
 
         # 计算变化字段（新增或值不同）
@@ -6446,7 +6453,8 @@ class EditControllerMixin:
             (k, v) for k, v in full_params.items()
             if k not in old_params or old_params[k] != v
         ]
-        if not changes:
+        power_changed = enabled is not None and effect.is_enabled != enabled
+        if not changes and not power_changed:
             return  # 无变化（例如仅切换开关到原状态）
 
         _cmds = get_command_classes()
@@ -6456,6 +6464,11 @@ class EditControllerMixin:
         MacroCommand = _cmds.get("MacroCommand")
 
         sub_commands = []
+        if power_changed:
+            sub_commands.append(_cmds["SetEffectEnabledCommand"].create(
+                track_id=track_id, clip_id=clip_id, effect_id=effect_id,
+                new_enabled=enabled, old_enabled=effect.is_enabled,
+            ))
         for param_name, new_value in changes:
             old_value = old_params.get(param_name)
             sub_commands.append(UpdateEffectParamCommand.create(
@@ -6490,91 +6503,81 @@ class EditControllerMixin:
         self._resync_audio_after_effect_change()
 
         # 这里不重建属性面板（dialog 仍打开，重建会打断交互）。
+        dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
+        if dialogs is not None:
+            remaining = dialogs.previews_for(clip_id)
+            remaining.pop(effect_id, None)
+            current = self.edit_page._current_timeline
+            updated_clip = current.get_clip_by_id(clip_id) if current is not None else None
+            if remaining and updated_clip is not None:
+                self._update_clip_fx_audition(updated_clip, remaining)
 
-    def _clip_fx_preview_entries(self, clip: Any, effect_id: str,
-                                 override_params: Any) -> list:
-        """P-clip-FX：构建 clip 引擎链条目（指定实例参数可被预览 dict 覆盖）。
+    def _update_clip_fx_audition(
+        self, clip: Any, overrides: dict[str, tuple[dict, bool | None]],
+    ) -> None:
+        """Combine open dialog previews using the same chain builder as playback."""
+        from src.features.edit.core.audio_retime import animated_fx_sampler, clip_fx_entries
 
-        与 ``audio_retime.clip_fx_entries`` 同一过滤/排序/启用口径
-        （AUDIO_MIXER_EFFECT_TYPES、order 升序、is_enabled ∧ params.enabled），
-        但按 effect_id 精确匹配替换参数——供预览直送引擎使用。
-        """
-        from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
-        entries = []
-        for ef in sorted(getattr(clip, "effects", ()) or (),
-                         key=lambda e: getattr(e, "order", 0)):
-            etype = str(getattr(ef, "effect_type", "") or "")
-            if etype not in AUDIO_MIXER_EFFECT_TYPES:
-                continue
-            params = dict(getattr(ef, "params", None) or {})
-            if effect_id and str(getattr(ef, "effect_id", "")) == str(effect_id):
-                params = dict(override_params or {})
-            dsp_enabled = (bool(getattr(ef, "is_enabled", True))
-                           and bool(params.get("enabled", True)))
-            entries.append((etype, params, dsp_enabled))
-        return entries
+        mgr = self._get_mixer_audio_manager()
+        set_clip_fx = getattr(mgr, "set_clip_effects", None) if mgr else None
+        if not callable(set_clip_fx):
+            return
+
+        effects = []
+        for effect in clip.effects:
+            override = overrides.get(effect.effect_id)
+            if override is not None:
+                params, enabled = override
+                # While auditioning a control, keep unrelated keyframe lanes
+                # running. Restoring the model restores every lane.
+                animated = {
+                    key: curve for key, curve in effect.animated_params.items()
+                    if effect.params.get(key) == params.get(key)
+                }
+                effect = replace(
+                    effect, params=params, animated_params=animated,
+                    is_enabled=effect.is_enabled if enabled is None else enabled,
+                )
+            effects.append(effect)
+
+        entries = clip_fx_entries(effects) or None
+        sampler = animated_fx_sampler(effects)
+        try:
+            if sampler is None:
+                set_clip_fx(clip.clip_id, entries, track_id=clip.track_id)
+            else:
+                set_clip_fx(clip.clip_id, entries, track_id=clip.track_id, animated_sampler=sampler)
+        except (RuntimeError, TypeError, ValueError):
+            logger.debug("Clip effect audition failed for %s", clip.clip_id, exc_info=True)
 
     def _on_edit_clip_effect_preview(
         self, clip_id: str, effect_id: str, preview_params: dict,
+        enabled: bool | None = None,
     ) -> None:
-        """P-clip-FX（十款新 rack FX）：对话框拖动预览 → 直送引擎。
-
-        预览参数只进引擎（set_clip_effects），不写模型、不入撤销栈——
-        与机架面板的 fx_preview 语义一致（试听 == 调参所见）。任何失败
-        只降级为无预览，不得中断调参交互。
-        """
-        edit_page = getattr(self, "edit_page", None)
-        timeline = getattr(edit_page, "_current_timeline", None)
-        if timeline is None:
+        """Send temporary dialog parameters to playback without writing commands."""
+        timeline = getattr(getattr(self, "edit_page", None), "_current_timeline", None)
+        clip = timeline.get_clip_by_id(clip_id) if timeline is not None else None
+        if clip is None or clip.get_effect_by_id(effect_id) is None:
             return
-        clip = timeline.get_clip_by_id(clip_id)
-        if clip is None:
+        track = timeline.get_track_by_id(clip.track_id)
+        if track is None or track.is_locked:
             return
-        mgr = self._get_mixer_audio_manager()
-        set_clip_fx = getattr(mgr, "set_clip_effects", None) if mgr else None
-        if not callable(set_clip_fx):
-            return
-        entries = self._clip_fx_preview_entries(clip, effect_id, preview_params)
-        try:
-            set_clip_fx(clip.clip_id, entries, track_id=clip.track_id)
-        except TypeError:
-            try:  # 旧引擎签名无 track_id 关键字
-                set_clip_fx(clip.clip_id, entries)
-            except Exception:  # noqa: BLE001
-                logger.debug("clip fx preview apply failed", exc_info=True)
-        except Exception:  # noqa: BLE001
-            logger.debug("clip fx preview apply failed", exc_info=True)
+        dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
+        overrides = dialogs.previews_for(clip_id) if dialogs is not None else {}
+        overrides[effect_id] = (preview_params, enabled)
+        self._update_clip_fx_audition(clip, overrides)
 
     def _on_edit_clip_effect_preview_finished(
-        self, clip_id: str, effect_id: str,
+        self, clip_id: str, _effect_id: str,
     ) -> None:
-        """P-clip-FX：对话框关闭 → 引擎链回滚到模型状态。
-
-        丢弃未提交的预览参数（无副作用：提交路径已先落库再触发本信号，
-        模型状态即提交后的状态）。
-        """
-        edit_page = getattr(self, "edit_page", None)
-        timeline = getattr(edit_page, "_current_timeline", None)
-        if timeline is None:
-            return
-        clip = timeline.get_clip_by_id(clip_id)
+        """Restore the timeline values and any other open previews."""
+        timeline = getattr(getattr(self, "edit_page", None), "_current_timeline", None)
+        clip = timeline.get_clip_by_id(clip_id) if timeline is not None else None
         if clip is None:
             return
-        mgr = self._get_mixer_audio_manager()
-        set_clip_fx = getattr(mgr, "set_clip_effects", None) if mgr else None
-        if not callable(set_clip_fx):
-            return
-        # effect_id 传空 → 无覆盖，条目即模型全量状态；空列表 → None 清链
-        entries = self._clip_fx_preview_entries(clip, "", None) or None
-        try:
-            set_clip_fx(clip.clip_id, entries, track_id=clip.track_id)
-        except TypeError:
-            try:
-                set_clip_fx(clip.clip_id, entries)
-            except Exception:  # noqa: BLE001
-                logger.debug("clip fx preview revert failed", exc_info=True)
-        except Exception:  # noqa: BLE001
-            logger.debug("clip fx preview revert failed", exc_info=True)
+        dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
+        overrides = dialogs.previews_for(clip_id) if dialogs is not None else {}
+        self._update_clip_fx_audition(clip, overrides)
 
     def _resync_audio_after_effect_change(self) -> None:
         """P-clip-FX: effect 参数变化后重新同步音频引擎。

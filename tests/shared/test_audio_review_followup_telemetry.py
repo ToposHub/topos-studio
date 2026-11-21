@@ -95,11 +95,11 @@ def test_natural_gap_clears_five_open_fx_windows(qapp, prefill: bool) -> None:
         _write(thread, prefill)
         qapp.processEvents()
         assert all(window.isVisible() for window in windows)
-        assert strip._eq_dialog.master_strip._meter_db > -50.0
+        assert strip._eq_dialog.panel.master_strip._meter_db > -50.0
         assert strip._eq_dialog.eq_graph.has_spectrum()
-        assert strip._dynamics_dialog.meter_input._value_db > -50.0
-        assert strip._reverb_dialogs["R"].output_meter._meter_db > -50.0
-        assert strip._delay_dialogs["D"].output_meter._l_db > -50.0
+        assert strip._dynamics_dialog.panel.meter_input._value_db > -50.0
+        assert strip._reverb_dialogs["R"].panel.output_meter._meter_db > -50.0
+        assert strip._delay_dialogs["D"].panel.output_meter._l_db > -50.0
 
         _write(thread, prefill)
         qapp.processEvents()
@@ -109,13 +109,13 @@ def test_natural_gap_clears_five_open_fx_windows(qapp, prefill: bool) -> None:
             assert events[-1][tid]["gr"] == events[-1][tid]["sc"] == {}
             assert events[-1][tid]["taps"] == {}
             assert events[-1][tid]["spectrum"] is None
-        assert strip._eq_dialog.master_strip._meter_db == -60.0
+        assert strip._eq_dialog.panel.master_strip._meter_db == -60.0
         assert not strip._eq_dialog.eq_graph.has_spectrum()
-        assert strip._dynamics_dialog.meter_input._value_db <= -55.0
-        assert strip._dynamics_dialog.meter_output._value_db <= -55.0
-        assert strip._dynamics_dialog.meter_gr_comp._value_db == 0.0
-        assert strip._reverb_dialogs["R"].output_meter._meter_db == -60.0
-        assert strip._delay_dialogs["D"].output_meter._l_db == -55.0
+        assert strip._dynamics_dialog.panel.meter_input._value_db <= -55.0
+        assert strip._dynamics_dialog.panel.meter_output._value_db <= -55.0
+        assert strip._dynamics_dialog.panel.meter_gr_comp._value_db == 0.0
+        assert strip._reverb_dialogs["R"].panel.output_meter._meter_db == -60.0
+        assert strip._delay_dialogs["D"].panel.output_meter._l_db == -55.0
         assert all(window.isVisible() for window in windows)
     finally:
         manager.cleanup()
