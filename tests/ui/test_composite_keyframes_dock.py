@@ -20,12 +20,14 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from src.features.composite.core.node_engine import NodeGraph
+from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.nodes.transform_node import TransformNode
 from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.constant_node import ConstantNode
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.keyframes_panel import KeyframesPanel
+from src.features.composite.ui.node_properties_panel import NodePropertiesPanel
 from src.features.composite.ui.keyframes_model import (
     KeyframesModel, CompositeTimelineState)
 
@@ -237,6 +239,137 @@ def test_node_transform_delete_keeps_material_layer_and_source(qapp):
     page.undo()
     assert g.get_node(second_root) is not None
     assert g.get_layer(second_layer).root_node_id == second_root
+    page.redo()
+    page._node_editor._add_new_node("transform", QPointF(100, 100), second.id)
+    new_root = g.get_layer(second_layer).root_node_id
+    assert new_root not in (second.id, second_root)
+    assert (new_root, "result", merge_id, "A") in page._graph_cable_keys()
+
+
+@pytest.mark.parametrize("method", ["menu", "toolbar", "drop", "input_first", "output_first"])
+def test_reinserting_transform_restores_layer_controls(qapp, method):
+    page = CompositePage()
+    panel = KeyframesPanel()
+    properties = NodePropertiesPanel()
+    page.set_properties_panel(properties)
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    editor = page._node_editor
+    page._evaluate_graph = MagicMock()
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="source"))
+    side = TransformNode(node_id="side")
+    graph.add_node(side)
+    layer_id = controller.add_media_layer("Footage", "source")
+    original_id = graph.get_layer(layer_id).root_node_id
+    merge = controller.layer_merge_node(layer_id)
+    graph.connect("source", "result", side.id, "image")
+    editor.build_from_graph(graph)
+    page.set_keyframes_panel(panel)
+    panel.set_view_mode("layers")
+    try:
+        assert controller.main_stack().version == BOTTOM_UP_LAYER_STACK_VERSION
+        assert editor._actions.delete_node(original_id)
+        assert graph.get_layer(layer_id).root_node_id == "source"
+
+        if method == "menu":
+            editor._add_new_node("transform", QPointF(100, 100), "source")
+        elif method == "toolbar":
+            editor.select_node("source")
+            page._add_node_by_type(TransformNode, (100, 100))
+        else:
+            node = editor._actions.add_node("transform", 100, 100)
+            assert node is not None
+            if method == "drop":
+                editor._move_start_positions = {node.id: QPointF(100, 100)}
+                editor._drop_insert_nearest_point = QPointF(100, 200)
+                editor._drop_insert_connection = next(
+                    value for value in editor._connection_items if value[3:] == (merge.id, "A"))
+                editor._execute_connection_insertion()
+                assert not editor._move_start_positions
+            else:
+                cables = [("source", "result", node.id, "image"),
+                          (node.id, "result", merge.id, "A")]
+                if method == "output_first":
+                    cables.reverse()
+                assert editor._actions.connect(*cables[0])
+                assert graph.get_layer(layer_id).root_node_id == "source"
+                assert editor._actions.connect(*cables[1])
+
+        root_id = graph.get_layer(layer_id).root_node_id
+        assert root_id not in ("source", side.id, original_id)
+        assert ("source", "result", side.id, "image") in page._graph_cable_keys()
+        assert (root_id, "result", merge.id, "A") in page._graph_cable_keys()
+        assert any(row.layer_id == layer_id and row.node_id == root_id
+                   and row.param_name == "translate_x" for row in panel._model.rows)
+
+        page.undo()
+        assert graph.get_layer(layer_id).root_node_id == "source"
+        assert not any(row.layer_id == layer_id and row.node_id == root_id
+                       for row in panel._model.rows)
+        if method in {"menu", "toolbar"}:
+            assert graph.get_node(root_id) is None
+        page.redo()
+        assert graph.get_layer(layer_id).root_node_id == root_id
+
+        panel.parameter_changed.emit(root_id, "translate_x", 123.0)
+        page._commit_pending_edit_transactions()
+        assert graph.get_node(root_id).parameters["translate_x"] == 123.0
+        page.load_composite_data(page.get_composite_data())
+        assert page.node_graph.get_layer(layer_id).source_node_id == "source"
+        assert page.node_graph.get_layer(layer_id).root_node_id == root_id
+        assert page.node_graph.get_node(root_id).parameters["translate_x"] == 123.0
+        assert any(row.layer_id == layer_id and row.node_id == root_id
+                   and row.param_name == "translate_x" for row in panel._model.rows)
+    finally:
+        page.close()
+        panel.close()
+        properties.close()
+
+
+@pytest.mark.parametrize("reason", ["other_layer", "locked", "managed_conflict"])
+def test_refused_transform_drop_preserves_existing_cables(qapp, reason):
+    page = CompositePage()
+    page._evaluate_graph = MagicMock()
+    graph = page.node_graph
+    editor = page._node_editor
+    controller = page._layer_stack_controller
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="first"))
+    graph.add_node(ConstantNode(node_id="second"))
+    first_layer = controller.add_media_layer("First", "first")
+    second_layer = controller.add_media_layer("Second", "second")
+    root_id = graph.get_layer(second_layer).root_node_id
+    merge_id = controller.layer_merge_node(second_layer).id
+    if reason == "other_layer":
+        transform_id = graph.get_layer(first_layer).root_node_id
+    else:
+        transform_id = "candidate"
+        graph.add_node(TransformNode(node_id=transform_id))
+        if reason == "locked":
+            assert controller.set_layer_locked(second_layer, True)
+        else:
+            graph.connect("first", "result", "out", "image")  # Conflict beyond the target wire.
+    editor.build_from_graph(graph)
+    try:
+        edges = page._graph_cable_keys()
+        editor._move_start_positions = {transform_id: QPointF(100, 100)}
+        editor._drop_insert_connection = next(
+            value for value in editor._connection_items if value[3:] == (merge_id, "A"))
+        editor._execute_connection_insertion()
+        assert editor._drop_insert_connection is None
+        assert page._graph_cable_keys() == edges
+        assert graph.get_layer(second_layer).root_node_id == root_id
+        if reason == "locked":
+            nodes = set(graph.nodes)
+            editor._add_new_node("transform", QPointF(100, 100), root_id)
+            assert set(graph.nodes) == nodes
+            assert not editor._actions.connect(transform_id, "result", merge_id, "A")
+            assert page._graph_cable_keys() == edges
+    finally:
+        page.close()
 
 
 # ── timeline state ──────────────────────────────────────────────────────

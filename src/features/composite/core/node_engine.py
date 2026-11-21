@@ -1343,6 +1343,48 @@ class NodeGraph:
 
     # ── Connection management ──
 
+    def would_create_connection_cycle(self, src_node_id: str, dst_node_id: str) -> bool:
+        """Read-only cycle check for interactive connection feedback."""
+        with self._lock:
+            return self._would_create_cycle(src_node_id, dst_node_id)
+
+    def edit_connections(self, removed: tuple[Connection, ...],
+                         added: tuple[Connection, ...], *,
+                         positions: tuple[int, ...] | None = None) -> bool:
+        """Validate an entire cable edit before publishing any of its edges."""
+        with self._lock:
+            if any(edge not in self.connections for edge in removed):
+                return False
+            proposed = [edge for edge in self.connections if edge not in removed]
+            for index, edge in enumerate(added):
+                if edge in proposed:
+                    continue
+                source = self.nodes.get(edge.src_node_id)
+                destination = self.nodes.get(edge.dst_node_id)
+                output = source.get_output_port(edge.src_port_name) if source else None
+                input_port = destination.get_input_port(edge.dst_port_name) if destination else None
+                if output is None or input_port is None or output.data_type != input_port.data_type:
+                    return False
+                occupied = sum(existing.dst_node_id == edge.dst_node_id
+                               and existing.dst_port_name == edge.dst_port_name
+                               for existing in proposed)
+                if input_port.max_connections > 0 and occupied >= input_port.max_connections:
+                    return False
+                if self._would_create_cycle(edge.src_node_id, edge.dst_node_id, proposed):
+                    return False
+                if positions is None:
+                    proposed.append(edge)
+                else:
+                    proposed.insert(positions[index], edge)
+            if proposed == self.connections:
+                return True
+            self.connections = proposed
+            for node_id in {edge.dst_node_id for edge in (*removed, *added)}:
+                self._mark_dirty_downstream(node_id)
+            self._generation += 1
+            self._topology_revision += 1
+            return True
+
     def connect(self, src_node_id: str, src_port_name: str,
                 dst_node_id: str, dst_port_name: str) -> bool:
         """Connect an output port to an input port.
@@ -2747,7 +2789,8 @@ class NodeGraph:
 
     # ── Helpers ──
 
-    def _would_create_cycle(self, src_node_id: str, dst_node_id: str) -> bool:
+    def _would_create_cycle(self, src_node_id: str, dst_node_id: str,
+                            connections: Optional[List[Connection]] = None) -> bool:
         """Check if adding src→dst would create a cycle (can dst reach src?)."""
         if src_node_id == dst_node_id:
             return True
@@ -2755,7 +2798,7 @@ class NodeGraph:
         # AUD-5110: index connections once — the previous full
         # ``self.connections`` scan per visited node was O(V·E).
         adjacency: Dict[str, List[str]] = {}
-        for conn in self.connections:
+        for conn in self.connections if connections is None else connections:
             adjacency.setdefault(conn.src_node_id, []).append(conn.dst_node_id)
 
         visited = set()

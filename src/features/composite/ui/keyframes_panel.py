@@ -112,6 +112,7 @@ class KeyframesPanel(QWidget):
     node_selected = pyqtSignal(str)
     # Emitted when the user selects a Layer-mode row.
     layer_selected = pyqtSignal(str)
+    reveal_layer_node_requested = pyqtSignal(str)
     # Emitted when Delete/Backspace is pressed on a selected Layer row.
     layer_delete_requested = pyqtSignal(str)
     layer_edit_committed = pyqtSignal(str, str)
@@ -1120,6 +1121,7 @@ class KeyframesPanel(QWidget):
         self._tree_view.layer_disclosure_requested.connect(self._restore_layer_disclosure)
         self._tree_view.layer_name_edited.connect(self._rename_layer_from_timeline)
         self._tree_view.layer_menu_requested.connect(self._open_layer_menu)
+        self._timeline_view.layer_menu_requested.connect(self._open_layer_menu)
         self._tree_view.layer_parent_menu_requested.connect(self._open_layer_parent_menu)
         self._tree_view.layer_delete_requested.connect(
             self.layer_delete_requested.emit)
@@ -3231,6 +3233,26 @@ class KeyframesPanel(QWidget):
         self._sync_layer_mode_actions()
         self.layer_selected.emit(layer_id)
 
+    def reveal_layer(self, layer_id: str) -> bool:
+        """Select and scroll to a layer after an explicit jump from the graph."""
+        self.set_view_mode("timeline")
+        self.set_layer_view_mode(KeyframesModel.VIEW_MODE_LAYERS)
+        row_id = f"layer:{layer_id}"
+        if (self._search_edit.text()
+                and not any(row.row_id == row_id for row in self._model.visible_rows())):
+            self._search_edit.clear()
+        for index, row in enumerate(self._model.visible_rows()):
+            if row.row_id == row_id:
+                self._on_layer_selected(layer_id)
+                top = index * KEYFRAMES_ROW_H
+                height = self._timeline_view.height() - self._timeline_view.ruler_height()
+                current = self._timeline_view._scroll_y
+                self._set_vertical_scroll(max(top + KEYFRAMES_ROW_H - height,
+                                              min(current, top)))
+                self._tree_view.setFocus(Qt.FocusReason.OtherFocusReason)
+                return True
+        return False
+
     def _layer_insert_index(self) -> int:
         stack = self._layer_stack_controller.main_stack()
         if stack is not None and self._selected_layer_id in stack.layer_ids:
@@ -3291,6 +3313,9 @@ class KeyframesPanel(QWidget):
                                    lambda: self._commit_layer_edit(
                                        controller.duplicate_layer(layer_id), layer_id))
         duplicate.setEnabled(editable)
+        if controller.graph.get_node(layer.root_node_id) is not None:
+            menu.addAction(I18N.tr("composite.layer_timeline.reveal_node", "Show in Node Graph"),
+                           lambda: self.reveal_layer_node_requested.emit(layer.root_node_id))
         if editable and controller.can_prepare_layer_transform(layer_id):
             menu.addAction(I18N.tr("keyframes.layer_prepare_transform", "Enable Layer Transform"),
                            lambda: self._commit_layer_edit(
@@ -3347,6 +3372,18 @@ class KeyframesPanel(QWidget):
         parents.setEnabled(editable and (bool(layer.parent_layer_id)
                            or self._parent_binding_supported(layer.root_node_id)))
         mattes.setEnabled(editable)
+        track = self._model.track_for(f"layer:{layer_id}")
+        if track is not None and track.range_bar is not None:
+            bar = track.range_bar
+            timing = menu.addMenu(I18N.tr("composite.layer_timeline.timing", "Layer Timing"))
+            timing.addAction(I18N.tr("composite.layer_timeline.goto_in", "Go to In Point")
+                             + f"  ({bar.start_frame})",
+                             lambda: self.seek_to_frame(bar.start_frame))
+            timing.addAction(I18N.tr("composite.layer_timeline.goto_out", "Go to Out Point")
+                             + f"  ({bar.end_frame})",
+                             lambda: self.seek_to_frame(bar.end_frame))
+            timing.addAction(I18N.tr("composite.layer_timeline.set_work_area", "Set Work Area to Layer"),
+                             lambda: self.set_play_range(bar.start_frame, bar.end_frame))
         menu.addSeparator()
         label = menu.addAction(I18N.tr("keyframes.layer_label_color", "Label Color…"),
                                lambda: self._choose_layer_color(layer))

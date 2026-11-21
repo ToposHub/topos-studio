@@ -48,6 +48,7 @@
 | `vault_complete_plan.md` | Vault AI 素材库子系统的唯一真相源（架构 + 计划 + 参考） |
 | `topos_color_professional_nle_performance_master_plan_2026-09-15.md` | 专业剪辑性能总计划（B/T/P 编号体系，收敛各性能线） |
 | `composite_pro_parity_gap_plan_2026-10-13.md` | 合成页对标 Nuke/Fusion/AE 差距审计与补齐计划（CP-001…CP-075 任务台账，勾选制） |
+| [图层与节点实施计划](plans/2026-11-22-composite-layer-node-implementation.md) | 图层优先合成工作流的现有交互、后端依赖、实施步骤和验收方法 |
 | `edit_page_fifth_audit_optimization_plan_2026-10-20.md` | 剪辑页第五轮全功能复查：22 项 E01–E22 问题、证据与分批优化计划（`audit/2026-10-20-edit-fifth-review/`） |
 | `edit_page_fifth_audit_fixes_2026-10-20.md` | 第五轮 E01–E22 修复记录：A/B/C 三批全部修复、13 个新回归文件、接线门禁与保留边界 |
 

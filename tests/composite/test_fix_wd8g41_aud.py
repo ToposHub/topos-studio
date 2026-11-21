@@ -23,8 +23,7 @@ Covers:
   * AUD-9704 — set_state validates numeric fields from the project JSON
                and falls back to defaults instead of raising
   * AUD-9705 — A/B snapshot probes glIsTexture only after makeCurrent
-  * AUD-9800 — _would_create_cycle walks the scene's ConnectionItems
-               (PortItem has no _connections list)
+  * AUD-9800 — staged cable edits reject cycles in the full node graph
   * AUD-9905 — curve samplers clip while sampling (window-bounded cost)
                with bit-identical output to the old generate-then-filter
   * AUD-9906 — evaluator unavailability flags has_error (no silent
@@ -52,7 +51,6 @@ pytestmark = pytest.mark.composite_core
 
 from PyQt6.QtCore import QEvent, QPointF, QPoint, Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QGraphicsRectItem, QGraphicsScene
 
 from src.features.composite.ui.graph_model import (
     GraphPoint,
@@ -514,74 +512,36 @@ class TestAbSnapshotContextOrder:
             "(AUD-9705)")
 
 
-# ── AUD-9800 (connection_item cycle guard) ─────────────────────────────
-
-
-class _GraphStub:
-    def __init__(self):
-        self._node_groups = {}
+# ── AUD-9800 (cable cycle guard) ──────────────────────────────────────
 
 
 class TestCycleDetection:
-    def _build_chain(self):
-        """Scene with nodes A→B→C connected; plus a dragged connection."""
-        from src.features.composite.ui.connection_item import ConnectionItem
-        from src.features.composite.ui.port_item import PortItem
+    @pytest.mark.parametrize(("old_pair", "new_pair", "allowed"), [
+        (("C", "D"), ("C", "A"), False),
+        (("A", "B"), ("A", "D"), True),
+        (("D", "A"), ("B", "A"), False),
+    ])
+    def test_aud9800_cycle_guard_uses_proposed_graph(self, old_pair, new_pair, allowed):
+        from src.features.composite.core.node_engine import Connection, NodeGraph
+        from src.features.composite.nodes.transform_node import TransformNode
 
-        scene = QGraphicsScene()
-        nodes = {}
-        ports = {}
+        graph = NodeGraph()
         for name in ("A", "B", "C", "D"):
-            node = QGraphicsRectItem(0, 0, 10, 10)
-            scene.addItem(node)
-            nodes[name] = node
-            ports[(name, "out")] = PortItem(
-                "out", "output", "image", parent=node)
-            ports[(name, "in")] = PortItem(
-                "in", "input", "image", parent=node)
-
-        def connect(src, dst):
-            conn = ConnectionItem(
-                ports[(src, "out")], ports[(dst, "in")], "image")
-            scene.addItem(conn)
-            return conn
-
-        connect("A", "B")
-        connect("B", "C")
-        return scene, nodes, ports, connect
-
-    def test_aud9800_cycle_detected_when_closing_loop(self, qapp):
-        scene, nodes, ports, connect = self._build_chain()
-        dragged = connect("C", "A")  # would close A→B→C→A
-        dragged._is_reconnecting = True
-        dragged._reconnect_src = False  # dragging the destination end
-        assert dragged._would_create_cycle(ports[("A", "in")]) is True
-
-    def test_aud9800_no_cycle_for_acyclic_target(self, qapp):
-        scene, nodes, ports, connect = self._build_chain()
-        dragged = connect("A", "D")
-        dragged._is_reconnecting = True
-        dragged._reconnect_src = False
-        assert dragged._would_create_cycle(ports[("D", "in")]) is False
-
-    def test_aud9800_can_reconnect_rejects_cyclic_target(self, qapp):
-        scene, nodes, ports, connect = self._build_chain()
-        dragged = connect("C", "A")
-        dragged._is_reconnecting = True
-        dragged._reconnect_src = False
-        # Same-node, type and direction checks all pass; the cycle guard
-        # must be the reason the reconnect is refused.
-        assert dragged._can_reconnect(ports[("A", "in")]) is False
-
-    def test_aud9800_direction_follows_disconnect_mode(self, qapp):
-        scene, nodes, ports, connect = self._build_chain()
-        dragged = connect("D", "A")
-        # Alt+disconnect dragging the SOURCE end onto B.out: the potential
-        # new edge is B.out → A.in. DFS starts at the destination (A) and
-        # reaches B through the existing A→B edge → cycle.
-        dragged._is_reconnecting = False
-        dragged._disconnect_src = True
-        assert dragged._would_create_cycle(ports[("B", "out")]) is True
+            graph.add_node(TransformNode(node_id=name))
+        old = Connection(old_pair[0], "result", old_pair[1], "image")
+        new = Connection(new_pair[0], "result", new_pair[1], "image")
+        assert graph.connect("A", "result", "B", "image")
+        assert graph.connect("B", "result", "C", "image")
+        if old not in graph.connections:
+            assert graph.connect(old.src_node_id, old.src_port_name,
+                                 old.dst_node_id, old.dst_port_name)
+        before = list(graph.connections)
+        assert graph.edit_connections((old,), (new,)) is allowed
+        if allowed:
+            assert old not in graph.connections
+            assert new in graph.connections
+        else:
+            assert graph.connections == before
 
 
 # ── AUD-9905 (window-bounded sampling) ──────────────────────────────────
@@ -710,6 +670,11 @@ class TestBuildGraphSeriesValidation:
 
 
 # ── AUD-9918 / AUD-9919 (group command snapshots) ───────────────────────
+
+
+class _GraphStub:
+    def __init__(self):
+        self._node_groups = {}
 
 
 class TestGroupCommandSnapshots:

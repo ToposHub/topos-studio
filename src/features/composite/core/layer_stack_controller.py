@@ -24,6 +24,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 try:
@@ -56,7 +57,8 @@ from .layer_model import (
 )
 from .layer_stack_compiler import (
     LayerStackCompiler, CompileChange, CompileResult,
-    MERGE_NODE_TYPE,
+    MERGE_NODE_TYPE, MERGE_PORT_FOREGROUND, MERGE_PORT_BACKGROUND,
+    OUTPUT_INPUT_PORT,
 )
 from .layer_stack_validator import LayerStackValidator
 from .layer_provenance import (
@@ -1009,6 +1011,148 @@ class LayerStackController(QObject if _HAVE_QT else object):
         except Exception:
             self._restore(before)
             raise
+
+    def layer_transform_insertion_target(
+            self, root_id: str) -> Optional[tuple[str, str, str]]:
+        """Find the primary compositing input of a uniquely owned layer root."""
+        layers = self.layers_map()
+        owners = [layer for layer in layers.values() if layer.root_node_id == root_id]
+        if len(owners) != 1:
+            return None
+        layer = owners[0]
+        stack = self._stack_for_layer(layer.layer_id)
+        if (stack is None or not stack.managed or not layer.managed
+                or layer.layer_type in {LAYER_TYPE_PRECOMP, LAYER_TYPE_3D}):
+            return None
+        if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION:
+            merge = self.layer_merge_node(layer.layer_id)
+            if merge is not None:
+                return layer.layer_id, merge.id, MERGE_PORT_FOREGROUND
+            return None
+
+        matte_ids = {layers[lid].track_matte_layer_id for lid in stack.layer_ids if lid in layers}
+        visible = [lid for lid in stack.layer_ids if lid in layers
+                   and layers[lid].enabled and lid not in matte_ids
+                   and self.graph.get_node(layers[lid].root_node_id) is not None]
+        if any(layers[lid].solo for lid in stack.layer_ids if lid in layers):
+            visible = [lid for lid in visible if layers[lid].solo]
+        if layer.layer_id not in visible:
+            return None
+        merges = stack.generated_merge_node_ids
+        index = visible.index(layer.layer_id)
+        if not merges and len(visible) == 1:
+            return layer.layer_id, stack.output_node_id, OUTPUT_INPUT_PORT
+        if index == 0 and merges:
+            return layer.layer_id, merges[0], MERGE_PORT_FOREGROUND
+        if 0 < index <= len(merges):
+            return layer.layer_id, merges[index - 1], MERGE_PORT_BACKGROUND
+        return None
+
+    def layer_transform_binding(self, edge: tuple[str, str, str, str]
+                                ) -> Optional[tuple[str, str, tuple[str, str]]]:
+        """Check whether a pending cable completes a managed Transform splice."""
+        src_id, src_port, dst_id, dst_port = edge
+        source = self.graph.get_node(src_id)
+        destination = self.graph.get_node(dst_id)
+        if source is None or destination is None:
+            return None
+        if source.node_type == "transform" and src_port == "result":
+            image = next((item for item in self.graph.get_input_connections(src_id)
+                          if item.dst_port_name == "image"), None)
+            target = self.layer_transform_insertion_target(image.src_node_id) if image else None
+            if target is not None and target[1:] == (dst_id, dst_port):
+                return target[0], src_id, target[1:]
+        if destination.node_type == "transform" and dst_port == "image":
+            target = self.layer_transform_insertion_target(src_id)
+            if target is not None and any(
+                    (item.dst_node_id, item.dst_port_name) == target[1:] and item.src_port_name == "result"
+                    for item in self.graph.get_output_connections(dst_id)):
+                return target[0], dst_id, target[1:]
+        return None
+
+    def is_locked_layer_transform_target(self, dst_id: str, dst_port: str) -> bool:
+        """Protect the layer's output slot even before a Transform has an input."""
+        for layer in self.graph.get_all_layers():
+            if layer.locked and self.layer_transform_insertion_target(layer.root_node_id) == (
+                    layer.layer_id, dst_id, dst_port):
+                return True
+        return False
+
+    def adopt_wired_layer_transform(self, layer_id: str, transform_id: str,
+                                   target: tuple[str, str]) -> bool:
+        """Update the layer to use its already-connected Transform."""
+        return self.adopt_wired_layer_effect(layer_id, transform_id, "result", target)
+
+    def adopt_wired_layer_effect(self, layer_id: str, effect_id: str, output_port: str,
+                                 target: tuple[str, str]) -> bool:
+        """Promote a wired effect to the layer root after checking the layer projection."""
+        layer = self.graph.get_layer(layer_id)
+        stack = self._stack_for_layer(layer_id)
+        effect = self.graph.get_node(effect_id)
+        if layer is None or layer.locked or stack is None or effect is None:
+            return False
+        if not effect.supports_parent_transform and (
+                layer.parent_layer_id or any(other.parent_layer_id == layer_id
+                                             for other in self.graph.get_all_layers())):
+            return False
+        if (stack.version < BOTTOM_UP_LAYER_STACK_VERSION and layer.opacity != 1.0
+                and "opacity" not in effect.parameters and not effect.supports_layer_opacity):
+            return False
+        dst_id, dst_port = target
+        if any(other_id != layer_id for other_id in self.trace_layer_ids_for_node(effect_id)):
+            return False
+        updated = replace(layer, root_node_id=effect_id,
+                          source_node_id=layer.source_node_id or layer.root_node_id)
+        layers = self.layers_map()
+        layers[layer_id] = updated
+        result = self.compiler.compile(stack, layers)
+        if not result.ok or any(
+                change.kind == "disconnect"
+                and (change.src_node_id, change.src_port_name,
+                     change.dst_node_id, change.dst_port_name) == (effect_id, output_port, dst_id, dst_port)
+                for change in result.changes):
+            return False
+        self.graph.upsert_layer(stack.stack_id, updated)
+        # A cable edit may leave other parts of the graph deliberately
+        # disconnected. Only project changes that follow from this new root.
+        matte_inputs = {change.dst_node_id for change in result.changes
+                        if change.kind == "connect" and change.src_node_id == effect_id
+                        and change.dst_port_name == "mask"}
+        self._apply_changes([
+            change for change in result.changes
+            if change.src_node_id == effect_id or change.node_id == effect_id
+            or (change.src_port_name == "__parent__" and change.dst_port_name == effect_id)
+            or (change.kind == "disconnect" and change.src_node_id == layer.root_node_id
+                and change.dst_port_name == "mask" and change.dst_node_id in matte_inputs)
+        ])
+        self._clear_previous_layer_parent(layer)
+        self.emit_changed(stack.stack_id)
+        return True
+
+    def splice_layer_transform(self, layer_id: str, root_id: str, root_port: str,
+                               transform_id: str, target: tuple[str, str]) -> bool:
+        """Insert an existing node and roll back its cables if adoption fails."""
+        in_edge = (root_id, root_port, transform_id, "image")
+        already_connected = any(item.src_node_id == root_id and item.src_port_name == root_port
+                                and item.dst_port_name == "image"
+                                for item in self.graph.get_input_connections(transform_id))
+        if not already_connected and not self.graph.connect(*in_edge):
+            return False
+        out_edge = (transform_id, "result", *target)
+        if self.graph.connect(*out_edge):
+            if self.adopt_wired_layer_transform(layer_id, transform_id, target):
+                return True
+            self.graph.connect(root_id, root_port, *target)
+        if not already_connected:
+            self.graph.disconnect(*in_edge)
+        return False
+
+    def _clear_previous_layer_parent(self, layer: Layer) -> None:
+        previous = self.graph.get_node(layer.root_node_id)
+        parent = self.graph.get_layer(layer.parent_layer_id) if layer.parent_layer_id else None
+        if (previous is not None and parent is not None
+                and previous.parent_id == parent.root_node_id):
+            self.graph.set_node_parent(previous.id, None)
 
     def add_node_to_layer(self, layer_id: str, node_id: str,
                           description: str = "") -> bool:
