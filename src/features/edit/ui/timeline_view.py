@@ -101,6 +101,9 @@ from src.features.edit.core.timeline_v2 import (
 )
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.project import MediaAsset, get_media_type
+from src.features.edit.core.library_reference import (
+    LIBRARY_REFERENCE_MIME, deserialize_reference, excerpt_frame_range, source_matches,
+)
 from src.features.edit.core.clip_params import SpeedParams
 from src.features.edit.core.source_drag_payload import (
     MIME_TYPE_SOURCE_CLIP,
@@ -266,6 +269,7 @@ from src.shared.ui.style_sheet import (
     COMPACT_HORIZONTAL_SCROLLBAR_STYLE,
     UI_FONT_FAMILIES,
     UI_MONO_FONT_FAMILIES,
+    timeline_timecode_font,
 )
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.format_registry import is_media
@@ -452,10 +456,7 @@ class _TimelineTimecodeLabel(QLabel):
         # Match Topos typography while fixing digit positions.
         # The theme may override QLabel.font(), so paint with this font
         # explicitly rather than the label's inherited proportional metrics.
-        self._display_font = QFont(QApplication.font())
-        self._display_font.setStyle(QFont.Style.StyleNormal)
-        self._display_font.setPixelSize(22)
-        self._display_font.setWeight(QFont.Weight.Medium)
+        self._display_font = timeline_timecode_font()
         metrics = QFontMetricsF(self._display_font)
         self._digit_width = math.ceil(max(metrics.horizontalAdvance(ch) for ch in "0123456789"))
         self._separator_width = math.ceil(max(metrics.horizontalAdvance(ch) for ch in ":;"))
@@ -16809,6 +16810,16 @@ class TimelineView(QGraphicsView):
                 event.ignore()
                 return
 
+            reference = None
+            if mime_data.hasFormat(LIBRARY_REFERENCE_MIME):
+                reference = deserialize_reference(
+                    bytes(mime_data.data(LIBRARY_REFERENCE_MIME)),
+                    file_paths[0] if len(file_paths) == 1 else "",
+                )
+                if reference is None:
+                    event.ignore()
+                    return
+
             logger.debug(f"Drag enter: received {len(file_paths)} file paths from URLs")
 
             # A user may start by dropping a Finder file directly on the
@@ -16828,10 +16839,15 @@ class TimelineView(QGraphicsView):
             self._drag_file_paths = file_paths  # Store paths for later import
             for path in file_paths:
                 asset = self._project.get_asset_by_path(path)
+                if reference is not None and reference.get("start_seconds") is not None:
+                    fps = float(self._timeline.fps) if self._timeline is not None else EMPTY_TIMELINE_FPS
+                    duration = max(1, round((reference["end_seconds"] - reference["start_seconds"]) * fps))
+                else:
+                    duration = self._get_asset_duration_frames(asset) if asset else None
                 self._drag_file_previews.append((
                     asset.display_name if asset else Path(path).name,
                     asset.media_type if asset else get_media_type(path),
-                    self._get_asset_duration_frames(asset) if asset else None,
+                    duration,
                 ))
             self._drag_transition_type = None
 
@@ -17713,6 +17729,15 @@ class TimelineView(QGraphicsView):
         from src.features.files.import_job import dedupe_paths
 
         paths = dedupe_paths(paths)
+        reference = None
+        mime = event.mimeData()
+        if mime.hasFormat(LIBRARY_REFERENCE_MIME):
+            reference = deserialize_reference(
+                bytes(mime.data(LIBRARY_REFERENCE_MIME)), paths[0] if len(paths) == 1 else "")
+            if reference is None or not source_matches(paths[0], reference):
+                self.status_message_requested.emit("源素材已变更或离线，请重新选择。")
+                event.ignore()
+                return
         subtitle_paths = [path for path in paths if self._is_subtitle_path(path)]
         if subtitle_paths:
             if len(subtitle_paths) != len(paths):
@@ -17764,6 +17789,8 @@ class TimelineView(QGraphicsView):
             "frame": self._calculate_insert_frame(drop.frame),
             "sequence_revision": int(getattr(self._timeline, "revision", 0))
             if self._timeline is not None else -1,
+            "sequence_id": getattr(self._timeline, "timeline_id", None),
+            "library_reference": reference,
         }
         self._external_job_id = self._external_import_runner.start(
             paths, project_existing_paths(self._project))
@@ -17865,7 +17892,9 @@ class TimelineView(QGraphicsView):
             self.status_message_requested.emit("工程已切换，导入结果作废")
             return
         timeline_revision = int(getattr(self._timeline, "revision", 0)) if self._timeline is not None else -1
-        if timeline_revision != target["sequence_revision"]:
+        if timeline_revision != target["sequence_revision"] or (
+            "sequence_id" in target and getattr(self._timeline, "timeline_id", None) != target["sequence_id"]
+        ):
             self.status_message_requested.emit("时间线已变化，导入结果作废，请重新拖入")
             return
         track = None
@@ -17879,7 +17908,21 @@ class TimelineView(QGraphicsView):
                     f"轨道 {track.name} 已锁定，导入结果作废")
                 return
 
-        from src.features.files.import_job import prepare_import
+        from src.features.files.import_job import ImportCandidate, prepare_import
+
+        reference = target.get("library_reference")
+        if reference is not None and not source_matches(reference["path"], reference):
+            self.status_message_requested.emit("源素材已变更或离线，请重新选择。")
+            return
+        library_asset_id = reference.get("asset_id") if reference is not None else None
+
+        def _import_reference(
+            current: Any, candidate: ImportCandidate, metadata: dict[str, Any], media_type: str,
+        ) -> Any:
+            return current.import_asset(
+                path=candidate.path, media_type=media_type,
+                metadata={**metadata, "global_library_asset_id": library_asset_id},
+            )
 
         def _fallback_metadata(path: str) -> dict[str, Any]:
             from src.features.edit.core.project import probe_media_metadata
@@ -17889,6 +17932,7 @@ class TimelineView(QGraphicsView):
             project, list(result.usable),
             fallback_metadata=_fallback_metadata,
             classify=get_media_type,
+            import_asset=_import_reference if library_asset_id else None,
         )
         for failure in plan.failures:
             logger.error("External drop: failed to import %s: %s",
@@ -17897,6 +17941,20 @@ class TimelineView(QGraphicsView):
         failures = list(result.failures) + [item for item in plan.failures
                                            if item not in result.failures]
         imported: List[MediaAsset] = list(plan.assets)
+
+        source_range = None
+        if reference is not None and reference.get("start_seconds") is not None and imported:
+            audio_fps = (
+                float(self._timeline.fps)
+                if self._timeline is not None and not self._provisional_timeline
+                and not self._timeline_is_empty(self._timeline)
+                else EMPTY_TIMELINE_FPS
+            )
+            try:
+                source_range = excerpt_frame_range(imported[0], reference, audio_fps=audio_fps)
+            except (ValueError, TypeError, OverflowError) as error:
+                self.status_message_requested.emit(f"片段无法落轨：{error}")
+                return
 
         if plan.changed and plan.project is not None:
             self._project = plan.project
@@ -17964,7 +18022,10 @@ class TimelineView(QGraphicsView):
             if add_track_cmd is not None:
                 batch_commands.append(add_track_cmd)
             for asset in imported:
-                success = self._add_asset_as_clip(asset, track, current_frame)
+                if source_range is None:
+                    success = self._add_asset_as_clip(asset, track, current_frame)
+                else:
+                    success = self._add_asset_as_clip(asset, track, current_frame, source_range=source_range)
                 if success:
                     added += 1
                     current_frame += self._get_asset_duration_frames(asset)
@@ -17974,7 +18035,7 @@ class TimelineView(QGraphicsView):
             self._batch_drop_commands = None
             self._timeline = real_timeline
 
-        if not batch_commands:
+        if not added or not batch_commands:
             removed = _compensate_new_imports()
             self.status_message_requested.emit(
                 f"片段构造失败，导入未落轨（已回退 {removed} 个新导入素材）")
@@ -19075,18 +19136,30 @@ class TimelineView(QGraphicsView):
     def _ensure_first_asset_timeline_settings(self, first_asset: MediaAsset) -> bool:
         """Create or conform an empty sequence before its first media insert."""
         if self._timeline is None or self._provisional_timeline:
-            logger.info("Timeline drop: creating default sequence from first asset")
-            self._timeline = self._create_default_timeline(first_asset)
-            if self._timeline is None:
+            provisional = self._timeline
+            if provisional is None:
+                timeline = self._create_default_timeline(first_asset)
+            else:
+                # The drop was hit-tested against these tracks. Keep their
+                # identities while applying first-media settings to the sequence.
+                timeline = replace(
+                    provisional,
+                    fps=self._timeline_fps_for_first_asset(first_asset),
+                    format_settings={
+                        **(provisional.format_settings or {}),
+                        **self._media_pool_preview_settings(first_asset),
+                    },
+                )
+            if timeline is None:
                 logger.warning("Timeline drop: failed to create default timeline")
                 return False
             self._provisional_timeline = False
-            self.load_timeline(self._timeline)
-            self.timeline_changed.emit(self._timeline)
+            self.load_timeline(timeline)
+            self.timeline_changed.emit(timeline)
             logger.info(
                 "Timeline drop: created default timeline '%s' at %.3ffps",
-                self._timeline.name,
-                float(self._timeline.fps),
+                timeline.name,
+                float(timeline.fps),
             )
             return True
 

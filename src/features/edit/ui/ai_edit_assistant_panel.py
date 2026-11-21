@@ -25,18 +25,22 @@ import html as _html
 import math
 from typing import Any
 
-from PyQt6.QtCore import QObject, QPoint, QRunnable, QTimer, Qt, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRunnable, QSize, QTimer, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import (
     QAction,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QIcon,
     QImage,
     QKeyEvent,
     QPixmap,
+    QTextCursor,
 )
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QFileDialog,
     QHBoxLayout,
@@ -56,6 +60,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.ui.panel_divider import PanelDockWidget
+from src.shared.assets.icon_manager import get_icon, icon_add, icon_ai, icon_search, icon_settings
 
 from src.features.edit.ai_editing.assistant_events import (
     AssistantState,
@@ -66,6 +71,10 @@ from src.features.edit.ai_editing.image_attachment import (
     ImageAttachment,
     attachment_from_qimage,
 )
+from src.features.edit.ai_editing.message_record import MESSAGE_CONTENT_LIMIT
+from src.features.edit.ai_editing.token_estimator import estimate_text_tokens
+from src.features.edit.ai_editing.transaction_service import PreviewResult
+from src.features.edit.ui.ai_assistant_composer import AssistantElidingButton
 from src.shared.i18n.i18n import tr
 
 
@@ -167,14 +176,14 @@ _SLASH_COMMANDS: tuple[dict[str, str], ...] = (
     },
     {
         "name": "compress",
-        "label": "压缩上下文",
-        "description": "压缩较早的对话上下文，释放 token 空间",
+        "label": "压缩上下文预览",
+        "description": "在项目上下文预览中查看压缩摘要",
         "signal": "context_compress_requested",
     },
     {
         "name": "scope",
-        "label": "选择素材范围",
-        "description": "调整本次对话使用的素材范围",
+        "label": "查看项目上下文",
+        "description": "查看素材和工程上下文摘要",
         "signal": "composer_scope_requested",
     },
     {
@@ -499,13 +508,16 @@ class AiEditAssistantPanel(PanelDockWidget):
     # 打开 Preferences 的 AI Editing 页面
     configure_models_requested = pyqtSignal()
     conversation_title_change_requested = pyqtSignal(str)
+    library_candidates_received = pyqtSignal(object, str, list)
+    library_candidate_import_requested = pyqtSignal(dict)
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        title = tr("panel.ai_edit_assistant", "AI assistant")
+        title = tr("panel.ai_edit_assistant", "AI Assistant")
         super().__init__(title, parent)
         self.setObjectName("dock_ai_edit_assistant")
         self._updating = False  # 状态锁，避免信号递归
         self._state = AssistantStateSnapshot()
+        self._last_variant_signature: tuple[object, ...] | None = None
         # 多模态：待发送的图片附件（粘贴/抓帧），发送后清空。
         self._pending_attachments: list[ImageAttachment | FileAttachment] = []
         # AUD-19511: 后台图片附件任务（解码+JPEG 编码）的信号载体与计数。
@@ -539,6 +551,10 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._media_popup: QListWidget | None = None
         self._media_matches: list[dict[str, str]] = []
         self._media_token_span: tuple[int, int] | None = None
+        self._library_search_context: object | None = None
+        self._library_search_hits: dict[tuple, tuple[str, dict[str, Any]]] = {}
+        self._library_review: QDialog | None = None
+        self._library_import_message: QLabel | None = None
         self._thinking_phase = 0
         self._thinking_timer = QTimer(self)
         self._thinking_timer.setInterval(420)
@@ -552,6 +568,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         # 否则切换到本面板会抬高整组 splitter 的最小宽度。
 
         self._build_ui()
+        self.library_candidates_received.connect(self._on_library_candidates, Qt.ConnectionType.QueuedConnection)
         self.refresh_state(self._state)
 
         # P5：右键菜单触发"显示工作流"弹窗（用户要求改 dock → 弹窗）
@@ -561,6 +578,103 @@ class AiEditAssistantPanel(PanelDockWidget):
     # ------------------------------------------------------------------ #
     # P5：右键菜单
     # ------------------------------------------------------------------ #
+
+    def set_library_search_context(self, context: object | None) -> None:
+        self._library_search_context = context
+        self._library_search_hits.clear()
+        self._library_results_button.hide()
+        if self._library_review is not None:
+            self._library_review.reject()
+
+    def _on_library_candidates(self, context: object, query: str, hits: list[dict[str, Any]]) -> None:
+        if context is not self._library_search_context:
+            return
+        for hit in hits:
+            key = (hit["path"], hit.get("start_seconds"), hit.get("end_seconds"))
+            self._library_search_hits.pop(key, None)
+            self._library_search_hits[key] = (query, hit)
+        while len(self._library_search_hits) > 80:
+            del self._library_search_hits[next(iter(self._library_search_hits))]
+        self._library_results_button.setVisible(bool(self._library_search_hits))
+        if self._library_review is not None:
+            results = self._library_review.findChild(QListWidget, "assistantLibraryResults")
+            if results is not None:
+                self._populate_library_candidates(results)
+
+    def show_library_import_status(self, message: str) -> None:
+        if self._library_import_message is not None:
+            self._library_import_message.setText(message)
+
+    def _populate_library_candidates(self, results: QListWidget) -> None:
+        current = results.currentItem()
+        active = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+        results.clear()
+        current_row = 0
+        for row, (query, hit) in enumerate(reversed(tuple(self._library_search_hits.values()))):
+            label = str(hit["name"])
+            start, end = hit.get("start_seconds"), hit.get("end_seconds")
+            if start is not None and end is not None:
+                label += f"   {start:.2f}–{end:.2f}s"
+            if not hit.get("online"):
+                label += "  ·  " + tr("files.ai_library.offline", "离线")
+            elif hit.get("project_asset_id"):
+                label += "  ·  " + tr("ai_assistant.library_in_pool", "源素材已在媒体池")
+            item = QListWidgetItem(label, results)
+            item.setData(Qt.ItemDataRole.UserRole, hit)
+            item.setToolTip(query)
+            if active and all(active.get(key) == hit.get(key) for key in ("path", "start_seconds", "end_seconds")):
+                current_row = row
+        results.setCurrentRow(current_row)
+
+    def _review_library_candidates(self) -> None:
+        if self._library_review is not None:
+            self._library_review.raise_()
+            return
+        dialog = QDialog(self)
+        self._library_review = dialog
+        dialog.setWindowTitle(tr("ai_assistant.library_candidates", "素材候选"))
+        dialog.resize(620, 390)
+        layout = QVBoxLayout(dialog)
+        results = QListWidget(dialog)
+        results.setObjectName("assistantLibraryResults")
+        layout.addWidget(results, 1)
+        description = QLabel(dialog)
+        description.setTextFormat(Qt.TextFormat.PlainText)
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        actions = QHBoxLayout()
+        self._library_import_message = QLabel(dialog)
+        self._library_import_message.setWordWrap(True)
+        self._library_import_message.setTextFormat(Qt.TextFormat.PlainText)
+        actions.addWidget(self._library_import_message, 1)
+        add = QPushButton(tr("files.ai_library.add_to_pool", "加入媒体池"), dialog)
+        actions.addWidget(add)
+        layout.addLayout(actions)
+        context = self._library_search_context
+        def update_selection() -> None:
+            item = results.currentItem()
+            hit = item.data(Qt.ItemDataRole.UserRole) if item else {}
+            description.setText(str(hit.get("text") or ""))
+            add.setEnabled(bool(hit.get("online")))
+
+        def add_selected() -> None:
+            item = results.currentItem()
+            if item is not None and context is self._library_search_context:
+                hit = item.data(Qt.ItemDataRole.UserRole)
+                if hit.get("online"):
+                    self.library_candidate_import_requested.emit(hit)
+
+        def clear_review() -> None:
+            self._library_review = None
+            self._library_import_message = None
+            dialog.deleteLater()
+
+        results.currentItemChanged.connect(update_selection)
+        add.clicked.connect(add_selected)
+        dialog.finished.connect(clear_review)
+        self._populate_library_candidates(results)
+        update_selection()
+        dialog.show()
 
     def _on_context_menu(self, pos: QPoint) -> None:
         """右键菜单：收纳低频操作，保持对话区干净。"""
@@ -610,11 +724,8 @@ class AiEditAssistantPanel(PanelDockWidget):
             )
             frame_grab_action.triggered.connect(self.frame_grab_requested.emit)
             menu.addAction(frame_grab_action)
-        scope_action = QAction(tr("ai_composer.scope_menu", "选择素材范围"), menu)
-        scope_action.triggered.connect(self.composer_scope_requested.emit)
-        menu.addAction(scope_action)
-        compress_action = QAction(tr("ai_composer.compress", "压缩上下文"), menu)
-        compress_action.triggered.connect(self.context_compress_requested.emit)
+        compress_action = QAction(tr("ai_assistant.compress_context_preview", "压缩上下文预览"), menu)
+        compress_action.triggered.connect(self._on_context_compress)
         menu.addAction(compress_action)
         menu.addSeparator()
         new_session_action = QAction(tr("ai_composer.new_session", "新对话"), menu)
@@ -642,6 +753,10 @@ class AiEditAssistantPanel(PanelDockWidget):
         )
         configure_action.triggered.connect(self.configure_models_requested.emit)
         menu.addAction(configure_action)
+        if self._plugin_diagnostics:
+            plugins = menu.addMenu(tr("ai_assistant.plugin_diagnostics", "插件状态"))
+            for diagnostic in self._plugin_diagnostics:
+                plugins.addAction(diagnostic).setEnabled(False)
         # Dock 管理动作与 AI 操作放在同一个菜单，避免 QDockWidget 默认菜单
         # 再弹出第二个窗口。
         menu.addSeparator()
@@ -791,6 +906,12 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._hide_slash_commands()
         self._request_edit.clear()
         self._request_edit.setFocus()
+        if command["name"] == "scope":
+            self._on_composer_scope()
+            return
+        if command["name"] == "compress":
+            self._on_context_compress()
+            return
         signal = getattr(self, command["signal"], None)
         if signal is not None:
             signal.emit()
@@ -1061,15 +1182,30 @@ class AiEditAssistantPanel(PanelDockWidget):
         central.setStyleSheet(
             "QWidget#assistant_surface { background: #27272b; color: #d8d8dc;"
             " border: none; border-radius: 0; }"
-            "QWidget#assistant_surface QLabel { color: #d8d8dc; }"
+            "QWidget#assistant_surface QLabel { color: #d8d8dc; background: transparent; }"
             "QLabel#assistant_status { color: #d8d8dc; padding: 1px 0; font-size: 10px; }"
             "QLabel#assistant_thinking { color: #e87519; padding: 1px 0; font-size: 10px; }"
-            "QToolButton#assistant_overflow {"
-            " border: none; padding: 3px 6px; border-radius: 4px; }"
-            "QToolButton#assistant_overflow:hover {"
-            " background: palette(mid); }"
-            "QPlainTextEdit#assistant_input { background: transparent; color: #d8d8dc;"
-            " border: none; border-radius: 0px; padding: 7px 7px 2px 7px; }"
+            "QToolButton[assistantHeaderAction='true'],"
+            "QPushButton[assistantHeaderAction='true'] { background: transparent;"
+            " color: #dddde2; border: none; padding: 2px 6px; border-radius: 5px; }"
+            "QToolButton[assistantHeaderAction='true']:hover,"
+            "QPushButton[assistantHeaderAction='true']:hover { background: #38383e; }"
+            "QToolButton[assistantHeaderAction='true']:focus,"
+            "QPushButton[assistantHeaderAction='true']:focus { border: 1px solid #54545c; }"
+            "QFrame#assistantContextStrip { background: #2d2d32; border-radius: 6px; }"
+            "QLabel[assistantIntro='heading'] { color: #f1f1f3; font-size: 17px;"
+            " font-weight: 650; }"
+            "QLabel[assistantIntro='body'] { color: #babbc3; font-size: 12px; }"
+            "QPushButton[assistantStarter='true'] { color: #dddde2; background: #2e2e33;"
+            " border: 1px solid #414149; border-radius: 6px;"
+            " padding: 6px 10px; text-align: left; }"
+            "QPushButton[assistantStarter='true']:hover,"
+            "QPushButton[assistantStarter='true']:focus { background: #37373d;"
+            " border-color: #a46a41; }"
+            "QPlainTextEdit#assistant_input { background: transparent; color: #ededf0;"
+            " placeholder-text-color: #a0a0a9; font-size: 12px;"
+            " border: none; border-radius: 0px; padding: 7px 9px 2px 9px; }"
+            "QLabel#assistantInputNotice { color: #ebae7a; padding: 0 10px 3px; }"
             "QScrollArea { background: transparent; border: none; }"
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
             "QWidget#assistant_messages_container, QWidget#assistant_variants_container,"
@@ -1090,38 +1226,31 @@ class AiEditAssistantPanel(PanelDockWidget):
             " border-radius: 4px; }"
             "QLabel#assistant_activity_status_label { color: #bfc0c6;"
             " padding: 2px 6px; font-size: 10px; }"
-            "QFrame#assistant_input_frame { background: #252529;"
-            " border: 1px solid #4a4a4a; border-radius: 6px; }"
-            "QFrame#assistant_input_frame:hover { border-color: #4b4d55; }"
+            "QFrame#assistant_input_frame { background: #202024;"
+            " border: 1px solid #45454d; border-radius: 9px; }"
+            "QFrame#assistant_input_frame:hover { border-color: #5a5a64; }"
+            "QFrame#assistant_input_frame[editing='true'] { border-color: #a96b3d; }"
             "QPushButton#assistant_send { background: #e87519; color: white;"
             " border: none; border-radius: 6px; padding: 0px;"
-            " min-width: 24px; max-width: 24px; min-height: 24px;"
-            " max-height: 24px; font-size: 14px; font-weight: 600; }"
+            " font-size: 15px; font-weight: 650; }"
             "QPushButton#assistant_send:hover { background: #f28a2e; }"
             "QPushButton#assistant_send:pressed { background: #cc620f; }"
-            "QPushButton#assistant_send:disabled { background: #8f531f;"
-            " color: #e6e6e6; }"
+            "QPushButton#assistant_send:disabled { background: #393940; color: #a0a0a6; }"
         )
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 6, 10, 8)
+        layout.setSpacing(5)
 
         # Header（M5：profile/隐私胶囊 + 上下文检查器入口；§2.1 状态胶囊）
         header_row = QWidget()
         hr_layout = QHBoxLayout(header_row)
         hr_layout.setContentsMargins(0, 0, 0, 0)
         hr_layout.setSpacing(4)
-        self._conversation_title_btn = QToolButton()
+        self._conversation_title_btn = AssistantElidingButton()
         self._conversation_title_btn.setObjectName("assistant_conversation_title")
-        self._conversation_title_btn.setAutoRaise(True)
-        self._conversation_title_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self._conversation_title_btn.setSizePolicy(
-            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred,
-        )
+        self._conversation_title_btn.setProperty("assistantHeaderAction", True)
         self._conversation_title_btn.setStyleSheet(
-            "QToolButton { font-weight: 600; font-size: 11px; text-align: left;"
-            " border: none; padding: 1px 0; color: #e6e6e6; }"
-            "QToolButton:hover { color: #e87519; }"
+            "QPushButton { font-weight: 650; font-size: 13px; text-align: left; }"
         )
         self._conversation_title_btn.setToolTip(
             tr("ai_assistant.edit_conversation_title", "点击修改当前会话标题")
@@ -1131,40 +1260,61 @@ class AiEditAssistantPanel(PanelDockWidget):
         )
         # Keep the old private name for lightweight host/test integrations.
         self._header_label = self._conversation_title_btn
-        hr_layout.addWidget(self._conversation_title_btn)
+        hr_layout.addWidget(self._conversation_title_btn, 1)
         self._context_budget_label = QLabel()
         self._context_budget_label.setStyleSheet(
-            "color: gray; font-size: 10px; padding: 1px 4px;"
+            "color: #b1b2ba; font-size: 10px; padding: 1px 4px;"
         )
         self._context_budget_label.setToolTip(tr(
             "ai_assistant.context_budget_tooltip",
             "当前对话上下文 token 用量与上限（本地估算）",
         ))
-        hr_layout.addWidget(self._context_budget_label)
         self._state_label = QLabel()
         self._state_label.setObjectName("assistant_status")
         self._state_label.setVisible(False)
         hr_layout.addWidget(self._state_label)
         # M5：上下文检查器入口（点开看本次模型看到了什么 / token / 可排除块）
         self._ctx_inspect_btn = QToolButton()
-        self._ctx_inspect_btn.setText(tr("ai_assistant.inspect_context", "上下文"))
+        self._ctx_inspect_btn.setProperty("assistantHeaderAction", True)
+        self._ctx_inspect_btn.setIcon(get_icon("fa5s.info-circle", "#bfc0c7"))
+        self._ctx_inspect_btn.setIconSize(QSize(13, 13))
         self._ctx_inspect_btn.setToolTip(tr(
             "ai_assistant.inspect_context_tooltip",
-            "检查本次模型看到的上下文（token/优先级/可排除）",
+            "查看项目上下文摘要和上下文预算",
         ))
-        self._ctx_inspect_btn.setStyleSheet("padding: 2px;")
-        self._ctx_inspect_btn.setVisible(False)
+        self._ctx_inspect_btn.setAccessibleName(tr("ai_assistant.inspect_context", "查看上下文"))
         self._ctx_inspect_btn.clicked.connect(self._on_inspect_context_clicked)
-        hr_layout.addWidget(self._ctx_inspect_btn)
+        self._library_results_button = AssistantElidingButton()
+        self._library_results_button.setProperty("assistantHeaderAction", True)
+        self._library_results_button.set_label(tr("ai_assistant.library_candidates", "素材候选"))
+        self._library_results_button.setMinimumWidth(79)
+        self._library_results_button.setMaximumWidth(136)
+        self._library_results_button.setToolTip(self._library_results_button.accessibleName())
+        self._library_results_button.setVisible(False)
+        self._library_results_button.clicked.connect(self._review_library_candidates)
+        hr_layout.addWidget(self._library_results_button, 1)
         self._thinking_indicator = QLabel()
         self._thinking_indicator.setObjectName("assistant_thinking")
         self._thinking_indicator.setVisible(False)
         hr_layout.addWidget(self._thinking_indicator)
         self._overflow_btn = QToolButton()
         self._overflow_btn.setObjectName("assistant_overflow")
-        self._overflow_btn.setText("⋯")
+        self._overflow_btn.setProperty("assistantHeaderAction", True)
+        self._overflow_btn.setFixedSize(26, 26)
+        self._overflow_btn.setIcon(get_icon("fa5s.ellipsis-h", "#bfc0c7"))
+        self._overflow_btn.setIconSize(QSize(14, 14))
         self._overflow_btn.setToolTip(tr("ai_assistant.more_actions", "更多操作"))
+        self._overflow_btn.setAccessibleName(self._overflow_btn.toolTip())
         self._overflow_btn.clicked.connect(self._show_overflow_menu)
+        self._new_conversation_btn = QToolButton()
+        self._new_conversation_btn.setProperty("assistantHeaderAction", True)
+        self._new_conversation_btn.setFixedSize(26, 26)
+        self._new_conversation_btn.setIcon(icon_add("#bfc0c7"))
+        self._new_conversation_btn.setIconSize(QSize(12, 12))
+        self._new_conversation_btn.setToolTip(tr("ai_composer.new_session", "新对话"))
+        self._new_conversation_btn.setAccessibleName(self._new_conversation_btn.toolTip())
+        self._new_conversation_btn.clicked.connect(self.new_session_requested.emit)
+        hr_layout.addWidget(self._new_conversation_btn)
         hr_layout.addWidget(self._overflow_btn)
         layout.addWidget(header_row)
 
@@ -1193,13 +1343,22 @@ class AiEditAssistantPanel(PanelDockWidget):
         )))
         self._stack.addWidget(empty_page)
 
-        # --- no profile 页（UI-1 之前：只允许编辑 Brief） ---
+        # --- no profile ---
         no_profile_page = QWidget()
         npp_layout = QVBoxLayout(no_profile_page)
-        npp_layout.addWidget(QLabel(tr(
-            "ai_assistant.no_profile",
-            "未配置模型 profile。\n可编辑 Brief 与查看上下文，AI 规划需先配置 profile。",
-        )))
+        npp_layout.addStretch()
+        setup, setup_layout = self._build_intro(
+            tr("ai_assistant.setup_heading", "连接 AI 模型"),
+            tr("ai_assistant.setup_caption", "配置语言模型后即可对话、查找素材和拟定剪辑方案。"),
+            icon_settings("#e49258"),
+        )
+        configure = QPushButton(tr("ai_assistant.configure_models", "配置模型"))
+        configure.setObjectName("assistantConfigureModel")
+        configure.setProperty("assistantStarter", True)
+        configure.clicked.connect(self.configure_models_requested.emit)
+        setup_layout.addWidget(configure, alignment=Qt.AlignmentFlag.AlignHCenter)
+        npp_layout.addWidget(setup, alignment=Qt.AlignmentFlag.AlignHCenter)
+        npp_layout.addStretch()
         self._stack.addWidget(no_profile_page)
 
         # --- idle/busy 主页 ---
@@ -1256,40 +1415,30 @@ class AiEditAssistantPanel(PanelDockWidget):
         composer_input_layout.setContentsMargins(0, 0, 0, 0)
         composer_input_layout.setSpacing(0)
 
-        # M5：上下文摘要（接入死代码 AiContextSummary widget；§2.2 上下文栏）
-        # 比 _context_label 更丰富：显示 analysis_fresh/snapshot_revision + 操作按钮。
-        try:
-            from src.features.edit.ui.ai_context_summary import AiContextSummary
-            self._context_details = QFrame()
-            context_layout = QVBoxLayout(self._context_details)
-            context_layout.setContentsMargins(0, 0, 0, 0)
-            context_layout.setSpacing(0)
-            self._context_summary = AiContextSummary()
-            self._context_summary.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-            )
-            self._context_details.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-            )
-            context_layout.addWidget(self._context_summary)
-            mp_layout.addWidget(self._context_details)
-            self._context_label = None  # 旧 QLabel 已弃用
-        except Exception:
-            # AiContextSummary 装配失败 → 回退到旧 QLabel（不阻断面板）
-            self._context_details = QFrame()
-            context_layout = QVBoxLayout(self._context_details)
-            context_layout.setContentsMargins(0, 0, 0, 0)
-            self._context_summary = None
-            self._context_label = QLabel()
-            self._context_label.setStyleSheet("color: gray; padding: 1px;")
-            self._context_details.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-            )
-            context_layout.addWidget(self._context_label)
-            mp_layout.addWidget(self._context_details)
+        from src.features.edit.ui.ai_context_summary import AiContextSummary
+
+        self._context_details = QFrame()
+        self._context_details.setObjectName("assistantContextStrip")
+        context_layout = QHBoxLayout(self._context_details)
+        context_layout.setContentsMargins(7, 2, 4, 2)
+        context_layout.setSpacing(4)
+        self._context_summary = AiContextSummary()
+        self._context_summary.setStyleSheet("background: transparent;")
+        self._context_summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        context_layout.addWidget(self._context_summary, 1)
+        self._analyze_assets_btn = QToolButton()
+        self._analyze_assets_btn.setProperty("assistantHeaderAction", True)
+        self._analyze_assets_btn.setText(tr("ai_assistant.analyze_short", "分析素材"))
+        self._analyze_assets_btn.setToolTip(tr("ai_assistant.analyze_context", "分析当前素材"))
+        self._analyze_assets_btn.clicked.connect(self.analyze_context_requested.emit)
+        context_layout.addWidget(self._analyze_assets_btn)
+        context_layout.addWidget(self._context_budget_label)
+        context_layout.addWidget(self._ctx_inspect_btn)
+        mp_layout.addWidget(self._context_details)
 
         # P7/P8：插件状态只消费 controller 投影，不访问插件实现或 registry 内部。
         self._plugin_status_strip = QFrame()
+        self._plugin_diagnostics: tuple[str, ...] = ()
         self._plugin_status_strip.setObjectName("assistant_plugin_status_strip")
         self._plugin_status_strip.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
@@ -1347,7 +1496,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         )
         self._messages_layout = QVBoxLayout(self._messages_container)
         self._messages_layout.setContentsMargins(0, 0, 0, 0)
-        self._messages_layout.setSpacing(4)
+        self._messages_layout.setSpacing(7)
         self._messages_layout.addStretch(1)
         self._messages_area.setWidget(self._messages_container)
         self._messages_area.viewport().setAttribute(
@@ -1415,16 +1564,35 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._variants_area.viewport().setStyleSheet("background: transparent;")
         conversation_layout.addWidget(self._variants_area, stretch=1)
 
-        # 状态占位（无 variant 时提示）
-        self._placeholder = QLabel(tr(
-            "ai_assistant.idle_hint",
-            "输入需求以生成剪辑方案。\n助手会给出至少两个可比较的方案。",
-        ))
-        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setStyleSheet("padding: 12px; color: gray;")
-        self._placeholder.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        self._placeholder = QWidget()
+        intro_host = QVBoxLayout(self._placeholder)
+        intro_host.setContentsMargins(2, 6, 2, 6)
+        intro_host.addStretch(2)
+        intro, intro_layout = self._build_intro(
+            tr("ai_assistant.starter_heading", "开始剪辑"),
+            tr("ai_assistant.starter_caption", "粘贴脚本，或告诉助手想剪成什么样。"),
+            icon_ai("#e49258"),
         )
+        for obj_name, label, prompt, icon in (
+            ("assistantStarterScript",
+             tr("ai_assistant.starter_script", "按脚本找素材"),
+             tr("ai_assistant.starter_script_prompt",
+                "按下面的脚本搜索 AI 素材库和当前项目，按段列出候选片段、源时间和选片理由。\n\n脚本：\n"),
+             icon_search("#bfc0c7")),
+            ("assistantStarterRoughCut",
+             tr("ai_assistant.starter_rough_cut", "拟定粗剪方案"),
+             tr("ai_assistant.starter_rough_cut_prompt",
+                "用当前项目的素材拟定一版粗剪，列出片段顺序和预计时长，供我确认。"),
+             get_icon("fa5s.film", "#bfc0c7")),
+        ):
+            button = QPushButton(icon, label)
+            button.setObjectName(obj_name)
+            button.setIconSize(QSize(13, 13))
+            button.setProperty("assistantStarter", True)
+            button.clicked.connect(lambda _checked=False, draft=prompt: self._fill_starter(draft))
+            intro_layout.addWidget(button)
+        intro_host.addWidget(intro, alignment=Qt.AlignmentFlag.AlignHCenter)
+        intro_host.addStretch(3)
         conversation_layout.addWidget(self._placeholder, stretch=1)
 
         # ---- request composer（M1.3：多行需求输入 + 发送/停止）---- #
@@ -1441,12 +1609,12 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._request_edit = _AssistantPromptEdit()
         self._request_edit.setPlaceholderText(tr(
             "ai_assistant.request_placeholder",
-            "描述你的需求（Enter 发送，Shift+Enter 换行；可粘贴截图）…",
+            "描述剪辑需求，或粘贴脚本…",
         ))
+        self._request_edit.setToolTip(tr("ai_assistant.input_shortcuts", "Enter 发送 · Shift+Enter 换行 · @ 引用素材"))
         self._request_edit.setMaximumHeight(80)
         self._request_edit.setMinimumWidth(88)
         self._request_edit.setObjectName("assistant_input")
-        # 长度上限（防止超长 prompt；真实 provider 在 M5 再做 token 预算）
         self._request_edit.setPlainText("")
         self._request_edit.submitted.connect(self._on_send_clicked)
         self._request_edit.cancelled.connect(self.cancel_requested.emit)
@@ -1460,12 +1628,19 @@ class AiEditAssistantPanel(PanelDockWidget):
         )
         self._request_edit.textChanged.connect(self._update_slash_commands)
         self._request_edit.textChanged.connect(self._update_media_mentions)
+        self._request_edit.textChanged.connect(self._refresh_composer_input)
+        self._request_edit.installEventFilter(self)
         composer_input_layout.addWidget(self._request_edit)
+        self._input_notice = QLabel()
+        self._input_notice.setObjectName("assistantInputNotice")
+        self._input_notice.setWordWrap(True)
+        self._input_notice.hide()
+        composer_input_layout.addWidget(self._input_notice)
 
         # Codex 风格的单一发送/停止按钮：空闲显示上箭头，忙碌时显示方块。
         self._send_btn = QPushButton()
         self._send_btn.setObjectName("assistant_send")
-        self._send_btn.setFixedSize(24, 24)
+        self._send_btn.setFixedSize(26, 26)
         self._send_btn.clicked.connect(self._on_send_or_cancel_clicked)
         # 保留旧属性名，兼容宿主/测试对取消按钮的引用；视觉上只有一个按钮。
         self._cancel_btn = self._send_btn
@@ -1555,13 +1730,20 @@ class AiEditAssistantPanel(PanelDockWidget):
         # --- error 页 ---
         error_page = QWidget()
         ep_layout = QVBoxLayout(error_page)
+        ep_layout.addStretch()
+        error_content, error_layout = self._build_intro(
+            tr("ai_assistant.error_heading", "请求未完成"),
+        )
         self._error_label = QLabel()
+        self._error_label.setTextFormat(Qt.TextFormat.PlainText)
         self._error_label.setWordWrap(True)
-        self._error_label.setStyleSheet("color: #c0392b; padding: 8px;")
-        ep_layout.addWidget(self._error_label)
+        self._error_label.setStyleSheet("color: #f0a996; padding: 5px;")
+        error_layout.addWidget(self._error_label)
         retry_btn = QPushButton(tr("ai_assistant.retry", "重试"))
+        retry_btn.setProperty("assistantStarter", True)
         retry_btn.clicked.connect(self.retry_requested.emit)
-        ep_layout.addWidget(retry_btn)
+        error_layout.addWidget(retry_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
+        ep_layout.addWidget(error_content, alignment=Qt.AlignmentFlag.AlignHCenter)
         ep_layout.addStretch(1)
         self._stack.addWidget(error_page)
 
@@ -1586,9 +1768,9 @@ class AiEditAssistantPanel(PanelDockWidget):
         ctx_header_row = QWidget()
         chr_layout = QHBoxLayout(ctx_header_row)
         chr_layout.setContentsMargins(0, 0, 0, 0)
-        chr_layout.addWidget(QLabel(f"<b>{tr('ai_assistant.context_inspector_title', '本次模型看到的上下文')}</b>"))
+        chr_layout.addWidget(QLabel(f"<b>{tr('ai_assistant.context_inspector_title', '项目上下文预览')}</b>"))
         ctx_back_btn = QPushButton(tr("ai_assistant.back", "返回"))
-        ctx_back_btn.clicked.connect(lambda: self._stack.setCurrentIndex(self._PAGE_MAIN))
+        ctx_back_btn.clicked.connect(self._exit_context_inspector)
         chr_layout.addStretch(1)
         chr_layout.addWidget(ctx_back_btn)
         cp_layout.addWidget(ctx_header_row)
@@ -1626,6 +1808,48 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._build_slash_popup(central)
         self._build_media_popup(central)
         self.setWidget(central)
+
+    def _build_intro(self, heading: str, description: str = "", icon: QIcon | None = None) -> tuple[QWidget, QVBoxLayout]:
+        content = QWidget()
+        content.setMaximumWidth(280)
+        content.setMinimumWidth(220)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(7)
+        if icon is not None:
+            mark = QLabel()
+            mark.setPixmap(icon.pixmap(QSize(24, 24)))
+            layout.addWidget(mark, alignment=Qt.AlignmentFlag.AlignHCenter)
+        title = QLabel(heading)
+        title.setProperty("assistantIntro", "heading")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        if description:
+            caption = QLabel(description)
+            caption.setProperty("assistantIntro", "body")
+            caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            caption.setWordWrap(True)
+            layout.addWidget(caption)
+        return content, layout
+
+    def _fill_starter(self, draft: str) -> None:
+        if self._request_edit.isReadOnly():
+            return
+        if not self._request_edit.toPlainText().strip():
+            self._request_edit.setPlainText(draft)
+            self._request_edit.moveCursor(QTextCursor.MoveOperation.End)
+        self._request_edit.setFocus()
+
+    def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:
+        if watched is getattr(self, "_request_edit", None) and event is not None:
+            if event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+                frame = self._composer_input_frame
+                frame.setProperty("editing", event.type() == QEvent.Type.FocusIn)
+                frame.style().unpolish(frame)
+                frame.style().polish(frame)
+                frame.update()
+        return super().eventFilter(watched, event)
 
     def set_pending_brief(self, brief: object) -> None:
         """把 AI 提议的预览 brief 回填进内嵌 Brief 编辑器（M1.3）。
@@ -1674,22 +1898,15 @@ class AiEditAssistantPanel(PanelDockWidget):
                 return " ".join(text.split())
         return ""
 
-    @staticmethod
-    def _compact_conversation_title(title: str) -> str:
-        normalized = " ".join(str(title or "").split())
-        if len(normalized) <= 8:
-            return normalized
-        return normalized[:7] + "…"
-
     def set_conversation_title(self, title: str, *, is_custom: bool = False) -> None:
-        """更新顶部标题；显示短标题，完整标题保留在 tooltip 中。"""
+        """更新顶部标题，按当前面板宽度截显。"""
         normalized = " ".join(str(title or "").split())
         self._conversation_title = normalized
         self._conversation_title_is_custom = bool(is_custom and normalized)
-        display = self._compact_conversation_title(normalized) or tr(
+        display = normalized or tr(
             "ai_composer.new_session", "新对话"
         )
-        self._conversation_title_btn.setText(display)
+        self._conversation_title_btn.set_label(display)
         edit_hint = tr("ai_assistant.edit_conversation_title", "点击修改当前会话标题")
         self._conversation_title_btn.setToolTip(
             normalized + "\n" + edit_hint if normalized else edit_hint
@@ -1905,56 +2122,56 @@ class AiEditAssistantPanel(PanelDockWidget):
 
     def _apply_state(self, s: AssistantStateSnapshot) -> None:
         self._set_send_button_busy(s.state.is_busy)
+        self._refresh_composer_input()
 
         # Header：显示当前会话标题；模型与连接策略已在底部选择器中展示。
         if not self._conversation_title_is_custom:
             self.set_conversation_title(self._first_user_message_text(s.messages))
 
-        # 上下文摘要（M5：优先喂 AiContextSummary widget；回退旧 QLabel）
         ctx = s.context
-        if self._context_summary is not None:
-            self._context_summary.set_summary(ctx)
-        elif self._context_label is not None:
-            self._context_label.setText(_trf(
-                "ai_assistant.context_summary",
-                "Assets {assets} | analyzed {done} | music {music} | locked {locked}",
-                assets=ctx.asset_count,
-                done=ctx.analyzed_count,
-                music=ctx.music_count,
-                locked=ctx.locked_count,
-            ))
+        self._context_summary.set_summary(ctx)
+        self._analyze_assets_btn.setVisible(
+            ctx.asset_count > 0 and (
+                ctx.analyzed_count < ctx.asset_count or not ctx.analysis_fresh
+            )
+        )
+        self._analyze_assets_btn.setEnabled(not s.state.is_busy)
+        self._update_new_conversation()
+        inspecting = self._stack.currentIndex() == self._PAGE_CONTEXT_INSPECTOR
 
         # 状态切换页
         if s.state == AssistantState.NO_PROJECT:
             # AI Assistant 本身是独立的对话入口，不应因为宿主还没有工程、
             # 时间线或素材就把 composer 隐藏。需要写入宿主时再由具体能力
             # 返回“请先创建工程/时间线”的明确提示即可。
-            self._stack.setCurrentIndex(self._PAGE_MAIN)
+            if not inspecting:
+                self._stack.setCurrentIndex(self._PAGE_MAIN)
             self._state_label.setText(
                 tr("ai_assistant.state_no_project_chat", "未创建工程 · 可先对话")
             )
             self._state_label.setVisible(True)
             self.set_thinking(False)
-            self._send_btn.setEnabled(True)
             self._request_edit.setReadOnly(False)
             self._render_variants(s)
             self._render_messages(s)
         elif s.state == AssistantState.NO_PROFILE:
             self._stack.setCurrentIndex(self._PAGE_NO_PROFILE)
-            self._state_label.setVisible(True)
+            self._state_label.hide()
             self.set_thinking(False)
         elif s.state == AssistantState.AWAITING_BRIEF_APPROVAL:
             # M1.3：显示 Brief 编辑器页，等用户显式批准后才规划
             self._stack.setCurrentIndex(self._PAGE_BRIEF_EDITOR)
-            self._state_label.setVisible(True)
+            self._state_label.setText(tr("ai_assistant.state_brief", "请确认 Brief"))
+            self._state_label.show()
             self.set_thinking(False)
         elif s.state == AssistantState.FAILED:
             self._stack.setCurrentIndex(self._PAGE_ERROR)
             self._error_label.setText(s.error_message or tr("ai_assistant.unknown_error", "未知错误"))
-            self._state_label.setVisible(True)
+            self._state_label.hide()
             self.set_thinking(False)
         else:
-            self._stack.setCurrentIndex(self._PAGE_MAIN)
+            if not inspecting:
+                self._stack.setCurrentIndex(self._PAGE_MAIN)
             # 主页：根据状态显示文案
             state_txt = {
                 # 空闲时由输入框表达状态；顶部的“就绪”会和活动流的
@@ -1975,7 +2192,6 @@ class AiEditAssistantPanel(PanelDockWidget):
             self._state_label.setVisible(bool(state_txt))
             self.set_thinking(s.state.is_busy)
             # busy 时输入框只读，但统一操作按钮仍保持可用以停止生成。
-            self._send_btn.setEnabled(True)
             self._request_edit.setReadOnly(s.state.is_busy)
             # 渲染 variant 列表（M1.3 最小闭环）
             self._render_variants(s)
@@ -2034,6 +2250,20 @@ class AiEditAssistantPanel(PanelDockWidget):
         + "应用"按钮（emit apply_requested，仅在校验通过后可点）。
         无 variant 时显示 placeholder。
         """
+        variants = s.variants
+        self._placeholder.setVisible(not variants and not s.messages and not s.state.is_busy)
+        self._variants_area.setVisible(bool(variants))
+        self._update_content_stretch()
+        can_apply = s.state in (
+            AssistantState.AWAITING_APPLY_APPROVAL,
+            AssistantState.AWAITING_VARIANT_APPROVAL,
+            AssistantState.VARIANTS_READY,
+            AssistantState.IDLE,
+        )
+        signature = (variants, can_apply, s.state.is_busy)
+        if signature == self._last_variant_signature:
+            return
+        self._last_variant_signature = signature
         # 清空旧卡片（保留尾部 stretch）
         while self._variants_layout.count() > 1:
             item = self._variants_layout.takeAt(0)
@@ -2042,21 +2272,6 @@ class AiEditAssistantPanel(PanelDockWidget):
                 w.setParent(None)
                 w.deleteLater()
 
-        variants = s.variants
-        # 对话消息优先：已有消息时不再显示“输入需求…”占位提示，否则该提示
-        # 会作为 stretch 项吞掉消息区约一半高度（截图中的大面积空白来源）。
-        self._placeholder.setVisible(not variants and not s.messages)
-        self._variants_area.setVisible(bool(variants))
-        self._update_content_stretch()
-        if not variants:
-            return
-
-        can_apply = s.state in (
-            AssistantState.AWAITING_APPLY_APPROVAL,
-            AssistantState.AWAITING_VARIANT_APPROVAL,
-            AssistantState.VARIANTS_READY,
-            AssistantState.IDLE,
-        )
         for v in variants:
             self._variants_layout.insertWidget(
                 self._variants_layout.count() - 1, self._build_variant_card(v, can_apply)
@@ -2065,29 +2280,35 @@ class AiEditAssistantPanel(PanelDockWidget):
     def _build_variant_card(self, v, can_apply: bool) -> QWidget:
         """单张 variant 卡。"""
         card = QFrame()
-        card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setStyleSheet("QFrame{background: palette(window); border: 1px solid palette(mid); border-radius: 4px;}")
+        card.setObjectName("assistantVariant")
+        border = "#96623e" if v.status == "selected" else "#414149"
+        card.setStyleSheet(
+            f"QFrame#assistantVariant {{ background: #2e2e33; border: 1px solid {border}; border-radius: 7px; }}"
+        )
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(5)
 
         # AUD-19503：v.label 来自 planner/模型输出，转义后再进富文本模板，
         # 防止 <>& 被当作标记（显示错乱/标记注入）。
         title = QLabel(f"<b>{_html.escape(str(v.label))}</b>")
         title.setTextFormat(Qt.TextFormat.RichText)
+        title.setWordWrap(True)
         layout.addWidget(title)
 
         # 摘要：时长 / hard constraint / beat coverage
-        dur_s = f"{v.duration_frames} 帧"
-        hc = tr("ai_assistant.hard_pass", "✓ 硬约束") if v.hard_constraints_passed else tr("ai_assistant.hard_fail", "✗ 硬约束")
-        cov = f"beat {v.beat_coverage:.0%}" if v.beat_coverage else ""
-        summary = QLabel(f"{dur_s} · {hc}" + (f" · {cov}" if cov else ""))
-        summary.setStyleSheet("color: gray;")
+        duration = _trf("ai_assistant.duration_frames", "{frames} 帧", frames=v.duration_frames)
+        details = [duration]
+        if not v.hard_constraints_passed:
+            details.append(tr("ai_assistant.constraints_unmet", "有约束未满足"))
+        summary = QLabel("  ·  ".join(details))
+        summary.setStyleSheet("color: #b6b7bf;")
         layout.addWidget(summary)
 
         # 状态标记
         status_txt = {
             "selected": tr("ai_assistant.vstatus_selected", "已选择"),
+            "accepted": tr("ai_assistant.vstatus_applied", "已应用"),
             "applied": tr("ai_assistant.vstatus_applied", "已应用"),
             "rejected": tr("ai_assistant.vstatus_rejected", "已拒绝"),
         }.get(v.status, "")
@@ -2098,19 +2319,49 @@ class AiEditAssistantPanel(PanelDockWidget):
 
         # 按钮行：选择（预览）/ 应用
         btn_row = QWidget()
-        br = QVBoxLayout(btn_row)
+        br = QHBoxLayout(btn_row)
         br.setContentsMargins(0, 0, 0, 0)
         br.setSpacing(4)
-        select_btn = QPushButton(tr("ai_assistant.select_preview", "选择并预览"))
+        actionable = v.status in {"proposed", "selected"}
+        select_btn = QPushButton(tr("ai_assistant.preview_changes", "预览变更"))
+        select_btn.setEnabled(not self._state.state.is_busy and actionable)
         select_btn.clicked.connect(lambda _checked=False, vid=v.variant_id: self.variant_selected.emit(vid))
         br.addWidget(select_btn)
 
         apply_btn = QPushButton(tr("ai_assistant.apply", "应用此方案"))
-        apply_btn.setEnabled(can_apply and v.hard_constraints_passed)
+        apply_btn.setEnabled(can_apply and v.hard_constraints_passed and actionable)
         apply_btn.clicked.connect(lambda _checked=False, vid=v.variant_id: self.apply_requested.emit(vid))
         br.addWidget(apply_btn)
         layout.addWidget(btn_row)
         return card
+
+    def show_variant_preview(self, variant_id: str, preview: PreviewResult, *, can_apply: bool) -> None:
+        """Show simulated changes and offer the existing approval entry point."""
+        if preview.diff is None:
+            return
+        from src.features.edit.ui.ai_timeline_diff import AiTimelineDiffPanel
+
+        dialog = QDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowTitle(tr("ai_assistant.preview_changes", "预览变更"))
+        dialog.resize(540, 420)
+        layout = QVBoxLayout(dialog)
+        view = AiTimelineDiffPanel(dialog)
+        view.set_diff(
+            preview.diff.to_dict(), variant_id=variant_id,
+            has_errors=preview.has_errors or not can_apply,
+        )
+        layout.addWidget(view)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        def request_apply(chosen_id: str) -> None:
+            dialog.accept()
+            self.apply_requested.emit(chosen_id)
+
+        view.apply_requested.connect(request_apply)
+        dialog.open()
 
     # ------------------------------------------------------------------ #
     # M5：消息渲染（snapshot.messages 之前从未渲染）
@@ -2152,6 +2403,7 @@ class AiEditAssistantPanel(PanelDockWidget):
             )
             self._placeholder.setVisible(
                 not s.messages and not s.variants and not has_dynamic and not has_activity
+                and not s.state.is_busy and self._streaming_label.isHidden()
             )
             self._update_content_stretch()
             return
@@ -2171,6 +2423,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         # 居中的引导语。
         self._placeholder.setVisible(
             not messages and not s.variants and not has_dynamic and not has_activity
+            and not s.state.is_busy and self._streaming_label.isHidden()
         )
         self._update_content_stretch()
         if not messages:
@@ -2410,11 +2663,16 @@ class AiEditAssistantPanel(PanelDockWidget):
             self._render_context_bundle()
 
     def _on_inspect_context_clicked(self) -> None:
-        """用户点"上下文"按钮 → 切到检查器页 + 通知 host 计算 bundle（§7.1）。"""
+        self._open_context_inspector()
+        self.context_inspector_requested.emit()
+
+    def _open_context_inspector(self) -> None:
         self._render_context_bundle()
         self._stack.setCurrentIndex(self._PAGE_CONTEXT_INSPECTOR)
-        # 通知 host：用户想看上下文 → host 计算 ContextBundle 后回填（set_context_bundle）
-        self.context_inspector_requested.emit()
+
+    def _exit_context_inspector(self) -> None:
+        self._stack.setCurrentIndex(self._PAGE_MAIN)
+        self.refresh_state(self._state)
 
     def _render_context_bundle(self) -> None:
         """渲染 ContextBundle 每块的 kind/优先级/token/为何包含/可排除（§7.1）。"""
@@ -2498,6 +2756,12 @@ class AiEditAssistantPanel(PanelDockWidget):
             why_label.setStyleSheet("color: gray; font-size: 10px;")
             why_label.setWordWrap(True)
             layout.addWidget(why_label)
+        summary = getattr(b, "content", None)
+        if getattr(b, "kind", "") == "recent_summary" and isinstance(summary, str):
+            summary_label = QLabel(summary)
+            summary_label.setTextFormat(Qt.TextFormat.PlainText)
+            summary_label.setWordWrap(True)
+            layout.addWidget(summary_label)
 
         # 排除按钮（HARD_CONSTRAINT 级不允许排除：§7.1 硬约束/用户锁定最优先）
         btn_row = QWidget()
@@ -2506,7 +2770,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         br.addStretch(1)
         block_id = getattr(b, "id", "")
         if priority < 60 and block_id:
-            exclude_btn = QPushButton(tr("ai_assistant.exclude_block", "排除"))
+            exclude_btn = QPushButton(tr("ai_assistant.hide_preview_block", "从预览中隐藏"))
             exclude_btn.setStyleSheet("padding: 2px; font-size: 10px;")
             exclude_btn.clicked.connect(
                 lambda _checked=False, bid=block_id: self.context_block_excluded.emit(bid)
@@ -2519,7 +2783,7 @@ class AiEditAssistantPanel(PanelDockWidget):
     # request composer（M1.3）
     # ------------------------------------------------------------------ #
 
-    _MAX_REQUEST_LEN = 2000  # 防止超长 prompt（真实 token 预算在 M5）
+    _MAX_REQUEST_LEN = MESSAGE_CONTENT_LIMIT
 
     def _on_send_or_cancel_clicked(self) -> None:
         """统一发送/停止按钮：空闲发送，生成中协作取消。"""
@@ -2551,7 +2815,7 @@ class AiEditAssistantPanel(PanelDockWidget):
 
     def _on_send_clicked(self) -> None:
         """发送按钮：取输入文本，封装为 request 并 emit。"""
-        if self._updating:
+        if self._updating or self._state.state.is_busy or not self._send_btn.isEnabled():
             return
         text = self._request_edit.toPlainText().strip()
         has_attachments = bool(
@@ -2559,11 +2823,43 @@ class AiEditAssistantPanel(PanelDockWidget):
         )
         if not text and not has_attachments:
             return
-        if len(text) > self._MAX_REQUEST_LEN:
-            text = text[: self._MAX_REQUEST_LEN]
         self.submit_request(text)
         # 发送后清空输入框
         self._request_edit.clear()
+
+    def _refresh_composer_input(self) -> None:
+        draft = self._request_edit.toPlainText().strip()
+        busy = self._state.state.is_busy
+        over_limit = len(draft) > self._MAX_REQUEST_LEN
+        footer = getattr(self._composer_footer, "state", None)
+        token_limit = getattr(footer, "draft_token_limit", None)
+        over_context = bool(
+            draft and token_limit is not None and estimate_text_tokens(draft) > token_limit
+        )
+        can_send = (
+            bool(draft or self._pending_attachments or self._pending_target_asset_ids)
+            and not over_limit and not over_context and not self._attachment_jobs_pending
+        )
+        notice = ""
+        if self._attachment_jobs_pending:
+            notice = tr("ai_assistant.preparing_attachments", "正在准备图片附件…")
+        elif over_limit:
+            notice = _trf(
+                "ai_assistant.draft_over_limit",
+                "草稿有 {count} 字符。每条消息最多 {limit} 字符，可分段发送。",
+                count=len(draft), limit=self._MAX_REQUEST_LEN,
+            )
+        elif over_context:
+            notice = tr("ai_assistant.draft_over_context", "草稿超出当前模型的可用上下文，请分段发送。")
+        self._input_notice.setText(notice)
+        self._input_notice.setVisible(bool(notice))
+        self._send_btn.setEnabled(busy or can_send)
+
+    def _update_new_conversation(self) -> None:
+        footer = getattr(self._composer_footer, "state", None)
+        self._new_conversation_btn.setEnabled(
+            not self._state.state.is_busy and not getattr(footer, "has_active_run", False)
+        )
 
     def submit_request(self, text: str) -> None:
         """用户提交一条需求（封装为 AssistantRequest 后发 signal）。
@@ -2615,6 +2911,7 @@ class AiEditAssistantPanel(PanelDockWidget):
     ) -> None:
         """派发一个后台解码/编码任务（AUD-19511）。"""
         self._attachment_jobs_pending += 1
+        self._refresh_composer_input()
         worker = _ImageAttachmentWorker(
             image=image,
             path=path,
@@ -2629,6 +2926,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         """后台编码完成回调（经队列信号回 UI 线程）。"""
         self._attachment_jobs_pending = max(0, self._attachment_jobs_pending - 1)
         if not ok or not isinstance(attachment, ImageAttachment):
+            self._refresh_composer_input()
             self._settle_image_batch(added=False)
             return
         self._pending_attachments.append(attachment)
@@ -2764,6 +3062,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         attachments = self._pending_attachments
         target_ids = self._pending_target_asset_ids
         self._attachment_preview_row.setVisible(bool(attachments or target_ids))
+        self._refresh_composer_input()
         for asset_id in target_ids:
             chip = QFrame()
             chip_lay = QHBoxLayout(chip)
@@ -2888,11 +3187,11 @@ class AiEditAssistantPanel(PanelDockWidget):
         if action == "current_frame":
             self.frame_grab_requested.emit()
         elif action == "scope":
-            self.composer_scope_requested.emit()
+            self._on_composer_scope()
         elif action == "context":
             self._on_inspect_context_clicked()
         elif action == "compress":
-            self.context_compress_requested.emit()
+            self._on_context_compress()
         elif action == "new_session":
             self._on_new_session()
         elif action == "history":
@@ -2939,6 +3238,7 @@ class AiEditAssistantPanel(PanelDockWidget):
     # controller 订阅后做（面板不在 slot 里跑模型 / 写 timeline）。
 
     def _on_composer_scope(self) -> None:
+        self._open_context_inspector()
         self.composer_scope_requested.emit()
 
     def _on_composer_permission(self, perm: str) -> None:
@@ -2950,6 +3250,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         self.composer_profile_requested.emit()
 
     def _on_context_compress(self) -> None:
+        self._open_context_inspector()
         self.context_compress_requested.emit()
 
     def _on_new_session(self) -> None:
@@ -2985,6 +3286,8 @@ class AiEditAssistantPanel(PanelDockWidget):
             if profile_label:
                 self._active_profile_display_name = profile_label
             self._composer_footer.set_state(footer_state)  # type: ignore[arg-type]
+            self._update_new_conversation()
+            self._refresh_composer_input()
             # 顶部摘要使用用户配置的十进制 token 单位：200,000 → 200k。
             used = max(0, int(getattr(footer_state, "context_used", 0))) / 1000.0
             limit = max(1, int(getattr(footer_state, "context_limit", 200_000))) / 1000.0
@@ -3012,7 +3315,7 @@ class AiEditAssistantPanel(PanelDockWidget):
                 )
             else:
                 self._context_budget_label.setStyleSheet(
-                    "color: gray; font-size: 10px; padding: 1px 4px;"
+                    "color: #b1b2ba; font-size: 10px; padding: 1px 4px;"
                 )
         finally:
             self._updating = False
@@ -3083,6 +3386,7 @@ class AiEditAssistantPanel(PanelDockWidget):
                 self._placeholder.setVisible(
                     not has_messages and not has_dynamic and not has_activity
                     and not getattr(self._state, "variants", ())
+                    and not self._state.state.is_busy and self._streaming_label.isHidden()
                 )
                 self._update_content_stretch()
                 if has_activity:
@@ -3191,6 +3495,7 @@ class AiEditAssistantPanel(PanelDockWidget):
         if not rows:
             strip.setVisible(False)
             label.clear()
+            self._plugin_diagnostics = ()
             return
         active = sum(getattr(row, "runnable", False) for row in rows)
         attention = sum(
@@ -3222,7 +3527,8 @@ class AiEditAssistantPanel(PanelDockWidget):
             )
             tooltip_rows.append(f"{line} · {reason}" if reason else line)
         label.setToolTip("\n".join(tooltip_rows))
-        strip.setVisible(True)
+        self._plugin_diagnostics = tuple(tooltip_rows)
+        strip.setVisible(bool(attention or unverified))
 
     # ------------------------------------------------------------------ #
     # P1.1：Skill 驱动 Agent 渲染入口（help / clarify / skill 推荐卡）

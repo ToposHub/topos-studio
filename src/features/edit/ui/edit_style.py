@@ -62,7 +62,7 @@ EDIT_COLORS = {
     "inner_shadow_alpha": 100,
 
     # 时间刻度尺专用 (DaVinci-like 层级)
-    "ruler_bg": "#202025",              # 刻度尺背景
+    "ruler_bg": C.TIMELINE_TIMECODE_BG,  # 刻度尺背景
     "ruler_bottom_line": C.PANEL_DIVIDER,
     "ruler_major_tick": "#5C606A",      # 主刻度线
     "ruler_medium_tick": "#3C4049",     # 中刻度线
@@ -82,8 +82,8 @@ EDIT_COLORS = {
     "track_header_badge_audio": "#743841",  # 音频轨 badge (红褐色)
 
     # 左上 timecode 面板
-    "timecode_panel_bg": "#202025",     # timecode 面板背景
-    "timecode_panel_text": "#D8D9DE",   # timecode 文字色
+    "timecode_panel_bg": C.TIMELINE_TIMECODE_BG,    # timecode 面板背景
+    "timecode_panel_text": C.TIMELINE_TIMECODE_TEXT,
     "timecode_panel_bottom_line": C.PANEL_DIVIDER,
 
     # 波形专用

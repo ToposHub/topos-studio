@@ -324,6 +324,7 @@ def analyze_fusion(plan: "RenderPlan", snapshot: "GraphSnapshot",
        d. roi_expansion > 0
        e. fan-out > 1 (output consumed by multiple downstream)
        f. Order incompatible with stage order
+       g. Node visibility is controlled by a time range or a layer gate
     5. In CONSERVATIVE mode: break chain when known texture sizes differ
        (sizes resolve from the eval cache, estimated bboxes or source
        parameters — AUD-11500)
@@ -352,6 +353,7 @@ def analyze_fusion(plan: "RenderPlan", snapshot: "GraphSnapshot",
 
     # 1. Build fan-out map: node_id -> downstream consumer count
     fan_out: Dict[str, int] = {}
+    layer_frame_gates = getattr(snapshot, "layer_frame_gates", None) or {}
     for node_id in plan.eval_order:
         np = plan.node_plans.get(node_id)
         if np is None:
@@ -452,6 +454,9 @@ def analyze_fusion(plan: "RenderPlan", snapshot: "GraphSnapshot",
             and output_port_counts.get(node_id, 0) <= 1
             and fan_out.get(node_id, 0) <= 1
             and np.roi_expansion == 0
+            # A fused pass bypasses individual time-range handling.
+            and node_id not in layer_frame_gates
+            and not getattr(node_ns, "time_range", None)
             # P1-9: node params must stay inside the fused shader's
             # implemented feature set, or the chain silently changes
             # pixels (grade blackpoint/multiply/…, non-sRGB cs modes).

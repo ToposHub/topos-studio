@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 from .base_node import Node, Port, TextureResult, ParamDef
 from src.features.composite.core.format import ImageFormat, BBox
 from src.features.composite.core.color_space import ColorSpace
+from src.features.composite.core.layer_model import EMPTY_LAYER_OUTPUT_PARAM
 
 
 class OutputNode(Node):
@@ -187,9 +188,34 @@ class OutputNode(Node):
     def _do_evaluate(self, inputs: Dict[str, TextureResult], ctx: Any, fb_manager: Any,
                      resource_pool: Any = None, render_mode: str = "preview") -> Dict[str, TextureResult]:
         image_input = inputs.get("image")
-        if not image_input or not image_input.is_valid:
+        if image_input and image_input.is_valid:
+            return self._evaluate_image(image_input, ctx, fb_manager, resource_pool)
+        if not self.parameters.get(EMPTY_LAYER_OUTPUT_PARAM):
             return {}
 
+        # No layer contributes pixels at this frame. Run a transparent image
+        # through the usual format, background, and alpha policies.
+        width = max(1, min(16384, self._get_param_int("width", 1920)))
+        height = max(1, min(16384, self._get_param_int("height", 1080)))
+        texture = (resource_pool.acquire_temp_texture(width, height)
+                   if resource_pool else fb_manager.get_temp_texture(width, height))
+        framebuffer = fb_manager.get_fbo(texture)
+        framebuffer.clear(0.0, 0.0, 0.0, 0.0)
+        blank = TextureResult(texture_id=texture.glo, width=width, height=height,
+                              alpha_premultiplied=True, color_space=ColorSpace.LINEAR,
+                              format=ImageFormat(width=width, height=height))
+        result: Dict[str, TextureResult] = {}
+        try:
+            result = self._evaluate_image(blank, ctx, fb_manager, resource_pool)
+            return result
+        finally:
+            display = result.get("display")
+            self._release_intermediate_texture(
+                blank, display.texture_id if display is not None else 0,
+                resource_pool, fb_manager)
+
+    def _evaluate_image(self, image_input: TextureResult, ctx: Any, fb_manager: Any,
+                        resource_pool: Any) -> Dict[str, TextureResult]:
         # --- Step 1: Resolve target dimensions & resize if needed ---
         result = self._apply_format(image_input, ctx, fb_manager, resource_pool)
         display = result.get("display")
@@ -630,7 +656,6 @@ class OutputNode(Node):
         bind_texture_unit(src.texture_id, 0)
 
         prog['u_texture'].value = 0
-        prog['u_src_resolution'].value = (float(src.width), float(src.height))
 
         vbo = ctx.buffer(np.array([
             -1.0, -1.0, 0.0, 0.0,
@@ -694,7 +719,6 @@ void main() {
 _RESIZE_FRAGMENT = """
 #version 410 core
 uniform sampler2D u_texture;
-uniform vec2 u_src_resolution;
 in vec2 v_uv;
 out vec4 frag_color;
 void main() {

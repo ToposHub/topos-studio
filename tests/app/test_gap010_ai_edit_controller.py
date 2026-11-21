@@ -921,6 +921,74 @@ def test_validate_chat_attachments_blocks_unsupported_inputs(qapp, monkeypatch) 
     assert controller._validate_chat_attachments((file_attachment,)) is True
 
 
+def test_current_visual_attachment_bypasses_project_analysis_router(qapp, monkeypatch) -> None:
+    from unittest.mock import Mock
+    from src.features.edit.ai_editing.assistant_events import AssistantRequest
+    from src.features.edit.ai_editing.image_attachment import ImageAttachment
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile, ProfileRegistry
+
+    controller, *_ = _started(qapp)
+    registry = ProfileRegistry()
+    primary = AiProviderProfile("flash", "Flash", "deepseek", model_id="deepseek-flash")
+    registry.add(primary)
+    registry.set_active(primary.profile_id)
+    controller._profile_registry = registry
+    controller.router = Mock()
+    started = Mock()
+    monkeypatch.setattr(controller, "_start_chat", started)
+    request = AssistantRequest(
+        request_id="image-1", text="请分析这张图片",
+        attachments=(ImageAttachment("data:image/jpeg;base64,dGVzdA=="),),
+    )
+
+    controller._on_request_submitted(request)
+
+    started.assert_called_once_with(request.text)
+    controller.router.route.assert_not_called()
+
+
+def test_mcp_fallback_sends_prepared_text_and_keeps_video_out_of_history(qapp, monkeypatch) -> None:
+    from unittest.mock import Mock
+    from src.features.edit.ai_editing import assistant_vision_fallback as fallback, llm_client
+    from src.features.edit.ai_editing.assistant_events import AssistantRequest
+    from src.features.edit.ai_editing.image_attachment import FileAttachment
+    from src.features.edit.ai_editing.mcp_vision_gateway import (
+        ZHIPU_VISION_ORIGIN, ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_TOOL,
+    )
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile, DataPolicy, ProfileRegistry
+
+    controller, service, *_ = _started(qapp)
+    registry = ProfileRegistry()
+    primary = AiProviderProfile("flash", "Flash", "deepseek", model_id="deepseek-flash")
+    vision = AiProviderProfile(
+        "vision", "Vision MCP", ZHIPU_VISION_PROVIDER_KIND,
+        endpoint=ZHIPU_VISION_ORIGIN, model_id=ZHIPU_VISION_TOOL,
+        credential_ref="vision-key", modalities=("image", "media_upload"),
+        data_policy=DataPolicy(allow_media_upload=True),
+    )
+    registry.add(primary)
+    registry.set_active(primary.profile_id)
+    registry.add(vision)
+    registry.set_active_for_capability("vision", vision.profile_id)
+    controller._profile_registry = registry
+    clip = FileAttachment("/tmp/example.mp4", mime="video/mp4", media_kind="video")
+    prepared = [{"role": "user", "content": "MCP evidence: sunrise"}]
+    prepare = Mock(return_value=prepared)
+    monkeypatch.setattr(fallback, "prepare_vision_fallback_messages", prepare)
+    client = Mock()
+    client.complete.return_value = "The video shows a sunrise."
+    monkeypatch.setattr(llm_client, "make_client", Mock(return_value=client))
+
+    controller._on_request_submitted(AssistantRequest(
+        request_id="video-1", text="请分析本次视频附件", attachments=(clip,),
+    ))
+
+    assert prepare.call_args.kwargs["required"] == (clip,)
+    assert prepare.call_args.kwargs["profile"] == vision
+    assert client.complete.call_args.args[0] == prepared
+    assert all(clip not in message.attachments for message in service.recent_chat_messages(limit=5))
+
+
 def test_chat_profile_for_mode_routes_language_capability(qapp) -> None:
     controller, *_ = _started(qapp)
     controller._profile_registry = None
@@ -941,7 +1009,7 @@ def test_chat_profile_for_mode_routes_language_capability(qapp) -> None:
     assert controller._chat_profile_for_mode(
         "teaching_html_generate",
     ) is language_profile
-    assert controller._chat_profile_for_mode("normal") is default_profile
+    assert controller._chat_profile_for_mode("normal") is language_profile
 
     class _BrokenRegistry:
         active_profile = default_profile

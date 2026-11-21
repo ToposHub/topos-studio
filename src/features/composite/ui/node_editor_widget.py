@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsItem,
     QMenu, QDockWidget,
     QInputDialog, )
-from PyQt6.QtCore import Qt, QPointF, QRectF, pyqtSignal, QTimer, QEvent
+from PyQt6.QtCore import Qt, QMimeData, QPointF, QRectF, pyqtSignal, QTimer, QEvent
 from PyQt6.QtGui import (
     QPainter, QPen, QColor,     QWheelEvent, QMouseEvent, QTransform, QKeySequence, QAction,
 )
@@ -34,6 +34,7 @@ if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
 
 logger = logging.getLogger(__name__)
 
+from src.features.composite.core.media_drop_payload import accepts_layer_media_drop
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.shortcut_manager import ShortcutManager
 from src.shared.ui.style_sheet import PRESET_DIALOG_STYLE, MANAGE_PRESET_DIALOG_STYLE
@@ -448,6 +449,7 @@ class NodeEditorWidget(QGraphicsView):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Accept file drops from Finder/Explorer
+        self._bootstrap_media_drop_handler: Optional[Callable[[QMimeData], bool]] = None
         self.setAcceptDrops(True)
 
         # AUD-10502: backfill slot for background video-metadata probes.
@@ -1003,6 +1005,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def dragEnterEvent(self, event) -> None:
         """Accept media-pool asset drags and file drops（image/video/3D model）。"""
+        if self._bootstrap_media_drop_handler is not None:
+            event.setAccepted(accepts_layer_media_drop(event.mimeData()))
+            return
         # AUD-10503: pool drags first (see _media_pool_asset_ids).
         if self._media_pool_asset_ids(event.mimeData()):
             event.acceptProposedAction()
@@ -1018,6 +1023,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def dragMoveEvent(self, event) -> None:
         """Keep accepting during drag move."""
+        if self._bootstrap_media_drop_handler is not None:
+            event.setAccepted(accepts_layer_media_drop(event.mimeData()))
+            return
         if (self._media_pool_asset_ids(event.mimeData())
                 or event.mimeData().hasUrls()):
             event.acceptProposedAction()
@@ -1052,6 +1060,12 @@ class NodeEditorWidget(QGraphicsView):
                 f"Video metadata probe failed for {path}: {e}")
             return None
 
+    def set_bootstrap_media_drop_handler(
+        self, handler: Optional[Callable[[QMimeData], bool]],
+    ) -> None:
+        """Send media drops to the workspace host before a composition opens."""
+        self._bootstrap_media_drop_handler = handler
+
     def dropEvent(self, event) -> None:
         """Handle dropped files / media-pool assets.
 
@@ -1063,6 +1077,22 @@ class NodeEditorWidget(QGraphicsView):
         创建 asset-backed 节点；未命中再走 URL 文件导入。
         AUD-10502：视频元数据探测移出 UI 线程（见 _schedule_video_metadata_probe）。
         """
+        if self._bootstrap_media_drop_handler is not None:
+            mime_data = event.mimeData()
+            if not accepts_layer_media_drop(mime_data):
+                event.ignore()
+                return
+            try:
+                handled = self._bootstrap_media_drop_handler(mime_data)
+            except Exception:
+                logger.exception("Initial composition media drop failed")
+                handled = False
+            if handled:
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return
+
         # Qt6/PyQt6: QDropEvent.pos() is gone — position() is the successor
         # (QPointF); QGraphicsView.mapToScene takes a QPoint. (Calling
         # .pos() here raised AttributeError, so the whole drop path was

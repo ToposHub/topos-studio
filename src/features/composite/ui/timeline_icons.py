@@ -113,6 +113,14 @@ def draw_icon(painter: QPainter, name: str, rect: QRectF,
         elif name in ("expand", "collapse"):
             _draw_chevron(painter, cx, cy, half,
                           down=(name == "expand"))
+        elif name in ("disclosure_down", "disclosure_right"):
+            if name == "disclosure_right":
+                painter.translate(cx, cy)
+                painter.rotate(-90.0)
+                painter.translate(-cx, -cy)
+            _draw_chevron(painter, cx, cy, half * 0.8, down=True)
+        elif name == "property_animation":
+            _draw_property_animation(painter, cx, cy, half)
         elif name == "snap":
             _draw_magnet(painter, cx, cy, half)
         elif name in ("expression", "expression_error"):
@@ -326,6 +334,20 @@ def _draw_chevron(p: QPainter, cx: float, cy: float, half: float,
                QPointF(cx, cy + sign * half * 0.4))
     p.drawLine(QPointF(cx, cy + sign * half * 0.4),
                QPointF(cx + half * 0.7, cy - sign * half * 0.4))
+
+
+def _draw_property_animation(p: QPainter, cx: float, cy: float, half: float) -> None:
+    """Draw a small timing dial for the value's keyframe control."""
+    radius = half * 0.68
+    pen = p.pen()
+    pen.setWidthF(1.15)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawEllipse(QPointF(cx, cy), radius, radius)
+    hand = QPainterPath(QPointF(cx, cy - radius * 0.63))
+    hand.lineTo(cx, cy)
+    hand.lineTo(cx + radius * 0.53, cy + radius * 0.27)
+    p.drawPath(hand)
 
 
 def _draw_magnet(p: QPainter, cx: float, cy: float, half: float) -> None:

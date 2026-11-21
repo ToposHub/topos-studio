@@ -15,8 +15,12 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from pathlib import Path
 
+import pytest
+from PyQt6.QtCore import QThreadPool
 from PyQt6.QtTest import QTest
+from pytestqt.qtbot import QtBot
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -25,6 +29,7 @@ from features.edit.core.commands import (
     MoveAssetToBinCommand,
 )
 from features.edit.core.project import EditProject
+from features.edit.ui import media_pool_panel
 from features.edit.ui.media_pool_panel import MediaPoolPanel
 
 
@@ -249,6 +254,48 @@ class _NoOpPool:
         return None
 
 
+def test_queued_browser_import_keeps_its_own_bin_and_skips_missing_files(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    project = EditProject.create("Queued browser import")
+    project = project.create_bin("First", project.root_bin_id).create_bin("Second", project.root_bin_id)
+    bins = {item.name: item.bin_id for item in project.bins.values()}
+    panel = MediaPoolPanel()
+    qtbot.addWidget(panel)
+    panel.set_project(project)
+    first, second, replaced = (tmp_path / name for name in ("one.png", "two.png", "gone.png"))
+    for path in (first, second, replaced):
+        path.write_bytes(b"test image")
+
+    class ImportPool:
+        def __init__(self) -> None:
+            self.workers: list[media_pool_panel.MediaImportWorker] = []
+
+        def start(self, worker: media_pool_panel.MediaImportWorker) -> None:
+            self.workers.append(worker)
+
+    queue = ImportPool()
+    monkeypatch.setattr(QThreadPool, "globalInstance", lambda: queue)
+    monkeypatch.setattr(media_pool_panel, "probe_media_metadata", lambda path: {"width": 8, "height": 8})
+
+    panel._on_bin_selected(bins["First"], False)
+    panel.import_file_paths([str(first)])
+    panel._on_bin_selected(bins["Second"], False)
+    panel.import_file_paths([str(second), str(replaced)])
+    replaced.unlink()
+    replaced.mkdir()
+    (replaced / "nested.png").touch()
+    assert len(queue.workers) == 1
+    queue.workers[0].run()
+    qtbot.waitUntil(lambda: len(queue.workers) == 2)
+    with qtbot.waitSignal(panel.media_import_status):
+        queue.workers[1].run()
+    result = panel.get_project()
+    assert result.bins[bins["First"]].asset_ids == (result.get_asset_by_path(str(first)).asset_id,)
+    assert result.bins[bins["Second"]].asset_ids == (result.get_asset_by_path(str(second)).asset_id,)
+    assert len(result.assets) == 2
+
+
 # ---------------------------------------------------------------------------
 # dropEvent fallback to the currently-browsed bin
 # ---------------------------------------------------------------------------
@@ -260,6 +307,9 @@ class _FakeUrlMime:
 
     def hasUrls(self) -> bool:
         return True
+
+    def hasFormat(self, mime_type: str) -> bool:
+        return False
 
     def urls(self):
         class _U:

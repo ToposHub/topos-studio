@@ -542,6 +542,8 @@ class RenderScheduler:
         self._roi_node_cache: Dict[str, Tuple[int, Dict[str, Any], Any]] = {}
         self._prev_disabled: Dict[str, bool] = {}
         self._prev_inputs: Dict[str, Dict[str, str]] = {}
+        self._prev_time_ranges: Dict[str, Optional[Dict[str, Any]]] = {}
+        self._prev_layer_gates: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
         self._prev_topology_revision: int = -1
         self._prev_color_revision: int = -1
         # P0-2: previous snapshot frame_number. When the playhead moves, only
@@ -1252,6 +1254,12 @@ class RenderScheduler:
             if ns.disabled != self._prev_disabled.get(node_id, False):
                 dirty.add(node_id)
 
+        frame_gates = snapshot.layer_frame_gates
+        for node_id, ns in snapshot.nodes.items():
+            if (ns.time_range != self._prev_time_ranges.get(node_id)
+                    or frame_gates.get(node_id) != self._prev_layer_gates.get(node_id)):
+                dirty.add(node_id)
+
         # 4. Input connection changes (only when topology changed)
         if snapshot.topology_revision != self._prev_topology_revision:
             for node_id, np in node_plans.items():
@@ -1281,11 +1289,10 @@ class RenderScheduler:
         if (self._prev_frame_number is not None
                 and snapshot.frame_number != self._prev_frame_number):
             _frame_overrides = getattr(snapshot, "frame_overrides", None) or {}
-            _frame_gates = getattr(snapshot, "layer_frame_gates", None) or {}
             for node_id, np in node_plans.items():
                 if node_id in dirty:
                     continue
-                if node_id in _frame_overrides or node_id in _frame_gates:
+                if node_id in _frame_overrides or node_id in frame_gates:
                     dirty.add(node_id)
                     continue
                 ns = snapshot.nodes.get(node_id)
@@ -1359,6 +1366,10 @@ class RenderScheduler:
             self._prev_params_hash[node_id] = np.params_hash
         self._prev_topology_revision = snapshot.topology_revision
         self._prev_color_revision = snapshot.color_revision
+        self._prev_time_ranges = {node_id: node.time_range
+                                  for node_id, node in snapshot.nodes.items()
+                                  if node.time_range is not None}
+        self._prev_layer_gates = dict(snapshot.layer_frame_gates)
         # P0-2: remember the frame so the next plan can detect playhead moves.
         self._prev_frame_number = snapshot.frame_number
 
@@ -1372,6 +1383,8 @@ class RenderScheduler:
         self._params_hash_memo_generation = -1
         self._prev_disabled.clear()
         self._prev_inputs.clear()
+        self._prev_time_ranges.clear()
+        self._prev_layer_gates.clear()
         self._prev_topology_revision = -1
         self._prev_color_revision = -1
         # Clear port-level revision tracking
@@ -1397,6 +1410,8 @@ class RenderScheduler:
         self._prev_params_hash = dict(source_scheduler._prev_params_hash)
         self._prev_disabled = dict(source_scheduler._prev_disabled)
         self._prev_inputs = {k: dict(v) for k, v in source_scheduler._prev_inputs.items()}
+        self._prev_time_ranges = dict(source_scheduler._prev_time_ranges)
+        self._prev_layer_gates = dict(source_scheduler._prev_layer_gates)
         self._prev_topology_revision = source_scheduler._prev_topology_revision
         self._prev_color_revision = source_scheduler._prev_color_revision
         # Copy port-level revision tracking

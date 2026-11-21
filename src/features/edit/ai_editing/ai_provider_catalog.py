@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
+from urllib.parse import urlsplit
+
+from src.features.edit.ai_editing.mcp_vision_gateway import (
+    ZHIPU_VISION_ORIGIN, ZHIPU_VISION_PROFILE_ID, ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_TOOL,
+)
 
 
 SOURCE_LOCAL = "local"
@@ -18,8 +23,8 @@ SOURCE_PRESET = "preset"
 SOURCE_CUSTOM = "custom"
 
 SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("本地安装模型", SOURCE_LOCAL),
-    ("本地 Ollama", SOURCE_OLLAMA),
+    ("本机模型", SOURCE_LOCAL),
+    ("Ollama 服务", SOURCE_OLLAMA),
     ("第三方服务预设", SOURCE_PRESET),
     ("自定义 API", SOURCE_CUSTOM),
 )
@@ -38,6 +43,8 @@ class AiProviderPreset:
     capabilities: tuple[str, ...]
     modalities: tuple[str, ...] = ()
     description: str = ""
+    label_en: str = ""
+    description_en: str = ""
 
 
 # Keep this list deliberately small and explicit.  It is configuration UI,
@@ -53,6 +60,50 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "适用于本机 vLLM / llama.cpp / LM Studio 等 OpenAI 兼容服务",
+    ),
+    AiProviderPreset(
+        "openai-compatible-vision",
+        "自建服务 · OpenAI 兼容视觉",
+        SOURCE_CUSTOM,
+        "openai",
+        "http://127.0.0.1:8000/v1",
+        "",
+        ("vision",),
+        ("image",),
+        "可填写局域网服务器地址，再获取或输入视觉模型 ID",
+    ),
+    AiProviderPreset(
+        ZHIPU_VISION_PROFILE_ID,
+        "智谱 · 视觉 MCP",
+        SOURCE_PRESET,
+        ZHIPU_VISION_PROVIDER_KIND,
+        ZHIPU_VISION_ORIGIN,
+        ZHIPU_VISION_TOOL,
+        ("vision",),
+        ("image",),
+        "智谱 GLM Coding Plan · npx 启动官方 stdio 服务，需要 Node.js 18+",
+    ),
+    AiProviderPreset(
+        "model-studio-vision",
+        "阿里云百炼 · 千问视觉",
+        SOURCE_PRESET,
+        "openai",
+        "",
+        "",
+        ("vision",),
+        ("image",),
+        "从百炼控制台复制当前工作空间的 OpenAI 兼容地址和视觉模型 ID",
+    ),
+    AiProviderPreset(
+        "openai-timed-asr",
+        "OpenAI · 带时间码的转录",
+        SOURCE_PRESET,
+        "openai",
+        "https://api.openai.com/v1",
+        "whisper-1",
+        ("asr",),
+        ("asr",),
+        "OpenAI 兼容转录接口；自建服务可修改地址和模型 ID",
     ),
     AiProviderPreset(
         "openai-chat",
@@ -75,6 +126,17 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "Anthropic Messages 接口",
+    ),
+    AiProviderPreset(
+        "deepseek-flash",
+        "DeepSeek · Flash",
+        SOURCE_PRESET,
+        "deepseek",
+        "https://api.deepseek.com",
+        "deepseek-flash",
+        ("language", "vision_understanding"),
+        ("text", "tool_call", "image"),
+        "DeepSeek OpenAI 兼容接口，支持对话、工具调用和图片理解",
     ),
     AiProviderPreset(
         "deepseek-chat",
@@ -128,7 +190,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "volcengine_seedream",
         "https://ark.cn-beijing.volces.com/api/plan/v3",
         "doubao-seedream-5.0-lite",
-        ("vision", "image"),
+        ("image",),
         ("image",),
         "Seedream 图片生成；Medium 套餐可用能力以控制台为准",
     ),
@@ -149,10 +211,34 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         SOURCE_PRESET,
         "volcengine_plan_asr",
         "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
-        "volc.seedasr.sauc.duration",
+        "volc.bigasr.auc_turbo",
         ("asr",),
         (),
         "文件识别端点；Resource-Id 可按控制台实际开通资源调整",
+    ),
+    AiProviderPreset(
+        "local-openai-compatible-embedding",
+        "本机 · OpenAI 兼容向量",
+        SOURCE_LOCAL,
+        "local_http",
+        "http://127.0.0.1:8000/v1",
+        "",
+        ("embedding",),
+        description="连接本机 OpenAI 兼容向量服务，可在模型列表中选择模型。",
+        label_en="Local · OpenAI-compatible embeddings",
+        description_en="Connect to a local OpenAI-compatible embedding server and select an available model.",
+    ),
+    AiProviderPreset(
+        "ollama-embedding",
+        "Ollama · 本机向量",
+        SOURCE_OLLAMA,
+        "ollama",
+        "http://127.0.0.1:11434/api/embed",
+        "",
+        ("embedding",),
+        description="使用 Ollama 原生向量接口，可选择已安装的嵌入模型。",
+        label_en="Ollama · Local embeddings",
+        description_en="Use Ollama's native embedding API and select an installed embedding model.",
     ),
     AiProviderPreset(
         "openai-embedding",
@@ -163,7 +249,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "text-embedding-3-small",
         ("embedding",),
         (),
-        "向量化接口配置预设；当前仅保存配置，运行时适配器按需接入",
+        "使用 OpenAI 向量模型为素材库提供语义搜索。",
+        description_en="Use OpenAI embeddings for semantic library search.",
     ),
     AiProviderPreset(
         "local-qwen-asr",
@@ -208,7 +295,11 @@ def presets_for_category(category: str) -> tuple[AiProviderPreset, ...]:
     }.get(category, set())
     if not wanted:
         return ()
-    return tuple(item for item in PROVIDER_PRESETS if wanted.intersection(item.capabilities))
+    return tuple(
+        item for item in PROVIDER_PRESETS
+        if wanted.intersection(item.capabilities)
+        or (category == "vision" and "vision_understanding" in item.capabilities)
+    )
 
 
 def infer_capabilities(provider_kind: str, modalities: Iterable[str]) -> tuple[str, ...]:
@@ -259,8 +350,21 @@ def profile_supports_input(profile: object, input_kind: str) -> bool:
     """
     kind = str(input_kind or "file").lower()
     provider_kind = str(getattr(profile, "provider_kind", "") or "").lower()
+    model = str(getattr(profile, "model_id", "") or "").lower()
     modalities = {str(item).lower() for item in (getattr(profile, "modalities", ()) or ())}
     capabilities = {str(item).lower() for item in (getattr(profile, "capabilities", ()) or ())}
+    endpoint = str(getattr(profile, "endpoint", "") or "")
+    try:
+        official_deepseek = urlsplit(endpoint).hostname == "api.deepseek.com"
+    except ValueError:
+        official_deepseek = False
+    if provider_kind == "deepseek" or official_deepseek:
+        if kind != "image":
+            return False
+        if model in {"deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"}:
+            return False
+        if model == "deepseek-flash" or model.startswith("deepseek-v4-flash"):
+            return True
     if _is_known_volcengine_multimodal(profile):
         return True
     if "multimodal" in modalities or "multimodal_understanding" in capabilities:

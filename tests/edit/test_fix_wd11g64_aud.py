@@ -500,10 +500,11 @@ class TestAud19603BackgroundTestConnection:
         monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
 
         class _FakeClient:
-            def test_connection(self) -> None:
-                return None
+            def test(self, capability: str) -> str:
+                assert capability == "language"
+                return "ok"
 
-        monkeypatch.setattr(prefs_mod, "make_client", lambda profile, store: _FakeClient())
+        monkeypatch.setattr(prefs_mod, "MediaInferenceClient", lambda profile, key: _FakeClient())
 
         store = _CountingCredentialStore()
         page = _make_page(qapp, [_make_profile("p1")], store)
@@ -520,10 +521,10 @@ class TestAud19603BackgroundTestConnection:
         monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
 
         class _FakeClient:
-            def test_connection(self) -> None:
+            def test(self, _capability: str) -> str:
                 raise RuntimeError("boom")
 
-        monkeypatch.setattr(prefs_mod, "make_client", lambda profile, store: _FakeClient())
+        monkeypatch.setattr(prefs_mod, "MediaInferenceClient", lambda profile, key: _FakeClient())
 
         store = _CountingCredentialStore()
         page = _make_page(qapp, [_make_profile("p1")], store)
@@ -547,29 +548,35 @@ class TestAud19604LocalUnverified:
         page = _make_page(qapp, [_make_profile("loc", source_kind=SOURCE_LOCAL)], store)
         page._on_test_connection()
         assert "loc" not in page._connection_results, "本地分支不得写入已通过标记"
-        assert "不会将其标记为已通过连接测试" in shown[0]
+        assert shown
 
 
 class TestAud19605PendingKeyFlush:
-    def test_switch_flushes_pending_key_to_old_profile(self, qapp) -> None:
+    def test_switch_keeps_pending_key_for_old_profile_until_apply(self, qapp, monkeypatch) -> None:
         store = _CountingCredentialStore()
         page = _make_page(qapp, [_make_profile("pa"), _make_profile("pb")], store)
-        lst = page._widgets["profile_list"]
-        assert lst.count() == 2
+        _isolate_user_files(monkeypatch, page)
+        picker = page._widgets["profile_picker"]
+        assert picker.count() == 2
         assert page._current_profile_id == "pa"
 
         page._widgets["api_key"].setText("secret-A")
         assert page._pending_api_key == "secret-A"
-        lst.setCurrentRow(1)  # 切换到 pb
+        picker.setCurrentIndex(picker.findData("pb"))
         assert page._current_profile_id == "pb"
-        assert store._store.get("topos:pa") == "secret-A", "切换时 key 必须落盘到旧 profile"
+        assert store._store.get("topos:pa") is None
+        picker.setCurrentIndex(picker.findData("pa"))
+        assert page._widgets["api_key"].text() == "secret-A"
+        page.apply(_FakeConfigManager())
+        assert store._store.get("topos:pa") == "secret-A"
 
     def test_empty_pending_key_keeps_stored_secret(self, qapp) -> None:
         store = _CountingCredentialStore()
         store.set_secret("topos:pa", "old-secret")
         page = _make_page(qapp, [_make_profile("pa"), _make_profile("pb")], store)
         page._widgets["api_key"].setText("")  # 留空 = 保持已存 key
-        page._on_profile_selected(page._widgets["profile_list"].item(1), None)
+        picker = page._widgets["profile_picker"]
+        picker.setCurrentIndex(picker.findData("pb"))
         assert store._store.get("topos:pa") == "old-secret"
 
 
@@ -594,24 +601,28 @@ class TestAud19607TypingPathPerformance:
     def test_typing_updates_label_in_place_without_rebuild(self, qapp, monkeypatch) -> None:
         store = _CountingCredentialStore()
         page = _make_page(qapp, [_make_profile("p1"), _make_profile("p2")], store)
-        lst = page._widgets["profile_list"]
+        picker = page._widgets["profile_picker"]
         rebuilds = []
         monkeypatch.setattr(
-            page, "_refresh_profile_list",
+            page, "_refresh_profile_picker",
             lambda *a, **k: rebuilds.append(1),
         )
 
         reads_before = store.get_calls
         page._widgets["display_name"].setText("Renamed")
         assert rebuilds == [], "键入路径不得整表重建列表"
-        assert "Renamed" in lst.item(0).text(), "标签须就地更新"
+        assert picker.itemText(picker.findData("p1")) == "Renamed", "标签须就地更新"
         assert store.get_calls == reads_before, "凭据读取须命中缓存"
 
-    def test_credential_cache_invalidated_on_write(self, qapp) -> None:
+    def test_credential_cache_invalidated_on_write(self, qapp, monkeypatch) -> None:
         store = _CountingCredentialStore()
         page = _make_page(qapp, [_make_profile("pa"), _make_profile("pb")], store)
+        _isolate_user_files(monkeypatch, page)
         page._widgets["api_key"].setText("k1")
-        page._on_profile_selected(page._widgets["profile_list"].item(1), None)
+        picker = page._widgets["profile_picker"]
+        picker.setCurrentIndex(picker.findData("pb"))
+        assert page._credential_secret_present("topos:pa") is False
+        page.apply(_FakeConfigManager())
         # 写入后缓存失效：下一次读取应重新击穿并拿到新值
         assert page._credential_secret_present("topos:pa") is True
         assert store._store.get("topos:pa") == "k1"

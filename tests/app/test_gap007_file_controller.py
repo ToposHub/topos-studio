@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import os
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import ANY, MagicMock, Mock
 
 import pytest
 
@@ -495,7 +496,7 @@ def test_load_edit_project_restores_from_autosave_when_confirmed(
 
     FileOpsMixin._load_edit_project(host, path)
 
-    io.load_project.assert_called_once_with(autosave)
+    io.load_project.assert_called_once_with(autosave, receive_ai_payload=ANY)
     io.set_current_filepath.assert_called_once_with(path)
     assert host._current_edit_project_filepath == path
     host.save_router.set_project_path.assert_called_once_with(path)
@@ -517,7 +518,7 @@ def test_load_edit_project_discards_autosave_when_declined(tmp_path, msgbox) -> 
     FileOpsMixin._load_edit_project(host, path)
 
     io.discard_autosave.assert_called_once_with(path)
-    io.load_project.assert_called_once_with(path)  # 未从恢复文件加载
+    io.load_project.assert_called_once_with(path, receive_ai_payload=ANY)
 
 
 def test_load_edit_project_reports_failure_when_result_none(tmp_path, msgbox) -> None:
@@ -583,6 +584,50 @@ def test_load_edit_project_falls_back_to_provisional_timeline(tmp_path) -> None:
     timeline_panel.set_timeline_sequence.assert_not_called()
     timeline_panel.clear.assert_called_once()
     timeline_panel.show_provisional_timeline.assert_called_once()
+
+
+def test_load_edit_project_restores_ai_evidence_into_new_services(
+    qapp: Any, tmp_path: Path,
+) -> None:
+    from src.app.controllers.ai_editing_mixin import AiEditingMixin
+    from src.features.edit.ai_editing.analysis_models import AssetAnalysis, AssetFingerprint
+    from src.features.edit.ai_editing.analysis_service import AnalysisService
+    from src.features.edit.core.edit_project_io import EditProjectIO, EditProjectIOConfig
+    from src.features.edit.core.project import EditProject
+
+    media = tmp_path / "subject.png"
+    media.write_bytes(b"fixture media")
+    first = EditProject.create("With evidence").import_asset(str(media), "image", metadata={})
+    asset_id = next(iter(first.assets))
+    original = AnalysisService()
+    original.ingest(asset_id, AssetAnalysis(
+        asset_id=asset_id, fingerprint=AssetFingerprint(size=media.stat().st_size), fps="24/1",
+    ), ())
+    archive = tmp_path / "with-evidence.topos"
+    empty_archive = tmp_path / "without-evidence.topos"
+    io = EditProjectIO(EditProjectIOConfig(autosave_interval=0))
+    assert io.save_project(empty_archive, EditProject.create("Without evidence"))
+    assert io.save_project(archive, first, ai_analysis_data=original.export_all())
+
+    previous = AnalysisService()
+    host = make_host(edit_project_io=io, _shared_analysis_service=previous)
+    host._init_timeline_preview_renderer = Mock()
+    host._setup_ai_editing = lambda: setattr(host, "_shared_analysis_service", AnalysisService())
+    io.set_callbacks(on_ai_payload_loaded=lambda payload: AiEditingMixin._restore_ai_payload(host, payload))
+
+    FileOpsMixin._load_edit_project(host, str(archive))
+    assert host._current_edit_project.project_id == first.project_id
+    assert host._shared_analysis_service.get_analysis(asset_id) == original.get_analysis(asset_id)
+    assert not previous.known_asset_ids()
+
+    FileOpsMixin._load_edit_project(host, str(empty_archive))
+    assert host._current_edit_project.name == "Without evidence"
+    assert not host._shared_analysis_service.known_asset_ids()
+
+    legacy_payloads: list[dict[str, Any]] = []
+    io.set_callbacks(on_ai_payload_loaded=legacy_payloads.append)
+    assert io.load_project(archive) is not None
+    assert [payload["analysis"] for payload in legacy_payloads] == [original.export_all()]
 
 
 # ═══════════════════════════════════════════════════════════════════════

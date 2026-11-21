@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
+from PyQt6.QtCore import QModelIndex, QPointF, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QTextOption
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
@@ -17,11 +17,13 @@ class FilesCardDelegate(QStyledItemDelegate):
     def __init__(
         self, entry_role: int, image_for_entry: Callable[[Entry], QImage | None],
         parent: QWidget, strip_for_entry: Callable[[Entry], QImage | None] | None = None,
+        *, ai_analyzed: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__(parent)
         self.entry_role = entry_role
         self.image_for_entry = image_for_entry
         self.strip_for_entry = strip_for_entry
+        self.ai_analyzed = ai_analyzed
         self.card_width = 180
         self.layout_mode = "grid"
         self.grid_fill = False
@@ -46,10 +48,7 @@ class FilesCardDelegate(QStyledItemDelegate):
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         offline = entry.availability == "offline"
         if selected or hovered:
-            body = QColor(C.ORANGE if selected else C.BG_ACTIVE)
-            if selected:
-                body.setAlpha(22)
-            painter.setBrush(body)
+            painter.setBrush(QColor(C.BG_ACTIVE if selected else C.BG_HOVER))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(rect, 5, 5)
         clip = QPainterPath()
@@ -88,7 +87,7 @@ class FilesCardDelegate(QStyledItemDelegate):
 
         if selected or hovered:
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER), 1.2))
+            painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER), 1.0))
             painter.drawRoundedRect(cover, 4, 4)
 
         kind = entry.kind
@@ -118,6 +117,17 @@ class FilesCardDelegate(QStyledItemDelegate):
             painter.setPen(QColor(C.ORANGE))
             painter.drawText(rating_rect, Qt.AlignmentFlag.AlignCenter, "★" * entry.user.rating)
 
+        if self.ai_analyzed is not None and self.ai_analyzed(entry.path):
+            ai_rect = QRectF(cover.right() - 31, cover.top() + (29 if entry.user.rating else 8), 23, 18)
+            badge_font.setBold(True)
+            painter.setFont(badge_font)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(18, 18, 18, 216))
+            painter.drawRoundedRect(ai_rect, 4, 4)
+            painter.setPen(QColor(C.ORANGE))
+            painter.drawText(ai_rect, Qt.AlignmentFlag.AlignCenter, "AI")
+            badge_font.setBold(False)
+
         title_font = QFont(option.font)
         title_font.setPointSizeF(10)
         painter.setFont(title_font)
@@ -140,10 +150,22 @@ class FilesCardDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(badge_rect, 4, 4)
             painter.setPen(QColor(C.TEXT_PRIMARY))
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
-        if option.state & QStyle.StateFlag.State_HasFocus:
-            painter.setPen(QPen(QColor(C.ORANGE), 1, Qt.PenStyle.DotLine))
+        if selected:
+            marker = QRectF(cover.left() + 6, cover.bottom() - 22, 16, 16)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(C.BG_DARKEST))
+            painter.drawEllipse(marker)
+            center = marker.center()
+            check = QPainterPath(center + QPointF(-3.5, 0))
+            check.lineTo(center + QPointF(-1, 2.5))
+            check.lineTo(center + QPointF(3.5, -2.5))
+            painter.setPen(QPen(QColor(C.ORANGE), 1.5, cap=Qt.PenCapStyle.RoundCap,
+                                join=Qt.PenJoinStyle.RoundJoin))
+            painter.drawPath(check)
+        elif option.state & QStyle.StateFlag.State_HasFocus:
+            painter.setPen(QPen(QColor(C.TEXT_DIM), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(3, 3, -3, -3), 6, 6)
+            painter.drawRoundedRect(rect, 5, 5)
         painter.restore()
 
 

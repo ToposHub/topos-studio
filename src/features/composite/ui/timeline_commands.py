@@ -956,9 +956,28 @@ def _video_source_node_for(target_node: Any, graph: Any,
     return None
 
 
+def layer_bar_edit_bounds(start: int, end: int, target: int, edit: str, *,
+                          source_total: int = 0, source_in: int = 0) -> tuple[int, int]:
+    """Apply the common layer timing limits for mouse and keyboard edits."""
+    if edit == "slide":
+        new_start = max(0, target)
+        return new_start, new_start + end - start
+    if edit == "trim_in":
+        earliest = max(0, start - source_in) if source_total else 0
+        return max(earliest, min(target, end)), end
+    if edit == "trim_out":
+        if source_total:
+            last_source_frame = start + source_total - 1 - source_in
+            target = min(target, max(end, last_source_frame))
+        return start, max(start, target)
+    raise ValueError(f"Unknown layer range edit: {edit!r}")
+
+
 def apply_video_range_edit(target_node: Any, graph: Any,
                            layers_map: Optional[Mapping[str, Any]],
-                           new_range: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+                           new_range: Mapping[str, Any], *,
+                           previous_start: Optional[int] = None
+                           ) -> Optional[Dict[str, Any]]:
     """Link a Keyframes-panel bar edit to the video source's playback range.
 
     NLE trim semantics (content stays anchored to the composition):
@@ -993,13 +1012,17 @@ def apply_video_range_edit(target_node: Any, graph: Any,
     except (TypeError, ValueError):
         return None
 
-    tr = getattr(target_node, "time_range", None)
-    old_start = 0
-    if isinstance(tr, dict):
-        try:
-            old_start = int(tr.get("comp_start", 0) or 0)
-        except (TypeError, ValueError):
-            old_start = 0
+    if previous_start is None:
+        tr = (getattr(target_node, "time_range", None)
+              or getattr(video_node, "time_range", None))
+        old_start = 0
+        if isinstance(tr, dict) and tr.get("enabled", True):
+            try:
+                old_start = int(tr.get("comp_start", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+    else:
+        old_start = previous_start
 
     params = getattr(video_node, "parameters", {})
     before: Dict[str, Any] = {}
@@ -1035,6 +1058,42 @@ def video_source_node_for(target_node: Any, graph: Any,
     still needs the layer's composition visibility range.
     """
     return _video_source_node_for(target_node, graph, layers_map)
+
+
+def shift_layer_animation(graph: Any, node_ids: set[str], delta: int
+                          ) -> tuple[dict[str, dict], dict[str, dict]]:
+    """Translate complete tracks without changing values or relative tangents."""
+    before: dict[str, dict] = {}
+    after: dict[str, dict] = {}
+    if not delta:
+        return before, after
+    for node_id in sorted(node_ids):
+        node = graph.get_node(node_id)
+        if node is None or not node.keyframe_tracks:
+            continue
+        shifted = copy.deepcopy(node.keyframe_tracks)
+        for track in shifted.values():
+            if not isinstance(track, dict):
+                continue
+            for keyframe in track.get("keyframes", ()) or ():
+                if isinstance(keyframe, dict) and type(keyframe.get("frame")) is int:
+                    keyframe["frame"] += delta
+        if shifted == node.keyframe_tracks:
+            continue
+        before[node_id] = copy.deepcopy(node.keyframe_tracks)
+        after[node_id] = shifted
+    restore_layer_animation(graph, after)
+    return before, after
+
+
+def restore_layer_animation(graph: Any, node_tracks: Mapping[str, dict]) -> None:
+    """Restore serialized tracks exactly, including legacy and plugin fields."""
+    for node_id, tracks in node_tracks.items():
+        node = graph.get_node(node_id)
+        if node is not None:
+            node.keyframe_tracks = copy.deepcopy(tracks)
+            node.param_revision += 1
+            node.bump_output_revision()
 
 
 __all__ = [

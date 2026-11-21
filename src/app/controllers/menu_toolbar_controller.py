@@ -884,7 +884,9 @@ class MenuToolbarMixin:
         # After dialog closes, shortcuts are already applied to QActions
         # and persisted to config.json by ShortcutManager
 
-    def show_preferences_dialog(self, initial_page_id: str | None = None) -> None:
+    def show_preferences_dialog(
+        self, initial_page_id: str | None = None, *, initial_ai_category: str | None = None,
+    ) -> None:
         """Show the Preferences dialog for application settings."""
         from src.app.ui.preferences_dialog import PreferencesDialog
 
@@ -899,6 +901,11 @@ class MenuToolbarMixin:
                     except Exception as exc:
                         logger.warning("Failed to register preference pages for %s: %s", fid, exc)
 
+        manager = getattr(self, "_model_pack_manager", None)
+        for page in module_pages:
+            if getattr(page, "page_id", None) == "edit.ai_editing":
+                page.set_model_pack_manager(manager)
+
         dialog = PreferencesDialog(
             self.config_manager, self.shortcut_manager, self,
             feature_flags=self.feature_flags,
@@ -906,6 +913,11 @@ class MenuToolbarMixin:
         )
         if initial_page_id:
             dialog.select_page(initial_page_id)
+        if initial_ai_category is not None:
+            for page in module_pages:
+                if getattr(page, "page_id", None) == "edit.ai_editing":
+                    page.select_model_category(initial_ai_category)
+                    break
 
         # Connect appearance preview signal for instant preview
         dialog.appearance_preview_changed.connect(self._on_appearance_preview)

@@ -17,16 +17,16 @@ Manages:
 import copy
 import logging
 import time
-from typing import Any, Optional, List, Tuple
+from typing import Any, Callable, Optional, List, Tuple
 
 import numpy as np
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QToolButton, QMenu, QFrame
+    QLabel, QPushButton, QToolButton, QMenu, QToolTip
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QActionGroup, QKeySequence, QShortcut
+from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QActionGroup, QCursor, QKeySequence, QShortcut
 
 from src.features.composite.render.composite_renderer import CompositeRenderer, CompositeCommand
 from src.features.composite.render.thumbnail_policy import CompositeThumbnailPolicy, ThumbnailThrottleState, compute_thumbnail_requests
@@ -36,9 +36,10 @@ from src.features.composite.render.render_scheduler import RenderRequest, Reques
 from src.features.composite.render.prefetch_scheduler import PrefetchScheduler, PrefetchPrediction
 from src.features.composite.nodes.node_state import NodeState
 from src.features.composite.core.node_engine import NodeGraph, NODE_REGISTRY
+from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.core.media_drop_payload import (
-    resolve_drop_payloads, resolve_asset_ids, MEDIA_TYPE_MODEL3D,
+    MediaDropPayload, resolve_drop_payloads, resolve_asset_ids, MEDIA_TYPE_MODEL3D,
     MEDIA_TYPE_VIDEO,
 )
 from src.features.composite.nodes.color_node import COLORNode  # Deprecated - kept for isinstance checks
@@ -107,12 +108,16 @@ def _page_node_is_locked(owner: object, node_id: object) -> bool:
     """Read the editor lock state while tolerating lightweight test doubles."""
     editor = getattr(owner, "_node_editor", None)
     is_locked = getattr(editor, "is_node_locked", None)
-    if not callable(is_locked) or node_id is None:
+    if node_id is None:
         return False
     # The real editor returns bool.  Requiring that exact type keeps a
     # lightweight MagicMock used by handler tests from becoming truthy and
     # accidentally blocking an otherwise unrelated parameter edit.
-    return is_locked(str(node_id)) is True
+    if callable(is_locked) and is_locked(str(node_id)) is True:
+        return True
+    controller = vars(owner).get("_layer_stack_controller")
+    layer_lock = getattr(controller, "is_node_locked_by_layer", None)
+    return callable(layer_lock) and layer_lock(str(node_id)) is True
 
 
 class _FrameReadyTrampoline:
@@ -176,10 +181,6 @@ class CompositePage(QWidget):
     # Signal: Output node "Render Output" button clicked.
     # Argument: node_id of the Output node.
     render_output_requested = pyqtSignal(str)
-
-    # Signal: create a new persistent Comp Clip from the empty-state CTA.
-    # The MainWindow handles the existing settings dialog/project workflow.
-    create_empty_comp_clip_requested = pyqtSignal()
 
     # Signal: 某个视频节点的当前帧已在后台解码完成（持帧预览路径）。
     # 工作线程经 VideoContext.notify_frame_ready → 本信号 emit（自动队列
@@ -326,7 +327,8 @@ class CompositePage(QWidget):
         # AE/Nuke hybrid controller. It shares the page's NodeGraph and undo
         # stack so layer edits are atomic with the rest of the composition.
         self._layer_stack_controller = LayerStackController(
-            self._node_graph, self._undo_stack, parent=self)
+            self._node_graph, self._undo_stack, parent=self,
+            layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
 
         # Parameter change debounce timer
         self._param_debounce_timer = QTimer(self)
@@ -392,8 +394,6 @@ class CompositePage(QWidget):
         self._properties_panel: Optional[Any] = None
         self._node_toolbar = None
         self._node_toolbar_controls: list[QWidget] = []
-        self._empty_state_overlay = None
-        self._empty_state_create_button = None
 
         # Prefetch system: scheduler and timer
         self._prefetch_scheduler = PrefetchScheduler()
@@ -590,6 +590,8 @@ class CompositePage(QWidget):
         editor_layout.setSpacing(0)
 
         self._node_editor = NodeEditorWidget(self)
+        self._node_editor.installEventFilter(self)
+        self._node_editor.viewport().installEventFilter(self)
         self._node_editor.node_double_clicked.connect(self._on_node_double_clicked)
         self._node_editor.node_connected.connect(self._on_nodes_connected)
         self._node_editor.node_disconnected.connect(self._on_nodes_disconnected)
@@ -684,105 +686,10 @@ class CompositePage(QWidget):
         # Initialize thumbnail manager
         self._thumbnail_manager = NodeThumbnailManager(self._node_graph)
 
-        self._build_empty_state_overlay()
         self.set_composition_active(False)
 
-    def _build_empty_state_overlay(self) -> None:
-        """Build the read-only overlay shown before a composition is opened.
-
-        This widget is intentionally parented to CompositePage rather than to
-        the main window.  It therefore blocks only the node workspace while
-        the shared Media Pool dock remains available for creating/opening a
-        Comp Clip.
-        """
-        overlay = QWidget(self)
-        overlay.setObjectName("compositeEmptyStateOverlay")
-        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        overlay.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        overlay.setStyleSheet(
-            f"QWidget#compositeEmptyStateOverlay {{"
-            " background-color: rgba(10, 11, 14, 178);"
-            "}"
-            f"QFrame#compositeEmptyStateCard {{"
-            f" background-color: {C.BG_PANEL};"
-            f" border: 1px solid {C.BORDER};"
-            " border-radius: 5px;"
-            "}"
-            f"QLabel#compositeEmptyStateTitle {{"
-            f" color: {C.TEXT_PRIMARY};"
-            " font-size: 13px;"
-            " font-weight: 600;"
-            "}"
-            f"QLabel#compositeEmptyStateHint {{"
-            f" color: {C.TEXT_HINT};"
-            " font-size: 11px;"
-            "}"
-            f"QPushButton#compositeEmptyStateCreateButton {{"
-            f" color: #ffffff;"
-            f" background-color: {C.ORANGE};"
-            f" border: 1px solid {C.ORANGE};"
-            " border-radius: 3px;"
-            " padding: 5px 14px;"
-            " min-width: 132px;"
-            " font-size: 11px;"
-            "}"
-            f"QPushButton#compositeEmptyStateCreateButton:hover {{"
-            f" background-color: {C.ORANGE_HOVER};"
-            "}"
-            f"QPushButton#compositeEmptyStateCreateButton:pressed {{"
-            f" background-color: {C.ORANGE_PRESS};"
-            "}"
-        )
-
-        overlay_layout = QVBoxLayout(overlay)
-        overlay_layout.setContentsMargins(20, 20, 20, 20)
-        overlay_layout.addStretch(1)
-
-        card = QFrame(overlay)
-        card.setObjectName("compositeEmptyStateCard")
-        card.setMaximumWidth(440)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(28, 24, 28, 24)
-        card_layout.setSpacing(10)
-
-        title = QLabel(
-            I18N.tr("composite.empty_state.title", "No Comp Clip Open"),
-            card,
-        )
-        title.setObjectName("compositeEmptyStateTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(title)
-
-        hint = QLabel(
-            I18N.tr(
-                "composite.empty_state.hint",
-                "Create or open a Comp Clip to begin editing.",
-            ),
-            card,
-        )
-        hint.setObjectName("compositeEmptyStateHint")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(hint)
-
-        create_button = QPushButton(
-            I18N.tr("composite.empty_state.create", "New Comp Clip"),
-            card,
-        )
-        create_button.setObjectName("compositeEmptyStateCreateButton")
-        create_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        create_button.clicked.connect(self.create_empty_comp_clip_requested.emit)
-        card_layout.addWidget(create_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        overlay_layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
-        overlay_layout.addStretch(1)
-
-        self._empty_state_overlay = overlay
-        self._empty_state_create_button = create_button
-        overlay.setGeometry(self.rect())
-        overlay.raise_()
-
     def set_composition_active(self, active: bool) -> None:
-        """Enable or disable the node workspace for the current composition.
+        """Enable node editing or let the empty workspace receive media.
 
         The state is based on the active composition identity, not on the
         current Media Pool selection.  Clearing a Media Pool selection after
@@ -801,10 +708,13 @@ class CompositePage(QWidget):
         for control in self._node_toolbar_controls:
             control.setEnabled(self._composition_active)
         if hasattr(self, "_node_editor"):
-            self._node_editor.setEnabled(self._composition_active)
+            self._node_editor.set_bootstrap_media_drop_handler(
+                None if self._composition_active else self._handle_initial_media_drop,
+            )
             self._node_editor.set_shortcuts_enabled(
                 self._composition_active and self._is_active
             )
+        self._minimap.setEnabled(self._composition_active)
 
         keyframes_panel = getattr(self, "_keyframes_panel", None)
         if keyframes_panel is not None and hasattr(
@@ -816,10 +726,18 @@ class CompositePage(QWidget):
         else:
             self._sync_import_report_for_selected_node()
 
-        if self._empty_state_overlay is not None:
-            self._empty_state_overlay.setVisible(not self._composition_active)
-            if not self._composition_active:
-                self._empty_state_overlay.raise_()
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (not self._composition_active
+                and event.type() in (
+                    QEvent.Type.ContextMenu, QEvent.Type.KeyPress,
+                    QEvent.Type.KeyRelease, QEvent.Type.MouseButtonPress,
+                    QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick,
+                    QEvent.Type.MouseMove, QEvent.Type.Wheel,
+                ) and watched in (self._node_editor, self._node_editor.viewport())):
+            # Keep the node viewport enabled so normal media drop events arrive.
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def has_active_composition(self) -> bool:
         """Return whether the node workspace currently has an open composition."""
@@ -945,6 +863,34 @@ class CompositePage(QWidget):
         """Set the project used by ToposColor nodes to resolve ColorStacks."""
         self._project = project
 
+    def set_initial_media_drop_handler(self, handler: Callable[[object], bool]) -> None:
+        self._initial_media_drop_handler = handler
+
+    def _handle_initial_media_drop(self, mime_data: object) -> bool:
+        handler = getattr(self, "_initial_media_drop_handler", None)
+        return bool(handler(mime_data)) if handler is not None else False
+
+    @staticmethod
+    def _add_dropped_media_layer(controller: LayerStackController,
+                                 payload: MediaDropPayload, insert_index: int) -> None:
+        if payload.media_type == MEDIA_TYPE_MODEL3D:
+            controller.add_model3d_payload(payload, insert_index=insert_index,
+                                           description="Add 3D model layer")
+        else:
+            controller.add_media_payload(payload, insert_index=insert_index,
+                                         description="Add media layer")
+
+    def build_initial_media_graph(self, empty_graph: dict,
+                                  payloads: list[MediaDropPayload]) -> tuple[dict, dict]:
+        """Build the first drop in an isolated graph before opening the clip."""
+        graph = NodeGraph.from_dict(empty_graph)
+        controller = LayerStackController(graph, layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
+        controller.project_from_node_graph()
+        before = graph.to_dict()
+        for index, payload in enumerate(payloads):
+            self._add_dropped_media_layer(controller, payload, index)
+        return before, graph.to_dict()
+
     def _handle_keyframes_media_drop(self, mime_data: object,
                                      _target_layer_id: Optional[str],
                                      insert_index: int) -> bool:
@@ -956,6 +902,8 @@ class CompositePage(QWidget):
         """
         if insert_index < 0:
             return False
+        if not self.has_active_composition() and getattr(self, "_initial_media_drop_handler", None) is not None:
+            return self._handle_initial_media_drop(mime_data)
         payloads = resolve_drop_payloads(mime_data, project=self._project)
         if not payloads:
             return False
@@ -965,19 +913,7 @@ class CompositePage(QWidget):
         added = 0
         try:
             for offset, payload in enumerate(payloads):
-                if getattr(payload, "media_type", "") == MEDIA_TYPE_MODEL3D \
-                        or getattr(payload, "node_type", "") == "model3d":
-                    self._layer_stack_controller.add_model3d_payload(
-                        payload,
-                        insert_index=insert_index + offset,
-                        description="Add 3D model layer",
-                    )
-                else:
-                    self._layer_stack_controller.add_media_payload(
-                        payload,
-                        insert_index=insert_index + offset,
-                        description="Add media layer",
-                    )
+                self._add_dropped_media_layer(self._layer_stack_controller, payload, insert_index + offset)
                 added += 1
             if grouped:
                 self._undo_stack.end_group("Add media layers")
@@ -987,6 +923,9 @@ class CompositePage(QWidget):
                 if added:
                     self._undo_stack.undo()
             logger.warning("Composite media drop failed: %s", exc)
+            panel = getattr(self, "_keyframes_panel", None)
+            if panel is not None:
+                QToolTip.showText(QCursor.pos(), str(exc), panel)
             return False
         self._node_editor.build_from_graph(self._node_graph)
         self._refresh_keyframes_panel()
@@ -7979,6 +7918,7 @@ class CompositePage(QWidget):
             _restore_graph_in_place(self._node_graph, data)
             self._node_editor.clear_all()
             self._node_editor.build_from_graph(self._node_graph)
+            self._refresh_keyframes_panel()
             self._update_minimap()
             self._evaluate_graph_now()
             self._clear_stale_properties()
@@ -8032,10 +7972,6 @@ class CompositePage(QWidget):
         """Reposition minimap on resize."""
         super().resizeEvent(event)
         self._reposition_minimap()
-        if self._empty_state_overlay is not None:
-            self._empty_state_overlay.setGeometry(self.rect())
-            if not self._composition_active:
-                self._empty_state_overlay.raise_()
 
     def showEvent(self, event) -> None:
         """Ensure minimap is positioned correctly when first shown."""
@@ -8072,13 +8008,6 @@ class CompositePage(QWidget):
                 panel.set_composition_active(self._composition_active)
             except (AttributeError, RuntimeError):
                 pass
-        # Keep the Keyframes empty-state CTA on the same creation path as the
-        # Composite node workspace.  The panel owns its presentation, while
-        # CompositePage remains the single signal boundary for MainWindow.
-        if hasattr(panel, "create_empty_comp_clip_requested"):
-            panel.create_empty_comp_clip_requested.connect(
-                self.create_empty_comp_clip_requested.emit
-            )
         # Timeline is the stable entry surface for the Keyframes dock.  The
         # Graph Editor is an opt-in inspection/editing view (or an explicit
         # expression/spline redirect); do not let a reused panel instance or
@@ -8163,6 +8092,12 @@ class CompositePage(QWidget):
         if hasattr(panel, 'layer_delete_requested'):
             panel.layer_delete_requested.connect(
                 self._on_keyframes_panel_layer_delete)
+        if hasattr(panel, 'layer_edit_committed'):
+            panel.layer_edit_committed.connect(self._on_keyframes_layer_edit_committed)
+        if hasattr(panel, 'generated_layer_requested'):
+            panel.generated_layer_requested.connect(self._on_keyframes_generated_layer)
+        if hasattr(panel, 'remove_layer_effect_requested'):
+            panel.remove_layer_effect_requested.connect(self._on_keyframes_remove_layer_effect)
         if hasattr(panel, 'promote_node_requested'):
             panel.promote_node_requested.connect(
                 self._on_keyframes_promote_node)
@@ -8234,7 +8169,11 @@ class CompositePage(QWidget):
         comp_total = max(1, self._total_frames_for_node())
         if panel is not None and hasattr(panel, 'set_frame_range'):
             try:
-                ruler_total = max(comp_total, self._max_video_media_frames())
+                graph = self.__dict__.get("_node_graph")
+                layers = graph.get_all_layers() if isinstance(graph, NodeGraph) else ()
+                layer_total = max((layer.out_frame + 1 for layer in layers
+                                   if layer.out_frame is not None), default=0)
+                ruler_total = max(comp_total, self._max_video_media_frames(), layer_total)
                 panel.set_frame_range(
                     0, ruler_total - 1, fps=self.comp_clip_fps())
                 if hasattr(panel, 'set_comp_extent'):
@@ -8747,74 +8686,84 @@ class CompositePage(QWidget):
 
     def _on_keyframes_panel_time_range_changed(self, node_id: str,
                                                time_range: dict) -> None:
-        """Write a range-bar drag into node.time_range + re-render (P5/P2).
-
-        Merge semantics: existing keys (source_in/source_out/offset/enabled)
-        survive a trim; AE-style default layer bars (node.time_range is None)
-        become explicit ranges on their first trim.
-
-        Video media rows additionally get NLE trim semantics applied to the
-        source node's playback range (source_in/source_out) so the material
-        stays anchored while the clip is trimmed (see
-        timeline_commands.apply_video_range_edit).
-        """
+        """Commit a composition layer gate and linked video trim together."""
         if _page_node_is_locked(self, node_id):
             return
-        import copy
         node = self._node_graph.get_node(node_id)
         if node is None:
             return
+        from src.features.composite.ui.timeline_commands import (
+            apply_video_range_edit, shift_layer_animation, video_source_node_for,
+        )
+        controller = getattr(self, "_layer_stack_controller", None)
+        layers_map = controller.layers_map() if controller is not None else None
+        layer_id = time_range.get("layer_id")
+        layer = layers_map.get(layer_id) if layer_id and layers_map else None
+        layer_before = layer_after = None
+        if layer_id:
+            if (layer is None or layer.locked or not layer.managed
+                    or layer.root_node_id != node_id):
+                return
+            try:
+                layer_after = (int(time_range["comp_start"]),
+                               int(time_range["comp_end"]))
+            except (KeyError, TypeError, ValueError):
+                return
+            layer_before = (layer.in_frame, layer.out_frame)
+            if not controller.apply_layer_time_bounds(layer_id, layer_after):
+                return
+            layers_map = {layer_id: layer}
+
         before = copy.deepcopy(node.time_range)
-        # Link the gesture to the source while node.time_range still contains
-        # the previous comp_start. The trim helper uses that old start to
-        # calculate how many source frames the layer's head moved; assigning
-        # the new range first would make a default bar look like a zero-frame
-        # move on its first head trim.
-        video_param_edit = None
-        video_source = None
-        try:
-            from src.features.composite.ui.timeline_commands import \
-                apply_video_range_edit, video_source_node_for
-            layers_map = None
-            controller = getattr(self, "_layer_stack_controller", None)
-            if controller is not None:
-                layers_map = controller.layers_map()
-            video_source = video_source_node_for(
-                node, self._node_graph, layers_map)
-            video_param_edit = apply_video_range_edit(
-                node, self._node_graph, layers_map, time_range)
-        except Exception:
-            video_param_edit = None
-        # "edit" is a transient gesture kind (trim_in/trim_out/slide), not
-        # part of the persisted time_range schema.
-        range_payload = {k: v for k, v in time_range.items() if k != "edit"}
-        merged = dict(node.time_range) if isinstance(node.time_range, dict) else {}
-        merged.update(range_payload)
-        node.time_range = merged
-        # A layer bar can live on a Transform/Merge root while the actual
-        # media is a Video Frame source upstream. Gate the source as well as
-        # the root, otherwise an effect-node bypass before comp_start can
-        # still pass the old video frame through to the output.
-        source_time_range_before = None
-        source_time_range_after = None
+        video_source = video_source_node_for(node, self._node_graph, layers_map)
+        previous_start = layer_before[0] if layer_before is not None else None
+        if layer is not None and previous_start is None:
+            previous_range = before or getattr(video_source, "time_range", None)
+            previous_start = 0
+            if isinstance(previous_range, dict) and previous_range.get("enabled", True):
+                try:
+                    previous_start = int(previous_range.get("comp_start", 0))
+                except (TypeError, ValueError):
+                    pass
+        video_param_edit = apply_video_range_edit(
+            node, self._node_graph, layers_map, time_range,
+            previous_start=previous_start)
+        range_payload = {key: value for key, value in time_range.items()
+                         if key not in {"edit", "layer_id"}}
+        # Old node rows and saved node ranges still use the node-level
+        # contract. New layer rows are gated at the Layer so an effect-node
+        # bypass cannot show the layer outside its range.
+        if layer is None or before or video_source is node:
+            node.time_range = {**(before or {}), **range_payload}
+        undo_data = {"node_id": node_id, "before": before,
+                     "after": copy.deepcopy(node.time_range)}
+        if layer is not None:
+            undo_data.update(layer_id=layer_id, layer_before=layer_before,
+                             layer_after=layer_after)
+            if time_range.get("edit") == "slide":
+                tracks_before, tracks_after = shift_layer_animation(
+                    self._node_graph, controller.layer_animation_node_ids(layer_id),
+                    layer_after[0] - previous_start)
+                if tracks_before:
+                    undo_data.update(tracks_before=tracks_before, tracks_after=tracks_after)
         if video_source is not None and video_source is not node:
-            source_time_range_before = copy.deepcopy(
-                getattr(video_source, "time_range", None))
-            video_source.time_range = copy.deepcopy(merged)
-            source_time_range_after = copy.deepcopy(video_source.time_range)
-        after = copy.deepcopy(node.time_range)
+            source_before = copy.deepcopy(video_source.time_range)
+            # Video playback uses comp_start as its composition time
+            # origin. Moving a bar changes the origin, but keeps source in
+            # and out unchanged so the same material moves with the bar.
+            video_source.time_range = {**(source_before or {}), **range_payload}
+            undo_data.update(
+                video_node_id=video_source.id,
+                video_time_range_before=source_before,
+                video_time_range_after=copy.deepcopy(video_source.time_range),
+            )
         # P2: real before/after undo for the range bar edit. The video
         # param linkage folds into the same action so one undo reverts the
         # whole gesture.
-        undo_data = {"node_id": node_id, "before": before, "after": after}
         if video_param_edit is not None:
             undo_data["video_node_id"] = video_param_edit["node_id"]
             undo_data["video_params_before"] = dict(video_param_edit["before"])
             undo_data["video_params_after"] = dict(video_param_edit["after"])
-        if video_source is not None and video_source is not node:
-            undo_data["video_node_id"] = video_source.id
-            undo_data["video_time_range_before"] = source_time_range_before
-            undo_data["video_time_range_after"] = source_time_range_after
         try:
             self._undo_stack.push(UndoAction(
                 action_type="node_time_range_change",
@@ -8825,8 +8774,11 @@ class CompositePage(QWidget):
             ))
         except Exception as e:
             logger.warning("Undo push failed for time range change: %s", e)
+        self._node_graph.bump_generation()
         self._emit_user_edit_once()
         self._evaluate_graph()
+        self._sync_keyframes_panel_frame_range()
+        self._refresh_keyframes_and_spline_for_node(node_id)
         # The selected Video Frame node exposes the same source trim through
         # its Properties panel; keep the In/Out handles and fields in sync
         # after a Keyframes layer-bar edit.
@@ -8837,6 +8789,15 @@ class CompositePage(QWidget):
         node = self._node_graph.get_node(data["node_id"])
         if node is not None:
             node.time_range = copy.deepcopy(data.get(which))
+        layer_id = data.get("layer_id")
+        if layer_id:
+            self._layer_stack_controller.apply_layer_time_bounds(
+                layer_id, data[f"layer_{which}"])
+        tracks = data.get(f"tracks_{which}")
+        if tracks:
+            from src.features.composite.ui.timeline_commands import restore_layer_animation
+
+            restore_layer_animation(self._node_graph, tracks)
         # Restore the video source playback-range params linked to the edit.
         video_node_id = data.get("video_node_id")
         params_key = ("video_params_before" if which == "before"
@@ -8855,7 +8816,10 @@ class CompositePage(QWidget):
             if video_node is not None:
                 video_node.time_range = copy.deepcopy(
                     data.get(video_time_range_key))
+        self._node_graph.bump_generation()
         self._evaluate_graph()
+        self._sync_keyframes_panel_frame_range()
+        self._refresh_properties_panel(data["node_id"])
         self._refresh_keyframes_and_spline_for_node(data["node_id"])
 
     def _on_keyframes_panel_play_range_changed(self, in_frame: int,
@@ -9001,6 +8965,41 @@ class CompositePage(QWidget):
         self._refresh_keyframes_panel()
         self._evaluate_graph()
         self._clear_stale_properties()
+
+    def _on_keyframes_generated_layer(self, layer_type: str, name: str,
+                                      settings: dict, index: int) -> None:
+        params = dict(settings)
+        params["width"], params["height"] = self._project_output_size()
+        if layer_type == "solid":
+            params["color"] = ConstantNode.hex_to_rgba(params["color_hex"])
+        controller = self._layer_stack_controller
+        try:
+            layer_id = controller.create_generated_layer(layer_type, name, params, index)
+        except (TypeError, ValueError) as error:
+            QToolTip.showText(QCursor.pos(), str(error), self._keyframes_panel)
+            logger.warning("Unable to create layer: %s", error)
+            return
+        source_id = controller.layers_map()[layer_id].source_node_id
+        self._on_keyframes_layer_edit_committed(layer_id, source_id or "")
+
+    def _on_keyframes_layer_edit_committed(self, layer_id: str, node_id: str) -> None:
+        self._node_editor.build_from_graph(self._node_graph)
+        self._last_selected_layer_id = layer_id
+        if node_id:
+            self._on_keyframes_panel_node_selected(node_id)
+        else:
+            self._on_keyframes_panel_layer_selected(layer_id)
+        self._refresh_keyframes_panel()
+        self._evaluate_graph()
+
+    def _on_keyframes_remove_layer_effect(self, layer_id: str, node_id: str) -> None:
+        if not self._layer_stack_controller.remove_layer_effect(layer_id, node_id):
+            QToolTip.showText(QCursor.pos(), I18N.tr(
+                "keyframes.layer_edit_failed", "Unable to apply this layer edit."), self._keyframes_panel)
+            return
+        if self._renderer:
+            self._renderer.submit(CompositeCommand.CLEANUP_NODE, {"node_id": node_id})
+        self._on_keyframes_layer_edit_committed(layer_id, "")
 
     def _on_keyframes_promote_node(self, node_id: str) -> None:
         """Promote a free-graph node only after an explicit user command."""

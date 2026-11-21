@@ -44,6 +44,7 @@ from src.features.edit.ai_editing.editorial_models import (
 from src.features.edit.ai_editing.plan_repository import PlanRepository
 from src.features.edit.ai_editing.transaction_service import TransactionService
 from src.features.edit.ai_editing.variant_planner import (
+    STANDALONE_VIDEO_TRACK_ID,
     PlannerInput,
     VariantPlanner,
     compare_variants,
@@ -256,6 +257,7 @@ class AssistantService:
         链统一处理；本方法只更新会话状态与对话记录。
         """
         rev = getattr(new_timeline, "revision", None)
+        self._mark_variant_accepted(variant_id)
         msg = AssistantMessage(
             message_id=str(uuid.uuid4()), role="assistant",
             text=(
@@ -266,6 +268,11 @@ class AssistantService:
         )
         self._messages.append(msg)
         self._set_state(AssistantState.IDLE)
+
+    def _mark_variant_accepted(self, variant_id: str) -> None:
+        variant = self._variants.get(variant_id)
+        if variant is not None:
+            self._variants[variant_id] = variant.with_status(VariantStatus.ACCEPTED)
 
     def _set_state(self, state: AssistantState, *, error: str | None = None) -> None:
         self._state = state
@@ -622,7 +629,7 @@ class AssistantService:
         try:
             brief = self._brief.get(self._active_brief_id)
             brief_rev = brief.revision if brief else 0
-            base_rev = self._current_timeline_revision(config.timeline_id)
+            base_rev, video_track_id = self._current_planning_target(config.timeline_id)
             if base_rev is None:
                 # AUD-13011：revision 未知（快照失败或活动时间线不匹配）时显式
                 # 降级告知，而不是静默以 revision 0 编译、到提交乐观锁才失败。
@@ -642,6 +649,7 @@ class AssistantService:
                 base_revision=base_rev or 0,
                 analysis_snapshot_hash=analysis_snapshot_hash,
                 target_duration=config.target_duration_frames,
+                video_track_id=video_track_id,
             )
             variants = self._planner.plan(
                 inp, semantic_index,
@@ -767,6 +775,7 @@ class AssistantService:
                 plan, source_variant_id=variant.variant_id,
             ),
             translation_provider=self._translation_provider,
+            resolve_video_track=lambda timeline_id: self._current_planning_target(timeline_id)[1],
         )
 
     # ------------------------------------------------------------------ #
@@ -862,6 +871,8 @@ class AssistantService:
     def select_variant(self, variant_id: str) -> None:
         self._set_state(AssistantState.AWAITING_VARIANT_APPROVAL)
         for vid, v in self._variants.items():
+            if v.status not in {VariantStatus.PROPOSED, VariantStatus.SELECTED}:
+                continue
             self._variants[vid] = v.with_status(
                 VariantStatus.SELECTED if vid == variant_id else VariantStatus.PROPOSED
             )
@@ -976,6 +987,7 @@ class AssistantService:
                 client="assistant",
             )
             if result.applied:
+                self._mark_variant_accepted(variant_id)
                 self._messages.append(AssistantMessage(
                     message_id=str(uuid.uuid4()), role="assistant",
                     text=f"方案已应用（revision {result.new_revision}，可一次撤销）",
@@ -1031,18 +1043,12 @@ class AssistantService:
     # 辅助
     # ------------------------------------------------------------------ #
 
-    def _current_timeline_revision(self, timeline_id: str) -> int | None:
-        """读取当前时间线 revision；无法确认时返回 None（不伪造基线）。
-
-        AUD-13011：快照异常不再被 ``except: pass`` 静默降级——记 warning（含
-        堆栈）。返回 None 时 ``plan_variants`` 会显式提示"以基线 0 规划"的降级，
-        而不是让 plan 悄悄针对 revision 0 编译、再在提交乐观锁处莫名失败。
-        """
+    def _current_planning_target(self, timeline_id: str) -> tuple[int | None, str]:
+        """Resolve the base revision and a writable video track from one snapshot."""
         try:
-            snap = self._session.get_snapshot()
-            tl = snap.active_timeline
-            if tl and tl.get("timeline_id") == timeline_id:
-                return int(tl.get("revision", 0))
+            timeline = self._session.get_snapshot().active_timeline
+            if timeline is None or timeline.get("timeline_id") != timeline_id:
+                timeline = self._session.get_snapshot(timeline_id=timeline_id).active_timeline
         except Exception:  # noqa: BLE001 — 失败可见，但规划不因此崩溃
             logger.warning(
                 "timeline revision snapshot failed for %s; planning will "
@@ -1050,7 +1056,22 @@ class AssistantService:
                 timeline_id,
                 exc_info=True,
             )
-        return None
+            # Keep the existing degraded planning contract for snapshot outages.
+            return None, STANDALONE_VIDEO_TRACK_ID
+        if timeline is None or timeline.get("timeline_id") != timeline_id:
+            raise ValueError("找不到要编辑的时间线，请打开目标时间线后重试。")
+
+        candidates = [
+            track for track in timeline.get("tracks", ())
+            if track.get("kind") == "video"
+            and not track.get("locked")
+            and track.get("track_role", "standard") == "standard"
+            and track.get("track_id")
+        ]
+        if not candidates:
+            raise ValueError("当前时间线没有可编辑的视频轨道，请添加或解锁视频轨道后重试。")
+        track = min(candidates, key=lambda candidate: candidate["index"])
+        return int(timeline.get("revision", 0)), track["track_id"]
 
 
 class _OfficialWorkflowBackend:

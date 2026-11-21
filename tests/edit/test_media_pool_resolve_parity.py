@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QModelIndex, QPointF, Qt, QItemSelection, QItemSelectionModel
+from PyQt6.QtCore import QModelIndex, QPointF, QSettings, Qt, QItemSelection, QItemSelectionModel
 from PyQt6.QtGui import QDropEvent
 from PyQt6.QtWidgets import QPushButton
 
@@ -39,6 +39,10 @@ def _selected(panel: MediaPoolPanel) -> set[tuple[str, str]]:
 @pytest.fixture
 def pool(qapp, tmp_path: Path, monkeypatch):
     """Use existing models with all decode/proxy side effects neutralized."""
+    def settings(_org: str, app: str) -> QSettings:
+        return QSettings(str(tmp_path / f"{app}.ini"), QSettings.Format.IniFormat)
+
+    monkeypatch.setattr("src.features.edit.ui.media_pool_panel.QSettings", settings)
     provider = ThumbnailProvider.instance()
     monkeypatch.setattr(provider, "get_thumbnail", lambda *args, **kwargs: None)
     monkeypatch.setattr(provider, "get_frame_thumbnail", lambda *args, **kwargs: None)
@@ -519,35 +523,135 @@ def test_information_popup_opens_to_right_with_screen_space(pool) -> None:
     panel._close_pool_info()
 
 
-def test_scrollbar_appears_only_on_overflow_and_retile_settles(pool, qapp) -> None:
+def test_scrollbar_appears_only_on_overflow_at_fixed_card_size(pool) -> None:
     from PyQt6.QtTest import QTest
     from src.features.edit.ui.media_pool_panel import GridItem
     panel, *_ = pool
     panel.resize(600, 500)
     QTest.qWait(30)
-    panel._column_grid.apply_columns(3)
+    panel.set_thumb_size(144)
     QTest.qWait(30)
+    grid = panel.grid_view.gridSize()
     assert panel.grid_view.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
     assert not panel.grid_view.verticalScrollBar().isVisible()
     one = next(item for item in panel.asset_model._items if item.item_type == "asset")
     many = [GridItem("asset", f"layout-{i}", one.data) for i in range(90)]
     panel.asset_model.set_items(many)
     panel._sync_metadata_shelf()
-    panel.grid_view.doItemsLayout()
-    panel._column_grid.schedule_retile()
     QTest.qWait(40)
     assert panel.grid_view.verticalScrollBar().isVisible()
-    grid = panel.grid_view.gridSize()
-    QTest.qWait(40)
     assert panel.grid_view.gridSize() == grid
-    assert not panel._column_grid._retile_timer.isActive()
     panel.asset_model.set_items([one])
     panel._sync_metadata_shelf()
-    panel.grid_view.doItemsLayout()
-    panel._column_grid.schedule_retile()
     QTest.qWait(40)
     assert not panel.grid_view.verticalScrollBar().isVisible()
-    assert not panel._column_grid._retile_timer.isActive()
+    assert panel.grid_view.gridSize() == grid
+
+
+def test_thumbnail_grid_reflows_without_resizing_or_reloading_posters(pool, monkeypatch) -> None:
+    from PyQt6.QtGui import QPixmap
+    from PyQt6.QtTest import QSignalSpy, QTest
+    from src.features.edit.ui.media_pool_panel import GridItem
+
+    panel, *_ = pool
+    view = panel.grid_view
+    panel.set_thumb_size(144)
+    one = next(item for item in panel.asset_model._items if item.item_type == "asset")
+    panel.asset_model.set_items([GridItem("asset", f"layout-{i}", one.data) for i in range(35)])
+    cached = QPixmap(288, 162)
+    cached.fill(Qt.GlobalColor.red)
+    panel.asset_model.set_thumbnail(one.data.path, cached)
+    requests = MagicMock(return_value=cached)
+    monkeypatch.setattr(panel._thumb_provider, "get_thumbnail", requests)
+    layout_changes = QSignalSpy(panel.asset_model.layoutChanged)
+    first = panel.asset_model.index(0, 0)
+    third = panel.asset_model.index(2, 0)
+
+    panel.resize(560, 400)
+    QTest.qWait(30)
+    narrow = view.visualRect(first)
+    assert view.visualRect(third).y() > narrow.y()
+    poster_size = panel.grid_delegate._item_rects(narrow)[0].size()
+    assert poster_size.width() == 144
+
+    panel.resize(1850, 400)
+    QTest.qWait(30)
+    wide = view.visualRect(first)
+    assert wide.size() == narrow.size()
+    assert view.visualRect(panel.asset_model.index(8, 0)).y() == wide.y()
+    assert panel.grid_delegate._item_rects(wide)[0].size() == poster_size
+    assert not view.horizontalScrollBar().isVisible()
+
+    panel.thumb_slider.setValue(196)
+    QTest.qWait(30)
+    poster = panel.grid_delegate._item_rects(view.visualRect(first))[0]
+    assert poster.width() == 196
+    assert poster.height() == round(196 * 9 / 16)
+    assert panel.asset_model._thumbnails[one.data.path].cacheKey() == cached.cacheKey()
+    requests.assert_not_called()
+    assert len(layout_changes) == 0
+
+    panel.set_view_mode(ViewMode.METADATA)
+    assert not view.gridSize().isValid()
+    panel.set_view_mode(ViewMode.GRID)
+    assert view.gridSize().width() == 196 + 34
+
+
+def test_thumbnail_zoom_batches_drag_and_fits_one_card_in_a_narrow_pane(pool) -> None:
+    from PyQt6.QtTest import QTest
+
+    panel, *_ = pool
+    slider = panel.thumb_slider
+    view = panel.grid_view
+    panel.resize(720, 500)
+    QTest.qWait(30)
+    slider.setSliderDown(True)
+    slider.setValue(284)
+    slider.setValue(320)
+    assert view.iconSize().width() == 180
+    assert not panel._thumbnail_settings.contains("thumbnail_width")
+    slider.setSliderDown(False)
+    assert view.iconSize().width() == 320
+    assert panel._thumbnail_settings.value("thumbnail_width", type=int) == 320
+
+    panel.resize(430, 400)
+    QTest.qWait(30)
+    assert view.iconSize().width() < 320
+    assert view.gridSize().width() < view.viewport().width()
+    assert panel.get_thumb_size() == 320
+    assert not view.horizontalScrollBar().isVisible()
+
+    panel.resize(720, 500)
+    QTest.qWait(30)
+    assert view.iconSize().width() == 320
+
+    slider.setSliderDown(True)
+    slider.setValue(210)
+    panel.set_view_mode(ViewMode.LIST)
+    assert not slider.isSliderDown()
+    assert panel._thumbnail_settings.value("thumbnail_width", type=int) == 210
+    panel.set_view_mode(ViewMode.GRID)
+    assert view.iconSize().width() == 210
+
+
+def test_poster_requests_can_resume_after_playback_and_slider_drag(pool, monkeypatch) -> None:
+    panel, *_ = pool
+    delegate = panel.grid_delegate
+    provider = panel._thumb_provider
+    path = "retry-after-playback.png"
+    requests = MagicMock()
+    monkeypatch.setattr(provider, "get_thumbnail", requests)
+
+    monkeypatch.setattr(provider, "_playback_active", True)
+    delegate._request_poster(path)
+    monkeypatch.setattr(provider, "_playback_active", False)
+    panel.thumb_slider.setSliderDown(True)
+    delegate._request_poster(path)
+    requests.assert_not_called()
+
+    panel.thumb_slider.setSliderDown(False)
+    delegate._request_poster(path)
+    requests.assert_called_once_with(path)
 
 
 def test_master_path_back_button_stays_visible_and_enabled_for_nested_bin(pool) -> None:

@@ -79,7 +79,7 @@ def test_diff_panel_high_risk_entry_styled(diff_panel):
     # 第一张卡（removed，高风险）应有红色边框样式
     first_card = diff_panel._container_layout.itemAt(0).widget()
     style = first_card.styleSheet()
-    assert "e74c3c" in style  # red border for high risk
+    assert "#b57068" in style  # red border for high risk
 
 
 def test_confirmation_dialog_content(qapp):

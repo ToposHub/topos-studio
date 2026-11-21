@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import QLabel, QSizePolicy
+from PyQt6.QtCore import Qt
 
 from src.features.edit.ai_editing.assistant_events import DecisionCard, JobCard
 from src.features.edit.ai_editing.provider_profiles import (
@@ -159,9 +159,9 @@ def test_decision_inspector_state_color(decision_inspector):
 
 def test_preferences_page_add_profile(prefs_page):
     widget = prefs_page.create_widget()
-    lst = prefs_page._widgets["profile_list"]
+    lst = prefs_page._widgets["profile_picker"]
     assert lst.count() == 0
-    prefs_page._on_add_profile()
+    prefs_page._widgets["add"].click()
     assert lst.count() == 1
     assert prefs_page.registry.list()[0].display_name != ""
 
@@ -177,21 +177,47 @@ def test_preferences_page_context_limit_uses_k_units(prefs_page):
     assert profile.limits.max_context_tokens == 128_000
 
 
-def test_preferences_profile_list_has_more_default_height(prefs_page):
-    """Profile 列表默认高度应能显示约三行，且保留合理上限。"""
+def test_preferences_profile_picker_and_advanced_disclosure(prefs_page, qtbot):
     widget = prefs_page.create_widget()
-    profile_list = prefs_page._widgets["profile_list"]
+    qtbot.addWidget(widget)
+    widget.resize(600, 455)
+    widget.show()
+    controls = prefs_page._widgets
+    assert not controls["profile_picker"].isVisible()
+    assert controls["profile_empty"].isVisible()
 
-    assert profile_list.minimumHeight() == 72
-    assert profile_list.maximumHeight() == 112
+    controls["add"].click()
+    assert controls["profile_picker"].isVisible()
+    assert controls["test_btn"].isVisible()
+    assert not controls["context_limit"].isVisible()
+
+    viewport = controls["models_scroll"].viewport()
+    spin = controls["context_limit"]
+
+    def context_is_in_view():
+        return viewport.rect().contains(spin.mapTo(viewport, spin.rect().bottomRight()))
+
+    controls["advanced_toggle"].click()
+    assert controls["context_limit"].isVisible()
+    qtbot.waitUntil(context_is_in_view)
+    controls["context_limit"].setValue(64)
+    controls["advanced_toggle"].click()
+    controls["advanced_toggle"].click()
+    assert controls["context_limit"].value() == 64
 
 
 def test_preferences_page_remove_profile(prefs_page):
     widget = prefs_page.create_widget()
     prefs_page._on_add_profile()
-    lst = prefs_page._widgets["profile_list"]
-    lst.setCurrentRow(0)
-    prefs_page._on_remove_profile()
+    lst = prefs_page._widgets["profile_picker"]
+    lst.setCurrentIndex(0)
+    actions = prefs_page._widgets["model_actions"].menu().actions()
+    actions[0].trigger()
+    assert lst.count() == 2
+    assert lst.currentData() != lst.itemData(0)
+    actions[1].trigger()
+    assert lst.count() == 1
+    actions[1].trigger()
     assert lst.count() == 0
 
 
@@ -203,10 +229,8 @@ def test_preferences_page_no_token_display(prefs_page):
     )
     prefs_page.registry.add(profile)
     widget = prefs_page.create_widget()
-    lst = prefs_page._widgets["profile_list"]
-    item = lst.item(0)
-    text = item.text()
-    # 列表项只显示 display_name + provider_kind，绝不含 secret/api_key
+    lst = prefs_page._widgets["profile_picker"]
+    text = lst.itemText(0)
     assert "keychain" not in text
     assert "secret" not in text.lower()
     assert "api_key" not in text.lower()
@@ -221,7 +245,7 @@ def test_preferences_page_explains_saved_key_is_hidden(qapp):
     store.set_secret("topos:p1", "secret-value")
     page = AiEditingPreferencePage(registry=registry, credential_store=store)
     widget = page.create_widget()
-    page._widgets["profile_list"].setCurrentRow(0)
+    page._widgets["profile_picker"].setCurrentIndex(0)
 
     status = page._widgets["key_status"].text().lower()
     placeholder = page._widgets["api_key"].placeholderText().lower()
@@ -230,12 +254,12 @@ def test_preferences_page_explains_saved_key_is_hidden(qapp):
     assert "secret-value" not in page._widgets["api_key"].text()
 
 
-def test_preferences_page_emits_profiles_changed(prefs_page):
+def test_preferences_page_does_not_publish_draft_profiles(prefs_page):
     widget = prefs_page.create_widget()
     emitted = []
     prefs_page.on_profiles_changed = lambda: emitted.append(1)
     prefs_page._on_add_profile()
-    assert emitted == [1]
+    assert emitted == []
 
 
 def test_preferences_page_exposes_capabilities_and_safe_automation_flags(prefs_page):
@@ -248,19 +272,25 @@ def test_preferences_page_exposes_capabilities_and_safe_automation_flags(prefs_p
     assert "受限自动模式" in status_list.item(status_list.count() - 3).text()
 
 
-def test_preferences_capability_status_matches_mcp_list_layout(prefs_page):
-    """能力状态页应与 MCP 服务页一样显示多行列表。"""
+def test_preferences_policy_and_service_status_have_separate_tabs(prefs_page, qtbot):
     widget = prefs_page.create_widget()
-    status_list = prefs_page._widgets["capability_status"]
-    status_label = next(
-        label
-        for label in prefs_page._widgets["environment_tabs"].widget(0).findChildren(QLabel)
-        if label.text() == "当前状态:"
-    )
+    qtbot.addWidget(widget)
+    widget.show()
+    controls = prefs_page._widgets
+    status_list = controls["capability_status"]
+    mcp_list = controls["mcp_server_list"]
+    upload = prefs_page._automation_widgets["cloud_upload"]
 
-    assert status_label.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
-    assert status_list.minimumHeight() == 96
-    assert status_list.maximumHeight() == 168
+    assert not status_list.isVisible()
+    assert not upload.isVisible()
+    controls["page_tabs"].setCurrentIndex(1)
+    assert upload.isVisible()
+    assert not status_list.isVisible()
+    controls["page_tabs"].setCurrentIndex(2)
+    assert not upload.isVisible()
+    assert mcp_list.isVisible() and status_list.isVisible()
+    assert status_list.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert status_list.count() >= 7
 
 
 def test_preferences_page_saves_media_routes_without_secret_values(prefs_page):
@@ -268,7 +298,7 @@ def test_preferences_page_saves_media_routes_without_secret_values(prefs_page):
     prefs_page._on_add_profile()
     prefs_page._modality_widgets["video"].setChecked(True)
     prefs_page._widgets["allow_media_upload"].setChecked(True)
-    profile = prefs_page.registry.active_profile
+    profile = prefs_page.registry.get(prefs_page._current_profile_id)
     assert profile is not None
     assert "video" in profile.modalities
     assert "media_upload" in profile.modalities
@@ -282,16 +312,16 @@ def test_preferences_page_groups_profiles_by_capability(prefs_page):
 
     # Language tab starts with the default profile.
     prefs_page._on_add_profile()
-    assert prefs_page._widgets["profile_list"].count() == 1
+    assert prefs_page._widgets["profile_picker"].count() == 1
 
     # Speech tab creates/selects a speech preset without mixing it into the
     # language list.
     tabs.setCurrentIndex(2)
     prefs_page._on_add_profile()
-    assert prefs_page._widgets["profile_list"].count() == 1
+    assert prefs_page._widgets["profile_picker"].count() == 1
     current = prefs_page.registry.get(prefs_page._current_profile_id)
     assert current is not None
-    assert "tts" in current.capabilities
+    assert "asr" in current.capabilities
 
 
 def test_preferences_page_filters_presets_by_category(prefs_page):
@@ -309,23 +339,32 @@ def test_preferences_page_filters_presets_by_category(prefs_page):
 
     tabs.setCurrentIndex(0)
     assert "openai-chat" in preset_ids()
+    assert "deepseek-flash" in preset_ids()
     assert "volcengine-seedream-image" not in preset_ids()
     assert "volcengine-plan-tts" not in preset_ids()
     assert "openai-embedding" not in preset_ids()
 
     tabs.setCurrentIndex(1)
-    assert preset_ids() == {"volcengine-seedream-image"}
+    assert preset_ids() == {
+        "deepseek-flash",
+        "openai-compatible-vision",
+        "model-studio-vision",
+        "volcengine-agent-plan-text",
+        "volcengine-seedream-image",
+        "zhipu-vision-mcp",
+    }
 
     tabs.setCurrentIndex(2)
     assert preset_ids() == {
         "volcengine-plan-tts",
         "volcengine-plan-asr",
+        "openai-timed-asr",
         "local-qwen-asr",
         "local-qwen-tts",
     }
 
     tabs.setCurrentIndex(3)
-    assert preset_ids() == {"openai-embedding"}
+    assert preset_ids() == {"openai-embedding", "local-openai-compatible-embedding", "ollama-embedding"}
 
     tabs.setCurrentIndex(4)
     assert preset_ids() == set()

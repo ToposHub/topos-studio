@@ -50,7 +50,11 @@ def load_user_ai_config(path: Path | None = None, *, strict: bool = False) -> di
             raise UserAiConfigError(f"failed to load {target}: {exc!r}") from exc
         logger.warning("user AI config %s unreadable, degrading to empty: %r", target, exc)
         return {}
-    return dict(value) if isinstance(value, dict) else {}
+    if isinstance(value, dict):
+        return dict(value)
+    if strict:
+        raise UserAiConfigError(f"expected a JSON object in {target}")
+    return {}
 
 
 def save_user_ai_config(

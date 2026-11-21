@@ -33,6 +33,7 @@ from __future__ import annotations
 import math
 import unicodedata
 from dataclasses import dataclass, field, replace
+from pathlib import PureWindowsPath
 from typing import Any, Iterable
 
 # ---------------------------------------------------------------------------
@@ -184,12 +185,21 @@ def service_unavailable_error(message: str, target: str | None = None) -> FilesE
 # 路径身份
 # ---------------------------------------------------------------------------
 
+def is_valid_folder_name(name: str) -> bool:
+    """Validate a single portable folder name."""
+    return bool(name) and not name.endswith(".") and not PureWindowsPath(name).is_reserved() and not any(
+        char in '/\\:*?"<>|' or ord(char) < 32 for char in name
+    )
+
+
 def normalize_path(path: str) -> str:
     """NFC + 正斜杠 + 去尾斜杠；不解析符号链接、不改大小写。"""
     if not path:
         return ""
     text = unicodedata.normalize("NFC", str(path).replace("\\", "/"))
     while len(text) > 1 and text.endswith("/"):
+        if len(text) == 3 and text[0].isascii() and text[0].isalpha() and text[1:] == ":/":
+            break  # A Windows drive root must remain absolute.
         text = text[:-1]
     return text
 

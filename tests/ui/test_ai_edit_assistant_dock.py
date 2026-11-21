@@ -32,7 +32,7 @@ def panel(qapp):
 def test_panel_creates_with_object_name(panel):
     assert isinstance(panel, PanelDockWidget)
     assert panel.objectName() == "dock_ai_edit_assistant"
-    assert panel.windowTitle() == "AI assistant"
+    assert panel.windowTitle() == "AI Assistant"
     assert panel.minimumWidth() < 360  # 不撑大共享的右侧标签组
 
 
@@ -49,7 +49,7 @@ def test_panel_shows_no_project_state(panel):
     panel.refresh_state(snap)
     assert panel._stack.currentIndex() == 2  # chat page remains available
     assert panel._request_edit.isHidden() is False
-    assert panel._send_btn.isEnabled() is True
+    assert not panel._request_edit.isReadOnly()
 
 
 def test_panel_can_submit_chat_without_project(panel):
@@ -318,14 +318,79 @@ def test_send_disabled_when_busy(panel):
     assert panel._cancel_btn.isHidden() is False
 
 
-def test_request_truncated_to_max_length(panel):
+def test_long_script_is_sent_in_full(panel):
+    panel.refresh_state(AssistantStateSnapshot(state=AssistantState.IDLE))
+    emitted = []
+    panel.request_submitted.connect(emitted.append)
+    script = "镜头一：室外远景。\n" * 500 + "最后一个镜头"
+    panel._request_edit.setPlainText(script)
+    panel._on_send_clicked()
+    assert emitted[0].text == script
+    assert not panel._request_edit.toPlainText()
+
+
+def test_request_over_limit_keeps_draft(panel):
     panel.refresh_state(AssistantStateSnapshot(state=AssistantState.IDLE))
     emitted = []
     panel.request_submitted.connect(lambda r: emitted.append(r))
     long_text = "x" * (panel._MAX_REQUEST_LEN + 500)
     panel._request_edit.setPlainText(long_text)
     panel._on_send_clicked()
-    assert len(emitted[0].text) == panel._MAX_REQUEST_LEN
+    assert not emitted
+    assert panel._request_edit.toPlainText() == long_text
+    assert not panel._input_notice.isHidden()
+    assert not panel._send_btn.isEnabled()
+
+
+def test_draft_stays_available_when_model_context_is_too_small(panel):
+    from src.features.edit.ui.ai_assistant_composer import ComposerFooterState
+
+    panel._request_edit.setPlainText("镜头从全景切到近景。")
+    panel.set_composer_footer(ComposerFooterState(draft_token_limit=1))
+    assert not panel._send_btn.isEnabled()
+    assert not panel._input_notice.isHidden()
+    panel.set_composer_footer(ComposerFooterState(draft_token_limit=100))
+    assert panel._send_btn.isEnabled()
+    assert panel._input_notice.isHidden()
+    assert panel._request_edit.toPlainText() == "镜头从全景切到近景。"
+
+
+def test_starter_fills_input_without_sending_or_replacing_draft(panel):
+    emitted = []
+    panel.request_submitted.connect(emitted.append)
+    script = panel.findChild(QPushButton, "assistantStarterScript")
+    script.click()
+    assert "脚本" in panel._request_edit.toPlainText()
+    assert not emitted
+    panel._request_edit.setPlainText("项目草稿")
+    panel.findChild(QPushButton, "assistantStarterRoughCut").click()
+    assert panel._request_edit.toPlainText() == "项目草稿"
+
+
+def test_setup_calls_model_preferences(panel):
+    panel.refresh_state(AssistantStateSnapshot(state=AssistantState.NO_PROFILE))
+    calls = []
+    panel.configure_models_requested.connect(lambda: calls.append(True))
+    panel.findChild(QPushButton, "assistantConfigureModel").click()
+    assert calls == [True]
+
+
+def test_busy_and_pending_attachments_do_not_send_incomplete_draft(panel):
+    emitted = []
+    panel.request_submitted.connect(emitted.append)
+    panel._request_edit.setPlainText("剪辑需求")
+    panel.refresh_state(AssistantStateSnapshot(state=AssistantState.PLANNING))
+    panel._request_edit.submitted.emit()
+    assert not emitted
+    panel.refresh_state(AssistantStateSnapshot(state=AssistantState.IDLE))
+    panel._attachment_jobs_pending = 1
+    panel._refresh_composer_input()
+    panel._request_edit.submitted.emit()
+    assert not emitted
+    assert panel._request_edit.toPlainText() == "剪辑需求"
+    panel._on_image_attachment_ready(None, "paste", False)
+    panel._send_btn.click()
+    assert [request.text for request in emitted] == ["剪辑需求"]
 
 
 def test_variants_render_cards(panel):

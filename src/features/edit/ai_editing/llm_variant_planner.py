@@ -448,7 +448,7 @@ class LLMVariantPlanner:
     ) -> "tuple[EditVariant, EditPlan]":
         """把创意决策编译成 EditVariant + EditPlan。
 
-        复用与规则引擎一致的 add_clip 结构（track_id=v1，timeline 按 beat 分配）。
+        使用宿主解析的目标视频轨道，按 beat 分配时间线范围。
         """
         # 按 target_beats 平均分配目标时长
         beat_ranges = _allocate_beat_ranges(target_beats, inp.target_duration)
@@ -491,7 +491,7 @@ class LLMVariantPlanner:
                 kind=OperationKind.ADD_CLIP,
                 params={
                     "clip_id": f"clip-{beat_id}",
-                    "track_id": "v1",
+                    "track_id": inp.video_track_id,
                     "asset_id": seg.asset_id,
                     "source": seg.source_range.to_dict(),
                     "timeline": beat_range.to_dict(),

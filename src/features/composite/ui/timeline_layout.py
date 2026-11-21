@@ -102,7 +102,7 @@ LEFT_COLUMNS: Tuple[ColumnSpec, ...] = (
 )
 
 
-def left_column_widths(total_width: int) -> Dict[str, int]:
+def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[str, int]:
     """Resolve column widths for a given total left-panel width.
 
     The ``name`` column absorbs the remainder after every fixed column
@@ -122,6 +122,8 @@ def left_column_widths(total_width: int) -> Dict[str, int]:
     name_col = next(c for c in LEFT_COLUMNS if c.name == "name")
 
     defaults = {c.name: max(0, int(c.width)) for c in fixed}
+    if layers_mode:
+        defaults.update(solo=18, index=23, value=110)
     fixed_default = sum(defaults.values())
     if total_width >= fixed_default + name_col.min_width:
         defaults["name"] = total_width - fixed_default
@@ -130,6 +132,8 @@ def left_column_widths(total_width: int) -> Dict[str, int]:
     # At normal compact sizes retain all switches but shrink them to their
     # declared minima. The remaining width belongs to the Name column.
     mins = {c.name: max(0, int(c.min_width)) for c in fixed}
+    if layers_mode:
+        mins.update(solo=14, value=80)
     fixed_min = sum(mins.values())
     if total_width >= fixed_min + name_col.min_width:
         mins["name"] = total_width - fixed_min

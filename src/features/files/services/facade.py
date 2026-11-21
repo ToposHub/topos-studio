@@ -10,11 +10,16 @@ request_id/generation/revision 身份；同一位置的新请求使旧请求作�
 """
 from __future__ import annotations
 
+import json
+import re
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+if TYPE_CHECKING:
+    from src.features.files.services.ai_library import LibraryAnalysisPolicy
 
 from src.features.files.contracts import (
     FilesError,
@@ -26,7 +31,7 @@ from src.features.files.contracts import (
     permission_error,
     unsupported_error,
 )
-from src.features.files.repository.catalog import FilesCatalog
+from src.features.files.repository.catalog import FilesCatalog, LibraryRecord
 from src.features.files.services.domain import (
     FilesCollectionsService,
     FilesMetadataService,
@@ -86,18 +91,20 @@ class FilesFacade:
                  tasks: FilesTaskService | None = None,
                  journal: OperationJournal | None = None) -> None:
         self._catalog = catalog
+        from src.features.files.services.thumbnail_cache import ThumbnailCache
+        self._thumbnail_cache = ThumbnailCache(catalog.locator)
         # B3 生产接线：崩溃可恢复的写路径必须有持久 job_log（None=纯内存
         # 运行仅用于测试注入）。任务与批改名共用同一 journal。
         self.journal = journal if journal is not None else OperationJournal(catalog)
         self.query = query or FilesQueryService(catalog)
         self.metadata = metadata or FilesMetadataService(catalog)
         self.scan = scan or FilesScanService(catalog)
+        self._operations = FileOperationService(catalog, journal=self.journal)
         self.tasks = tasks or FilesTaskService(
-            catalog, journal=self.journal)
+            catalog, journal=self.journal, operations=self._operations)
         self.libraries = FilesLibraryService(catalog)
         self.collections = FilesCollectionsService(catalog)
-        self._planner = BatchRenamePlanner(
-            catalog, service=FileOperationService(catalog, journal=self.journal))
+        self._planner = BatchRenamePlanner(catalog, service=self._operations)
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="files-facade")
         if max_pending < max_workers or max_workers < 1:
@@ -112,6 +119,168 @@ class FilesFacade:
         self._closed = False
 
     # ------------------------------------------------------------ 统计/生命周期
+
+    def search_ai_library(
+        self, query: str, *, limit: int = 40, library_id: str | None = None,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
+        only_unanalyzed: bool = False, cancel: CancelToken | None = None,
+        embedding: tuple[str, Sequence[float]] | None = None,
+        semantic_library_ids: frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).search(
+            query, limit=limit, library_id=library_id, folder=folder, kinds=kinds, recursive=recursive,
+            only_unanalyzed=only_unanalyzed, cancel=cancel, embedding=embedding,
+            semantic_library_ids=semantic_library_ids,
+        )
+
+    def build_ai_library_embeddings(
+        self, embed: Callable[[Sequence[str]], Sequence[Sequence[float]]], *, model_key: str,
+        library_id: str | None = None, folder: str | None = None, kinds: tuple[str, ...] | None = None,
+        recursive: bool = True, cancel: CancelToken | None = None,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, Any]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).build_embeddings(
+            embed, model_key=model_key, library_id=library_id, folder=folder, kinds=kinds,
+            recursive=recursive, cancel=cancel, progress=progress,
+        )
+
+    def ai_library_embedding_status(
+        self, model_key: str, *, library_id: str | None = None, folder: str | None = None,
+        kinds: tuple[str, ...] | None = None, recursive: bool = True, cancel: CancelToken | None = None,
+    ) -> dict[str, int]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).embedding_status(
+            model_key, library_id=library_id, folder=folder, kinds=kinds, recursive=recursive, cancel=cancel,
+        )
+
+    def _embedding_consent_scope(self, library_id: str, folder: str | None) -> tuple[str, tuple[str, str]]:
+        stamp = self.ai_library_scope_stamp(library_id, folder=folder)
+        if stamp is None:
+            raise ValueError("请先连接素材库。")
+        root = next((item.root for item in self.libraries.list_libraries() if item.library_id == library_id), None)
+        if root is None:
+            raise ValueError("素材目录已取消登记。")
+        relative = str(Path(folder).resolve().relative_to(Path(root).resolve())) if folder else "."
+        return f"ai_library_embedding_consent:{relative}", stamp
+
+    def ai_library_embedding_consent(self, library_id: str, *, folder: str | None = None) -> str | None:
+        try:
+            key, stamp = self._embedding_consent_scope(library_id, folder)
+        except (OSError, ValueError):
+            return None
+        with self._catalog._read() as cursor:
+            row = cursor.execute("SELECT value FROM settings WHERE library_id = ? AND key = ?",
+                                 (library_id, key)).fetchone()
+        if row:
+            try:
+                payload = json.loads(row[0])
+                if isinstance(payload, dict) and payload.get("stamp") == list(stamp):
+                    approval = payload.get("approval")
+                    if isinstance(approval, str) and re.fullmatch(r"[a-f0-9]{64}", approval):
+                        return approval
+            except (TypeError, ValueError):
+                pass
+        return None
+
+    def set_ai_library_embedding_consent(
+        self, library_id: str, approval: str | None, *, folder: str | None = None,
+        expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        key, stamp = self._embedding_consent_scope(library_id, folder)
+        if approval is not None and (expected_scope_stamp != stamp or not re.fullmatch(r"[a-f0-9]{64}", approval)):
+            raise ValueError("素材文件夹或服务已更换，请重新确认向量服务授权。")
+        with self._catalog._write() as cursor:
+            if approval is None:
+                cursor.execute("DELETE FROM settings WHERE library_id = ? AND key = ?", (library_id, key))
+            else:
+                cursor.execute(
+                    """INSERT INTO settings (library_id, key, value) VALUES (?, ?, ?)
+                       ON CONFLICT(library_id, key) DO UPDATE SET value = excluded.value""",
+                    (library_id, key, json.dumps({"stamp": stamp, "approval": approval})),
+                )
+
+    def ai_library_analyzed_paths(self, paths: Sequence[str], *, cancel: CancelToken | None = None) -> set[str]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_status(paths, cancel=cancel)
+
+    def build_ai_library(
+        self, analyze: Callable, *, revision: str, cancel: CancelToken,
+        progress: Callable[[int, int], None],
+        additional_analyzers: Callable[[str], Sequence[Callable]] | None = None,
+        library_id: str | None = None,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None,
+        recursive: bool = True, force: bool = False,
+        only_unanalyzed: bool = False,
+        per_library_scope: dict[str, tuple[tuple[str, ...], bool]] | None = None,
+    ) -> dict[str, Any]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).build_index(
+            analyze, analyzer_revision=revision, cancel=cancel, progress=progress,
+            additional_analyzers=additional_analyzers, library_id=library_id,
+            folder=folder, kinds=kinds, recursive=recursive, force=force,
+            only_unanalyzed=only_unanalyzed, per_library_scope=per_library_scope,
+        )
+
+    def ai_library_analysis_policy(self, library_id: str, *, folder: str | None = None) -> LibraryAnalysisPolicy:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_policy(library_id, folder=folder)
+
+    def ai_library_scope_stamp(self, library_id: str, *, folder: str | None = None) -> tuple[str, str] | None:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_scope_stamp(library_id, folder=folder)
+
+    def ai_library_analysis_policies(self) -> list[dict[str, Any]]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        service = AILibraryService(self._catalog)
+        return [{"library_id": record.library_id, "name": record.name, "path": record.root,
+                 **service.analysis_policy(record.library_id).to_dict()}
+                for record in self.libraries.list_libraries()]
+
+    def set_ai_library_analysis_policy(
+        self, library_id: str, policy: LibraryAnalysisPolicy, *, folder: str | None = None,
+        expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        from src.features.files.services.ai_library import AILibraryService
+
+        AILibraryService(self._catalog).set_analysis_policy(
+            library_id, policy, folder=folder, expected_scope_stamp=expected_scope_stamp,
+        )
+
+    def copy_to_ai_library(self, sources: list[str], destination: str) -> ServiceResult:
+        root = Path(destination).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("素材库目标必须是文件夹")
+        record = self.libraries.library_for_path(root) or self.libraries.register(root)
+        return self.tasks.start_task(record.library_id, "copy", sources,
+                                     options={"destination": str(root)}, policy="rename")
+
+    def register_library(self, directory: str, name: str = "") -> LibraryRecord:
+        root = Path(directory)
+        if not root.is_absolute():
+            raise ValueError("请选择绝对路径。")
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            raise NotADirectoryError(directory)
+        if name:
+            return self._operations.create_library(str(root), name)
+        return self.libraries.register(root)
+
+    def thumbnail_bytes(self, path: str, version: int, *, cancel: threading.Event) -> bytes:
+        from src.features.files.services.media import thumbnail_bytes
+
+        if cancel.is_set():
+            raise ValueError("缩略图请求已取消")
+        return self._thumbnail_cache.get_or_create(path, version, lambda: thumbnail_bytes(path, cancel=cancel))
 
     @property
     def dropped_results(self) -> int:
@@ -164,11 +333,13 @@ class FilesFacade:
             wrap=lambda result: result,
         )
 
-    def tree(self, path: str, *, request_id: str, listener: Listener) -> None:
+    def tree(self, path: str, *, request_id: str, listener: Listener,
+             follow_symlinks: bool = True) -> None:
         """目录树子节点；同路径新请求作废旧请求。"""
         self._submit(
             key=f"tree:{identity_key(path)}", request_id=request_id,
-            work=lambda: self.query.tree(path),
+            work=lambda: (self.query.tree(path) if follow_symlinks
+                          else self.query.tree(path, follow_symlinks=False)),
             listener=listener,
             wrap=lambda result: result,
         )

@@ -225,6 +225,14 @@ class WorkspacePanelBar(QToolBar):
                 self._right_actions.add(action)
             actions.setdefault(page, []).append(action)
 
+        show_library_pool = getattr(window, "set_library_media_pool_visible", None)
+        if self._docks("dock_edit_media_pool") and callable(show_library_pool):
+            pool = QAction(_shortcut_icon("folder-open"), I18N.tr("panel.media_pool", "Media Pool"), self)
+            pool.setObjectName("workspace_library_media_pool")
+            pool.setCheckable(True)
+            pool.toggled.connect(show_library_pool)
+            actions["Library"] = [pool]
+
         group("Edit", "folder-open", I18N.tr("panel.media_pool", "Media Pool"),
               "dock_edit_media_pool", "dock_edit_effects",
               peers=("dock_audio_mixer",))
@@ -243,8 +251,8 @@ class WorkspacePanelBar(QToolBar):
         group("Composite", "sliders-horizontal", I18N.tr("panel.node_properties", "Node Properties"),
               "dock_node_properties", "dock_composite_scene_outliner", "dock_composite_material",
               right=True)
-        group("Composite", "chart-line-up", I18N.tr("workspace.animation", "Animation"),
-              "dock_composite_keyframes", "dock_composite_spline")
+        group("Composite", "stack", "", "dock_composite_keyframes")
+        group("Composite", "tree-structure", "", "dock_composite")
         group("Composite", "chart-line", "", "dock_composite_scope", right=True)
         group("Mixer", "faders", "", "dock_audio_console")
         group("Mixer", "monitor-play", "", "dock_audio_viewer", right=True)
@@ -335,6 +343,8 @@ class WorkspacePanelBar(QToolBar):
             toolbar.removeAction(action)
         self._active_page = page
         primary = self._primary_actions.get(page, [])
+        if page == "Library" and primary:
+            self._window.set_library_media_pool_visible(primary[0].isChecked())
         self._panels_menu.clear()
         tab_toggles = {action.dock.toggleViewAction() for action in primary
                        if isinstance(action, DockTabAction)}
@@ -342,7 +352,7 @@ class WorkspacePanelBar(QToolBar):
             if action not in tab_toggles:
                 self._panels_menu.addAction(action)
         show_tools = page == "Color" and bool(self._tools_menu.actions())
-        self._panel_menu_action.setVisible(bool(self._panels_menu.actions()))
+        self._panel_menu_action.setVisible(page != "Library" and bool(self._panels_menu.actions()))
         self._tool_menu_action.setVisible(show_tools)
         for action in primary:
             if isinstance(action, (DockGroupAction, DockTabAction)):
@@ -352,9 +362,7 @@ class WorkspacePanelBar(QToolBar):
             button = toolbar.widgetForAction(action)
             if button is not None:
                 button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        # The Library already has permanent Locations and Info switches on its
-        # own navigation strip, adjacent to the browser they control.
-        self.setVisible(bool(self._panels_menu.actions()) or show_tools)
+        self.setVisible(bool(primary or self._panels_menu.actions()) or show_tools)
         self.right_tools.setVisible(bool(self.right_tools.actions()))
 
     def reset_groups(self, page: str | None = None) -> None:

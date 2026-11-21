@@ -2133,9 +2133,17 @@ class NodeGraph:
             # time-node frame remaps were precomputed above (N-06) so both
             # parameter evaluation and frame-reading sources see the same
             # mapping.
-            from .time_remap import compute_layer_frame_gates
+            from .layer_model import EMPTY_LAYER_OUTPUT_PARAM
+            from .time_remap import (compute_layer_frame_gates,
+                                     empty_managed_layer_outputs)
             layer_frame_gates = compute_layer_frame_gates(
                 self._layer_stacks.values(), self._layers.get)
+            for output_id in empty_managed_layer_outputs(
+                    self._layer_stacks.values(), self._layers.get,
+                    self.connections, layer_frame_gates, frame_number):
+                output = node_snaps.get(output_id)
+                if output is not None and output.node_type == "output":
+                    output.parameters[EMPTY_LAYER_OUTPUT_PARAM] = True
 
             return GraphSnapshot(
                 generation=self._generation,

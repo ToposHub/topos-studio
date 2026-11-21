@@ -6,7 +6,7 @@ from typing import Any
 
 from PyQt6.QtCore import QModelIndex, QPoint, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QHelpEvent, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QPolygon
-from PyQt6.QtWidgets import QAbstractItemView, QLineEdit, QStyle, QStyleOptionViewItem, QToolTip, QWidget
+from PyQt6.QtWidgets import QAbstractItemView, QLineEdit, QListView, QStyle, QStyleOptionViewItem, QToolTip, QTreeWidget, QWidget
 
 from .media_pool_panel import AssetListModel, GridDelegate
 from .media_pool_icons import draw_timeline_glyph, pool_icon
@@ -14,14 +14,115 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 
 
+def pool_tree_style(row_height: int) -> str:
+    return f"""
+        QTreeWidget {{ background: {C.BG_PANEL}; alternate-background-color: {C.BG_INPUT};
+            color: {C.TEXT_SECONDARY}; border: none; font-size: 11px; }}
+        QTreeWidget::item {{ height: {row_height}px; padding: 0 4px; border: none; }}
+        QTreeWidget::item:selected {{ background: {C.BG_DARKEST}; color: {C.TEXT_PRIMARY}; }}
+        QTreeWidget::item:hover {{ background: {C.BG_ACTIVE}; }}
+        QHeaderView::section {{ background: {C.BG_INPUT}; color: {C.TEXT_LABEL}; border: none;
+            border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
+    """
+
+
+def configure_pool_columns(tree: QTreeWidget) -> None:
+    tree.setHeaderLabels([
+        I18N.tr("edit.media_pool.clip_name", "Clip Name"),
+        I18N.tr("edit.media_pool.header_reel", "Reel Name"),
+        I18N.tr("edit.media_pool.header_scene", "Scene/Shot/Take"),
+        I18N.tr("edit.media_pool.header_duration", "Duration"),
+        I18N.tr("edit.media_pool.header_fps", "FPS"),
+        I18N.tr("edit.media_pool.header_resolution", "Resolution"),
+        I18N.tr("edit.media_pool.header_codec", "Codec"),
+        I18N.tr("edit.media_pool.header_audio", "Audio"),
+        I18N.tr("edit.media_pool.header_path", "File Path"),
+    ])
+    for column, width in enumerate((200, 90, 120, 90, 65, 110, 90, 70, 250)):
+        tree.setColumnWidth(column, width)
+    tree.setAlternatingRowColors(True)
+    tree.setRootIsDecorated(False)
+    tree.setUniformRowHeights(True)
+    tree.setStyleSheet(pool_tree_style(23))
+    tree.header().setStretchLastSection(False)
+
+
+def configure_pool_posters(view: QListView, delegate: ResolvePoolDelegate, *, metadata: bool) -> None:
+    delegate.metadata_mode = metadata
+    view.setViewMode(QListView.ViewMode.ListMode if metadata else QListView.ViewMode.IconMode)
+    margins = (0, 0, 0, 0) if metadata else (15, 8, 0, 0)
+    view.setViewportMargins(*margins)
+    view.setFlow(QListView.Flow.TopToBottom if metadata else QListView.Flow.LeftToRight)
+    view.setWrapping(not metadata)
+    view.setMovement(QListView.Movement.Static)
+    view.setResizeMode(QListView.ResizeMode.Adjust)
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    view.setSpacing(0)
+    view.setUniformItemSizes(True)
+    if metadata:
+        view.setGridSize(QSize())
+
+
+def resize_pool_posters(view: QListView, delegate: ResolvePoolDelegate, preferred: int) -> None:
+    width = preferred
+    padding = delegate.THUMBNAIL_CELL_PADDING
+    cell_width = preferred + padding
+    if view.isVisible():
+        maximum = view.maximumViewportSize().width()
+        columns = max(1, maximum // cell_width)
+        available = maximum - view.verticalScrollBar().sizeHint().width() - 2
+        min_padding = delegate.MIN_THUMBNAIL_CELL_PADDING
+        # Fit a near-full trailing slot by tightening the gutters if one
+        # more poster fits at the requested zoom.
+        if (available - columns * cell_width >= cell_width * 7 // 10
+                and available // (columns + 1) >= preferred + min_padding):
+            columns += 1
+        cell_width = min(cell_width, max(1, available // columns))
+        width = min(preferred, max(1, cell_width - min_padding))
+    height = round(width * 9 / 16)
+    icon = QSize(width, height)
+    grid = QSize(cell_width, height + padding)
+    if view.iconSize() != icon or view.gridSize() != grid:
+        delegate.set_thumb_size((width, height))
+        delegate.thumbnail_cell_width = cell_width
+        view.setIconSize(icon)
+        view.setGridSize(grid)
+
+
+def configure_pool_shelf(view: QListView, delegate: ResolvePoolDelegate) -> None:
+    view.setViewMode(QListView.ViewMode.IconMode)
+    view.setFlow(QListView.Flow.LeftToRight)
+    view.setWrapping(True)
+    view.setResizeMode(QListView.ResizeMode.Adjust)
+    view.setMovement(QListView.Movement.Static)
+    view.setGridSize(QSize(116, 88))
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    delegate.view = view
+    delegate.set_thumb_size((86, 48))
+    view.setItemDelegate(delegate)
+
+
+def pool_shelf_height(width: int, count: int) -> int:
+    columns = max(1, (width - 16) // 116)
+    rows = (count + columns - 1) // columns
+    return max(88, min(176, rows * 88))
+
+
 class ResolvePoolDelegate(GridDelegate):
     """Compact 16:9 posters, or a poster with existing metadata beside it."""
+
+    THUMBNAIL_CELL_PADDING = 34
+    MIN_THUMBNAIL_CELL_PADDING = 16
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.metadata_mode: bool = False
-        self.poster_inset: int = 0
         self.show_duration_badge: bool = False
+        self.show_clip_information: bool = True
+        self.card_data_role: int = Qt.ItemDataRole.UserRole
+        self.thumbnail_cell_width: int | None = None
         self._identity_icons = {name: pool_icon(name, C.TEXT_PRIMARY) for name in ("info", "video", "audio", "image")}
 
     def _item_rects(self, rect: QRect) -> tuple[QRect, QRect]:
@@ -32,7 +133,7 @@ class ResolvePoolDelegate(GridDelegate):
             name = QRect(poster.right() + 12, rect.top() + 10,
                          max(0, rect.right() - poster.right() - 22), 22)
             return poster, name
-        width = max(1, min(self.thumb_size[0] - self.poster_inset, rect.width() - 12))
+        width = max(1, min(self.thumb_size[0], rect.width() - 12))
         height = max(1, round(width * 9 / 16))
         poster = QRect(rect.left() + (rect.width() - width) // 2,
                        rect.top() + 6, width, height)
@@ -165,7 +266,8 @@ class ResolvePoolDelegate(GridDelegate):
         super()._draw_comp_clip_icon(painter, rect)
 
     def helpEvent(self, event: QHelpEvent, view: QAbstractItemView, option: QStyleOptionViewItem, index: QModelIndex) -> bool:
-        if index.data(AssetListModel.ITEM_TYPE_ROLE) in ("asset", "timeline") and self.info_button_rect(option.rect).contains(event.pos()):
+        if (self.show_clip_information and index.data(AssetListModel.ITEM_TYPE_ROLE) in ("asset", "timeline")
+                and self.info_button_rect(option.rect).contains(event.pos())):
             QToolTip.showText(event.globalPos(), I18N.tr("edit.media_pool.show_clip_information", "Show Clip Information"), view)
             return True
         return super().helpEvent(event, view, option, index)
@@ -178,6 +280,8 @@ class ResolvePoolDelegate(GridDelegate):
     def _metadata_lines(self, item_type: str, data: Any) -> list[str]:
         """Read asset/reference fields without synchronous media probing."""
         if item_type == "bin":
+            if data is None:
+                return []
             count = len(getattr(data, "asset_ids", ()))
             return [I18N.tr("edit.media_pool.bin", "Bin"),
                     I18N.tr("edit.media_pool.item_count", "{count} clips", count=count)]
@@ -215,7 +319,7 @@ class ResolvePoolDelegate(GridDelegate):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         poster, name = self._item_rects(option.rect)
         item_type = index.data(AssetListModel.ITEM_TYPE_ROLE)
-        data = index.data(Qt.ItemDataRole.UserRole)
+        data = index.data(self.card_data_role)
         if item_type in ("asset", "timeline"):
             painter.save()
             clip = QPainterPath()
@@ -237,7 +341,7 @@ class ResolvePoolDelegate(GridDelegate):
                 painter.fillRect(QRect(poster.left(), poster.bottom() - 2, poster.width(), 3), QColor(color_label))
         if item_type in ("asset", "timeline"):
             painter.restore()
-            if self.info_button_visible(index, option):
+            if self.show_clip_information and self.info_button_visible(index, option):
                 self._draw_info_button(painter, option.rect)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(C.PANEL_DIVIDER), .8))
@@ -271,8 +375,12 @@ class ResolvePoolDelegate(GridDelegate):
         if self.metadata_mode:
             width = self.view.viewport().width() if self.view is not None else 380
             return QSize(max(1, width), 106)
-        width = max(1, self.thumb_size[0])
-        return QSize(width + 34, round(width * 9 / 16) + 34)
+        return self.thumbnail_cell_size()
+
+    def thumbnail_cell_size(self) -> QSize:
+        width, height = self.thumb_size
+        return QSize(self.thumbnail_cell_width or width + self.THUMBNAIL_CELL_PADDING,
+                     height + self.THUMBNAIL_CELL_PADDING)
 
     def updateEditorGeometry(self, editor: QWidget, option: QStyleOptionViewItem,
                              index: QModelIndex) -> None:

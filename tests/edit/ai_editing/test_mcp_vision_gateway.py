@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +51,18 @@ class _StubOpener:
 
 
 class TestTransportFraming:
+    def test_cancel_interrupts_pending_stdio_roundtrip(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        requests: list[dict] = []
+        checks = iter((False, False, True))
+        transport = SubprocessStdioTransport(("npx",), cancel_requested=lambda: next(checks))
+        monkeypatch.setattr(transport, "_write", requests.append)
+
+        with pytest.raises(McpTransportError, match="请求已取消"):
+            transport._roundtrip({"id": 7, "method": "tools/call"}, timeout=30)
+
+        assert [item["method"] for item in requests] == ["tools/call", "notifications/cancelled"]
+        assert requests[-1]["params"]["requestId"] == 7
+
     def test_parse_valid_json_line(self):
         line = b'{"jsonrpc":"2.0","id":1,"result":{"a":1}}\n'
         msg = SubprocessStdioTransport._parse(line)
@@ -252,6 +265,21 @@ def _make_gateway_with_fake(tmp_path, tool="analyze_image"):
 
 
 class TestGatewayInvoke:
+    def test_image_tool_error_is_not_a_description(self, tmp_path: Path) -> None:
+        image = tmp_path / "sample.jpg"
+        image.touch()
+        fake = _FakeTransport(response={
+            "result": {"isError": True, "content": [{"type": "text", "text": "invalid API key"}]},
+        })
+        gateway = McpVisionGateway(
+            api_key_provider=lambda: "test-key", npx_path="/fake/npx", transport_factory=lambda _: fake,
+        )
+        try:
+            result = gateway.invoke("topos.mcp.analyze_image", {"image_ref": str(image)})
+            assert result == {"ok": False, "error": "invalid API key"}
+        finally:
+            gateway.shutdown()
+
     def test_analyze_image_maps_ref_to_image_source(self, tmp_path):
         gw, fake, img = _make_gateway_with_fake(tmp_path)
         r = gw.invoke(

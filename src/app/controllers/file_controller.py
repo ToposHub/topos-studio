@@ -8,7 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import cv2
 import numpy as np
@@ -31,6 +31,9 @@ from src.shared.ui.shortcut_scope import active_motion_graphic_editor
 from src.shared.media.format_registry import is_video as _is_video_file
 
 from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
+
+if TYPE_CHECKING:
+    from src.features.edit.core.project import MediaAsset
 
 
 
@@ -1789,6 +1792,12 @@ class FileOpsMixin:
         except Exception as e:
             logger.warning(f"Failed to bind composite_id to clip: {e}")
 
+    def _on_timeline_project_changed(self, project: EditProject) -> None:
+        """Publish imports and their undo/redo back to the project media pool."""
+        self._on_media_pool_project_changed(project)
+        if self.media_pool_panel is not None:
+            self.media_pool_panel.set_project(self._current_edit_project, check_offline=False)
+
     def _on_media_pool_project_changed(self, project: EditProject) -> None:
         """
         Handle project_changed signal from MediaPoolPanel.
@@ -2274,6 +2283,18 @@ class FileOpsMixin:
                 asset,
                 getattr(self._current_edit_project,
                         "interpretation_overrides", None)))
+        FileOpsMixin._focus_open_edit_source(self, asset.asset_id, "media_pool_double_click")
+        logger.debug(f"Asset opened in Source Viewer: {asset.display_name}")
+
+    def _on_library_source_preview(self, asset: MediaAsset, poster: QImage, focus: bool = True) -> None:
+        """Preview an external library item without changing project membership."""
+        viewer = self.source_viewer_widget
+        if viewer is not None:
+            if getattr(viewer, "current_asset", None) is not asset:
+                viewer.open_asset(asset, preview_only=True, initial_preview=poster)
+            FileOpsMixin._focus_open_edit_source(self, asset.asset_id, "library_preview", focus=focus)
+
+    def _focus_open_edit_source(self, asset_id: str, via: str, *, focus: bool = True) -> None:
         # I01（复查计划）：素材打开进入仲裁快照（内容同步；激活由
         # show_source 的 viewport 信号单独产生一次领域请求——一次交互
         # 恰好对应内容+激活两类请求，不重复）。
@@ -2281,8 +2302,7 @@ class FileOpsMixin:
         if coordinator is not None:
             try:
                 coordinator.open_source_asset(
-                    asset.asset_id, activate=False,
-                    via="media_pool_double_click")
+                    asset_id, activate=False, via=via)
             except Exception:
                 logger.debug("open_source_asset bookkeeping failed",
                              exc_info=True)
@@ -2293,7 +2313,7 @@ class FileOpsMixin:
 
         viewport = getattr(self, "edit_viewport", None)
         if viewport is not None:
-            viewport.show_source(focus=True)
+            viewport.show_source(focus=focus)
             self.dock_program_viewer.show()
             self.dock_program_viewer.raise_()
         else:
@@ -2305,10 +2325,8 @@ class FileOpsMixin:
         # A double-click is an explicit request to work with this source.
         # Move focus off the media pool so Space immediately controls Source.
         source_canvas = getattr(self.source_viewer_widget, "viewer", None)
-        if source_canvas is not None:
+        if focus and source_canvas is not None:
             source_canvas.setFocus()
-
-        logger.debug(f"Asset opened in Source Viewer: {asset.display_name}")
 
     def _on_asset_selected(self, asset_id: str) -> None:
         """Handle single-click asset selection from MediaPoolPanel.
@@ -4663,8 +4681,11 @@ class FileOpsMixin:
                 # the same file would trigger the dialog on every next launch.
                 self.edit_project_io.discard_autosave(original_filepath)
 
-        # Load project
-        result = self.edit_project_io.load_project(load_filepath)
+        # Keep this archive's AI payload local until its project services are bound.
+        loaded_ai_payload: dict[str, Any] = {}
+        result = self.edit_project_io.load_project(
+            load_filepath, receive_ai_payload=loaded_ai_payload.update,
+        )
         if result is None:
             QMessageBox.critical(
                 self,
@@ -4732,6 +4753,8 @@ class FileOpsMixin:
 
         # M1.2：重新装配 AI 子系统绑定到新打开的工程（teardown 旧 + setup 新）
         self._setup_ai_editing()
+        if loaded_ai_payload and self._current_edit_project is project:
+            self.edit_project_io.restore_loaded_ai_payload(loaded_ai_payload)
 
     def _restore_edit_ui_state(self, ui_state: UIState) -> None:
         """Restore UI state after loading project."""

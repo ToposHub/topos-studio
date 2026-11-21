@@ -29,6 +29,15 @@ _CHECKMARK_ICON_FILE = (
 _CHECKMARK_ICON_PATH = _CHECKMARK_ICON_FILE.resolve().as_posix()
 
 
+def timeline_timecode_font() -> QFont:
+    """Typography for the timeline corner timecode in Edit and Composite."""
+    font = QFont(QApplication.font())
+    font.setStyle(QFont.Style.StyleNormal)
+    font.setPixelSize(22)
+    font.setWeight(QFont.Weight.Medium)
+    return font
+
+
 # ============================================================================
 # 统一颜色常量 — 修改此处的颜色值即可全局生效
 # ============================================================================
@@ -51,8 +60,9 @@ class C:
     BG_DEEPEST      = "#121212"   # 画布 / 最深区域
     BG_DARKEST      = "#1a1a1a"   # 主窗口 / 分隔条
     BG_DARK         = "#1e1e1e"   # 面板标题 / 停靠窗口
-    KEYFRAMES_BG    = "#1c1d20"   # Keyframes 左右工作区基础底色
     BG_PANEL        = "#27272b"   # 面板背景（标准）
+    KEYFRAMES_BG    = BG_PANEL
+    TIMELINE_TIMECODE_BG = "#202025"
     BG_INPUT        = "#252529"   # 输入框 / 下拉框背景
     BG_INPUT_DARK   = "#252525"   # 复选框背景
     BG_HOVER        = "#2a2a2a"   # 悬停背景 / 滑槽背景
@@ -78,6 +88,7 @@ class C:
     TEXT_DIM         = "#999999"  # 更暗的提示文字
     TEXT_LABEL       = "#aaaaaa"  # 标签文字
     TEXT_BRIGHT      = "#dddddd"  # 按钮文字
+    TIMELINE_TIMECODE_TEXT = "#D8D9DE"
 
     # --- ToggleSwitch 专用 ---
     TOGGLE_PILL_BG  = "#3C3C42"  # 药丸背景
@@ -627,6 +638,13 @@ NODE_GROUP_BOX_STYLE = f"""
 # ============================================================================
 # 对话框通用模板
 # ============================================================================
+
+PRIMARY_DIALOG_BUTTON_STYLE = f"""
+    QPushButton {{ background: {C.ORANGE_PRESS}; border-color: {C.ORANGE_PRESS}; color: white; }}
+    QPushButton:hover, QPushButton:focus {{ border-color: {C.ORANGE_HOVER}; }}
+    QPushButton:hover {{ background: {C.ORANGE_HOVER}; color: {C.BG_DEEPEST}; }}
+    QPushButton:disabled {{ background: {C.BG_BUTTON}; border-color: {C.BORDER_MID}; color: {C.TEXT_HINT}; }}
+"""
 
 # --- 通用暗色对话框 ---
 DIALOG_BASE_STYLE = f"""
@@ -1863,14 +1881,14 @@ LAYER_LIST_STYLE = """
 
 COMPOSITE_KEYFRAMES_PANEL_STYLE = f"""
     QWidget#CompositeKeyframesPanel, QWidget#CompositeSplinePanel {{
-        background-color: {C.BG_DARKEST};
+        background-color: {C.BG_PANEL};
         border: none;
     }}
 """
 
 COMPOSITE_KEYFRAMES_TOOLBAR_STYLE = f"""
     QToolBar {{
-        background-color: {C.BG_DARK};
+        background-color: {C.BG_PANEL};
         border: none;
         border-bottom: 1px solid {C.BORDER_DARK};
         spacing: 2px;

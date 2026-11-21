@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlsplit
+
+from src.shared.ai_models.generation.media_inference import is_local_media_endpoint
 
 #: 本地模型包清单（capability_id, label, pack_id）——
 #: capability 矩阵与 RuntimeCapabilitySnapshot（T-P0-00）共用同一份定义。
@@ -185,11 +188,19 @@ def build_capability_matrix(
     """
 
     statuses: list[CapabilityStatus] = []
+    endpoint = str(getattr(profile, "endpoint", "") or "")
+    try:
+        needs_credentials = not is_local_media_endpoint(urlsplit(endpoint))
+    except ValueError:
+        needs_credentials = True
+    profile_id = str(getattr(profile, "profile_id", "") or "")
+    connection = (connection_results or {}).get(profile_id)
     profile_ready = bool(
         profile is not None
-        and getattr(profile, "endpoint", "")
+        and endpoint
         and getattr(profile, "model_id", "")
-        and (credential_available or getattr(profile, "provider_kind", "") in {"ollama", "local_http", "openai_compat"})
+        and (credential_available or not needs_credentials or connection is True
+             or getattr(profile, "provider_kind", "") in {"ollama", "local_http", "openai_compat"})
     )
     blocked = set(blocked_capabilities)
     profile_failed = _failure_reason(failed_capabilities, "deepseek_text_agent")
@@ -212,7 +223,6 @@ def build_capability_matrix(
         llm_state = CapabilityState.OFFLINE
         llm_reason = "当前处于离线模式，云端 profile 暂不可用"
     elif str(getattr(profile, "endpoint", "")).startswith(("http://", "https://")):
-        connection = (connection_results or {}).get(str(getattr(profile, "profile_id", "")))
         if connection is True:
             llm_state = CapabilityState.AVAILABLE
             llm_reason = "连接测试已通过"
@@ -230,13 +240,13 @@ def build_capability_matrix(
         llm_reason = ""
     statuses.append(CapabilityStatus(
         capability_id="deepseek_text_agent",
-        label="DeepSeek 文本 Agent",
+        label="剪辑助手语言模型",
         tier=CapabilityTier.BETA,
         state=llm_state,
-        provider_id=str(getattr(profile, "profile_id", "") or ""),
+        provider_id=profile_id,
         reason=llm_reason,
         requires_consent=True,
-        requires_credentials=True,
+        requires_credentials=needs_credentials,
         source="profile",
         next_step=(
             "测试连接确认模型可达" if llm_state == CapabilityState.UNVERIFIED

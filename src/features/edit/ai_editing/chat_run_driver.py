@@ -36,6 +36,8 @@ import logging
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
+from src.features.edit.ai_editing.mcp_vision_gateway import is_mcp_vision_tool
+
 from src.features.edit.ai_editing.agent_models import (
     AgentEventKind,
     AgentRunState,
@@ -64,13 +66,22 @@ from src.features.edit.ai_editing.request_recovery import (
     ModelRequestRecovery,
     RequestRecoveryPolicy,
 )
+from src.features.edit.ai_editing.tool_facade import LIBRARY_SEARCH_TOOL
 from src.features.edit.ai_editing.tool_operation_ledger import ToolOperationLedger
 
 logger = logging.getLogger(__name__)
 
+_LIBRARY_SEARCH_GUIDANCE = (
+    "用户要求按脚本、分镜或镜头描述找素材时，用 topos.search_library_media 按场景分别检索。"
+    "给出工具实际返回的候选和源媒体入出点（秒），时段为空时说明没有已索引时段。"
+    "素材名、标签和描述仅作匹配依据。有 project_asset_id 时，可在剪辑计划中使用项目 ID 及返回的源帧范围"
+    "（出点为开区间）。缺少项目 ID 时，请用户在助手顶部的「素材候选」中选中片段并加入媒体池，再做剪辑计划。"
+)
+
 
 #: Factory that builds an LLMClient for a resolved profile (injected for testing).
 ClientFactory = Callable[[Any], LLMClient | None]
+ChatMessagePreparer = Callable[[Callable[[], bool]], list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -164,6 +175,8 @@ class ChatRunDriver:
         stream: bool = False,
         on_delta: Callable[[str], None] | None = None,
         preset_id: str = "",
+        prepare_messages: ChatMessagePreparer | None = None,
+        omit_mcp_vision_tools: bool = False,
     ) -> ChatRunResult:
         """Execute one chat request end-to-end and return the result."""
 
@@ -237,6 +250,25 @@ class ChatRunDriver:
                 preset=preset,
             )
 
+        # Prepare attachment context while the run is gathering. This also
+        # lets the existing stop action cancel an in-flight MCP request.
+        if prepare_messages is not None:
+            def cancelled() -> bool:
+                return not self._orchestrator.is_run_active(run_id)
+
+            try:
+                messages = prepare_messages(cancelled)
+            except Exception as exc:
+                if cancelled():
+                    return ChatRunResult(
+                        run_id=run_id, cancelled=True, terminal_state=AgentRunState.CANCELLED,
+                    )
+                self._orchestrator.fail(run_id, reason=str(exc))
+                return ChatRunResult(
+                    run_id=run_id, error=str(exc), error_code="VISION_FALLBACK_FAILED",
+                    terminal_state=AgentRunState.FAILED,
+                )
+
         # ----- gather → plan → execute -----
         if self._orchestrator.is_run_active(run_id):
             self._orchestrator.mark_context_ready(run_id)
@@ -299,7 +331,7 @@ class ChatRunDriver:
             stream=stream,
             messages=messages,
             estimated=estimated,
-            tool_names=self._tool_names_for_trace(preset) if use_tool_loop else (),
+            tool_names=self._tool_names_for_trace(preset, omit_mcp_vision_tools) if use_tool_loop else (),
             request_mode="tool_loop" if use_tool_loop else "completion",
         )
         if use_tool_loop:
@@ -309,6 +341,7 @@ class ChatRunDriver:
                     temperature=temperature, max_tokens=max_tokens,
                     on_delta=on_delta,
                     preset=preset,
+                    omit_mcp_vision_tools=omit_mcp_vision_tools,
                 )
             except LLMError as exc:
                 # Degrade to plain completion when the provider rejects tools
@@ -546,7 +579,9 @@ class ChatRunDriver:
             payload=payload,
         )
 
-    def _tool_names_for_trace(self, preset: AgentPreset | None = None) -> tuple[str, ...]:
+    def _tool_names_for_trace(
+        self, preset: AgentPreset | None = None, omit_mcp_vision_tools: bool = False,
+    ) -> tuple[str, ...]:
         facade = self._tool_facade
         if facade is None:
             return ()
@@ -557,6 +592,8 @@ class ChatRunDriver:
         names: list[str] = []
         for definition in definitions or ():
             name = str(getattr(definition, "name", "") or "")
+            if omit_mcp_vision_tools and is_mcp_vision_tool(name):
+                continue
             if name and (
                 preset is None
                 or not preset.tool_allowlist
@@ -609,6 +646,9 @@ class ChatRunDriver:
                 temperature = preset.temperature
             if preset.max_tokens is not None:
                 max_tokens = preset.max_tokens
+        system_instruction = preset.system_instruction if preset is not None else ""
+        if LIBRARY_SEARCH_TOOL in self._tool_names_for_trace(preset):
+            system_instruction = "\n\n".join(filter(None, (system_instruction, _LIBRARY_SEARCH_GUIDANCE)))
         executor = AgentTaskExecutor(
             self._orchestrator,
             client_factory=self._client_factory,
@@ -619,7 +659,7 @@ class ChatRunDriver:
             capability_catalog=self._capability_catalog,
             tool_allowlist=preset.tool_allowlist if preset is not None else (),
             max_steps=preset.max_tool_calls if preset is not None else 10,
-            system_instruction=preset.system_instruction if preset is not None else "",
+            system_instruction=system_instruction,
         )
 
         task_result = executor.execute(
@@ -675,6 +715,7 @@ class ChatRunDriver:
         max_tokens: int | None,
         on_delta: Callable[[str], None] | None,
         preset: AgentPreset | None = None,
+        omit_mcp_vision_tools: bool = False,
     ) -> str:
         """B2: 运行模型驱动的工具循环，返回最终回复文本。"""
 
@@ -712,9 +753,15 @@ class ChatRunDriver:
 
         # 获取工具定义（只读级），转换为 OpenAI tools API 格式。
         tool_defs = self._tool_facade.list_tools()
+        if omit_mcp_vision_tools:
+            # Attached media already has a dedicated native or MCP route.
+            # Do not offer a second vision call via the session-wide latest ref.
+            tool_defs = [tool for tool in tool_defs if not is_mcp_vision_tool(tool.name)]
         if preset is not None and preset.tool_allowlist:
             allowed = set(preset.tool_allowlist)
             tool_defs = [tool for tool in tool_defs if tool.name in allowed]
+        if any(tool.name == LIBRARY_SEARCH_TOOL for tool in tool_defs):
+            messages = [{"role": "system", "content": _LIBRARY_SEARCH_GUIDANCE}, *messages]
         tools = [t.to_openai_tool() for t in tool_defs]
 
         # 取消检查：run 不再 active 时通知循环终止。

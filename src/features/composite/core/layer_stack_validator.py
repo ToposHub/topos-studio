@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from .layer_model import (
     Layer, LayerStack, ALL_LAYER_TYPES, LAYER_BLEND_MODES, DEFAULT_BLEND_MODE,
-    TRACK_MATTE_MODES,
+    BOTTOM_UP_LAYER_STACK_VERSION, LAYER_MERGE_OWNER_PARAM, TRACK_MATTE_MODES,
 )
 
 
@@ -245,6 +245,8 @@ class LayerStackValidator:
     def _check_merge_ports(self, stack: LayerStack,
                            report: ValidationReport) -> None:
         # Auto-merges must still be Merge nodes with A/B inputs.
+        layer_ids = set(stack.layer_ids)
+        owners: Set[str] = set()
         for mid in stack.generated_merge_node_ids:
             node = self.graph.get_node(mid)
             if node is None:
@@ -261,6 +263,15 @@ class LayerStackValidator:
                     message=(f"Auto-merge {mid!r} is not a valid Merge node "
                              f"(missing A/B inputs)."),
                     node_id=mid, stack_id=stack.stack_id))
+            if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION:
+                owner_id = node.parameters.get(LAYER_MERGE_OWNER_PARAM)
+                if node.node_type != "merge" or owner_id not in layer_ids or owner_id in owners:
+                    report.issues.append(ValidationIssue(
+                        severity=SEVERITY_ERROR, code="invalid_merge_layer_owner",
+                        message=f"Managed Merge {mid!r} has an invalid or duplicate layer owner.",
+                        node_id=mid, stack_id=stack.stack_id))
+                else:
+                    owners.add(owner_id)
 
     def _check_layer_fields(self, stack: LayerStack,
                             layers: Dict[str, Layer],

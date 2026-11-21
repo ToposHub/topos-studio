@@ -352,7 +352,9 @@ class FilesTaskService:
         if operation not in self.OPERATIONS:
             return rejected("files.task.start", error_code="INVALID_OPERATION",
                             message=f"未知操作 {operation}")
-        targets = [nfc(t) for t in targets]
+        # Native file URLs preserve spelling because equivalent Unicode names
+        # can resolve to distinct files on a mounted disk.
+        targets = list(targets) if operation in {"mkdir", "copy", "move"} else [nfc(t) for t in targets]
         if not targets and operation != "mkdir":
             return rejected("files.task.start", error_code="EMPTY_TARGETS",
                             message="没有目标")
@@ -397,7 +399,7 @@ class FilesTaskService:
                  options: dict[str, Any], policy: str,
                  cancel: CancelToken) -> ItemOutcome:
         if operation == "mkdir":
-            return self._operations.mkdir(target)
+            return self._operations.mkdir(target, parents=options.get("parents") is not False)
         if operation == "rename":
             return self._operations.rename(
                 library_id, target, str(options.get("new_name") or ""),

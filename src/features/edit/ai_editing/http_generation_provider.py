@@ -42,12 +42,19 @@ from src.features.edit.ai_editing.generation_models import (
 from src.features.edit.ai_editing.provider_profiles import (
     AiProviderProfile,
     CredentialStore,
+    ZHIPU_VISION_PROVIDER_KIND,
 )
 
 
 DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_POLL_SECONDS = 15 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+_GENERATION_CAPABILITIES = {
+    GenerationModality.VIDEO: "video_generation",
+    GenerationModality.MUSIC: "music_generation",
+    GenerationModality.VOICE: "tts",
+    GenerationModality.IMAGE: "image_generation",
+}
 
 
 @dataclass(frozen=True)
@@ -126,7 +133,15 @@ class HttpGenerationProvider:
 
     @property
     def supported_modalities(self) -> tuple[GenerationModality, ...]:
-        """Modalities declared by the profile (unknown values are ignored)."""
+        """Use generation capabilities when present, preserving legacy HTTP profiles."""
+        if self._profile.provider_kind in {"deepseek", ZHIPU_VISION_PROVIDER_KIND}:
+            return ()
+        if self._profile.capabilities:
+            capabilities = self._profile.routed_capabilities
+            return tuple(
+                modality for modality, capability in _GENERATION_CAPABILITIES.items()
+                if capability in capabilities
+            )
         supported: list[GenerationModality] = []
         for raw in self._profile.modalities:
             try:

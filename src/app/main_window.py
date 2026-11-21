@@ -748,11 +748,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                         logger.warning(f"Composite first-launch enter_page_hook failed: {e}")
 
             # Initialize Library Panel path
-            last_path = self.config_manager.get("last_path")
+            last_path = self.config_manager.get("last_path") or self.config_manager.get("last_library_path")
             if last_path:
-                self.library_panel.set_root_path(last_path)
-                # 同时初始化 Files Panel 的路径，确保切换语言重启后 Files 面板能正确显示内容
-                self.files_panel.set_root_path(last_path)
+                self.library_panel.follow_directory(last_path)
+                self.files_panel.follow_directory(last_path)
 
             # Startup dialog: video mode shows the Project Manager (DaVinci
             # style — must pick/create a project before entering the app);
@@ -1308,7 +1307,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.canvas.engine = self.engine
         self.engine.canvas_ref = self.canvas  # P4-2 SAFETY: Enable paint/render cycle detection
         self.canvas.config_manager = self.config_manager
-        self.library_panel = LibraryPanel()
+        self.library_panel = LibraryPanel(parent=self)
 
         self.files_panel = FilesPanel(self)  # 传入 self 作为 parent
 
@@ -1506,7 +1505,26 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                     overlay_sig.connect(self._on_scene_cut_overlay_visibility_changed)
         if self._edit_available:
             if MediaPoolPanel is not None and self.media_pool_panel is None:
+                from src.app.ui.media_pool_library_browser import MediaPoolLibraryBrowser
+
                 self.media_pool_panel = MediaPoolPanel()
+                self.media_pool_panel.media_import_status.connect(
+                    lambda message: self.status_bar.showMessage(message, 5000))
+                self.media_pool_panel.open_ai_library_requested.connect(self.files_panel.open_ai_library)
+                self.media_pool_panel.ai_library_import_status.connect(self.files_panel.show_ai_library_import_status)
+                self.media_pool_panel.ai_library_import_status.connect(self.library_panel.show_ai_library_import_status)
+                browser = MediaPoolLibraryBrowser(self.media_pool_panel)
+                self.media_pool_library_browser = browser
+                self.media_pool_panel.install_library_view(browser.tree, browser, browser.set_presentation)
+                browser.browse_requested.connect(self.media_pool_panel.show_library_media)
+                browser.project_requested.connect(self.media_pool_panel.show_project_media)
+                browser.source_preview_requested.connect(self._on_library_source_preview)
+                self.media_pool_panel.library_search_requested.connect(browser.search.setFocus)
+                self.media_pool_panel.library_search_visibility_changed.connect(browser.set_search_visible)
+                self.media_pool_panel.ai_library_import_status.connect(browser.show_import_status)
+                self.media_pool_panel.media_import_status.connect(browser.show_import_status)
+                self.files_panel.library_registry_changed.connect(browser.refresh_registry)
+                self.library_panel.library_registry_changed.connect(browser.refresh_registry)
             if ProgramViewerWidget is not None and self.program_viewer_widget is None:
                 self.program_viewer_widget = ProgramViewerWidget()
             if SourceViewerWidget is not None and self.source_viewer_widget is None:
@@ -1936,10 +1954,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         self.files_panel.image_opened.connect(self.load_image)
         # Files 面板不支持视频打开，请使用 Library 面板
-        self.files_panel.directory_changed.connect(self.library_panel.set_root_path)
-
-        # 新增：双向目录同步 (Library → Files)
-        self.library_panel.directory_changed.connect(self.files_panel.set_root_path)
+        self.files_panel.directory_navigation_requested.connect(self.library_panel.follow_directory)
+        self.library_panel.directory_navigation_requested.connect(self.files_panel.follow_directory)
+        self.files_panel.library_registry_changed.connect(self.library_panel.refresh_library_registry)
+        self.library_panel.library_registry_changed.connect(self.files_panel.refresh_library_registry)
+        self.files_panel.ai_analysis_changed.connect(self.library_panel.refresh_ai_marks)
+        self.library_panel.ai_analysis_changed.connect(self.files_panel.refresh_ai_marks)
+        self.files_panel.transfer_directories_changed.connect(self.library_panel.refresh_transfer_directories)
+        self.library_panel.transfer_directories_changed.connect(self.files_panel.refresh_transfer_directories)
 
         # 新增：星级评定双向同步 (Files → Library)
         self.files_panel.rating_changed.connect(self.library_panel.refresh_file_rating)
@@ -2702,8 +2724,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                     logger.exception(
                         "MainWindow: %s worker shutdown failed", panel_attr)
             # Dock-contained native browsers do not receive closeEvent when
-            # only their main window closes; stop both resource owners here.
-            for panel_name in ("files_panel", "library_panel"):
+            # only their main window closes; stop the resource owners here.
+            for panel_name in ("files_panel", "library_panel", "media_pool_library_browser"):
                 try:
                     panel = getattr(self, panel_name, None)
                     if panel is not None:

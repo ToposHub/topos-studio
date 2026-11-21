@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from pytestqt.qtbot import QtBot
 
 from src.app.ui.native_files_transport import NativeFilesTransport
 from src.features.files.contracts import identity_key
@@ -141,6 +142,74 @@ def test_directory_switch_drops_late_result(qtbot, env):
         transport.shutdown()
 
 
+@pytest.mark.parametrize("old_directory_exists", [True, False])
+def test_directory_switch_discards_result_already_queued_to_qt(
+    qtbot: QtBot, env: SimpleNamespace, old_directory_exists: bool,
+) -> None:
+    old = env.lib if old_directory_exists else env.root / "missing"
+    query = GatedQuery(env.catalog)
+    gate = threading.Event()
+    query.gates[f"list:{identity_key(str(old))}"] = gate
+    facade = FilesFacade(env.catalog, max_workers=1, query=query)
+    transport = NativeFilesTransport(lambda: "", None, facade=facade)
+    loaded = []
+    failed = []
+    pages = []
+    transport.loaded.connect(lambda path, _: loaded.append(path))
+    transport.failed.connect(lambda path, _: failed.append(path))
+    transport.page_meta.connect(lambda path, *_: pages.append(path))
+    try:
+        transport.load_directory(str(old))
+        idle = threading.Event()
+        facade.when_idle(idle.set)
+        gate.set()
+        # Do not pump Qt until the newer request has invalidated the posted reply.
+        assert idle.wait(3)
+        with qtbot.waitSignal(transport.loaded, timeout=3000):
+            transport.load_directory(str(env.lib))
+        assert loaded == pages == [str(env.lib)]
+        assert failed == []
+    finally:
+        gate.set()
+        transport.shutdown()
+
+
+def test_linked_files_panels_follow_latest_directory_without_echo(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.app.ui.files_panel import FilesPanel
+    from src.app.ui.native_files_panel import NativeFilesPanel
+
+    monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    browsable = NativeFilesPanel.is_browsable_path
+
+    def allow_test_directories(panel: NativeFilesPanel, path: str) -> bool:
+        # macOS places pytest's temporary media under /private/var.
+        return path.startswith(f"{tmp_path}/") or browsable(panel, path)
+
+    monkeypatch.setattr(NativeFilesPanel, "is_browsable_path", allow_test_directories)
+    first_dir, last_dir = tmp_path / "first", tmp_path / "last"
+    first_dir.mkdir()
+    last_dir.mkdir()
+    files = FilesPanel(include_plugins=False)
+    library = FilesPanel(include_plugins=False)
+    for panel in (files, library):
+        qtbot.addWidget(panel)
+    files.directory_navigation_requested.connect(library.follow_directory)
+    library.directory_navigation_requested.connect(files.follow_directory)
+    requested: list[str] = []
+    files.directory_navigation_requested.connect(requested.append)
+    library.directory_navigation_requested.connect(requested.append)
+    try:
+        files.set_root_path(str(first_dir))
+        library.set_root_path(str(last_dir))
+        qtbot.waitUntil(lambda: files._files_root_path == library._files_root_path == str(last_dir))
+        assert requested == [str(first_dir), str(last_dir)]
+    finally:
+        for panel in (files, library):
+            panel.shutdown()
+
+
 def test_data_routes_never_touch_network(qtbot, env):
     """数据面与旧 HTTP 服务完全解耦：网络栈被换成哨兵也能浏览/搜索。"""
     _seed(env, "solo.png")
@@ -201,6 +270,81 @@ def test_tree_missing_directory_reports_empty(qtbot, env):
         with qtbot.waitSignal(transport.tree_loaded, timeout=8000) as received:
             transport.load_tree(str(env.root / "ghost"))
         assert received.args == [str(env.root / "ghost"), []]
+    finally:
+        transport.shutdown()
+
+
+def test_macos_mount_snapshot_lists_data_volumes_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.app.ui import native_files_locations as locations
+
+    def volume(path: str, name: str, *, root: bool = False, ready: bool = True) -> SimpleNamespace:
+        return SimpleNamespace(
+            rootPath=lambda: path, displayName=lambda: name, device=lambda: b"device",
+            isRoot=lambda: root, isReady=lambda: ready, isValid=lambda: True,
+        )
+
+    monkeypatch.setattr(locations, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(locations.QStorageInfo, "mountedVolumes", lambda: (
+        volume("/", "Startup", root=True),
+        volume("/System/Volumes/Data", "Data"),
+        volume("/Volumes/Offline", "Offline", ready=False),
+        volume("/Volumes/USB", "USB"),
+        volume("/Volumes/Archive", "Archive"),
+    ))
+    assert [mount.name for mount in locations.mounted_data_volumes()] == ["Archive", "USB"]
+
+
+def test_transport_reads_mount_snapshot_off_ui_thread(
+    qtbot: QtBot, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.app.ui import native_files_transport
+    from src.app.ui.native_files_locations import MountedVolume
+
+    worker_threads: list[int] = []
+    mount = MountedVolume("/Volumes/USB", "USB", b"device")
+
+    def read_mounts() -> tuple[MountedVolume, ...]:
+        worker_threads.append(threading.get_ident())
+        return (mount,)
+
+    monkeypatch.setattr(native_files_transport, "mounted_data_volumes", read_mounts)
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.volumes_loaded) as result:
+            transport.load_volumes()
+            transport.load_volumes()
+        assert result.args == [(mount,)]
+        assert len(worker_threads) == 1 and worker_threads[0] != threading.get_ident()
+    finally:
+        transport.shutdown()
+
+
+def test_visible_sidebar_updates_when_drive_is_removed(
+    qtbot: QtBot, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.app.ui import native_files_transport
+    from src.app.ui.native_files_locations import MountedVolume
+    from src.app.ui.native_files_panel import NativeFilesPanel
+
+    usb = MountedVolume("/Volumes/USB", "USB", b"device")
+    mounts = (usb,)
+    monkeypatch.setattr(native_files_transport, "mounted_data_volumes", lambda: mounts)
+    transport = make_transport(env)
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    panel.resize(860, 520)
+    tree = panel.locations
+    tree._volume_poll.setInterval(25)
+    tree.volumes_requested.connect(transport.load_volumes)
+    transport.volumes_loaded.connect(tree.set_volumes)
+    try:
+        panel.show()
+        qtbot.waitUntil(lambda: usb.path in tree._nodes)
+        mounts = ()
+        qtbot.waitUntil(lambda: usb.path not in tree._nodes)
+        assert tree.item_model.rowCount() == 1
+        panel.hide()
+        assert not tree._volume_poll.isActive()
     finally:
         transport.shutdown()
 
@@ -304,6 +448,12 @@ def test_task_mkdir_joins_name_option(qtbot, env):
             transport.run_task("mkdir", [str(env.lib)], options={"name": "新建"})
         assert received.args[0]["successes"]
         assert (env.lib / "新建").is_dir()
+
+        missing = env.lib / "removed"
+        with qtbot.waitSignal(transport.task_finished, timeout=8000) as failed:
+            transport.run_task("mkdir", [str(missing)], options={"name": "子目录"})
+        assert failed.args[0]["failures"]
+        assert not missing.exists()
     finally:
         transport.shutdown()
 
@@ -330,29 +480,196 @@ def test_cancel_queued_mutation_before_worker_can_start(qtbot, env):
 # 常用位置 / 索引 / 搜索 / 集合
 # ---------------------------------------------------------------------------
 
-def test_libraries_pin_unpin_roundtrip(qtbot, env):
+def test_libraries_add_rename_remove_roundtrip(qtbot, env):
     transport = make_transport(env)
+    original = env.lib / "original.png"
+    original.write_bytes(b"media")
     try:
         with qtbot.waitSignal(transport.library_changed, timeout=8000) as changed:
             transport.pin_library(str(env.lib))
-        assert changed.args == [True, "已固定为常用位置"]
+        assert changed.args[0] is True
         with qtbot.waitSignal(transport.libraries_loaded, timeout=8000) as listed:
             transport.load_libraries()
         assert [item["path"] for item in listed.args[0]] == [str(env.lib)]
         assert listed.args[0][0]["library_id"] == env.library.library_id
 
-        with qtbot.waitSignal(transport.library_changed, timeout=8000) as unpinned:
-            transport.unpin_library(str(env.lib))
-        assert unpinned.args[0] is True
+        with qtbot.waitSignal(transport.library_changed, timeout=8000) as renamed:
+            transport.rename_library(env.library.library_id, "Projects")
+        assert renamed.args[0] is True
+        record, = env.catalog.libraries()
+        assert (record.library_id, record.name, record.root) == (
+            env.library.library_id, "Projects", str(env.lib),
+        )
+
+        with qtbot.waitSignal(transport.library_changed, timeout=8000) as removed:
+            transport.remove_library(env.library.library_id)
+        assert removed.args[0] is True
+        assert original.read_bytes() == b"media"
         with qtbot.waitSignal(transport.libraries_loaded, timeout=8000) as after:
             transport.load_libraries()
         assert after.args[0] == []
 
         with qtbot.waitSignal(transport.library_changed, timeout=8000) as unknown:
-            transport.unpin_library(str(env.lib))
+            transport.remove_library(env.library.library_id)
         assert unknown.args[0] is False
-        assert "不在常用位置" in unknown.args[1]
     finally:
+        transport.shutdown()
+
+
+def test_ai_scope_uses_selected_kind_and_folder_policy(qtbot, env, monkeypatch):
+    from src.app.services import ai_library_analysis as adapter
+    from src.features.files.services.ai_library import MediaEvidence
+    from src.shared.ai_models.generation.provider_profiles import AiProviderProfile, ProfileRegistry
+
+    root = env.lib.resolve()
+    folder = root / "selected"
+    nested = folder / "nested"
+    nested.mkdir(parents=True)
+    image = folder / "source.png"
+    for path in (image, nested / "nested.png", folder / "another.wav", root / "outside.png"):
+        path.write_bytes(path.name.encode())
+    registry = ProfileRegistry()
+    for profile_id in ("global", "selected"):
+        registry.add(AiProviderProfile(profile_id, profile_id, endpoint="http://localhost:9991/v1",
+                                       model_id=profile_id, capabilities=("vision",)))
+    registry.set_active_for_capability("vision", "global")
+    monkeypatch.setattr(adapter, "_load_profiles", lambda: registry)
+    monkeypatch.setattr(adapter.LibraryAnalyzer, "revision", property(lambda _: "test-revision"))
+    calls: list[tuple[str, str, str]] = []
+
+    def analyze(analyzer: adapter.LibraryAnalyzer, path: str, kind: str) -> tuple[MediaEvidence, ...]:
+        if analyzer._mode == "basic":
+            return ()
+        route = analyzer._authorized_route("vision")
+        calls.append((route.profile.profile_id, path, kind))
+        return (MediaEvidence("annotated content"),)
+
+    monkeypatch.setattr(adapter.LibraryAnalyzer, "__call__", analyze)
+    library_id = env.library.library_id
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+            transport.save_ai_library_settings(library_id, "profiles", (), folder=str(folder),
+                                               models={"image": "selected"}, kinds=("image",), recursive=False)
+        assert saved.args == [""]
+        with qtbot.waitSignal(transport.ai_library_settings_loaded) as loaded:
+            transport.load_ai_library_settings(library_id, folder=str(folder))
+        snapshot, = loaded.args
+        assert snapshot["library_id"] == library_id and snapshot["folder"] == str(folder)
+        assert snapshot["scope_policy"] == {"mode": "profiles", "approved_routes": [],
+                                            "models": {"image": "selected"}, "kinds": ["image"],
+                                            "recursive": False}
+        assert snapshot["libraries"][0]["mode"] == "basic"
+        assert {row["profile_id"] for row in snapshot["models"] if row["kind"] == "image"} == {"global", "selected"}
+
+        for force, pending_only, call_count in ((False, False, 1), (False, True, 1), (True, False, 2)):
+            with qtbot.waitSignal(transport.ai_library_index_status,
+                                  check_params_cb=lambda state: not state.get("running")) as done:
+                transport.start_ai_library_index(library_id, folder=str(folder), force=force,
+                                                 only_unanalyzed=pending_only)
+            assert "error" not in done.args[0]
+            assert calls == [("selected", str(image), "image")] * call_count
+
+        with qtbot.waitSignal(transport.ai_library_results) as found:
+            transport.search_ai_library("scope", "annotated", library_id, folder=str(folder),
+                                        kinds=("image",), recursive=False)
+        assert (found.args[0], found.args[2]) == ("scope", "")
+        assert [hit["path"] for hit in found.args[1]] == [str(image)]
+
+        with qtbot.waitSignal(transport.ai_analysis_marks_loaded) as marked:
+            transport.load_ai_analysis_marks(str(folder), [str(image), str(nested / "nested.png")])
+        assert marked.args == [str(folder), [str(image)]]
+
+        with qtbot.waitSignal(transport.ai_library_results) as pending:
+            transport.search_ai_library("pending", "", library_id, folder=str(folder), kinds=("image",),
+                                        recursive=True, only_unanalyzed=True)
+        assert pending.args[2] == ""
+        assert [hit["path"] for hit in pending.args[1]] == [str(nested / "nested.png")]
+
+        with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+            transport.save_ai_library_settings(library_id, "profiles", (), models={"image": "global"},
+                                               kinds=("image",), recursive=False)
+        assert saved.args == [""]
+        with qtbot.waitSignal(transport.ai_library_index_status,
+                              check_params_cb=lambda state: not state.get("running")) as done:
+            transport.start_ai_library_index(force=True)
+        assert "error" not in done.args[0]
+        assert calls[2:] == [("global", str(root / "outside.png"), "image")]
+    finally:
+        facade = transport._facade
+        transport.shutdown()
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        assert stopped.wait(2)
+
+
+def test_ai_scope_reports_missing_model_or_unapproved_service_before_scanning(qtbot, env, monkeypatch):
+    from src.app.services import ai_library_analysis as adapter
+    from src.shared.ai_models.generation.provider_profiles import AiProviderProfile, DataPolicy, ProfileRegistry
+
+    registry = ProfileRegistry()
+    registry.add(AiProviderProfile(
+        "remote", "Remote visual", endpoint="https://never-contacted.invalid/v1", model_id="model",
+        capabilities=("vision",), modalities=("image", "media_upload"), data_policy=DataPolicy("cloud", True),
+    ))
+    monkeypatch.setattr(adapter, "_load_profiles", lambda: registry)
+    transport = make_transport(env)
+    facade = transport._facade
+    library_id = env.library.library_id
+
+    def no_scan(*args, **kwargs):
+        raise AssertionError("Explicitly unconfigured or unapproved scope must not scan")
+
+    monkeypatch.setattr(facade, "build_ai_library", no_scan)
+    try:
+        for profile, required, expected in (("missing", True, "模型"), ("remote", False, "授权")):
+            with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+                transport.save_ai_library_settings(library_id, "profiles", (), models={"image": profile},
+                                                   kinds=("image",))
+            assert saved.args == [""]
+            with qtbot.waitSignal(transport.ai_library_index_status,
+                                  check_params_cb=lambda state: not state.get("running")) as done:
+                transport.start_ai_library_index(library_id)
+            state, = done.args
+            assert expected in state["error"]
+            assert bool(state.get("model_setup_required")) is required
+            if required:
+                assert state["kind"] == "image"
+    finally:
+        transport.shutdown()
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        assert stopped.wait(2)
+
+
+def test_ai_analysis_marks_discard_cancelled_previous_view(qtbot, env, monkeypatch):
+    transport = make_transport(env)
+    facade = transport._facade
+    entered = threading.Event()
+    release = threading.Event()
+    cancelled = threading.Event()
+
+    def read(paths, *, cancel):
+        entered.set()
+        if release.wait(2) and cancel.requested:
+            cancelled.set()
+        return set(paths)
+
+    monkeypatch.setattr(facade, "ai_library_analyzed_paths", read)
+    received: list[tuple[str, list[str]]] = []
+    transport.ai_analysis_marks_loaded.connect(lambda path, marks: received.append((path, marks)))
+    try:
+        transport.load_ai_analysis_marks("old-view", [str(env.lib / "sample.png")])
+        qtbot.waitUntil(entered.is_set)
+        transport.load_ai_analysis_marks("new-view", [])
+        release.set()
+        qtbot.waitUntil(cancelled.is_set)
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        qtbot.waitUntil(stopped.is_set)
+        assert received == [("new-view", [])]
+    finally:
+        release.set()
         transport.shutdown()
 
 
@@ -673,6 +990,26 @@ def test_local_thumbnail_version_dedup_and_reload(qtbot, local_media):
     with qtbot.waitSignal(transport.thumbnail_loaded, timeout=3000):
         transport.request_thumbnail(path, 17)
     assert len(state["calls"]) == 2
+
+
+def test_thumbnail_dispatch_resumes_with_cached_result(qtbot: QtBot, local_media: tuple, env: SimpleNamespace) -> None:
+    transport, state, _, png = local_media
+    path = str(_seed(env, "cached.jpg"))
+    transport.set_thumbnail_dispatch_paused(True)
+    transport.request_thumbnail(path, 17)
+    assert not transport._thumbnail_replies
+    with qtbot.waitSignal(transport.thumbnail_loaded) as first:
+        transport.set_thumbnail_dispatch_paused(False)
+    assert first.args == [path, png]
+
+    reopened = make_transport(env)
+    try:
+        with qtbot.waitSignal(reopened.thumbnail_loaded) as second:
+            reopened.request_thumbnail(path, 17)
+        assert second.args == [path, png]
+        assert state["calls"] == [(path, False)]
+    finally:
+        reopened.shutdown()
 
 
 def test_local_thumbnail_queue_bounds_cancel_and_shutdown(qtbot, local_media):

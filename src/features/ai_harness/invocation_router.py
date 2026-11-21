@@ -128,7 +128,7 @@ INTENT_RULES: tuple[IntentRule, ...] = (
     IntentRule(
         intent="rough_cut",
         keywords=("精剪", "粗剪", "剪辑方案", "ab 方案", "a/b 方案", "剪成",
-                  "口播精剪", "剪一版"),
+                  "口播精剪", "剪一版", "rough cut", "rough-cut"),
         skill_id="topos.voiceover_polish",
         description="基于转录证据生成 A/B 粗剪方案",
     ),

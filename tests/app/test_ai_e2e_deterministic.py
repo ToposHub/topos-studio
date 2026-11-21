@@ -11,6 +11,10 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+from unittest.mock import Mock
+
 import pytest
 
 pytestmark = pytest.mark.app
@@ -18,6 +22,7 @@ pytestmark = pytest.mark.app
 from src.app.controllers.ai_editing_mixin import AiEditingMixin
 from src.app.controllers.ai_edit_host_bridge_impl import MainWindowAiEditHostBridge
 from src.features.edit.ai_editing.approval_service import ApprovalService
+from src.features.edit.ai_editing.assistant_events import AssistantState
 from src.features.edit.ai_editing.assistant_service import (
     AssistantConfig,
     AssistantService,
@@ -66,7 +71,11 @@ def _state() -> ProjectSequences:
     seq = TimelineSequence(
         timeline_id="t1", name="Main", fps=Rational(24, 1),
         width=1920, height=1080, sample_rate=48000,
-        video_tracks=(EditTrack(track_id="v1", name="V1", track_type="video", index=0),),
+        video_tracks=(
+            EditTrack(name="V1", index=0, is_locked=True),
+            EditTrack(name="Graphics", index=1, track_role="graphics"),
+            EditTrack(name="V2", index=2),
+        ),
     )
     ref = TimelineSequenceRef(
         timeline_id="t1", name="Main", fps=24.0, width=1920, height=1080,
@@ -152,6 +161,8 @@ def test_e2e_ai_edit_lands_on_command_stack_and_is_undoable(service):
     chosen = variants[0]
     plan = svc.plan_repository.get_plan(chosen.edit_plan_ref)
     assert plan is not None
+    target_track_id = state.sequences["t1"].video_tracks[2].track_id
+    assert {op.params["track_id"] for op in plan.operations} == {target_track_id}
 
     # 2. 选择 + 真实 preview（M2.3）
     svc.select_variant(chosen.variant_id)
@@ -203,7 +214,9 @@ def test_e2e_ai_edit_lands_on_command_stack_and_is_undoable(service):
     )
     assert new_tl is not None
     # timeline 真实变化
-    assert len(new_tl.video_tracks[0].clips) >= 1
+    assert new_tl.get_track_by_id(target_track_id).clips
+    assert not new_tl.video_tracks[0].clips
+    assert not new_tl.video_tracks[1].clips
     # CommandStack 可 undo
     assert stack.can_undo() is True
     # 走了 execute_command（emits 非空，证明是界面刷新链）
@@ -214,7 +227,58 @@ def test_e2e_ai_edit_lands_on_command_stack_and_is_undoable(service):
     if isinstance(undone, tuple):
         undone = undone[0]
     assert undone is not None
-    assert len(undone.video_tracks[0].clips) == 0  # 回到提交前
+    assert not undone.get_track_by_id(target_track_id).clips
+
+
+def test_planning_requires_an_editable_video_track() -> None:
+    state = _state()
+    timeline = state.sequences["t1"]
+    locked_and_graphics_only = replace(timeline, video_tracks=timeline.video_tracks[:2])
+    state = replace(state, sequences={"t1": locked_and_graphics_only})
+    svc = AssistantService(EditSession(_Host(state)))
+    config = AssistantConfig(asset_id="a1", timeline_id="t1", project_id="p1")
+    states = []
+    svc.on_state_changed = states.append
+    svc.start_session(config, active_profile_id="prof", profile_connected=True)
+    svc.submit_request("30 秒竖版")
+
+    assert svc.plan_variants(_index(), config) == []
+    assert svc.state == AssistantState.FAILED
+    assert "请添加或解锁视频轨道" in (states[-1].error_message or "")
+
+
+def test_model_backed_plan_previews_on_the_real_track(service) -> None:
+    from src.features.edit.ai_editing.llm_variant_planner import LLMVariantPlanner
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile
+    from src.features.edit.ai_editing.structured_output import PLANNER_SCHEMA_VERSION
+
+    svc, state = service
+    decisions = [
+        {"beat_id": beat, "segment_id": f"t{index}", "explanation": "Fixture"}
+        for index, beat in enumerate(svc.config.target_beats)
+    ]
+    client = Mock()
+    client.complete.return_value = json.dumps({
+        "schema_version": PLANNER_SCHEMA_VERSION,
+        "variants": [{"label": label, "decisions": decisions} for label in ("A", "B")],
+    })
+    svc.set_planner(LLMVariantPlanner(
+        AiProviderProfile(profile_id="test", display_name="Fixture"),
+        Mock(),
+        client=client,
+    ))
+
+    variants = svc.plan_variants(_index(), svc.config)
+
+    assert len(variants) == 2
+    target_track_id = state.sequences["t1"].video_tracks[2].track_id
+    for variant in variants:
+        plan = svc.plan_repository.get_plan(variant.edit_plan_ref)
+        assert plan is not None
+        assert {op.params["track_id"] for op in plan.operations} == {target_track_id}
+        preview = svc.validate_selected(variant.variant_id, state=state)
+        assert isinstance(preview, PreviewResult)
+        assert not preview.has_errors
 
 
 def test_e2e_grant_cannot_replay_after_commit(service):

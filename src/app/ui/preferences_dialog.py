@@ -27,6 +27,7 @@ import os
 import sys
 import json
 import platform
+import sqlite3
 import subprocess
 import threading
 
@@ -55,6 +56,7 @@ class PreferencesDialog(QDialog):
 
     # AUD-03908: background cache-size scan results (worker thread → UI thread)
     cache_size_ready = pyqtSignal(int)
+    thumbnail_cache_cleared = pyqtSignal(int)
     # AUD-03912: background diagnostics export completion (ok, path_or_error)
     diagnostics_export_finished = pyqtSignal(bool, str)
 
@@ -105,6 +107,7 @@ class PreferencesDialog(QDialog):
         # AUD-03908: single background cache-size scan at a time
         self._cache_scan_in_progress = False
         self.cache_size_ready.connect(self._on_cache_size_ready)
+        self.thumbnail_cache_cleared.connect(self._on_thumbnail_cache_cleared)
         # AUD-03912: background diagnostics export completion
         self.diagnostics_export_finished.connect(self._on_diagnostics_export_finished)
 
@@ -1183,6 +1186,21 @@ class PreferencesDialog(QDialog):
         clear_cache_btn.clicked.connect(self._clear_cache)
         cache_form.addRow("", clear_cache_btn)
 
+        thumbnail_clear_btn = QPushButton(I18N.tr(
+            "preferences.file_storage.clear_thumbnail_cache", "Clear Media Library Thumbnails"))
+        thumbnail_clear_btn.setObjectName("PrefDangerBtn")
+        thumbnail_clear_btn.setFixedHeight(36)
+        thumbnail_clear_btn.clicked.connect(self._clear_thumbnail_cache)
+        self._widgets["thumbnail_clear_button"] = thumbnail_clear_btn
+        cache_form.addRow("", thumbnail_clear_btn)
+
+        thumbnail_status = QLabel()
+        thumbnail_status.setObjectName("PrefNoteLabel")
+        thumbnail_status.setWordWrap(True)
+        thumbnail_status.hide()
+        self._widgets["thumbnail_clear_status"] = thumbnail_status
+        cache_form.addRow("", thumbnail_status)
+
         layout.addWidget(cache_group)
 
         # Video Proxy group（2026-09-19 缓存审计补齐：非 topos 源的素材
@@ -1538,12 +1556,12 @@ class PreferencesDialog(QDialog):
     # ── New Page Action Handlers ───────────────────────────────────
 
     def _clear_cache(self) -> None:
-        """Clear application cache."""
+        """Clear the image and baked-layer caches managed by FileIO."""
         reply = QMessageBox.question(
             self,
             I18N.tr("preferences.file_storage.clear_cache", "Clear Cache"),
             I18N.tr("preferences.file_storage.clear_cache_confirm",
-                    "Clear all cached data? This cannot be undone."),
+                    "Clear the cached images and baked layers? This cannot be undone."),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -1574,6 +1592,41 @@ class PreferencesDialog(QDialog):
                 I18N.tr("preferences.file_storage.cache_cleared",
                         "Cache cleared. {count} files removed.").format(count=total)
             )
+
+    def _clear_thumbnail_cache(self) -> None:
+        self._widgets["thumbnail_clear_button"].setEnabled(False)
+        status = self._widgets["thumbnail_clear_status"]
+        status.setText(I18N.tr("preferences.file_storage.clearing_thumbnail_cache", "Clearing thumbnail cache…"))
+        status.show()
+        threading.Thread(
+            target=self._clear_thumbnail_cache_worker, name="prefs-thumbnail-cache-clear", daemon=True,
+        ).start()
+
+    def _clear_thumbnail_cache_worker(self) -> None:
+        from src.features.files.repository.locator import FilesDataLocator
+        from src.features.files.services.thumbnail_cache import ThumbnailCache
+
+        try:
+            count = ThumbnailCache(FilesDataLocator.default()).clear()
+        except (OSError, ValueError, sqlite3.Error) as error:
+            logger.warning("Failed to clear thumbnail cache: %s", error)
+            count = -1
+        try:
+            self.thumbnail_cache_cleared.emit(count)
+        except RuntimeError:
+            logger.debug("Thumbnail cache clear result dropped: dialog gone")
+
+    def _on_thumbnail_cache_cleared(self, count: int) -> None:
+        self._widgets["thumbnail_clear_button"].setEnabled(True)
+        status = self._widgets["thumbnail_clear_status"]
+        if count < 0:
+            status.setText(I18N.tr(
+                "preferences.file_storage.thumbnail_cache_clear_failed", "Couldn't clear the thumbnail cache."))
+        else:
+            status.setText(I18N.tr(
+                "preferences.file_storage.thumbnail_cache_cleared",
+                "Thumbnail cache cleared. {count} entries removed.",
+            ).format(count=count))
 
     def _export_diagnostics(self) -> None:
         """Export diagnostic report (AUD-03912: heavy probes off the UI thread).
@@ -2057,7 +2110,7 @@ class PreferencesDialog(QDialog):
                 self._category_list.setCurrentRow(row)
                 return
 
-    def _apply_settings(self) -> None:
+    def _apply_settings(self) -> bool:
         """Collect all settings and apply to config (without closing)."""
         cfg = self._config_manager
 
@@ -2202,6 +2255,7 @@ class PreferencesDialog(QDialog):
 
         # Write all at once
         cfg.save_config()
+        return not module_apply_failures
 
     def _on_apply(self) -> None:
         """Apply settings without closing dialog."""
@@ -2217,7 +2271,10 @@ class PreferencesDialog(QDialog):
 
     def _on_save(self) -> None:
         """Apply settings and close dialog."""
-        self._apply_settings()
+        self._applied = True
+        with self._tracking_config_writes():
+            if self._apply_settings() is False:
+                return
         
         # Check if locale changed -> need restart
         locale = self._widgets['locale'].currentData()
@@ -2242,6 +2299,9 @@ class PreferencesDialog(QDialog):
 
     def _on_cancel(self) -> None:
         """Restore settings and close dialog."""
+        self.reject()
+
+    def reject(self) -> None:
         # If Apply was pressed, restore everything it wrote: the host config
         # snapshot, Files plugin intent and module page side
         # effects (see the helpers below).
@@ -2250,7 +2310,7 @@ class PreferencesDialog(QDialog):
             self._restore_plugin_state_snapshot()
             self._rollback_module_pages()
         self._restore_preview_snapshot()
-        self.reject()
+        super().reject()
 
     def _tracking_config_writes(self):
         """[AUD-03904] Record which config keys Apply touches.

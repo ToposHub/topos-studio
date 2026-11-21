@@ -493,7 +493,7 @@ def test_workflow_variants_feed_into_assistant_service_commit_loop():
     seq = TimelineSequence(
         timeline_id="t1", name="Main", fps=Rational(24, 1),
         width=1920, height=1080, sample_rate=48000,
-        video_tracks=(EditTrack(track_id="v1", name="V1", track_type="video", index=0),),
+        video_tracks=(EditTrack(name="V1", track_type="video", index=0),),
     )
     ref = TimelineSequenceRef(timeline_id="t1", name="Main", fps=24.0,
                               width=1920, height=1080, sample_rate=48000)
@@ -540,6 +540,7 @@ def test_workflow_variants_feed_into_assistant_service_commit_loop():
     plan = svc.plan_repository.get_plan(chosen.edit_plan_ref)
     assert plan is not None
     assert plan.brief_id == "b1"
+    assert {op.params["track_id"] for op in plan.operations} == {seq.video_tracks[0].track_id}
 
     # 3. 真实 preview（绑定 plan_hash + diff_hash）
     txn = TransactionService()

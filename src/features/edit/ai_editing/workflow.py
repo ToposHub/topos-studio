@@ -54,6 +54,7 @@ from src.features.edit.ai_editing.subtitle_draft import (
     build_subtitle_draft,
 )
 from src.features.edit.ai_editing.variant_planner import (
+    STANDALONE_VIDEO_TRACK_ID,
     PlannerInput,
     STRATEGY_A_TALKING_HEAD,
     STRATEGY_B_BROLL,
@@ -356,6 +357,7 @@ class WorkflowRunner:
         artifact_store: ArtifactStore | None = None,
         on_plan_compiled: "Callable[[Any, EditVariant], None] | None" = None,
         translation_provider: Callable[[tuple[SemanticSegment, ...], str], Any] | None = None,
+        resolve_video_track: Callable[[str], str] | None = None,
     ) -> None:
         self._planner = planner
         self._analysis = analysis_service
@@ -363,6 +365,7 @@ class WorkflowRunner:
         self._artifact_store = artifact_store
         self._on_plan_compiled = on_plan_compiled
         self._translation_provider = translation_provider
+        self._resolve_video_track = resolve_video_track
 
     # ---------------- 查询 ---------------- #
 
@@ -470,6 +473,17 @@ class WorkflowRunner:
         diag_dicts: list[dict[str, Any]],
     ) -> WorkflowResult:
         """构造 PlannerInput，调既有 VariantPlanner，收集 A/B variant。"""
+        try:
+            track_id = (
+                self._resolve_video_track(inp.timeline_id) if self._resolve_video_track
+                else STANDALONE_VIDEO_TRACK_ID
+            )
+        except ValueError as exc:
+            return WorkflowResult(
+                workflow_id=inp.workflow_id,
+                degradation=str(exc),
+                diagnostics=tuple(diag_dicts),
+            )
         index = self._build_index(inp.asset_ids)
         brief_rev = self._brief_revision(inp.brief_id)
         planner_inp = PlannerInput(
@@ -481,6 +495,7 @@ class WorkflowRunner:
             base_revision=inp.base_revision,
             analysis_snapshot_hash=inp.analysis_snapshot_hash,
             target_duration=inp.target_duration,
+            video_track_id=track_id,
         )
         variants = self._planner.plan(
             planner_inp, index,

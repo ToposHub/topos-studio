@@ -522,7 +522,7 @@ class DockLayoutMixin:
         if self._edit_available and self.media_pool_panel is not None:
             self.media_pool_panel.project_changed.connect(self._on_media_pool_project_changed)
         if self._edit_available and self.timeline_panel is not None:
-            self.timeline_panel.project_changed.connect(self._on_media_pool_project_changed)
+            self.timeline_panel.project_changed.connect(self._on_timeline_project_changed)
 
         # Connect EditPage to panels
         if self._edit_available and self.edit_page is not None:
@@ -1786,6 +1786,93 @@ class DockLayoutMixin:
         self._save_current_layout_to_store("Mixer")
         self.config_manager.save_config()
 
+    def _apply_default_composite_layout(self) -> None:
+        """Arrange the Composite workspace for its available editing surface."""
+        top = Qt.DockWidgetArea.TopDockWidgetArea
+        left = Qt.DockWidgetArea.LeftDockWidgetArea
+        right = Qt.DockWidgetArea.RightDockWidgetArea
+        bottom = Qt.DockWidgetArea.BottomDockWidgetArea
+        horizontal = Qt.Orientation.Horizontal
+        vertical = Qt.Orientation.Vertical
+        timeline = self.dock_composite_keyframes
+        graph = self.dock_composite
+        viewer = self.dock_viewport
+        inspector = self.dock_node_properties
+        media = self.dock_edit_media_pool
+
+        for dock in self.all_docks:
+            dock.hide()
+        self.setCorner(Qt.Corner.TopLeftCorner, left if timeline else top)
+        self.setCorner(Qt.Corner.TopRightCorner, right if timeline else top)
+        self.setCorner(Qt.Corner.BottomLeftCorner, bottom)
+        self.setCorner(Qt.Corner.BottomRightCorner, bottom)
+
+        primary = [(viewer, top), (inspector, right), (media, left), (timeline, bottom)]
+        for dock, area in primary:
+            if dock is not None:
+                dock.setFloating(False)
+                self.addDockWidget(area, dock)
+                dock.show()
+
+        graph.setFloating(False)
+        self.splitDockWidget(viewer, graph, horizontal)
+        graph.setVisible(timeline is None)
+
+        # Rebuild the optional groups with their own dock identities so
+        # Show Panels and saved Qt state can still address each tool.
+        for dock in (
+            self.dock_composite_scene_outliner, self.dock_composite_material,
+        ):
+            if dock is not None:
+                dock.setFloating(False)
+                self.addDockWidget(right, dock)
+                if inspector is not None:
+                    self.tabifyDockWidget(inspector, dock)
+                dock.hide()
+
+        assets = self.dock_composite_asset_dependency
+        report = self.dock_composite_import_report
+        for dock in (assets, report):
+            if dock is not None:
+                dock.setFloating(False)
+                self.addDockWidget(right, dock)
+                dock.hide()
+        if assets is not None and report is not None:
+            self.tabifyDockWidget(assets, report)
+
+        spline = self.dock_composite_spline
+        if spline is not None:
+            spline.setFloating(False)
+            self.addDockWidget(bottom, spline)
+            spline.hide()
+
+        scopes = self.dock_composite_scope
+        if scopes is not None:
+            scopes.setFloating(False)
+            self.addDockWidget(right if timeline is not None else bottom, scopes)
+            scopes.show()
+            if timeline is not None and inspector is not None:
+                self.resizeDocks([inspector, scopes], [370, 220], vertical)
+
+        if timeline is not None:
+            column_sizes = [(media, 270), (viewer, 920), (inspector, 320)]
+            columns, widths = zip(*(
+                (dock, width) for dock, width in column_sizes if dock is not None
+            ))
+            self.resizeDocks(list(columns), list(widths), horizontal)
+            self.resizeDocks([viewer, timeline], [510, 330], vertical)
+        else:
+            self.resizeDocks([viewer, graph], [800, 600], horizontal)
+
+    def _capture_default_composite_layout(self) -> QByteArray:
+        """Create the default without changing the currently displayed layout."""
+        previous = self.saveState()
+        try:
+            self._apply_default_composite_layout()
+            return self.saveState()
+        finally:
+            self.restoreState(previous)
+
     def _sync_color_timeline_selector(self, *_args: object) -> None:
         """Refresh the Color viewport's active-timeline selector."""
         viewport_menu = getattr(getattr(self, "canvas", None), "viewport_menu", None)
@@ -1858,6 +1945,15 @@ class DockLayoutMixin:
 
         # Overlay mode-scoped profiles on the older page-layout mirror.
         self._load_layouts_from_store()
+
+        # A partial factory file leaves the layer workspace to the live
+        # dock layout. User profiles and explicit captures take precedence.
+        if (
+            factory_state and self._composite_available and self.dock_composite
+            and self.dock_composite_keyframes and "Composite" not in self.page_layouts
+            and "Composite" not in (factory_panels or {})
+        ):
+            self.page_layouts["Composite"] = self._capture_default_composite_layout()
 
         # Seed every missing page before using a partial saved layout.
         # When no factory capture exists for this mode, generate the layout
@@ -1985,11 +2081,15 @@ class DockLayoutMixin:
 
         # 1. Library Layout
         for d in self.all_docks: d.setVisible(False)
-        self.dock_viewport.setVisible(True)
-        self.dock_library.setVisible(True)
-        self.dock_info.setVisible(True)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_library)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
+        if self._current_work_mode() == "video":
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
+            self.dock_files.show()
+        else:
+            self.dock_viewport.show()
+            self.dock_library.show()
+            self.dock_info.show()
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_library)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
         self.page_layouts["Library"] = self.saveState()
 
         # 2. Edit Layout (P1 phase) - conditional
@@ -2107,85 +2207,7 @@ class DockLayoutMixin:
 
         # 4. Composite Layout (if available)
         if self._composite_available and self.dock_composite:
-            for d in self.all_docks: d.setVisible(False)
-            self.dock_viewport.setVisible(True)
-            self.dock_composite.setVisible(True)
-            # Composite has its own Node Properties dock (no longer borrows
-            # Edit's dock_properties, which is absent in Image mode).
-            if self.dock_node_properties:
-                self.dock_node_properties.setVisible(True)
-            # Media Pool is shared with Composite so assets can be dragged
-            # into the node editor.
-            if self.dock_edit_media_pool is not None:
-                self.dock_edit_media_pool.setVisible(True)
-                self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_media_pool)
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_composite)
-            if self.dock_node_properties:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_node_properties)
-            # The Inspector stack is contextual: Node Properties is the
-            # default tab, while Scene Outliner and Material remain available
-            # without consuming additional right-side columns.
-            if self.dock_composite_scene_outliner:
-                self.addDockWidget(
-                    Qt.DockWidgetArea.RightDockWidgetArea,
-                    self.dock_composite_scene_outliner)
-                self.dock_composite_scene_outliner.setVisible(False)
-                if self.dock_node_properties:
-                    self.tabifyDockWidget(
-                        self.dock_node_properties,
-                        self.dock_composite_scene_outliner)
-            if self.dock_composite_material:
-                self.addDockWidget(
-                    Qt.DockWidgetArea.RightDockWidgetArea,
-                    self.dock_composite_material)
-                self.dock_composite_material.setVisible(False)
-                inspector_anchor = (self.dock_node_properties or
-                                    self.dock_composite_scene_outliner)
-                if inspector_anchor:
-                    self.tabifyDockWidget(
-                        inspector_anchor,
-                        self.dock_composite_material)
-            # Scopes is an independent bottom dock, visible in the default
-            # Composite workspace. It intentionally is not tabified with the
-            # animation docks: it is a persistent monitoring surface, just as
-            # on the Color page.
-            if self.dock_composite_scope:
-                self.addDockWidget(
-                    Qt.DockWidgetArea.BottomDockWidgetArea,
-                    self.dock_composite_scope)
-                self.dock_composite_scope.setVisible(True)
-            # Asset health is a separate workflow from the node inspector.
-            # Keep the two asset-facing reports in their own tab group.
-            if self.dock_composite_asset_dependency:
-                self.addDockWidget(
-                    Qt.DockWidgetArea.RightDockWidgetArea,
-                    self.dock_composite_asset_dependency)
-                self.dock_composite_asset_dependency.setVisible(False)
-            if self.dock_composite_import_report:
-                self.addDockWidget(
-                    Qt.DockWidgetArea.RightDockWidgetArea,
-                    self.dock_composite_import_report)
-                self.dock_composite_import_report.setVisible(False)
-                if self.dock_composite_asset_dependency:
-                    self.tabifyDockWidget(
-                        self.dock_composite_asset_dependency,
-                        self.dock_composite_import_report)
-            # Bottom animation docks belong to the Composite layout. Keep
-            # Keyframes and Spline as separate docks until Spline is fully
-            # integrated into the Keyframes editor.
-            if self.dock_composite_keyframes:
-                self.dock_composite_keyframes.setVisible(True)
-                self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_composite_keyframes)
-            if self.dock_composite_spline:
-                # Keep the future graph-editor surface available but opt-in
-                # until it is fully integrated into Keyframes.
-                self.dock_composite_spline.setVisible(False)
-                self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_composite_spline)
-            self.resizeDocks(
-                [self.dock_composite, self.dock_viewport, self.dock_node_properties if self.dock_node_properties else QWidget()],
-                [600, 800, 300],
-                Qt.Orientation.Horizontal
-            )
+            self._apply_default_composite_layout()
             self.page_layouts["Composite"] = self.saveState()
 
         self.page_layouts.update(saved_page_layouts)
@@ -3751,6 +3773,15 @@ class DockLayoutMixin:
             restored = self.restoreState(QByteArray.fromHex(factory_state.encode()))
 
         if restored:
+            if (
+                self._composite_available and self.dock_composite
+                and self.dock_composite_keyframes and "Composite" not in (panel_states or {})
+            ):
+                composite_state = self._capture_default_composite_layout()
+                panel_states = {
+                    **(panel_states or {}),
+                    "Composite": bytes(composite_state.toHex()).decode("ascii"),
+                }
             # 恢复所有页面的布局状态
             if panel_states:
                 self._apply_all_page_layouts(panel_states)
@@ -3776,7 +3807,12 @@ class DockLayoutMixin:
             "Factory layout unavailable or restoreState rejected it; "
             "falling back to hardcoded default layout"
         )
-        self.apply_default_layout()
+        if self.current_page == "Composite" and self.dock_composite and self.dock_composite_keyframes:
+            self._apply_default_composite_layout()
+            self.page_layouts["Composite"] = self.saveState()
+            self._save_current_layout_to_store("Composite")
+        else:
+            self.apply_default_layout()
         self._enforce_page_dock_visibility()
         self._reset_workspace_panel_controls()
         self._sync_floating_docks()
@@ -3938,6 +3974,19 @@ class DockLayoutMixin:
         QTimer.singleShot(150, _clamp_safely)
         QTimer.singleShot(400, _clamp_safely)
 
+    def set_library_media_pool_visible(self, visible: bool) -> None:
+        """Move the live pool between the Library browser and its Edit dock."""
+        pool = self.media_pool_panel
+        dock = self.dock_edit_media_pool
+        if self.current_page != "Library" or pool is None or dock is None:
+            return
+        browser = self.files_panel if self._current_work_mode() == "video" else self.library_panel
+        if visible:
+            browser.show_media_pool(pool)
+        elif browser.hosts_media_pool(pool):
+            dock.setWidget(pool)
+            pool.show()
+
     # ------------------------------------------------------------------
     # _enforce_page_dock_visibility
     # ------------------------------------------------------------------
@@ -3986,6 +4035,8 @@ class DockLayoutMixin:
                 d = getattr(self, attr, None)
                 if d is not None:
                     d.setVisible(False)
+            if self.current_page == "Library" and self.dock_files.isHidden():
+                self.dock_files.show()
         elif work_mode == "image":
             if getattr(self, "dock_color_timeline_clips", None) is not None:
                 self.dock_color_timeline_clips.setVisible(False)

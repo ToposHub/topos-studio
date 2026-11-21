@@ -340,6 +340,11 @@ class FilesCatalog:
                 )
         return tuple(records)
 
+    def library_for_path(self, path: str | Path) -> LibraryRecord | None:
+        target = Path(nfc(Path(path).resolve()))
+        matching = (record for record in self.libraries() if target.is_relative_to(record.root))
+        return max(matching, key=lambda record: len(Path(record.root).parts), default=None)
+
     def register_library(self, root: str | Path, name: str = "") -> LibraryRecord:
         with self._lock:
             return self._register_library(root, name)
@@ -367,6 +372,19 @@ class FilesCatalog:
                 return False
             self._save_libraries(remaining)
             return True
+
+    def rename_library(self, library_id: str, name: str) -> bool:
+        title = name.strip()
+        if not title:
+            raise ValueError("素材库名称不能为空")
+        with self._lock:
+            libraries = list(self.libraries())
+            for index, library in enumerate(libraries):
+                if library.library_id == library_id:
+                    libraries[index] = LibraryRecord(library_id, title, library.root, library.created_at)
+                    self._save_libraries(tuple(libraries))
+                    return True
+        return False
 
     def _save_libraries(self, records: tuple[LibraryRecord, ...]) -> None:
         """temp + os.replace 原子写（沿旧 save_config P2-12 模式）。"""
@@ -467,6 +485,29 @@ class FilesCatalog:
             )
         return moved
 
+    def move_to_library(self, source_id: str, target_id: str, old: Path, new: Path, *, is_dir: bool) -> int:
+        """Move the file records and their tags into the receiving library."""
+        origin = nfc(old)
+        prefix = origin.rstrip(os.sep) + os.sep
+        with self._write() as cursor:
+            rows = cursor.execute(
+                "SELECT * FROM assets WHERE library_id = ? AND (path = ? OR (? AND substr(path, 1, ?) = ?))",
+                (source_id, origin, is_dir, len(prefix), prefix),
+            ).fetchall()
+            for row in rows:
+                source_path = row["path"]
+                relative = Path(source_path).relative_to(origin)
+                target_path = nfc(new / relative)
+                relations = self.snapshot_relations(source_id, source_path)
+                self.delete_asset_tree(target_id, target_path)
+                self.insert_asset_full(target_id, dict(row) | {"path": target_path, "name": Path(target_path).name})
+                self.restore_relations(target_id, target_path, tag_names=[tag["name"] for tag in relations["tags"]])
+                if relations["ocr"]:
+                    cursor.execute("UPDATE assets_fts SET ocr = ? WHERE library_id = ? AND path = ?",
+                                   (relations["ocr"], target_id, target_path))
+                self.delete_asset_tree(source_id, source_path)
+        return len(rows)
+
     def remove_asset_rows(self, library_id: str, paths: list[str]) -> int:
         keys = [(library_id, nfc(p)) for p in paths]
         with self._write() as cursor:
@@ -485,10 +526,14 @@ class FilesCatalog:
     # ------------------------------------------------------------ 搜索
 
     def search(self, query: str, *, library_id: str = "", limit: int = 200,
-               offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+               offset: int = 0, within_library_roots: bool = False,
+               folder: str | None = None) -> tuple[list[dict[str, Any]], int]:
         """FTS 检索（trigram）；<3 字符回落 LIKE，返回 (rows, total)。"""
         query = query.strip()
         with self._read() as cursor:
+            libraries = tuple(library for library in self.libraries() if not library_id or library.library_id == library_id)
+            if not libraries:
+                return [], 0
             if len(query) >= 3:
                 # FTS5 字面短语：内部双引号按 FTS 规则翻倍转义
                 where = "assets_fts MATCH ?"
@@ -498,10 +543,22 @@ class FilesCatalog:
                          " OR assets_fts.tag_names LIKE ?)")
                 like = f"%{query}%"
                 args = [like, like, like]
-            scope = ""
-            if library_id:
-                scope = " AND assets_fts.library_id = ?"
-                args.append(library_id)
+            if within_library_roots:
+                roots = ", ".join("(?, ?)" for _ in libraries)
+                scope = (" AND EXISTS (SELECT 1 FROM (VALUES " + roots + ") AS roots"
+                         " WHERE roots.column1 = assets_fts.library_id"
+                         " AND substr(assets_fts.path, 1, length(roots.column2)) = roots.column2)")
+                for library in libraries:
+                    prefix = library.root.rstrip(os.sep) + os.sep
+                    args.extend((library.library_id, prefix))
+            else:
+                placeholders = ",".join("?" for _ in libraries)
+                scope = f" AND assets_fts.library_id IN ({placeholders})"
+                args.extend(library.library_id for library in libraries)
+            if folder is not None:
+                prefix = nfc(folder).rstrip(os.sep) + os.sep
+                scope += " AND substr(assets_fts.path, 1, length(?)) = ?"
+                args.extend((prefix, prefix))
             total = cursor.execute(
                 f"SELECT COUNT(*) FROM assets_fts WHERE {where}{scope}", args
             ).fetchone()[0]

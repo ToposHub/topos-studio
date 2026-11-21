@@ -2105,6 +2105,7 @@ class CreateSubclipCommand:
     end_frame: int
     display_name: str | None = None
     target_bin_id: str | None = None
+    audio_frame_rate: float | None = None
     _created_subclip_id: str | None = None
     _applied: bool = False
 
@@ -2120,6 +2121,7 @@ class CreateSubclipCommand:
             display_name=self.display_name,
             target_bin_id=self.target_bin_id,
             subclip_asset_id=self._created_subclip_id,
+            audio_frame_rate=self.audio_frame_rate,
         )
         object.__setattr__(self, "_created_subclip_id", subclip.asset_id)
         object.__setattr__(self, "_applied", True)
@@ -2136,7 +2138,7 @@ class CreateSubclipCommand:
         return project.remove_asset(self._created_subclip_id)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "command_id": self.command_id,
             "command_type": "CreateSubclipCommand",
             "label": self.label,
@@ -2146,6 +2148,9 @@ class CreateSubclipCommand:
             "display_name": self.display_name,
             "target_bin_id": self.target_bin_id,
         }
+        if self.audio_frame_rate is not None:
+            data["audio_frame_rate"] = self.audio_frame_rate
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "CreateSubclipCommand":
@@ -2157,6 +2162,7 @@ class CreateSubclipCommand:
             end_frame=int(data.get("end_frame", 0)),
             display_name=data.get("display_name"),
             target_bin_id=data.get("target_bin_id"),
+            audio_frame_rate=data.get("audio_frame_rate"),
         )
 
     @staticmethod
@@ -2168,6 +2174,7 @@ class CreateSubclipCommand:
         display_name: str | None = None,
         target_bin_id: str | None = None,
         label: str = "Create Subclip",
+        audio_frame_rate: float | None = None,
     ) -> "CreateSubclipCommand":
         return CreateSubclipCommand(
             command_id=str(uuid.uuid4()),
@@ -2177,6 +2184,7 @@ class CreateSubclipCommand:
             end_frame=end_frame,
             display_name=display_name,
             target_bin_id=target_bin_id,
+            audio_frame_rate=audio_frame_rate,
         )
 
 

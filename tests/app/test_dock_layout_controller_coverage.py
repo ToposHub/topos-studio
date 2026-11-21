@@ -962,6 +962,74 @@ def test_initialize_first_run_uses_factory_file(
         "first run must run the full page activation path")
 
 
+def test_composite_factory_layout_gives_layer_timeline_its_own_row(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch, qapp) -> None:
+    _set_work_mode(host, "video", monkeypatch)
+    host.resize(1440, 900)
+    host.current_page = "Composite"
+    host.dock_composite.show()
+    host.initialize_page_layouts()
+    qapp.processEvents()
+
+    timeline = host.dock_composite_keyframes
+    viewer = host.dock_viewport
+    props = host.dock_node_properties
+    media = host.dock_edit_media_pool
+    scopes = host.dock_composite_scope
+    assert host.dock_composite.isHidden()
+    assert not timeline.isHidden()
+    assert not viewer.isHidden()
+    assert not media.isHidden()
+    assert not props.isHidden()
+    assert not scopes.isHidden()
+    assert media.geometry().right() < viewer.geometry().left()
+    assert viewer.geometry().right() < props.geometry().left()
+    assert timeline.geometry().top() > viewer.geometry().bottom()
+    assert timeline.width() > viewer.width()
+    assert scopes.geometry().top() > props.geometry().bottom()
+
+    for dock in (
+        host.dock_composite_asset_dependency, host.dock_composite_import_report,
+        host.dock_composite_material, host.dock_composite_spline,
+    ):
+        assert dock.isHidden()
+        dock.show()
+    qapp.processEvents()
+    assert host.dock_composite_import_report in host.tabifiedDockWidgets(
+        host.dock_composite_asset_dependency)
+    assert host.dock_composite_material in host.tabifiedDockWidgets(props)
+    assert host.dock_composite_spline not in host.tabifiedDockWidgets(timeline)
+
+
+def test_image_composite_layout_keeps_node_graph_available(host: _DockHost) -> None:
+    timeline = host.dock_composite_keyframes
+    host.dock_composite_keyframes = None
+
+    try:
+        host._apply_default_composite_layout()
+
+        assert not host.dock_composite.isHidden()
+        assert not host.dock_viewport.isHidden()
+        assert timeline.isHidden()
+    finally:
+        host.dock_composite_keyframes = timeline
+
+
+def test_composite_saved_layout_keeps_node_graph_open(
+        layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_work_mode(layout_host, "video", monkeypatch)
+    layout_host.current_page = "Composite"
+    layout_host.dock_composite.show()
+    user_state = layout_host.saveState()
+    layout_host.config_manager.set("page_layouts", {"Composite": _hex_of(user_state)})
+
+    layout_host.initialize_page_layouts()
+
+    assert layout_host.page_layouts["Composite"] == user_state
+    layout_host.restoreState(user_state)
+    assert not layout_host.dock_composite.isHidden()
+
+
 def test_initialize_falls_back_to_hardcoded_defaults(
         layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("TOPOS_DEFAULT_LAYOUT_PATH",

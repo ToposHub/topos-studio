@@ -1,4 +1,4 @@
-"""MCP 视觉网关 —— 把智谱 Vision MCP Server（GLM-4.6V）接入 Agent 工具面。
+"""MCP 视觉网关 —— 把智谱 Vision MCP Server 接入应用。
 
 在 ``mcp_outbound.py``（受控出站客户端骨架）+ ``mcp_stdio_transport.py``（真实
 subprocess 传输）之上，提供一个面向 ``ToolFacade`` 的网关：
@@ -28,7 +28,9 @@ import shutil
 import tempfile
 import threading
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from src.features.ai_harness.mcp_outbound import (
     McpConnectionProfile,
@@ -38,6 +40,7 @@ from src.features.ai_harness.mcp_outbound import (
 from src.features.ai_harness.mcp_stdio_transport import (
     SubprocessStdioTransport,
 )
+from src.shared.ai_models.generation.provider_profiles import ZHIPU_VISION_PROVIDER_KIND
 
 if TYPE_CHECKING:
     from src.features.ai_harness.mcp_http_transport import HttpMcpTransport
@@ -45,6 +48,8 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 
 ZHIPU_VISION_PROFILE_ID = "zhipu-vision-mcp"
+ZHIPU_VISION_ORIGIN = "https://open.bigmodel.cn"
+ZHIPU_VISION_TOOL = "analyze_image"
 ZHIPU_SEARCH_PROFILE_ID = "zhipu-web-search-mcp"
 ZHIPU_READER_PROFILE_ID = "zhipu-web-reader-mcp"
 _NVM_NPX_CANDIDATES = ("~/.nvm/versions/node",)
@@ -75,7 +80,7 @@ _MCP_SERVER_TOOLS: dict[str, tuple[str, ...]] = {
 # server 展示元信息（偏好页「MCP 服务」分区用）。
 _MCP_SERVER_META: dict[str, dict[str, str]] = {
     ZHIPU_VISION_PROFILE_ID: {
-        "name": "智谱 Vision MCP（GLM-4.6V 视觉）",
+        "name": "智谱 Vision MCP",
         "server": "@z_ai/mcp-server",
         "author": "智谱 AI（docs.bigmodel.cn）",
         "transport": "本地 stdio（npx，需 Node.js v18+）",
@@ -103,12 +108,12 @@ def _server_of_tool(tool_name: str) -> str:
     return ""
 
 
-def default_zhipu_key_provider() -> str | None:
-    """默认 key 解析：从用户配置里找智谱/bigmodel profile 的 API key。
+def is_mcp_vision_tool(tool_name: str) -> bool:
+    return _server_of_tool(tool_name) == ZHIPU_VISION_PROFILE_ID
 
-    GLM（openai → bigmodel endpoint）的 key 即智谱账号 key（Z_AI_API_KEY）。
-    解析失败返回 None（网关随之优雅降级）。
-    """
+
+def default_zhipu_key_provider(*, vision: bool = False) -> str | None:
+    """Read a Zhipu key for the assistant's built-in MCP tools."""
     try:
         from src.features.edit.ai_editing.credential_store import HybridCredentialStore
         from src.features.edit.ai_editing.provider_profiles import ProfileRegistry
@@ -117,15 +122,30 @@ def default_zhipu_key_provider() -> str | None:
         if not reg.load_from_user_file():
             return None
         store = HybridCredentialStore(prefer="file")
-        for p in reg.list():
-            endpoint = (getattr(p, "endpoint", "") or "").lower()
-            model_id = (getattr(p, "model_id", "") or "").lower()
-            if "bigmodel" in endpoint or "glm" in model_id:
-                ref = getattr(p, "credential_ref", "")
-                if ref:
-                    key = store.get_secret(ref)
+        profiles = reg.list()
+        if vision:
+            active = reg.active_profile_for_capability("vision")
+            profiles = [active, *profiles] if active is not None else profiles
+            for profile in profiles:
+                if (
+                    profile.provider_kind == ZHIPU_VISION_PROVIDER_KIND
+                    and profile.endpoint == ZHIPU_VISION_ORIGIN
+                    and profile.allows_media_upload
+                ):
+                    key = store.get_secret(profile.credential_ref) if profile.credential_ref else None
                     if key:
                         return key
+        for profile in profiles:
+            if profile.provider_kind == ZHIPU_VISION_PROVIDER_KIND:
+                continue
+            try:
+                endpoint = urlsplit(profile.endpoint)
+            except ValueError:
+                continue
+            if endpoint.scheme == "https" and endpoint.hostname == "open.bigmodel.cn" and profile.credential_ref:
+                key = store.get_secret(profile.credential_ref)
+                if key:
+                    return key
         return None
     except Exception:  # noqa: BLE001 — key 解析失败 → 网关不可用
         return None
@@ -147,6 +167,7 @@ def get_mcp_vision_gateway() -> "McpVisionGateway":
             if _GATEWAY is None:
                 _GATEWAY = McpVisionGateway(
                     api_key_provider=default_zhipu_key_provider,
+                    vision_key_provider=lambda: default_zhipu_key_provider(vision=True),
                 )
     return _GATEWAY
 
@@ -243,19 +264,24 @@ class McpVisionGateway:
         self,
         *,
         api_key_provider: Callable[[], str | None],
+        vision_key_provider: Callable[[], str | None] | None = None,
         npx_path: str = "",
         request_timeout: float = 240.0,
         startup_timeout: float = 120.0,
+        cancel_requested: Callable[[], bool] | None = None,
         transport_factory: Any | None = None,
     ) -> None:
         self._api_key_provider = api_key_provider
+        self._vision_key_provider = vision_key_provider or api_key_provider
         self._npx_path = npx_path or resolve_npx_path()
         self._request_timeout = request_timeout
         self._startup_timeout = startup_timeout
+        self._cancel_requested = cancel_requested
         # 测试注入点：覆盖默认的 npx+key transport 工厂（fake transport 用）。
         self._injected_transport_factory = transport_factory
         self._lock = threading.Lock()
         self._client: McpOutboundClient | None = None
+        self._vision_key = ""
         self._http_clients: dict[str, McpOutboundClient] = {}  # 远程 HTTP MCP（search/reader）
         self._failed_reason: str = ""     # 一旦启动失败，记住原因不再反复尝试
         self._closed = False              # shutdown() 后拒绝再建 client（AUD-13850）
@@ -301,19 +327,22 @@ class McpVisionGateway:
         enabled = 用户是否启用（两者都满足工具才暴露）。
         """
         has_key = bool(self._resolve_api_key())
+        has_vision_key = has_key if self._vision_key_provider is self._api_key_provider else bool(
+            self._resolve_api_key(vision=True),
+        )
         # AUD-13851：锁内取启用状态快照，循环中不再直接读共享 set。
         with self._state_lock:
             disabled_snapshot = set(self._server_disabled)
         statuses: list[dict[str, Any]] = []
         for pid, meta in _MCP_SERVER_META.items():
             if pid == ZHIPU_VISION_PROFILE_ID:
-                available = bool(self._npx_path) and has_key and not self._failed_reason
+                available = bool(self._npx_path) and has_vision_key and not self._failed_reason
                 if self._failed_reason:
                     reason = self._failed_reason
                 elif not self._npx_path:
                     reason = "未找到 npx（需要 Node.js v18+，可经 nvm 安装）"
-                elif not has_key:
-                    reason = "未配置智谱 API key"
+                elif not has_vision_key:
+                    reason = "未配置助手可用的智谱 API key，或该视觉配置未开启素材上传"
                 else:
                     reason = ""
             else:
@@ -353,6 +382,7 @@ class McpVisionGateway:
                 except Exception:  # noqa: BLE001
                     pass
                 self._client = None
+                self._vision_key = ""
             for c in self._http_clients.values():
                 try:
                     c.close()
@@ -360,9 +390,10 @@ class McpVisionGateway:
                     pass
             self._http_clients.clear()
 
-    def _resolve_api_key(self) -> str:
+    def _resolve_api_key(self, *, vision: bool = False) -> str:
         try:
-            return self._api_key_provider() or ""
+            provider = self._vision_key_provider if vision else self._api_key_provider
+            return provider() or ""
         except Exception:  # noqa: BLE001
             return ""
 
@@ -396,7 +427,7 @@ class McpVisionGateway:
             return client
 
     def _ensure_client(self) -> McpOutboundClient | None:
-        """懒启动 MCP 子进程 + 客户端；失败记住原因并优雅降级。
+        """懒启动 MCP 子进程，并在凭据变更时重新连接。
 
         全程持 ``self._lock``（与 ``_ensure_http_client`` / ``shutdown`` 互斥）：
         并发首调只会构建一个 client（否则输家 client 的 npx 子进程会成为
@@ -405,14 +436,17 @@ class McpVisionGateway:
         with self._lock:
             if self._failed_reason or self._closed:
                 return None
-            if self._client is not None:
-                return self._client
             if not self._npx_path:
                 self._failed_reason = "未找到 npx（需要 Node.js v18+，可经 nvm 安装）"
                 return None
-            api_key = self._resolve_api_key()
+            api_key = self._resolve_api_key(vision=True)
+            if self._client is not None:
+                if api_key == self._vision_key:
+                    return self._client
+                self._client.close()
+                self._client = None
+                self._vision_key = ""
             if not api_key:
-                self._failed_reason = "未配置智谱 API key（Z_AI_API_KEY）"
                 return None
 
             def _factory(profile: McpConnectionProfile) -> SubprocessStdioTransport:
@@ -423,6 +457,7 @@ class McpVisionGateway:
                     env={"Z_AI_API_KEY": api_key, "Z_AI_MODE": "ZHIPU"},
                     startup_timeout=self._startup_timeout,
                     request_timeout=self._request_timeout,
+                    cancel_requested=self._cancel_requested,
                 )
 
             registry = McpServerRegistry()
@@ -433,7 +468,33 @@ class McpVisionGateway:
             # 不预热：SubprocessStdioTransport.send_request 懒启动 + 握手，
             # 首次 call_tool 才拉起子进程；失败由 call_tool 的审计链归一为 ok=False。
             self._client = client
+            self._vision_key = api_key
             return client
+
+    def analyze_image(self, path: str | Path) -> tuple[str, tuple[str, ...]]:
+        """Describe and tag a staged library image through the official MCP tool."""
+        from src.shared.ai_models.generation.media_inference import (
+            MediaInferenceError, TAGGED_CAPTION_PROMPT, parse_image_analysis,
+        )
+
+        result = self.invoke("topos.mcp.analyze_image", {
+            "image_ref": str(path), "prompt": TAGGED_CAPTION_PROMPT,
+        })
+        if not result["ok"]:
+            error = str(result.get("error") or "智谱视觉 MCP 调用失败")
+            key = self._resolve_api_key(vision=True)
+            raise MediaInferenceError(error.replace(key, "••••")[:400] if key else error[:400])
+        return parse_image_analysis(result["analysis"][:8000])
+
+    def test_vision(self) -> str:
+        """Verify a real tool call using a generated image."""
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory(prefix="topos-mcp-probe-") as temp:
+            path = Path(temp) / "sample.jpg"
+            Image.new("RGB", (96, 96), "red").save(path)
+            self.analyze_image(path)
+        return "智谱视觉 MCP 测试成功"
 
     # ------------------------------------------------------------------ #
     # 会话图片注册（宿主在抓帧/粘贴时调用）
@@ -636,7 +697,7 @@ class McpVisionGateway:
 
         client = self._ensure_client()
         if client is None:
-            return {"ok": False, "error": f"MCP 视觉不可用：{self._failed_reason}"}
+            return {"ok": False, "error": f"MCP 视觉不可用：{self._failed_reason or '未配置智谱 API key 或会话已关闭'}"}
 
         prompt = str(args.get("prompt", "") or "").strip()
         mcp_tool = ""
@@ -684,12 +745,15 @@ class McpVisionGateway:
         # MCP 返回只取 text 内容（不可信数据；上层 ToolFacade 会再 sanitize）。
         texts: list[str] = []
         payload = result.get("result") or {}
-        content = (payload.get("result") or {}).get("content") or []
+        tool_result = payload.get("result") or {}
+        content = tool_result.get("content") or []
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
                 t = block.get("text", "")
                 if t:
                     texts.append(str(t))
+        if tool_result.get("isError"):
+            return {"ok": False, "error": "\n".join(texts) or "MCP 工具报告执行失败"}
         if not texts:
             return {"ok": False, "error": "MCP 返回无文本内容"}
         return {"ok": True, "analysis": "\n".join(texts)}

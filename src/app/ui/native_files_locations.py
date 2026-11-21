@@ -1,20 +1,64 @@
-"""Home-rooted lazy directory navigation populated by the existing service."""
+"""Lazy directory navigation for Home and mounted data volumes."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+import posixpath
+import sys
 from typing import Any
 
-from PyQt6.QtCore import QModelIndex, QSignalBlocker, Qt, pyqtSignal
-from PyQt6.QtGui import QStandardItem, QStandardItemModel
+from PyQt6.QtCore import QModelIndex, QSignalBlocker, QStorageInfo, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QHideEvent, QIcon, QKeyEvent, QKeySequence, QShowEvent, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QAbstractItemView, QStyle, QTreeView, QWidget
+import qtawesome as qta
 
+from src.features.files.contracts import normalize_path
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C
+
+
+def library_icon() -> QIcon:
+    return qta.icon("fa5s.photo-video", color=C.ORANGE, color_selected=C.ORANGE)
+
+
+@dataclass(frozen=True)
+class MountedVolume:
+    path: str
+    name: str
+    device: bytes
+
+
+def mounted_data_volumes() -> tuple[MountedVolume, ...]:
+    """Read the OS mount table on a worker, without scanning directory contents."""
+    volumes = []
+    for storage in QStorageInfo.mountedVolumes():
+        if not storage.isValid() or not storage.isReady() or storage.isRoot():
+            continue
+        path = normalize_path(storage.rootPath())
+        if sys.platform == "darwin" and path.rpartition("/")[0] != "/Volumes":
+            continue
+        if sys.platform.startswith("linux") and not (
+            path == "/mnt" or path.startswith(("/mnt/", "/media/", "/run/media/"))
+        ):
+            continue
+        name = storage.displayName() or path.rsplit("/", 1)[-1] or path
+        if path and name:
+            volumes.append(MountedVolume(path, name, bytes(storage.device())))
+    return tuple(sorted(volumes, key=lambda volume: (volume.name.casefold(), volume.path)))
 
 
 class HomeDirectoryTree(QTreeView):
     directory_requested = pyqtSignal(str)
+    paste_requested = pyqtSignal(str)
     tree_requested = pyqtSignal(str)
+    tree_reload_requested = pyqtSignal(str)
+    tree_path_removed = pyqtSignal(str)
+    tree_root_removed = pyqtSignal(str)
+    volumes_requested = pyqtSignal()
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
+    BRANCH_ROLE = PATH_ROLE + 1
+    LIBRARY_ROLE = PATH_ROLE + 2
+    LOADED_ROLE = PATH_ROLE + 3
 
     def __init__(
         self, home: str, visible_entry: Callable[[dict[str, Any]], bool],
@@ -22,111 +66,282 @@ class HomeDirectoryTree(QTreeView):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("filesHomeTree")
-        self.home = home.rstrip("/")
+        self.home = normalize_path(home)
         self._visible_entry = visible_entry
-        self._nodes: dict[str, QStandardItem] = {}
-        self._loaded: set[str] = set()
+        self._nodes: dict[str, dict[str, QStandardItem]] = {}
         self._pending: set[str] = set()
         self._reveal_target: str | None = None
+        self._active_branch: str | None = None
+        self._volumes: dict[str, MountedVolume] = {}
+        self._volume_roots: dict[str, QStandardItem] = {}
+        self._library_roots: dict[str, QStandardItem] = {}
         self.item_model = QStandardItemModel(self)
         self.setModel(self.item_model)
         self.setHeaderHidden(True)
         self.setIndentation(14)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setUniformRowHeights(True)
-        self.home_item = self._make_item(I18N.tr("files.native.home_root", "Home"), self.home, True)
+        self._folder_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
+        self._library_icon = library_icon()
+        self.home_item = self._make_item(I18N.tr("files.native.home_root", "Home"), self.home,
+                                         QStyle.StandardPixmap.SP_DirHomeIcon, branch="home")
         self.item_model.appendRow(self.home_item)
+        self._folders_heading = QStandardItem(I18N.tr("files.native.folders_heading", "文件夹"))
+        self._folders_heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self._folders_heading.setForeground(QColor(C.TEXT_DIM))
+        font = self.font()
+        font.setPixelSize(11)
+        font.setBold(True)
+        self._folders_heading.setFont(font)
+        self._volume_group = QStandardItem(I18N.tr("files.native.volumes_heading", "磁盘"))
+        self._volume_group.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self._volume_poll = QTimer(self)
+        self._volume_poll.setInterval(2500)
+        self._volume_poll.timeout.connect(self.volumes_requested)
         self.expanded.connect(self._expanded)
         self.clicked.connect(self._navigate)
 
-    def _make_item(self, name: str, path: str, home: bool = False) -> QStandardItem:
+    def _make_item(self, name: str, path: str,
+                   icon: QStyle.StandardPixmap | None = None, *,
+                   branch: str, library_id: str = "", library_root: bool = False) -> QStandardItem:
         item = QStandardItem(name)
         item.setEditable(False)
         item.setData(path, self.PATH_ROLE)
+        item.setData(branch, self.BRANCH_ROLE)
+        item.setData(library_id, self.LIBRARY_ROLE)
         item.setToolTip(path)
-        item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon if home else QStyle.StandardPixmap.SP_DirIcon))
-        self._nodes[path] = item
-        placeholder = QStandardItem(I18N.tr("files.native.tree_expand", "展开查看"))
+        if library_root:
+            item.setIcon(self._library_icon)
+        else:
+            item.setIcon(self._folder_icon if icon is None else self.style().standardIcon(icon))
+        self._nodes.setdefault(path, {})[branch] = item
+        self._set_placeholder(item, I18N.tr("files.native.tree_expand", "展开查看"))
+        return item
+
+    @staticmethod
+    def _set_placeholder(item: QStandardItem, text: str) -> None:
+        placeholder = QStandardItem(text)
         placeholder.setEnabled(False)
         item.appendRow(placeholder)
-        return item
+
+    def set_libraries(self, entries: list[dict[str, str]]) -> None:
+        registered = {entry["library_id"]: entry for entry in entries}
+        for library_id, item in tuple(self._library_roots.items()):
+            entry = registered.get(library_id)
+            if entry is None or item.data(self.PATH_ROLE) != normalize_path(entry["path"]):
+                self._forget_item(item)
+                self.item_model.removeRow(item.row())
+                del self._library_roots[library_id]
+
+        for row, (library_id, entry) in enumerate(registered.items()):
+            item = self._library_roots.get(library_id)
+            if item is None:
+                item = self._make_item(entry["name"], normalize_path(entry["path"]),
+                                       branch=f"library:{library_id}", library_id=library_id, library_root=True)
+                self._library_roots[library_id] = item
+                self.item_model.insertRow(row, item)
+            else:
+                item.setText(entry["name"])
+        heading_visible = self._folders_heading.index().isValid()
+        if self._library_roots and not heading_visible:
+            self.item_model.insertRow(len(self._library_roots), self._folders_heading)
+        elif not self._library_roots and heading_visible:
+            self.item_model.takeRow(self._folders_heading.row())
+
+    def library_root(self, index: QModelIndex) -> bool:
+        root = self._library_roots.get(index.data(self.LIBRARY_ROLE))
+        return root is not None and root.index() == index
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.volumes_requested.emit()
+        self._volume_poll.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._volume_poll.stop()
+        super().hideEvent(event)
+
+    def set_volumes(self, volumes: tuple[MountedVolume, ...]) -> None:
+        visible = {volume.path: volume for volume in volumes if volume.path != self.home and
+                   self._visible_entry({"name": volume.name, "path": volume.path, "type": "dir"})}
+        if visible == self._volumes:
+            return
+
+        group_attached = self._volume_group.index().isValid()
+        for path, old in self._volumes.items():
+            updated = visible.get(path)
+            if updated is None or updated.device != old.device:
+                item = self._volume_roots.pop(path)
+                self._forget_item(item)
+                self._volume_group.removeRow(item.row())
+
+        changed = {path for path in self._volumes.keys() | visible.keys()
+                   if path not in self._volumes or path not in visible
+                   or self._volumes[path].device != visible[path].device}
+        for path in changed:
+            self._invalidate_mount(path)
+
+        for row, (path, volume) in enumerate(visible.items()):
+            if path in self._volume_roots:
+                self._volume_roots[path].setText(volume.name)
+            else:
+                item = self._make_item(volume.name, path, QStyle.StandardPixmap.SP_DriveHDIcon,
+                                       branch=f"volume:{path}")
+                self._volume_roots[path] = item
+                self._volume_group.insertRow(row, item)
+        self._volumes = visible
+
+        if visible and not group_attached:
+            self.item_model.insertRow(self.home_item.row(), self._volume_group)
+            self.setExpanded(self._volume_group.index(), True)
+        elif not visible and group_attached:
+            self.item_model.takeRow(self._volume_group.row())
+        for path in changed & visible.keys():
+            for item in (*self._nodes.get(path, {}).values(), *self._library_roots.values()):
+                root = item.data(self.PATH_ROLE)
+                if self.isExpanded(item.index()) and (root == path or root.startswith(path.rstrip("/") + "/")):
+                    self._request_children(item)
+        if self._reveal_target:
+            self.reveal(self._reveal_target)
+
+    def _invalidate_mount(self, path: str) -> None:
+        prefix = path.rstrip("/") + "/"
+        self._pending.difference_update(
+            {pending for pending in self._pending if pending == path or pending.startswith(prefix)})
+        self.tree_root_removed.emit(path)
+        roots = list(self._nodes.get(path, {}).values())
+        roots.extend(item for item in self._library_roots.values() if item.data(self.PATH_ROLE).startswith(prefix))
+        for item in roots:
+            self._clear_children(item)
+            item.setData(False, self.LOADED_ROLE)
+            self._set_placeholder(item, I18N.tr("files.native.tree_expand", "展开查看"))
 
     def start(self) -> None:
         self.setExpanded(self.home_item.index(), True)
-        self._request_children(self.home)
+        self._request_children(self.home_item)
 
     def refresh(self, path: str) -> None:
-        if path in self._nodes:
-            self._loaded.discard(path)
-            self._request_children(path)
+        path = normalize_path(path)
+        items = self._nodes.get(path)
+        if not items:
+            return
+        if path in self._pending:
+            self.tree_reload_requested.emit(path)
+        else:
+            self._pending.add(path)
+            self.tree_requested.emit(path)
 
     def _expanded(self, index: QModelIndex) -> None:
-        path = index.data(self.PATH_ROLE)
-        if path:
-            self._request_children(path)
+        item = self.item_model.itemFromIndex(index)
+        if item is not None:
+            self._request_children(item)
 
-    def _request_children(self, path: str) -> None:
-        if path not in self._loaded and path not in self._pending:
+    def _request_children(self, item: QStandardItem) -> None:
+        path = item.data(self.PATH_ROLE)
+        if path and not item.data(self.LOADED_ROLE) and path not in self._pending:
             self._pending.add(path)
             self.tree_requested.emit(path)
 
     def _navigate(self, index: QModelIndex) -> None:
-        path = index.data(self.PATH_ROLE)
-        if path:
-            self._request_children(path)
+        item = self.item_model.itemFromIndex(index)
+        if item is not None and (path := item.data(self.PATH_ROLE)):
+            self._active_branch = item.data(self.BRANCH_ROLE)
+            self._request_children(item)
             self.directory_requested.emit(path)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.matches(QKeySequence.StandardKey.Paste):
+            if (path := self.currentIndex().data(self.PATH_ROLE)):
+                self.paste_requested.emit(path)
+            event.accept()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.currentIndex().isValid():
+            self._navigate(self.currentIndex())
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def set_children(self, path: str, entries: list[dict[str, Any]]) -> None:
-        item = self._nodes.get(path)
-        if item is None:
-            return
         self._pending.discard(path)
         # Only nodes immediately below this requested directory are accepted.
-        children = [entry for entry in entries
-                    if entry["path"].replace("\\", "/").rstrip("/").rsplit("/", 1)[0] == path.rstrip("/")
-                    and self._visible_entry({**entry, "type": "dir"})]
-        self._clear_children(path, item)
-        self._loaded.add(path)
-        for entry in sorted(children, key=lambda entry: entry["name"].casefold()):
-            item.appendRow(self._make_item(entry["name"], entry["path"]))
+        children: dict[str, str] = {}
+        for entry in sorted(entries, key=lambda entry: entry["name"].casefold()):
+            child_path = normalize_path(entry["path"])
+            if posixpath.dirname(child_path).rstrip("/") == path.rstrip("/") and self._visible_entry(
+                {**entry, "path": child_path, "type": "dir"}
+            ):
+                children[child_path] = entry["name"]
+        for branch, item in tuple(self._nodes.get(path, {}).items()):
+            item.setData(True, self.LOADED_ROLE)
+            item.setToolTip(path)
+            existing: set[str] = set()
+            for row in reversed(range(item.rowCount())):
+                child = item.child(row)
+                child_path = child.data(self.PATH_ROLE)
+                if child_path in children:
+                    child.setText(children[child_path])
+                    existing.add(child_path)
+                else:
+                    self._forget_item(child)
+                    item.removeRow(row)
+            for row, (child_path, name) in enumerate(children.items()):
+                if child_path not in existing:
+                    item.insertRow(row, self._make_item(
+                        name, child_path, branch=branch, library_id=item.data(self.LIBRARY_ROLE)))
         if self._reveal_target:
             self.reveal(self._reveal_target)
 
     def set_error(self, path: str, message: str) -> None:
         self._pending.discard(path)
-        self._loaded.discard(path)
-        item = self._nodes.get(path)
-        if item is not None:
+        for item in tuple(self._nodes.get(path, {}).values()):
+            item.setData(False, self.LOADED_ROLE)
             item.setToolTip(f"{path}\n{message}")
-            self._clear_children(path, item)
-            placeholder = QStandardItem(I18N.tr("files.native.tree_retry", "读取失败，点击目录重试"))
-            placeholder.setEnabled(False)
-            item.appendRow(placeholder)
+            self._clear_children(item)
+            self._set_placeholder(item, I18N.tr("files.native.tree_retry", "读取失败，点击目录重试"))
 
-    def _clear_children(self, path: str, item: QStandardItem) -> None:
-        removed = {key for key in self._nodes if key.startswith(path.rstrip("/") + "/")}
-        for key in removed:
-            self._nodes.pop(key)
-        self._loaded.difference_update(removed)
-        self._pending.difference_update(removed)
+    def _clear_children(self, item: QStandardItem) -> None:
+        for row in range(item.rowCount()):
+            self._forget_item(item.child(row))
         item.removeRows(0, item.rowCount())
 
+    def _forget_item(self, item: QStandardItem) -> None:
+        descendants = [item]
+        while descendants:
+            node = descendants.pop()
+            path = node.data(self.PATH_ROLE)
+            if path:
+                branches = self._nodes[path]
+                branches.pop(node.data(self.BRANCH_ROLE))
+                if not branches:
+                    del self._nodes[path]
+                    if path in self._pending:
+                        self._pending.remove(path)
+                        self.tree_path_removed.emit(path)
+            descendants.extend(node.child(row) for row in range(node.rowCount()))
+
     def reveal(self, path: str) -> None:
-        if path != self.home and not path.startswith(self.home + "/"):
-            self._reveal_target = None
-            self.clearSelection()
-            return
+        path = normalize_path(path)
         self._reveal_target = path
-        current = self.home_item
-        current_path = self.home
-        parts = path[len(self.home):].strip("/").split("/") if path != self.home else []
+        items = (*self._library_roots.values(), self.home_item, *self._volume_roots.values())
+        roots = ((item.data(self.PATH_ROLE), item.data(self.BRANCH_ROLE), item) for item in items)
+        match = max(((root, branch, item) for root, branch, item in roots
+                     if path == root or path.startswith(root.rstrip("/") + "/")),
+                    key=lambda entry: (entry[1] == self._active_branch, len(entry[0])), default=None)
+        if match is None:
+            self.setCurrentIndex(QModelIndex())
+            return
+        root, branch, current = match
+        current_path = root
+        if current.parent() is self._volume_group:
+            self.setExpanded(self._volume_group.index(), True)
+        relative = path[len(root):].strip("/")
+        parts = relative.split("/") if relative else []
         for part in parts:
             self.setExpanded(current.index(), True)
-            if current_path not in self._loaded:
-                self._request_children(current_path)
+            if not current.data(self.LOADED_ROLE):
+                self._request_children(current)
                 return
-            current_path += "/" + part
-            current = self._nodes.get(current_path)
+            current_path = current_path.rstrip("/") + "/" + part
+            current = self._nodes.get(current_path, {}).get(branch)
             if current is None:
                 self._reveal_target = None
                 return

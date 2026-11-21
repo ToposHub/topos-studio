@@ -35,6 +35,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QLabel,
                              QMessageBox, QWidget)
+from pytestqt.qtbot import QtBot
 
 import src.app.ui.preferences_dialog as preferences_dialog_module
 from src.app.ui.preferences_dialog import PreferencesDialog
@@ -434,6 +435,27 @@ class TestFileStorageRoundTrip:
         dlg, _ = make_dialog()
         label = dlg._widgets["cache_size_label"]
         _wait_for_cache_label(label, "2.5 KB")
+
+    def test_clear_media_thumbnails_from_settings(
+        self, make_dialog: Callable[..., tuple[PreferencesDialog, _RecordingConfig]],
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qtbot: QtBot,
+    ) -> None:
+        from src.features.files.repository.locator import FilesDataLocator
+        from src.features.files.services.thumbnail_cache import ThumbnailCache
+
+        monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+        cache = ThumbnailCache(FilesDataLocator.default())
+        source = tmp_path / "asset.png"
+        source.write_bytes(b"original file")
+        cache.get_or_create(str(source), 0, lambda: b"\x89PNG\r\n\x1a\npreview")
+        dialog, _ = make_dialog()
+        button = dialog._widgets["thumbnail_clear_button"]
+        with qtbot.waitSignal(dialog.thumbnail_cache_cleared) as cleared:
+            button.click()
+            assert not button.isEnabled()
+        assert cleared.args == [1]
+        assert button.isEnabled()
+        assert cache.clear() == 0 and source.read_bytes() == b"original file"
 
 
 # ── Timeline Defaults 页 ────────────────────────────────────────

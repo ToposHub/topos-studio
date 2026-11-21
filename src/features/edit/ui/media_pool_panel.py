@@ -9,7 +9,7 @@ Features:
 - List View: File name | Type | Duration | Resolution | FPS | Codec
 - Grid View: Large thumbnails with filename overlay
 - View mode toggle buttons (list/grid)
-- Thumbnail size selector (Small/Medium/Large)
+- Adjustable thumbnail width with responsive grid wrapping
 - Asynchronous thumbnail loading with cache
 - Drag-and-drop import support
 - Context menu for asset actions
@@ -23,7 +23,8 @@ import uuid
 import platform
 import subprocess
 import json
-from typing import Optional, List, Dict, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional, List, Dict, Any
 from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
@@ -33,13 +34,13 @@ from PyQt6.QtWidgets import (
     QFormLayout, QLineEdit, QListView, QToolButton, QComboBox,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QSlider, QFrame, QPushButton,
     QTreeWidgetItemIterator, QRubberBand, QSpinBox, QCheckBox,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QStackedWidget, QWIDGETSIZE_MAX,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QUrl, QTimer, QSize, QRect, QModelIndex, QPoint,
     QAbstractListModel, QSortFilterProxyModel, QMimeData, QByteArray,
     QThreadPool, QObject, QRunnable, pyqtSlot, QItemSelectionModel,
-    QItemSelection,
+    QItemSelection, QEvent, QSettings,
 )
 from PyQt6.QtGui import (
     QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent,
@@ -74,6 +75,9 @@ from src.features.edit.core.timeline_v2 import (
     MEDIA_POOL_PREVIEW_FRAME_KEY,
 )
 from src.features.edit.core.asset_usage_index import build_asset_usage_index
+from src.features.edit.core.library_reference import (
+    LIBRARY_REFERENCE_MIME, deserialize_reference, excerpt_frame_range, source_matches,
+)
 from src.features.edit.core.media_replacement import (
     merge_replacement_metadata, validate_replacement_usages,
 )
@@ -140,7 +144,11 @@ from src.shared.ui.dock_context_menu import (
     find_parent_dock,
 )
 
+if TYPE_CHECKING:
+    from .media_pool_presentation import ResolvePoolDelegate
+
 logger = logging.getLogger(__name__)
+_POOL_SIDEBAR_ROW_HEIGHT = 23
 
 
 # ================================================================
@@ -379,7 +387,13 @@ class MediaImportWorker(QRunnable):
             if self._cancelled:
                 break
             try:
+                if not os.path.isfile(path):
+                    raise FileNotFoundError(path)
+                if not os.access(path, os.R_OK):
+                    raise PermissionError(path)
                 metadata = probe_media_metadata(path)
+                if not metadata and not os.path.isfile(path):
+                    raise FileNotFoundError(path)
                 # R12：probe 修正类型——纯音频容器（无视频流的
                 # .mov/.mxf）按 audio 导入，不按扩展名伪装 video
                 media_type = media_type_from_probe(path, metadata)
@@ -600,7 +614,7 @@ class ProxyResolutionWorker(QRunnable):
 
 
 # ================================================================
-# View Mode and Thumbnail Size Enums
+# View and Search Modes
 # ================================================================
 
 class ViewMode(Enum):
@@ -610,16 +624,13 @@ class ViewMode(Enum):
     METADATA = auto()  # 缩略图与日志元数据
 
 
-class ThumbnailSize(Enum):
-    """缩略图尺寸枚举 — DaVinci 紧凑规格"""
-    SMALL = (60, 40)    # 小尺寸
-    MEDIUM = (100, 67)  # 中尺寸（默认）
-    LARGE = (160, 107)  # 大尺寸
-
-    @property
-    def size(self) -> tuple[int, int]:
-        """获取尺寸"""
-        return self.value
+_THUMBNAIL_WIDTH_MIN = 96
+_THUMBNAIL_WIDTH_MAX = 320
+_THUMBNAIL_WIDTH_DEFAULT = 180
+_THUMBNAIL_WIDTH_KEY = "thumbnail_width"
+# Preserve the relative zoom of each legacy column-count preference.
+_LEGACY_COLUMN_WIDTHS = (_THUMBNAIL_WIDTH_MAX, 240, _THUMBNAIL_WIDTH_DEFAULT,
+                         144, 126, 112, 104, _THUMBNAIL_WIDTH_MIN)
 
 
 class SearchFilterMode(Enum):
@@ -845,6 +856,7 @@ class BinTreeWidget(QTreeWidget):
         Args:
             project: 当前项目
         """
+        self._clear_drop_target()
         self.clear()
 
         if project is None:
@@ -922,7 +934,7 @@ class BinTreeWidget(QTreeWidget):
         smart_root.setIcon(0, icon_smart())
         smart_root.setData(0, self.BIN_ID_ROLE, "__smart_bins__")
         smart_root.setData(0, self.BIN_TYPE_ROLE, "section")
-        smart_root.setExpanded(True)
+        smart_root.setExpanded(not self.property("smartBinsOnly"))
         smart_root.setFlags(smart_root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
         # Smart Bin 条目 — DaVinci 风格：柔和灰蓝图标
@@ -996,9 +1008,12 @@ class BinTreeWidget(QTreeWidget):
                 continue
             item = find_item(root)
             if item is not None:
+                keep_collapsed = is_smart_bin and not root.isExpanded()
                 previous = self.blockSignals(True)
                 try:
                     self.setCurrentItem(item)
+                    if keep_collapsed:
+                        root.setExpanded(False)
                 finally:
                     self.blockSignals(previous)
                 return True
@@ -1120,8 +1135,15 @@ class BinTreeWidget(QTreeWidget):
             # spring-loaded auto-expand for hovered collapsed bins.
             panel = self._find_media_pool_panel()
             if panel is not None:
+                library_drop = mime.hasFormat(LIBRARY_REFERENCE_MIME)
+                if library_drop and self is not panel.bin_tree:
+                    self._clear_drop_target()
+                    event.ignore()
+                    return
                 pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
                 target_bin_id = panel._target_bin_at(pos, source="sidebar")
+                if library_drop and target_bin_id is None and panel._project is not None:
+                    target_bin_id = panel._project.root_bin_id
                 if target_bin_id is not None:
                     self._set_drop_target(target_bin_id)
                     event.acceptProposedAction()
@@ -1177,11 +1199,16 @@ class BinTreeWidget(QTreeWidget):
         if mime.hasUrls():
             panel = self._find_media_pool_panel()
             if panel is not None:
+                library_drop = mime.hasFormat(LIBRARY_REFERENCE_MIME)
+                self._clear_drop_target()
+                if library_drop and self is not panel.bin_tree:
+                    event.ignore()
+                    return
                 pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
                 target_bin_id = panel._target_bin_at(pos, source="sidebar")
-                self._clear_drop_target()
+                if library_drop and target_bin_id is None and panel._project is not None:
+                    target_bin_id = panel._project.root_bin_id
                 panel.dropEvent(event, target_bin_id=target_bin_id)
-                event.acceptProposedAction()
                 return
             event.ignore()
             return
@@ -1193,24 +1220,29 @@ class BinTreeWidget(QTreeWidget):
         """Highlight the hovered bin and arm the spring-loaded auto-expand."""
         if bin_id == self._spring_target_id:
             return  # Same bin — keep the timer running.
-        # Target changed: cancel pending expansion and (re)arm the timer.
+        # Clear the previous item's highlight before starting the new timer.
+        self._clear_drop_target()
         self._spring_target_id = bin_id
         self._spring_timer.start()
-        # Update visual highlight.
-        item = self._find_bin_item(bin_id)
-        if item is not self._drop_target_item:
-            self._clear_drop_target()
-            if item is not None:
-                self._drop_target_item = item
-                item.setBackground(0, QColor(get_color("accent")))
+        self._drop_target_item = self._find_bin_item(bin_id)
+        self.viewport().update()
 
     def _clear_drop_target(self) -> None:
         """Remove the drop highlight and cancel spring expansion."""
         self._spring_timer.stop()
         self._spring_target_id = None
         if self._drop_target_item is not None:
-            self._drop_target_item.setBackground(0, QColor(0, 0, 0, 0))
             self._drop_target_item = None
+            self.viewport().update()
+
+    def drawRow(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        super().drawRow(painter, option, index)
+        if self._drop_target_item is not None and self.itemFromIndex(index) is self._drop_target_item:
+            painter.save()
+            painter.setPen(QColor(C.ORANGE))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(option.rect.adjusted(0, 0, -1, -1))
+            painter.restore()
 
     def _spring_expand_current(self) -> None:
         """Expand the currently hovered bin (spring-loaded folders)."""
@@ -1277,7 +1309,7 @@ class BinTreeWidget(QTreeWidget):
         panel = self._find_media_pool_panel()
         if panel is None or panel._updating:
             return
-        if column != 0:
+        if column != 0 or not (item.flags() & Qt.ItemFlag.ItemIsEditable):
             return
         if item.data(0, self.BIN_TYPE_ROLE) != "bin":
             return
@@ -1683,6 +1715,10 @@ class GridDelegate(QStyledItemDelegate):
 
     def set_thumb_size(self, size: tuple[int, int]) -> None:
         """设置缩略图尺寸"""
+        if self.thumb_size != size:
+            # Playback can discard queued requests. Missing visible posters
+            # can retry after zoom without evicting any decoded posters.
+            self._pending_thumbnails.clear()
         self.thumb_size = size
 
     def _get_panel(self) -> Optional["MediaPoolPanel"]:
@@ -2366,11 +2402,7 @@ class GridDelegate(QStyledItemDelegate):
             # through the normal async thumbnail provider.  Empty Comp Clips
             # have no source and keep the graph placeholder.
             if preview_asset.asset_id != asset.asset_id:
-                if preview_asset.path not in self._pending_thumbnails:
-                    self._pending_thumbnails.add(preview_asset.path)
-                    self.thumb_provider.get_thumbnail(
-                        preview_asset.path, max(self.thumb_size)
-                    )
+                self._request_poster(preview_asset.path)
             painter.setBrush(QBrush(QColor("#2a1a3a")))  # Dark purple bg
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(rect, 2, 2)
@@ -2433,9 +2465,7 @@ class GridDelegate(QStyledItemDelegate):
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "SUB")
         else:
             # 如果不在待加载列表，请求加载
-            if asset.path not in self._pending_thumbnails:
-                self._pending_thumbnails.add(asset.path)
-                self.thumb_provider.get_thumbnail(asset.path, max(self.thumb_size))
+            self._request_poster(asset.path)
 
             # 绘制占位符 — 简洁深色底
             painter.setBrush(QBrush(QColor("#1a1b1e")))
@@ -2448,6 +2478,15 @@ class GridDelegate(QStyledItemDelegate):
             font.setPixelSize(10)
             painter.setFont(font)
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "…")
+
+    def _request_poster(self, path: str) -> None:
+        if path in self._pending_thumbnails or self.thumb_provider.is_thumbnail_work_suspended:
+            return
+        panel = self._get_panel()
+        if panel is not None and panel.thumb_slider.isSliderDown():
+            return
+        self._pending_thumbnails.add(path)
+        self.thumb_provider.get_thumbnail(path)
 
     def _draw_thumbnail(self, painter: QPainter, rect: QRect,
                         pixmap: QPixmap) -> None:
@@ -3262,7 +3301,6 @@ class AssetTreeWidget(QTreeWidget):
                     target_bin_id = parent._target_bin_at(pos, source="tree")
                     parent._set_drop_target_bin(None)
                     parent.dropEvent(event, target_bin_id=target_bin_id)
-                    event.acceptProposedAction()
                     return
                 parent = parent.parent()
             event.ignore()
@@ -3919,7 +3957,6 @@ class AssetListView(QListView):
                     target_bin_id = parent._target_bin_at(pos, source=self)
                     parent._set_drop_target_bin(None)
                     parent.dropEvent(event, target_bin_id=target_bin_id)
-                    event.acceptProposedAction()
                     return
                 parent = parent.parent()
             event.ignore()
@@ -4800,6 +4837,12 @@ class MediaPoolPanel(QWidget):
     # Signals
     asset_import_requested = pyqtSignal(list)  # list of file paths
     asset_imported = pyqtSignal(str, dict)     # asset_id, metadata
+    media_import_status = pyqtSignal(str)
+    open_ai_library_requested = pyqtSignal()
+    library_search_requested = pyqtSignal()
+    library_search_visibility_changed = pyqtSignal(bool)
+    library_presentation_changed = pyqtSignal(object, int)
+    ai_library_import_status = pyqtSignal(str)
     # E22: asset_removed 已删除（2 个 emit、0 个 connect 的死信号）
     timeline_create_requested = pyqtSignal()
     timeline_switch_requested = pyqtSignal(str)  # timeline_id (switch to this timeline)
@@ -4859,14 +4902,17 @@ class MediaPoolPanel(QWidget):
         self._progress_update_in_flight: bool = False
         self._finish_import_deferred: bool = False
         self._view_mode: ViewMode = ViewMode.GRID  # 默认网格视图
-        self._thumb_size_enum: ThumbnailSize = ThumbnailSize.MEDIUM
-        self._thumb_width: int = 100  # DaVinci compact default
+        self._thumbnail_settings = QSettings("ToposColor", "MediaPool")
+        self._thumbnail_layout_timer = QTimer(self)
+        self._thumbnail_layout_timer.setSingleShot(True)
+        self._thumbnail_layout_timer.timeout.connect(self._update_thumbnail_layouts)
         self._current_timeline_id: Optional[str] = None  # Current active timeline (V-10, UI-27)
         self._import_in_progress: bool = False
         self._active_import_batch_id: Optional[str] = None
         self._active_import_project_id: Optional[str] = None
         self._active_import_worker: Optional[MediaImportWorker] = None
-        self._pending_import_files: List[str] = []
+        self._pending_import_files: list[tuple[str, list[str], str | None, str | None]] = []
+        self._pending_ai_library_candidate: dict[str, Any] | None = None
         self._proxy_jobs: Dict[str, str] = {}  # asset_id -> source path at job start
         # FE-B11：任务 generation token。旧回调只在 expected_path 非空时
         # 校验路径；换源/删除把 _proxy_jobs pop 后 expected=None，旧代理
@@ -5007,7 +5053,7 @@ class MediaPoolPanel(QWidget):
         search_escape.activated.connect(lambda: self.btn_search.setChecked(False))
         self._search_escape = search_escape
         self._pool_shortcuts: list[QShortcut] = []
-        for key, callback in (("Ctrl+f", lambda: self.btn_search.setChecked(True)), ("Ctrl+Shift+n", self._on_new_bin_clicked), ("Ctrl+i", self._show_selected_pool_info)):
+        for key, callback in (("Ctrl+f", self._focus_media_search), ("Ctrl+Shift+n", self._on_new_bin_clicked), ("Ctrl+i", self._show_selected_pool_info)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
@@ -5073,10 +5119,10 @@ class MediaPoolPanel(QWidget):
         # Only the widget surface is transparent; groove/handle colors and
         # geometry still come from the shared application slider stylesheet.
         self.thumb_slider.setStyleSheet("QSlider#mediaPoolThumbnailSlider { background: transparent; border: none; }")
-        # Larger images to the right, as in Resolve; the stored value remains
-        # a column count owned by ColumnGridController.
-        self.thumb_slider.setInvertedAppearance(True)
-        self.thumb_slider.setInvertedControls(True)
+        self.thumb_slider.setRange(_THUMBNAIL_WIDTH_MIN, _THUMBNAIL_WIDTH_MAX)
+        self.thumb_slider.setSingleStep(8)
+        self.thumb_slider.setPageStep(24)
+        self.thumb_slider.setValue(self._restore_thumbnail_width())
         self.thumb_slider.setToolTip(I18N.tr("edit.media_pool.thumb_size_tooltip", "Thumbnail Size"))
         self.thumb_slider.setAccessibleName(self.thumb_slider.toolTip())
         toolbar.addWidget(self.thumb_slider)
@@ -5135,12 +5181,13 @@ class MediaPoolPanel(QWidget):
         self.smart_bin_tree = BinTreeWidget()
         self.smart_bin_tree.setProperty("smartBinsOnly", True)
         self.smart_bin_tree.setStyleSheet(self._pool_tree_style())
+        self._hidden_smart_bin_height = _POOL_SIDEBAR_ROW_HEIGHT
         self.sidebar.addWidget(self.bin_tree)
-        self.sidebar.addWidget(self.smart_bin_tree)
-        self.sidebar.setSizes([560, 150])
         self.sidebar.setStretchFactor(0, 1)
-        self.sidebar.setStretchFactor(1, 0)
+        self._add_sidebar_section(self.smart_bin_tree, 135)
         self.main_splitter.addWidget(self.sidebar)
+        self._pool_content = QStackedWidget(self)
+        self._library_view: QWidget | None = None
         self.view_container = QWidget()
         self.view_container.setObjectName("mediaPoolContent")
         container_layout = QVBoxLayout(self.view_container)
@@ -5165,26 +5212,10 @@ class MediaPoolPanel(QWidget):
         container_layout.addWidget(self.breadcrumb_widget)
 
         self.tree = AssetTreeWidget()
-        self.tree.setHeaderLabels([
-            I18N.tr("edit.media_pool.clip_name", "Clip Name"),
-            I18N.tr("edit.media_pool.header_reel", "Reel Name"),
-            I18N.tr("edit.media_pool.header_scene", "Scene/Shot/Take"),
-            I18N.tr("edit.media_pool.header_duration", "Duration"),
-            I18N.tr("edit.media_pool.header_fps", "FPS"),
-            I18N.tr("edit.media_pool.header_resolution", "Resolution"),
-            I18N.tr("edit.media_pool.header_codec", "Codec"),
-            I18N.tr("edit.media_pool.header_audio", "Audio"),
-            I18N.tr("edit.media_pool.header_path", "File Path"),
-        ])
-        for column, width in enumerate((200, 90, 120, 90, 65, 110, 90, 70, 250)):
-            self.tree.setColumnWidth(column, width)
-        self.tree.setAlternatingRowColors(True)
-        self.tree.setRootIsDecorated(False)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setStyleSheet(self._pool_tree_style())
+        from .media_pool_presentation import configure_pool_columns
+        configure_pool_columns(self.tree)
         self.tree.header().setSectionsClickable(True)
         self.tree.header().setSectionsMovable(True)
-        self.tree.header().setStretchLastSection(False)
         self.tree.header().setSortIndicatorShown(True)
         self.tree.header().sectionClicked.connect(self._on_header_clicked)
         self.tree.header().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -5202,15 +5233,104 @@ class MediaPoolPanel(QWidget):
         container_layout.addWidget(self.tree)
         self.tree.hide()
         self.grid_view: Optional[QListView] = None
-        self.grid_delegate: Optional[GridDelegate] = None
+        self.grid_delegate: Optional[ResolvePoolDelegate] = None
         self.asset_model: Optional[AssetListModel] = None
-        self.main_splitter.addWidget(self.view_container)
+        self._pool_content.addWidget(self.view_container)
+        self.main_splitter.addWidget(self._pool_content)
         self.main_splitter.setSizes([150, 405])
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
         layout.addWidget(self.main_splitter, 1)
         self._setup_pool_menus()
         self._update_breadcrumb()
+
+    def _add_sidebar_section(self, tree: QTreeWidget, expanded_height: int) -> None:
+        """Keep a collapsed tree at its heading height and reclaim its splitter space."""
+        self.sidebar.addWidget(tree)
+        index = self.sidebar.indexOf(tree)
+        self.sidebar.setStretchFactor(index, 0)
+
+        row_height = _POOL_SIDEBAR_ROW_HEIGHT + 2 * tree.frameWidth()
+        tree.setFixedHeight(row_height)
+
+        def resize_section(expanded: bool) -> None:
+            nonlocal expanded_height
+            sizes = self.sidebar.sizes()
+            if expanded:
+                tree.setMinimumHeight(0)
+                tree.setMaximumHeight(QWIDGETSIZE_MAX)
+                height = expanded_height
+            else:
+                if tree.maximumHeight() > row_height and sizes[index] > row_height:
+                    expanded_height = sizes[index]
+                tree.setFixedHeight(row_height)
+                height = row_height
+            sizes[0] += sizes[index] - height
+            sizes[index] = height
+            smart_index = self.sidebar.indexOf(self.smart_bin_tree)
+            if tree is not self.smart_bin_tree and self.smart_bin_tree.isHidden():
+                sizes[smart_index] = self._hidden_smart_bin_height
+            elif tree is self.smart_bin_tree and tree.isHidden():
+                self._hidden_smart_bin_height = height
+            self.sidebar.setSizes(sizes)
+
+        def resize_for_heading(item: QTreeWidgetItem) -> None:
+            if item.parent() is None and not item.isHidden():
+                resize_section(item.isExpanded())
+
+        heading = tree.topLevelItem(0)
+        resize_section(heading is not None and heading.isExpanded())
+        tree.itemExpanded.connect(resize_for_heading)
+        tree.itemCollapsed.connect(resize_for_heading)
+
+    def _set_smart_bins_visible(self, visible: bool) -> None:
+        if not visible:
+            self._hidden_smart_bin_height = self.smart_bin_tree.height()
+        self.smart_bin_tree.setVisible(visible)
+
+    def install_library_view(
+        self, tree: QTreeWidget, view: QWidget,
+        set_presentation: Callable[[ViewMode, int], None],
+    ) -> None:
+        """Mount the host's global library without sharing project bin state."""
+        self._library_view = view
+        tree.setStyleSheet(self._pool_tree_style())
+        self._add_sidebar_section(tree, 140)
+        self._pool_content.addWidget(view)
+        self.library_presentation_changed.connect(set_presentation)
+        set_presentation(self._view_mode, self.get_thumb_size())
+        self.bin_tree.itemClicked.connect(self.show_project_media)
+        self.smart_bin_tree.itemClicked.connect(self.show_project_media)
+        button = self._pool_button("fa5s.database", "library_browser.title", "Media Libraries")
+        button.setIcon(qta.icon("fa5s.database", color=C.TEXT_SECONDARY))
+        button.clicked.connect(self._open_library_media)
+        toolbar = self.toolbar_container.layout()
+        toolbar.insertWidget(1, button)
+
+    def _open_library_media(self) -> None:
+        self.btn_toggle_sidebar.setChecked(True)
+        self._on_toggle_sidebar(True)
+        self.show_library_media()
+
+    def show_library_media(self) -> None:
+        if self._library_view is not None:
+            self.search_box.hide()
+            self.library_search_visibility_changed.emit(self.btn_search.isChecked())
+            self._pool_content.setCurrentWidget(self._library_view)
+            self.library_presentation_changed.emit(self._view_mode, self.get_thumb_size())
+
+    def show_project_media(self) -> None:
+        self._pool_content.setCurrentWidget(self.view_container)
+        self.search_box.setVisible(self.btn_search.isChecked())
+        self._apply_thumbnail_grid_size()
+
+    def _focus_media_search(self) -> None:
+        if self._pool_content.currentWidget() is self._library_view:
+            self.btn_search.setChecked(True)
+            self.library_search_requested.emit()
+        else:
+            self.btn_search.setChecked(True)
+            self.search_box.line_edit.setFocus()
 
     def _pool_button(self, icon_name: str, key: str, label: str, checkable: bool = False) -> QToolButton:
         """Create a compact, accessible toolbar button using the global theme."""
@@ -5233,15 +5353,9 @@ class MediaPoolPanel(QWidget):
     @staticmethod
     def _pool_tree_style() -> str:
         """Scope view styling without overriding global scrollbars."""
-        return f"""
-            QTreeWidget {{ background: {C.BG_PANEL}; alternate-background-color: {C.BG_INPUT};
-                color: {C.TEXT_SECONDARY}; border: none; font-size: 11px; }}
-            QTreeWidget::item {{ height: 23px; padding: 0 4px; border: none; }}
-            QTreeWidget::item:selected {{ background: {C.BG_DARKEST}; color: {C.TEXT_PRIMARY}; }}
-            QTreeWidget::item:hover {{ background: {C.BG_ACTIVE}; }}
-            QHeaderView::section {{ background: {C.BG_INPUT}; color: {C.TEXT_LABEL}; border: none;
-                border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
-        """
+        from .media_pool_presentation import pool_tree_style
+
+        return pool_tree_style(_POOL_SIDEBAR_ROW_HEIGHT)
 
     def _setup_pool_menus(self) -> None:
         """Expose existing actions through Resolve-style compact menus."""
@@ -5295,11 +5409,13 @@ class MediaPoolPanel(QWidget):
             ("new_smart_bin", "New Smart Bin…", self._on_create_smart_bin),
         ):
             menu.addAction(I18N.tr(f"edit.media_pool.{key}", label)).triggered.connect(callback)
+        menu.addAction(I18N.tr("files.ai_library.open", "AI 素材库…"),
+                       lambda _checked=False: self.open_ai_library_requested.emit())
         menu.addSeparator()
         action = menu.addAction(I18N.tr("edit.media_pool.show_smart_bins", "Show Smart Bins"))
         action.setCheckable(True)
         action.setChecked(True)
-        action.toggled.connect(self.smart_bin_tree.setVisible)
+        action.toggled.connect(self._set_smart_bins_visible)
         self.action_show_smart_bins = action
         hover = menu.addAction(I18N.tr("edit.media_pool.live_preview", "Live Media Preview"))
         hover.setCheckable(True)
@@ -5379,19 +5495,16 @@ class MediaPoolPanel(QWidget):
         self.grid_view.setModel(self.asset_model)
 
         # Delegate setup
-        from .media_pool_presentation import ResolvePoolDelegate
+        from .media_pool_presentation import ResolvePoolDelegate, configure_pool_posters, configure_pool_shelf
         self.grid_delegate = ResolvePoolDelegate(self)
-        self.grid_delegate.poster_inset = 6
         self.grid_delegate.view = self.grid_view
         self.grid_view.setItemDelegate(self.grid_delegate)
 
         # Configure view
-        self.grid_view.setViewMode(QListView.ViewMode.IconMode)
-        self.grid_view.setResizeMode(QListView.ResizeMode.Adjust)
+        configure_pool_posters(self.grid_view, self.grid_delegate, metadata=False)
         self.grid_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.grid_view.setUniformItemSizes(True)  # Performance optimization
-        self.grid_view.setSpacing(0)
-        self.grid_view.setViewportMargins(15, 8, 0, 0)
+        self._apply_thumbnail_grid_size()
+        self.grid_view.viewport().installEventFilter(self)
         # Enable drag for assets (drag to timeline / drop into bins)
         self.grid_view.setDragEnabled(True)
         # DragDrop: support both outgoing drags (to timeline) and incoming
@@ -5404,19 +5517,6 @@ class MediaPoolPanel(QWidget):
         self.grid_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.grid_view.customContextMenuRequested.connect(self._on_grid_context_menu)
 
-        # Column-count zoom: media thumbs are 16:9 with a caption strip the
-        # delegate paints below the thumb.  The controller derives card
-        # size from the live viewport so rows tile flush with the right
-        # edge; its callback syncs the delegate's thumb_size (which drives
-        # both painting and sizeHint) and re-requests thumbnails.
-        from src.shared.ui.column_grid import ColumnGridController
-        self._column_grid = ColumnGridController(
-            self.grid_view, slider=None,
-            settings_key="media_pool_columns", columns_default=3,
-            gap=34, aspect=9.0 / 16.0, extra_height=0,
-            pin_item_hints=False, scrollbar_as_needed=True,
-            on_columns_applied=self._on_columns_applied)
-
         # Add to container — grid view 为默认视图
         if self.view_container:
             container_layout = self.view_container.layout()
@@ -5427,22 +5527,12 @@ class MediaPoolPanel(QWidget):
         self.metadata_shelf = AssetListView()
         self.metadata_shelf.setModel(self.asset_model)
         self.metadata_shelf.setSelectionModel(self.grid_view.selectionModel())
-        self.metadata_shelf.setViewMode(QListView.ViewMode.IconMode)
-        self.metadata_shelf.setFlow(QListView.Flow.LeftToRight)
-        self.metadata_shelf.setWrapping(True)
-        self.metadata_shelf.setResizeMode(QListView.ResizeMode.Adjust)
-        self.metadata_shelf.setMovement(QListView.Movement.Static)
+        self.shelf_delegate = ResolvePoolDelegate(self)
+        configure_pool_shelf(self.metadata_shelf, self.shelf_delegate)
         self.metadata_shelf.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.metadata_shelf.setDragEnabled(True)
         self.metadata_shelf.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.metadata_shelf.setAcceptDrops(True)
-        self.metadata_shelf.setGridSize(QSize(116, 88))
-        self.metadata_shelf.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.metadata_shelf.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.shelf_delegate = ResolvePoolDelegate(self)
-        self.shelf_delegate.view = self.metadata_shelf
-        self.shelf_delegate.set_thumb_size((86, 48))
-        self.metadata_shelf.setItemDelegate(self.shelf_delegate)
         self.metadata_shelf.doubleClicked.connect(self._on_grid_double_clicked)
         self.metadata_shelf.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.metadata_shelf.customContextMenuRequested.connect(
@@ -5467,15 +5557,25 @@ class MediaPoolPanel(QWidget):
         self._resize_metadata_shelf()
 
     def _resize_metadata_shelf(self) -> None:
+        from .media_pool_presentation import pool_shelf_height
+
         if not hasattr(self, "metadata_shelf"):
             return
-        columns = max(1, (self.view_container.width() - 16) // 116)
-        rows = (getattr(self, "_metadata_shelf_count", 0) + columns - 1) // columns
-        self.metadata_shelf.setFixedHeight(max(88, min(176, rows * 88)))
+        self.metadata_shelf.setFixedHeight(pool_shelf_height(
+            self.view_container.width(), getattr(self, "_metadata_shelf_count", 0)))
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         self._resize_metadata_shelf()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Hide and watched is self.thumb_slider:
+            self.thumb_slider.setSliderDown(False)
+        elif (event.type() == QEvent.Type.Resize and self._view_mode == ViewMode.GRID
+                and self.grid_view is not None and watched is self.grid_view.viewport()
+                and not self._thumbnail_layout_timer.isActive()):
+            self._thumbnail_layout_timer.start(0)
+        return super().eventFilter(watched, event)
 
     def _setup_context_menu(self) -> None:
         """Set up context menu for the panel."""
@@ -5491,9 +5591,9 @@ class MediaPoolPanel(QWidget):
         self.btn_grid_view.clicked.connect(self._toggle_grid_view)
         self.btn_metadata_view.clicked.connect(self._toggle_metadata_view)
 
-        # Thumbnail size slider — column-count model (range set by the
-        # controller; card width follows the viewport width).
-        self._column_grid.attach_slider(self.thumb_slider)
+        self.thumb_slider.valueChanged.connect(self._on_thumbnail_width_changed)
+        self.thumb_slider.sliderReleased.connect(self._finish_thumbnail_resize)
+        self.thumb_slider.installEventFilter(self)
 
         # Search and sort
         self.search_box.search_changed.connect(self._on_search_filter_changed)
@@ -5531,7 +5631,7 @@ class MediaPoolPanel(QWidget):
 
     # ==================== Project Binding ====================
 
-    def set_project(self, project: Optional[EditProject]) -> None:
+    def set_project(self, project: Optional[EditProject], *, check_offline: bool = True) -> None:
         """
         Set the current project reference.
 
@@ -5539,6 +5639,8 @@ class MediaPoolPanel(QWidget):
 
         Args:
             project: EditProject instance to bind
+            check_offline: Check availability now. Timeline imports have already
+                validated their sources and can use the periodic offline worker.
         """
         if self._updating:
             return
@@ -5593,11 +5695,13 @@ class MediaPoolPanel(QWidget):
             # not repeat that work when only the active timeline changes.
             if project is not None:
                 signature = self._offline_signature(project)
-                if signature != self._offline_status_signature:
+                if check_offline and signature != self._offline_status_signature:
                     checked_project = update_offline_status(project)
                     offline_status_changed = checked_project is not project
                     project = checked_project
                     self._offline_status_signature = self._offline_signature(project)
+                elif not check_offline:
+                    self._offline_status_signature = signature
                 offline_count = sum(1 for a in project.assets.values() if a.is_offline)
                 if offline_count > 0:
                     logger.info(f"Detected {offline_count} offline asset(s) in project")
@@ -5753,6 +5857,7 @@ class MediaPoolPanel(QWidget):
     def clear_project(self) -> None:
         """Clear the current project reference and reset UI."""
         self._close_pool_info()
+        self._pending_import_files.clear()
         if self._active_import_batch_id is not None:
             self._cancel_import_batch(self._active_import_batch_id)
             self._finish_import_batch()
@@ -5776,8 +5881,7 @@ class MediaPoolPanel(QWidget):
         self.tree.clear()
         # AUD-20209: 树已清空 → 索引失效。
         self._tree_index_dirty = True
-        self.bin_tree.populate(None)
-        self.smart_bin_tree.populate(None)
+        self._refresh_bin_tree()
         if self.asset_model:
             self.asset_model.set_items([])
         self._sync_metadata_shelf()
@@ -5965,6 +6069,8 @@ class MediaPoolPanel(QWidget):
 
     def _switch_view_mode(self, mode: ViewMode) -> None:
         """Share selection, navigation and commands across the three views."""
+        from .media_pool_presentation import configure_pool_posters
+
         if self._updating or self.grid_view is None or self.grid_delegate is None:
             return
         snapshot = self._capture_pool_selection()
@@ -5976,25 +6082,13 @@ class MediaPoolPanel(QWidget):
                                    (self.btn_grid_view, ViewMode.GRID),
                                    (self.btn_metadata_view, ViewMode.METADATA)):
                 button.setChecked(mode == target)
-            self._column_grid.set_active(mode == ViewMode.GRID)
             self.thumb_slider.setVisible(
                 mode == ViewMode.GRID and self._audio_workspace_saved is None)
-            self.grid_delegate.metadata_mode = mode == ViewMode.METADATA
-            if mode == ViewMode.METADATA:
-                self.grid_view.setViewportMargins(0, 0, 0, 0)
-                self.grid_view.setViewMode(QListView.ViewMode.ListMode)
-                self.grid_view.setFlow(QListView.Flow.TopToBottom)
-                self.grid_view.setWrapping(False)
-                self.grid_view.setGridSize(QSize())
-                self.grid_view.setSpacing(0)
-                self.grid_view.setUniformItemSizes(True)
-            elif mode == ViewMode.GRID:
-                self.grid_view.setViewportMargins(15, 8, 0, 0)
-                self.grid_view.setViewMode(QListView.ViewMode.IconMode)
-                self.grid_view.setFlow(QListView.Flow.LeftToRight)
-                self.grid_view.setWrapping(True)
-                self.grid_view.setSpacing(0)
-                self._column_grid.schedule_retile()
+            if mode != ViewMode.LIST:
+                configure_pool_posters(self.grid_view, self.grid_delegate, metadata=mode == ViewMode.METADATA)
+                self.grid_view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+            if mode == ViewMode.GRID:
+                self._apply_thumbnail_grid_size()
             self.tree.setVisible(mode == ViewMode.LIST)
             self.grid_view.setVisible(mode != ViewMode.LIST)
             if mode != ViewMode.LIST:
@@ -6004,6 +6098,7 @@ class MediaPoolPanel(QWidget):
             self._restore_pool_selection(snapshot)
         finally:
             self._updating = False
+        self.library_presentation_changed.emit(mode, self.get_thumb_size())
 
     def _capture_pool_selection(self) -> tuple[list[tuple[str, str]], Optional[tuple[str, str]], int]:
         """Capture stable item identities rather than invalidatable indexes."""
@@ -6071,8 +6166,13 @@ class MediaPoolPanel(QWidget):
 
     def _on_search_toggled(self, checked: bool) -> None:
         """Toggle search bar visibility."""
+        if self._pool_content.currentWidget() is self._library_view:
+            self.library_search_visibility_changed.emit(checked)
+            if checked:
+                self.library_search_requested.emit()
+            return
         if checked:
-            self.search_box.show()
+            self.show_project_media()
             self.search_box.line_edit.setFocus()
         else:
             self.search_box.hide()
@@ -6726,6 +6826,7 @@ class MediaPoolPanel(QWidget):
         """Navigate from either sidebar section and synchronize the path."""
         if self._updating or self._project is None:
             return
+        self.show_project_media()
         self._current_bin_id = "" if bin_id == self._project.root_bin_id else bin_id
         self._current_bin_is_smart = is_smart_bin
         self._navigation_forward_stack.clear()
@@ -6751,6 +6852,10 @@ class MediaPoolPanel(QWidget):
 
     def _refresh_bin_tree(self) -> None:
         """Refresh regular and Smart Bins, preserving expanded folders."""
+        smart_root = self.smart_bin_tree.topLevelItem(1)
+        if smart_root is not None and self._project is None:
+            smart_root.setExpanded(False)
+        smart_expanded = smart_root is not None and smart_root.isExpanded()
         expanded: set[str] = set()
         iterator = QTreeWidgetItemIterator(self.bin_tree)
         had_items = self.bin_tree.topLevelItemCount() > 0
@@ -6768,6 +6873,8 @@ class MediaPoolPanel(QWidget):
                     item = tree.topLevelItem(row)
                     is_section = item.data(0, BinTreeWidget.BIN_TYPE_ROLE) == "section"
                     item.setHidden(is_section != smart_only)
+                    if smart_only and is_section:
+                        item.setExpanded(smart_expanded)
                 if self._project and self._current_bin_is_smart == smart_only:
                     tree.select_bin(self._current_bin_id or self._project.root_bin_id, smart_only)
             finally:
@@ -6918,58 +7025,51 @@ class MediaPoolPanel(QWidget):
         key = fields.get(self._sort_by)
         return sorted(assets, key=key, reverse=reverse) if key is not None else assets
 
-    def _update_grid_size(self) -> None:
-        """更新网格视图尺寸 — 尺寸计算归列数控制器所有"""
-        grid = getattr(self, "_column_grid", None)
-        if grid is not None:
-            grid.schedule_retile()
-        elif self.grid_view and self.grid_delegate:
-            w = self._thumb_width
-            h = round(w * 9 / 16)
-            self.grid_delegate.set_thumb_size((w, h))
-            self.grid_view.setGridSize(QSize(w + 14, h + 38))
-            self.grid_view.viewport().update()
-
-    def _reload_grid_thumbnails(self) -> None:
-        """重新加载网格视图缩略图（尺寸变化时）"""
-        if not self._project or not self.asset_model:
-            return
-
-        # 清空模型缓存，强制重新请求
-        self.asset_model._thumbnails.clear()
-
-        # 从 ThumbnailProvider 全局缓存获取已有缩略图（使用新尺寸）
-        thumb_size = self._thumb_width
-        thumb_provider = ThumbnailProvider.instance()
-
-        for item in self.asset_model._items:
-            if item.is_asset and isinstance(item.data, MediaAsset):
-                if item.data.is_motion_graphic:
-                    continue
-                preview_path = self._thumbnail_path_for_asset(item.data)
-                cached = thumb_provider.get_cached_thumbnail(preview_path, thumb_size)
-                if cached:
-                    self.asset_model._thumbnails[preview_path] = cached
-                    self.asset_model._thumbnails[item.data.path] = cached
-                else:
-                    # 请求新尺寸的缩略图
-                    thumb_provider.get_thumbnail(preview_path, thumb_size)
-
-        # 触发视图更新
-        self.asset_model.layoutChanged.emit()
-        if self.grid_view:
-            self.grid_view.viewport().update()
-
     # ==================== Thumbnail Size ====================
 
-    def _on_columns_applied(self, icon: QSize, cell: QSize) -> None:
-        """列数控制器回调：同步委托 thumb_size 并按新尺寸重取缩略图。"""
-        self._thumb_width = icon.width()
-        if self.grid_delegate:
-            self.grid_delegate.set_thumb_size((icon.width(), icon.height()))
-        if self._view_mode != ViewMode.LIST:
-            self._reload_grid_thumbnails()
-        logger.debug(f"Thumbnail columns applied: {icon.width()}x{icon.height()}px")
+    def _restore_thumbnail_width(self) -> int:
+        try:
+            width = int(self._thumbnail_settings.value(_THUMBNAIL_WIDTH_KEY, 0))
+        except (TypeError, ValueError):
+            width = 0
+        if _THUMBNAIL_WIDTH_MIN <= width <= _THUMBNAIL_WIDTH_MAX:
+            return width
+
+        legacy_settings = QSettings("ToposColor", "ColumnGrids")
+        try:
+            columns = int(legacy_settings.value("media_pool_columns", 0))
+        except (TypeError, ValueError):
+            return _THUMBNAIL_WIDTH_DEFAULT
+        if 1 <= columns <= len(_LEGACY_COLUMN_WIDTHS):
+            return _LEGACY_COLUMN_WIDTHS[columns - 1]
+        return _THUMBNAIL_WIDTH_DEFAULT
+
+    def _apply_thumbnail_grid_size(self) -> None:
+        """Fit the grid to the available viewport while preserving its column count."""
+        from .media_pool_presentation import resize_pool_posters
+
+        view, delegate = self.grid_view, self.grid_delegate
+        if self._view_mode != ViewMode.GRID or view is None or delegate is None:
+            return
+        resize_pool_posters(view, delegate, self.get_thumb_size())
+
+    def _on_thumbnail_width_changed(self, _width: int) -> None:
+        if self.thumb_slider.isSliderDown():
+            if not self._thumbnail_layout_timer.isActive():
+                self._thumbnail_layout_timer.start(32)
+        else:
+            self._finish_thumbnail_resize()
+
+    def _finish_thumbnail_resize(self) -> None:
+        self._thumbnail_layout_timer.stop()
+        self._update_thumbnail_layouts()
+        self._thumbnail_settings.setValue(_THUMBNAIL_WIDTH_KEY, self.thumb_slider.value())
+
+    def _update_thumbnail_layouts(self) -> None:
+        self._apply_thumbnail_grid_size()
+        self.library_presentation_changed.emit(self._view_mode, self.get_thumb_size())
+        if self._view_mode == ViewMode.GRID and self.grid_view is not None:
+            self.grid_view.viewport().update()
 
     def _thumbnail_path_for_asset(self, asset: MediaAsset) -> str:
         """Return the async poster path for a media-pool asset."""
@@ -7145,6 +7245,96 @@ class MediaPoolPanel(QWidget):
 
     # ==================== Import Logic ====================
 
+    def import_file_paths(self, paths: list[str]) -> None:
+        """Import a browser selection into the open bin of the current project."""
+        if paths:
+            target = None if self._current_bin_is_smart else self._current_bin_id or None
+            self._import_files_async(paths, target_bin_id=target, files_only=True)
+
+    def import_ai_library_candidate(
+        self, candidate: dict[str, Any], *, target_bin_id: str | None = None,
+    ) -> None:
+        path = str(candidate.get("path") or "")
+        if not path or not candidate.get("online") or not os.path.isfile(path):
+            self.ai_library_import_status.emit("源素材离线或已移动，请先重新连接。")
+            return
+        if not source_matches(path, candidate):
+            self.ai_library_import_status.emit("源素材已变更，请重新分析后再添加。")
+            return
+        if self._project is None:
+            self.auto_project_needed.emit()
+        if self._project is None:
+            self.ai_library_import_status.emit("需要打开一个剪辑工程。")
+            return
+        if getattr(self, "_import_in_progress", False):
+            self.ai_library_import_status.emit("媒体池正在导入，请稍后再添加。")
+            return
+
+        existing = self._project.get_asset_by_path(path)
+        target = target_bin_id if target_bin_id is not None else (
+            None if self._current_bin_is_smart else self._current_bin_id or None)
+        if existing is not None:
+            project, message = self._create_ai_library_excerpt(self._project, existing, candidate, target)
+            if project is not self._project:
+                self._project = project
+                self.project_changed.emit(project)
+                self._refresh_tree(refresh_bins=True)
+            self.ai_library_import_status.emit(message)
+            return
+
+        self._pending_ai_library_candidate = dict(candidate)
+        self._import_files_async([path], target_bin_id=target, files_only=True)
+        if not self._import_in_progress:
+            self._pending_ai_library_candidate = None
+            self.ai_library_import_status.emit("媒体池无法导入此文件。")
+        else:
+            self.ai_library_import_status.emit("正在加入媒体池…")
+
+    def _create_ai_library_excerpt(
+        self, project: EditProject, asset: MediaAsset, candidate: dict[str, Any],
+        target_bin_id: str | None,
+    ) -> tuple[EditProject, str]:
+        start, end = candidate.get("start_seconds"), candidate.get("end_seconds")
+        if start is None or end is None or asset.media_type not in ("audio", "video"):
+            return self._reference_library_asset(project, asset, target_bin_id)
+
+        from src.features.edit.core.asset_source_range import SourceRangeError, get_effective_source_range
+        from src.features.edit.core.commands.asset_commands import CreateSubclipCommand
+
+        try:
+            audio_fps = (asset.fps or 24.0) if asset.media_type == "audio" else None
+            source_range = excerpt_frame_range(asset, candidate)
+            if source_range is None:
+                return self._reference_library_asset(project, asset, target_bin_id)
+            first, last = source_range
+            total = (math.ceil(asset.duration_seconds * audio_fps)
+                     if audio_fps and asset.duration_seconds else asset.total_frames)
+            if first == 0 and last == total - 1:
+                return self._reference_library_asset(project, asset, target_bin_id)
+            if first < 0 or last <= first:
+                raise SourceRangeError("候选范围超出素材或不足两帧")
+            for current in project.assets.values():
+                if (current.metadata.get("parent_asset_id") == asset.asset_id
+                        and get_effective_source_range(current) == (first, last)):
+                    return self._reference_library_asset(project, current, target_bin_id)
+            label = f"{asset.display_name} [{float(start):.2f}–{float(end):.2f}s]"
+            command = CreateSubclipCommand.create(
+                asset.asset_id, first, last, display_name=label, target_bin_id=target_bin_id,
+                audio_frame_rate=audio_fps, label="Add Library Excerpt",
+            )
+            return self._command_stack.execute(command, project), f"已加入片段 · {label}"
+        except (ValueError, TypeError, OverflowError) as error:
+            return project, f"原素材已在媒体池，无法应用入出点。{error}"
+
+    def _reference_library_asset(
+        self, project: EditProject, asset: MediaAsset, target_bin_id: str | None,
+    ) -> tuple[EditProject, str]:
+        target = project.bins.get(target_bin_id) if target_bin_id else None
+        if target is None or target_bin_id == project.root_bin_id or asset.asset_id in target.asset_ids:
+            return project, f"媒体池中已有 {asset.display_name}。"
+        command = MoveAssetToBinCommand.create(asset.asset_id, target.bin_id)
+        return self._command_stack.execute(command, project), f"已加入 {target.name} · {asset.display_name}"
+
     def _on_import_clicked(self) -> None:
         """Handle Import button click - open file dialog."""
         # 获取顶层窗口作为父级
@@ -7173,13 +7363,7 @@ class MediaPoolPanel(QWidget):
         )
         if not folder:
             return
-        # Collect all media files under the folder (recursive).
-        all_files = self._filter_valid_media_files([folder])
-        if not all_files:
-            return
-        # Remember the folder root so we can rebuild bin structure after import.
-        self._import_folder_root = os.path.abspath(folder)
-        self._import_files(all_files)
+        self._import_files_async([folder], folder_root=os.path.abspath(folder))
 
     def _import_files(self, file_paths: List[str]) -> None:
         """
@@ -7460,7 +7644,18 @@ class MediaPoolPanel(QWidget):
         window lands them inside it (Finder behavior). At the project root
         level, files go to the root bin as before.
         """
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime.hasFormat(LIBRARY_REFERENCE_MIME):
+            urls = mime.urls()
+            path = urls[0].toLocalFile() if len(urls) == 1 else ""
+            reference = deserialize_reference(bytes(mime.data(LIBRARY_REFERENCE_MIME)), path)
+            if reference is None:
+                event.ignore()
+                return
+            self.import_ai_library_candidate(reference, target_bin_id=target_bin_id)
+            event.acceptProposedAction()
+            return
+        if mime.hasUrls():
             file_paths = [
                 url.toLocalFile()
                 for url in event.mimeData().urls()
@@ -7497,6 +7692,8 @@ class MediaPoolPanel(QWidget):
         file_paths: List[str],
         target_bin_id: Optional[str] = None,
         folder_root: Optional[str] = None,
+        *,
+        files_only: bool = False,
     ) -> None:
         """
         Start async import of files.
@@ -7514,37 +7711,45 @@ class MediaPoolPanel(QWidget):
             folder_root: Absolute path of a dropped/imported folder whose
                 subfolder structure should be mirrored into bins. Detected
                 automatically when a single directory is dropped.
+            files_only: The caller selected files. Keep path validation on the
+                worker and never expand a source that has become a directory.
         """
         if not self._project:
             self.auto_project_needed.emit()
             if not self._project:
                 return
 
-        # Auto-detect a single-folder drop so its structure is mirrored. Don't
-        # clobber a folder_root already set by the "Import Folder" button (it
-        # pre-stages _import_folder_root before calling the sync entry point).
-        if folder_root is None:
+        # Auto-detect a single-folder drop so its structure is mirrored.
+        if folder_root is None and not files_only:
             folder_root = self._single_dropped_folder(file_paths)
-        if folder_root is None:
-            folder_root = self._import_folder_root  # may be pre-staged or None
 
         # Filter and deduplicate
-        valid_files = self._filter_valid_media_files(file_paths)
+        if files_only:
+            valid_files = list(dict.fromkeys(
+                os.path.abspath(os.path.expanduser(path)) for path in file_paths
+                if get_media_type(path) in ("video", "image", "audio", "subtitle")
+            ))
+        else:
+            valid_files = self._filter_valid_media_files(file_paths)
         new_files = [p for p in valid_files if not self._project.has_asset_path(p)]
 
         if not new_files:
+            if valid_files:
+                message = I18N.tr("edit.media_pool.import_already_present", "The selected files are already in the Media Pool.")
+            else:
+                message = I18N.tr("edit.media_pool.import_no_files", "No readable media files to import.")
+            self.media_import_status.emit(message)
             return
 
         # Guard against concurrent imports
+        project_id = self._project.project_id
         if getattr(self, '_import_in_progress', False):
-            logger.warning("Import already in progress, queuing files")
-            self._pending_import_files.extend(new_files)
+            self._pending_import_files.append((project_id, new_files, target_bin_id, folder_root))
             return
 
         self._import_in_progress = True
         import uuid
         batch_id = str(uuid.uuid4())
-        project_id = self._project.project_id
         self._active_import_batch_id = batch_id
         self._active_import_project_id = project_id
         # Persist target bin + folder root for this batch so the batch-finished
@@ -7727,20 +7932,22 @@ class MediaPoolPanel(QWidget):
         if batch_id != self._active_import_batch_id:
             logger.info(f"Ignoring stale media import batch: {batch_id}")
             return
+        library_candidate = getattr(self, "_pending_ai_library_candidate", None)
         if self._project is None or self._project.project_id != project_id:
             logger.info(f"Dropping media import results for inactive project: {project_id}")
+            if library_candidate:
+                self.ai_library_import_status.emit("工程已切换，已取消添加素材。")
             self._finish_import_batch()
             return
         if getattr(self, "_import_cancelled", False):
             logger.info(f"Dropping cancelled media import batch: {batch_id}")
+            if library_candidate:
+                self.ai_library_import_status.emit("已取消添加素材。")
             self._finish_import_batch()
             return
-        if not isinstance(results, list):
-            logger.warning("Media import worker returned invalid results")
-            self._finish_import_batch()
-            return
-
-        if not results:
+        if not isinstance(results, list) or not results:
+            if library_candidate:
+                self.ai_library_import_status.emit("媒体池未能读取此素材。")
             self._finish_import_batch()
             return
 
@@ -7748,6 +7955,10 @@ class MediaPoolPanel(QWidget):
         errors: List[tuple[str, str]] = []
         imported_assets: List[MediaAsset] = []
         project = self._project
+        target_bin_id = self._active_import_target_bin_id
+        if target_bin_id not in project.bins:
+            target_bin_id = None
+        library_message = ""
 
         # M04.4：通用序列分类——连号静帧合成单一 image_sequence 素材
         # （此前逐张独立 image，媒体池冗余）；不成组路径走既有逐张导入。
@@ -7773,6 +7984,12 @@ class MediaPoolPanel(QWidget):
                 continue  # 序列帧：经组单资产导入（下方循环）
 
             try:
+                if library_candidate and path == library_candidate["path"]:
+                    if not source_matches(path, library_candidate):
+                        library_message = "源素材已变更，请重新分析后再添加。"
+                        continue
+                    if library_candidate.get("asset_id"):
+                        metadata = {**metadata, "global_library_asset_id": library_candidate["asset_id"]}
                 new_project = project.import_asset(
                     path=path,
                     media_type=media_type,
@@ -7785,6 +8002,12 @@ class MediaPoolPanel(QWidget):
                     imported_asset = project.get_asset_by_path(path)
                     if imported_asset is not None:
                         imported_assets.append(imported_asset)
+                        if library_candidate and path == library_candidate["path"]:
+                            if library_candidate.get("start_seconds") is None:
+                                library_message = f"已加入媒体池 · {imported_asset.display_name}"
+                            else:
+                                project, library_message = self._create_ai_library_excerpt(
+                                    project, imported_asset, library_candidate, target_bin_id)
             except Exception as e:
                 errors.append((path, str(e)))
                 logger.error(f"Failed to import: {path}, error={e}")
@@ -7821,7 +8044,6 @@ class MediaPoolPanel(QWidget):
         # Update project reference once (not per file)
         if project is not self._project:
             self._project = project
-            target_bin_id = self._active_import_target_bin_id
             # If this batch came from a folder import/drop, mirror the folder
             # tree into bins before emitting (so the structure shows up at once).
             # When dropped onto a specific bin, the tree is nested under it and
@@ -7843,7 +8065,7 @@ class MediaPoolPanel(QWidget):
                     move_cmd = MoveAssetToBinCommand.create(asset.asset_id, target_bin_id)
                     self._project = self._command_stack.execute(move_cmd, self._project)
             # Emit project_changed only ONCE for the entire batch
-            self.project_changed.emit(project)
+            self.project_changed.emit(self._project)
             # A 4K-or-larger video gets a background 1080p ProRes proxy as
             # soon as it enters the media pool.  The playback hot path only
             # reads a ready proxy; it never starts a transcode itself.  This
@@ -7864,13 +8086,17 @@ class MediaPoolPanel(QWidget):
         if errors:
             logger.warning(f"Batch import had {len(errors)} errors")
 
+        if library_candidate:
+            self.ai_library_import_status.emit(library_message or "素材无法加入媒体池。")
+        else:
+            if errors:
+                message = I18N.tr("edit.media_pool.import_partial", "Imported {count} · Failed {failed}",
+                                  count=imported_count, failed=len(errors))
+            else:
+                message = I18N.tr("edit.media_pool.import_complete", "Added to Media Pool · {count}",
+                                  count=imported_count)
+            self.media_import_status.emit(message)
         self._finish_import_batch()
-
-        # Process any queued imports
-        pending = list(self._pending_import_files)
-        if pending:
-            self._pending_import_files = []
-            self._import_files_async(pending)
 
     def _finish_import_batch(self) -> None:
         """Reset import UI and worker state."""
@@ -7892,9 +8118,16 @@ class MediaPoolPanel(QWidget):
         self._active_import_batch_id = None
         self._active_import_project_id = None
         self._active_import_worker = None
+        self._pending_ai_library_candidate = None
         self._import_cancelled = False
         self._active_import_target_bin_id = None
         self._import_folder_root = None
+
+        while self._pending_import_files and not self._import_in_progress and self._project is not None:
+            project_id, paths, target, folder_root = self._pending_import_files.pop(0)
+            if self._project.project_id == project_id:
+                self._import_files_async(paths, target_bin_id=target if target in self._project.bins else None,
+                                         folder_root=folder_root, files_only=True)
 
     # ==================== Tree Management ====================
 
@@ -8537,9 +8770,7 @@ class MediaPoolPanel(QWidget):
         for asset in assets:
             if asset.is_motion_graphic:
                 continue
-            self._thumb_provider.get_thumbnail(
-                self._thumbnail_path_for_asset(asset), self._thumb_width
-            )
+            self._thumb_provider.get_thumbnail(self._thumbnail_path_for_asset(asset))
 
         logger.debug(
             f"Grid view populated with {len(bins)} bins + "
@@ -8592,16 +8823,14 @@ class MediaPoolPanel(QWidget):
 
             # Show the regular thumbnail immediately while the requested
             # random video frame is decoded asynchronously.
-            cached = self._thumb_provider.get_cached_thumbnail(
-                preview_path, self._thumb_width
-            )
+            cached = self._thumb_provider.get_cached_thumbnail(preview_path)
             if cached is not None:
                 self.asset_model.set_timeline_preview(timeline.timeline_id, cached)
             else:
                 self._pending_timeline_image_previews.setdefault(
                     preview_path, set()
                 ).add(timeline.timeline_id)
-                self._thumb_provider.get_thumbnail(preview_path, self._thumb_width)
+                self._thumb_provider.get_thumbnail(preview_path)
 
             if asset.media_type == "image":
                 continue
@@ -8626,7 +8855,7 @@ class MediaPoolPanel(QWidget):
                 preview_path,
                 frame_index,
                 total_frames,
-                icon_size=self._thumb_width,
+                icon_size=_THUMBNAIL_WIDTH_MAX,
                 asset_id=asset.asset_id,
             )
 
@@ -12255,7 +12484,7 @@ class MediaPoolPanel(QWidget):
 
     def get_thumb_size(self) -> int:
         """Get current thumbnail width in pixels."""
-        return self._thumb_width
+        return self.thumb_slider.value()
 
     def set_view_mode(self, mode: ViewMode) -> None:
         """Set view mode programmatically."""
@@ -12267,20 +12496,8 @@ class MediaPoolPanel(QWidget):
             self._toggle_metadata_view()
 
     def set_thumb_size(self, width: int) -> None:
-        """Set thumbnail size programmatically.
-
-        The grid is column-driven now, so an approximate pixel width maps
-        to the column count that best produces that card width at the
-        current viewport size.
-        """
-        width = max(60, min(240, width))
-        viewport_width = (self.grid_view.viewport().width()
-                          if self.grid_view else 0)
-        if viewport_width >= width:
-            columns = max(1, min(8, round(viewport_width / width)))
-        else:
-            columns = 1
-        self._column_grid.apply_columns(columns)
+        """Set the preferred thumbnail width in pixels."""
+        self.thumb_slider.setValue(width)
 
     # ==================== Undo/Redo API ====================
 

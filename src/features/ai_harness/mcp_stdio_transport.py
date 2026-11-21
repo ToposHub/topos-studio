@@ -15,7 +15,7 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from src.features.ai_harness.mcp_outbound import StdioTransport
 from src.features.ai_harness.mcp_protocol import (
@@ -56,6 +56,7 @@ class SubprocessStdioTransport(StdioTransport):
         cwd: str | None = None,
         startup_timeout: float = _DEFAULT_STARTUP_TIMEOUT,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> None:
         if not command:
             raise ValueError("command must not be empty")
@@ -67,6 +68,7 @@ class SubprocessStdioTransport(StdioTransport):
         self._cwd = cwd
         self._startup_timeout = max(0.1, float(startup_timeout))
         self._request_timeout = max(0.1, float(request_timeout))
+        self._cancel_requested = cancel_requested
 
         self._proc: subprocess.Popen[bytes] | None = None
         self._lock = threading.RLock()
@@ -305,6 +307,8 @@ class SubprocessStdioTransport(StdioTransport):
         )
 
     def _roundtrip(self, request: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+        if self._cancel_requested is not None and self._cancel_requested():
+            raise McpTransportError("MCP 请求已取消")
         self._write(request)
         req_id = request.get("id")
         if req_id is None:
@@ -314,6 +318,9 @@ class SubprocessStdioTransport(StdioTransport):
         out_queue = self._stdout_queue
         deadline = time.monotonic() + timeout
         while True:
+            if self._cancel_requested is not None and self._cancel_requested():
+                self._send_cancel(req_id, reason="cancelled")
+                raise McpTransportError("MCP 请求已取消")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._send_cancel(req_id)
@@ -322,13 +329,10 @@ class SubprocessStdioTransport(StdioTransport):
                     f"stderr={self._stderr_tail()}"
                 )
             try:
-                message = out_queue.get(timeout=remaining)
-            except queue.Empty as exc:
-                self._send_cancel(req_id)
-                raise McpTransportError(
-                    f"MCP 请求超时（id={req_id}, method={request.get('method')}）；"
-                    f"stderr={self._stderr_tail()}"
-                ) from exc
+                wait = min(remaining, 0.1) if self._cancel_requested is not None else remaining
+                message = out_queue.get(timeout=wait)
+            except queue.Empty:
+                continue
             if message is None:
                 raise McpTransportError(
                     f"MCP 子进程已退出 / 无响应（id={req_id}）；stderr={self._stderr_tail()}"
@@ -337,12 +341,12 @@ class SubprocessStdioTransport(StdioTransport):
                 return message
             _LOG.debug("mcp 忽略非匹配消息: %s", message.get("method") or message)
 
-    def _send_cancel(self, request_id: Any) -> None:
+    def _send_cancel(self, request_id: Any, *, reason: str = "timeout") -> None:
         """Best-effort stdio cancellation; never masks the original timeout."""
         try:
             cancellation = {
                 "jsonrpc": "2.0", "method": "notifications/cancelled",
-                "params": {"requestId": request_id, "reason": "timeout"},
+                "params": {"requestId": request_id, "reason": reason},
             }
             if self._mode == "modern":
                 cancellation = self._with_metadata(cancellation)

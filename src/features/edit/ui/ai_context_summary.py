@@ -44,9 +44,9 @@ class AiContextSummary(QWidget):
         layout.setSpacing(0)
 
         self._summary_label = QLabel()
-        self._summary_label.setWordWrap(False)
+        self._summary_label.setWordWrap(True)
         self._summary_label.setStyleSheet(
-            "color: #5b9462; font-size: 10px; padding: 1px 2px;"
+            "color: #c9c9d0; font-size: 11px; padding: 1px 2px;"
         )
         layout.addWidget(self._summary_label)
 
@@ -54,27 +54,29 @@ class AiContextSummary(QWidget):
         """回填上下文摘要。"""
         self._updating = True
         try:
-            if summary.analyzed_count <= 0:
-                status = tr("ai_context.not_analyzed", "尚未分析")
-                color = "#b58a52"
-            elif summary.analysis_fresh:
-                status = tr("ai_context.fresh_short", "分析新鲜")
-                color = "#5b9462"
-            else:
-                status = tr("ai_context.stale_short", "需要重新分析")
-                color = "#b58a52"
+            stale = summary.analyzed_count > 0 and not summary.analysis_fresh
             self._summary_label.setText(
                 _trf(
-                    "ai_context.compact_line",
-                    "素材 {assets} · 已分析 {done} · revision {rev} · {status}",
+                    "ai_context.analysis_count", "已分析 {done}/{assets} 项",
+                    assets=summary.asset_count, done=summary.analyzed_count,
+                )
+                if summary.asset_count else tr("ai_context.no_assets", "没有项目素材")
+            )
+            if stale:
+                self._summary_label.setText(
+                    self._summary_label.text() + " · " + tr("ai_context.stale_short", "分析待更新")
+                )
+            color = "#e1ad78" if stale else "#c9c9d0"
+            self._summary_label.setToolTip(
+                _trf(
+                    "ai_context.summary_details", "素材 {assets} · 已分析 {done} · 工程版本 {rev}",
                     assets=summary.asset_count,
                     done=summary.analyzed_count,
                     rev=summary.snapshot_revision,
-                    status=status,
                 )
             )
             self._summary_label.setStyleSheet(
-                f"color: {color}; font-size: 10px; padding: 1px 2px;"
+                f"color: {color}; font-size: 11px; padding: 1px 2px;"
             )
         finally:
             self._updating = False

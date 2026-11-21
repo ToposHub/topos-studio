@@ -393,6 +393,7 @@ class SnapshotTrack:
     locked: bool = False
     clips: tuple[dict[str, Any], ...] = ()
     caption_metadata: dict[str, Any] | None = None
+    track_role: str = "standard"
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -405,6 +406,8 @@ class SnapshotTrack:
         }
         if self.caption_metadata is not None:
             d["caption_metadata"] = dict(self.caption_metadata)
+        if self.track_role != "standard":
+            d["track_role"] = self.track_role
         return d
 
 

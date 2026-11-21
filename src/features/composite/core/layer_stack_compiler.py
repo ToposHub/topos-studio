@@ -10,8 +10,9 @@ pass sees a consistent picture.
 
 Key invariants (plan §4):
 
-* ``layer_ids[0]`` is the foreground.  For ``[A, B, C]`` the chain is
-  ``Merge1(A, B) → Merge2(Merge1, C) → Output``.
+* ``layer_ids[0]`` is the foreground. Version 2 starts at the bottom and
+  places each layer over the layers below it. Version 1 retains the original
+  top-down grouping for saved compositions.
 * Merge input port names are ``A`` (foreground) and ``B`` (background) —
   the actual :class:`MergeNode` port names, **not** the
   "Foreground"/"Background" labels used in the plan doc (those are
@@ -28,12 +29,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from graphlib import CycleError, TopologicalSorter
 from typing import Any, Dict, List, Optional, Tuple
 
 from .layer_model import (
+    BOTTOM_UP_LAYER_STACK_VERSION,
     Layer,
     LayerStack,
     LAYER_BLEND_MODE_TO_NODE,
+    LAYER_MERGE_MATTE_PARAM,
+    LAYER_MERGE_OWNER_PARAM,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,8 @@ class _CompileCtx:
     input_index: Dict[Tuple[str, str], str] = field(default_factory=dict)
     # The stack being compiled (for output-id checks in _is_managed_connection).
     output_node_id: str = ""
+    # New stacks own Merge inputs. A user may read their output in a side branch.
+    preserve_merge_consumers: bool = False
 
 
 @dataclass
@@ -95,10 +102,8 @@ class CompileChange:
 class CompileResult:
     """Structured outcome of :meth:`LayerStackCompiler.compile`.
 
-    ``merge_node_ids`` is the post-compile ordered list of auto-merge node
-    IDs (foreground-first, i.e. ``merge_node_ids[0]`` merged the topmost
-    two layers).  The controller writes this back into
-    ``stack.generated_merge_node_ids``.
+    ``merge_node_ids`` is the post-compile list of auto-merge node IDs in
+    layer order. The controller writes it back to ``generated_merge_node_ids``.
     """
 
     ok: bool
@@ -143,6 +148,12 @@ class LayerStackCompiler:
             unchanged and the controller must surface the conflict.
         """
         result = CompileResult(ok=True)
+        if not stack.managed:
+            result.merge_node_ids = list(stack.generated_merge_node_ids)
+            return result
+        if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION:
+            return self._compile_bottom_up(stack, layers, result)
+
         layer_ids = [lid for lid in stack.layer_ids
                      if self._layer_is_live(lid, layers, result)]
         # A Track Matte source is a control layer, not a visible layer in
@@ -156,12 +167,6 @@ class LayerStackCompiler:
         if matte_source_ids:
             layer_ids = [lid for lid in layer_ids
                          if lid not in matte_source_ids]
-
-        if not stack.managed:
-            # Free-graph mode (plan §8.2): compiler is a no-op.  The stack
-            # is purely a reference view; reordering does not reconnect.
-            result.merge_node_ids = list(stack.generated_merge_node_ids)
-            return result
 
         # Build per-compile caches once (perf finding #8): the managed-node
         # id set and a (dst_node, dst_port) -> src_node input index.  These
@@ -216,6 +221,160 @@ class LayerStackCompiler:
         return result
 
     # ── Helpers ─────────────────────────────────────────────────────────
+
+    def _compile_bottom_up(self, stack: LayerStack, layers: Dict[str, Layer],
+                           result: CompileResult) -> CompileResult:
+        """Reconcile a bottom-up chain with a stable Merge for each layer."""
+        ordered_layers: List[Layer] = []
+        for layer_id in stack.layer_ids:
+            layer = layers.get(layer_id)
+            if layer is None or self.graph.get_node(layer.root_node_id) is None:
+                result.warnings.append(f"Layer {layer_id!r} has no root node; skipped.")
+                continue
+            ordered_layers.append(layer)
+
+        matte_ids = {layer.track_matte_layer_id for layer in ordered_layers
+                     if layer.track_matte_layer_id}
+        visible_layers = [layer for layer in ordered_layers
+                          if layer.enabled and layer.layer_id not in matte_ids]
+        if any(layer.solo for layer in visible_layers):
+            visible_layers = [layer for layer in visible_layers if layer.solo]
+        current_merges: Dict[str, str] = {}
+        for node_id in stack.generated_merge_node_ids:
+            node = self.graph.get_node(node_id)
+            if node is None:
+                continue
+            owner_id = node.parameters.get(LAYER_MERGE_OWNER_PARAM)
+            if (node.node_type != MERGE_NODE_TYPE or not owner_id
+                    or owner_id in current_merges):
+                return self._bottom_up_conflict(result, node_id, "invalid layer owner")
+            current_merges[owner_id] = node_id
+
+        merge_owners = {node_id: layer_id for layer_id, node_id in current_merges.items()}
+        current_ids = set(merge_owners)
+        known_roots = {node_id for layer in layers.values()
+                       for node_id in (layer.root_node_id, layer.source_node_id)
+                       if node_id}
+        retained_layers = set(stack.layer_ids)
+        removed_merges = {node_id for owner_id, node_id in current_merges.items()
+                          if owner_id not in retained_layers}
+        ctx = _CompileCtx(managed_node_ids=current_ids,
+                          output_node_id=stack.output_node_id,
+                          preserve_merge_consumers=True)
+        for edge in self.graph.connections:
+            feeds_output = (edge.dst_node_id == stack.output_node_id
+                            and edge.dst_port_name == OUTPUT_INPUT_PORT)
+            feeds_merge = edge.dst_node_id in current_ids
+            if feeds_output or (feeds_merge and edge.dst_node_id not in removed_merges):
+                if ((feeds_output and current_ids)
+                        or edge.dst_port_name == MERGE_PORT_BACKGROUND):
+                    valid_input = edge.src_node_id in current_ids
+                else:
+                    roots = known_roots
+                    if feeds_merge and edge.dst_port_name == MERGE_PORT_FOREGROUND:
+                        owner = layers.get(merge_owners[edge.dst_node_id])
+                        roots = {owner.root_node_id} if owner is not None else set()
+                    # Appending an effect makes the former root an ancestor
+                    # of the current root until the compiler replaces its edge.
+                    valid_input = (edge.src_node_id in roots or self._is_upstream_of_roots(
+                        edge.src_node_id, roots, current_ids))
+                if not valid_input:
+                    return self._bottom_up_conflict(
+                        result, edge.dst_node_id, f"external input {edge.src_node_id!r}")
+            if edge.src_node_id in removed_merges and not (feeds_output or feeds_merge):
+                return self._bottom_up_conflict(
+                    result, edge.src_node_id, f"external consumer {edge.dst_node_id!r}")
+
+        for node_id in sorted(removed_merges):
+            result.changes.append(CompileChange(
+                kind="remove_node", node_id=node_id, node_type=MERGE_NODE_TYPE))
+
+        # A hidden layer keeps its Merge and any animation. Active layers
+        # enter the chain from the bottom, each as the A input of its Merge.
+        intended: List[Tuple[str, str, str, str]] = []
+        background_id = None
+        for layer in reversed(visible_layers):
+            merge_id = current_merges.get(layer.layer_id)
+            node = self.graph.get_node(merge_id) if merge_id else None
+            if merge_id is None:
+                merge_id = self._new_node_id(prefix="layer_merge")
+                current_merges[layer.layer_id] = merge_id
+                result.changes.append(CompileChange(
+                    kind="create_node", node_id=merge_id, node_type=MERGE_NODE_TYPE))
+                _project_param(node, LAYER_MERGE_OWNER_PARAM, layer.layer_id,
+                               result, merge_id)
+                # The Merge owns opacity after creation so animation and
+                # edits made through the node survive layer reordering.
+                _project_param(node, "opacity", layer.opacity, result, merge_id)
+            intended.append((layer.root_node_id, _output_port_of(self.graph, layer.root_node_id),
+                             merge_id, MERGE_PORT_FOREGROUND))
+            if background_id is not None:
+                intended.append((background_id, MERGE_OUTPUT_PORT, merge_id,
+                                 MERGE_PORT_BACKGROUND))
+            has_matte = False
+            matte = layers.get(layer.track_matte_layer_id)
+            if layer.track_matte_layer_id:
+                if matte is not None and self.graph.get_node(matte.root_node_id) is not None:
+                    has_matte = True
+                    intended.append((matte.root_node_id, _output_port_of(
+                        self.graph, matte.root_node_id, role="matte"), merge_id, "mask"))
+                else:
+                    result.warnings.append(f"Layer {layer.layer_id!r} has a missing Track Matte.")
+            _project_param(node, LAYER_MERGE_MATTE_PARAM, has_matte, result, merge_id)
+            _project_param(node, "blend_mode", LAYER_BLEND_MODE_TO_NODE.get(layer.blend_mode, "over"),
+                           result, merge_id)
+            _project_param(node, "mask_channel", layer.track_matte_mode, result, merge_id)
+            _project_param(node, "mask_invert", bool(layer.track_matte_invert), result, merge_id)
+            background_id = merge_id
+
+        for layer in ordered_layers:
+            if layer.managed:
+                self._project_layer_parent(layer, layers, result)
+        if background_id is not None and stack.output_node_id:
+            intended.append((background_id, MERGE_OUTPUT_PORT, stack.output_node_id,
+                             OUTPUT_INPUT_PORT))
+        topology = TopologicalSorter()
+        for edge in self.graph.connections:
+            key = (edge.src_node_id, edge.src_port_name, edge.dst_node_id, edge.dst_port_name)
+            if not self._is_managed_connection(key, ctx):
+                topology.add(edge.dst_node_id, edge.src_node_id)
+        for src_id, _, dst_id, _ in intended:
+            topology.add(dst_id, src_id)
+        try:
+            topology.prepare()
+        except CycleError:
+            result.changes.clear()
+            return self._bottom_up_conflict(result, stack.output_node_id,
+                                            "layer wiring would create a cycle")
+        self._reconcile_connections(intended, result, ctx)
+        result.merge_node_ids = [current_merges[layer_id] for layer_id in stack.layer_ids
+                                 if layer_id in current_merges]
+        return result
+
+    def _is_upstream_of_roots(self, source_id: str, root_ids: set[str],
+                              merge_ids: set[str]) -> bool:
+        incoming: Dict[str, List[str]] = {}
+        for edge in self.graph.connections:
+            if edge.src_node_id not in merge_ids and edge.dst_node_id not in merge_ids:
+                incoming.setdefault(edge.dst_node_id, []).append(edge.src_node_id)
+        visited = set(root_ids)
+        pending = list(root_ids)
+        while pending:
+            for upstream_id in incoming.get(pending.pop(), []):
+                if upstream_id == source_id:
+                    return True
+                if upstream_id not in visited:
+                    visited.add(upstream_id)
+                    pending.append(upstream_id)
+        return False
+
+    @staticmethod
+    def _bottom_up_conflict(result: CompileResult, node_id: str,
+                            detail: str) -> CompileResult:
+        result.conflict = True
+        result.ok = False
+        result.conflict_reason = f"Cannot rebuild managed node {node_id!r}: {detail}."
+        return result
 
     def _layer_is_live(self, layer_id: str, layers: Dict[str, Layer],
                        result: CompileResult) -> bool:
@@ -472,6 +631,8 @@ class LayerStackCompiler:
         if ctx is not None:
             managed = ctx.managed_node_ids
             out_id = ctx.output_node_id
+            if ctx.preserve_merge_consumers:
+                return dst_id in managed or (dst_id == out_id and dst_port == OUTPUT_INPUT_PORT)
         else:
             stack = self.graph.get_main_layer_stack()
             if stack is None:
@@ -639,25 +800,19 @@ class LayerStackCompiler:
                 # use the root-node opacity fallback (never the group
                 # merge at this index, which would dim everything above).
                 self._project_root_opacity(layer, result)
-            # Parenting is projected onto the layer root (Transform/Text),
-            # not the merge — the runtime world-transform resolver reads
-            # ``parent_id`` on that node.
-            root = self.graph.get_node(layer.root_node_id)
-            if root is not None and getattr(root, "supports_parent_transform",
-                                            False):
-                parent_layer = (layers.get(layer.parent_layer_id)
-                                if layer.parent_layer_id else None)
-                wanted_parent = (parent_layer.root_node_id
-                                 if parent_layer is not None else None)
-                if getattr(root, "parent_id", None) != wanted_parent:
-                    # Record as a node param-style change so the controller
-                    # can wrap it in the same undo group.
-                    result.changes.append(CompileChange(
-                        kind="connect",  # reuse connect change for parent set
-                        src_node_id=layer.root_node_id,
-                        dst_node_id=layer.root_node_id,
-                        src_port_name="__parent__",
-                        dst_port_name=wanted_parent or ""))
+            self._project_layer_parent(layer, layers, result)
+
+    def _project_layer_parent(self, layer: Layer, layers: Dict[str, Layer],
+                              result: CompileResult) -> None:
+        root = self.graph.get_node(layer.root_node_id)
+        if root is None or not getattr(root, "supports_parent_transform", False):
+            return
+        parent_layer = layers.get(layer.parent_layer_id) if layer.parent_layer_id else None
+        parent_id = parent_layer.root_node_id if parent_layer is not None else None
+        if getattr(root, "parent_id", None) != parent_id:
+            result.changes.append(CompileChange(
+                kind="connect", src_node_id=layer.root_node_id, dst_node_id=layer.root_node_id,
+                src_port_name="__parent__", dst_port_name=parent_id or ""))
 
     def _project_root_opacity(self, layer: Layer,
                               result: CompileResult) -> None:

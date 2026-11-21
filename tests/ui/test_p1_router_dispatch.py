@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -120,6 +121,47 @@ def test_subtitle_intent_routes_to_skill_execution(qapp):
     assert controller._active_chat_run_id, "应产生 run_id"
     rec = runtime.get_run(controller._active_chat_run_id)
     assert rec is not None
+
+
+def test_rough_cut_retry_reuses_its_original_timeline_revision(qapp, monkeypatch) -> None:
+    controller, _, _, runtime = _make_p1_controller(qapp)
+    bridge = controller._bridge = MagicMock()
+    bridge.get_project_id.return_value = "p1"
+    bridge.get_active_timeline_id.return_value = "t1"
+    bridge.get_selected_asset_ids.return_value = ("a1",)
+    timeline = SimpleNamespace(revision=12)
+    bridge.get_project_sequences.return_value = SimpleNamespace(
+        project=SimpleNamespace(project_id="p1"), sequences={"t1": timeline},
+    )
+    execute = MagicMock(return_value=True)
+    monkeypatch.setattr(controller, "_execute_skill_route", execute)
+
+    _submit(controller, "Plan a rough cut using media in this project.")
+    result, scope = execute.call_args.args
+    assert result.skill_id == "topos.voiceover_polish"
+    assert scope.base_revision == 12
+    invocation = controller.router.to_invocation(result, scope=scope, policy=None)
+    run_id = runtime.start(invocation)
+    runtime.finish(run_id, success=False, error_code="TEST_RETRY")
+
+    timeline.revision = 13
+    assert controller._build_chat_scope().base_revision == 13
+    controller._on_result_action_retry(run_id)
+
+    assert execute.call_args.args[1] == scope
+    assert execute.call_args.args[1].base_revision == 12
+
+
+def test_english_script_starter_routes_to_library_search(qapp, monkeypatch) -> None:
+    controller, _, _, _ = _make_p1_controller(qapp)
+    controller._chat_tool_facade = object()
+    start_chat = MagicMock()
+    monkeypatch.setattr(controller, "_can_use_llm_chat", lambda: True)
+    monkeypatch.setattr(controller, "_start_chat", start_chat)
+    text = "Search the AI Media Library and current project for the script below.\n\nScript:\nExport boxes leave the factory."
+
+    assert controller._dispatch_via_router(text)
+    start_chat.assert_called_once_with(text)
 
 
 def test_translate_dub_intent_routes_to_skill(qapp):

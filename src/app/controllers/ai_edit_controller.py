@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
@@ -91,7 +92,47 @@ from src.features.edit.ai_editing.goal_round_driver import GoalRoundDriver
 from src.features.edit.ai_editing.context_spill import ContextSpillStore
 from src.features.edit.ai_editing.tool_operation_ledger import ToolOperationLedger
 
+if TYPE_CHECKING:
+    from src.features.edit.ai_editing.chat_run_driver import ChatMessagePreparer
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile
+    from src.features.edit.ai_editing.tool_facade import ToolFacade
+
 logger = logging.getLogger(__name__)
+
+_LIBRARY_SEARCH_REQUEST = re.compile(
+    r"(?:搜索|检索|查找|寻找|找|匹配|挑选|筛选|推荐)[^\n，。！？]{0,12}(?:素材|镜头|画面)"
+    r"|(?:素材库|素材候选)[^\n，。！？]{0,12}(?:搜索|检索|查找|匹配)"
+)
+_ENGLISH_LIBRARY_SEARCH_REQUEST = re.compile(
+    r"\b(?:search|find|look for|match)\b[^.!?\n]{0,70}\bmedia library\b",
+    re.IGNORECASE,
+)
+
+
+def _is_language_profile(profile: Any) -> bool:
+    capabilities = getattr(profile, "routed_capabilities", None)
+    if capabilities is None:
+        capabilities = getattr(profile, "capabilities", ()) or ()
+    if capabilities:
+        return "language" in capabilities
+    modalities = getattr(profile, "modalities", ()) or ()
+    return not modalities or "text" in modalities
+
+
+def resolve_language_profile(registry: Any) -> AiProviderProfile | None:
+    """Resolve the same language model for validation, chat and editorial plans."""
+    getter = getattr(registry, "active_profile_for_capability", None)
+    if callable(getter):
+        try:
+            profile = getter("language")
+        except RuntimeError:
+            logger.debug("Language capability lookup unavailable, checking the legacy profile", exc_info=True)
+        else:
+            if profile is not None:
+                return profile
+    profile = getattr(registry, "active_profile", None)
+    return profile if profile is not None and _is_language_profile(profile) else None
+
 
 # 自由对话（unknown 分支 → LLM chat）的系统提示与温度映射。
 # 温度与 LLMVariantPlanner 保持一致（low→0.8 / medium→0.6 / high→0.3）。
@@ -240,13 +281,14 @@ class _ChatWorker(QThread):
     def __init__(
         self,
         client: Any,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         temperature: float = 0.7,
         json_mode: bool = False,
         max_tokens: int | None = None,
         stream: bool = True,
         parent: QObject | None = None,
+        prepare_messages: ChatMessagePreparer | None = None,
     ) -> None:
         super().__init__(parent)
         self._client = client
@@ -255,22 +297,29 @@ class _ChatWorker(QThread):
         self._json_mode = json_mode
         self._max_tokens = max_tokens
         self._stream = stream
+        self._prepare_messages = prepare_messages
         self.cancel_requested: bool = False
 
     def run(self) -> None:
         try:
+            messages = self._messages
+            if self._prepare_messages is not None:
+                messages = self._prepare_messages(lambda: self.cancel_requested)
+            if self.cancel_requested:
+                self.cancelled.emit()
+                return
             stream_complete = getattr(self._client, "stream_complete", None)
             # Structured scene edits must use the non-streaming JSON contract;
             # the current streaming provider API has no json_mode parameter.
             if callable(stream_complete) and not self._json_mode and self._stream:
                 reply = stream_complete(
-                    self._messages,
+                    messages,
                     on_delta=self.stream_delta.emit,
                     temperature=self._temperature,
                 )
             else:
                 reply = self._client.complete(
-                    self._messages,
+                    messages,
                     json_mode=self._json_mode,
                     temperature=self._temperature,
                     # Scene-build JSON can legitimately contain inline SVG,
@@ -285,6 +334,9 @@ class _ChatWorker(QThread):
             else:
                 self.finished_reply.emit(reply or "")
         except Exception as exc:  # noqa: BLE001
+            if self.cancel_requested:
+                self.cancelled.emit()
+                return
             logger.error("Chat LLM 调用失败：%s", exc, exc_info=True)
             self.failed.emit(str(exc))
 
@@ -468,6 +520,7 @@ class AiEditController(QObject):
         skill_plugin_host: Any = None,
         profile_registry: Any = None,
         credential_store: Any = None,
+        chat_tool_facade: ToolFacade | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -516,6 +569,7 @@ class AiEditController(QObject):
         )
         self._profile_registry: Any = profile_registry
         self._credential_store: Any = credential_store
+        self._chat_tool_facade = chat_tool_facade
         self._teaching_context_provider: Any = None
         self._teaching_request_handler: Any = None
         self._teaching_motion_graphic_mode_handler: Any = None
@@ -1086,7 +1140,8 @@ class AiEditController(QObject):
         )
         if not text and not attachments and not target_asset_ids:
             return
-        if attachments and not self._validate_chat_attachments(attachments):
+        mode = normalize_assistant_mode(getattr(request, "mode", "chat"))
+        if attachments and not self._validate_chat_attachments(attachments, allow_mcp=mode == "chat"):
             return
         self._last_request_text = text
         # 多模态：暂存附件供 _start_chat 消费（仅内存，不持久化为字节）。
@@ -1097,7 +1152,6 @@ class AiEditController(QObject):
         # The footer mode is an explicit routing choice.  Handle it before the
         # natural-language router so a request such as “做一段风景” cannot be
         # mistaken for ordinary chat or a different skill.
-        mode = normalize_assistant_mode(getattr(request, "mode", "chat"))
         self._current_assistant_mode = mode
         if (
             mode == "chat"
@@ -1290,6 +1344,14 @@ class AiEditController(QObject):
                     show(f"场景修改规划失败：{exc}", warning=True)
                 return
 
+        # Visual attachments in ordinary chat refer to the current message.
+        # Project-analysis skills use the host selection instead.
+        if mode == "chat" and any(
+            self._attachment_input_kind(item) in {"image", "video"} for item in attachments
+        ):
+            self._start_chat(text)
+            return
+
         # P1：router 已装配 → 意图路由分发
         if self.router is not None:
             if self._dispatch_via_router(text):
@@ -1329,6 +1391,22 @@ class AiEditController(QObject):
         Returns:
             True 表示已分发（不再走旧路径）；False 表示分发失败需回退。
         """
+        if (
+            self.__dict__.get("_chat_tool_facade") is not None
+            and self._pending_route is None
+            and (
+                _ENGLISH_LIBRARY_SEARCH_REQUEST.search(text)
+                or (
+                    any(context in text for context in ("脚本", "分镜", "镜头描述", "全局素材库"))
+                    and _LIBRARY_SEARCH_REQUEST.search(text)
+                )
+            )
+            and self._can_use_llm_chat()
+        ):
+            # This explicit request queries the library. Words inside the script
+            # may otherwise trigger an unrelated analysis or editing skill.
+            self._start_chat(text)
+            return True
         try:
             scope = self._build_chat_scope()
             # 澄清往返：pending_route 存在时，本次输入是澄清答案
@@ -1692,6 +1770,7 @@ class AiEditController(QObject):
         project_id = ""
         timeline_id = ""
         selected: tuple[str, ...] = ()
+        base_revision: int | None = None
         try:
             project_id = self._bridge.get_project_id() or "default"
         except Exception:  # noqa: BLE001
@@ -1702,6 +1781,15 @@ class AiEditController(QObject):
                 timeline_id = tl
         except Exception:  # noqa: BLE001
             timeline_id = ""
+        if timeline_id:
+            try:
+                state = self._bridge.get_project_sequences()
+                if state is not None and state.project.project_id == project_id:
+                    timeline = state.sequences.get(timeline_id)
+                    if timeline is not None:
+                        base_revision = timeline.revision
+            except Exception:  # noqa: BLE001 — the bridge may not expose edit state
+                logger.debug("could not read the timeline revision for the AI request", exc_info=True)
         try:
             selected = self._bridge.get_selected_asset_ids()
         except Exception:  # noqa: BLE001
@@ -1710,6 +1798,7 @@ class AiEditController(QObject):
             project_id=project_id or "default",
             timeline_id=timeline_id,
             selected_asset_ids=tuple(selected),
+            base_revision=base_revision,
         )
 
     def _execute_skill_route(
@@ -2060,43 +2149,11 @@ class AiEditController(QObject):
 
     def _can_use_llm_chat(self) -> bool:
         """是否具备 LLM 自由对话能力（profile 已配置 + credential_store 可用）。"""
-        if self._profile_registry is None or self._credential_store is None:
-            return False
-        try:
-            if self._profile_registry.active_profile is not None:
-                return True
-            # A user may configure a capability-specific language model
-            # without designating a global default.  Structured HTML/Motion
-            # Graphic calls can safely use that explicit route.
-            getter = getattr(self._profile_registry, "active_profile_for_capability", None)
-            return bool(callable(getter) and getter("language") is not None)
-        except Exception:  # noqa: BLE001
-            return False
+        return self._credential_store is not None and self._chat_profile_for_mode("normal") is not None
 
-    def _chat_profile_for_mode(self, chat_mode: str) -> Any | None:
-        """Select the user-configured model for a chat transport.
-
-        Motion Graphic authoring is a language-generation task.  Respect the
-        existing ``language`` capability route when the user configured one;
-        do not perform paid/provider fallback here.  Attachments remain
-        validated against this exact choice below, so routing cannot silently
-        send media to a profile that lacks the corresponding input capability.
-        """
-        registry = self._profile_registry
-        if registry is None:
-            return None
-        if chat_mode in {
-            "teaching_html_generate", "teaching_motion_graphic_build",
-        }:
-            getter = getattr(registry, "active_profile_for_capability", None)
-            if callable(getter):
-                try:
-                    routed = getter("language")
-                except Exception:  # noqa: BLE001 - a bad registry must not crash chat
-                    routed = None
-                if routed is not None:
-                    return routed
-        return getattr(registry, "active_profile", None)
+    def _chat_profile_for_mode(self, chat_mode: str) -> AiProviderProfile | None:
+        """Ordinary chat and structured authoring share the language route."""
+        return resolve_language_profile(self._profile_registry)
 
     @staticmethod
     def _attachment_input_kind(attachment: object) -> str:
@@ -2107,6 +2164,7 @@ class AiEditController(QObject):
 
     def _validate_chat_attachments(
         self, attachments: tuple[ChatAttachment, ...], *, profile: Any | None = None,
+        allow_mcp: bool = True,
     ) -> bool:
         """发送前阻断不支持多模态的模型，并给出可操作的切换提示。"""
         profile = profile or self._chat_profile_for_mode(self._chat_mode)
@@ -2120,7 +2178,7 @@ class AiEditController(QObject):
             profile_supports_input,
         )
         unsupported = [
-            self._attachment_input_kind(attachment)
+            attachment
             for attachment in attachments
             if not profile_supports_input(
                 profile, self._attachment_input_kind(attachment),
@@ -2128,10 +2186,61 @@ class AiEditController(QObject):
         ]
         if not unsupported:
             return True
+        if allow_mcp:
+            from src.features.edit.ai_editing.assistant_vision_fallback import required_mcp_attachments
+
+            eligible = required_mcp_attachments(profile, attachments)
+            if len(eligible) == len(unsupported):
+                if self._configured_mcp_vision_profile() is not None:
+                    return True
+                show = getattr(self._panel, "set_agent_notice", None)
+                if callable(show):
+                    show(self._tr_safe(
+                        "ai_assistant.vision_fallback_unavailable",
+                        "当前模型不支持此附件。请在首选项启用智谱视觉 MCP，设为默认视觉服务并允许上传素材。",
+                    ), warning=True)
+                return False
         show = getattr(self._panel, "set_agent_notice", None)
         if callable(show):
             show(profile_multimodal_reason(profile), warning=True)
         return False
+
+    def _configured_mcp_vision_profile(self) -> AiProviderProfile | None:
+        from src.features.edit.ai_editing.assistant_vision_fallback import resolve_mcp_vision_profile
+        from src.features.edit.ai_editing.mcp_vision_gateway import (
+            ZHIPU_VISION_PROFILE_ID,
+            get_mcp_vision_gateway,
+        )
+
+        profile = resolve_mcp_vision_profile(self._profile_registry)
+        if profile is not None and get_mcp_vision_gateway().is_server_enabled(ZHIPU_VISION_PROFILE_ID):
+            return profile
+        return None
+
+    def _chat_message_preparer(
+        self, primary: AiProviderProfile, vision: AiProviderProfile | None,
+        required: tuple[ChatAttachment, ...], messages: list[dict[str, Any]], prompt: str,
+    ) -> ChatMessagePreparer | None:
+        if not required and not any(isinstance(message.get("content"), list) for message in messages):
+            return None
+
+        from src.features.edit.ai_editing.assistant_vision_fallback import prepare_vision_fallback_messages
+
+        def prepare(cancelled: Callable[[], bool]) -> list[dict[str, Any]]:
+            # Recheck the selected route at execution time. A changed/default
+            # recipient is never swapped in while the user request is queued.
+            current = self._configured_mcp_vision_profile() if required else None
+            return prepare_vision_fallback_messages(
+                messages, primary=primary, required=required,
+                profile=vision if current == vision else None,
+                credential_store=self._credential_store, prompt=prompt, cancelled=cancelled,
+                still_authorized=(
+                    (lambda: self._configured_mcp_vision_profile() == vision)
+                    if required and vision is not None else None
+                ),
+            )
+
+        return prepare
     @staticmethod
     def _chat_activity_label(
         chat_mode: str,
@@ -2212,18 +2321,35 @@ class AiEditController(QObject):
         )
         expose_user_message = not isolated_artifact
 
-        # 记录 user 消息（UI 立即显示 + 供下一轮历史拼装）。携带多模态附件。
         attachments = self._pending_chat_attachments
         self._pending_chat_attachments = ()  # 消费即清空，避免跨请求残留
+        profile = self._chat_profile_for_mode(chat_mode)
+        if profile is None:
+            self._on_chat_failed("当前没有可用的 AI 模型，请先配置并连接模型。")
+            return
+        allow_mcp = chat_mode == "normal" and self._current_assistant_mode == "chat"
+        if attachments and not self._validate_chat_attachments(
+            attachments, profile=profile, allow_mcp=allow_mcp,
+        ):
+            self._pending_chat_attachments = attachments
+            self._finish_legacy_chat_activity("已阻止", status="cancelled")
+            return
+        required = ()
+        if allow_mcp and attachments:
+            from src.features.edit.ai_editing.assistant_vision_fallback import required_mcp_attachments
+
+            required = required_mcp_attachments(profile, attachments)
+        vision = self._configured_mcp_vision_profile() if required else None
+        # Keep fallback-only files out of conversation history. A later model
+        # switch may change the provider that receives the conversation context.
+        native_attachments = tuple(item for item in attachments if item not in required)
+        if required and not text.strip():
+            text = self._tr_safe("ai_assistant.vision_attachment_request", "请分析本次附件。")
         if expose_user_message:
             try:
-                self._service.append_chat_message("user", text, attachments=attachments)
+                self._service.append_chat_message("user", text, attachments=native_attachments)
             except Exception:  # noqa: BLE001
                 logger.debug("append user chat message failed", exc_info=True)
-        # MCP 视觉：把附件存盘并注册，供 topos.mcp.* 工具以 'latest' 引用。
-        if attachments:
-            self._register_mcp_session_images(attachments)
-
         # Artifact generation must be deterministic with respect to the
         # current brief, not with respect to whatever template-like answer
         # happened to be in the preceding chat.  Keep ordinary conversation
@@ -2238,33 +2364,22 @@ class AiEditController(QObject):
             # ordinary chat history first.  Keep dropped files in that same
             # isolated message; otherwise the UI accepts the attachments but
             # the artifact model never receives them.
-            draft_attachments=attachments if isolated_artifact else (),
+            draft_attachments=native_attachments if isolated_artifact else (),
         )
         self._update_legacy_chat_activity(
             self._chat_activity_label(chat_mode, "context", system_instruction),
             detail=f"已准备 {len(messages)} 条消息",
         )
 
-        # 构造 client（make_client 纯构造、无副作用；与 _on_composer_profile_changed
-        # 的做法一致：不长期持有 client，避免切 profile 后的脏引用）。结构化
-        # Motion Graphic 请求优先采用用户为 ``language`` 显式配置的路由。
-        profile = self._chat_profile_for_mode(chat_mode)
-        if profile is None:
-            self._on_chat_failed("当前没有可用的 AI 模型，请先配置并连接模型。")
-            return
-        # 多模态附件必须使用这一次实际发起请求的 Profile。不能静默切换到另一
-        # 个模型，否则底部显示的模型与实际处理请求的模型会不一致。
-        if attachments and not self._validate_chat_attachments(
-            attachments, profile=profile,
-        ):
-            # AUD-2001：早退路径必须终结 Run Drawer 的活动项，否则留下一个
-            # 永不结束、也无法有效取消的 "running" 幽灵条目（profile is None
-            # 分支经 _on_chat_failed 收尾，本分支此前没有对称处理）。
-            # 附件保留在暂存区供隔离 artifact 请求的模块重试消费（模块复用
-            # 同一 request_id 重试，重试前用户可切换 language 路由的 Profile）。
-            self._pending_chat_attachments = attachments
-            self._finish_legacy_chat_activity("已阻止", status="cancelled")
-            return
+        prepare = self._chat_message_preparer(profile, vision, required, messages, text)
+        if required:
+            notice = getattr(self._panel, "set_agent_notice", None)
+            if callable(notice):
+                notice(self._tr_safe(
+                    "ai_assistant.vision_fallback_started", "将由智谱视觉 MCP 分析本次附件，当前模型继续回答。",
+                ))
+        elif attachments:
+            self._register_mcp_session_images(attachments)
         try:
             from src.features.edit.ai_editing.llm_client import make_client
             client = make_client(profile, self._credential_store)
@@ -2293,6 +2408,8 @@ class AiEditController(QObject):
         # 测试模式：同步执行（保持现有断言式测试契约，与 _start_plan 一致）
         if os.environ.get("TOPOS_TEST_MODE"):
             try:
+                if prepare is not None:
+                    messages = prepare(lambda: False)
                 reply = client.complete(
                     messages,
                     json_mode=chat_mode in ("teaching_scene_edit", "teaching_motion_graphic_build"),
@@ -2317,8 +2434,11 @@ class AiEditController(QObject):
             from src.features.edit.ai_editing.agent_feature_flags import (
                 is_agent_runtime_v2_enabled,
             )
+            options: dict[str, Any] = {"prepare_messages": prepare} if prepare is not None else {}
+            if any(self._attachment_input_kind(item) in {"image", "video"} for item in attachments):
+                options["omit_mcp_vision_tools"] = True
             if is_agent_runtime_v2_enabled() and self._start_chat_v2(
-                text, messages, temperature=temperature,
+                text, messages, temperature=temperature, **options,
             ):
                 # V2 owns the visible activity stream from run.created onward.
                 # Drop only the fallback item; do not clear the panel because a
@@ -2339,6 +2459,7 @@ class AiEditController(QObject):
             max_tokens=_HTML_GENERATE_MAX_TOKENS if chat_mode == "teaching_html_generate" else None,
             stream=chat_mode != "teaching_html_generate",
             parent=self,
+            prepare_messages=prepare,
         )
         self._streaming_reply_text = ""
         clear_stream = getattr(self._panel, "clear_streaming_reply", None)
@@ -2466,9 +2587,11 @@ class AiEditController(QObject):
     def _start_chat_v2(
         self,
         text: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         temperature: float,
+        prepare_messages: ChatMessagePreparer | None = None,
+        omit_mcp_vision_tools: bool = False,
     ) -> bool:
         """Run ordinary chat through the unified AgentRun (plan §A1).
 
@@ -2477,6 +2600,9 @@ class AiEditController(QObject):
         existing chat callbacks so the UI behaviour stays identical.
         """
 
+        lookup = getattr(self._profile_registry, "active_profile_for_capability", None)
+        if not callable(lookup) or lookup("language") is None:
+            return False
         driver = self._get_v2_chat_driver()
         if driver is None:
             return False
@@ -2494,6 +2620,8 @@ class AiEditController(QObject):
             temperature=temperature,
             stream=True,
             parent=self,
+            prepare_messages=prepare_messages,
+            omit_mcp_vision_tools=omit_mcp_vision_tools,
         )
         self._streaming_reply_text = ""
         clear_stream = getattr(self._panel, "clear_streaming_reply", None)
@@ -2619,13 +2747,16 @@ class AiEditController(QObject):
             logger.debug("queue active V2 follow-up failed", exc_info=True)
             return False
 
-    def _try_build_tool_facade(self) -> Any:
+    def _try_build_tool_facade(self) -> ToolFacade | None:
         """B2: 尝试用当前 EditSession 构造 ToolFacade（只读工具集）。
 
         EditSession.current() 在工程打开后可用；未绑定时返回 None，
         ChatRunDriver 会降级为纯对话（不使用工具循环）。
         """
 
+        facade = self.__dict__.get("_chat_tool_facade")
+        if facade is not None:
+            return facade
         try:
             from src.features.edit.ai_editing.edit_api import EditSession
             from src.features.edit.ai_editing.tool_facade import ToolFacade
@@ -3567,11 +3698,11 @@ class AiEditController(QObject):
             return 200_000
 
     @staticmethod
-    def _estimate_chat_tokens(messages: list[dict[str, str]]) -> int:
+    def _estimate_chat_tokens(messages: list[dict[str, Any]]) -> int:
         """估算完整消息数组的 token 数（含每条消息的轻量协议开销）。"""
-        from src.features.edit.ai_editing.token_estimator import estimate_text_tokens
+        from src.features.edit.ai_editing.context_budget import estimate_window_usage
 
-        return sum(4 + estimate_text_tokens(str(m.get("content", ""))) for m in messages)
+        return estimate_window_usage(messages, window_limit=None).window_prompt or 0
 
     def _compress_chat_messages(
         self,
@@ -3635,6 +3766,12 @@ class AiEditController(QObject):
             candidate = system_messages + summary_messages + recent_messages
             if len(summary_text) <= 64:
                 break
+
+        if summary_messages and self._estimate_chat_tokens(candidate) > limit:
+            # Earlier history is optional when its summary would crowd out the
+            # user's latest message.
+            summary_messages = []
+            candidate = system_messages + recent_messages
 
         # 最后一条也可能本身超出极小 Profile；继续缩短消息正文，确保真正
         # 发送给 provider 的数组不会悄悄超过上限。
@@ -4898,7 +5035,7 @@ class AiEditController(QObject):
         原先只切 catalog active 但不清内存，导致内存历史与持久化目录脱节——
         用户以为"新建=清空"但 LLM 仍看到旧对话，体感混乱。
         """
-        if self.session_store is None:
+        if self.session_store is None or self._session_change_blocked():
             return
         try:
             self.session_store.create_session()
@@ -4923,7 +5060,7 @@ class AiEditController(QObject):
 
     def _on_clear_history(self) -> None:
         """清空本机/当前工程的 AI 对话历史，并同步清空内存上下文。"""
-        if self.session_store is None:
+        if self.session_store is None or self._session_change_blocked():
             return
         try:
             clear = getattr(self.session_store, "clear_history", None)
@@ -5047,8 +5184,9 @@ class AiEditController(QObject):
         MessageSummary 回灌。原先只切 catalog active 不动内存历史，导致切换
         会话后 LLM 仍看到旧会话内容，与 UI 显示脱节。
         """
-        if self.session_store is None or not session_id:
+        if self.session_store is None or not session_id or self._session_change_blocked():
             return False
+
         try:
             ok = self.session_store.set_active_session(session_id)
             if not ok:
@@ -5085,6 +5223,18 @@ class AiEditController(QObject):
             logger.debug("switch session failed", exc_info=True)
             return False
 
+    def _session_change_blocked(self) -> bool:
+        state = self._service.state
+        if not isinstance(state, AssistantState) or not state.is_busy:
+            return False
+        notice = getattr(self._panel, "set_agent_notice", None)
+        if callable(notice):
+            notice(self._tr_safe(
+                "ai_assistant.session_busy",
+                "请等当前请求完成，或先点停止，再切换会话。",
+            ), warning=True)
+        return True
+
     # ------------------------------------------------------------------ #
     # P0.5：上下文压缩
     # ------------------------------------------------------------------ #
@@ -5103,6 +5253,7 @@ class AiEditController(QObject):
             request = ContextBuildRequest(
                 sources=sources,
                 budget=self._context_budget(),
+                history=self._inspector_history(),
             )
             bundle = ContextService().build_bundle(request)
             self._active_context_bundle = bundle
@@ -5137,19 +5288,7 @@ class AiEditController(QObject):
                 self.session_store.add_compression_checkpoint(cp)
             except Exception:  # noqa: BLE001
                 logger.debug("checkpoint persist failed", exc_info=True)
-        # 刷新 footer（context_compressed=True）
-        try:
-            from src.features.edit.ui.ai_assistant_composer import ComposerFooterState
-            state = ComposerFooterState(
-                permission=self._current_permission,
-                mode=self._current_assistant_mode,
-                context_used=getattr(new_bundle, "total_tokens", 0),
-                context_limit=getattr(new_bundle.budget, "limit", 200_000),
-                context_compressed=True,
-            )
-            self._panel.set_composer_footer(state)
-        except Exception:  # noqa: BLE001
-            pass
+        self._refresh_composer_footer()
 
     def _on_brief_approved(self, brief: Any) -> None:
         """用户在 Brief 编辑器点"批准 Brief" → save brief → 规划 variants。
@@ -6231,42 +6370,27 @@ class AiEditController(QObject):
             has_active_run = True
         registry_list = getattr(self._profile_registry, "list", None)
         profiles = registry_list() if callable(registry_list) else ()
+        active = self._chat_profile_for_mode(self._chat_mode)
+        draft_token_limit = None
+        if active is not None:
+            system_tokens = self._estimate_chat_tokens([{"content": _CHAT_SYSTEM_PROMPT}])
+            draft_token_limit = max(0, active.limits.max_context_tokens - system_tokens - 4)
         state = ComposerFooterState(
             permission=self._current_permission,
             context_used=context_used,
             context_compressed=context_compressed,
-            context_limit=(
-                self._profile_registry.active_profile.limits.max_context_tokens
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else 200_000
+            context_limit=active.limits.max_context_tokens if active is not None else 200_000,
+            profile_label=active.display_name if active is not None else "",
+            model_label=active.model_id if active is not None else "",
+            profile_options=tuple(
+                (profile.profile_id, profile.display_name, profile.model_id)
+                for profile in profiles if _is_language_profile(profile)
             ),
-            profile_label=(
-                self._profile_registry.active_profile.display_name
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else ""
-            ),
-            model_label=(
-                self._profile_registry.active_profile.model_id
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else ""
-            ),
-            profile_options=(
-                tuple(
-                    (p.profile_id, p.display_name, p.model_id)
-                    for p in profiles
-                )
-                if self._profile_registry is not None else ()
-            ),
-            active_profile_id=(
-                getattr(self._profile_registry, "active_profile_id", "")
-                if self._profile_registry is not None else ""
-            ),
+            active_profile_id=active.profile_id if active is not None else "",
             mode=self._current_assistant_mode,
             reasoning_effort=self._current_reasoning_effort,
             has_active_run=has_active_run,
+            draft_token_limit=draft_token_limit,
         )
         try:
             self._panel.set_composer_footer(state)
@@ -6276,10 +6400,7 @@ class AiEditController(QObject):
     def _context_budget(self) -> Any:
         """返回当前 Profile 的上下文预算（无 Profile 时使用 200k 默认值）。"""
         from src.features.edit.ai_editing.context_bundle import TokenBudget
-        active = (
-            self._profile_registry.active_profile
-            if self._profile_registry is not None else None
-        )
+        active = self._chat_profile_for_mode(self._chat_mode)
         limit = active.limits.max_context_tokens if active is not None else 200_000
         return TokenBudget(limit=max(1_024, int(limit)))
 
@@ -6305,10 +6426,14 @@ class AiEditController(QObject):
         if registry is None or not profile_id:
             return
         profile = registry.get(profile_id)
-        if profile is None:
+        if profile is None or not _is_language_profile(profile):
             return
         try:
-            registry.set_active(profile_id)
+            bind = getattr(registry, "set_active_for_capability", None)
+            if callable(bind):
+                bind("language", profile_id)
+            else:
+                registry.set_active(profile_id)
             registry.save_to_user_file()
         except Exception:
             logger.debug("saving selected AI profile failed", exc_info=True)
@@ -6366,7 +6491,7 @@ class AiEditController(QObject):
         except Exception:
             logger.debug("saving reasoning effort failed", exc_info=True)
         # Profile 不变，只重建 planner 以使后续请求使用新的推理强度。
-        active = self._profile_registry.active_profile if self._profile_registry is not None else None
+        active = self._chat_profile_for_mode(self._chat_mode)
         if active is not None and self._credential_store is not None:
             try:
                 from src.features.edit.ai_editing.llm_variant_planner import LLMVariantPlanner
@@ -6524,6 +6649,7 @@ class AiEditController(QObject):
             request = ContextBuildRequest(
                 sources=sources,
                 budget=self._context_budget(),
+                history=self._inspector_history(),
             )
             bundle = ContextService().build_bundle(request)
             self._active_context_bundle = bundle
@@ -6653,12 +6779,24 @@ class AiEditController(QObject):
 
         return _InspectorSources()
 
+    def _inspector_history(self) -> tuple[dict[str, str], ...]:
+        return tuple(
+            {"role": message.role, "text": message.text}
+            for message in self._service.recent_chat_messages(limit=10)
+        )
+
     def _on_variant_selected(self, variant_id: str) -> None:
         """用户选定方案 → 校验（TAEP §11.6 步骤 10）。"""
+        variant = self._service.get_variant(variant_id)
+        if variant is None or variant.status.value not in {"proposed", "selected"}:
+            return
         self._service.select_variant(variant_id)
         state = self._bridge.get_project_sequences()
         # state 可能为 None（无工程）；validate_selected 内部会给出明确诊断。
-        self._service.validate_selected(variant_id, state=state)
+        preview = self._service.validate_selected(variant_id, state=state)
+        show_preview = getattr(self._panel, "show_variant_preview", None)
+        if preview is not None and preview.diff is not None and callable(show_preview):
+            show_preview(variant_id, preview, can_apply=variant.scores.hard_constraints_passed)
 
     def _on_apply_requested(self, variant_id: str) -> None:
         """用户点"应用方案" → 走审批 → 提交（TAEP §11.6 步骤 11）。
@@ -6677,7 +6815,15 @@ class AiEditController(QObject):
         )
 
         variant = self._service.get_variant(variant_id)
-        if variant is None or variant.edit_plan_ref is None:
+        if (
+            variant is None or variant.edit_plan_ref is None
+            or variant.status.value not in {"proposed", "selected"}
+        ):
+            return
+        if not variant.scores.hard_constraints_passed:
+            self._service.record_error(self._tr_safe(
+                "ai_assistant.constraints_unmet", "有约束未满足",
+            ))
             return
         repo = self._service.plan_repository
         stored = repo.get(variant.edit_plan_ref)
@@ -6703,6 +6849,20 @@ class AiEditController(QObject):
         grant = self._bridge.request_plan_approval(plan, preview)
         if grant is None:
             return  # 用户拒绝
+
+        # The approval dialog runs a nested event loop. Recheck the live target
+        # in case the project or timeline changed while the dialog was open.
+        live_state = self._bridge.get_project_sequences()
+        live_preview = self._service.preview_plan(plan, live_state) if live_state is not None else None
+        if (
+            live_preview is None or live_preview.has_errors
+            or live_preview.diff_hash != preview.diff_hash
+        ):
+            self._service.record_error(self._tr_safe(
+                "ai_assistant.approval_expired",
+                "工程在确认期间发生变化，请重新预览方案。",
+            ))
+            return
 
         # consume 授权（原子校验作用域 + 一次性消费）。失败则明确记错，不静默。
         approval_svc = self._bridge.approval_service()

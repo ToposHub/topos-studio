@@ -18,21 +18,23 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from PyQt6.QtCore import QDateTime, QEvent, Qt, QTimer, QSize, pyqtSignal
+from PyQt6.QtCore import QDateTime, QEvent, QObject, QPoint, Qt, QTimer, QSize, pyqtSignal
 from PyQt6.QtGui import (
     QAction,
     QActionGroup,
     QCloseEvent,
+    QColor,
     QCursor,
     QKeySequence,
     QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QComboBox, QFrame, QLabel, QLineEdit, QPushButton,
+    QColorDialog, QComboBox, QInputDialog, QLabel, QLineEdit,
     QSizePolicy, QMenu, QToolBar, QToolButton, QVBoxLayout,
-    QWidget,
+    QToolTip, QWidget,
 )
 
+from src.features.composite.core.layer_model import LAYER_BLEND_MODES, Layer
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
@@ -49,10 +51,11 @@ _TOOLBAR_BTN_H = 22
 
 from .keyframes_model import (
     CompositeTimelineState, FrameMapper, KeyframesModel, KEYFRAMES_RULER_H,
-    KEYFRAMES_ROW_H)
+    KEYFRAMES_ROW_H, LAYER_TRANSFORM_PROPERTIES, KeyframesTrackVisual)
 from . import timeline_layout
 from .keyframes_tree_view import KeyframesTreeView
 from .keyframes_timeline_view import KeyframesTimelineView
+from .timeline_commands import layer_bar_edit_bounds
 from .graph_view import GraphCanvasHost
 from .timeline_icons import make_qicon
 from .timeline_time_display import TimelineTimeDisplay
@@ -73,6 +76,10 @@ logger = logging.getLogger(__name__)
 # scrubbed across thousands of frames would otherwise grow without limit.
 _DISPLAY_VALUE_CACHE_MAX = 8192
 _DISPLAY_VALUE_MISS = object()
+_COMPAT_SHORTCUT_ATTRIBUTES = (
+    "_shortcut_add_kf", "_shortcut_nav_prev", "_shortcut_nav_next",
+    "_shortcut_add_kf_mod", "_shortcut_set_in", "_shortcut_set_out", "_shortcut_toggle_graph",
+)
 
 
 class KeyframesPanel(QWidget):
@@ -107,6 +114,9 @@ class KeyframesPanel(QWidget):
     layer_selected = pyqtSignal(str)
     # Emitted when Delete/Backspace is pressed on a selected Layer row.
     layer_delete_requested = pyqtSignal(str)
+    layer_edit_committed = pyqtSignal(str, str)
+    remove_layer_effect_requested = pyqtSignal(str, str)
+    generated_layer_requested = pyqtSignal(str, str, dict, int)
     promote_node_requested = pyqtSignal(str)
     create_matte_layer_requested = pyqtSignal(str)
     attach_node_requested = pyqtSignal(str)
@@ -138,9 +148,6 @@ class KeyframesPanel(QWidget):
     property_value_drag_finished = pyqtSignal(str, str)
     parameter_binding_changed = pyqtSignal(str, str, str, str)
     parent_binding_changed = pyqtSignal(str, object)
-    # Reuse CompositePage's existing New Comp Clip workflow from the empty
-    # state, while keeping the dock itself available for the CTA click.
-    create_empty_comp_clip_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -218,6 +225,7 @@ class KeyframesPanel(QWidget):
         self._layer_stack_controller: Optional[object] = None
         self._layer_view_mode: str = KeyframesModel.VIEW_MODE_NODES
         self._selected_layer_id: Optional[str] = None
+        self._layer_delete_blocked = False
         # Expression policy (P0 §5.3 decision). Defaults preserve A-15; the
         # host can flip this once node-side coexistence storage lands.
         self._expression_policy = ExpressionPolicy()
@@ -245,11 +253,11 @@ class KeyframesPanel(QWidget):
         # collapsed until the user asks to edit an expression.
         self._expression_editor_expanded: bool = False
         self._expression_editor_height: int = 120
-        self._empty_state_overlay: Optional[QWidget] = None
-        self._empty_state_create_button: Optional[QPushButton] = None
         self._toolbar: Optional[QWidget] = None
         self._footer: Optional[QWidget] = None
         self._shortcut_enabled = True
+        self._shortcut_set_in: Optional[QShortcut] = None
+        self._shortcut_set_out: Optional[QShortcut] = None
         self._shortcut_dispatcher = timeline_shortcuts.ShortcutDispatcher()
         self._shortcut_filter_widgets = []
 
@@ -277,12 +285,7 @@ class KeyframesPanel(QWidget):
         # older hosts/plugins that inspected them directly. The dispatcher
         # below remains authoritative; these shortcuts mirror only the small
         # set of legacy bindings and are disabled before being replaced.
-        compat_attrs = (
-            "_shortcut_add_kf", "_shortcut_nav_prev", "_shortcut_nav_next",
-            "_shortcut_add_kf_mod", "_shortcut_set_in", "_shortcut_set_out",
-            "_shortcut_toggle_graph",
-        )
-        for attr in compat_attrs:
+        for attr in _COMPAT_SHORTCUT_ATTRIBUTES:
             old = getattr(self, attr, None)
             if old is not None:
                 old.setEnabled(False)
@@ -294,6 +297,7 @@ class KeyframesPanel(QWidget):
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(handler)
+            shortcut.setEnabled(self._shortcut_enabled and not self._uses_ae_layer_shortcuts())
             setattr(self, attr, shortcut)
 
         if self._ae_nav_enabled:
@@ -349,6 +353,8 @@ class KeyframesPanel(QWidget):
             ts.CMD_COPY: self._timeline_view.copy_selected_keyframes,
             ts.CMD_PASTE: self._timeline_view.paste_keyframes,
             ts.CMD_DELETE: self._timeline_view._delete_selected_keyframes,
+            ts.CMD_DUPLICATE_LAYER: self._duplicate_selected_layer,
+            ts.CMD_RENAME_LAYER: self._rename_selected_layer,
             ts.CMD_UNDO: self.undo_requested.emit,
             ts.CMD_REDO: self.redo_requested.emit,
             ts.CMD_FIT_SELECTION: self.fit_selection,
@@ -363,6 +369,47 @@ class KeyframesPanel(QWidget):
         }
         for command, handler in bindings.items():
             dispatcher.bind(command, handler)
+        self._bind_layer_property_shortcuts()
+        self._bind_layer_timing_shortcuts()
+
+    def _bind_layer_property_shortcuts(self) -> None:
+        if not self._uses_ae_layer_shortcuts():
+            return
+        dispatcher = self._shortcut_dispatcher
+
+        def bind(key: str, command: str, handler: Callable[[], None]) -> None:
+            dispatcher.registry.set_binding(key, command)
+            dispatcher.bind(command, handler)
+
+        properties = {"A": "anchor", "P": "position", "S": "scale",
+                      "R": "rotation", "T": "opacity", "E": "effects",
+                      "U": "animated"}
+        for key, token in properties.items():
+            bind(key, f"layer.show.{token}", lambda token=token: self._show_layer_properties(token))
+            bind(f"Shift+{key}", f"layer.toggle.{token}",
+                 lambda token=token: self._show_layer_properties(token, additive=True))
+            if token in LAYER_TRANSFORM_PROPERTIES:
+                command = f"layer.keyframe.{token}"
+                handler = lambda token=token: self._toggle_layer_property_keyframe(token)
+                bind(f"Alt+{key}", command, handler)
+                bind(f"Shift+Alt+{key}", command, handler)
+
+        ts = timeline_shortcuts
+        dispatcher.bind(ts.CMD_FILTER_MODIFIED, lambda: self._show_layer_properties("modified", replace=True))
+        dispatcher.bind(ts.CMD_FILTER_EXPRESSION, lambda: self._show_layer_properties("expression", replace=True))
+        bind("Shift+J", "layer.seek.previous_selected", lambda: self._seek_visible_timeline_item(-1, selected=True))
+        bind("Shift+K", "layer.seek.next_selected", lambda: self._seek_visible_timeline_item(1, selected=True))
+        bind("PageUp", ts.CMD_NAV_STEP_BACK, self._step_frame_backward)
+        bind("PageDown", ts.CMD_NAV_STEP_FWD, self._step_frame_forward)
+        bind("Shift+PageUp", ts.CMD_NAV_STEP_BACK_BIG,
+             lambda: self.seek_to_frame(self._state.current_frame - 10))
+        bind("Shift+PageDown", ts.CMD_NAV_STEP_FWD_BIG,
+             lambda: self.seek_to_frame(self._state.current_frame + 10))
+        bind("F9", "layer.keys.ease", lambda: self._timeline_view.set_selected_interpolation("ease_in_out"))
+        bind("Enter", "layer.enter", self._rename_or_edit_on_enter)
+        bind("Delete", ts.CMD_DELETE, self._delete_layer_timeline_selection)
+        bind("Backspace", ts.CMD_DELETE, self._delete_layer_timeline_selection)
+        bind("Ctrl+Shift+Z", ts.CMD_REDO, self.redo_requested.emit)
 
     def _install_shortcut_event_filters(self) -> None:
         """Capture timeline keys while leaving text editors to Qt."""
@@ -385,18 +432,21 @@ class KeyframesPanel(QWidget):
             Qt.Key.Key_End: "End", Qt.Key.Key_Delete: "Delete",
             Qt.Key.Key_Backspace: "Backspace", Qt.Key.Key_Return: "Enter",
             Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Escape: "Esc",
-            Qt.Key.Key_F3: "F3", Qt.Key.Key_Plus: "+",
+            Qt.Key.Key_F2: "F2", Qt.Key.Key_F3: "F3", Qt.Key.Key_Plus: "+",
             Qt.Key.Key_Equal: "=", Qt.Key.Key_Minus: "-",
+            Qt.Key.Key_BracketLeft: "[", Qt.Key.Key_BracketRight: "]",
+            Qt.Key.Key_PageUp: "PageUp", Qt.Key.Key_PageDown: "PageDown",
+            Qt.Key.Key_F9: "F9",
         }
         name = key_names.get(key)
         if name is None:
-            text = str(event.text() or "")
-            if len(text) == 1 and text.isalpha():
-                name = text.upper()
-            elif isinstance(key_value, int) and 65 <= key_value <= 90:
+            if isinstance(key_value, int) and 65 <= key_value <= 90:
                 name = chr(key_value)
             else:
-                return ""
+                text = str(event.text() or "")
+                if len(text) != 1 or not text.isalpha():
+                    return ""
+                name = text.upper()
 
         modifiers = event.modifiers()
         prefix = []
@@ -411,18 +461,39 @@ class KeyframesPanel(QWidget):
             prefix.append("Alt")
         return "+".join(prefix + [name])
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        if (self._shortcut_enabled
-                and event.type() == QEvent.Type.KeyPress
-                and not event.isAutoRepeat()):
+    def _uses_ae_layer_shortcuts(self) -> bool:
+        return self._ae_nav_enabled and self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        event_type = event.type()
+        if (not self._composition_active
+                and watched in (self._tree_view, self._timeline_view)
+                and event_type in (
+                    QEvent.Type.ContextMenu, QEvent.Type.KeyPress,
+                    QEvent.Type.KeyRelease, QEvent.Type.MouseButtonPress,
+                    QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick,
+                    QEvent.Type.MouseMove, QEvent.Type.Wheel,
+                )):
+            # Both canvases keep receiving Qt drag and drop events.
+            event.accept()
+            return True
+        if self._shortcut_enabled and event_type in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
+            dispatcher = self._shortcut_dispatcher
+            if self._uses_ae_layer_shortcuts() and dispatcher.is_text_input_focused():
+                return super().eventFilter(watched, event)
             sequence = self._shortcut_sequence(event)
             if sequence:
-                command = self._shortcut_dispatcher.handle_key(
-                    sequence,
-                    now_ms=float(QDateTime.currentMSecsSinceEpoch()))
-                if command is not None \
-                        and command in self._shortcut_dispatcher.handlers:
-                    return True
+                if event_type == QEvent.Type.ShortcutOverride:
+                    if (self._uses_ae_layer_shortcuts()
+                            and dispatcher.registry.command_for(sequence) in dispatcher.handlers):
+                        event.accept()
+                        return True
+                elif not event.isAutoRepeat() or sequence in {
+                    "PageUp", "PageDown", "Shift+PageUp", "Shift+PageDown",
+                }:
+                    command = dispatcher.handle_key(sequence, now_ms=float(QDateTime.currentMSecsSinceEpoch()))
+                    if command is not None and command in dispatcher.handlers:
+                        return True
         return super().eventFilter(watched, event)
 
     def _toggle_play_from_shortcut(self) -> None:
@@ -436,13 +507,82 @@ class KeyframesPanel(QWidget):
         if index >= 0 and self._filter_combo.currentIndex() != index:
             self._filter_combo.setCurrentIndex(index)
 
+    def _show_layer_properties(self, token: str, *, additive: bool = False,
+                               replace: bool = False) -> None:
+        layer_ids = [row.layer_id for row in self._model.rows
+                     if row.row_type == "layer" and row.layer_id is not None
+                     and (self._selected_layer_id is None or self._selected_layer_id == row.layer_id)]
+        self._model.focus_layer_properties(layer_ids, token, additive=additive, force=replace)
+        self._rebuild_filtered_model()
+
+    def _restore_layer_disclosure(self, layer_id: str) -> None:
+        if self._model.clear_layer_property_focus(layer_id):
+            self._rebuild_filtered_model()
+
+    def _toggle_layer_property_keyframe(self, token: str) -> None:
+        layer = self._selected_unlocked_layer()
+        if layer is None:
+            return
+        controller = self._layer_stack_controller
+        names = LAYER_TRANSFORM_PROPERTIES[token]
+        prepare = token != "opacity" and controller.can_prepare_layer_transform(layer.layer_id)
+        count = len(names) + int(prepare)
+        label = I18N.tr("keyframes.property_shortcut_keyframes", "Set property keyframes")
+        self.track_batch_about_to_commit.emit(label, count)
+        try:
+            if prepare:
+                if not controller.prepare_layer_transform(layer.layer_id):
+                    return
+                self.layer_edit_committed.emit(layer.layer_id, "")
+                layer = controller.layers_map()[layer.layer_id]
+            root = controller.graph.get_node(layer.root_node_id)
+            merge = controller.layer_merge_node(layer.layer_id) if token == "opacity" else None
+            node = merge if merge is not None else root
+            if node is None:
+                return
+            definitions = node.get_param_defs()
+            names = tuple(name for name in names if name in definitions and definitions[name].is_animatable())
+            if not names:
+                return
+            self._model.focus_layer_properties([layer.layer_id], token, additive=True, force=True)
+            self._rebuild_filtered_model()
+            for name in self._keyframe_toggle_targets(node.id, names):
+                self._on_property_keyframe_toggle(node.id, name, allow_hidden=True)
+        finally:
+            self.track_batch_committed.emit(label, count)
+
     def _focus_property(self, token: str) -> None:
         token = str(token).casefold()
-        for row in self._model.visible_rows():
+        layer = self._selected_unlocked_layer()
+        if layer is not None and self._layer_stack_controller.can_prepare_layer_transform(layer.layer_id):
+            if not self._layer_stack_controller.prepare_layer_transform(layer.layer_id):
+                return
+            self.layer_edit_committed.emit(layer.layer_id, "")
+        selected_layer = next((row for row in self._model.rows
+                               if row.row_type == "layer" and
+                               row.layer_id == self._selected_layer_id), None)
+        names = {"position": ("position", "translate"), "anchor": ("anchor", "pivot")}
+        if selected_layer is not None:
+            pairs = {"anchor": "pivot_x", "position": "translate_x", "scale": "scale_x"}
+            for row in self._model.rows:
+                if row.layer_id != selected_layer.layer_id:
+                    continue
+                if row.component_params and pairs.get(token) == row.component_params[0]:
+                    self._model.reveal_row(row.row_id)
+                    self._on_expand_changed(row.node_id, True)
+                    self._on_param_selected(row.node_id, row.component_params[0])
+                    return
+            rows = [row for row in self._model.rows if row.layer_id == selected_layer.layer_id]
+        else:
+            rows = self._model.visible_rows()
+        for row in rows:
             if row.row_type != "param" or not row.param_name:
                 continue
-            if token not in row.param_name.casefold():
+            if not any(name in row.param_name.casefold() for name in names.get(token, (token,))):
                 continue
+            if selected_layer is not None:
+                self._model.reveal_row(row.row_id)
+                self._on_expand_changed(row.node_id, True)
             self._on_param_selected(row.node_id, row.param_name)
             return
 
@@ -450,9 +590,86 @@ class KeyframesPanel(QWidget):
         if self._selected_param is not None:
             self._open_keyframe_editor_for_param(*self._selected_param)
 
+    def _rename_or_edit_on_enter(self) -> None:
+        if self._selected_param is not None:
+            self._edit_selected_property()
+        elif (layer := self._selected_unlocked_layer()) is not None:
+            self._tree_view.open_layer_name_editor(layer.layer_id)
+
+    def _delete_layer_timeline_selection(self) -> None:
+        if self._timeline_view.selected_keyframes():
+            self._timeline_view._delete_selected_keyframes()
+        elif (not self._layer_delete_blocked and self._selected_param is None
+              and (layer := self._selected_unlocked_layer()) is not None):
+            self.layer_delete_requested.emit(layer.layer_id)
+
     def _cancel_timeline_edit(self) -> None:
         self._timeline_view.clear_keyframe_selection()
         self._tree_view._close_keyframe_editor()
+
+    def _bind_layer_timing_shortcuts(self) -> None:
+        """Use AE layer timing keys without overriding the Nodes bindings."""
+        if not self._uses_ae_layer_shortcuts():
+            return
+        ts = timeline_shortcuts
+        dispatcher = self._shortcut_dispatcher
+        handlers = {
+            ts.CMD_GOTO_LAYER_IN: lambda: self._goto_layer_timing_boundary(False),
+            ts.CMD_GOTO_LAYER_OUT: lambda: self._goto_layer_timing_boundary(True),
+            ts.CMD_GOTO_WORK_IN: lambda: self._goto_work_area_boundary(False),
+            ts.CMD_GOTO_WORK_OUT: lambda: self._goto_work_area_boundary(True),
+            ts.CMD_MOVE_LAYER_IN: lambda: self._edit_layer_timing_at_playhead("slide"),
+            ts.CMD_MOVE_LAYER_OUT: lambda: self._edit_layer_timing_at_playhead("slide", True),
+            ts.CMD_TRIM_LAYER_IN: lambda: self._edit_layer_timing_at_playhead("trim_in"),
+            ts.CMD_TRIM_LAYER_OUT: lambda: self._edit_layer_timing_at_playhead("trim_out"),
+            ts.CMD_SET_WORK_AREA_FROM_LAYER: self._set_work_area_from_layer,
+        }
+        for key, command in ts.AE_LAYER_TIMING_BINDINGS.items():
+            dispatcher.registry.set_binding(key, command)
+            dispatcher.bind(command, handlers[command])
+
+    def _selected_layer_timing_track(self) -> Optional[KeyframesTrackVisual]:
+        if self._selected_layer_id is None:
+            return None
+        return self._model.track_for(f"layer:{self._selected_layer_id}")
+
+    def _goto_layer_timing_boundary(self, end: bool) -> None:
+        track = self._selected_layer_timing_track()
+        if track is not None and track.range_bar is not None:
+            bar = track.range_bar
+            self.seek_to_frame(bar.end_frame if end else bar.start_frame)
+
+    def _goto_work_area_boundary(self, end: bool) -> None:
+        start, finish = self.effective_play_range()
+        self.seek_to_frame(finish if end else start)
+
+    def _set_work_area_from_layer(self) -> None:
+        track = self._selected_layer_timing_track()
+        if track is not None and track.range_bar is not None:
+            bar = track.range_bar
+            self.set_play_range(bar.start_frame, bar.end_frame)
+        else:
+            self.set_play_range(*self._effective_comp_range())
+
+    def _edit_layer_timing_at_playhead(self, edit: str, align_end: bool = False) -> None:
+        layer = self._selected_unlocked_layer()
+        track = self._selected_layer_timing_track()
+        if (layer is None or not layer.managed or track is None
+                or not track.layer_managed or track.range_bar is None):
+            return
+        bar = track.range_bar
+        target = self._state.current_frame
+        if align_end:
+            target -= bar.end_frame - bar.start_frame
+        start, end = layer_bar_edit_bounds(
+            bar.start_frame, bar.end_frame, target, edit,
+            source_total=track.source_total, source_in=track.source_in,
+        )
+        if (start, end) != (bar.start_frame, bar.end_frame):
+            self._on_timeline_range_changed(layer.root_node_id, {
+                "comp_start": start, "comp_end": end, "enabled": True,
+                "edit": edit, "layer_id": layer.layer_id,
+            })
 
     def set_ae_nav_enabled(self, enabled: bool) -> None:
         """Toggle the AE navigation habits (T06 AE-habits switch).
@@ -464,6 +681,8 @@ class KeyframesPanel(QWidget):
             return
         self._ae_nav_enabled = bool(enabled)
         self._rebuild_shortcuts()
+        if not enabled and self._model.clear_layer_property_focus():
+            self._rebuild_filtered_model()
 
     @property
     def ae_nav_enabled(self) -> bool:
@@ -530,8 +749,18 @@ class KeyframesPanel(QWidget):
             # external projection promised by the migration contract.
             self._layer_stack_controller.project_from_node_graph()
         self._layer_view_mode = mode
+        self._rebuild_shortcuts()
         self._model.set_view_mode(mode)
+        self._tree_view.set_header_height(self._timeline_view.ruler_height())
+        self._time_display.set_single_line(mode == KeyframesModel.VIEW_MODE_LAYERS)
+        self._tree_view.set_header_time_display(self._time_display)
+        self._graph_view.set_frame_range(*self._navigation_extent())
+        if mode == KeyframesModel.VIEW_MODE_LAYERS:
+            self.set_current_frame(self._state.current_frame)
+            self._fit_pending = True
+            QTimer.singleShot(0, self._complete_deferred_fit)
         self._sync_layer_mode_actions()
+        self._splitter.set_resize_grip(mode == KeyframesModel.VIEW_MODE_LAYERS)
         self._rebuild_filtered_model()
 
     def set_layer_stack_controller(self, controller: Optional[object]) -> None:
@@ -888,6 +1117,10 @@ class KeyframesPanel(QWidget):
         # P9: tree node selection forwards to CompositePage.
         self._tree_view.node_selected.connect(self._on_node_selected)
         self._tree_view.layer_selected.connect(self._on_layer_selected)
+        self._tree_view.layer_disclosure_requested.connect(self._restore_layer_disclosure)
+        self._tree_view.layer_name_edited.connect(self._rename_layer_from_timeline)
+        self._tree_view.layer_menu_requested.connect(self._open_layer_menu)
+        self._tree_view.layer_parent_menu_requested.connect(self._open_layer_parent_menu)
         self._tree_view.layer_delete_requested.connect(
             self.layer_delete_requested.emit)
         self._tree_view.promote_node_requested.connect(
@@ -907,6 +1140,8 @@ class KeyframesPanel(QWidget):
         self._tree_view.param_selected.connect(self._on_param_selected)
         self._tree_view.keyframe_toggle_requested.connect(
             self._on_property_keyframe_toggle)
+        self._tree_view.paired_keyframe_toggle_requested.connect(
+            self._on_paired_keyframe_toggle)
         self._tree_view.keyframe_edit_requested.connect(
             self._open_keyframe_editor_for_param)
         self._tree_view.keyframe_edit_commit_requested.connect(
@@ -935,6 +1170,8 @@ class KeyframesPanel(QWidget):
             self._on_playhead_moved)
         self._timeline_view.selection_changed.connect(
             self._on_timeline_selection_changed)
+        self._timeline_view.property_group_revealed.connect(
+            lambda node_id: self._on_expand_changed(node_id, True))
         self._timeline_view.expression_edit_requested.connect(
             self._open_expression_for_param)
         self._timeline_view.track_changed.connect(
@@ -959,6 +1196,7 @@ class KeyframesPanel(QWidget):
         # persisted time_range schema used by older integrations.
         self._timeline_view.range_changed.connect(
             self._on_timeline_range_changed)
+        self._timeline_view.layer_selected.connect(self._on_layer_selected)
         # Work-area (play range) band edits.
         self._timeline_view.play_range_changed.connect(
             self._on_timeline_play_range_changed)
@@ -991,97 +1229,10 @@ class KeyframesPanel(QWidget):
         # remaining height.
         self._footer = None
 
-        self._build_empty_state_overlay()
         self.set_composition_active(self._composition_active)
 
-    def _build_empty_state_overlay(self) -> None:
-        """Create the shared-style empty state with an actionable CTA."""
-        overlay = QWidget(self)
-        overlay.setObjectName("KeyframesEmptyStateOverlay")
-        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        overlay.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        overlay.setStyleSheet(
-            f"QWidget#KeyframesEmptyStateOverlay {{"
-            " background-color: rgba(10, 11, 14, 178);"
-            "}"
-            f"QFrame#KeyframesEmptyStateCard {{"
-            f" background-color: {C.BG_PANEL};"
-            f" border: 1px solid {C.BORDER};"
-            " border-radius: 5px;"
-            "}"
-            f"QLabel#KeyframesEmptyStateTitle {{"
-            f" color: {C.TEXT_PRIMARY};"
-            " font-size: 13px;"
-            " font-weight: 600;"
-            "}"
-            f"QLabel#KeyframesEmptyStateHint {{"
-            f" color: {C.TEXT_HINT};"
-            " font-size: 11px;"
-            "}"
-            f"QPushButton#KeyframesEmptyStateCreateButton {{"
-            " color: #ffffff;"
-            f" background-color: {C.ORANGE};"
-            f" border: 1px solid {C.ORANGE};"
-            " border-radius: 3px;"
-            " padding: 5px 14px;"
-            " min-width: 132px;"
-            " font-size: 11px;"
-            "}"
-            f"QPushButton#KeyframesEmptyStateCreateButton:hover {{"
-            f" background-color: {C.ORANGE_HOVER};"
-            "}"
-            f"QPushButton#KeyframesEmptyStateCreateButton:pressed {{"
-            f" background-color: {C.ORANGE_PRESS};"
-            "}"
-        )
-        layout = QVBoxLayout(overlay)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        card = QFrame(overlay)
-        card.setObjectName("KeyframesEmptyStateCard")
-        card.setMaximumWidth(440)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(28, 24, 28, 24)
-        card_layout.setSpacing(10)
-
-        title = QLabel(
-            I18N.tr("composite.empty_state.title", "No Comp Clip Open"),
-            card,
-        )
-        title.setObjectName("KeyframesEmptyStateTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(title)
-
-        hint = QLabel(
-            I18N.tr(
-                "composite.empty_state.hint",
-                "Create or open a Comp Clip to begin editing.",
-            ),
-            card,
-        )
-        hint.setObjectName("KeyframesEmptyStateHint")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(hint)
-
-        create_button = QPushButton(
-            I18N.tr("composite.empty_state.create", "New Comp Clip"),
-            card,
-        )
-        create_button.setObjectName("KeyframesEmptyStateCreateButton")
-        create_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        create_button.clicked.connect(self.create_empty_comp_clip_requested.emit)
-        card_layout.addWidget(create_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        layout.addStretch(1)
-        layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch(1)
-        self._empty_state_overlay = overlay
-        self._empty_state_create_button = create_button
-        overlay.setGeometry(self.rect())
-        overlay.raise_()
-
     def set_composition_active(self, active: bool) -> None:
-        """Enable or disable all Keyframes interactions for the active graph."""
+        """Allow editing only while attached, and keep the media targets live."""
         was_active = self._composition_active
         self._composition_active = bool(active)
         if not self._composition_active:
@@ -1116,16 +1267,14 @@ class KeyframesPanel(QWidget):
             # next empty-page entry.
             self.set_view_mode("timeline")
             self.set_expression_editor_expanded(False)
-        # Keep the top-level panel enabled so the empty-state CTA remains
-        # clickable. Disable only the actual editing surfaces underneath it.
-        for widget in (self._toolbar, self._splitter, self._footer):
+            self._tree_view._close_layer_name_editor()
+        for widget in (self._toolbar, self._time_display, self._graph_view,
+                       self._expr_editor, self._footer):
             if widget is not None:
                 widget.setEnabled(self._composition_active)
+        if was_active != self._composition_active:
+            self._tree_view.refresh()
         self._set_shortcuts_enabled(self._composition_active)
-        if self._empty_state_overlay is not None:
-            self._empty_state_overlay.setVisible(not self._composition_active)
-            if not self._composition_active:
-                self._empty_state_overlay.raise_()
 
     def has_active_composition(self) -> bool:
         """Return whether Keyframes is attached to an editable composition."""
@@ -1163,10 +1312,12 @@ class KeyframesPanel(QWidget):
         super().closeEvent(event)
 
     def _set_shortcuts_enabled(self, enabled: bool) -> None:
-        """Enable/disable panel shortcuts without disabling the CTA overlay."""
+        """Enable keyboard editing for the current composition."""
         self._shortcut_enabled = bool(enabled)
-        for shortcut in self.findChildren(QShortcut):
-            shortcut.setEnabled(self._shortcut_enabled)
+        for attr in _COMPAT_SHORTCUT_ATTRIBUTES:
+            shortcut = getattr(self, attr, None)
+            if shortcut is not None:
+                shortcut.setEnabled(self._shortcut_enabled and not self._uses_ae_layer_shortcuts())
 
     def _build_toolbar(self) -> QWidget:
         bar = QToolBar(self)
@@ -1175,6 +1326,25 @@ class KeyframesPanel(QWidget):
         bar.setIconSize(QSize(_TOOLBAR_ICON_PX, _TOOLBAR_ICON_PX))
         bar.setStyleSheet(COMPOSITE_KEYFRAMES_TOOLBAR_STYLE +
                           COMPOSITE_KEYFRAMES_ICON_BTN_STYLE)
+
+        new_layer = QToolButton(bar)
+        new_layer.setText(I18N.tr("keyframes.layer_new", "New Layer"))
+        new_layer.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        new_layer.setStyleSheet("QToolButton { padding: 0 18px 0 8px; }")
+        new_menu = QMenu(new_layer)
+        new_menu.addAction(I18N.tr("keyframes.layer_text", "Text"),
+                           self._create_text_layer)
+        new_menu.addAction(I18N.tr("keyframes.layer_solid", "Solid"),
+                           self._create_solid_layer)
+        new_layer.setMenu(new_menu)
+        self._new_layer_action = bar.addWidget(new_layer)
+
+        layer_options = QToolButton(bar)
+        layer_options.setText(I18N.tr("keyframes.layer_options", "Layer Settings"))
+        layer_options.setStyleSheet("QToolButton { padding: 0 8px; }")
+        layer_options.clicked.connect(self._open_selected_layer_menu)
+        self._layer_options_action = bar.addWidget(layer_options)
+        self._layer_options_action.setEnabled(False)
 
         # ── Transport cluster: first / prev / play-pause / next / last ──
         self._act_first = QAction(
@@ -1445,6 +1615,10 @@ class KeyframesPanel(QWidget):
         # T77: also give each icon-only button an accessible name + tooltip
         # (derived from its action's text) and make it keyboard-focusable.
         for btn in bar.findChildren(QToolButton):
+            if btn in (new_layer, layer_options):
+                btn.setFixedHeight(_TOOLBAR_BTN_H)
+                btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                continue
             btn.setFixedSize(_TOOLBAR_BTN_W, _TOOLBAR_BTN_H)
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             act = btn.defaultAction()
@@ -1505,6 +1679,12 @@ class KeyframesPanel(QWidget):
     def set_node_graph(self, node_graph, selected_node_id: Optional[str] = None,
                        selected_layer_id: Optional[str] = None) -> None:
         """Rebuild the model from the given NodeGraph and refresh both views."""
+        previous_keys = set()
+        if node_graph is not self._node_graph:
+            self._model.clear_layer_property_focus()
+            self._layer_delete_blocked = False
+        elif self._uses_ae_layer_shortcuts():
+            previous_keys.update(self._timeline_view.selected_keyframes())
         # AUD-10102: a rebuild means node/track state may have changed under
         # the panel — drop the Value-column memo so freshly written
         # parameters are never shown from a stale cache.
@@ -1516,6 +1696,10 @@ class KeyframesPanel(QWidget):
         self._node_graph = node_graph
         if selected_layer_id is not None:
             self._selected_layer_id = str(selected_layer_id)
+        if (self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
+                and self._layer_stack_controller is not None
+                and self._layer_stack_controller.main_stack() is None):
+            self._layer_stack_controller.project_from_node_graph()
         if (self._selected_layer_id
                 and self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
                 and self._layer_stack_controller is not None):
@@ -1547,11 +1731,29 @@ class KeyframesPanel(QWidget):
         # button keeps working after every graph edit refresh.
         if self._selected_param is not None:
             self._apply_param_selection(self._selected_param, refresh=False)
+            if self._uses_ae_layer_shortcuts() and self._selected_param is None:
+                self._layer_delete_blocked = True
+        if previous_keys:
+            restored = False
+            lo, hi = self._navigation_extent()
+            for row_id, frame in previous_keys:
+                if not lo <= frame <= hi:
+                    continue
+                track = self._model.track_for(row_id)
+                if track is None:
+                    continue
+                point = next((key for key in track.keyframes if key.frame == frame), None)
+                if point is not None:
+                    point.selected = True
+                    restored = True
+            if not restored:
+                self._layer_delete_blocked = True
         # T11/T13: mirror the rebuild's per-row/per-point selection into the
         # shared AnimationSelectionModel so the Spline panel (and future
         # Graph Editor) stay in sync without re-querying the legacy flags.
         self._selection_model.sync_from_model(self._model)
         self._tree_view.set_selected_layer_id(self._selected_layer_id)
+        self._sync_layer_mode_actions()
         self._tree_view.refresh()
         self._timeline_view.refresh()
         self._clamp_vertical_scroll()
@@ -1563,10 +1765,16 @@ class KeyframesPanel(QWidget):
 
     def _sync_layer_mode_actions(self) -> None:
         if hasattr(self, "_act_nodes_mode"):
-            self._act_nodes_mode.setChecked(
-                self._layer_view_mode == KeyframesModel.VIEW_MODE_NODES)
-            self._act_layers_mode.setChecked(
-                self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS)
+            layers_mode = self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
+            self._act_nodes_mode.setChecked(not layers_mode)
+            self._act_layers_mode.setChecked(layers_mode)
+            self._new_layer_action.setVisible(layers_mode)
+            self._layer_options_action.setVisible(layers_mode)
+            controller = self._layer_stack_controller
+            stack = controller.main_stack() if controller is not None else None
+            managed = controller is not None and (stack is None or stack.managed)
+            self._new_layer_action.setEnabled(managed)
+            self._layer_options_action.setEnabled(bool(self._selected_layer_id))
 
     def _display_value_for(self, node_id: str,
                            param_name: Optional[str]) -> Optional[str]:
@@ -1726,7 +1934,7 @@ class KeyframesPanel(QWidget):
     def _value_control_metadata(self, node_id: str,
                                 param_name: str) -> Optional[dict]:
         """Return the same numeric metadata used by Properties DragValue."""
-        if self._node_graph is None:
+        if not self._composition_active or self._node_graph is None:
             return None
         try:
             node = self._node_graph.get_node(node_id)
@@ -1810,7 +2018,7 @@ class KeyframesPanel(QWidget):
         return bool(getattr(node, "supports_parent_transform", False))
 
     def _on_property_keyframe_toggle(self, node_id: str,
-                                     param_name: str) -> None:
+                                     param_name: str, *, allow_hidden: bool = False) -> None:
         """Toggle the current-frame keyframe for exactly one property."""
         status = self._keyframe_status_for(node_id, param_name)
         frame = int(self._state.current_frame)
@@ -1819,14 +2027,32 @@ class KeyframesPanel(QWidget):
             self._write_color_keyframe_at(
                 node_id, param_name, frame, remove=status["at_current"])
             return
+        edit_track = (self._model.track_for_property_edit(node, param_name)
+                      if allow_hidden and node is not None else None)
         if status["at_current"]:
-            self._timeline_view.remove_keyframe_at(node_id, param_name, frame)
+            self._timeline_view.remove_keyframe_at(node_id, param_name, frame, edit_track=edit_track)
         else:
             value = None
             value = self._value_provider(node_id, param_name) \
                 if self._value_provider else None
+            if value is None and node is not None and not status["animated"]:
+                value = node.parameters.get(param_name)
             self._timeline_view.add_keyframe_at(
-                node_id, param_name, frame, value_hint=value)
+                node_id, param_name, frame, value_hint=value, edit_track=edit_track)
+
+    def _keyframe_toggle_targets(self, node_id: str, params: tuple[str, ...]) -> tuple[str, ...]:
+        keyed = {name for name in params if self._keyframe_status_for(node_id, name)["at_current"]}
+        return params if len(keyed) == len(params) else tuple(name for name in params if name not in keyed)
+
+    def _on_paired_keyframe_toggle(self, node_id: str, params: tuple[str, ...]) -> None:
+        targets = self._keyframe_toggle_targets(node_id, params)
+        label = I18N.tr("keyframes.paired_keyframes", "Set paired keyframes")
+        self.track_batch_about_to_commit.emit(label, len(targets))
+        try:
+            for name in targets:
+                self._on_property_keyframe_toggle(node_id, name)
+        finally:
+            self.track_batch_committed.emit(label, len(targets))
 
     def _on_property_value_changed(self, node_id: str, param_name: str,
                                    text: str) -> None:
@@ -1852,7 +2078,6 @@ class KeyframesPanel(QWidget):
         node = self._node_graph.get_node(node_id)
         if node is None:
             return
-        old = node.parameters.get(param_name)
         pdef = node.get_param_defs().get(param_name)
         if pdef is not None:
             value = max(float(pdef.min_val), min(float(pdef.max_val), value))
@@ -1863,11 +2088,17 @@ class KeyframesPanel(QWidget):
         elif (getattr(node, "node_type", "") == "roto_shape"
               and str(param_name).startswith("roto_point_")):
             value = max(0.0, min(1.0, float(value)))
+        self._apply_property_value(node_id, node, param_name, value)
+
+    def _apply_property_value(self, node_id: str, node: Any, param_name: str, value: object,
+                              *, edit_track: bool = True) -> None:
         frame = int(self._state.current_frame)
-        if self._keyframe_status_for(node_id, param_name)["at_current"]:
+        status = self._keyframe_status_for(node_id, param_name)
+        if edit_track and (status["at_current"] or (status["animated"] and
+                           self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS)):
             self._timeline_view.add_keyframe_at(
-                node_id, param_name, frame, value_hint=float(value))
-        elif old != value:
+                node_id, param_name, frame, value_hint=value)
+        elif node.parameters.get(param_name) != value:
             self.parameter_changed.emit(node_id, param_name, value)
         # AUD-10102: the write may be applied without a full panel rebuild —
         # drop this property's memoized display values so the Value column
@@ -1927,20 +2158,15 @@ class KeyframesPanel(QWidget):
                 start_index = 0
             index = max(0, min(len(labels) - 1,
                                start_index + int(round(delta_pixels / 24.0))))
-            value = labels[index]
-            if node.parameters.get(param_name) != value:
-                self.parameter_changed.emit(node_id, param_name, value)
-                self._invalidate_display_values(node_id, param_name)
-            self._tree_view.update()
+            self._apply_property_value(node_id, node, param_name, labels[index],
+                                       edit_track=self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS)
             return
         if ptype == "bool":
             current = str(base).strip().lower() in {"1", "true", "yes", "on"}
             value = current if abs(float(delta_pixels)) < 4.0 \
                 else float(delta_pixels) > 0.0
-            if node.parameters.get(param_name) != value:
-                self.parameter_changed.emit(node_id, param_name, value)
-                self._invalidate_display_values(node_id, param_name)
-            self._tree_view.update()
+            self._apply_property_value(node_id, node, param_name, value,
+                                       edit_track=self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS)
             return
 
         try:
@@ -1952,21 +2178,7 @@ class KeyframesPanel(QWidget):
             and str(param_name).startswith("roto_point_"))
         step = 0.01 if is_roto_point else float(
             getattr(pdef, "step", 1.0) or 1.0)
-        value = base + float(delta_pixels) * step
-        if pdef is not None:
-            value = max(float(pdef.min_val), min(float(pdef.max_val), value))
-            if pdef.ptype == "int":
-                value = int(round(value))
-        elif is_roto_point:
-            value = max(0.0, min(1.0, float(value)))
-        frame = int(self._state.current_frame)
-        if self._keyframe_status_for(node_id, param_name)["at_current"]:
-            self._timeline_view.add_keyframe_at(
-                node_id, param_name, frame, value_hint=float(value))
-        else:
-            self.parameter_changed.emit(node_id, param_name, value)
-        self._invalidate_display_values(node_id, param_name)
-        self._tree_view.update()
+        self._apply_property_numeric_value(node_id, param_name, base + float(delta_pixels) * step)
 
     def _on_property_value_drag_finished(self, node_id: str,
                                           param_name: str) -> None:
@@ -1998,6 +2210,15 @@ class KeyframesPanel(QWidget):
                 "Parent binding is not supported by this node")
             return
         self._pending_expression_binding = None
+        child = self._layer_for_root(child_node_id)
+        parent = self._layer_for_root(parent_node_id)
+        if child is not None:
+            if parent is None:
+                self._commit_layer_edit(False, child.layer_id)
+            else:
+                self._commit_layer_edit(self._layer_stack_controller.set_layer_parent(
+                    child.layer_id, parent.layer_id), child.layer_id)
+            return
         self.parent_binding_changed.emit(child_node_id, parent_node_id)
 
     def show_binding_feedback(self, target_node_id: str, param_name: str,
@@ -2105,6 +2326,16 @@ class KeyframesPanel(QWidget):
         if self._node_graph is None:
             return
         menu = QMenu(self)
+        layer = self._layer_for_root(node_id) if not param_name else None
+        if layer is not None:
+            stack = self._layer_stack_controller.main_stack()
+            if stack is None or not stack.managed or not layer.managed or layer.locked:
+                return
+            self._populate_layer_parent_menu(
+                menu, layer, self._layer_stack_controller.layers_map(), stack.layer_ids)
+            menu.exec(QCursor.pos())
+            menu.deleteLater()
+            return
         if param_name:
             current = self._node_graph.get_parameter_binding(node_id, param_name)
             if current:
@@ -2230,6 +2461,7 @@ class KeyframesPanel(QWidget):
         combo = getattr(self, "_filter_combo", None)
         if combo is None:
             return
+        self._model.clear_layer_property_focus()
         self._model.set_filter(str(combo.currentData() or "all"))
         self._rebuild_filtered_model()
 
@@ -2340,18 +2572,18 @@ class KeyframesPanel(QWidget):
             return None
 
     def set_timeline_state(self, state: CompositeTimelineState) -> None:
-        range_changed = (
-            state.start_frame != self._state.start_frame or
-            state.end_frame != self._state.end_frame or
-            abs(float(state.fps) - float(self._state.fps)) > 1e-6)
+        bounds_changed = (state.start_frame, state.end_frame) != (self._state.start_frame, self._state.end_frame)
+        rate_changed = abs(float(state.fps) - float(self._state.fps)) > 1e-6
+        layers_bound = self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS and self._comp_extent is not None
+        range_changed = rate_changed or (bounds_changed and not layers_bound)
         self._state = state
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            lo, hi = self._navigation_extent()
+            state.current_frame = max(lo, min(state.current_frame, hi))
         self._timeline_view.set_current_frame(state.current_frame)
         self._tree_view.set_current_frame(state.current_frame)
-        # The timeline view uses the actual composition bounds for the orange
-        # work-area band. A longer media bar remains visible on the extended
-        # ruler and is editable outside this playback range.
-        self._timeline_view.set_composition_range(
-            *self._effective_comp_range())
+        # Keep the work area and the Layer ruler on the composition bounds.
+        self._set_timeline_composition_range(*self._effective_comp_range())
         # Ruler labels follow the panel's display unit (frames/timecode).
         self._timeline_view.set_display(state.display_mode, state.fps)
         self._frame_label.setText(str(state.current_frame))
@@ -2376,8 +2608,7 @@ class KeyframesPanel(QWidget):
         # so its x axis and sampling stay aligned with the comp clip.
         if hasattr(self, "_graph_view"):
             self._graph_view.set_fps(state.fps)
-            self._graph_view.set_frame_range(state.start_frame,
-                                             state.end_frame)
+            self._graph_view.set_frame_range(*self._navigation_extent())
             self._graph_view.set_current_frame(state.current_frame)
         self._update_range_label()
         if range_changed:
@@ -2424,16 +2655,18 @@ class KeyframesPanel(QWidget):
     def set_comp_extent(self, start_frame: int, end_frame: int) -> None:
         """Declare the real composition extent (inclusive frames).
 
-        The work area stays on this extent. Video media longer than the comp
-        keeps its source length in the model and on the extended ruler. Call
-        after :meth:`set_frame_range` when the host updates comp metadata.
+        Layer navigation and the work area stay on this extent. Call after
+        :meth:`set_frame_range` when the host updates comp metadata.
         """
         extent = (int(start_frame), int(end_frame))
         if extent == self._comp_extent:
             return
         self._comp_extent = extent
         self._model.set_comp_range(*extent)
-        self._timeline_view.set_composition_range(*extent)
+        self._set_timeline_composition_range(*extent)
+        self._graph_view.set_frame_range(*self._navigation_extent())
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            self.set_current_frame(self._state.current_frame)
         if not self._play_range_explicit:
             self._play_in, self._play_out = extent
             self._timeline_view.set_play_range(*extent)
@@ -2445,10 +2678,21 @@ class KeyframesPanel(QWidget):
         self._fit_pending = True
         QTimer.singleShot(0, self._complete_deferred_fit)
 
+    def _set_timeline_composition_range(self, start: int, end: int) -> None:
+        had_selected_points = self._uses_ae_layer_shortcuts() and bool(self._timeline_view.selected_keyframes())
+        self._timeline_view.set_composition_range(start, end)
+        if had_selected_points and not self._timeline_view.selected_keyframes():
+            self._layer_delete_blocked = True
+
     def _effective_comp_range(self) -> Tuple[int, int]:
         """Composition extent, falling back to the ruler range."""
         if self._comp_extent is not None:
             return self._comp_extent
+        return self._state.start_frame, self._state.end_frame
+
+    def _navigation_extent(self) -> Tuple[int, int]:
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            return self._effective_comp_range()
         return self._state.start_frame, self._state.end_frame
 
     def set_playback_controller(self, controller: Optional[object]) -> None:
@@ -2517,6 +2761,9 @@ class KeyframesPanel(QWidget):
         otherwise the page's anti-recursion guard is the only thing saving us
         from a bounce. User-initiated seeks use seek_to_frame() instead.
         """
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            lo, hi = self._navigation_extent()
+            frame = max(lo, min(int(frame), hi))
         self._state.current_frame = int(frame)
         self._timeline_view.set_current_frame(int(frame))
         self._tree_view.set_current_frame(int(frame))
@@ -2538,9 +2785,8 @@ class KeyframesPanel(QWidget):
         through here so CompositePage receives the change and re-renders.
         The frame is clamped to the composition clip's range.
         """
-        frame = max(self._state.start_frame,
-                    min(int(frame), max(self._state.start_frame,
-                                        self._state.end_frame)))
+        lo, hi = self._navigation_extent()
+        frame = max(lo, min(int(frame), hi))
         self.set_current_frame(frame)
         self.current_frame_changed.emit(int(frame))
 
@@ -2553,22 +2799,24 @@ class KeyframesPanel(QWidget):
     # ── work area (play range) ──
 
     def set_play_in_at_playhead(self) -> None:
-        """I key: set the work-area In point at the current playhead."""
+        """Set the work-area In point at the playhead."""
         frame = int(self._state.current_frame)
         out = self._play_out if self._play_out is not None else self._state.end_frame
-        self.set_play_range(min(frame, out), max(frame, out))
+        start = frame if self._uses_ae_layer_shortcuts() else min(frame, out)
+        self.set_play_range(start, max(frame, out))
 
     def set_play_out_at_playhead(self) -> None:
-        """O key: set the work-area Out point at the current playhead."""
+        """Set the work-area Out point at the playhead."""
         frame = int(self._state.current_frame)
         pin = self._play_in if self._play_in is not None else self._state.start_frame
-        self.set_play_range(min(frame, pin), max(frame, pin))
+        end = frame if self._uses_ae_layer_shortcuts() else max(frame, pin)
+        self.set_play_range(min(frame, pin), end)
 
     def set_play_range(self, in_frame: int, out_frame: int) -> None:
         """Set the work area (inclusive) and notify listeners."""
         comp_start, comp_end = self._effective_comp_range()
-        in_frame = max(comp_start, int(in_frame))
-        out_frame = min(comp_end, int(out_frame))
+        in_frame = max(comp_start, min(comp_end, int(in_frame)))
+        out_frame = max(comp_start, min(comp_end, int(out_frame)))
         if out_frame < in_frame:
             out_frame = in_frame
         if (in_frame, out_frame) == (self._play_in, self._play_out):
@@ -2650,15 +2898,21 @@ class KeyframesPanel(QWidget):
         """
         data = dict(payload) if isinstance(payload, dict) else {}
         public_payload = {key: value for key, value in data.items()
-                          if key != "edit"}
+                          if key not in {"edit", "layer_id"}}
         self.range_changed.emit(node_id, public_payload)
         self.range_edit_changed.emit(node_id, data)
 
     # ── internal slots ──
 
     def _on_playhead_moved(self, frame: int) -> None:
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            lo, hi = self._navigation_extent()
+            if not lo <= frame <= hi:
+                self.seek_to_frame(frame)
+                return
         self._state.current_frame = int(frame)
         self._frame_label.setText(str(int(frame)))
+        self._time_display.set_current_frame(int(frame))
         self.current_frame_changed.emit(int(frame))
 
     def _on_expand_changed(self, node_id: str, expanded: bool) -> None:
@@ -2727,14 +2981,12 @@ class KeyframesPanel(QWidget):
         self._timeline_view.pan_to_frame(self._state.current_frame)
 
     def _zoom_in(self) -> None:
-        self._frame_mapper.set_zoom(self._frame_mapper.pixels_per_frame * 1.25)
-        self._timeline_view.refresh()
+        self._timeline_view.zoom_time_at(0.0, 1.25)
 
     def _zoom_out(self) -> None:
         """T27: zoom-out counterpart to ``_zoom_in``. Symmetric 1/1.25 step
         so zoom-in then zoom-out returns to the same scale (no drift)."""
-        self._frame_mapper.set_zoom(self._frame_mapper.pixels_per_frame / 1.25)
-        self._timeline_view.refresh()
+        self._timeline_view.zoom_time_at(0.0, 1 / 1.25)
 
     def fit_selection(self) -> None:
         """T27/§3.2.D: fit the selected keyframes (not the whole comp) to
@@ -2785,12 +3037,18 @@ class KeyframesPanel(QWidget):
             self._graph_view.set_graph_type(mode)
 
     def _goto_prev_keyframe(self) -> None:
+        if self._uses_ae_layer_shortcuts():
+            self._seek_visible_timeline_item(-1)
+            return
         frame = self._nearest_keyframe(self._state.current_frame, -1)
         if frame is not None:
             # P0-1: emit so CompositePage re-renders the new frame.
             self.seek_to_frame(frame)
 
     def _goto_next_keyframe(self) -> None:
+        if self._uses_ae_layer_shortcuts():
+            self._seek_visible_timeline_item(1)
+            return
         frame = self._nearest_keyframe(self._state.current_frame, +1)
         if frame is not None:
             # P0-1: emit so CompositePage re-renders the new frame.
@@ -2811,13 +3069,52 @@ class KeyframesPanel(QWidget):
             return max(candidates)
         return min(candidates)
 
+    def _seek_visible_timeline_item(self, direction: int, *, selected: bool = False) -> None:
+        if selected:
+            candidates = self._selected_timeline_keyframe_frames()
+        else:
+            candidates = set(self.effective_play_range())
+            for row in self._model.visible_rows():
+                track = self._model.track_for(row.row_id)
+                if track is not None:
+                    candidates.update(key.frame for key in track.keyframes)
+                if row.component_params and not row.expanded:
+                    for name in row.component_params:
+                        axis = self._model.track_for(f"param:{row.node_id}:{name}")
+                        if axis is not None:
+                            candidates.update(key.frame for key in axis.keyframes)
+
+        position = self._state.current_frame
+        lo, hi = self._navigation_extent()
+        nearby = [frame for frame in candidates if lo <= frame <= hi
+                  and (frame - position) * direction > 0]
+        if nearby:
+            frame = min(nearby) if direction > 0 else max(nearby)
+            self.seek_to_frame(frame)
+            if not 0 <= self._frame_mapper.frame_to_x(frame, 0.0) < self._timeline_view.width():
+                self._timeline_view.pan_to_frame(frame)
+
+    def _selected_timeline_keyframe_frames(self) -> set[int]:
+        if self._selected_param is not None and self._node_graph is not None:
+            node_id, param_name = self._selected_param
+            node = self._node_graph.get_node(node_id)
+            if node is not None:
+                track = self._model.track_for_property_edit(node, param_name)
+                return {key.frame for key in track.keyframes}
+        controller = self._layer_stack_controller
+        if controller is not None and self._selected_layer_id is not None:
+            layer = controller.layers_map().get(self._selected_layer_id)
+            if layer is not None:
+                return self._model.layer_keyframe_frames(controller, layer)
+        return set()
+
     # ── transport / playback ──
 
     def _goto_first_frame(self) -> None:
-        self.seek_to_frame(self._state.start_frame)
+        self.seek_to_frame(self._navigation_extent()[0])
 
     def _goto_last_frame(self) -> None:
-        self.seek_to_frame(self._state.end_frame)
+        self.seek_to_frame(self._navigation_extent()[1])
 
     def _step_frame_backward(self) -> None:
         self.seek_to_frame(self._state.current_frame - 1)
@@ -2921,31 +3218,254 @@ class KeyframesPanel(QWidget):
         return None
 
     def _on_layer_selected(self, layer_id: str) -> None:
+        if self._uses_ae_layer_shortcuts():
+            self._timeline_view.clear_keyframe_selection()
+            self._layer_delete_blocked = False
+        if self._selected_param is not None:
+            self._selected_param = None
+            for row in self._model.rows:
+                if row.row_type == "param":
+                    row.selected = False
         self._selected_layer_id = str(layer_id)
         self._tree_view.set_selected_layer_id(self._selected_layer_id)
+        self._sync_layer_mode_actions()
         self.layer_selected.emit(layer_id)
+
+    def _layer_insert_index(self) -> int:
+        stack = self._layer_stack_controller.main_stack()
+        if stack is not None and self._selected_layer_id in stack.layer_ids:
+            return stack.layer_ids.index(self._selected_layer_id)
+        return 0
+
+    def _create_text_layer(self) -> None:
+        title = I18N.tr("keyframes.layer_text", "Text")
+        text, accepted = QInputDialog.getMultiLineText(self, title, title)
+        if accepted and text.strip():
+            name = text.strip().splitlines()[0][:80]
+            self.generated_layer_requested.emit(
+                "text", name, {"text": text}, self._layer_insert_index())
+
+    def _create_solid_layer(self) -> None:
+        title = I18N.tr("keyframes.layer_solid", "Solid")
+        color = QColorDialog.getColor(QColor("#ffffff"), self, title)
+        if color.isValid():
+            self.generated_layer_requested.emit(
+                "solid", title, {"color_hex": color.name()}, self._layer_insert_index())
+
+    def _open_selected_layer_menu(self) -> None:
+        button = self._toolbar.widgetForAction(self._layer_options_action)
+        if self._selected_layer_id and button is not None:
+            self._open_layer_menu(self._selected_layer_id,
+                                  button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _open_layer_menu(self, layer_id: str, position: QPoint) -> None:
+        controller = self._layer_stack_controller
+        if controller is None:
+            return
+        layers = controller.layers_map()
+        layer = layers.get(layer_id)
+        stack = controller.main_stack()
+        if layer is None or stack is None:
+            return
+        if self._selected_layer_id != layer_id:
+            self._on_layer_selected(layer_id)
+        menu = QMenu(self)
+        self._populate_layer_menu(menu, layer, layers, stack.layer_ids,
+                                  stack.managed and layer.managed)
+        menu.exec(position)
+        menu.deleteLater()
+
+    def _populate_layer_menu(self, menu: QMenu, layer: Layer,
+                             layers: dict[str, Layer], layer_ids: list[str],
+                             managed: bool) -> None:
+        from src.features.composite.core.node_engine import NODE_REGISTRY
+        from src.features.shared.effects.effect_catalog import get_effect_catalog
+
+        controller = self._layer_stack_controller
+        layer_id = layer.layer_id
+        editable = managed and not layer.locked
+        rename = menu.addAction(I18N.tr("keyframes.layer_rename", "Rename…"),
+                                lambda: self._rename_layer(layer))
+        rename.setEnabled(not layer.locked)
+        duplicate = menu.addAction(I18N.tr("keyframes.layer_duplicate", "Duplicate"),
+                                   lambda: self._commit_layer_edit(
+                                       controller.duplicate_layer(layer_id), layer_id))
+        duplicate.setEnabled(editable)
+        if editable and controller.can_prepare_layer_transform(layer_id):
+            menu.addAction(I18N.tr("keyframes.layer_prepare_transform", "Enable Layer Transform"),
+                           lambda: self._commit_layer_edit(
+                               controller.prepare_layer_transform(layer_id), layer_id))
+        menu.addSeparator()
+        effects = menu.addMenu(I18N.tr("keyframes.layer_add_effect", "Add Effect"))
+        for spec in sorted(get_effect_catalog().get_all_specs(), key=lambda item: item.name.casefold()):
+            if not spec.internal and NODE_REGISTRY.get(spec.effect_type) is not None:
+                effects.addAction(spec.name, lambda effect=spec.effect_type:
+                                  self._commit_layer_edit(
+                                      controller.add_layer_effect(layer_id, effect), layer_id))
+        effects.setEnabled(editable and controller.can_add_layer_effect(layer_id)
+                           and bool(effects.actions()))
+        remove_effect = menu.addMenu(I18N.tr("keyframes.layer_remove_effect", "Remove Effect"))
+        for effect_id in controller.layer_effect_ids(layer_id):
+            node = controller.graph.get_node(effect_id)
+            if node is not None:
+                remove_effect.addAction(node.display_title, lambda target=effect_id:
+                                        self.remove_layer_effect_requested.emit(layer_id, target))
+        remove_effect.setEnabled(editable and bool(remove_effect.actions()))
+        blend = menu.addMenu(I18N.tr("keyframes.layer_blend", "Blend Mode"))
+        for mode in sorted(LAYER_BLEND_MODES, key=lambda mode: (mode != "normal", mode)):
+            action = blend.addAction(I18N.tr(f"keyframes.layer_blend_modes.{mode}",
+                                           mode.replace("_", " ").title()),
+                                     lambda value=mode: self._commit_layer_edit(
+                                         controller.set_layer_blend_mode(layer_id, value), layer_id))
+            action.setCheckable(True)
+            action.setChecked(layer.blend_mode == mode)
+        blend.setEnabled(editable)
+
+        parents = menu.addMenu(I18N.tr("keyframes.layer_parent", "Parent"))
+        self._populate_layer_parent_menu(parents, layer, layers, layer_ids)
+        mattes = menu.addMenu(I18N.tr("keyframes.layer_matte", "Track Matte"))
+        no_relation = I18N.tr("keyframes.layer_no_relation", "None")
+        mattes.addAction(no_relation, lambda: self._commit_layer_edit(
+            controller.set_layer_track_matte(layer_id, None), layer_id))
+        for other_id in layer_ids:
+            if other_id == layer_id or other_id not in layers:
+                continue
+            other = layers[other_id]
+            matte = mattes.addMenu(other.name)
+            for mode, invert, label in (
+                ("alpha", False, I18N.tr("keyframes.layer_matte_alpha", "Alpha")),
+                ("alpha", True, I18N.tr("keyframes.layer_matte_alpha_invert", "Alpha Inverted")),
+                ("luma", False, I18N.tr("keyframes.layer_matte_luma", "Luma")),
+                ("luma", True, I18N.tr("keyframes.layer_matte_luma_invert", "Luma Inverted")),
+            ):
+                action = matte.addAction(label, lambda target=other_id, channel=mode, inv=invert:
+                                         self._commit_layer_edit(controller.set_layer_track_matte(
+                                             layer_id, target, channel, inv), layer_id))
+                action.setCheckable(True)
+                action.setChecked((layer.track_matte_layer_id, layer.track_matte_mode,
+                                   layer.track_matte_invert) == (other_id, mode, invert))
+        parents.setEnabled(editable and (bool(layer.parent_layer_id)
+                           or self._parent_binding_supported(layer.root_node_id)))
+        mattes.setEnabled(editable)
+        menu.addSeparator()
+        label = menu.addAction(I18N.tr("keyframes.layer_label_color", "Label Color…"),
+                               lambda: self._choose_layer_color(layer))
+        label.setEnabled(not layer.locked)
+        delete = menu.addAction(I18N.tr("keyframes.layer_delete", "Delete Layer"),
+                                lambda: self.layer_delete_requested.emit(layer_id))
+        delete.setEnabled(editable)
+
+    def _populate_layer_parent_menu(self, menu: QMenu, layer: Layer,
+                                    layers: dict[str, Layer], layer_ids: list[str]) -> None:
+        controller = self._layer_stack_controller
+        layer_id = layer.layer_id
+        clear = menu.addAction(I18N.tr("keyframes.layer_no_relation", "None"),
+                               lambda: self._commit_layer_edit(
+                                   controller.set_layer_parent(layer_id, None), layer_id))
+        clear.setCheckable(True)
+        clear.setChecked(layer.parent_layer_id is None)
+        for other_id in layer_ids:
+            other = layers.get(other_id)
+            if (other is None or other_id == layer_id or
+                    not self._parent_binding_supported(other.root_node_id)):
+                continue
+            action = menu.addAction(other.name, lambda _checked=False, target=other_id: self._commit_layer_edit(
+                controller.set_layer_parent(layer_id, target), layer_id))
+            action.setCheckable(True)
+            action.setChecked(layer.parent_layer_id == other_id)
+
+    def _open_layer_parent_menu(self, layer_id: str, position: QPoint) -> None:
+        controller = self._layer_stack_controller
+        if controller is None:
+            return
+        layers = controller.layers_map()
+        layer = layers.get(layer_id)
+        stack = controller.main_stack()
+        if (layer is None or stack is None or layer.locked or not layer.managed or not stack.managed):
+            return
+        if not layer.parent_layer_id and not self._parent_binding_supported(layer.root_node_id):
+            return
+        menu = QMenu(self)
+        menu.setObjectName("KeyframesLayerParentMenu")
+        self._populate_layer_parent_menu(menu, layer, layers, stack.layer_ids)
+        menu.aboutToHide.connect(menu.deleteLater)
+        menu.popup(position)
+
+    def _rename_layer(self, layer: Layer) -> None:
+        title = I18N.tr("keyframes.layer_rename", "Rename…")
+        name, accepted = QInputDialog.getText(self, title, title, text=layer.name)
+        if accepted:
+            self._rename_layer_from_timeline(layer.layer_id, name)
+
+    def _rename_layer_from_timeline(self, layer_id: str, name: str) -> None:
+        controller = self._layer_stack_controller
+        layer = controller.layers_map().get(layer_id) if controller is not None else None
+        name = name.strip()
+        if layer is not None and not layer.locked and name and name != layer.name:
+            self._commit_layer_edit(controller.rename_layer(layer_id, name), layer_id)
+
+    def _selected_unlocked_layer(self) -> Optional[Layer]:
+        controller = self._layer_stack_controller
+        if controller is None or self._layer_view_mode != KeyframesModel.VIEW_MODE_LAYERS:
+            return None
+        layer = controller.layers_map().get(self._selected_layer_id)
+        return layer if layer is not None and not layer.locked else None
+
+    def _rename_selected_layer(self) -> None:
+        if (layer := self._selected_unlocked_layer()) is not None:
+            self._rename_layer(layer)
+
+    def _duplicate_selected_layer(self) -> None:
+        layer = self._selected_unlocked_layer()
+        if layer is not None and layer.managed:
+            self._commit_layer_edit(self._layer_stack_controller.duplicate_layer(
+                layer.layer_id), layer.layer_id)
+
+    def _choose_layer_color(self, layer: Layer) -> None:
+        color = QColorDialog.getColor(QColor(layer.label_color), self, I18N.tr(
+            "keyframes.layer_label_color", "Label Color…"))
+        if color.isValid() and color.name() != layer.label_color:
+            self._commit_layer_edit(self._layer_stack_controller.set_layer_label_color(
+                layer.layer_id, color.name()), layer.layer_id)
+
+    def _commit_layer_edit(self, result: bool | str | None, layer_id: str) -> None:
+        if result:
+            node_id = ""
+            if isinstance(result, str):
+                if result in self._layer_stack_controller.layers_map():
+                    layer_id = result
+                else:
+                    node_id = result
+            self.layer_edit_committed.emit(layer_id, node_id)
+        else:
+            QToolTip.showText(QCursor.pos(), I18N.tr(
+                "keyframes.layer_edit_failed", "Unable to apply this layer edit."), self)
 
     def _on_layer_lock_changed(self, root_node_id: str, locked: bool) -> None:
         layer = self._layer_for_root(root_node_id)
         if layer is None:
             return
-        if not self._layer_stack_controller.set_layer_locked(
-                layer.layer_id, locked):
+        if self._layer_stack_controller.set_layer_locked(layer.layer_id, locked):
+            self.layer_edit_committed.emit(layer.layer_id, "")
+        else:
             self._rebuild_filtered_model()
 
     def _on_layer_eye_changed(self, root_node_id: str, enabled: bool) -> None:
         layer = self._layer_for_root(root_node_id)
         if layer is None:
             return
-        if not self._layer_stack_controller.set_layer_visibility(
-                layer.layer_id, enabled):
+        if self._layer_stack_controller.set_layer_visibility(layer.layer_id, enabled):
+            self.layer_edit_committed.emit(layer.layer_id, "")
+        else:
             self._rebuild_filtered_model()
 
     def _on_layer_solo_changed(self, layer_id: str, solo: bool) -> None:
         if (self._layer_view_mode != KeyframesModel.VIEW_MODE_LAYERS
                 or self._layer_stack_controller is None):
             return
-        if not self._layer_stack_controller.set_layer_solo(layer_id, solo):
+        if self._layer_stack_controller.set_layer_solo(layer_id, solo):
+            self.layer_edit_committed.emit(layer_id, "")
+        else:
             self._rebuild_filtered_model()
 
     def _on_layer_reorder_requested(self, layer_id: str,
@@ -2967,6 +3487,7 @@ class KeyframesPanel(QWidget):
             return
         if self._layer_stack_controller.move_layer(layer_id, target):
             self.layer_reordered.emit(layer_id, target)
+            self.layer_edit_committed.emit(layer_id, "")
 
     def _on_param_selected(self, node_id: str, param_name: str) -> None:
         self._selected_param = (node_id, param_name)
@@ -3065,10 +3586,6 @@ class KeyframesPanel(QWidget):
         self._apply_ae_splitter_defaults()
         self._complete_deferred_fit()
         self._clamp_vertical_scroll()
-        if self._empty_state_overlay is not None:
-            self._empty_state_overlay.setGeometry(self.rect())
-            if not self._composition_active:
-                self._empty_state_overlay.raise_()
 
     def _apply_ae_splitter_defaults(self) -> None:
         """Give the layer/property side the same visual weight as AE.
@@ -3119,7 +3636,7 @@ class KeyframesPanel(QWidget):
         """Return the scroll range required by the visible rows only."""
         content_height = len(self._model.visible_rows()) * KEYFRAMES_ROW_H
         viewport_height = max(
-            0, self._timeline_view.height() - KEYFRAMES_RULER_H)
+            0, self._timeline_view.height() - self._timeline_view.ruler_height())
         return max(0, content_height - viewport_height)
 
     def _set_vertical_scroll(self, value: int) -> int:
@@ -3184,12 +3701,11 @@ class KeyframesPanel(QWidget):
         if mods & Qt.KeyboardModifier.ControlModifier:
             # Zoom anchored at the playhead so it doesn't jump.
             factor = 1.15 if delta > 0 else (1.0 / 1.15)
-            new_ppf = self._frame_mapper.pixels_per_frame * factor
-            self._frame_mapper.set_zoom(new_ppf)
-            self._timeline_view.refresh()
+            anchor = self._frame_mapper.frame_to_x(self._state.current_frame)
+            self._timeline_view.zoom_time_at(anchor, factor)
         elif mods & Qt.KeyboardModifier.ShiftModifier:
             # Horizontal pan.
-            self._frame_mapper.set_scroll(
+            self._timeline_view.set_horizontal_offset(
                 self._frame_mapper.scroll_offset - delta * 0.5)
             self._timeline_view.refresh()
         else:

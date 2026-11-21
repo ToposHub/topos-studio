@@ -112,6 +112,7 @@ class FilesDataLocator:
         for directory in (
             self.root,
             self.root / "trash",
+            self.root / "cache",
             self.cache_thumbnails_dir,
             self.cache_strips_dir,
             self.cache_probe_dir,
