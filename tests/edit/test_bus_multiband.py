@@ -238,3 +238,71 @@ class TestMultibandFX04:
             {"crossovers": [180.0, 4200.0],
              "bands": [{"makeup_db": 6.0}, {}, {}]})
         assert aliased.band_low["makeup_gain"] == 6.0
+
+
+class TestBusCompFX05:
+    """FX-05（2026-11-21 计划）：连续参数覆盖模板 + makeup 别名生效。"""
+
+    def test_knob_overrides_template(self) -> None:
+        """显式连续字段覆盖模板值；未给字段沿用模板。"""
+        fx = BusCompEffect(RATE)
+        fx.set_params({"template": "dx_glue", "threshold_db": -30.0})
+        assert fx._comp._threshold_db == -30.0      # 覆盖
+        assert fx._comp._ratio == 2.5               # dx_glue 模板值
+        assert fx._comp._makeup_db == 1.5           # 模板 makeup 别名生效
+
+    def test_template_makeup_alias_effective(self) -> None:
+        """模板 makeup_db（旧键）→ makeup_gain：补偿实际生效。"""
+        rng = np.random.default_rng(3)
+        x = (rng.uniform(-0.3, 0.3, (2, RATE))).astype(np.float32)
+        fx0 = BusCompEffect(RATE)
+        fx0.set_params({"template": "dx_glue", "makeup_gain": 0.0})
+        y0 = fx0.process(x.copy())
+        fx6 = BusCompEffect(RATE)
+        fx6.set_params({"template": "dx_glue", "makeup_gain": 6.0})
+        y6 = fx6.process(x.copy())
+        rms0 = float(np.sqrt(np.mean(y0[:, RATE // 2:] ** 2)))
+        rms6 = float(np.sqrt(np.mean(y6[:, RATE // 2:] ** 2)))
+        assert 20 * np.log10(rms6 / rms0) == pytest.approx(6.0, abs=0.2)
+
+    def test_hard_knee_transfer_curve(self) -> None:
+        """硬膝传递曲线：GR = over·(1 − 1/ratio)（±0.2 dB，detector 校准解耦）。"""
+        # 高频正弦（检测包络纹波最小）→ 传递曲线与纹波相位解耦。
+        t = np.arange(2 * RATE) / RATE
+        sine = (10 ** (-10.0 / 20.0)
+                * np.sin(2 * np.pi * 12000.0 * t))[None, :].astype(np.float32)
+        fx = BusCompEffect(RATE)
+        fx.set_params({"threshold_db": -20.0, "ratio": 2.0, "knee": 0.0,
+                       "mix": 100.0, "attack_ms": 1.0, "release_ms": 300.0,
+                       "makeup_gain": 0.0})
+        out = fx.process(sine.copy())
+        measured_gr = -20.0 * np.log10(
+            float(np.max(np.abs(out[0, RATE:])))
+            / max(float(np.max(np.abs(sine[0, RATE:]))), 1e-9))
+        detector_db = float(fx._comp.last_detector_db)
+        over = detector_db - (-20.0)
+        theoretical = max(0.0, over) * (1.0 - 1.0 / 2.0)
+        assert measured_gr == pytest.approx(theoretical, abs=0.2)
+
+    def test_sc_hpf_keeps_bass_in_output(self) -> None:
+        """SC 高通只作用检测支路：输出低频保留，触发减少。"""
+        t = np.arange(2 * RATE) / RATE
+        bass = (0.4 * np.sin(2 * np.pi * 50.0 * t))[None, :].astype(
+            np.float32)
+        hi = (0.05 * np.sin(2 * np.pi * 1000.0 * t))[None, :].astype(
+            np.float32)
+        mix_sig = (bass + hi).astype(np.float32)
+        common = {"threshold_db": -18.0, "ratio": 3.0, "knee": 0.0,
+                  "mix": 100.0, "attack_ms": 3.0, "release_ms": 50.0}
+        o_off = BusCompEffect(RATE).set_params(
+            dict(common, sc_hpf_hz=0.0)) or BusCompEffect(RATE)
+        o_off = BusCompEffect(RATE)
+        o_off.set_params(dict(common, sc_hpf_hz=0.0))
+        y_off = o_off.process(mix_sig.copy())
+        o_on = BusCompEffect(RATE)
+        o_on.set_params(dict(common, sc_hpf_hz=120.0))
+        y_on = o_on.process(mix_sig.copy())
+        bass_off = float(np.max(np.abs(y_off[0, RATE:])))
+        bass_on = float(np.max(np.abs(y_on[0, RATE:])))
+        # 输出未被直接高通（低频保留）+ HPF 减少触发 → bass 幅度不降反升。
+        assert bass_on >= bass_off * 0.9

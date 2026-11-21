@@ -47,10 +47,22 @@ class BusCompEffect(AudioEffect):
         self._hpf_state = None
 
     def _apply_template(self) -> None:
+        """模板值 + 显式连续字段覆盖（FX-05：旋钮提交与模板解耦）。
+
+        模板的 ``makeup_db`` 旧键归一为 ``makeup_gain``（旧实现写入后
+        被 CompressorEffect 静默忽略）。
+        """
         template = str(self._params.get("template", "dx_glue"))
-        self._comp.set_params(
-            BUS_COMP_TEMPLATES.get(template, BUS_COMP_TEMPLATES["dx_glue"]),
-            sample_rate=self._sample_rate)
+        base = dict(BUS_COMP_TEMPLATES.get(
+            template, BUS_COMP_TEMPLATES["dx_glue"]))
+        if "makeup_gain" not in base and "makeup_db" in base:
+            base["makeup_gain"] = base.pop("makeup_db")
+        for key in ("threshold_db", "ratio", "attack_ms", "release_ms",
+                    "knee", "mix", "makeup_gain"):
+            value = self._params.get(key)
+            if value is not None:
+                base[key] = value
+        self._comp.set_params(base, sample_rate=self._sample_rate)
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -61,10 +73,10 @@ class BusCompEffect(AudioEffect):
         merged = dict(self._params)
         if isinstance(params, dict):
             merged.update(params)
-        template_changed = merged.get("template") != self._params.get("template")
         self._params = merged
-        if template_changed:
-            self._apply_template()
+        # FX-05：模板与旋钮都重算有效参数（连续字段覆盖模板值）；
+        # CompressorEffect.set_params 保持包络状态（FX-04 同合同）。
+        self._apply_template()
         hpf = float(np.clip(self._params.get("sc_hpf_hz", 120.0),
                             0.0, self._sample_rate * 0.45))
         self._hpf_sos = (butter(2, hpf, btype="highpass",

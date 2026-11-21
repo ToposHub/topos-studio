@@ -4085,30 +4085,61 @@ class DynamicEqParams:
 
 @dataclass(frozen=True)
 class BusCompParams:
-    """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。"""
+    """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。
+
+    FX-05（2026-11-21 计划）：连续字段（threshold_db/ratio/attack_ms/
+    release_ms/knee/mix/makeup_gain）显式给出时覆盖模板值（旋钮提交
+    与模板选择解耦）；未给出的字段沿用模板。模板的 ``makeup_db`` 旧
+    键在入口归一为 ``makeup_gain``（旧实现静默失效）。
+    """
     template: str = "dx_glue"  # BUS_COMP_TEMPLATES: dx_glue | mx_glue
     sc_hpf_hz: float = 120.0
     enabled: bool = True
+    threshold_db: float | None = None
+    ratio: float | None = None
+    attack_ms: float | None = None
+    release_ms: float | None = None
+    knee: float | None = None
+    mix: float | None = None
+    makeup_gain: float | None = None
 
     @staticmethod
     def default() -> "BusCompParams":
         return BusCompParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "template": self.template, "sc_hpf_hz": self.sc_hpf_hz,
             "enabled": self.enabled,
         }
+        for key in ("threshold_db", "ratio", "attack_ms", "release_ms",
+                    "knee", "mix", "makeup_gain"):
+            value = getattr(self, key)
+            if value is not None:
+                data[key] = value
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "BusCompParams":
         template = str(data.get("template", "dx_glue") or "dx_glue")
         if template not in ("dx_glue", "mx_glue"):
             template = "dx_glue"
+
+        def _opt(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+
         return BusCompParams(
             template=template,
             sc_hpf_hz=_params_f("sc_hpf_hz", data, 120.0),
             enabled=bool(data.get("enabled", True)),
+            threshold_db=_opt("threshold_db"),
+            ratio=_opt("ratio"),
+            attack_ms=_opt("attack_ms"),
+            release_ms=_opt("release_ms"),
+            knee=_opt("knee"),
+            mix=_opt("mix"),
+            makeup_gain=_opt("makeup_gain"),
         )
 
 
