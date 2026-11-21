@@ -297,6 +297,24 @@ CHORUS_FLANGER_EFFECT = EffectDefinition(
     icon="audio_track",
 )
 
+EXCITER_EFFECT = EffectDefinition(
+    effect_type="exciter",
+    name="Exciter",
+    category="audio",
+    description="Two-band harmonic exciter (even/odd branches mixed "
+                "back into dry)",
+    params_schema={
+        "ex_crossover_hz": _float_schema(2000.0, 100.0, 8000.0, 10.0,
+                                         "Crossover", "Hz"),
+        "ex_oversampling": _float_schema(1.0, 1.0, 2.0, 1.0,
+                                         "Oversampling", "x"),
+        "ex_wet": _float_schema(1.0, 0.0, 1.0, 0.01, "Wet", ""),
+        "ex_output_gain_db": _float_schema(0.0, -24.0, 24.0, 0.1,
+                                           "Output", "dB"),
+    },
+    icon="audio_track",
+)
+
 PHASER_EFFECT = EffectDefinition(
     effect_type="phaser",
     name="Phaser",
@@ -455,6 +473,8 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
     "multiband_comp", "convolution_reverb", "transient_designer",
     "tremolo_auto_pan", "chorus_flanger", "phaser",
+    # P2（2026-11-21 计划 FX-15）：激励器
+    "exciter",
 })
 
 
@@ -934,6 +954,8 @@ class EffectRegistry:
         self.register(TREMOLO_AUTO_PAN_EFFECT)
         self.register(CHORUS_FLANGER_EFFECT)
         self.register(PHASER_EFFECT)
+        # P2（2026-11-21 计划 FX-15）：激励器
+        self.register(EXCITER_EFFECT)
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an

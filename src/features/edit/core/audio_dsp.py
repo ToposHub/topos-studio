@@ -3861,6 +3861,11 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanAdapter
         _EFFECT_CLASS_REGISTRY["chorus_flanger"] = ChorusFlangerAdapter
         _EFFECT_CLASS_REGISTRY["phaser"] = PhaserAdapter
+        # P2（2026-11-21 计划 FX-15）：激励器
+        from src.features.edit.core.audio_effects.exciter import (
+            ExciterEffect,
+        )
+        _EFFECT_CLASS_REGISTRY["exciter"] = ExciterEffect
     return _EFFECT_CLASS_REGISTRY
 
 

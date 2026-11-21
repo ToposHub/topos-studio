@@ -3240,6 +3240,77 @@ class SaturationParams:
 
 @dataclass(frozen=True)
 @preserves_param_extras
+class ExciterParams:
+    """激励器（FX-15 · 2026-11-21 计划）：两段谐波支路并回干声。
+
+    首版两段（low/high），每段 Amount 默认 0 → 输出精确干声；
+    Solo 属监听语义（DSP 不消费）。
+    """
+    enabled: bool = True
+    ex_crossover_hz: float = 2000.0
+    ex_bands: tuple = ()
+    ex_oversampling: int = 1
+    ex_wet: float = 1.0
+    ex_output_gain_db: float = 0.0
+
+    @staticmethod
+    def default() -> "ExciterParams":
+        return ExciterParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "ex_crossover_hz": self.ex_crossover_hz,
+            "ex_bands": [dict(band) for band in self.ex_bands],
+            "ex_oversampling": self.ex_oversampling,
+            "ex_wet": self.ex_wet,
+            "ex_output_gain_db": self.ex_output_gain_db,
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        data = dict(band) if isinstance(band, dict) else {}
+
+        def _num(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        mode = str(data.get("mode", "even") or "even")
+        if mode not in ("even", "odd"):
+            mode = "even"
+        return {
+            "enabled": bool(data.get("enabled", False)),
+            "mode": mode,
+            "amount": _num("amount", 0.0),
+            "mix": _num("mix", 1.0),
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ExciterParams":
+        raw = data.get("ex_bands") or ()
+        bands = tuple(ExciterParams._normalize_band(band)
+                      for band in list(raw)[:2]) if isinstance(
+            raw, (list, tuple)) else ()
+        while len(bands) < 2:
+            bands = bands + (ExciterParams._normalize_band({}),)
+        try:
+            oversampling = int(data.get("ex_oversampling", 1))
+        except (TypeError, ValueError):
+            oversampling = 1
+        return ExciterParams(
+            enabled=bool(data.get("enabled", True)),
+            ex_crossover_hz=float(data.get("ex_crossover_hz", 2000.0)),
+            ex_bands=bands,
+            ex_oversampling=oversampling if oversampling in (1, 2) else 1,
+            ex_wet=float(data.get("ex_wet", 1.0)),
+            ex_output_gain_db=float(data.get("ex_output_gain_db", 0.0)),
+        )
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
 class ImagerParams:
     """立体声成像器参数（FX 机架效果器之一）。
 
@@ -3548,6 +3619,7 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["bus_comp"] = BusCompParams
         _EFFECT_PARAM_REGISTRY["multiband_comp"] = MultibandCompParams
         _EFFECT_PARAM_REGISTRY["convolution_reverb"] = ConvolutionReverbParams
+        _EFFECT_PARAM_REGISTRY["exciter"] = ExciterParams
         _EFFECT_PARAM_REGISTRY["transient_designer"] = TransientDesignerParams
         _EFFECT_PARAM_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanParams
         _EFFECT_PARAM_REGISTRY["chorus_flanger"] = ChorusFlangerParams
