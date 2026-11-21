@@ -3083,6 +3083,32 @@ class DelayEffect(AudioEffect):
         self._fade_l_remaining = 0
         self._fade_r_remaining = 0
 
+    def collect_graph_data(self) -> dict:
+        """FX-09：回声图数据源（纯读——不触碰音频线程状态）。
+
+        发布当前采样率、左右读头位置（样本 + ms）、实际反馈、交叉比、
+        高频衰减比、状态版本与尾音预算；图横坐标 ms =
+        1000·delay_samples/sample_rate。旁路时读头仍反映参数目标。
+        """
+        sr = float(self._sample_rate)
+        left_ms = float(self._left_delay)
+        right_ms = float(self._right_delay)
+        return {
+            "sample_rate": sr,
+            "read_head_left_samples": round(left_ms * sr / 1000.0, 2),
+            "read_head_right_samples": round(right_ms * sr / 1000.0, 2),
+            "read_head_left_ms": left_ms,
+            "read_head_right_ms": right_ms,
+            "feedback_left": float(self._left_fb),
+            "feedback_right": float(self._right_fb),
+            "blend": float(self._blend),
+            "high_damping_ratio": float(self._high_ratio),
+            "dry_wet": float(self._dry_wet),
+            "algorithm_version": self._algorithm_version,
+            "tail_estimate_samples": self.tail_estimate_samples(),
+            "state": "bypassed" if not self._enabled else "active",
+        }
+
     def tail_estimate_samples(self) -> int:
         """MX-07：延迟尾音估计——最大延迟 × 反馈衰减到 -60dB 的圈数。
 
