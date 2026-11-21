@@ -56,6 +56,27 @@ class TestDefaults:
 
 
 class TestFormatting:
+    def test_layer_timecode_uses_edit_type_and_keeps_details_on_one_line(self, qapp):
+        from src.shared.ui.style_sheet import C, timeline_timecode_font
+
+        w = TimelineTimeDisplay(fps=23.976, compact=True)
+        w.set_single_line(True)
+        w.resize(260, 30)
+        w.set_display_mode("timecode")
+        w.set_current_frame(14_412)
+        w.show()
+        qapp.processEvents()
+        try:
+            assert w._top_label.text() == "00:10:00:12"
+            assert w._bottom_label.text() == "14412 · 23.976 fps"
+            assert w._top_label.font() == timeline_timecode_font()
+            assert C.TIMELINE_TIMECODE_TEXT in w.styleSheet()
+            assert w._top_label.geometry().right() < w._bottom_label.geometry().left()
+            assert w._top_label.geometry().center().y() == w._bottom_label.geometry().center().y()
+            assert w._parse_user_input(w._top_label.text()) == w.current_frame
+        finally:
+            w.close()
+
     def test_frame_mode_top_zero_padded(self, qapp):
         w = TimelineTimeDisplay(fps=24.0)
         w.set_display_mode("frame")

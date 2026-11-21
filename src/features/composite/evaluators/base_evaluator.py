@@ -34,6 +34,7 @@ def _typed_default(value_type: str) -> Any:
     return 0.0
 
 from ..core.graph_snapshot import GraphSnapshot, NodeSnapshot
+from ..core.layer_model import EMPTY_LAYER_OUTPUT_PARAM
 from ..nodes.base_node import TextureResult
 from ..core.format import ImageFormat, BBox, MergeGeometry
 from ..render.cache_manager import CacheManager, CacheEntry
@@ -398,6 +399,10 @@ class BaseEvaluatorMixin:
                 # Sync parameters; invalidate cache if resolution params changed
                 params_changed = False
                 if existing is not None:
+                    if (EMPTY_LAYER_OUTPUT_PARAM in existing.parameters
+                            and EMPTY_LAYER_OUTPUT_PARAM not in ns.parameters):
+                        existing.parameters.pop(EMPTY_LAYER_OUTPUT_PARAM)
+                        params_changed = True
                     for key, val in ns.parameters.items():
                         if existing.parameters.get(key) != val:
                             existing.parameters[key] = val
@@ -2458,7 +2463,10 @@ class BaseEvaluatorMixin:
         return self._apply_merge_blend(input_a, input_b, input_mask,
                                         blend_mode, opacity, format_policy, bbox_policy,
                                         alpha_policy, alpha_clamp,
-                                        mix, mask_channel, mask_invert)
+                                        mix, mask_channel, mask_invert,
+                                        layer_composite=effect_params.get("layer_composite", False),
+                                        transparent_background=effect_params.get(
+                                            "transparent_background", False))
 
     def _apply_merge_blend(self, input_a: TextureResult, input_b: TextureResult,
                            input_mask: Optional[TextureResult],
@@ -2468,7 +2476,9 @@ class BaseEvaluatorMixin:
                            alpha_clamp: bool = True,
                            mix: float = 1.0,
                            mask_channel: int = 0,
-                           mask_invert: bool = False) -> dict:
+                           mask_invert: bool = False, *,
+                           layer_composite: bool = False,
+                           transparent_background: bool = False) -> dict:
         """Apply GPU merge/blend operation.
 
         Core GPU rendering logic shared by:
@@ -2622,7 +2632,7 @@ class BaseEvaluatorMixin:
             (geometry.resolution_b[0], geometry.resolution_b[1]) != out_res or
             geometry.bbox_a.x != output_bbox.x or geometry.bbox_a.y != output_bbox.y or
             geometry.bbox_b.x != output_bbox.x or geometry.bbox_b.y != output_bbox.y or
-            (geometry.bbox_mask is not None and (
+            (not layer_composite and geometry.bbox_mask is not None and (
                 geometry.bbox_mask.x != output_bbox.x or
                 geometry.bbox_mask.y != output_bbox.y)) or
             # Also enable when output bbox itself doesn't start at origin
@@ -2636,6 +2646,10 @@ class BaseEvaluatorMixin:
         self._set_uniform_if_present(prog, 'u_mix', float(mix))
         self._set_uniform_if_present(prog, 'u_mask_channel', int(mask_channel))
         self._set_uniform_if_present(prog, 'u_mask_invert', bool(mask_invert))
+        self._set_uniform_if_present(prog, 'u_layer_composite', layer_composite)
+        self._set_uniform_if_present(prog, 'u_transparent_background', transparent_background)
+        self._set_uniform_if_present(
+            prog, 'u_mask_straight', has_mask and input_mask.alpha_premultiplied is False)
 
         from ..nodes.blend_node import BLEND_MODES
         mode_idx = BLEND_MODES.index(blend_mode) if blend_mode in BLEND_MODES else 0

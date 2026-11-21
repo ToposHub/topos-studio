@@ -18,13 +18,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytest
 
 from PyQt6.QtCore import QPoint, QPointF, Qt, QEvent
-from PyQt6.QtGui import QMouseEvent, QWheelEvent
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QMenu
 
 from src.app.controllers.page_controller import _KeyframesTimelineTransport
 from src.features.composite.core.node_engine import NodeGraph
+from src.features.composite.core.layer_stack_controller import LayerStackController
+from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.transform_node import TransformNode
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.keyframes_panel import KeyframesPanel
+from src.features.composite.ui.keyframes_model import KEYFRAMES_ROW_H
 from src.shared.keyframe import Keyframe, KeyframeTrack
 
 
@@ -63,6 +68,373 @@ def _mouse(view, etype, x, y, button, buttons=Qt.MouseButton.NoButton):
     view.mousePressEvent(ev) if etype == QEvent.Type.MouseButtonPress \
         else view.mouseMoveEvent(ev) if etype == QEvent.Type.MouseMove \
         else view.mouseReleaseEvent(ev)
+
+
+def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp):
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    layer_id = controller.create_generated_layer("solid", "Card", {})
+    node_id = graph.get_layer(layer_id).root_node_id
+    node = graph.get_node(node_id)
+    panel = KeyframesPanel()
+    panel.resize(1200, 360)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    panel.set_value_provider(lambda _node_id, param: node.parameters.get(param))
+    panel.show()
+    try:
+        qapp.processEvents()
+        tree = panel._tree_view
+        model = panel._model
+        cols = tree._column_geometry()
+        layer_y = tree._header_height + KEYFRAMES_ROW_H // 2
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint(cols["name"][0] + 8, layer_y))
+        pair = next(row for row in model.visible_rows()
+                    if row.component_params == ("scale_x", "scale_y"))
+        assert not pair.expanded
+        x_control = tree._value_controls[(node_id, "scale_x")]
+        y_control = tree._value_controls[(node_id, "scale_y")]
+        assert x_control.value() == y_control.value() == 100.0
+        assert x_control.geometry().right() < y_control.geometry().left()
+        panel.parameter_changed.connect(lambda _nid, name, value: node.set_parameter(name, value))
+        x_control.setValue(125.0)
+        assert node.parameters["scale_x"] == 1.25
+
+        calls = []
+        panel.track_changed.connect(lambda _nid, name, keyframes: calls.append((name, keyframes)))
+        pair_y = layer_y + model.visible_rows().index(pair) * KEYFRAMES_ROW_H
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint(cols["keyframe"][0] + 8, pair_y))
+        assert [(name, keyframes[0]["value"]) for name, keyframes in calls] == [
+            ("scale_x", 1.25), ("scale_y", 1.0)]
+
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint(cols["name"][0] + 50, pair_y))
+        assert pair.expanded
+        assert [row.param_name for row in model.visible_rows() if row.parent_row_id == pair.row_id] == [
+            "scale_x", "scale_y"]
+
+        scale_track = KeyframeTrack(param_name="scale_x", min_val=0.01, max_val=100.0)
+        scale_track.add_keyframe(Keyframe(0, 1.25))
+        scale_track.add_keyframe(Keyframe(10, 1.50))
+        node.set_keyframe_track("scale_x", scale_track)
+        panel.set_node_graph(graph, selected_layer_id=layer_id)
+        panel.set_current_frame(5)
+        tree._value_controls[(node_id, "scale_x")].setValue(140.0)
+        assert node.parameters["scale_x"] == 1.25
+        assert calls[-1][0] == "scale_x"
+        assert [keyframe["frame"] for keyframe in calls[-1][1]] == [0, 5, 10]
+
+        pair = next(row for row in model.visible_rows() if row.row_id == pair.row_id)
+        model.set_row_expanded(pair.row_id, False)
+        rail = panel._timeline_view
+        pair_y = layer_y + model.visible_rows().index(pair) * KEYFRAMES_ROW_H
+        marker_x = round(panel._frame_mapper.frame_to_x(10))
+        seeks = []
+        panel.current_frame_changed.connect(seeks.append)
+        QTest.mouseClick(rail, Qt.MouseButton.LeftButton, pos=QPoint(marker_x, pair_y))
+        assert pair.expanded
+        assert seeks == [10]
+    finally:
+        panel.close()
+
+
+def test_recursive_disclosure_expands_only_the_clicked_layer_branch(qapp):
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    sibling_id = controller.create_generated_layer("solid", "Other layer", {})
+    layer_id = controller.create_generated_layer("solid", "Card", {})
+    panel = KeyframesPanel()
+    panel.resize(1200, 400)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    panel.show()
+    try:
+        qapp.processEvents()
+        tree = panel._tree_view
+        model = panel._model
+        name_x, last_name_x = tree._column_geometry()["name"]
+        heading_y = tree._header_height + KEYFRAMES_ROW_H // 2
+        root = next(row for row in model.visible_rows() if row.layer_id == layer_id)
+        sibling = next(row for row in model.visible_rows() if row.layer_id == sibling_id)
+        disclosures = []
+        tree.layer_disclosure_requested.connect(disclosures.append)
+
+        name_click = QPoint(min(last_name_x - 2, name_x + 55), heading_y)
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.ControlModifier, name_click)
+        assert not root.expanded and not disclosures
+        disclosure_click = QPoint(name_x + 8, heading_y)
+        QTest.mouseMove(tree, disclosure_click)
+        assert "Cmd" in tree.toolTip() or "Ctrl" in tree.toolTip()
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.ControlModifier, disclosure_click)
+        assert root.expanded and not sibling.expanded
+        assert disclosures == [layer_id]
+        assert all(row.expanded for row in model.visible_rows()
+                   if row.layer_id == layer_id and row.row_type == "group")
+        assert {"scale_x", "scale_y"} <= {
+            row.param_name for row in model.visible_rows() if row.layer_id == layer_id
+        }
+
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.ControlModifier, disclosure_click)
+        assert not root.expanded
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint(name_x + 8, heading_y))
+        assert root.expanded
+        assert not any(row.param_name == "scale_x" for row in model.visible_rows())
+    finally:
+        panel.close()
+
+
+def test_inline_layer_rename_commits_only_the_current_row(qapp):
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    other_id = controller.create_generated_layer("solid", "Other", {})
+    layer_id = controller.create_generated_layer("solid", "Card", {})
+    panel = KeyframesPanel()
+    panel.resize(1200, 360)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    panel.show()
+    try:
+        qapp.processEvents()
+        tree = panel._tree_view
+        edits = []
+        tree.layer_name_edited.connect(lambda ident, name: edits.append((ident, name)))
+        assert not tree.open_layer_name_editor(other_id)
+        assert tree.open_layer_name_editor(layer_id)
+        editor = tree._layer_name_editor
+        assert editor.hasFocus() and editor.selectedText() == "Card"
+        QTest.keyClicks(editor, "  New title  ")
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        assert edits == [(layer_id, "New title")]
+        assert tree._layer_name_editor is None
+
+        assert tree.open_layer_name_editor(layer_id)
+        editor = tree._layer_name_editor
+        editor.setText("Cancelled")
+        QTest.keyClick(editor, Qt.Key.Key_Escape)
+        assert tree._layer_name_editor is None
+
+        assert tree.open_layer_name_editor(layer_id)
+        tree._layer_name_editor.setText("Focus changed")
+        panel._timeline_view.setFocus()
+        qapp.processEvents()
+        assert tree._layer_name_editor is None
+
+        assert tree.open_layer_name_editor(layer_id)
+        tree._layer_name_editor.setText("Selection moved")
+        tree.set_selected_layer_id(other_id)
+        assert tree._layer_name_editor is None
+
+        tree.set_selected_layer_id(layer_id)
+        assert tree.open_layer_name_editor(layer_id)
+        tree._layer_name_editor.setText("Row rebuilt")
+        panel.set_node_graph(graph, selected_layer_id=layer_id)
+        assert tree._layer_name_editor is None
+        assert edits == [(layer_id, "New title")]
+    finally:
+        panel.close()
+
+
+@pytest.fixture
+def layer_shortcuts_panel(qapp):
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    other = controller.create_generated_layer("solid", "Other", {})
+    layer_id = controller.create_generated_layer("solid", "Card", {})
+    root = graph.get_node(graph.get_layer(layer_id).root_node_id)
+    assert controller.add_layer_effect(layer_id, "blur")
+    root.set_parameter("scale_x", 1.4)
+    root.set_expression("translate_y", "1")
+    rotation = KeyframeTrack(param_name="rotation", min_val=-360.0, max_val=360.0)
+    rotation.add_keyframe(Keyframe(10, 0.0))
+    rotation.add_keyframe(Keyframe(30, 20.0))
+    root.set_keyframe_track("rotation", rotation)
+    panel = KeyframesPanel()
+    panel.resize(1200, 400)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    panel.set_frame_range(0, 99, fps=25.0)
+    panel.show()
+    qapp.setActiveWindow(panel)
+    panel._tree_view.setFocus()
+    qapp.processEvents()
+    yield panel, graph, layer_id, other, root
+    panel.close()
+
+
+def test_layer_property_shortcuts_isolate_add_and_restore(layer_shortcuts_panel):
+    panel, _, layer_id, other, _ = layer_shortcuts_panel
+    tree = panel._tree_view
+    model = panel._model
+
+    def shown_params():
+        return {row.param_name for row in model.rows if row.layer_id == layer_id and row.param_name}
+
+    QTest.keyClick(tree, Qt.Key.Key_P)
+    assert shown_params() == {"translate_x", "translate_y"}
+    assert any(row.component_params == ("translate_x", "translate_y") for row in model.visible_rows())
+    assert not any(row.row_id.endswith(":group:transform") for row in model.visible_rows())
+    assert any(row.layer_id == other for row in model.visible_rows())
+    QTest.keyClick(tree, Qt.Key.Key_S, Qt.KeyboardModifier.ShiftModifier)
+    assert shown_params() == {"translate_x", "translate_y", "scale_x", "scale_y"}
+    QTest.keyClick(tree, Qt.Key.Key_P, Qt.KeyboardModifier.ShiftModifier)
+    assert shown_params() == {"scale_x", "scale_y"}
+
+    QTest.keyClick(tree, Qt.Key.Key_U)
+    assert shown_params() == {"rotation"}
+    QTest.keyClick(tree, Qt.Key.Key_U)
+    assert {"rotation", "scale_x", "translate_y"} <= shown_params()
+    QTest.keyClick(tree, Qt.Key.Key_E)
+    assert any(row.row_type == "node" and row.layer_id == layer_id for row in model.visible_rows())
+    QTest.keyClick(tree, Qt.Key.Key_E)
+    assert shown_params() == {"translate_y"}
+
+    layer_y = tree._header_height + KEYFRAMES_ROW_H // 2
+    disclosure = QPoint(tree._column_geometry()["name"][0] + 8, layer_y)
+    QTest.mouseClick(tree, Qt.MouseButton.LeftButton, pos=disclosure)
+    QTest.mouseClick(tree, Qt.MouseButton.LeftButton, pos=disclosure)
+    assert any(row.row_id.endswith(":group:transform") for row in model.visible_rows())
+    assert {"rotation", "translate_y", "scale_x"} <= shown_params()
+
+
+def test_layer_navigation_keys_use_visible_or_selected_tracks(layer_shortcuts_panel):
+    panel, _, _, _, _ = layer_shortcuts_panel
+    tree = panel._tree_view
+    panel.set_play_range(2, 90)
+    panel.set_current_frame(5)
+    QTest.keyClick(tree, Qt.Key.Key_K)
+    assert panel._state.current_frame == 90
+    panel.set_current_frame(5)
+    QTest.keyClick(tree, Qt.Key.Key_P)
+    QTest.keyClick(tree, Qt.Key.Key_K, Qt.KeyboardModifier.ShiftModifier)
+    assert panel._state.current_frame == 10
+    QTest.keyClick(tree, Qt.Key.Key_R)
+    QTest.keyClick(tree, Qt.Key.Key_K)
+    assert panel._state.current_frame == 30
+    QTest.keyClick(tree, Qt.Key.Key_PageUp)
+    assert panel._state.current_frame == 29
+    QTest.keyClick(tree, Qt.Key.Key_PageDown, Qt.KeyboardModifier.ShiftModifier)
+    assert panel._state.current_frame == 39
+
+
+def test_layer_keyboard_editing_respects_focus_and_edit_target(layer_shortcuts_panel):
+    panel, graph, layer_id, _, root = layer_shortcuts_panel
+    tree = panel._tree_view
+    QTest.keyClick(tree, Qt.Key.Key_Return)
+    editor = tree._layer_name_editor
+    assert editor is not None and editor.selectedText() == "Card"
+    QTest.keyClicks(editor, "New layer")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    assert graph.get_layer(layer_id).name == "New layer"
+
+    changes = []
+    panel.track_changed.connect(lambda nid, name, keys: changes.append((nid, name, keys)))
+    panel.set_current_frame(12)
+    QTest.keyClick(tree, Qt.Key.Key_P, Qt.KeyboardModifier.AltModifier)
+    assert [(nid, name, keys[0]["frame"]) for nid, name, keys in changes] == [
+        (root.id, "translate_x", 12), (root.id, "translate_y", 12)]
+
+    panel._search_edit.setFocus()
+    QTest.keyClicks(panel._search_edit, "press uuee")
+    assert panel._search_edit.text() == "press uuee"
+    assert panel._state.current_frame == 12
+    panel._search_edit.clear()
+    tree.setFocus()
+
+    QTest.keyClick(tree, Qt.Key.Key_R)
+    rail = panel._timeline_view
+    row_id = f"param:{root.id}:rotation"
+    rail._select_keyframe(row_id, 10, additive=False)
+    QTest.keyClick(tree, Qt.Key.Key_F9)
+    assert changes[-1][2][0]["interpolation"] == "ease_in_out"
+    deleted_layers = []
+    panel.layer_delete_requested.connect(deleted_layers.append)
+    QTest.keyClick(tree, Qt.Key.Key_Backspace)
+    assert changes[-1][1] == "rotation"
+    assert len(changes[-1][2]) == 1 and not deleted_layers
+    rail.clear_keyframe_selection()
+    QTest.keyClick(tree, Qt.Key.Key_Backspace)
+    assert deleted_layers == [layer_id]
+
+
+def test_layer_time_ruler_aligns_time_labels_to_seconds(layer_shortcuts_panel):
+    panel, _, _, _, _ = layer_shortcuts_panel
+    view = panel._timeline_view
+    view.set_display("time", 25.0)
+    panel._frame_mapper.set_zoom(2.0)
+    assert view._tick_steps() == (25, 50)
+    assert view._ruler_label(50) == "00:02"
+    assert view._ruler_label(55) == "00:02+05f"
+
+
+def test_option_shortcut_keys_the_text_layer_transform_through_filters(layer_shortcuts_panel):
+    panel, graph, _, _, _ = layer_shortcuts_panel
+    controller = panel._layer_stack_controller
+    layer_id = controller.create_generated_layer("text", "Title", {"text": "Title"})
+    root_id = graph.get_layer(layer_id).root_node_id
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    panel._set_filter_mode("animated")
+    edits = []
+    panel.track_changed.connect(lambda nid, name, keys: edits.append((nid, name, keys)))
+    panel.set_current_frame(12)
+
+    event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier, "ß")
+    assert panel.eventFilter(panel._tree_view, event)
+    assert [(node_id, name, keys[0]["value"]) for node_id, name, keys in edits] == [
+        (root_id, "scale_x", 1.0), (root_id, "scale_y", 1.0)]
+
+
+def test_property_projection_preserves_visible_keyframe_selection(layer_shortcuts_panel):
+    panel, _, layer_id, _, root = layer_shortcuts_panel
+    tree = panel._tree_view
+    rail = panel._timeline_view
+    QTest.keyClick(tree, Qt.Key.Key_R)
+    row_id = f"param:{root.id}:rotation"
+    rail._select_keyframe(row_id, 10)
+    QTest.keyClick(tree, Qt.Key.Key_S, Qt.KeyboardModifier.ShiftModifier)
+    assert rail.selected_keyframes() == [(row_id, 10)]
+
+    layer_deletes = []
+    panel.layer_delete_requested.connect(layer_deletes.append)
+    QTest.keyClick(tree, Qt.Key.Key_P)
+    assert rail.selected_keyframes() == []
+    QTest.keyClick(tree, Qt.Key.Key_Backspace)
+    assert layer_deletes == []
+    panel._on_layer_selected(layer_id)
+    QTest.keyClick(tree, Qt.Key.Key_Backspace)
+    assert layer_deletes == [layer_id]
+
+
+def test_layer_parent_menu_is_available_directly_on_the_row(layer_shortcuts_panel, monkeypatch):
+    panel, graph, layer_id, other, _ = layer_shortcuts_panel
+    tree = panel._tree_view
+    y = tree._header_height + KEYFRAMES_ROW_H // 2
+    x = tree._column_geometry()["value"][0] + 16
+    QTest.mouseClick(tree, Qt.MouseButton.LeftButton, pos=QPoint(x, y))
+    menu = panel.findChild(QMenu, "KeyframesLayerParentMenu")
+    assert menu is not None
+    next(action for action in menu.actions() if action.text() == "Other").trigger()
+    assert graph.get_layer(layer_id).parent_layer_id == other
+    row = next(row for row in panel._model.rows if row.layer_id == layer_id and row.row_type == "layer")
+    assert row.parent_layer_name == "Other"
+    menu.close()
+    painted = []
+    monkeypatch.setattr(tree, "_draw_layer_parent", lambda _painter, _span, _y, row: painted.append(row))
+    assert not tree.grab().isNull()
+    assert row in painted
 
 
 # ── 1. 滚轮缩放 ─────────────────────────────────────────────────────────

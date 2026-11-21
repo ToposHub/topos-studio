@@ -26,7 +26,9 @@ evaluator and the cache all agree without extra locking.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
+
+from .layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 
 # Node types whose parameters define an output-frame → input-frame mapping.
 TIME_REMAP_NODE_TYPES = frozenset({
@@ -389,3 +391,42 @@ def compute_layer_frame_gates(layer_stacks: Iterable[object],
                     gate = _intersect_gates(gates[node_id], gate)
                 gates[node_id] = gate
     return gates
+
+
+def empty_managed_layer_outputs(
+    stacks: Iterable[Any], get_layer: Callable[[str], Any], connections: Iterable[Any],
+    gates: dict[str, tuple[int | None, int | None]], frame: int,
+) -> set[str]:
+    """Identify deliberate empty frames in compositor-owned v2 output wiring."""
+    managed_stacks = [stack for stack in stacks if stack.managed and stack.output_node_id
+                      and stack.version >= BOTTOM_UP_LAYER_STACK_VERSION]
+    if not managed_stacks:
+        return set()
+    inputs = {(edge.dst_node_id, edge.dst_port_name): edge.src_node_id
+              for edge in connections}
+    blank: set[str] = set()
+    for stack in managed_stacks:
+        output = stack.output_node_id
+        source = inputs.get((output, "image"))
+        if source is None:
+            layers = [layer for layer_id in stack.layer_ids
+                      if (layer := get_layer(layer_id)) is not None]
+            has_solo = any(layer.solo for layer in layers)
+            mattes = {layer.track_matte_layer_id for layer in layers}
+            if not any(layer.enabled and (layer.solo or not has_solo)
+                       and layer.layer_id not in mattes for layer in layers):
+                blank.add(output)
+            continue
+
+        merges = set(stack.generated_merge_node_ids)
+        while source in merges:
+            merges.remove(source)
+            foreground = inputs.get((source, "A"))
+            gate = gates.get(foreground) if foreground is not None else None
+            if gate is None or gate_active(gate, frame):
+                break
+            source = inputs.get((source, "B"))
+            if source is None:
+                blank.add(output)
+                break
+    return blank

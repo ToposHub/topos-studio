@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
 from src.app.services.ai_library_embeddings import active_library_embedding_route, library_query_embedding
+from src.features.files.contracts import Availability, identity_key
 from src.features.files.services.facade import FilesFacade
 from src.features.files.transactions import CancelToken
 from src.shared.ai_models.generation.media_inference import MediaInferenceError
@@ -30,7 +32,7 @@ def search_library(
     facade: FilesFacade, query: str, *, limit: int = 40, library_id: str | None = None,
     folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
     only_unanalyzed: bool = False, semantic: bool = True, allow_remote: bool = False,
-    cancel: CancelToken | None = None,
+    cancel: CancelToken | None = None, include_catalog_metadata: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     scope = {"library_id": library_id, "folder": folder, "kinds": kinds, "recursive": recursive, "cancel": cancel}
     embedding = None
@@ -59,4 +61,22 @@ def search_library(
             note = tr("files.ai_library.keyword_fallback_offline", "向量服务暂不可用，使用关键词搜索。")
     hits = facade.search_ai_library(query, limit=limit, only_unanalyzed=only_unanalyzed,
                                    embedding=embedding, semantic_library_ids=owners, **scope)
+    if (include_catalog_metadata and not only_unanalyzed and query.strip() and len(hits) < limit
+            and not (cancel and cancel.requested)):
+        known = {identity_key(hit["path"]) for hit in hits}
+        metadata = facade.query.search(query, library_id=library_id or "", folder=folder,
+                                       limit=limit * 3, hydrate=True)
+        for entry in metadata.entries:
+            if len(hits) >= limit or (cancel and cancel.requested):
+                break
+            if ((kinds is not None and entry.kind not in kinds) or not entry.has_known_media
+                    or entry.identity in known):
+                continue
+            known.add(entry.identity)
+            hits.append({
+                "path": entry.path, "name": entry.name, "kind": entry.kind,
+                "online": entry.availability != Availability.OFFLINE and os.path.isfile(entry.path),
+                "tags": entry.user.tags, "text": entry.user.comments,
+                "technical": entry.technical.to_dict(), "thumb_version": entry.thumb_version,
+            })
     return hits, note

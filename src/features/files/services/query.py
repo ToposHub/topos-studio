@@ -157,20 +157,29 @@ class FilesQueryService:
 
     # ------------------------------------------------------------ tree / search
 
-    def tree(self, path: str) -> list[dict[str, str]]:
+    def tree(self, path: str, *, follow_symlinks: bool = True) -> list[dict[str, str]]:
         root = Path(normalize_path(path))
         try:
             children = child_directories(root)
         except OSError:
+            if not follow_symlinks:
+                raise
             return []
-        return [{"name": child.name, "path": nfc(child)} for child in children]
+        return [{"name": child.name, "path": nfc(child)} for child in children
+                if follow_symlinks or not child.is_symlink()]
 
     def search(self, query: str, *, library_id: str, request_id: str = "",
-               limit: int = 200, offset: int = 0) -> QueryResult:
+               limit: int = 200, offset: int = 0, folder: str | None = None,
+               hydrate: bool = False) -> QueryResult:
         rows, total = self._catalog.search(
-            query, library_id=library_id, limit=limit, offset=offset, within_library_roots=True)
+            query, library_id=library_id, limit=limit, offset=offset, within_library_roots=True,
+            folder=folder,
+        )
         entries = []
         for row in rows:
+            if hydrate:
+                entries.append(self._path_entry(row["path"], row["library_id"]))
+                continue
             asset = self._catalog.asset(row["library_id"], row["path"]) or {}
             entries.append(Entry(
                 path=row["path"], name=os.path.basename(row["path"]),

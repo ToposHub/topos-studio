@@ -67,6 +67,73 @@ def _graph():
     }
 
 
+def test_layer_time_gate_breaks_fusion_at_the_layer_root():
+    from src.features.composite.core.layer_model import Layer, LayerStack
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.render.render_scheduler import RenderScheduler
+    from src.features.composite.utils.pass_fusion import analyze_fusion
+
+    graph = NodeGraph.from_dict(_graph())
+    scheduler = RenderScheduler()
+    before = graph.snapshot(frame_number=0)
+    assert "g1" in analyze_fusion(scheduler.plan(before), before).node_to_chain
+
+    graph.set_layer_stack(LayerStack(stack_id="main", name="Main",
+                                     output_node_id="out"))
+    graph.upsert_layer("main", Layer(layer_id="layer", name="Layer",
+                                    root_node_id="g1", in_frame=2))
+    after = graph.snapshot(frame_number=0)
+    assert "g1" not in analyze_fusion(scheduler.plan(after), after).node_to_chain
+
+
+def test_managed_layer_gaps_render_transparent_in_preview_and_export(qapp, _gl_available, monkeypatch):
+    from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
+    from src.features.composite.core.layer_stack_controller import LayerStackController
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.nodes.constant_node import ConstantNode
+    from src.features.composite.nodes.output_node import OutputNode
+    from src.features.composite.render.composite_frame_renderer import CompositeFrameRenderer
+
+    monkeypatch.setenv("TOPOS_HEADLESS_GL", "1")
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    output = graph.get_node("out")
+    output.set_parameter("width", 32)
+    output.set_parameter("height", 24)
+    output.set_parameter("format_mode", "custom")
+    free_graph = graph.to_dict()
+    controller = LayerStackController(graph, layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
+    for ident, span, color in (("red", (3, 6), (1.0, 0.0, 0.0, 1.0)),
+                               ("blue", (9, 12), (0.0, 0.0, 1.0, 1.0))):
+        source = ConstantNode(node_id=ident)
+        source.set_parameter("width", 32)
+        source.set_parameter("height", 24)
+        source.set_parameter("color", color)
+        graph.add_node(source)
+        layer = controller.add_media_layer(ident, source.id)
+        assert controller.apply_layer_time_bounds(layer, span)
+
+    data = graph.to_dict()
+    for mode in ("preview", "export"):
+        renderer = CompositeFrameRenderer()
+        try:
+            for frame, covered in ((0, False), (3, True), (7, False), (9, True), (13, False)):
+                result = renderer.render_comp_clip_frame(data, timeline_frame=frame, quality=mode)
+                assert result is not None and result.shape[:2] == (24, 32)
+                assert bool(np.any(result)) is covered
+                if not covered:
+                    engine = renderer._get_export_renderer()
+                    snapshot = renderer._build_snapshot(data, frame)
+                    display = engine._get_cached_outputs_for_node("out", snapshot)["display"]
+                    framebuffer = next(fbo for tex, fbo in engine.fb_manager._fbo_cache.items()
+                                       if tex.glo == display.texture_id)
+                    pixel = framebuffer.read(viewport=(0, 0, 1, 1), components=4, dtype="f4")
+                    assert np.frombuffer(pixel, np.float32)[3] == 0.0
+            assert renderer.render_comp_clip_frame(free_graph, quality=mode) is None
+        finally:
+            renderer.cleanup()
+
+
 def _render(config_values=None):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("TOPOS_HEADLESS_GL", "1")

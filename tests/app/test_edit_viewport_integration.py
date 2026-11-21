@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QWidget
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
@@ -52,6 +53,20 @@ def test_quick_preview_keeps_current_monitor_and_focus() -> None:
     FileOpsMixin._on_asset_selected(host, "camera")
     source.open_asset.assert_called_once_with(asset, interpretation_fps=None)
     viewport.show_source.assert_not_called()
+
+
+def test_library_asset_opens_as_read_only_source_in_unified_viewport() -> None:
+    asset = SimpleNamespace(asset_id="external", display_name="Library Clip")
+    poster = QImage()
+    viewport = SimpleNamespace(show_source=MagicMock())
+    source = SimpleNamespace(open_asset=MagicMock(), viewer=SimpleNamespace(setFocus=MagicMock()))
+    host = SimpleNamespace(
+        current_page="Edit", source_viewer_widget=source, edit_viewport=viewport,
+        dock_program_viewer=SimpleNamespace(show=MagicMock(), raise_=MagicMock()),
+    )
+    FileOpsMixin._on_library_source_preview(host, asset, poster)
+    source.open_asset.assert_called_once_with(asset, preview_only=True, initial_preview=poster)
+    viewport.show_source.assert_called_once_with(focus=True)
 
 
 def test_source_only_legacy_layout_reveals_viewport_once(qapp) -> None:

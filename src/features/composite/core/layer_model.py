@@ -96,6 +96,12 @@ LAYER_BLEND_MODE_TO_NODE = {
 # Merge node's mask-channel UI so the layer model can persist AE semantics.
 TRACK_MATTE_MODES = frozenset({"alpha", "luma"})
 
+LEGACY_LAYER_STACK_VERSION = 1
+BOTTOM_UP_LAYER_STACK_VERSION = 2
+LAYER_MERGE_OWNER_PARAM = "layer_owner_id"
+EMPTY_LAYER_OUTPUT_PARAM = "_empty_layer_output"
+LAYER_MERGE_MATTE_PARAM = "layer_has_track_matte"
+
 
 @dataclass
 class Layer:
@@ -239,7 +245,7 @@ class LayerStack:
     # When False the stack is a passive view: reordering/parenting/visibility
     # are surfaced in the UI but the compiler must not touch the graph.
     managed: bool = True
-    version: int = 1
+    version: int = LEGACY_LAYER_STACK_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -263,7 +269,7 @@ class LayerStack:
             generated_merge_node_ids=list(data.get("generated_merge_node_ids", [])),
             enabled=data.get("enabled", True),
             managed=data.get("managed", True),
-            version=_safe_int(data.get("version", 1), 1),
+            version=_safe_int(data.get("version"), LEGACY_LAYER_STACK_VERSION),
         )
 
 

@@ -48,6 +48,7 @@ To disable alpha clamping for HDR alpha compositing, use alpha_clamp=False.
 
 from typing import Dict, Optional, Any
 from .base_node import Node, Port, TextureResult, ParamDef
+from ..core.layer_model import LAYER_MERGE_MATTE_PARAM, LAYER_MERGE_OWNER_PARAM
 
 if __name__ != "__main__":
     from src.features.composite.core.format import BBox
@@ -155,6 +156,8 @@ class MergeNode(Node):
         # S3-A: Mask channel selection (luma/R/G/B/A) and invert
         ParamDef("mask_channel", "option", "luma", labels=MASK_CHANNELS),
         ParamDef("mask_invert", "bool", False),
+        ParamDef(LAYER_MERGE_OWNER_PARAM, "str", "", hidden=True),
+        ParamDef(LAYER_MERGE_MATTE_PARAM, "bool", False, hidden=True),
     ]
 
     def __init__(self, node_id: Optional[str] = None) -> None:
@@ -271,6 +274,7 @@ class MergeNode(Node):
         input_a = inputs.get("A")
         input_b = inputs.get("B")
         input_mask = inputs.get("mask")
+        layer_composite = bool(self.parameters.get(LAYER_MERGE_OWNER_PARAM))
 
         if input_a is None and input_b is None:
             return {}
@@ -278,8 +282,22 @@ class MergeNode(Node):
         # Pass through if only one input
         if input_a is None or not input_a.is_valid:
             return {"result": input_b} if input_b else {}
+        if (layer_composite and self.parameters.get(LAYER_MERGE_MATTE_PARAM)
+                and (input_mask is None or not input_mask.is_valid)
+                and not self.parameters.get("mask_invert", False)):
+            return {"result": input_b} if input_b else {}
+        transparent_background = False
         if input_b is None or not input_b.is_valid:
-            return {"result": input_a}
+            if (not layer_composite
+                    or ((input_mask is None or not input_mask.is_valid)
+                        and self.parameters.get("opacity", 1.0) == 1.0
+                        and self.parameters.get("mix", 1.0) == 1.0
+                        and self.parameters.get("alpha_policy", "auto") == "auto")):
+                return {"result": input_a}
+            # A also supplies geometry for the absent background. The shader
+            # treats B as transparent without allocating a second texture.
+            input_b = input_a
+            transparent_background = True
 
         # S2-B: Determine output alpha_premultiplied based on alpha_policy
         alpha_policy = self.parameters.get("alpha_policy", "auto")
@@ -316,6 +334,8 @@ class MergeNode(Node):
                 # S3-A: Mask parameters
                 "mask_channel": mask_channel_idx,
                 "mask_invert": self.parameters.get("mask_invert", False),
+                "layer_composite": layer_composite,
+                "transparent_background": transparent_background,
             },
         }
 

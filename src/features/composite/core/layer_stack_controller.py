@@ -40,12 +40,17 @@ except Exception:  # pragma: no cover - allows pure-CLI tests
         return None
 
 from .layer_model import (
+    BOTTOM_UP_LAYER_STACK_VERSION,
+    LEGACY_LAYER_STACK_VERSION,
     Layer,
     LayerStack,
     DEFAULT_BLEND_MODE,
     LAYER_BLEND_MODES,
+    LAYER_MERGE_OWNER_PARAM,
     LAYER_TYPE_PRECOMP,
     LAYER_TYPE_SHAPE,
+    LAYER_TYPE_SOLID,
+    LAYER_TYPE_TEXT,
     LAYER_TYPE_3D,
     TRACK_MATTE_MODES,
 )
@@ -97,7 +102,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
 
     def __init__(self, graph: Any, undo_stack: Any = None,
                  node_factory: Any = None,
-                 parent: Optional[QObject] = None) -> None:
+                 parent: Optional[QObject] = None, *,
+                 layer_stack_version: int = LEGACY_LAYER_STACK_VERSION) -> None:
         """Create a controller bound to ``graph``.
 
         Args:
@@ -107,6 +113,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
             node_factory: callable ``(node_type, node_id=None) -> Node``.
                 When None, the controller falls back to the graph's
                 ``create_node_by_type``.  Injected so tests can swap it.
+            layer_stack_version: Blend semantics for newly created stacks.
+                Loaded stacks retain their serialized version.
         """
         if _HAVE_QT:
             super().__init__(parent)
@@ -116,6 +124,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self.validator = LayerStackValidator(graph)
         self.provenance = LayerProvenanceResolver(graph)
         self._node_factory = node_factory
+        self._layer_stack_version = layer_stack_version
         # Incremented on every successful mutation; useful for change
         # detection in tests / UI caches.
         self.generation: int = 0
@@ -142,6 +151,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             stack = LayerStack(
                 stack_id="main",
                 output_node_id=output_node_id,
+                version=self._layer_stack_version,
             )
             self.graph.set_layer_stack(stack)
         elif output_node_id and not stack.output_node_id:
@@ -158,6 +168,14 @@ class LayerStackController(QObject if _HAVE_QT else object):
     def layers_map(self) -> Dict[str, Layer]:
         """Return ``layer_id -> Layer`` for the current stacks."""
         return {l.layer_id: l for l in self.graph.get_all_layers()}
+
+    def layer_merge_node(self, layer_id: str) -> Optional[Any]:
+        stack = self._stack_for_layer(layer_id)
+        if stack is None or stack.version < BOTTOM_UP_LAYER_STACK_VERSION:
+            return None
+        return next((node for node_id in stack.generated_merge_node_ids
+                     if (node := self.graph.get_node(node_id)) is not None
+                     and node.parameters.get(LAYER_MERGE_OWNER_PARAM) == layer_id), None)
 
     def layer_relationships(self, stack_id: Optional[str] = None
                             ) -> List[Dict[str, Any]]:
@@ -266,7 +284,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
 
     def active_layer_ids_for_output(self,
                                     stack_id: Optional[str] = None) -> List[str]:
-        """Return layers whose root is reachable from the stack Output.
+        """Return reachable layers and layers temporarily hidden by switches.
 
         Layer metadata is intentionally retained when a user disconnects a
         material in Nodes mode, but the Keyframes Layers view represents the
@@ -298,12 +316,17 @@ class LayerStackController(QObject if _HAVE_QT else object):
             pending.extend(incoming.get(node_id, ()))
 
         result: List[str] = []
+        has_solo = any(layer.enabled and layer.solo and layer.managed
+                       for layer in self.layers_map().values()
+                       if layer.layer_id in stack.layer_ids)
         for layer_id in stack.layer_ids:
             layer = self.graph.get_layer(layer_id)
             if layer is None:
                 continue
             root_id = layer.root_node_id
-            if root_id and root_id in reachable:
+            hidden_by_switch = (stack.managed and layer.managed
+                                and (not layer.enabled or (has_solo and not layer.solo)))
+            if root_id and (root_id in reachable or hidden_by_switch):
                 result.append(layer_id)
         return result
 
@@ -393,6 +416,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         result = CompileResult(ok=True)
         if auto_compile:
             result = self._recompile(stack)
+        if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION and result.conflict:
+            self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            raise ValueError(result.conflict_reason or "Unable to compile the layer.")
         after = self._snapshot()
         self._push_undo(ACTION_ADD_LAYER, before, after, description or
                         f"Add layer {layer.name!r}", stack.stack_id,
@@ -424,6 +451,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             stack_id=child_id,
             name=name or "Precomp",
             output_node_id=precomp_id,
+            version=parent_stack.version,
         )
         layer_id = self._new_layer_id("precomp")
         layer = Layer(
@@ -472,6 +500,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
                         opacity: float = 1.0,
                         description: str = "",
                         _before_snapshot: Optional[Dict[str, Any]] = None,
+                        _force_transform: bool = False,
+                        _rollback_conflict: bool = False,
                         stack_id: Optional[str] = None) -> str:
         """High-level media-drop entry point.
 
@@ -508,7 +538,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if root_node_id is None:
             # Auto-wrap: source → Transform.  If the source node already
             # supports layer_root (e.g. Text) we skip the wrapper.
-            if getattr(source_node, "supports_layer_root", False):
+            if (getattr(source_node, "supports_layer_root", False)
+                    and not _force_transform):
                 root_node_id = source_node_id
             else:
                 t = self._create_node("transform")
@@ -555,6 +586,11 @@ class LayerStackController(QObject if _HAVE_QT else object):
             raise ValueError(f"Unable to register layer {layer_id!r}.")
 
         result = self._recompile(stack)
+        if result.conflict and (_rollback_conflict or stack.version >= BOTTOM_UP_LAYER_STACK_VERSION):
+            if _before_snapshot is None:
+                self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            raise ValueError(result.conflict_reason or "Unable to compile the layer.")
         after = self._snapshot()
         self._push_undo(
             ACTION_ADD_MEDIA, before, after,
@@ -566,6 +602,182 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self._handle_conflict(result, stack.stack_id)
         self.emit_changed(stack.stack_id)
         return layer_id
+
+    def create_generated_layer(self, layer_type: str, name: str,
+                               settings: Dict[str, Any],
+                               insert_index: int = 0) -> str:
+        """Create a text or solid source and its editable transform in one undo."""
+        node_types = {LAYER_TYPE_TEXT: "text", LAYER_TYPE_SOLID: "constant"}
+        node_type = node_types.get(layer_type)
+        if node_type is None:
+            raise ValueError(f"Unsupported generated layer type {layer_type!r}.")
+        stack = self.main_stack()
+        if stack is not None and not stack.managed:
+            raise ValueError("The composition output is owned by a free node graph.")
+        before = self._snapshot()
+        source = self._create_node(node_type, self._new_node_id(node_type))
+        if source is None:
+            raise ValueError(f"Unable to create {node_type!r}.")
+        for key, value in settings.items():
+            source.set_parameter(key, value)
+        self.graph.add_node(source)
+        try:
+            return self.add_media_layer(
+                name, source.id, layer_type=layer_type,
+                insert_index=insert_index, description=f"Add {name} layer",
+                _before_snapshot=before, _force_transform=True,
+                _rollback_conflict=True,
+            )
+        except (TypeError, ValueError):
+            self._restore(before)
+            raise
+
+    def _layer_effect_input(self, layer_id: str) -> Optional[Any]:
+        layer = self.graph.get_layer(layer_id)
+        stack = self._stack_for_layer(layer_id)
+        if (layer is None or stack is None or layer.locked
+                or not layer.managed or not stack.managed):
+            return None
+        root = self.graph.get_node(layer.root_node_id)
+        if root is None or root.node_type != "transform":
+            return None
+        return next((conn for conn in self.graph.connections
+                     if conn.dst_node_id == root.id
+                     and conn.dst_port_name == "image"), None)
+
+    def can_prepare_layer_transform(self, layer_id: str) -> bool:
+        layer = self.graph.get_layer(layer_id)
+        stack = self._stack_for_layer(layer_id)
+        if (layer is None or stack is None or layer.locked or not layer.managed
+                or not stack.managed or stack.version < BOTTOM_UP_LAYER_STACK_VERSION):
+            return False
+        root = self.graph.get_node(layer.root_node_id)
+        return bool(root is not None and not root.supports_parent_transform
+                    and any(port.data_type == "image" for port in root.outputs))
+
+    def _wrap_layer_root(self, layer: Layer) -> bool:
+        from .layer_stack_compiler import _output_port_of
+
+        source = self.graph.get_node(layer.root_node_id)
+        transform = self._create_node("transform", self._new_node_id("transform"))
+        if transform is None:
+            return False
+        transform.position = (source.position[0] + 160.0, source.position[1])
+        self.graph.add_node(transform)
+        if not self.graph.connect(source.id, _output_port_of(self.graph, source.id),
+                                  transform.id, "image"):
+            return False
+        if not layer.source_node_id:
+            layer.source_node_id = source.id
+        layer.root_node_id = transform.id
+        return True
+
+    def prepare_layer_transform(self, layer_id: str) -> bool:
+        """Give an imported base layer its editable Transform and Merge."""
+        if not self.can_prepare_layer_transform(layer_id):
+            return False
+        layer = self.graph.get_layer(layer_id)
+        stack = self._stack_for_layer(layer_id)
+        before = self._snapshot()
+        if not self._wrap_layer_root(layer):
+            self._restore(before)
+            return False
+        result = self._recompile(stack)
+        if result.conflict:
+            self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            return False
+        self._push_undo("layer_prepare_transform", before, self._snapshot(),
+                        "Enable layer transform", stack.stack_id)
+        self.emit_changed(stack.stack_id)
+        return True
+
+    def can_add_layer_effect(self, layer_id: str) -> bool:
+        return (self._layer_effect_input(layer_id) is not None
+                or self.can_prepare_layer_transform(layer_id))
+
+    def add_layer_effect(self, layer_id: str, effect_type: str) -> Optional[str]:
+        """Insert a catalog effect ahead of the existing Transform node."""
+        from src.features.shared.effects.effect_catalog import get_effect_catalog
+
+        from .layer_stack_compiler import _output_port_of
+
+        spec = get_effect_catalog().get_spec(effect_type)
+        if spec is None or spec.internal or not self.can_add_layer_effect(layer_id):
+            return None
+        node = self._create_node(effect_type, self._new_node_id(effect_type))
+        if node is None:
+            return None
+        image_input = next((port for port in node.inputs
+                            if port.data_type == "image"), None)
+        if image_input is None:
+            return None
+        stack = self._stack_for_layer(layer_id)
+        if stack is None:
+            return None
+        before = self._snapshot()
+        connection = self._layer_effect_input(layer_id)
+        wrapped = connection is None
+        if wrapped and self._wrap_layer_root(self.graph.get_layer(layer_id)):
+            connection = self._layer_effect_input(layer_id)
+        if connection is None:
+            self._restore(before)
+            return None
+        source = self.graph.get_node(connection.src_node_id)
+        source_port = connection.src_port_name
+        target = self.graph.get_node(connection.dst_node_id)
+        target_port = connection.dst_port_name
+        self.graph.disconnect(source.id, source_port, target.id, target_port)
+        px = (source.position[0] + target.position[0]) / 2
+        py = (source.position[1] + target.position[1]) / 2
+        node.position = (px, py + 70.0)
+        self.graph.add_node(node)
+        if not (self.graph.connect(source.id, source_port, node.id, image_input.name)
+                and self.graph.connect(node.id, _output_port_of(self.graph, node.id),
+                                       target.id, target_port)):
+            self._restore(before)
+            return None
+        if wrapped:
+            result = self._recompile(stack)
+            if result.conflict:
+                self._restore(before)
+                self._handle_conflict(result, stack.stack_id)
+                return None
+        self._push_undo(ACTION_ATTACH_NODE_TO_LAYER, before, self._snapshot(),
+                        f"Add {spec.name} to layer", stack.stack_id)
+        self.emit_changed(stack.stack_id)
+        return node.id
+
+    def layer_effect_ids(self, layer_id: str) -> List[str]:
+        layer = self.graph.get_layer(layer_id)
+        return list(reversed(self._layer_image_chain(layer)[1:-1])) if layer is not None else []
+
+    def remove_layer_effect(self, layer_id: str, node_id: str) -> bool:
+        layer = self.graph.get_layer(layer_id)
+        stack = self._stack_for_layer(layer_id)
+        if (layer is None or stack is None or layer.locked or not layer.managed
+                or not stack.managed or node_id not in self.layer_effect_ids(layer_id)):
+            return False
+        chain = self._layer_image_chain(layer)
+        index = chain.index(node_id)
+        edges = list(self.graph.connections)
+        outgoing = [edge for edge in edges if edge.src_node_id == node_id]
+        if len(outgoing) != 1 or outgoing[0].dst_node_id != chain[index - 1]:
+            return False
+        inputs = [edge for edge in edges if edge.dst_node_id == node_id
+                  and edge.src_node_id == chain[index + 1]]
+        if len(inputs) != 1:
+            return False
+        before = self._snapshot()
+        self.graph.remove_node(node_id)
+        if not self.graph.connect(inputs[0].src_node_id, inputs[0].src_port_name,
+                                  outgoing[0].dst_node_id, outgoing[0].dst_port_name):
+            self._restore(before)
+            return False
+        self._push_undo("layer_remove_effect", before, self._snapshot(),
+                        "Remove layer effect", stack.stack_id)
+        self.emit_changed(stack.stack_id)
+        return True
 
     @staticmethod
     def _node_pixel_size(node: Any) -> tuple[int, int]:
@@ -664,6 +876,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if self.graph.get_node(root_id) is not None:
             self.graph.remove_node_and_reconnect(root_id)
         result = self._recompile(stack)
+        if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION and result.conflict:
+            self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            return False
         after = self._snapshot()
         if record_undo:
             self._push_undo(
@@ -687,6 +903,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
         creating the source externally would leave that source behind after a
         single Undo, which violates the media-drop atomicity contract.
         """
+        stack = self.main_stack()
+        if stack is not None and not stack.managed:
+            raise ValueError("The composition output is owned by a free node graph.")
         before = self._snapshot()
         node_type = str(getattr(payload, "node_type", "image_input"))
         node = self._create_node(node_type, self._new_node_id(node_type))
@@ -936,8 +1155,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             if node_id
         }
         if delete_nodes and layer.managed:
-            owned_ids = {node_id for node_id in (
-                layer.source_node_id, layer.root_node_id) if node_id}
+            owned_ids = set(self._layer_image_chain(layer))
             # A node can be shared by the free Nuke graph without being
             # referenced by another Layer. Keep the whole owned chain when a
             # non-stack connection touches it; deleting the source alone can
@@ -953,17 +1171,27 @@ class LayerStackController(QObject if _HAVE_QT else object):
                 for conn in self.graph.connections
             )
             if not has_external_ref:
-                if (layer.source_node_id
-                        and layer.source_node_id not in referenced_elsewhere):
-                    node_ids_to_delete.append(layer.source_node_id)
-                if (layer.root_node_id != layer.source_node_id
-                        and layer.root_node_id not in referenced_elsewhere):
-                    node_ids_to_delete.append(layer.root_node_id)
+                node_ids_to_delete.extend(sorted(owned_ids - referenced_elsewhere))
         # Deleting a parent must not leave children pointing at a missing
         # layer; AE clears the parent relationship in this case.
         for other in other_layers:
             if other.parent_layer_id == layer_id:
                 other.parent_layer_id = None
+            if other.track_matte_layer_id == layer_id:
+                other.track_matte_layer_id = None
+        if (stack.managed and layer.managed
+                and stack.version >= BOTTOM_UP_LAYER_STACK_VERSION
+                and layer.root_node_id not in referenced_elsewhere):
+            # A free branch can keep the old layer root alive. Clear its
+            # managed feeds before the compiler checks for external wiring.
+            managed_merges = set(stack.generated_merge_node_ids)
+            for edge in list(self.graph.connections):
+                if (edge.src_node_id == layer.root_node_id
+                        and (edge.dst_node_id in managed_merges
+                             or (edge.dst_node_id == stack.output_node_id
+                                 and edge.dst_port_name == "image"))):
+                    self.graph.disconnect(edge.src_node_id, edge.src_port_name,
+                                          edge.dst_node_id, edge.dst_port_name)
         # Detach.
         self.graph.remove_layer(layer_id)
         for nid in node_ids_to_delete:
@@ -995,6 +1223,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
                 if not has_external_ref:
                     self.graph.remove_node(nid)
         result = self._recompile(stack)
+        if stack.version >= BOTTOM_UP_LAYER_STACK_VERSION and result.conflict:
+            self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            return False
         after = self._snapshot()
         if record_undo:
             self._push_undo(
@@ -1031,6 +1263,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
             return True
         stack.layer_ids.insert(new_index, stack.layer_ids.pop(old_index))
         result = self._recompile(stack)
+        if result.conflict:
+            stack.layer_ids.insert(old_index, stack.layer_ids.pop(new_index))
+            self._handle_conflict(result, stack.stack_id)
+            return False
         after = self._snapshot()
         self._push_undo(
             ACTION_MOVE_LAYER, before, after,
@@ -1046,57 +1282,21 @@ class LayerStackController(QObject if _HAVE_QT else object):
 
     def duplicate_layer(self, layer_id: str,
                         description: str = "") -> Optional[str]:
-        """Duplicate a layer's *node chain* and register a new layer above.
-
-        Returns the new layer_id, or None on failure.  The source + root
-        nodes are deep-copied via to_dict/from_dict, so the duplicate owns
-        independent parameters AND its own keyframe track copies (AE-style
-        Ctrl+D semantics: the clone animates independently from the
-        original).  Deeper effect chains (Blur/Color/... between source
-        and root, or upstream of source) are shared by reference to keep
-        the duplication lightweight — power users can duplicate those via
-        the node editor.  Plan §6.1's "keyframes belong to node params"
-        rule still holds: the duplicate's keyframes live on the duplicate's
-        own node, never on the Layer object.
-        """
+        """Clone the primary image chain and keyframes above the original layer."""
         stack = self._stack_for_layer(layer_id) or self.main_stack()
         if stack is None:
             return None
         layer = self.graph.get_layer(layer_id)
-        if layer is None or layer_id not in stack.layer_ids:
+        if layer is None or layer.locked or layer_id not in stack.layer_ids:
             return None
         before = self._snapshot()
-
-        # Clone the source + root chain.  We only clone the immediate
-        # source and root; deeper effect chains (Blur/Color/...) are shared
-        # by reference to keep the duplication lightweight.  Power users can
-        # duplicate the full chain via the node editor.
-        created_node_ids: List[str] = []
-        new_source_id = None
-        if layer.source_node_id:
-            new_source_id = self._clone_node(layer.source_node_id)
-            if not new_source_id:
-                return None
-            created_node_ids.append(new_source_id)
-        if layer.root_node_id == layer.source_node_id and new_source_id:
-            new_root_id = new_source_id
-        else:
-            new_root_id = self._clone_node(layer.root_node_id)
-            if not new_root_id:
-                if new_source_id:
-                    self.graph.remove_node(new_source_id)
-                return None
-            created_node_ids.append(new_root_id)
-        # Re-wire source → root for the clone if both exist.
-        if new_source_id and new_root_id and new_root_id != new_source_id:
-            from .layer_stack_compiler import _output_port_of
-            if not self.graph.connect(
-                    new_source_id,
-                    _output_port_of(self.graph, new_source_id),
-                    new_root_id, "image"):
-                for nid in created_node_ids:
-                    self.graph.remove_node(nid)
-                return None
+        node_ids = self._clone_layer_image_chain(layer)
+        if node_ids is None:
+            self._restore(before)
+            return None
+        created_node_ids = list(node_ids.values())
+        new_root_id = node_ids[layer.root_node_id]
+        new_source_id = node_ids.get(layer.source_node_id or "")
 
         # AUD-4906: a duplicated Precomp must own an independent child
         # stack.  Sharing the original child_stack_id made the two layers
@@ -1110,9 +1310,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
                 new_child_id = self._duplicate_layer_stack_tree(
                     old_child_id, new_root_id, created_node_ids)
                 if new_child_id is None:
-                    for nid in created_node_ids:
-                        if self.graph.get_node(nid) is not None:
-                            self.graph.remove_node(nid)
+                    self._restore(before)
                     return None
                 # Point the cloned boundary node at the copied stack (the
                 # to_dict/from_dict clone carried the original stack id).
@@ -1126,27 +1324,24 @@ class LayerStackController(QObject if _HAVE_QT else object):
                     "original.", layer_id)
 
         new_layer_id = self._new_layer_id(suffix=layer_id)
-        new_layer = Layer(
-            layer_id=new_layer_id,
-            name=f"{layer.name} copy",
-            root_node_id=new_root_id or layer.root_node_id,
-            source_node_id=new_source_id or layer.source_node_id,
-            layer_type=layer.layer_type,
-            blend_mode=layer.blend_mode,
-            opacity=layer.opacity,
-            label_color=layer.label_color,
-            enabled=layer.enabled,
-            shy=layer.shy,
-            in_frame=layer.in_frame,
-            out_frame=layer.out_frame,
-            managed=layer.managed,
-        )
+        new_layer = Layer.from_dict(layer.to_dict())
+        new_layer.layer_id = new_layer_id
+        new_layer.name = f"{layer.name} copy"
+        new_layer.root_node_id = new_root_id
+        new_layer.source_node_id = new_source_id
         # Insert directly above the original (plan §6.3: Ctrl+D).
         idx = stack.layer_ids.index(layer_id)
         stack.layer_ids.insert(idx, new_layer_id)
-        self.graph.upsert_layer(stack.stack_id, new_layer)
+        if not self.graph.upsert_layer(stack.stack_id, new_layer):
+            self._restore(before)
+            return None
+        self._duplicate_layer_merge(layer_id, new_layer, stack, created_node_ids)
 
         result = self._recompile(stack)
+        if result.conflict:
+            self._restore(before)
+            self._handle_conflict(result, stack.stack_id)
+            return None
         after = self._snapshot()
         self._push_undo(
             ACTION_DUPLICATE_LAYER, before, after,
@@ -1159,6 +1354,69 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self._handle_conflict(result, stack.stack_id)
         self.emit_changed(stack.stack_id)
         return new_layer_id
+
+    def _layer_image_chain(self, layer: Layer) -> List[str]:
+        """Resolve the primary image path when it reaches the layer's source."""
+        chain = [layer.root_node_id]
+        source_id = layer.source_node_id
+        if not source_id:
+            return chain
+        inputs = {(c.dst_node_id, c.dst_port_name): c.src_node_id
+                  for c in self.graph.connections}
+        while chain[-1] != source_id:
+            node = self.graph.get_node(chain[-1])
+            if node is None:
+                break
+            port = next((port for port in node.inputs if port.data_type == "image"), None)
+            previous_id = inputs.get((node.id, port.name)) if port is not None else None
+            if not previous_id or previous_id in chain:
+                break
+            chain.append(previous_id)
+        if chain[-1] != source_id:
+            return [layer.root_node_id, source_id]
+        return chain
+
+    def is_node_locked_by_layer(self, node_id: str) -> bool:
+        for layer in self.graph.get_all_layers():
+            if layer.locked and layer.managed:
+                if node_id in self._layer_image_chain(layer):
+                    return True
+                merge = self.layer_merge_node(layer.layer_id)
+                if merge is not None and merge.id == node_id:
+                    return True
+        return False
+
+    def _duplicate_layer_merge(self, layer_id: str, new_layer: Layer,
+                               stack: LayerStack, created_node_ids: List[str]) -> None:
+        source = self.layer_merge_node(layer_id)
+        if source is None:
+            return
+        new_layer.opacity = float(source.parameters.get("opacity", 1.0))
+        clone_id = self._clone_node(source.id)
+        if clone_id is not None:
+            clone = self.graph.get_node(clone_id)
+            clone.set_parameter(LAYER_MERGE_OWNER_PARAM, new_layer.layer_id)
+            stack.generated_merge_node_ids.append(clone_id)
+            created_node_ids.append(clone_id)
+
+    def _clone_layer_image_chain(self, layer: Layer) -> Optional[Dict[str, str]]:
+        node_ids: Dict[str, str] = {}
+        for node_id in self._layer_image_chain(layer):
+            clone_id = self._clone_node(node_id)
+            if clone_id is None:
+                return None
+            node_ids[node_id] = clone_id
+        if layer.layer_type == LAYER_TYPE_PRECOMP:
+            return node_ids
+        for connection in list(self.graph.connections):
+            target = node_ids.get(connection.dst_node_id)
+            if target is None or connection.dst_node_id == layer.source_node_id:
+                continue
+            source = node_ids.get(connection.src_node_id, connection.src_node_id)
+            if not self.graph.connect(source, connection.src_port_name,
+                                      target, connection.dst_port_name):
+                return None
+        return node_ids
 
     def _clone_node(self, node_id: str) -> Optional[str]:
         node = self.graph.get_node(node_id)
@@ -1211,11 +1469,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
             name=f"{stack.name} copy",
             output_node_id=new_output_node_id,
             managed=stack.managed,
+            version=stack.version,
         )
         self.graph.set_layer_stack(new_stack)
         created_stacks: List[str] = [new_stack_id]
-        from .layer_stack_compiler import _output_port_of
-
         def _rollback() -> None:
             for sid in reversed(created_stacks):
                 if self.graph.get_layer_stack(sid) is not None:
@@ -1230,25 +1487,11 @@ class LayerStackController(QObject if _HAVE_QT else object):
             layer = self.graph.get_layer(old_layer_id)
             if layer is None:
                 continue
-            node_id_map: Dict[str, str] = {}
-            for nid in (layer.source_node_id, layer.root_node_id):
-                if not nid or nid in node_id_map:
-                    continue
-                clone_id = self._clone_node(nid)
-                if clone_id is None:
-                    _rollback()
-                    return None
-                node_id_map[nid] = clone_id
-                created_node_ids.append(clone_id)
-            if (layer.source_node_id and layer.root_node_id
-                    and layer.root_node_id != layer.source_node_id):
-                if not self.graph.connect(
-                        node_id_map[layer.source_node_id],
-                        _output_port_of(
-                            self.graph, node_id_map[layer.source_node_id]),
-                        node_id_map[layer.root_node_id], "image"):
-                    _rollback()
-                    return None
+            node_id_map = self._clone_layer_image_chain(layer)
+            if node_id_map is None:
+                _rollback()
+                return None
+            created_node_ids.extend(node_id_map.values())
             new_layer = Layer.from_dict(layer.to_dict())
             new_layer.layer_id = self._new_layer_id(suffix=old_layer_id)
             new_layer.root_node_id = node_id_map.get(
@@ -1260,6 +1503,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             new_layers.append(new_layer)
             new_stack.layer_ids.append(new_layer.layer_id)
             self.graph.upsert_layer(new_stack.stack_id, new_layer)
+            self._duplicate_layer_merge(layer.layer_id, new_layer, new_stack, created_node_ids)
             # Nested Precomp layers recurse so the copy owns its own
             # subtree instead of aliasing the original child stack.
             if layer.layer_type == LAYER_TYPE_PRECOMP:
@@ -1391,6 +1635,14 @@ class LayerStackController(QObject if _HAVE_QT else object):
         result = CompileResult(ok=True)
         if render_affecting:
             result = self._recompile(stack)
+            if result.conflict:
+                setattr(layer, prop, old_value)
+                self._handle_conflict(result, stack.stack_id)
+                return False
+            if prop == "opacity" and (merge := self.layer_merge_node(layer_id)) is not None:
+                merge.set_parameter("opacity", value)
+        else:
+            self.graph.bump_generation()
         after = self._snapshot()
         extra = {"layer_id": layer_id, "prop": prop,
                  "old_value": old_value, "new_value": value,
@@ -1413,6 +1665,61 @@ class LayerStackController(QObject if _HAVE_QT else object):
     def set_layer_locked(self, layer_id: str, locked: bool) -> bool:
         return self.set_layer_property(layer_id, "locked", locked,
                                        description="Toggle layer lock")
+
+    def apply_layer_time_bounds(
+        self, layer_id: str, bounds: tuple[int | None, int | None]
+    ) -> bool:
+        """Apply both frame gates within the host's timeline undo transaction."""
+        layer = self.graph.get_layer(layer_id)
+        start, end = bounds
+        if (layer is None or not layer.managed
+                or (start is not None and end is not None and end < start)):
+            return False
+        layer.in_frame, layer.out_frame = start, end
+        return True
+
+    def layer_animation_node_ids(self, layer_id: str) -> set[str]:
+        """Identify animation owned by one layer, excluding shared branches."""
+        provenance = self.provenance_for_layer(layer_id)
+        if provenance is None or not provenance.managed:
+            return set()
+        chain = set(provenance.chain_node_ids)
+        merge = self.layer_merge_node(layer_id)
+        if merge is not None:
+            chain.add(merge.id)
+        generated = set(provenance.generated_node_ids)
+        shared = {
+            node_id for other in self.graph.get_all_layers()
+            if other.layer_id != layer_id
+            for node_id in (other.root_node_id, other.source_node_id)
+            if node_id in chain
+        }
+        incoming: dict[str, list[str]] = {}
+        for edge in self.graph.connections:
+            source, target = edge.src_node_id, edge.dst_node_id
+            if source not in chain:
+                continue
+            if target in chain:
+                incoming.setdefault(target, []).append(source)
+                continue
+            # Ignore wiring authored by this layer's own stack compiler.
+            # A matte input or a separate downstream branch is still shared.
+            if (target == provenance.output_node_id and edge.dst_port_name == "image"
+                    and source in {provenance.root_node_id, getattr(merge, "id", None)}):
+                continue
+            if target in generated and ((merge is None
+                    and source == provenance.root_node_id and edge.dst_port_name in {"A", "B"})
+                    or (merge is not None and source == merge.id and edge.dst_port_name == "B")):
+                continue
+            shared.add(source)
+
+        pending = list(shared)
+        while pending:
+            for ancestor in incoming.get(pending.pop(), ()):
+                if ancestor not in shared:
+                    pending.append(ancestor)
+                    shared.add(ancestor)
+        return chain - shared
 
     def set_layer_solo(self, layer_id: str, solo: bool) -> bool:
         return self.set_layer_property(layer_id, "solo", solo,
@@ -1444,6 +1751,14 @@ class LayerStackController(QObject if _HAVE_QT else object):
                     (matte is None or matte_layer_id == layer_id or
                      self._stack_for_layer(matte_layer_id) is not stack))):
             return False
+        visited = {layer_id}
+        matte_source = matte
+        while matte_source is not None:
+            if matte_source.layer_id in visited:
+                return False
+            visited.add(matte_source.layer_id)
+            next_id = matte_source.track_matte_layer_id
+            matte_source = self.graph.get_layer(next_id) if next_id else None
         before = self._snapshot()
         layer.track_matte_layer_id = matte_layer_id
         layer.track_matte_mode = mode

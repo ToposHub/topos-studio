@@ -453,7 +453,7 @@ class CompositeModule:
             page_ids=("Composite",),
             dock_attr="dock_composite",
             order=100,
-            default_visible=True,
+            default_visible=False,
         ))
         panel_registry.register(PanelDescriptor(
             panel_id="composite.node_properties",
@@ -495,8 +495,8 @@ class CompositeModule:
         # dock widget itself is created by CompositeRuntime + MainWindowAdapter.
         panel_registry.register(PanelDescriptor(
             panel_id="composite.keyframes",
-            title_key="panel.keyframes",
-            fallback_title="Keyframes",
+            title_key="panel.layer_timeline",
+            fallback_title="Layer Timeline",
             feature_id="composite",
             category="Composite",
             page_ids=("Composite",),

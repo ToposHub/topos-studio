@@ -1505,12 +1505,26 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                     overlay_sig.connect(self._on_scene_cut_overlay_visibility_changed)
         if self._edit_available:
             if MediaPoolPanel is not None and self.media_pool_panel is None:
+                from src.app.ui.media_pool_library_browser import MediaPoolLibraryBrowser
+
                 self.media_pool_panel = MediaPoolPanel()
                 self.media_pool_panel.media_import_status.connect(
                     lambda message: self.status_bar.showMessage(message, 5000))
                 self.media_pool_panel.open_ai_library_requested.connect(self.files_panel.open_ai_library)
                 self.media_pool_panel.ai_library_import_status.connect(self.files_panel.show_ai_library_import_status)
                 self.media_pool_panel.ai_library_import_status.connect(self.library_panel.show_ai_library_import_status)
+                browser = MediaPoolLibraryBrowser(self.media_pool_panel)
+                self.media_pool_library_browser = browser
+                self.media_pool_panel.install_library_view(browser.tree, browser, browser.set_presentation)
+                browser.browse_requested.connect(self.media_pool_panel.show_library_media)
+                browser.project_requested.connect(self.media_pool_panel.show_project_media)
+                browser.source_preview_requested.connect(self._on_library_source_preview)
+                self.media_pool_panel.library_search_requested.connect(browser.search.setFocus)
+                self.media_pool_panel.library_search_visibility_changed.connect(browser.set_search_visible)
+                self.media_pool_panel.ai_library_import_status.connect(browser.show_import_status)
+                self.media_pool_panel.media_import_status.connect(browser.show_import_status)
+                self.files_panel.library_registry_changed.connect(browser.refresh_registry)
+                self.library_panel.library_registry_changed.connect(browser.refresh_registry)
             if ProgramViewerWidget is not None and self.program_viewer_widget is None:
                 self.program_viewer_widget = ProgramViewerWidget()
             if SourceViewerWidget is not None and self.source_viewer_widget is None:
@@ -2710,8 +2724,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                     logger.exception(
                         "MainWindow: %s worker shutdown failed", panel_attr)
             # Dock-contained native browsers do not receive closeEvent when
-            # only their main window closes; stop both resource owners here.
-            for panel_name in ("files_panel", "library_panel"):
+            # only their main window closes; stop the resource owners here.
+            for panel_name in ("files_panel", "library_panel", "media_pool_library_browser"):
                 try:
                     panel = getattr(self, panel_name, None)
                     if panel is not None:
