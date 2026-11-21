@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
+from PyQt6.QtCore import QModelIndex, QPointF, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QTextOption
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
@@ -46,10 +46,7 @@ class FilesCardDelegate(QStyledItemDelegate):
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         offline = entry.availability == "offline"
         if selected or hovered:
-            body = QColor(C.ORANGE if selected else C.BG_ACTIVE)
-            if selected:
-                body.setAlpha(22)
-            painter.setBrush(body)
+            painter.setBrush(QColor(C.BG_ACTIVE if selected else C.BG_HOVER))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(rect, 5, 5)
         clip = QPainterPath()
@@ -88,7 +85,7 @@ class FilesCardDelegate(QStyledItemDelegate):
 
         if selected or hovered:
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER), 1.2))
+            painter.setPen(QPen(QColor(C.ORANGE if selected else C.BORDER_HOVER), 1.0))
             painter.drawRoundedRect(cover, 4, 4)
 
         kind = entry.kind
@@ -140,10 +137,22 @@ class FilesCardDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(badge_rect, 4, 4)
             painter.setPen(QColor(C.TEXT_PRIMARY))
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
-        if option.state & QStyle.StateFlag.State_HasFocus:
-            painter.setPen(QPen(QColor(C.ORANGE), 1, Qt.PenStyle.DotLine))
+        if selected:
+            marker = QRectF(cover.left() + 6, cover.bottom() - 22, 16, 16)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(C.BG_DARKEST))
+            painter.drawEllipse(marker)
+            center = marker.center()
+            check = QPainterPath(center + QPointF(-3.5, 0))
+            check.lineTo(center + QPointF(-1, 2.5))
+            check.lineTo(center + QPointF(3.5, -2.5))
+            painter.setPen(QPen(QColor(C.ORANGE), 1.5, cap=Qt.PenCapStyle.RoundCap,
+                                join=Qt.PenJoinStyle.RoundJoin))
+            painter.drawPath(check)
+        elif option.state & QStyle.StateFlag.State_HasFocus:
+            painter.setPen(QPen(QColor(C.TEXT_DIM), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(3, 3, -3, -3), 6, 6)
+            painter.drawRoundedRect(rect, 5, 5)
         painter.restore()
 
 

@@ -190,6 +190,8 @@ def normalize_path(path: str) -> str:
         return ""
     text = unicodedata.normalize("NFC", str(path).replace("\\", "/"))
     while len(text) > 1 and text.endswith("/"):
+        if len(text) == 3 and text[0].isascii() and text[0].isalpha() and text[1:] == ":/":
+            break  # A Windows drive root must remain absolute.
         text = text[:-1]
     return text
 

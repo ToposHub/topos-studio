@@ -27,7 +27,7 @@ def _entry_dicts(count, start=0):
 # transport：offset 续页 + page_meta
 # ---------------------------------------------------------------------------
 
-def test_transport_directory_pages_with_total_and_truncated(qtbot, tmp_path):
+def test_transport_directory_pages_with_total_and_truncated(qtbot, tmp_path, monkeypatch):
     locator = FilesDataLocator.for_config_root(tmp_path)
     locator.ensure_layout()
     catalog = FilesCatalog(locator)
@@ -40,6 +40,13 @@ def test_transport_directory_pages_with_total_and_truncated(qtbot, tmp_path):
     transport = NativeFilesTransport(
         lambda: "", None, facade=FilesFacade(catalog, max_workers=1))
     transport.PAGE_SIZE = 3  # 实例级收紧：7 项 → 3/3/1 三页
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    monkeypatch.setattr(panel, "is_browsable_path", lambda path: path.startswith(f"{tmp_path}/"))
+    panel.directory_more_requested.connect(transport.load_directory)
+    transport.loading.connect(panel.set_loading)
+    transport.loaded.connect(panel.show_directory_page)
+    transport.page_meta.connect(panel.set_page_meta)
     try:
         pages = []
         metas = []
@@ -51,16 +58,19 @@ def test_transport_directory_pages_with_total_and_truncated(qtbot, tmp_path):
             transport.load_directory(str(lib))
         assert len(pages[0]) == 3
         assert metas[0] == (7, True)
+        assert panel.load_more_button.isVisibleTo(panel)
 
         with qtbot.waitSignal(transport.loaded, timeout=8000):
-            transport.load_directory(str(lib), offset=3)
+            panel.load_more_button.click()
         assert len(pages[1]) == 3
         assert metas[1] == (7, True)
 
         with qtbot.waitSignal(transport.loaded, timeout=8000):
-            transport.load_directory(str(lib), offset=6)
+            panel.load_more_button.click()
         assert len(pages[2]) == 1
         assert metas[2] == (7, False)
+        assert len(panel.model.entries) == 7
+        assert not panel.load_more_button.isVisibleTo(panel)
         names = [entry.name for page in pages for entry in page]
         assert len(set(names)) == 7  # 三页合计无重复
     finally:
@@ -129,6 +139,7 @@ def test_panel_load_more_emits_directory_offset(qtbot):
     emitted = []
     panel.directory_more_requested.connect(
         lambda path, offset: emitted.append((path, offset)))
+    panel._load_more()
     panel._load_more()
     assert emitted == [("/media", 2)]  # offset = 已消费条数
 

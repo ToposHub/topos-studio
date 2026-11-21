@@ -4,6 +4,11 @@
     "version": "3.0",
     "brand": "Topos"
   },
+  "files": {
+    "native": {
+      "volumes_heading": "Drives"
+    }
+  },
   "deliver": {
     "render_settings": "Render Settings",
     "video": {
@@ -1178,7 +1183,11 @@
       "temp_max_age": "Temp file max age (days):",
       "cache_size_label": "Current cache size:",
       "clear_cache": "Clear Cache",
-      "clear_cache_confirm": "Clear all cached data? This cannot be undone.",
+      "clear_cache_confirm": "Clear the cached images and baked layers? This cannot be undone.",
+      "clear_thumbnail_cache": "Clear Media Library Thumbnails",
+      "clearing_thumbnail_cache": "Clearing thumbnail cache…",
+      "thumbnail_cache_cleared": "Thumbnail cache cleared. {count} entries removed.",
+      "thumbnail_cache_clear_failed": "Couldn't clear the thumbnail cache.",
       "calculating": "Calculating..."
     },
     "image_processing": {

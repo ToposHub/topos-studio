@@ -33,7 +33,7 @@
 ├── libraries.json             # 库注册表（id、根路径、显示名、创建时间）
 ├── trash/<library_id>/        # 每库回收站文件体（跨卷 send2trash 回退，如实标注）
 ├── cache/
-│   ├── thumbnails/<key>.webp  # 三档缩略图（可再生；LRU 上限 B 阶段定）
+│   ├── thumbnails/thumbnails-v1.db  # 各显示尺寸共用的缩略图 PNG；512 MiB 负载上限
 │   ├── strips/                # 胶片条
 │   └── probe/                 # 深度元数据探测缓存（按 mtime+size 失效）
 ├── plugins/

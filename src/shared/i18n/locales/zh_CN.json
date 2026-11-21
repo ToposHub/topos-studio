@@ -4,6 +4,11 @@
     "version": "3.0",
     "brand": "Topos"
   },
+  "files": {
+    "native": {
+      "volumes_heading": "磁盘"
+    }
+  },
   "deliver": {
     "render_settings": "渲染设置",
     "video": {
@@ -1198,7 +1203,11 @@
       "temp_max_age": "临时文件最大保留天数：",
       "cache_size_label": "当前缓存大小：",
       "clear_cache": "清除缓存",
-      "clear_cache_confirm": "清除所有缓存数据？此操作不可撤销。",
+      "clear_cache_confirm": "清除已缓存的图像和烘焙图层？此操作不可撤销。",
+      "clear_thumbnail_cache": "清除素材库缩略图缓存",
+      "clearing_thumbnail_cache": "正在清除缩略图缓存…",
+      "thumbnail_cache_cleared": "已清除缩略图缓存，共移除 {count} 条记录。",
+      "thumbnail_cache_clear_failed": "无法清除缩略图缓存。",
       "calculating": "计算中..."
     },
     "image_processing": {

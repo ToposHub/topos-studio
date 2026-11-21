@@ -7,6 +7,7 @@ import os
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget, QFileDialog, QMenu, QDockWidget
+from src.features.files.contracts import normalize_path
 from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class FilesPanel(QWidget):
     directory_changed = pyqtSignal(str)
+    directory_navigation_requested = pyqtSignal(str)
     image_opened = pyqtSignal(str)
     video_opened = pyqtSignal(str)
     rating_changed = pyqtSignal(str, int)
@@ -25,6 +27,7 @@ class FilesPanel(QWidget):
         self.layout.setSpacing(0)
         self._main_window = parent
         self._files_root_path: str | None = None
+        self._following_directory = False
         self._native_panel = None
         self._native_transport = None
         self._files_jobs = None
@@ -87,8 +90,25 @@ class FilesPanel(QWidget):
         if not path or self._closed:
             return
         if (self._native_panel is not None
-                and self._native_panel._requested_path != str(path)):
+                and normalize_path(self._native_panel._requested_path) != normalize_path(path)):
             self._native_panel.navigate(str(path))
+
+    def follow_directory(self, path: str) -> None:
+        self._following_directory = True
+        try:
+            self.set_root_path(path)
+        finally:
+            self._following_directory = False
+
+    def _request_native_directory(self, path: str) -> None:
+        if self._closed:
+            return
+        changed = normalize_path(self._native_panel._requested_path) != normalize_path(path)
+        self._native_transport.load_directory(path)
+        # Mirror directory intent once. A completed read only updates local
+        # state, even when both panels have requests in flight.
+        if changed and not self._following_directory:
+            self.directory_navigation_requested.emit(path)
 
     def _initialize_native(self) -> None:
         if self._native_panel is None:
@@ -98,8 +118,7 @@ class FilesPanel(QWidget):
             self._native_panel = NativeFilesPanel(self, preferences=self._files_prefs)
             self._native_transport = NativeFilesTransport(
                 lambda: '', None, self)
-            self._native_panel.directory_requested.connect(
-                lambda path: self._native_transport.load_directory(path))
+            self._native_panel.directory_requested.connect(self._request_native_directory)
             self._native_panel.directory_more_requested.connect(
                 lambda path, offset: self._native_transport.load_directory(
                     path, offset=offset))
@@ -107,6 +126,8 @@ class FilesPanel(QWidget):
                 self._native_panel.set_page_meta)
             self._native_panel.thumbnail_requested.connect(self._native_transport.request_thumbnail)
             self._native_panel.thumbnail_released.connect(self._native_transport.release_thumbnail)
+            self._native_panel.thumbnail_dispatch_paused.connect(
+                self._native_transport.set_thumbnail_dispatch_paused)
             self._native_transport.thumbnail_loaded.connect(self._native_panel.set_thumbnail)
             self._native_transport.thumbnail_failed.connect(self._native_panel.thumbnail_failed)
             self._native_transport.thumbnail_pending.connect(self._native_panel.thumbnail_pending)
@@ -210,6 +231,9 @@ class FilesPanel(QWidget):
             self._native_panel.compare_requested.connect(self._open_compare)
             self._native_transport.tree_loaded.connect(self._native_panel.locations.set_children)
             self._native_transport.tree_failed.connect(self._native_panel.locations.set_error)
+            self._native_panel.locations.volumes_requested.connect(self._native_transport.load_volumes)
+            self._native_transport.volumes_loaded.connect(self._native_panel.locations.set_volumes)
+            self._native_panel.locations.tree_root_removed.connect(self._native_transport.invalidate_tree_root)
             self._native_panel.file_activated.connect(self._open_native_file)
             self._native_panel.legacy_requested.connect(self._show_native_tools)
             if self._include_plugins:

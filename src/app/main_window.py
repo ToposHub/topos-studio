@@ -748,11 +748,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                         logger.warning(f"Composite first-launch enter_page_hook failed: {e}")
 
             # Initialize Library Panel path
-            last_path = self.config_manager.get("last_path")
+            last_path = self.config_manager.get("last_path") or self.config_manager.get("last_library_path")
             if last_path:
-                self.library_panel.set_root_path(last_path)
-                # 同时初始化 Files Panel 的路径，确保切换语言重启后 Files 面板能正确显示内容
-                self.files_panel.set_root_path(last_path)
+                self.library_panel.follow_directory(last_path)
+                self.files_panel.follow_directory(last_path)
 
             # Startup dialog: video mode shows the Project Manager (DaVinci
             # style — must pick/create a project before entering the app);
@@ -1936,10 +1935,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         self.files_panel.image_opened.connect(self.load_image)
         # Files 面板不支持视频打开，请使用 Library 面板
-        self.files_panel.directory_changed.connect(self.library_panel.set_root_path)
-
-        # 新增：双向目录同步 (Library → Files)
-        self.library_panel.directory_changed.connect(self.files_panel.set_root_path)
+        self.files_panel.directory_navigation_requested.connect(self.library_panel.follow_directory)
+        self.library_panel.directory_navigation_requested.connect(self.files_panel.follow_directory)
 
         # 新增：星级评定双向同步 (Files → Library)
         self.files_panel.rating_changed.connect(self.library_panel.refresh_file_rating)

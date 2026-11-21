@@ -214,7 +214,7 @@ class FilesGalleryView(QAbstractItemView):
             return
         self._aspect_hints[path] = value
         if path not in self._known_aspect_paths and self._mode != "grid":
-            self._schedule_layout()
+            self._schedule_layout(delay_ms=32)
 
     def clearAspectRatios(self) -> None:
         self._aspect_hints.clear()
@@ -231,13 +231,16 @@ class FilesGalleryView(QAbstractItemView):
         row = min(visible, key=lambda item: (self._rectangles[item].top(), item))
         return self._paths[row], self._rectangles[row].top() - top
 
-    def _schedule_layout(self, *_args: Any) -> None:
+    def _schedule_layout(self, *_args: Any, delay_ms: int = 0) -> None:
         if not hasattr(self, "_layout_timer") or self._laying_out:
             return
         if not self._layout_timer.isActive():
             self._anchor = self._capture_anchor()
+            self._layout_timer.start(delay_ms)
+        elif not delay_ms and self._layout_timer.interval():
             self._layout_timer.start(0)
-        self.viewport().update()
+        if not delay_ms:
+            self.viewport().update()
 
     def doItemsLayout(self) -> None:
         if not hasattr(self, "_layout_timer"):
