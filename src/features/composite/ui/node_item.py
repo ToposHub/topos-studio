@@ -18,9 +18,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import (
     QPen, QBrush, QColor, QPainter, QPainterPath, QFont,
-    QLinearGradient, QPixmap, QKeyEvent, QFocusEvent
+    QFontMetrics, QLinearGradient, QPixmap, QPolygonF, QKeyEvent, QFocusEvent
 )
 from typing import Any, Dict, List, Optional
+
+from src.shared.i18n import tr
 
 from .port_item import PortItem
 from .connection_item import ConnectionItem
@@ -57,16 +59,16 @@ class NodeItem(QGraphicsRectItem):
     └──────────────────────────┘
     """
 
-    NODE_WIDTH = 180
-    HEADER_HEIGHT = 28
-    PORT_ROW_HEIGHT = 24
+    NODE_WIDTH = 148
+    HEADER_HEIGHT = 24
+    PORT_ROW_HEIGHT = 19
     PORT_MARGIN = 14
-    BODY_PADDING = 6
+    BODY_PADDING = 4
     CORNER_RADIUS = 8
     STATUS_BAR_HEIGHT = 6
     THUMBNAIL_SIZE = 64         # Legacy: thumbnail preview max dimension
     THUMBNAIL_MARGIN = 6        # Margin around thumbnail
-    THUMBNAIL_MAX_HEIGHT = 120  # Max thumbnail display height in node
+    THUMBNAIL_MAX_HEIGHT = 94   # Max thumbnail display height in node
 
     # Dot node constants
     DOT_SIZE = 14               # Diameter of dot node circle
@@ -74,10 +76,11 @@ class NodeItem(QGraphicsRectItem):
 
     def __init__(self, node_id: str, node_title: str = "Node",
                  header_color: str = "#555555", is_dot: bool = False,
-                 node_type: str = "", parent=None) -> None:
+                 node_type: str = "", parent=None, *, layer_managed: bool = False) -> None:
         self._is_dot = is_dot
         # node_type 用于节点级自动匹配（如 Camera3D 落到 Scene3D 上自动选 camera_in）。
         self.node_type = node_type
+        self._layer_managed = layer_managed
 
         if is_dot:
             # Dot node: small square, centered on the dot circle
@@ -145,9 +148,11 @@ class NodeItem(QGraphicsRectItem):
         self._preview_connections: list = []
 
         # Visual setup
+        self._title_item: Optional[QGraphicsTextItem] = None
         if not self._is_dot:
             self._setup_visuals()
             self._create_title()
+        self._refresh_tooltip()
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
@@ -166,17 +171,27 @@ class NodeItem(QGraphicsRectItem):
     def _create_title(self) -> None:
         """Create the title text in the header."""
         self._title_item = QGraphicsTextItem(self)
-        self._title_item.setPlainText(self.node_title)
+        self._title_item.document().setDocumentMargin(0)
+        self._title_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         font = QFont()
         font.setPixelSize(12)
         font.setBold(True)
         self._title_item.setFont(font)
         self._title_item.setDefaultTextColor(QColor(240, 240, 240))
 
-        # Position title centered in header
-        text_width = self._title_item.boundingRect().width()
-        x = (self.NODE_WIDTH - text_width) / 2
-        self._title_item.setPos(x, 6)
+        self._update_title_text()
+
+    def _update_title_text(self) -> None:
+        if self._title_item is None:
+            return
+        metrics = QFontMetrics(self._title_item.font())
+        margin = 24 if self._layer_managed or self._locked else 8
+        self._title_item.setPlainText(metrics.elidedText(
+            self.node_title, Qt.TextElideMode.ElideRight, self.NODE_WIDTH - 2 * margin,
+        ))
+        bounds = self._title_item.boundingRect()
+        self._title_item.setPos((self.NODE_WIDTH - bounds.width()) / 2,
+                                (self.HEADER_HEIGHT - bounds.height()) / 2)
 
     def set_title(self, new_title: str) -> None:
         """Update the on-canvas title dynamically (命名升级 P1).
@@ -185,12 +200,9 @@ class NodeItem(QGraphicsRectItem):
         图标选中态切换）。重算居中位置，触发重绘。
         """
         self.node_title = new_title
-        if self._title_item is not None:
-            self._title_item.setPlainText(new_title)
-            text_width = self._title_item.boundingRect().width()
-            x = (self.NODE_WIDTH - text_width) / 2
-            self._title_item.setPos(x, 6)
-            self.update()
+        self._update_title_text()
+        self._refresh_tooltip()
+        self.update()
 
     # ── B4: in-canvas inline rename ──
 
@@ -261,17 +273,26 @@ class NodeItem(QGraphicsRectItem):
     def is_renaming(self) -> bool:
         return self._rename_proxy is not None
 
-    def add_input_port(self, name: str, data_type: str = "image", max_connections: int = 1):
+    def add_input_port(self, name: str, data_type: str = "image",
+                       max_connections: int = 1) -> PortItem:
         """Add an input port to the left side of the node.
 
         max_connections: 端口容量（1=单连接默认，>1=多输入，如 Scene3D scene 端口）。
         """
         port = PortItem(name, "input", data_type, max_connections=max_connections, parent=self)
+        if self.node_type == "merge":
+            labels = {
+                "A": tr("composite.node_editor.foreground", "A Foreground"),
+                "B": tr("composite.node_editor.background", "B Background"),
+                "mask": tr("composite.node_editor.mask", "Mask"),
+            }
+            if name in labels:
+                port.set_display_label(labels[name])
         self.input_ports[name] = port
         self._update_layout()
         return port
 
-    def add_output_port(self, name: str, data_type: str = "image"):
+    def add_output_port(self, name: str, data_type: str = "image") -> PortItem:
         """Add an output port to the right side of the node."""
         port = PortItem(name, "output", data_type, parent=self)
         self.output_ports[name] = port
@@ -364,6 +385,7 @@ class NodeItem(QGraphicsRectItem):
         self._locked = bool(locked)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
                      not self._locked)
+        self._update_title_text()
         self._refresh_tooltip()
         self.update()
 
@@ -401,7 +423,9 @@ class NodeItem(QGraphicsRectItem):
 
     def _refresh_tooltip(self) -> None:
         """Keep lock, runtime error and preflight text visible together."""
-        messages = []
+        messages = [self.node_title] if not self._is_dot else []
+        if self._layer_managed:
+            messages.append(tr("composite.node_editor.layer_managed", "Managed by the layer stack"))
         if self._locked:
             messages.append("Node is locked. Unlock it to move or edit connections.")
         if self._state == "failed" and self._error_msg:
@@ -597,6 +621,12 @@ class NodeItem(QGraphicsRectItem):
         painter.setPen(QPen(QColor(0, 0, 0, 60), 1))
         painter.drawLine(int(rect.left() + 4), int(sep_y), int(rect.right() - 4), int(sep_y))
 
+        if self._layer_managed:
+            painter.setPen(QPen(QColor(240, 240, 240, 190), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(8, 8, 8, 6, 1, 1)
+            painter.drawPolyline(QPolygonF([QPointF(10, 16), QPointF(18, 16), QPointF(18, 10)]))
+
         # Locked badge — drawn as a small vector lock so it remains readable
         # with the system font and does not depend on an emoji glyph.
         if self._locked:
@@ -614,14 +644,19 @@ class NodeItem(QGraphicsRectItem):
         painter.setFont(font)
         painter.setPen(QColor(190, 190, 190) if not self._disabled else QColor(120, 120, 120))
 
-        for name, port in self.input_ports.items():
+        label_width = 84 if self.node_type == "merge" else int(rect.width() / 2) - 13
+        for port in self.input_ports.values():
             pos = port.pos()
-            painter.drawText(int(pos.x() + 12), int(pos.y() + 4), name)
+            label = painter.fontMetrics().elidedText(port.display_label, Qt.TextElideMode.ElideRight,
+                                                      label_width)
+            painter.drawText(int(pos.x() + 10), int(pos.y() + 4), label)
 
-        for name, port in self.output_ports.items():
+        for port in self.output_ports.values():
             pos = port.pos()
-            text_width = painter.fontMetrics().horizontalAdvance(name)
-            painter.drawText(int(pos.x() - text_width - 12), int(pos.y() + 4), name)
+            label = painter.fontMetrics().elidedText(port.display_label, Qt.TextElideMode.ElideRight,
+                                                      label_width)
+            text_width = painter.fontMetrics().horizontalAdvance(label)
+            painter.drawText(int(pos.x() - text_width - 10), int(pos.y() + 4), label)
 
         # Disabled overlay — diagonal hatch lines
         if self._disabled:

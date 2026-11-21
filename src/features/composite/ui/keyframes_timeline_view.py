@@ -10,8 +10,8 @@ import logging
 import math
 from typing import Any, List, Optional, Tuple
 
-from PyQt6.QtCore import QMimeData, Qt, QPointF, QRectF, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QResizeEvent
+from PyQt6.QtCore import QMimeData, Qt, QPoint, QPointF, QRectF, pyqtSignal
+from PyQt6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen, QPolygonF, QResizeEvent
 from PyQt6.QtWidgets import QMenu, QWidget
 
 from src.features.composite.core.media_drop_payload import accepts_layer_media_drop
@@ -92,6 +92,7 @@ class KeyframesTimelineView(QWidget):
     track_batch_committed = pyqtSignal(str, int)
     range_changed = pyqtSignal(str, dict)       # node_id, time_range dict
     layer_selected = pyqtSignal(str)
+    layer_menu_requested = pyqtSignal(str, QPoint)
     property_group_revealed = pyqtSignal(str)
     play_range_changed = pyqtSignal(int, int)   # work-area in/out frames
     display_mode_changed = pyqtSignal(str)      # ruler label mode changed
@@ -1171,9 +1172,23 @@ class KeyframesTimelineView(QWidget):
                 return
         self.unsetCursor()
 
-    def contextMenuEvent(self, event) -> None:
-        """Right-click: keyframe editing + interpolation + ruler mode."""
-        has_sel = bool(self.selected_keyframes())
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        """Open the menu for the keyframe, layer row or ruler under the pointer."""
+        selection = self.selected_keyframes()
+        has_sel = bool(selection)
+        if event.reason() == QContextMenuEvent.Reason.Mouse:
+            x, y = float(event.pos().x()), float(event.pos().y())
+            hit = self._hit_keyframe(x, y)
+            if hit is not None and hit not in selection:
+                self._select_keyframe(*hit, additive=False)
+            has_sel = hit is not None
+            if self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+                index = self._row_index_at_y(y)
+                if index >= 0:
+                    row = self._model.visible_rows()[index]
+                    if row.row_type == "layer" and row.layer_id:
+                        self.layer_menu_requested.emit(row.layer_id, event.globalPos())
+                        return
         menu = QMenu(self)
 
         if has_sel:
@@ -1418,17 +1433,8 @@ class KeyframesTimelineView(QWidget):
         A snapshot of the original frames is taken so each move recomputes
         positions from the press point (no accumulated rounding drift).
 
-        T42: when ``_drag_copy`` is set (Alt/Option was held at press time),
-        each selected keyframe is duplicated in place first; the originals
-        are deselected and the copies become the drag targets. The originals
-        stay behind, so releasing the drag leaves both the source and the
-        moved copies in place — one undo step.
-
-        AUD-10203: the duplication itself is deferred to the first real
-        move (see :meth:`_do_multi_keyframe_drag`). Duplicating on press
-        meant a plain Alt+click — press, no drag, release — committed two
-        keyframes on the same frame, breaking the one-keyframe-per-frame
-        invariant.
+        Alt/Option copies become selected on the first valid move. The
+        originals stay in place and count as occupied destinations.
         """
         self._drag_mode = "keyframe"
         self._drag_row_id = grabbed_row_id
@@ -1447,40 +1453,6 @@ class KeyframesTimelineView(QWidget):
                                     else (kf.frame, False)
                                     for kf in track.keyframes]
         self._multi_drag_snapshot = snapshot
-
-    def _duplicate_selected_in_place(self) -> None:
-        """T42 helper: copy every selected keyframe in place.
-
-        For each track that has any selected keyframe, append a copy of
-        each selected point at the same frame with the same value/interp/
-        extra fields, then flip selection so only the copies remain
-        selected. The originals become ordinary (deselected) keyframes.
-
-        The duplicates are appended after the originals and the list is
-        re-sorted by frame so painting stays ordered. Because the copy
-        lands on the *same* frame as the original, the drag's first move
-        must shift it elsewhere — the conflict guard naturally enforces
-        this (a no-delta move is a no-op, and any real delta tries to put
-        the copy on a free frame).
-        """
-        for row_id, track in self._model.tracks().items():
-            selected = [kf for kf in track.keyframes if kf.selected]
-            if not selected:
-                continue
-            # Deselect originals; the copies inherit selection.
-            for kf in track.keyframes:
-                kf.selected = False
-            for src in selected:
-                dup = KeyframePointVisual(
-                    frame=src.frame,
-                    value=src.value,
-                    interpolation=src.interpolation,
-                    selected=True,
-                    extra=dict(src.extra),
-                )
-                track.keyframes.append(dup)
-            track.keyframes.sort(key=lambda k: k.frame)
-            self._drag_affected_rows.add(row_id)
 
     def _do_multi_keyframe_drag(self, x: float) -> None:
         """Move all selected keyframes by the cursor delta (snap to frames).
@@ -1504,27 +1476,17 @@ class KeyframesTimelineView(QWidget):
             cur_frame = self._snap_frame(
                 cur_frame, row_id=self._drag_row_id)
         delta = cur_frame - self._multi_drag_press_frame
+        frames = [frame for keys in self._multi_drag_snapshot.values()
+                  for frame, selected in keys if selected]
+        if not frames:
+            return
         extent = self._layer_time_extent()
         if extent is not None:
-            frames = [frame for keys in self._multi_drag_snapshot.values() for frame, selected in keys if selected]
-            if frames:
-                delta = max(extent[0] - min(frames), min(delta, extent[1] - max(frames)))
+            delta = min(delta, extent[1] - max(frames))
+        delta = max((extent[0] if extent else 0) - min(frames), delta)
         if delta == 0:
             return
-        if self._drag_copy_pending:
-            # AUD-10203: the gesture became a real drag — NOW materialize the
-            # T42 copies and rebuild the snapshot from the post-duplication
-            # state (copies selected, originals as static obstacles), exactly
-            # as the old press-time duplication did.
-            self._drag_copy_pending = False
-            self._duplicate_selected_in_place()
-            snapshot = {}
-            for row_id, track in self._model.tracks().items():
-                if any(kf.selected for kf in track.keyframes):
-                    snapshot[row_id] = [
-                        (kf.frame, True) if kf.selected else (kf.frame, False)
-                        for kf in track.keyframes]
-            self._multi_drag_snapshot = snapshot
+        copying = self._drag_copy_pending
         # Phase 1: validate every track first (all-or-nothing per move).
         moves: dict = {}
         for row_id, entries in self._multi_drag_snapshot.items():
@@ -1532,11 +1494,11 @@ class KeyframesTimelineView(QWidget):
             if track is None:
                 continue
             sel_frames = [f for f, sel in entries if sel]
-            new_frames = [max(0, f + delta) for f in sel_frames]
+            new_frames = [f + delta for f in sel_frames]
             # No-op rows can be skipped.
             if new_frames == sel_frames:
                 continue
-            static = {f for f, sel in entries if not sel}
+            static = {f for f, sel in entries if copying or not sel}
             if any(nf in static or
                    (nf not in sel_frames and
                     any(kf.frame == nf for kf in track.keyframes))
@@ -1550,19 +1512,22 @@ class KeyframesTimelineView(QWidget):
             track = self._model.track_for(row_id)
             if track is None:
                 continue
-            for kf in track.keyframes:
-                if kf.selected and kf.frame in mapping:
+            selected = [kf for kf in track.keyframes if kf.selected and kf.frame in mapping]
+            for kf in selected:
+                if copying:
+                    kf.selected = False
+                    track.keyframes.append(KeyframePointVisual(
+                        frame=mapping[kf.frame], value=kf.value,
+                        interpolation=kf.interpolation, selected=True,
+                        extra=dict(kf.extra)))
+                else:
                     kf.frame = mapping[kf.frame]
             track.keyframes.sort(key=lambda k: k.frame)
+            self._multi_drag_snapshot[row_id] = [(kf.frame, kf.selected)
+                                                for kf in track.keyframes]
             self._drag_affected_rows.add(row_id)
+        self._drag_copy_pending = False
         self._multi_drag_press_frame += delta
-        # Keep the snapshot in sync with the new positions.
-        for row_id, entries in self._multi_drag_snapshot.items():
-            mapping = moves.get(row_id)
-            if mapping is None:
-                continue
-            self._multi_drag_snapshot[row_id] = [
-                (mapping.get(f, f), sel) for f, sel in entries]
         self.update()
 
     def _do_range_edge_drag(self, x: float) -> None:

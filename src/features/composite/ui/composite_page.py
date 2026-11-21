@@ -17,15 +17,17 @@ Manages:
 import copy
 import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Callable, Optional, List, Tuple
 
 import numpy as np
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QToolButton, QMenu, QToolTip
+    QLabel, QPushButton, QToolButton, QMenu, QToolTip, QDockWidget,
 )
-from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import QEvent, QObject, QPointF, Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QActionGroup, QCursor, QKeySequence, QShortcut
 
 from src.features.composite.render.composite_renderer import CompositeRenderer, CompositeCommand
@@ -35,9 +37,11 @@ logger = logging.getLogger(__name__)
 from src.features.composite.render.render_scheduler import RenderRequest, RequestIdGenerator, RenderMode, PrefetchRequest
 from src.features.composite.render.prefetch_scheduler import PrefetchScheduler, PrefetchPrediction
 from src.features.composite.nodes.node_state import NodeState
-from src.features.composite.core.node_engine import NodeGraph, NODE_REGISTRY
+from src.features.composite.core.node_engine import Connection, NodeGraph, NODE_REGISTRY
 from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
-from src.features.composite.core.layer_stack_controller import LayerStackController
+from src.features.composite.core.layer_stack_controller import (
+    ACTION_ATTACH_NODE_TO_LAYER, LayerStackController,
+)
 from src.features.composite.core.media_drop_payload import (
     MediaDropPayload, resolve_drop_payloads, resolve_asset_ids, MEDIA_TYPE_MODEL3D,
     MEDIA_TYPE_VIDEO,
@@ -48,6 +52,7 @@ from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.image_input_node import ImageInputNode
 from src.features.composite.nodes.blend_node import MergeNode
 from src.features.composite.nodes.constant_node import ConstantNode
+from src.features.composite.nodes.dot_node import DotNode
 from src.features.edit.core.composite_graph_data import (
     PROJECT_BACKGROUND_PARAM,
     CONSTANT_COLOR_SPACE_PARAM,
@@ -77,6 +82,7 @@ from src.features.composite.core.undo_stack import (
     create_disconnect_action,
 )
 from .node_editor_widget import NodeEditorWidget
+from .node_search_popup import NodeSearchPopup
 from .minimap_widget import MinimapWidget
 from .node_thumbnail import NodeThumbnailManager, linear_rgb_to_display
 from .viewer_tool_system import ViewerToolMode, NodeOutputRegion
@@ -554,6 +560,15 @@ class CompositePage(QWidget):
             toolbar_layout.addWidget(btn)
             self._node_toolbar_controls.append(btn)
 
+        self._node_palette_button = QPushButton(
+            I18N.tr("composite.node_editor.palette", "Node Library"))
+        self._node_palette_button.setCheckable(True)
+        self._node_palette_button.setStyleSheet(btn_style)
+        self._node_palette_button.toggled.connect(self._set_node_palette_visible)
+        toolbar_layout.addWidget(self._node_palette_button)
+        self._node_toolbar_controls.append(self._node_palette_button)
+        self._node_palette: NodeSearchPopup | None = None
+
         # Settings button (⋯) — node-graph view options menu
         self._settings_btn = QToolButton()
         self._settings_btn.setText("⋯")
@@ -585,14 +600,21 @@ class CompositePage(QWidget):
 
         # Node editor with minimap overlay
         editor_container = QWidget()
-        editor_layout = QVBoxLayout(editor_container)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(0)
+        self._graph_body = QHBoxLayout(editor_container)
+        self._graph_body.setContentsMargins(0, 0, 0, 0)
+        self._graph_body.setSpacing(0)
 
         self._node_editor = NodeEditorWidget(self)
+        self._node_editor.insert_layer_transform = self._insert_layer_transform
+        self._node_editor.edit_cables = self._edit_graph_cables
+        self._node_editor.can_connect_cable = self._can_connect_canvas_cable
+        self._node_editor.insert_cable_dot = self._insert_cable_dot
+        self._node_editor.group_node_creation = self._group_node_creation
         self._node_editor.installEventFilter(self)
         self._node_editor.viewport().installEventFilter(self)
         self._node_editor.node_double_clicked.connect(self._on_node_double_clicked)
+        self._node_editor.timeline_layer_targets = self._timeline_layers_for_node
+        self._node_editor.reveal_timeline_layer_requested.connect(self._reveal_timeline_layer)
         self._node_editor.node_connected.connect(self._on_nodes_connected)
         self._node_editor.node_disconnected.connect(self._on_nodes_disconnected)
         self._node_editor.node_about_to_be_removed.connect(self._on_node_about_to_be_removed)
@@ -658,7 +680,7 @@ class CompositePage(QWidget):
         # 编辑器只识别媒体池 MIME 并发信号；asset 解析与建节点归页面
         # （见 _on_editor_assets_dropped）。
         self._node_editor.assets_dropped.connect(self._on_editor_assets_dropped)
-        editor_layout.addWidget(self._node_editor)
+        self._graph_body.addWidget(self._node_editor, 1)
 
         # Minimap overlay (bottom-right corner)
         self._minimap = MinimapWidget(self._node_editor, self._node_editor)
@@ -676,7 +698,6 @@ class CompositePage(QWidget):
             self._node_editor.height() - self._minimap.height() - 8,
         )
 
-        editor_container.setLayout(editor_layout)
         layout.addWidget(editor_container)
         self._node_toolbar = toolbar
 
@@ -687,6 +708,18 @@ class CompositePage(QWidget):
         self._thumbnail_manager = NodeThumbnailManager(self._node_graph)
 
         self.set_composition_active(False)
+
+    def _set_node_palette_visible(self, visible: bool) -> None:
+        editor = self._node_editor
+        if self._node_palette is None and visible:
+            self._node_palette = NodeSearchPopup(
+                editor.node_creation_categories(), parent=self, embedded=True)
+            self._node_palette.node_selected.connect(editor.add_node_from_library)
+            self._graph_body.insertWidget(0, self._node_palette)
+        if self._node_palette is not None:
+            if visible:
+                self._node_palette.set_node_categories(editor.node_creation_categories())
+            self._node_palette.setVisible(visible)
 
     def set_composition_active(self, active: bool) -> None:
         """Enable node editing or let the empty workspace receive media.
@@ -700,6 +733,7 @@ class CompositePage(QWidget):
             # or an injected timeline transport is playing. Stop that source
             # before disabling the panels so no stale graph keeps advancing.
             self.comp_pause()
+            self._node_palette_button.setChecked(False)
         self._composition_active = bool(active)
         self._sync_fit_composition_shortcut()
 
@@ -2174,6 +2208,9 @@ class CompositePage(QWidget):
         # 命名升级（P1）：分配实例序号（Camera1/Light2…）
         from src.features.composite.core.node_engine import assign_instance_index
         assign_instance_index(node, self._node_graph)
+        if (node.node_type == "transform" and selected_node_id
+                and self._insert_layer_transform(selected_node_id, node) is not None):
+            return
         # Register state callback for UI updates
         node.set_state_callback(self._on_node_state_changed)
         self._node_graph.add_node(node)
@@ -2181,13 +2218,24 @@ class CompositePage(QWidget):
         # Apply initial state to visual
         self._update_node_item_state(node)
 
-        # Auto-connect after selected node
         if selected_node_id:
-            self._node_editor._auto_connect_after(selected_node_id, node)
+            with self._group_node_creation():
+                self._push_add_undo(node)
+                self._node_editor._auto_connect_after(selected_node_id, node)
+        else:
+            self._push_add_undo(node)
 
-        self._push_add_undo(node)
         self._evaluate_graph()
         self._refresh_keyframes_and_spline_for_node(node.id)
+
+    @contextmanager
+    def _group_node_creation(self) -> Iterator[None]:
+        self._commit_pending_edit_transactions()
+        self._undo_stack.begin_group()
+        try:
+            yield
+        finally:
+            self._undo_stack.end_group("Add node and connect")
 
     def load_composite_data(self, composite_data: dict) -> None:
         """
@@ -2453,6 +2501,297 @@ class CompositePage(QWidget):
         node = self._node_graph.get_node(node_id)
         if isinstance(node, (COLORNode, ToposColorNode)):
             self.switch_to_color_requested.emit()
+        elif node is not None and isinstance(self._properties_panel, QWidget):
+            self._node_editor.select_node(node_id)
+            self._raise_panel_dock(self._properties_panel)
+
+    @staticmethod
+    def _raise_panel_dock(widget: QWidget) -> None:
+        parent = widget.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QDockWidget):
+                parent.show()
+                parent.raise_()
+                return
+            parent = parent.parentWidget()
+
+    def _timeline_layers_for_node(self, node_id: str) -> list[tuple[str, str]]:
+        if getattr(self, "_keyframes_panel", None) is None:
+            return []
+        controller = self._layer_stack_controller
+        layers = controller.layers_map()
+        owned = {entry.layer_id for entry in controller.provenance_for_node(node_id)
+                 if not entry.read_only}
+        matches = []
+        for layer_id in controller.active_layer_ids_for_output():
+            layer = layers.get(layer_id)
+            if layer is None:
+                continue
+            merge = controller.layer_merge_node(layer_id)
+            if layer_id in owned or (merge is not None and merge.id == node_id):
+                matches.append((layer_id, layer.name))
+        return matches
+
+    def _reveal_timeline_layer(self, layer_id: str) -> None:
+        panel = getattr(self, "_keyframes_panel", None)
+        if isinstance(panel, QWidget):
+            self._raise_panel_dock(panel)
+            panel.reveal_layer(layer_id)
+
+    def _reveal_layer_node(self, node_id: str) -> None:
+        editor = self._node_editor
+        item = editor.get_node_item(node_id)
+        if item is None:
+            return
+        editor.show_node_in_group_view(node_id)
+        self._raise_panel_dock(editor)
+        editor.clear_graph_focus()
+        editor.select_node(node_id)
+        editor.centerOn(item)
+        editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _insert_layer_transform(self, root_id: str, node: TransformNode,
+                                target: tuple[str, str] | None = None,
+                                position: QPointF | None = None) -> bool | None:
+        """Splice at the managed output. None delegates to regular node editing."""
+        controller = self._layer_stack_controller
+        insertion = controller.layer_transform_insertion_target(root_id)
+        if insertion is None:
+            return None
+        layer_id, dst_id, dst_port = insertion
+        if target is not None and target != (dst_id, dst_port):
+            return None
+        old_cable = next((edge for edge in self._node_graph.get_output_connections(root_id)
+                          if edge.dst_node_id == dst_id and edge.dst_port_name == dst_port), None)
+        if old_cable is None:
+            return None
+        if (_page_node_is_locked(self, root_id) or _page_node_is_locked(self, node.id)
+                or controller.trace_layer_ids_for_node(node.id)):
+            return False
+        if any((edge.src_node_id, edge.src_port_name) != (root_id, old_cable.src_port_name)
+               for edge in self._node_graph.get_input_connections(node.id)):
+            return False
+        self._emit_user_edit_once()
+        self._commit_pending_edit_transactions()
+        before = controller.snapshot()
+        edges_before = self._graph_cable_keys()
+        created = self._node_graph.get_node(node.id) is None
+        if created:
+            self._node_graph.add_node(node)
+        if not controller.splice_layer_transform(layer_id, root_id, old_cable.src_port_name,
+                                                 node.id, (dst_id, dst_port)):
+            if created:
+                self._node_graph.remove_node(node.id)
+            return False
+        if created:
+            node.set_state_callback(self._on_node_state_changed)
+            self._node_editor.add_node_visual(node)
+            self._update_node_item_state(node)
+        if position is not None:
+            node.position = (position.x(), position.y())
+            item = self._node_editor.get_node_item(node.id)
+            if item is not None:
+                item.setPos(position)
+        self._commit_layer_transform_wiring(before, edges_before)
+        return True
+
+    def _graph_cable_keys(self) -> set[tuple[str, str, str, str]]:
+        return {(edge.src_node_id, edge.src_port_name, edge.dst_node_id, edge.dst_port_name)
+                for edge in self._node_graph.connections}
+
+    def _commit_layer_transform_wiring(self, before: dict,
+                                       edges_before: set[tuple[str, str, str, str]],
+                                       description: str = "Connect Transform to layer") -> None:
+        """Publish one undo record and update cables without rebuilding the canvas."""
+        self._update_cable_visuals(edges_before)
+        self._undo_stack.push(UndoAction(
+            ACTION_ATTACH_NODE_TO_LAYER,
+            {"before": before, "after": self._layer_stack_controller.snapshot()},
+            undo_fn=lambda data: self._restore_layer_node_snapshot_for_ui(data["before"]),
+            redo_fn=lambda data: self._restore_layer_node_snapshot_for_ui(data["after"]),
+            description=description,
+        ))
+        self._update_minimap()
+        self._sync_layer_stack_after_node_edit()
+        self._evaluate_graph()
+
+    def _update_cable_visuals(self, before: set[tuple[str, str, str, str]]) -> None:
+        after = self._graph_cable_keys()
+        for edge in before - after:
+            self._node_editor.remove_connection_visual_exact(*edge)
+        for edge in after - before:
+            self._node_editor.add_connection_visual(*edge, self._port_data_type(*edge[:2]))
+
+    def _managed_layer_destinations(self) -> set[str]:
+        return {
+            node_id for stack in self._layer_stack_controller.stacks().values()
+            if stack.managed and stack.layer_ids
+            for node_id in (*stack.generated_merge_node_ids, stack.output_node_id)
+        }
+
+    def _is_pending_layer_transform(self, edge: tuple[str, str, str, str]) -> bool:
+        """Allow the existing output-first route for a newly added Transform."""
+        src_id, output, dst_id, port_name = edge
+        graph = self._node_graph
+        controller = self._layer_stack_controller
+        source = graph.get_node(src_id)
+        if (source is None or source.node_type != "transform" or output != "result"
+                or graph.get_input_connections(src_id) or graph.get_output_connections(src_id)
+                or controller.is_locked_layer_transform_target(dst_id, port_name)):
+            return False
+        return any(
+            original.dst_port_name == port_name
+            and (target := controller.layer_transform_insertion_target(original.src_node_id)) is not None
+            and target[1:] == (dst_id, port_name)
+            for original in graph.get_input_connections(dst_id)
+        )
+
+    def _can_connect_canvas_cable(self, edge: tuple[str, str, str, str],
+                                  allow_pending: bool) -> bool:
+        if self._node_graph.would_create_connection_cycle(edge[0], edge[2]):
+            return False
+        if edge[2] not in self._managed_layer_destinations():
+            return True
+        controller = self._layer_stack_controller
+        binding = controller.layer_transform_binding(edge)
+        if binding is not None:
+            layer = self._node_graph.get_layer(binding[0])
+            return layer is not None and not layer.locked
+        return allow_pending and self._is_pending_layer_transform(edge)
+
+    def _insert_cable_dot(self, edge: tuple[str, str, str, str], center: QPointF) -> bool:
+        """Create a routing Dot and splice only the clicked image cable."""
+        if self._port_data_type(*edge[:2]) != "image":
+            return False
+        dot = DotNode()
+        dot.position = center.x(), center.y()
+        graph = self._node_graph
+        with self._group_node_creation():
+            graph.add_node(dot)
+            if self._edit_graph_cables(
+                (edge,), ((*edge[:2], dot.id, "input"), (dot.id, "output", *edge[2:])),
+                created_dot=dot,
+            ):
+                return True
+            graph.remove_node(dot.id)
+        return False
+
+    def _edit_graph_cables(self, removed: tuple[tuple[str, str, str, str], ...],
+                           added: tuple[tuple[str, str, str, str], ...], *,
+                           replace_input: bool = False,
+                           allow_pending_transform: bool = False,
+                           moved_node: str | None = None,
+                           position: QPointF | None = None,
+                           created_dot: DotNode | None = None) -> bool:
+        """Apply an entire routing gesture and give it one undo record."""
+        graph = self._node_graph
+        controller = self._layer_stack_controller
+        old_edges = self._graph_cable_keys()
+        if replace_input and len(added) == 1:
+            dst_id, port_name = added[0][2:]
+            destination = graph.get_node(dst_id)
+            port = destination.get_input_port(port_name) if destination else None
+            if port is not None and port.max_connections == 1:
+                removed = tuple(dict.fromkeys((*removed, *(
+                    edge for edge in old_edges if edge[2:] == (dst_id, port_name)
+                    and edge != added[0]
+                ))))
+        if any(_page_node_is_locked(self, node_id) for edge in (*removed, *added)
+               for node_id in (edge[0], edge[2])):
+            return False
+        if set(removed) == set(added) or (not removed and all(edge in old_edges for edge in added)):
+            return False
+
+        managed = self._managed_layer_destinations()
+        binding = None
+        if len(added) == 2 and len(removed) == 1:
+            incoming, outgoing = added
+            original = removed[0]
+            target = controller.layer_transform_insertion_target(original[0])
+            if (target is not None and incoming[:2] == original[:2]
+                    and incoming[2] == outgoing[0] and outgoing[2:] == original[2:] == target[1:]):
+                effect_id = outgoing[0]
+                if controller.trace_layer_ids_for_node(effect_id):
+                    return False
+                binding = (target[0], effect_id, outgoing[1], target[1:])
+        elif len(added) == 1:
+            transform = controller.layer_transform_binding(added[0])
+            if transform is not None:
+                binding = (transform[0], transform[1], "result", transform[2])
+        protected = {edge[2:] for edge in (*removed, *added) if edge[2] in managed}
+        if protected and (binding is None or protected != {binding[3]}):
+            if (allow_pending_transform and len(added) == 1
+                    and self._is_pending_layer_transform(added[0])):
+                self._on_nodes_connected(*added[0])
+                return added[0] in self._graph_cable_keys()
+            return False
+        if binding is not None:
+            layer = graph.get_layer(binding[0])
+            if layer is None or layer.locked:
+                return False
+
+        before = controller.snapshot() if binding else None
+        remove_keys = set(removed) - set(added)
+        indexed_removed = [(index, edge) for index, edge in enumerate(graph.connections)
+                           if (edge.src_node_id, edge.src_port_name,
+                               edge.dst_node_id, edge.dst_port_name) in remove_keys]
+        removed_edges = tuple(edge for _, edge in indexed_removed)
+        positions = tuple(index for index, _ in indexed_removed)
+        added_edges = tuple(Connection(*edge) for edge in added if edge not in old_edges)
+        if not remove_keys <= old_edges:
+            return False
+        if not graph.edit_connections(removed_edges, added_edges):
+            return False
+        if binding is not None and not controller.adopt_wired_layer_effect(*binding):
+            graph.edit_connections(added_edges, removed_edges, positions=positions)
+            return False
+
+        node = graph.get_node(moved_node) if moved_node is not None else None
+        move = (node.position, (position.x(), position.y())) if node and position is not None else None
+
+        def set_position(value: tuple[float, float]) -> None:
+            current = graph.get_node(moved_node)
+            if current is not None:
+                current.position = value
+                item = self._node_editor.get_node_item(moved_node)
+                if item is not None:
+                    item.setPos(*value)
+
+        if move is not None:
+            set_position(move[1])
+        self._emit_user_edit_once()
+        self._commit_pending_edit_transactions()
+        if created_dot is not None:
+            created_dot.set_state_callback(self._on_node_state_changed)
+            self._node_editor.add_node_visual(created_dot)
+            self._update_node_item_state(created_dot)
+            self._push_add_undo(created_dot)
+        if before is not None:
+            self._commit_layer_transform_wiring(before, old_edges, "Insert or connect layer effect")
+            return True
+
+        def refresh() -> None:
+            self._update_minimap()
+            self._sync_layer_stack_after_node_edit()
+            self._evaluate_graph()
+
+        def replay(remove: tuple[Connection, ...], add: tuple[Connection, ...], index: int) -> None:
+            existing = self._graph_cable_keys()
+            if graph.edit_connections(remove, add, positions=positions if index == 0 else None):
+                if move is not None:
+                    set_position(move[index])
+                self._update_cable_visuals(existing)
+                refresh()
+
+        self._update_cable_visuals(old_edges)
+        self._undo_stack.push(UndoAction(
+            "connect_replace", {},
+            undo_fn=lambda _: replay(added_edges, removed_edges, 0),
+            redo_fn=lambda _: replay(removed_edges, added_edges, 1),
+            description="Edit node connections",
+        ))
+        refresh()
+        return True
 
     def _on_nodes_connected(self, src_node_id: str, src_port: str,
                             dst_node_id: str, dst_port: str) -> None:
@@ -2469,6 +2808,21 @@ class CompositePage(QWidget):
         # 对单输入端口会静默替换旧边——不捕获的话 undo 只断新线，
         # 旧线永久丢失。
         dst_node = self._node_graph.get_node(dst_node_id)
+        controller = getattr(self, "_layer_stack_controller", None)
+        edge = (src_node_id, src_port, dst_node_id, dst_port)
+        binding = None
+        if controller is not None and not self.__dict__.get("_compound_paste_active"):
+            if (src_node is not None and src_node.node_type == "transform"
+                    and controller.is_locked_layer_transform_target(dst_node_id, dst_port)):
+                return
+            binding = controller.layer_transform_binding(edge)
+        if binding is not None:
+            layer = self._node_graph.get_layer(binding[0])
+            if layer.locked:
+                return
+            self._commit_pending_edit_transactions()
+            before = controller.snapshot()
+            edges_before = self._graph_cable_keys()
         dst_port_obj = dst_node.get_input_port(dst_port) if dst_node else None
         is_multi_input = (dst_port_obj is not None
                           and dst_port_obj.max_connections > 1)
@@ -2483,6 +2837,9 @@ class CompositePage(QWidget):
         # Connect in data model FIRST — if it fails, visual stays unchanged
         success = self._node_graph.connect(src_node_id, src_port, dst_node_id, dst_port)
         if not success:
+            return
+        if binding is not None and controller.adopt_wired_layer_transform(*binding):
+            self._commit_layer_transform_wiring(before, edges_before)
             return
 
         # Sync visual: 单输入端口按精确 quad 移除旧线（U-15：by-dst 会
@@ -2558,6 +2915,8 @@ class CompositePage(QWidget):
         if controller is None:
             return
         controller.restore_snapshot(snapshot)
+        for node in self._node_graph.nodes.values():
+            node.set_state_callback(self._on_node_state_changed)
         self._node_editor.clear_all()
         self._node_editor.build_from_graph(self._node_graph)
         self._refresh_keyframes_panel()
@@ -3597,7 +3956,7 @@ class CompositePage(QWidget):
         if self._viewer is not None and hasattr(
                 self._viewer, "set_selected_3d_scene_node"):
             self._viewer.set_selected_3d_scene_node(None)
-        if node and hasattr(self, '_properties_panel'):
+        if node and getattr(self, "_properties_panel", None) is not None:
             param_options = node.get_param_options() if hasattr(node, 'get_param_options') else {}
             param_defs = node.get_param_defs() if hasattr(node, 'get_param_defs') else {}
             # 同步当前视图模式给面板（Scene3D 开关据此高亮当前模式）。
@@ -5687,7 +6046,7 @@ class CompositePage(QWidget):
         graph = getattr(self, "_node_graph", None)
         if editor is None or graph is None:
             return
-        from src.features.composite.ui.group_commands import EnterGroupCommand
+        from src.features.composite.ui.group_commands import EnterGroupCommand, ExitGroupCommand
 
         cmd = EnterGroupCommand(graph=graph, group_id=str(group_id))
         if not cmd.redo():
@@ -5699,7 +6058,9 @@ class CompositePage(QWidget):
                                   group_id=str(group_id)).redo()
                 editor.enter_group_view(str(group_id))
             else:
-                editor.exit_group_view()
+                ExitGroupCommand(graph=graph, group_id=str(group_id)).redo()
+                if editor.group_view_stack[-1:] == [str(group_id)]:
+                    editor.exit_group_view(update_model=False)
 
         self._undo_stack.push(UndoAction(
             "group_enter_view",
@@ -8089,6 +8450,8 @@ class CompositePage(QWidget):
         if hasattr(panel, 'layer_selected'):
             panel.layer_selected.connect(
                 self._on_keyframes_panel_layer_selected)
+        if hasattr(panel, 'reveal_layer_node_requested'):
+            panel.reveal_layer_node_requested.connect(self._reveal_layer_node)
         if hasattr(panel, 'layer_delete_requested'):
             panel.layer_delete_requested.connect(
                 self._on_keyframes_panel_layer_delete)

@@ -34,6 +34,7 @@ class PortItem(QGraphicsEllipseItem):
         super().__init__(-r, -r, 2 * r, 2 * r, parent)
 
         self.port_name = port_name
+        self.display_label = port_name
         self.direction = direction  # "input" or "output"
         self.data_type = data_type
         # 输入端口容量：1=单连接（默认），>1=多输入（如 Scene3D 的 scene 端口）。
@@ -71,7 +72,11 @@ class PortItem(QGraphicsEllipseItem):
 
     def _update_tooltip(self) -> None:
         dir_text = "Input" if self.direction == "input" else "Output"
-        self.setToolTip(f"{dir_text}: {self.port_name} ({self.data_type})")
+        self.setToolTip(f"{dir_text}: {self.display_label} ({self.data_type})")
+
+    def set_display_label(self, label: str) -> None:
+        self.display_label = label
+        self._update_tooltip()
 
     @property
     def _connected(self) -> bool:
