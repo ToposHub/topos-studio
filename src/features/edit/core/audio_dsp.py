@@ -3270,6 +3270,12 @@ class ImagerEffect(AudioEffect):
         self._pan: float = _IMAGER_DEFAULT_PAN
         self._width: float = _IMAGER_DEFAULT_WIDTH
         self._enabled: bool = False
+        # FX-13：M/S 独立增益 + Mono Maker（默认中性 → 旧快速路径）。
+        self._mid_gain: float = 1.0
+        self._side_gain_db: float = 1.0
+        self._output_gain: float = 1.0
+        self._mono_maker: Optional[dict] = None  # {'sos':…, 'zi':…}
+        self._mono_maker_key: Optional[tuple] = None
         self._recompute_gains()
 
     def _recompute_gains(self) -> None:
@@ -3309,6 +3315,33 @@ class ImagerEffect(AudioEffect):
         self._width = _clamp_finite(params.get("width", _IMAGER_DEFAULT_WIDTH),
                                     0.0, 200.0, _IMAGER_DEFAULT_WIDTH)
         self._enabled = bool(params.get("enabled", True))
+        self._mid_gain = 10.0 ** (_clamp_finite(
+            params.get("mid_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        self._side_gain_db = 10.0 ** (_clamp_finite(
+            params.get("side_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        self._output_gain = 10.0 ** (_clamp_finite(
+            params.get("output_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        mono_on = bool(params.get("mono_maker_on", False))
+        mono_hz = _clamp_finite(params.get("mono_maker_hz", 200.0),
+                                20.0, 2000.0, 200.0)
+        mono_slope = str(params.get("mono_maker_slope", "6") or "6")
+        if mono_slope not in ("6", "12"):
+            mono_slope = "6"
+        if mono_on:
+            key = (round(mono_hz, 3), mono_slope,
+                   round(float(self._sample_rate), 3))
+            if key != self._mono_maker_key:
+                from scipy.signal import butter
+                order = 1 if mono_slope == "6" else 2
+                self._mono_maker = {
+                    "sos": butter(order, mono_hz, btype="lowpass",
+                                  fs=self._sample_rate, output="sos"),
+                }
+                self._mono_maker_key = key
+                self._mono_maker["zi"] = None
+        else:
+            self._mono_maker = None
+            self._mono_maker_key = None
         self._recompute_gains()
 
     def process(self, samples: np.ndarray) -> np.ndarray:
@@ -3322,6 +3355,8 @@ class ImagerEffect(AudioEffect):
         """
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
+        if not self._legacy_fast_path():
+            return self._process_extended(samples)
 
         out = samples.astype(np.float64, copy=True)
         channels, n = out.shape
@@ -3349,14 +3384,51 @@ class ImagerEffect(AudioEffect):
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
-        """无状态效果，无需重置。"""
-        pass
+        """Mono Maker 滤波状态清零（seek 语义）；其余无状态。"""
+        if self._mono_maker is not None:
+            self._mono_maker["zi"] = None
+
+    def _legacy_fast_path(self) -> bool:
+        """FX-13 新字段全部中性 → 旧快速路径（位精确兼容基准）。"""
+        return (self._mid_gain == 1.0 and self._side_gain_db == 1.0
+                and self._output_gain == 1.0 and self._mono_maker is None)
+
+    def _process_extended(self, samples: np.ndarray) -> np.ndarray:
+        """FX-13 新路径：M/S 分解 → Mono Maker（衰减低频 Side）→
+        Width×Side 增益 / Mid 增益 → 逆矩阵 → Pan → 输出增益。"""
+        from scipy.signal import sosfilt
+        out = samples.astype(np.float64, copy=True)
+        channels, n = out.shape
+        if channels == 1:
+            out[0] *= (self._pan_l + self._pan_r) * 0.5 * self._output_gain
+            return out.astype(samples.dtype, copy=False)
+        mid = (out[0] + out[1]) * 0.5
+        side = (out[0] - out[1]) * 0.5
+        if self._mono_maker is not None:
+            sos = self._mono_maker["sos"]
+            zi = self._mono_maker.get("zi")
+            expected = (sos.shape[0], 1, 2)
+            if zi is None or zi.shape != expected:
+                zi = np.zeros(expected, dtype=np.float64)
+            low, zi = sosfilt(sos, side[None, :], axis=-1, zi=zi)
+            self._mono_maker["zi"] = zi
+            side = side - low[0]  # 低频 Side 衰减 → 低频 mono
+        mid = mid * self._mid_gain
+        side = side * (self._side_gain * self._side_gain_db)
+        new_l = mid + side
+        new_r = mid - side
+        out[0] = new_l * self._pan_l
+        out[1] = new_r * self._pan_r
+        out[:2] *= self._output_gain
+        return out.astype(samples.dtype, copy=False)
 
     @property
     def is_active(self) -> bool:
-        # 仅当有实际效果时才活跃（pan≠0 或 width≠100）
+        # 仅当有实际效果时才活跃（pan≠0 或 width≠100 或新字段非中性）
         return self._enabled and (
             abs(self._pan) > 0.1 or abs(self._width - 100.0) > 0.1
+            or self._mid_gain != 1.0 or self._side_gain_db != 1.0
+            or self._output_gain != 1.0 or self._mono_maker is not None
         )
 
 

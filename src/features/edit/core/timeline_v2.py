@@ -3255,12 +3255,23 @@ class ImagerParams:
     pan: float = 0.0
     width: float = 100.0
     enabled: bool = True
+    # FX-13（2026-11-21 计划）：M/S 独立增益与 Mono Maker。默认全中性
+    # → 走旧快速路径（位精确兼容基准）。
+    mid_gain_db: float = 0.0
+    side_gain_db: float = 0.0
+    output_gain_db: float = 0.0
+    mono_maker_on: bool = False
+    mono_maker_hz: float = 200.0
+    mono_maker_slope: str = "6"  # "6" | "12" dB/oct
 
     def __post_init__(self) -> None:
         if not (-100.0 <= self.pan <= 100.0):
             raise ValueError(f"pan must be in [-100, 100]: {self.pan}")
         if not (0.0 <= self.width <= 200.0):
             raise ValueError(f"width must be in [0, 200]: {self.width}")
+        if self.mono_maker_slope not in ("6", "12"):
+            raise ValueError(
+                f"mono_maker_slope must be '6'|'12': {self.mono_maker_slope!r}")
 
     @staticmethod
     def default() -> "ImagerParams":
@@ -3271,14 +3282,29 @@ class ImagerParams:
             "pan": self.pan,
             "width": self.width,
             "enabled": self.enabled,
+            "mid_gain_db": self.mid_gain_db,
+            "side_gain_db": self.side_gain_db,
+            "output_gain_db": self.output_gain_db,
+            "mono_maker_on": self.mono_maker_on,
+            "mono_maker_hz": self.mono_maker_hz,
+            "mono_maker_slope": self.mono_maker_slope,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ImagerParams":
+        slope = str(data.get("mono_maker_slope", "6") or "6")
+        if slope not in ("6", "12"):
+            slope = "6"
         return ImagerParams(
             pan=float(data.get("pan", 0.0)),
             width=float(data.get("width", 100.0)),
             enabled=bool(data.get("enabled", True)),
+            mid_gain_db=float(data.get("mid_gain_db", 0.0)),
+            side_gain_db=float(data.get("side_gain_db", 0.0)),
+            output_gain_db=float(data.get("output_gain_db", 0.0)),
+            mono_maker_on=bool(data.get("mono_maker_on", False)),
+            mono_maker_hz=float(data.get("mono_maker_hz", 200.0)),
+            mono_maker_slope=slope,
         )
 
 
