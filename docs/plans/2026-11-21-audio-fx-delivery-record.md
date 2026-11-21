@@ -166,12 +166,24 @@ FX-11 卷积混响 IR 试听、FX-23 限制器 A/B 与 Dither 交付对拍、
 FX-18 调制扫频听感、FX-14 三段饱和等响 A/B、FX-06 齿音对白实测、
 FX-13 Mono Maker 低频监听。合成夹具验收已全部通过。
 
+| 记录项 | FX-08 音高校正（P2） |
+| --- | --- |
+| 提交 | pitch correction |
+| 实现 | YIN 式 F0 追踪（65–1000 Hz、静音门控）；音阶量化（12 音集合/bypass 音名/参考 A4）；稳定音符段固定偏移（保时长 pitch_shift + 10 ms 边界淡化，长度严格保持）；strength 缩放 |
+| 验收 | 443 → 440 中段误差 0.00 cents（≤5）；A3 音阶内不动；白噪声直通；bypass 直通；颤音收敛同一目标；静音 ≤1e-7；audio_edit 栈端到端 440.00 Hz |
+| 待办 | 图形锚点模式与实时版（计划第 4 步） |
+
+| 记录项 | FX-20 加倍/和声（P2） |
+| --- | --- |
+| 提交 | doubler |
+| 实现 | `render_doubler`：每声部 interval+detune（SUPPORTED_SEMITONES 校验）→ 保时长变调 → 整数样本创作延迟（delay ≥ 缓冲已处理）→ 等功率声像 → dB 增益；线性求和无重归一化；mono 输入保持 mono |
+| 注册 | `doubler` 预渲染处理器（length-preserving）+ 执行分发 |
+| 验收 | +12 st → 440 Hz；延迟 onset 720 ±1；pan ±100 单边；detune 6 cents ≤2 cents；mute/dry 参照 |
+
 ## 待后续批次
 
-- **FX-08 音高校正**：单声部 F0 追踪 + 音阶量化 + 保时长合成
-  （计划四步提交次序，需独立的大批次）。
-- **FX-20 加倍/和声**：片段预渲染双声（复用 pitch_shift + 延迟 +
-  等功率声像）+ `audio_edit.PROCESSORS` 注册。
 - FX-01 实例级 PCM 频谱 taps（订阅型，需引擎接线）；FX-02 外检源
   （依赖侧链路由）；FX-07 片段命令接线；FX-11 worker 装载/取消；
-  FX-23 LUFS Match 异步分析；FX-22 遥测增强（粒子数/丢弃计数）。
+  FX-23 LUFS Match 异步分析；FX-22 遥测增强（粒子数/丢弃计数）；
+  FX-08 图形锚点/实时版；FX-20 调式与实时版；FX-19 square/saw
+  平滑与占空比。
