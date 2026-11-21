@@ -27,6 +27,7 @@ Automation Recorder — Write/Touch/Latch 自动化录制（§3.1）。
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -48,6 +49,8 @@ class _FaderSample:
 def simplify_samples(
     samples: List[_FaderSample],
     threshold: float = 0.005,
+    *,
+    protected_frames: Optional[set] = None,
 ) -> List[_FaderSample]:
     """将连续 fader 采样简化为关键帧（Douglas-Peucker 简化思想）。
 
@@ -55,10 +58,13 @@ def simplify_samples(
     - 起点/终点必保留。
     - 相邻关键帧间，若任意中间样本偏离线性插值 > threshold，则保留偏离最大的点。
     - 重复此过程直到无点需保留。
+    - B07/§13 步骤 8：``protected_frames``（hold 边界/触摸按下-释放边界/
+      陡边）必须保留——RDP 不得删去语义边界。线性参数（pan 等）的线性
+      插值重放 == 直线偏离，本函数的阈值即重放误差界。
 
     Args:
         samples: 按 frame 排序的采样列表
-        threshold: 线性偏离阈值（参数值单位，如 volume 0.005 = 0.5%）
+        threshold: 偏离阈值（参数值单位，如 pan 0.005）
 
     Returns:
         简化后的关键帧列表（frame 单调递增）
@@ -81,8 +87,12 @@ def simplify_samples(
     # 将其降级为 warning——整段录制数据丢失。保留点集合与递归版等价。
     frames = [p.frame for p in pts]
     values = [p.value for p in pts]
+    protected = protected_frames or set()
     kept = [False] * len(pts)
     kept[0] = kept[len(pts) - 1] = True
+    for i, frame in enumerate(frames):
+        if frame in protected:
+            kept[i] = True
     stack: List[Tuple[int, int]] = [(0, len(pts) - 1)]
     while stack:
         start, end = stack.pop()
@@ -95,6 +105,8 @@ def simplify_samples(
         max_idx = -1
         vertical = x1 == x0
         for i in range(start + 1, end):
+            if kept[i]:
+                continue  # 受保护/已保留的点不参与删除判定
             if vertical:
                 dist = abs(values[i] - y0)
             else:
@@ -116,6 +128,79 @@ def simplify_samples(
         if not out or out[-1].frame != p.frame:
             out.append(p)
     return out
+
+
+def simplify_volume_db(
+    samples: List[_FaderSample],
+    max_error_db: float = 0.1,
+    *,
+    protected_frames: Optional[set] = None,
+) -> List[_FaderSample]:
+    """volume 线性倍率采样简化，保证**线性重放**误差 ≤ max_error_db dB。
+
+    §13 步骤 8 的 volume 误差界在 dB 域定义，但生产求值对关键帧做**线性**
+    插值——对指数形衰减，dB 域 DP 的界在线性重放下不成立。本函数按真实
+    重放误差迭代细化：从端点（+受保护帧）出发，反复加入重放 dB 误差最大
+    的样本，直到全部样本误差 ≤ 阈值。保留点数最少化（贪心，非全局最优，
+    但误差界严格成立）。
+
+    Args:
+        samples: 按 frame 排序的采样列表（值为线性倍率，>0）
+        max_error_db: 重放 dB 误差上界（默认 0.1 dB）
+        protected_frames: 必须保留的帧集合（hold/触摸边界）
+
+    Returns:
+        简化后的关键帧列表（frame 单调递增）
+    """
+    if max_error_db <= 0:
+        raise ValueError("max_error_db must be positive")
+    if len(samples) <= 2:
+        return list(samples)
+    deduped: Dict[int, float] = {}
+    for s in samples:
+        deduped[s.frame] = s.value
+    frames = sorted(deduped.keys())
+    values = [max(1e-6, float(deduped[f])) for f in frames]
+    dbs = [20.0 * math.log10(v) for v in values]
+    n = len(frames)
+    protected = protected_frames or set()
+    kept: List[int] = [0, n - 1]
+    kept.extend(i for i in range(n) if frames[i] in protected and 0 < i < n - 1)
+    kept = sorted(set(kept))
+
+    def replay_db(idx: int) -> float:
+        # 生产求值方式：关键帧**值**线性插值，再换算 dB 误差。
+        if idx in kept_set:
+            return dbs[idx]
+        import bisect as _bisect
+        pos = _bisect.bisect_right(kept, idx)
+        lo, hi = kept[pos - 1], kept[pos]
+        t = (idx - lo) / (hi - lo)
+        replay_value = values[lo] + t * (values[hi] - values[lo])
+        return 20.0 * math.log10(max(replay_value, 1e-6))
+
+    for _ in range(n):
+        kept_set = set(kept)
+        worst_idx = -1
+        worst_err = 0.0
+        for i in range(n):
+            if i in kept_set:
+                continue
+            err = abs(replay_db(i) - dbs[i])
+            if err > worst_err:
+                worst_err = err
+                worst_idx = i
+        if worst_idx < 0 or worst_err <= max_error_db:
+            break
+        kept.append(worst_idx)
+        kept.sort()
+    out = [_FaderSample(frames[i], values[i]) for i in kept]
+    # 去重连续重复
+    deduped_out: List[_FaderSample] = []
+    for p in out:
+        if not deduped_out or deduped_out[-1].frame != p.frame:
+            deduped_out.append(p)
+    return deduped_out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -584,3 +669,154 @@ class AutomationPreviewCapture:
 
     def cancel(self) -> None:
         self._inner.cancel()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B07/§13 步骤 6：Trim 烘入曲线（coalesce）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CoalesceAutomationTrimCommand:
+    """把 volume trim 恒定倍率烘入自动化曲线后复位 trim（单次 undo）。
+
+    合同（主计划 §13 步骤 6）：coalesce 前后 ``get_automation_value`` 逐帧
+    相等（声音不变），不累计不可逆偏置。trim × 曲线值若溢出曲线
+    [min_val, max_val]（KeyframeTrack 求值时 clamp），烘入会改变声音 →
+    拒绝执行并保留 trim（显式诊断，不静默改变听感）。无曲线时烘入
+    track.volume（静态默认值的唯一存储；仅 volume 参数参与 trim）。
+
+    apply 返回携带完整快照的新命令实例（undo 一次恢复 automation/trim/
+    volume）。
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    param: str = "volume"
+    _old_automation: Optional[Dict[str, Any]] = None
+    _old_trim: Optional[Dict[str, float]] = None
+    _old_volume: Optional[float] = None
+
+    @staticmethod
+    def create(track_id: str, param: str = "volume",
+               command_id: str = "") -> "CoalesceAutomationTrimCommand":
+        if param != "volume":
+            raise ValueError(
+                "trim coalescing is only defined for volume (pan/mute have "
+                "no trim contract)")
+        return CoalesceAutomationTrimCommand(
+            command_id=command_id or f"coalesce-trim-{track_id}",
+            label=f"Coalesce volume trim ({track_id})",
+            track_id=track_id, param=param,
+        )
+
+    def apply(
+        self, timeline: Any,
+    ) -> Tuple[Any, "CoalesceAutomationTrimCommand"]:
+        from src.shared.keyframe import Keyframe, KeyframeTrack
+
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        factor = track.automation_trim_factor(self.param)
+        if factor == 1.0:
+            raise ValueError(
+                f"track {self.track_id} has no volume trim to coalesce")
+        old_auto = {k: v.to_dict() for k, v in track.automation.items()}
+        old_trim = dict(track.automation_trim)
+        old_volume = float(track.volume)
+
+        curve = track.automation.get(self.param)
+        if curve is not None and getattr(curve, "keyframes", None):
+            baked: list = []
+            for kf in curve.keyframes:
+                value = float(kf.value) * factor
+                if value < curve.min_val - 1e-9 or value > curve.max_val + 1e-9:
+                    raise ValueError(
+                        f"coalescing trim {factor} would clamp keyframe at "
+                        f"frame {kf.frame} ({value} outside "
+                        f"[{curve.min_val}, {curve.max_val}]); sound would "
+                        "change — trim kept, adjust curve first")
+                baked.append(Keyframe(
+                    frame=int(kf.frame), value=value,
+                    interpolation=kf.interpolation))
+            new_curve = KeyframeTrack(
+                param_name=curve.param_name,
+                min_val=float(curve.min_val), max_val=float(curve.max_val))
+            for kf in baked:
+                new_curve.add_keyframe(kf)
+            new_auto = track._clone_automation()
+            new_auto[self.param] = new_curve
+            new_track = track._rebuild(
+                automation=new_auto,
+                automation_trim={k: v for k, v in old_trim.items()
+                                 if k != self.param},
+            )
+        else:
+            # 无曲线：静态默认（track.volume）承担 trim（模型 get_automation_value
+            # 的 default×factor 语义 → volume×factor、trim=1 等价）。
+            new_volume = old_volume * factor
+            if new_volume < 0.0 - 1e-9 or new_volume > 2.0 + 1e-9:
+                raise ValueError(
+                    f"coalescing trim {factor} would push volume {new_volume} "
+                    "outside [0, 2]; trim kept")
+            new_track = track._rebuild(
+                volume=new_volume,
+                automation_trim={k: v for k, v in old_trim.items()
+                                 if k != self.param},
+            )
+        new_timeline = timeline.with_track_updated(new_track)
+        updated = CoalesceAutomationTrimCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, param=self.param,
+            _old_automation=old_auto, _old_trim=old_trim,
+            _old_volume=old_volume,
+        )
+        return new_timeline, updated
+
+    def undo(self, timeline: Any) -> Any:
+        if self._old_automation is None:
+            return timeline
+        from src.shared.keyframe import KeyframeTrack
+
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            return timeline
+        restored: Dict[str, Any] = {}
+        for param, snap in self._old_automation.items():
+            try:
+                restored[param] = KeyframeTrack.from_dict(snap)
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "CoalesceAutomationTrimCommand.undo: 无法恢复参数 %r 快照",
+                    param)
+        return timeline.with_track_updated(track._rebuild(
+            automation=restored,
+            automation_trim=dict(self._old_trim or {}),
+            volume=float(self._old_volume if self._old_volume is not None
+                         else track.volume),
+        ))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "CoalesceAutomationTrimCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "param": self.param,
+            "old_automation": self._old_automation,
+            "old_trim": self._old_trim,
+            "old_volume": self._old_volume,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "CoalesceAutomationTrimCommand":
+        return CoalesceAutomationTrimCommand(
+            command_id=str(data.get("command_id", "")),
+            label=str(data.get("label", "Coalesce trim")),
+            track_id=str(data.get("track_id", "")),
+            param=str(data.get("param", "volume")),
+            _old_automation=data.get("old_automation"),
+            _old_trim=data.get("old_trim"),
+            _old_volume=data.get("old_volume"),
+        )
