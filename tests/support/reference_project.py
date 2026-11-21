@@ -10,7 +10,7 @@ DX/ADR/Foley/FX/MX 普通轨 + DX Bus/FX Bus/Return Bus + Master：
 """
 from __future__ import annotations
 
-from fractions import Fraction
+from src.shared.media.metadata import Rational
 
 from src.features.edit.core.timeline_v2 import (
     ClipInstance,
@@ -22,7 +22,7 @@ from src.features.edit.core.timeline_v2 import (
 from src.shared.keyframe import Keyframe, KeyframeTrack
 
 RATE = 48000
-FPS = Fraction(24, 1)
+FPS = Rational(24, 1)
 
 
 def _clip(clip_id: str, asset_id: str, track_id: str, timeline_start: int,

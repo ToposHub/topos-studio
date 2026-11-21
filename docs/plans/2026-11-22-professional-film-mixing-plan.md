@@ -83,7 +83,11 @@ Netflix的旧规范链接现跳转到[官方Knowledge Hub](https://studiopartner
 
 状态：UI01–10 已完成；B00–B04 的核心反例修复与 fixture 基线已于本分支落地
 （见§19批次1记录与 `tests/edit/test_b00_counterexamples.py`，各任务剩余边界
-在该记录中逐项列出），其余任务“待后端实施”。工时为一名熟悉Python/音频的开发者在现有工程上的**粗估有效人日**，含定向测试，不含等待硬件/外部接收端。新手应按里程碑拆小PR，不将估算当承诺。
+在该记录中逐项列出）；B05/B07/B08/B09/B10/B11/B12/B13/B14/B15/B16/B17/B18
+/B19/B20/B21/B22 的核心模型/算法/回归亦已分批落地（见§19批次2–6记录）。
+B06 全链（原生 track_dsp/bus_master 多声道）、B12 外部接收端往返、
+B16 真实插件宿主、B18 ADM 完整 renderer、B22 夜间长压、全部硬件/听音
+验收保持待实施。工时为一名熟悉Python/音频的开发者在现有工程上的**粗估有效人日**，含定向测试，不含等待硬件/外部接收端。新手应按里程碑拆小PR，不将估算当承诺。
 
 | ID | 优先级 | 任务/完成产物 | 依赖 | 粗估人日 | 详细方法 |
 | --- | --- | --- | --- | ---: | --- |
@@ -643,6 +647,118 @@ assert np.allclose(g, [1.0, 10 ** (-12.0 / 20)])
 边界说明：本批次未改任何命令/模型 schema（trim/VCA 消费既有字段），
 无需迁移；修 PDC 会改变旧有问题工程的声音时序（发布说明须注明），
 线性图在旧两级近似已对齐的形态下输出不变（既有 parity 组未动）。
+
+### 批次2（8c304e2a）：B05 交付 profile/测量/发布 + B07 trim 烘入与保边简化
+
+- **B05（核心，部分）**：`delivery_profile.py`——`DeliveryProfile`
+  （schema 版本/来源核实/测量模式/逐 stem 规则/未知字段往返）、旧
+  preset 迁移（legacy 标记 + 旧目标原样保留）、`MeasurementResult`
+  （五态；文件 hash/布局/率绑定）、`measurement_rejection` 验收链
+  （缺测/NaN/bool/静音规则）、manifest v2（profile+sound hash+逐文件
+  sha256）、`publish_delivery_atomic`（暂存→校验→原子改名，失败零
+  污染）。tests/edit/test_delivery_profile.py 16 项。
+- **B07（核心，部分）**：`CoalesceAutomationTrimCommand`（trim 烘入
+  曲线/静态 volume，帧级求值 parity、溢出拒绝、单步 undo）；
+  `simplify_samples` 受保护帧（hold/触摸边界不删）；
+  `simplify_volume_db` 以生产线性重放为 oracle 的 0.1dB 误差界。
+  剩余：B07 全部写入作用域扩展/录制状态机完善/能力声明。
+
+### 批次3（98609ffa）：B09 健康遥测 + B21 渲染产物 + B10 控制室 + B08 金字塔
+
+- **B09（核心，部分）**：`AudioHealthSnapshot`（unknown=None 语义、
+  渲染 p50/p95/p99 窗口、ring 统计注入、PDC/轨数/声音身份）；
+  mix_samples 耗时采集；mixer/manager 双层 API。剩余：编译 worker
+  隔离、deadline miss 计数、UI 健康面板接线。
+- **B21（核心，部分）**：`render_artifacts.py`——`RenderArtifact`
+  （freeze/bounce/printmaster 三语义、声音身份+依赖签名+文件绑定）、
+  `freeze_staleness` 失效链、`ArtifactRegistry`（原子 sidecar）、
+  `PrintJobLock`（revision 锁；输入漂移中止不混版）。剩余：bounce
+  落 asset 的完整 command、freeze 边界合同与缓存接线。
+- **B10（核心，部分）**：`monitor_service.py`——`MonitorService`
+  （PFL/AFL/SIP/program/input 选择、布局矩阵 mono、5ms 增益斜坡）
+  与监听隔离不变量（Master/Stem 字节不变）；`EditTrack.solo_safe`
+  字段 + `SetTrackSoloSafeCommand`（apply/undo/序列化，旧工程
+  默认 False）。剩余：图编译 tap 接线、设备 patch、校准 profile。
+- **B08（核心，部分）**：`waveform_pyramid.py`——多级 min/max/RMS
+  金字塔（极值保留、内存预算截断、概览列保守包含）与
+  `plan_decode_window`（ClipExtent/DecodedWindow 分离、字节预算）。
+  剩余：300 秒上限逐处理器解除、tile 缓存落盘、滚动窗接全链。
+
+### 批次4（84af840e）：B11 采集时钟/Punch + B13 对白候选 + B14 comp + B20 参考mix
+
+- **B11（核心，部分）**：`capture_clock.py`——`CaptureStream`（严格
+  设备样本记账/缺块重复标记）、`PunchRange`/`punch_slice`（手册
+  oracle：块×256、[250,780) → arange(250,780)）、`ClockAnchor`
+  （±100ppm fixture 校正 ≤1 参考样本；±1000ppm 拒绝拟合）、
+  `CaptureJournal`（fsync 节流 JSONL；崩溃半行/缺段只报连续前缀）。
+  剩余：真机 loopback、`RecordingSessionPlan` v2 接线、跨设备漂移。
+- **B13（核心，部分）**：`dialogue_proposal.py`——`DialogueProposal`
+  只读候选 + `validate_proposal`（revision/指纹/置信度门槛）、
+  `ApplyDialogueProposalCommand`（对齐写既有偏移字段：右移延迟/
+  左移源侧修剪；低置信度不自动应用；单步 undo）、`RoomToneRef`
+  （PCM 不进工程）、`RecorderSourceIdentity`（unknown 保留）。
+- **B14（核心，部分）**：`audio_comp.py`——`AudioComp/CompRegion`
+  （有序不重叠）、`replace_region`（手册 oracle，左右残片源偏移
+  推进；100 次随机替换不变式）、`compile_comp_plan`（逐 take 渲染
+  窗、边界 crossfade 区段长限制、缺 take/源短显式 offline 不换音）。
+  剩余：命令化提交/试听/flatten 到共享 renderer。
+- **B20（核心，部分）**：`reference_mix.py`——`ReferenceMixRef`/
+  `MixVersion`（冻结登记）、`ComparisonState`（仅监听会话）、
+  `comparison_gain`（手册 oracle + 上限拒绝）、
+  `align_reference_offset`（1001 样本延迟 ≤1 样本对齐）。剩余：
+  A/B 输出时钟切换、监听响度匹配闭环（B05 测量口径）。
+
+### 批次5（d5b53029）：B12 AAF 音频子集 + 批次6（10f40280）：B06 真值锁
+
+- **B12（v1 核心，部分）**：pyaaf2 1.7.1 引入并锁定（LICENSE 核实为
+  MIT，旧注释 BSD-3 已更正）；`adapters/aaf_adapter.py`（Composition
+  /Sound 槽样本编辑率/SourceClip 源窗/间隙/PCM 描述符外部引用；导出
+  临时目录原子发布；bake 策略显式拒绝）。本地往返 ≤1 样本、轨名/槽
+  身份/间隙保持、非 Sound/FX 进报告。**capability 保持 available=False**：
+  外部接收端（Pro Tools/Media Composer 等）往返验收未执行——本地自读
+  自写不冒充兼容（tests/edit/test_aaf_audio_subset.py + 门测试锁定）。
+- **B06（真值锁，全链待实施）**：`test_b06_capability_truth.py`——
+  capability 声明与渲染实际对锁（track_dsp/bus_master 立体声域、
+  clip 阶段降混/轨链不吞声道分工）、BS.775 系数逐项、VBAP 手册
+  oracle（±30° 对 0° → [√.5,√.5]；5.1 0° 精确命中 C；无高度布局
+  仰角请求显式标记）。
+
+### 批次7（本提交）：B15/B16/B17/B18/B19 手册 oracle + B22 稳定性回归
+
+- **B15（核心，部分）**：`reconform_transaction.py`——`KeptSpan`/
+  `remap_sample`（手册 oracle：半开区间、删除不吸附、歧义报错）、
+  `plan_kept_spans`（帧域→样本域绝对边界，23.976 整数边界锁定）、
+  `validate_reconform_transaction`（保护区间切碎/删除重叠拒绝整个
+  提交）。剩余：完整事务命令与 cue/automation 联动、真实改版试片。
+- **B16（核心，部分）**：`pro_audio_oracles.py`——`accept_block_reply`
+  三元身份拒绝矩阵、`QuarantineRegistry`（指纹隔离/解除/容量）、
+  `PluginDescriptor`。宿主进程/IPC/真实插件保持待实施（ADR 未签）。
+- **B17（核心，部分）**：`MtcAssembler`（错序/重复不发布；完整序列
+  组装）、`should_apply` 反馈去环（回声/时间窗/容量）、
+  `SyncStateMachine`（acquiring→locked→freewheel→lost→重新捕获）。
+  真机台/独立同步源保持待验收。
+- **B18（核心，部分）**：`validate_track_uids`（手册 oracle：UID 形状
+  /唯一/index 范围；numUIDs>numTracks 合法语义）+ 最小 chna 打包/
+  解析往返（EBU 3285-s7 布局）。完整 ADM renderer/交付保持待实施。
+- **B19（核心，部分）**：`estimate_roundtrip_samples`（233 样本手册
+  oracle）、`bandlimited_probe`（带限低电平；极性反转可检）、
+  `validate_patch_claims`（输出通道独占冲突）。真机 4 输出/硬件
+  bypass 保持待验收。
+- **B22（CI 部分）**：`test_b22_stability.py`——30× 模型序列化往返
+  sound hash 不变（B00 参考工程，含 trim/VCA/sends 全字段）、未知
+  payload 保留、100× undo/redo 回原始、coalesce 帧级求值 parity。
+  夜间长压/故障注入/真机矩阵保持待实施。
+- **B23/B24 现状核查**：`test_audio_fx_completed_controls.py` +
+  `test_audio_denoise.py` + `test_audio_repair.py` + 
+  `test_de_click_dehum.py` 33 项通过——已交付能力健康；E01–E09 与
+  B24 进阶项按原计划保持待实施（不为"全实现"重写旧算法）。
+
+预存基线失败（非本工作引入，已用 stash 对拍核实）：
+`test_audio_h01_version_boundaries.py::test_upgrade_undo_roundtrip`、
+`test_effect_registry_audio.py`（exciter/subharmonic ×4）、
+`test_channel_layout_truth.py::test_unknown_layout_rejected_not_truncated`；
+`test_timeline_envelope_editing.py::test_hit_performance_with_1200_nodes`
+为机器敏感的边界性能测试（带/不带本工作均间歇超 250ms）。
 
 ## 20. B10–B20完整实施手册
 
