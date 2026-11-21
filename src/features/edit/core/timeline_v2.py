@@ -4883,6 +4883,9 @@ class EditTrack:
     # P1-5：自动化写保护——保护后录制入口拒绝采集/切 Write/Touch/Latch
     #（与轨锁同一守卫模式；写入仍可经命令栈显式撤销）。
     automation_write_protected: bool = False
+    # B10：SIP solo-safe——其他轨 solo 时本轨不被监听闭包静音（监听规则
+    # 属声音模型；SetTrackSoloSafeCommand 提交，旧工程默认 False）。
+    solo_safe: bool = False
     # W24: Bus 路由字段
     is_bus: bool = False  # True=该轨是 Bus/Aux 轨（无 clips，只接收 send/routing）
     output_bus_id: Optional[str] = None  # 输出目标 Bus 的 track_id（None=直接输出到 Master）
@@ -5041,6 +5044,7 @@ class EditTrack:
                  automation_mode: Optional[str] = None,
                  automation_trim: Optional[dict] = None,
                  automation_write_protected: bool | None = None,
+                 solo_safe: bool | None = None,
                  bus_layout: str | None = None,
                  is_bus: bool | None = None,
                  output_bus_id: Optional[str] | None = None,
@@ -5093,6 +5097,7 @@ class EditTrack:
                 self.automation_write_protected
                 if automation_write_protected is None else automation_write_protected
             ),
+            solo_safe=self.solo_safe if solo_safe is None else solo_safe,
             bus_layout=self.bus_layout if bus_layout is None else bus_layout,
             is_bus=self.is_bus if is_bus is None else is_bus,
             output_bus_id=self.output_bus_id if output_bus_id is None else output_bus_id,
@@ -5379,6 +5384,10 @@ class EditTrack:
         """P1-5：设置自动化写保护。"""
         return self._rebuild(automation_write_protected=bool(protected))
 
+    def with_solo_safe(self, safe: bool) -> EditTrack:
+        """B10：设置 SIP solo-safe（其他轨 solo 时本轨保持可听）。"""
+        return self._rebuild(solo_safe=bool(safe))
+
     def automation_trim_factor(self, param: str) -> float:
         """该参数的 Trim 倍率（1.0 = 无 trim）。"""
         try:
@@ -5552,6 +5561,7 @@ class EditTrack:
             "automation_mode": self.automation_mode,
             "automation_trim": dict(self.automation_trim),
             "automation_write_protected": self.automation_write_protected,
+            "solo_safe": self.solo_safe,
             "is_bus": self.is_bus,
             "bus_layout": self.bus_layout,
             "output_bus_id": self.output_bus_id,
@@ -5627,6 +5637,7 @@ class EditTrack:
             automation_trim=dict(data.get("automation_trim", {}) or {}),
             automation_write_protected=bool(
                 data.get("automation_write_protected", False)),
+            solo_safe=bool(data.get("solo_safe", False)),
             is_bus=bool(data.get("is_bus", False)),
             bus_layout=str(data.get("bus_layout", "stereo") or "stereo"),
             output_bus_id=data.get("output_bus_id"),
@@ -5643,7 +5654,7 @@ class EditTrack:
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
             "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
             "automation_mode", "automation_trim",
-            "automation_write_protected", "is_bus", "bus_layout",
+            "automation_write_protected", "solo_safe", "is_bus", "bus_layout",
             "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })

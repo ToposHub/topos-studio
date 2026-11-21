@@ -1809,6 +1809,9 @@ class AudioMixer:
         self._pdc_total: int = 0
         self._pdc_arrival: Dict[str, int] = {}
         self._pdc_send_edges: Dict[str, int] = {}
+        # B09 · 渲染健康遥测：最近 512 块 mix_samples 耗时（ms）
+        self._render_times_ms: deque = deque(maxlen=512)
+        self._sound_key_active: Optional[str] = None
         # A5: solo 计数器，避免 mix_samples 每帧 `any(t.solo for t in self._tracks.values())` 遍历。
         # 所有修改 _tracks 的入口（add/remove/set_track_state/update_track_solo）都负责维护它。
         self._solo_count: int = 0
@@ -2677,6 +2680,61 @@ class AudioMixer:
                 np.zeros((buffered.shape[0], num_samples), dtype=np.float32),
             )
 
+    def health_snapshot(self, ring_stats: Optional[dict] = None) -> "AudioHealthSnapshot":
+        """B09：实时混音运行态健康快照（持锁采集；UI 节流消费）。
+
+        未知数据保持 None（unknown 语义），不显示健康绿灯。ring 统计由
+        调用方注入（播放线程 ring 归 manager 所有）；渲染百分位来自最近
+        512 块 mix_samples 耗时窗口。
+        """
+        from src.features.edit.core.audio_health import (
+            AudioHealthSnapshot as _Snapshot,
+            render_percentiles_ms,
+        )
+        with QMutexLocker(self._mutex):
+            ring = ring_stats or {}
+            p50, p95, p99, _miss = render_percentiles_ms(
+                tuple(self._render_times_ms))
+            buffer_size = ring.get("block_size")
+            deadline = None
+            if self._sample_rate and buffer_size:
+                deadline = 1000.0 * float(buffer_size) / float(self._sample_rate)
+            fill = ring.get("fill_ratio")
+            if fill is None and ring:
+                filled = ring.get("filled")
+                capacity = ring.get("capacity")
+                if filled is not None and capacity:
+                    fill = float(filled) / float(capacity)
+            buses = 0
+            tracks = 0
+            for tid, routing in self._track_routing.items():
+                if tid == MASTER_BUS_KEY:
+                    continue
+                if isinstance(routing, dict) and routing.get("is_bus"):
+                    buses += 1
+                else:
+                    tracks += 1
+            return _Snapshot(
+                sample_rate=int(self._sample_rate),
+                buffer_size=int(buffer_size) if buffer_size else None,
+                render_p50_ms=p50, render_p95_ms=p95, render_p99_ms=p99,
+                render_deadline_ms=deadline,
+                ring_fill_ratio=(float(fill) if fill is not None else None),
+                underruns=ring.get("underruns"),
+                overflows=ring.get("overflows"),
+                pdc_total_samples=int(self._pdc_total),
+                active_tracks=tracks,
+                active_buses=buses,
+                sound_key_active=self._sound_key_active,
+                spectrum_metering=bool(self._spectrum_metering_enabled),
+                lufs_metering=bool(self._lufs_metering_enabled),
+            )
+
+    def set_active_sound_key(self, sound_key: Optional[str]) -> None:
+        """B09/B01：记录当前生效的声音身份（图提交时下发；诊断显示用）。"""
+        with QMutexLocker(self._mutex):
+            self._sound_key_active = (str(sound_key) if sound_key else None)
+
     def reset_dsp_states(self) -> None:
         """复位所有效果器/滤波器的内部状态（seek 后调用）。线程安全。
 
@@ -3118,6 +3176,8 @@ class AudioMixer:
               注意：为向后兼容，TrackLevel 同时支持索引访问 [0]/[1]（返回 peak_l/peak_r）。
         """
         with QMutexLocker(self._mutex):
+            # B09：本块渲染耗时起点（health_snapshot 百分位窗口）
+            _render_t0 = time.perf_counter()
             # A5: 用计数器替代 any() 遍历，避免每帧扫描全表
             has_solo = self._solo_count > 0
 
@@ -4136,6 +4196,9 @@ class AudioMixer:
                               if master_chain is not None else {}),
                     )
 
+            # B09：渲染耗时遥测（窗口 512 块；health_snapshot() 消费百分位）。
+            self._render_times_ms.append(
+                (time.perf_counter() - _render_t0) * 1000.0)
             return output, per_track_peaks
 
 
@@ -6587,6 +6650,14 @@ class AudioPlaybackManager(QObject):
             return ring.stats()
         except Exception:
             return {}
+
+    def health_snapshot(self) -> "AudioHealthSnapshot":
+        """B09：健康快照（manager 层合并播放线程 ring 统计与 mixer 遥测）。"""
+        return self._mixer.health_snapshot(ring_stats=self.ring_stats())
+
+    def set_active_sound_key(self, sound_key: Optional[str]) -> None:
+        """B09/B01：声音身份下发（转发 AudioMixer）。"""
+        self._mixer.set_active_sound_key(sound_key)
 
     def get_video_sync_frame(self) -> int:
         """

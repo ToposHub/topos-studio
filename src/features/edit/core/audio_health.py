@@ -37,6 +37,74 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# B09 · 实时渲染健康快照（运行态遥测；mix_samples 采集，UI 节流消费）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class AudioHealthSnapshot:
+    """实时混音运行态健康快照（B09 §15 步骤 5）。
+
+    无数据显示 unknown（None），不能显示健康绿灯。渲染耗时百分位以 ms
+    计；deadline = 1000·block_samples/sample_rate，消费方比较 p99 与
+    deadline（建议 p99 < 70% deadline，主计划 §15 预算算法）。
+    """
+
+    sample_rate: Optional[int] = None
+    buffer_size: Optional[int] = None          # 设备块样本数（未知=None）
+    render_p50_ms: Optional[float] = None      # 最近窗口 mix_samples 耗时
+    render_p95_ms: Optional[float] = None
+    render_p99_ms: Optional[float] = None
+    render_deadline_ms: Optional[float] = None
+    deadline_miss_count: int = 0               # p99 语义下的超限计数（窗口内）
+    ring_fill_ratio: Optional[float] = None    # 0..1；None=无 ring
+    underruns: Optional[int] = None
+    overflows: Optional[int] = None
+    pdc_total_samples: Optional[int] = None    # 当前图最迟路径补偿
+    active_tracks: Optional[int] = None
+    active_buses: Optional[int] = None
+    sound_key_active: Optional[str] = None     # 当前生效的声音身份（未知=None）
+    spectrum_metering: bool = False
+    lufs_metering: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "sample_rate": self.sample_rate,
+            "buffer_size": self.buffer_size,
+            "render_p50_ms": self.render_p50_ms,
+            "render_p95_ms": self.render_p95_ms,
+            "render_p99_ms": self.render_p99_ms,
+            "render_deadline_ms": self.render_deadline_ms,
+            "deadline_miss_count": self.deadline_miss_count,
+            "ring_fill_ratio": self.ring_fill_ratio,
+            "underruns": self.underruns,
+            "overflows": self.overflows,
+            "pdc_total_samples": self.pdc_total_samples,
+            "active_tracks": self.active_tracks,
+            "active_buses": self.active_buses,
+            "sound_key_active": self.sound_key_active,
+            "spectrum_metering": self.spectrum_metering,
+            "lufs_metering": self.lufs_metering,
+        }
+
+
+def render_percentiles_ms(durations_ms: Tuple[float, ...]) -> Tuple[
+        Optional[float], Optional[float], Optional[float], int]:
+    """从耗时窗口计算 (p50, p95, p99, deadline 未统计的 miss 计数恒 0)。
+
+    durations_ms 为空 → (None, None, None, 0)（unknown 语义）。
+    """
+    if not durations_ms:
+        return None, None, None, 0
+    ordered = sorted(float(d) for d in durations_ms)
+
+    def _pct(p: float) -> float:
+        idx = min(len(ordered) - 1, max(0, int(round(p * (len(ordered) - 1)))))
+        return ordered[idx]
+
+    return _pct(0.50), _pct(0.95), _pct(0.99), 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 磁盘空间探测
 # ─────────────────────────────────────────────────────────────────────────────
 

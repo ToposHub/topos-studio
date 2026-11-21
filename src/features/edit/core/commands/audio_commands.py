@@ -2383,3 +2383,69 @@ class UpdateSendCommand:
             new_level=level, new_enabled=enabled, new_target_bus_id=target_bus_id,
             new_tap=tap, new_muted=muted,
         )
+
+
+@dataclass(frozen=True)
+class SetTrackSoloSafeCommand:
+    """B10：轨道 SIP solo-safe 入时间线历史。
+
+    solo_safe=True 的轨在其他轨 solo 时不被监听闭包静音（控制室监听规则，
+    属声音模型字段）。旧工程无该字段时默认 False（迁移零变化）。
+    """
+
+    command_id: str
+    label: str
+    track_id: str
+    safe: bool
+    _old_safe: bool | None = None
+
+    def apply(self, timeline: TimelineSequence):
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        old = bool(track.solo_safe)
+        new_timeline = timeline.with_track_updated(
+            track.with_solo_safe(bool(self.safe)))
+        updated_cmd = SetTrackSoloSafeCommand(
+            command_id=self.command_id, label=self.label,
+            track_id=self.track_id, safe=bool(self.safe), _old_safe=old)
+        logger.debug(
+            "SetTrackSoloSafeCommand applied: track %s safe=%s",
+            self.track_id, self.safe)
+        return new_timeline, updated_cmd
+
+    def undo(self, timeline: TimelineSequence) -> TimelineSequence:
+        if self._old_safe is None:
+            return timeline
+        track = timeline.get_track_by_id(self.track_id)
+        if track is None:
+            raise ValueError(f"Track not found: {self.track_id}")
+        return timeline.with_track_updated(
+            track.with_solo_safe(bool(self._old_safe)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "command_type": "SetTrackSoloSafeCommand",
+            "label": self.label,
+            "track_id": self.track_id,
+            "safe": bool(self.safe),
+            "old_safe": self._old_safe,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SetTrackSoloSafeCommand":
+        return SetTrackSoloSafeCommand(
+            command_id=data.get("command_id", str(uuid.uuid4())),
+            label=data.get("label", "Set Solo Safe"),
+            track_id=data.get("track_id", ""),
+            safe=bool(data.get("safe", False)),
+            _old_safe=data.get("old_safe"),
+        )
+
+    @staticmethod
+    def create(track_id: str, safe: bool) -> "SetTrackSoloSafeCommand":
+        return SetTrackSoloSafeCommand(
+            command_id=str(uuid.uuid4()),
+            label=f"Set Solo Safe: {'on' if safe else 'off'}",
+            track_id=track_id, safe=bool(safe))
