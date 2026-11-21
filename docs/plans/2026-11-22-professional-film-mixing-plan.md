@@ -81,7 +81,9 @@ Netflix的旧规范链接现跳转到[官方Knowledge Hub](https://studiopartner
 
 ## 4. 总计划表与依赖
 
-状态全部“待后端实施”，UI01–10除外。工时为一名熟悉Python/音频的开发者在现有工程上的**粗估有效人日**，含定向测试，不含等待硬件/外部接收端。新手应按里程碑拆小PR，不将估算当承诺。
+状态：UI01–10 已完成；B00–B04 的核心反例修复与 fixture 基线已于本分支落地
+（见§19批次1记录与 `tests/edit/test_b00_counterexamples.py`，各任务剩余边界
+在该记录中逐项列出），其余任务“待后端实施”。工时为一名熟悉Python/音频的开发者在现有工程上的**粗估有效人日**，含定向测试，不含等待硬件/外部接收端。新手应按里程碑拆小PR，不将估算当承诺。
 
 | ID | 优先级 | 任务/完成产物 | 依赖 | 粗估人日 | 详细方法 |
 | --- | --- | --- | --- | ---: | --- |
@@ -593,6 +595,54 @@ assert np.allclose(g, [1.0, 10 ** (-12.0 / 20)])
 主计划包含B00–B24共25项后端任务、完整B10–B20手册，89个本地文件链接已验证存在；11段工作流示例以及修复/空间声像教学代码实际运行通过，独立算法测试18项通过。中文760px及200px混音台、中文路由总览已离屏渲染并目视复核。测试不包含新的物理听音、Windows硬件或第三方AAF/插件往返，相关验收均留在后端任务中。
 
 本轮证据见[执行报告](/Users/heng/Documents/vscode/topos-studio/docs/validation/2026-11-22-mixer-professional-audit.md)。所有后端任务保持待实施；没有因为现有85项核心测试通过而把五项反例标为解决。
+
+### 批次1（2026-11-22，分支 bugfix）：B00 基线 + B01/B02/B03/B04 核心反例修复
+
+审计脚本五类反例已按“先失败回归、后修生产路径”固化为真实 pytest
+（`tests/edit/test_b00_counterexamples.py`，31项），修复后全部通过；审计
+脚本重跑五项 `contract_satisfied=true`（JSON 已随本批次更新，修复前证据
+保留在 git 历史 37dd3acc 的 JSON）。命令：
+`QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/edit/test_b00_counterexamples.py tests/edit/test_mixer_pdc_alignment.py tests/edit/test_pdc_and_stem_sum.py tests/edit/test_clip_fx_pdc.py tests/edit/test_audio_graph_snapshot.py tests/edit/test_audio_signature_completeness.py tests/edit/test_audio_graph_parity.py tests/edit/test_audio_three_way_parity.py tests/edit/test_audio_export_parity.py tests/edit/test_vca_groups.py tests/edit/test_delivery_preset.py tests/edit/test_delivery_qc.py`（约300项通过）；另跑 `tests/edit -k "audio or pdc or …"` 大组（596项通过、1项基线预存失败 `test_audio_h01_version_boundaries.py::test_upgrade_undo_roundtrip`，与本批次无关——stash 验证过）。
+
+- **B00（部分）**：新增 `tests/support/sound_fixtures.py`（固定 seed 波形
+  生成器、有理帧时钟、16/24/32f WAV 往返、对拍/null 工具）、
+  `tests/support/reference_project.py`（10分钟 DX/ADR/Foley/FX/MX + 3 Bus
+  + pre/post send + trim/VCA/自动化 模型构建器）。五类反例独立成测试。
+  剩余：10分钟工程保存/重开/导出闭环、旧版本小工程 golden、44.1/96k 全
+  组合三端对拍。
+- **B01（部分）**：`edit_page._build_audio_timeline_signature` 补 send
+  tap/muted、automation_trim、VCA 组（顶层新增第7元）；快照
+  `TrackNodeSnapshot.sends` 升 4 元组、新增 `automation_trim`、
+  `ClipNodeSnapshot.audio_gain_db`、`AudioGraphSnapshot.vcas` 并入
+  stable_hash。参数化反例（每字段只改一项）全绿。剩余：SoundSnapshot 显
+  式投影接全部消费端（预渲染 key/离线输入/缓存键）、schema_version、
+  worker 提交前解析、路由原子宏事务（§7 步骤8）。
+- **B02（核心落地，部分）**：`audio_dsp.plan_edge_pdc` 共享规划器（Kahn
+  拓扑 + 逐边补偿 + 60s 上限截断诊断）；离线
+  `AudioGraphRenderer._recompute_pdc` 与实时
+  `AudioMixer._recompute_pdc_locked` 改为同一边级计划；主路边延迟在路由
+  点应用（`route_track_output`/`render_bus_stage`/mix_samples 阶段1/2），
+  每条 send 独立边延迟线（pre/post tap 按 clip/链延迟区分）；成片
+  （timeline_export）与 Stem（stem_export）接同一 seam；`pdc_total_samples`
+  = 最迟路径真实总量。审计串联 Bus 反例恢复单脉冲@400、幅度2.0；并行
+  Bus+send 反例同步对齐；块长 733/4001/2000 无关性、mute 块推进、seek
+  清线既有回归全绿。剩余：旁路/换采样率/插件延迟变更的图重编译交叉过渡、
+  delay ring 预分配（当前仍为增长式缓冲）、sidechain 检测边对齐。
+- **B03（部分）**：离线 `_TrackNode` 携带 volume trim 并在
+  `render_track_block` 消费（反例 0.5→0.25 恢复）；实时 mix_samples ramp
+  分支乘 VCA（反例恢复 0.25）；edit_page 图重建补 trim 与 VCA 下发
+  （`AudioPlaybackManager.set_vca_overrides` 新委托）。剩余：VcaGroup 正式
+  command/undo、保存重开三端对拍扩展、Bus/Master 作用域能力声明。
+- **B04（部分）**：`evaluate_delivery` 增加必测防线——preset 声明限值的
+  指标（integrated_lufs/true_peak_dbtp/peak_dbfs）缺测/None/bool/字符串/
+  NaN/±Inf 一律 blocking（`delivery.{stem}.measurement_missing/invalid`），
+  比较仅在防线通过后进行。既有 delivery/loudness 回归全绿。剩余：
+  `MeasurementResult` 结构与真实文件回读 worker、checksum/manifest 绑定
+  （§10 步骤2–6）。
+
+边界说明：本批次未改任何命令/模型 schema（trim/VCA 消费既有字段），
+无需迁移；修 PDC 会改变旧有问题工程的声音时序（发布说明须注明），
+线性图在旧两级近似已对齐的形态下输出不变（既有 parity 组未动）。
 
 ## 20. B10–B20完整实施手册
 

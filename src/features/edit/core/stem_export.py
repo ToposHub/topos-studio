@@ -893,6 +893,9 @@ def _iter_stem_pcm_chunks(
                              (total_samples + preroll_samples) - out_start)
                 if actual <= 0:
                     continue
+                # B02 · PDC：processed 为未延迟节点输出；主路边延迟在此应用
+                # （检源缓冲/路由消费同一延迟后内容）。
+                processed = renderer._apply_pdc(track.track_id, processed)
                 proc = processed[:channels, :actual]
                 local = out_start - s0
                 take = min(actual, chunk_len - local)
@@ -919,9 +922,10 @@ def _iter_stem_pcm_chunks(
                     else:
                         buf[:, local:local + take] += proc[:, :take]
                     if node is not None:
-                        for send_entry in node.sends:
+                        for send_index, send_entry in enumerate(node.sends):
                             # R03/MX-14: pre_fader 取求和帧（推子前），
                             # post_fader 取处理后输出；muted 只断开该 send。
+                            # B02 · PDC：每条 send 经独立延迟线对齐。
                             send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted \
@@ -932,13 +936,19 @@ def _iter_stem_pcm_chunks(
                                     (channels, chunk_len), dtype=np.float32)
                             if send_tap == "pre_fader":
                                 pre_take = min(summed.shape[-1], take)
+                                pre_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    summed[:channels, :pre_take])
                                 bus_bufs[send_bus_id][
                                     :, local:local + pre_take] += \
-                                    summed[:channels, :pre_take] * send_level
+                                    pre_delayed * send_level
                             else:
+                                send_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    proc[:, :take])
                                 bus_bufs[send_bus_id][
                                     :, local:local + take] += \
-                                    proc[:, :take] * send_level
+                                    send_delayed * send_level
                     # R03：检源轨块内 tap（供后续被控轨与 bus/master 阶段）
                     if track.track_id in sc_needed_ids:
                         _scbuf = chunk_sc.get(track.track_id)

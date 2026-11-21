@@ -55,6 +55,9 @@ class ClipNodeSnapshot:
     fade_curve: Optional[str] = None
     fade_curve_in: Optional[str] = None
     fade_curve_out: Optional[str] = None
+    # B01: clip 增益（dB，听感字段；审计反例 clip_gain_control——此前
+    # 快照完全缺该字段，改增益不触发重建）
+    audio_gain_db: float = 0.0
     effects_signature: Tuple = ()  # clip FX 摘要
     # P0-3：Clip Editor 处理栈摘要（enabled 步骤的有序指纹；变化必须重建）。
     audio_edit_signature: Tuple = ()
@@ -72,12 +75,16 @@ class TrackNodeSnapshot:
     is_solo: bool
     is_enabled: bool
     output_bus_id: Optional[str]
-    sends: Tuple[Tuple[str, float], ...]  # (target_bus_id, level)
+    # B01: (target_bus_id, level, tap, muted)——tap 决定取样点、muted 独立
+    # 断开 send 贡献；二者此前遗漏（审计反例 send_tap/send_muted）。
+    sends: Tuple[Tuple[str, float, str, bool], ...]
     strip_eq_signature: Optional[str]
     effect_chain_signature: Optional[str]
     automation_signature: Optional[str]
     automation_mode: str
-    stem_group: str
+    # B01/P1-5: volume trim 倍率（离线渲染消费；审计反例 automation_trim）
+    automation_trim: Tuple[Tuple[str, float], ...] = ()
+    stem_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -102,6 +109,9 @@ class AudioGraphSnapshot:
     clips: Tuple[ClipNodeSnapshot, ...]
     tracks: Tuple[TrackNodeSnapshot, ...]
     master: MasterNodeSnapshot
+    # B01: VCA 组快照（(vca_id, gain_db, muted, member_track_ids) 稳定序）。
+    # VCA 增益/静音/成员变化改变实时听感（审计反例 vca_gain）。
+    vcas: Tuple[Tuple[str, float, bool, Tuple[str, ...]], ...] = ()
     # 编译期校验结果
     validation_errors: Tuple[str, ...] = ()
 
@@ -127,15 +137,18 @@ class AudioGraphSnapshot:
             # clip: asset_id（换素材）、source_start（改源起点）都会改变声音
             "c": [(c.clip_id, c.asset_id, c.source_start, c.timeline_start,
                    c.timeline_duration, c.speed, c.fade_in_frames, c.fade_out_frames,
-                   c.fade_curve, c.fade_curve_in, c.fade_curve_out,
+                   c.fade_curve, c.fade_curve_in, c.fade_curve_out, c.audio_gain_db,
                    c.effects_signature, c.audio_edit_signature) for c in self.clips],
-            # track: is_enabled（禁用轨不发声）
+            # track: is_enabled（禁用轨不发声）；B01: sends 含 tap/muted、
+            # automation_trim 参与声音身份
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
                    t.output_bus_id, t.sends, t.strip_eq_signature,
                    t.effect_chain_signature, t.automation_signature, t.automation_mode,
-                   t.stem_group, t.is_bus) for t in self.tracks],
+                   t.automation_trim, t.stem_group, t.is_bus) for t in self.tracks],
             "m": (self.master.volume, self.master.muted,
                   self.master.automation_signature, self.master.automation_mode),
+            # B01: VCA 组（gain/mute/成员）
+            "v": self.vcas,
         }
         return hashlib.sha256(
             json.dumps(data, sort_keys=True, default=str).encode("utf-8")
@@ -242,6 +255,7 @@ def build_audio_graph_snapshot(
                 fade_curve=getattr(clip, "fade_curve", None),
                 fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
                 fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
+                audio_gain_db=float(getattr(clip, "audio_gain_db", 0.0) or 0.0),
                 effects_signature=_clip_effects_signature(clip),
                 audio_edit_signature=steps_signature(
                     getattr(clip, "audio_edit", None)),
@@ -250,11 +264,15 @@ def build_audio_graph_snapshot(
     # track/bus 节点
     tracks: List[TrackNodeSnapshot] = []
     for track in getattr(sequence, "audio_tracks", ()) or ():
+        # B01: send 4 元组带 tap/muted（MX-14 模型 v2 字段入声音身份）
         sends = tuple(
-            (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)))
+            (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)),
+             str(getattr(s, "tap", "post_fader") or "post_fader"),
+             bool(getattr(s, "muted", False)))
             for s in (getattr(track, "sends", ()) or ())
             if getattr(s, "enabled", True)
         )
+        trim = getattr(track, "automation_trim", {}) or {}
         tracks.append(TrackNodeSnapshot(
             track_id=getattr(track, "track_id", ""),
             name=getattr(track, "name", ""),
@@ -270,6 +288,8 @@ def build_audio_graph_snapshot(
             effect_chain_signature=_effect_chain_signature(getattr(track, "effect_chain", None)),
             automation_signature=_automation_signature(getattr(track, "automation", {})),
             automation_mode=str(getattr(track, "automation_mode", "off") or "off"),
+            automation_trim=tuple(sorted(
+                (str(k), float(v)) for k, v in trim.items())),
             stem_group=str(getattr(track, "stem_group", "") or ""),
         ))
 
@@ -288,6 +308,17 @@ def build_audio_graph_snapshot(
     if hasattr(fps, "num"):
         fps = float(fps.num) / float(fps.den) if fps.den else 24.0
 
+    # B01: VCA 组快照（稳定序，成员轨 ID 排序）
+    vcas = tuple(sorted(
+        (
+            str(getattr(v, "vca_id", "")),
+            float(getattr(v, "gain_db", 0.0)),
+            bool(getattr(v, "muted", False)),
+            tuple(sorted(str(m) for m in getattr(v, "member_track_ids", ()) or ())),
+        )
+        for v in (getattr(sequence, "vcas", ()) or ())
+    ))
+
     return AudioGraphSnapshot(
         revision=revision,
         fps=fps,
@@ -295,6 +326,7 @@ def build_audio_graph_snapshot(
         clips=tuple(clips),
         tracks=tuple(tracks),
         master=master,
+        vcas=vcas,
         validation_errors=tuple(validation_errors),
     )
 

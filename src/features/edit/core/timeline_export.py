@@ -4609,6 +4609,9 @@ class TimelineExporter:
                         return  # automation mute
                     node = renderer.get_node(track.track_id)
                     target = node.output_bus_id if node else None
+                    # B02 · PDC：processed 为未延迟节点输出；主路边延迟在此
+                    # 应用（检源缓冲/主路累积消费同一延迟后内容）。
+                    processed = renderer._apply_pdc(track.track_id, processed)
                     actual = min(processed.shape[-1], out_end - out_start)
                     if target is not None:
                         if target not in bus_inputs:
@@ -4618,9 +4621,10 @@ class TimelineExporter:
                     else:
                         output[:, out_start:out_end] += processed[:channels, :actual]
                     # sends（并行；MX-14: pre_fader tap 取 clip 求和块 summed，
-                    # post_fader 取处理后输出；独立 mute 只断开 send）
+                    # post_fader 取处理后输出；独立 mute 只断开 send）。
+                    # B02 · PDC：每条 send 经独立延迟线对齐到目标到达时间。
                     if node is not None:
-                        for send_entry in node.sends:
+                        for send_index, send_entry in enumerate(node.sends):
                             send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted:
@@ -4631,12 +4635,18 @@ class TimelineExporter:
                             if send_tap == "pre_fader":
                                 pre_actual = min(summed.shape[-1],
                                                  out_end - out_start)
+                                pre_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    summed[:channels, :pre_actual])
                                 bus_inputs[send_bus_id][
                                     :, out_start:out_start + pre_actual] += \
-                                    summed[:channels, :pre_actual] * send_level
+                                    pre_delayed * send_level
                             else:
+                                send_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    processed[:channels, :actual])
                                 bus_inputs[send_bus_id][:, out_start:out_end] += \
-                                    processed[:channels, :actual] * send_level
+                                    send_delayed * send_level
                     # R02: 检源轨直写单份全长缓冲（不足块宽处保持零填充语义）
                     if track.track_id in export_sc_source_ids:
                         buf = sc_tap_buffers.get(track.track_id)

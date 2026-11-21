@@ -3932,6 +3932,78 @@ def apply_pdc_delay_line(
     return np.ascontiguousarray(out, dtype=np.float32)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# B02 · DAG 边级 PDC 规划（离线渲染与实时混音共用）
+# ─────────────────────────────────────────────────────────────────────────────
+
+MASTER_SINK_ID = "\x00master_sink"
+"""图级汇点保留 ID（非工程轨 ID；规划主 sink = Master 节点）。"""
+
+
+def plan_edge_pdc(
+    latency: dict,
+    edges: list,
+    master_id: str,
+    *,
+    max_edge_delay: int = 0,
+) -> tuple:
+    """按 DAG 边计算延迟补偿计划（主计划 §8）。
+
+    latency: {node_id: 节点固有 DSP 延迟样本}；master_id 必须在表内。
+    edges: [(u, v, edge_key, tap_latency), ...]——u/v 为节点 ID（v 可为
+        master_id）；tap_latency 是该边**取样点**的固有延迟：主路/
+        post_fader tap 取节点链输出 → = latency[u]；pre_fader tap 取其
+        实际内容已携带的延迟（如轨级 clip 链最大延迟）。
+    max_edge_delay: 单边补偿上限（样本；<=0 不限）。超限按上限截断——
+        禁止按用户参数分配无界延迟内存（调用方负责记录诊断）。
+
+    返回 (edge_delay {edge_key: samples}, arrival {node: samples}, total)；
+    total = arrival[master_id] + latency[master_id]（尾音预算消费）。
+
+    算法（Kahn 拓扑序；环/环下游节点由调用方剔除，若仍残留则该子图不
+    规划、不产生延迟线）：
+        arrival[v] = max(arrival[u] + tap_latency(u, v) for u in inputs[v],
+                         default=0)
+        edge_delay[u→v] = max(0, arrival[v] − arrival[u] − tap_latency(u, v))
+    同源多路径在共同下游按最迟到达对齐，每条边独立延迟线。
+    """
+    nodes = set(latency)
+    fwd: dict = {n: [] for n in nodes}   # u → [(v, key, tap)]
+    ins: dict = {n: [] for n in nodes}   # v → [(u, key, tap)]
+    for u, v, edge_key, tap_lat in edges:
+        if u in nodes and v in nodes and u != v:
+            fwd[u].append((v, edge_key, max(0, int(tap_lat))))
+            ins[v].append((u, edge_key, max(0, int(tap_lat))))
+
+    # Kahn 拓扑序
+    indeg = {n: len(ins[n]) for n in nodes}
+    queue = [n for n in nodes if indeg[n] == 0]
+    order: list = []
+    while queue:
+        u = queue.pop()
+        order.append(u)
+        for v, _key, _tap in fwd[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                queue.append(v)
+    resolved = set(order)
+
+    arrival: dict = {}
+    edge_delay: dict = {}
+    for u in order:
+        u_ins = [(iu, key, tap) for iu, key, tap in ins[u] if iu in resolved]
+        arrival[u] = max(((arrival[iu] + tap) for iu, _k, tap in u_ins),
+                         default=0)
+        for iu, key, tap in u_ins:
+            delay = max(0, arrival[u] - arrival[iu] - tap)
+            if max_edge_delay > 0:
+                delay = min(delay, int(max_edge_delay))
+            edge_delay[key] = delay
+
+    total = arrival.get(master_id, 0) + max(0, int(latency.get(master_id, 0)))
+    return edge_delay, arrival, total
+
+
 class EffectChain:
     """有序效果器链。
 

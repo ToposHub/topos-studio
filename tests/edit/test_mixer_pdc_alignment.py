@@ -74,6 +74,9 @@ class _LatencyFx:
     def tap_levels(self) -> dict:
         return {}
 
+    def set_spectrum_metering(self, _enabled: bool) -> None:
+        return None
+
     def reset_state(self) -> None:
         self._history = np.zeros((2, self._latency), dtype=np.float32)
 
@@ -188,7 +191,10 @@ class TestMixerPdcAlignment:
             for track_id in ("dry", "lat"):
                 processed = renderer.render_track_block(track_id, block, 0)
                 if processed is not None:
-                    offline[:, pos:pos + n] += processed
+                    # B02：与生产导出同一 seam——主路边延迟在路由点应用；
+                    # route_track_output 写 output[:, :n]，传滑动视图。
+                    renderer.route_track_output(track_id, processed,
+                                                offline[:, pos:pos + n], {})
             pos += n
         assert _pulse_peaks(realtime) == _pulse_peaks(offline)
 

@@ -1,7 +1,7 @@
 {
   "audit_date": "2026-11-22",
   "scope": "read-only synthetic probes; no media/device/project mutations",
-  "source_revision": "37dd3accd9048c2c88e83d0523bb62cf5e1fe6c2",
+  "source_revision": "65e33d9beab7f0dcd23bfb30881bc4be4b286f05",
   "source_state": "working tree including approved mixer UI changes",
   "python": "3.12.14",
   "numpy": "2.5.2",
@@ -11,23 +11,22 @@
       "entry": "AudioGraphRenderer._recompute_pdc/render_bus_stage",
       "fixture": "sample 100; dry->Master; wet->bus1(100)->bus2(200)->Master",
       "observed_pulse_positions": [
-        100,
-        500
+        400
       ],
-      "observed_declared_total_pdc_samples": 200,
+      "observed_declared_total_pdc_samples": 300,
       "observed_node_padding_samples": {
-        "bus1": 100
+        "dry": 300
       },
       "expected": "one aligned pulse at sample 400, amplitude 2.0",
-      "contract_satisfied": false
+      "contract_satisfied": true
     },
     "automation_trim_export": {
       "entry": "AudioGraphRenderer._TrackNode/render_track_block",
       "input_amplitude": 0.5,
       "model_trimmed_gain": 0.5,
       "expected_output_amplitude": 0.25,
-      "observed_output_amplitude": 0.5,
-      "contract_satisfied": false
+      "observed_output_amplitude": 0.25,
+      "contract_satisfied": true
     },
     "delivery_qc_missing_measurements": {
       "entry": "delivery_preset.evaluate_delivery",
@@ -40,10 +39,20 @@
         "true_peak_dbtp",
         "peak_dbfs"
       ],
-      "observed_findings": [],
-      "observed_passed": true,
+      "observed_findings": [
+        {
+          "check_id": "delivery.FullMix.measurement_missing",
+          "severity": "blocking",
+          "message": "stem FullMix 缺少必测指标 true_peak_dbtp（preset 声明了对应限值，缺测量无法校验交付）",
+          "details": {
+            "stem": "FullMix",
+            "measurement": "true_peak_dbtp"
+          }
+        }
+      ],
+      "observed_passed": false,
       "expected_passed": false,
-      "contract_satisfied": false
+      "contract_satisfied": true
     },
     "audible_field_signatures": {
       "entries": [
@@ -51,21 +60,21 @@
         "AudioGraphSnapshot.stable_hash"
       ],
       "live_signature_changed": {
-        "send_tap": false,
-        "send_muted": false,
-        "automation_trim": false,
-        "vca_gain": false,
+        "send_tap": true,
+        "send_muted": true,
+        "automation_trim": true,
+        "vca_gain": true,
         "clip_gain_control": true
       },
       "snapshot_hash_changed": {
-        "send_tap": false,
-        "send_muted": false,
-        "automation_trim": false,
-        "vca_gain": false,
-        "clip_gain_control": false
+        "send_tap": true,
+        "send_muted": true,
+        "automation_trim": true,
+        "vca_gain": true,
+        "clip_gain_control": true
       },
       "expected": "every independently audible field changes both signatures",
-      "contract_satisfied": false,
+      "contract_satisfied": true,
       "scope_note": "snapshot currently acts mainly as a validation gate; do not replace the live signature with its hash yet"
     },
     "vca_with_read_volume_automation": {
@@ -74,9 +83,9 @@
       "vca_linear_factor": 0.5,
       "volume_automation_value": 1.0,
       "observed_without_volume_automation": 0.25,
-      "observed_with_read_volume_automation": 0.5,
+      "observed_with_read_volume_automation": 0.25,
       "expected_output_amplitude_in_both_cases": 0.25,
-      "contract_satisfied": false
+      "contract_satisfied": true
     }
   },
   "interpretation": "Unmet contracts are backend roadmap tasks. This probe deliberately does not repair production code."

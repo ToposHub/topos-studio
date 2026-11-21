@@ -87,7 +87,11 @@ def _impulse_block(block_len: int, impulse_at: int) -> np.ndarray:
 
 def _render_track_stream(renderer, track_id, total, block_len,
                           impulse_at=1000):
-    """以固定块长推进一条轨，返回全长输出（模拟导出逐块求和）。"""
+    """以固定块长推进一条轨，返回全长输出（模拟导出逐块求和）。
+
+    B02：生产导出在路由点应用主路边延迟（render_track_block 输出为未
+    延迟节点处理结果）——本模拟经 route_track_output 与生产同一 seam。
+    """
     out = np.zeros((2, total), dtype=np.float32)
     pos = 0
     while pos < total:
@@ -95,7 +99,10 @@ def _render_track_stream(renderer, track_id, total, block_len,
         block = _impulse_block(n, impulse_at - pos if pos <= impulse_at < pos + n else -1)
         processed = renderer.render_track_block(track_id, block, 0)
         if processed is not None:
-            out[:, pos:pos + n] += processed
+            # route_track_output 写 output[:, :n]（单块缓冲语义）——
+            # 传入滑动视图累积到全长输出的正确位置。
+            renderer.route_track_output(track_id, processed,
+                                        out[:, pos:pos + n], {})
         pos += n
         impulse_consumed = True
     return out

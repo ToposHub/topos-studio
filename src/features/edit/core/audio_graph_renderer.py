@@ -37,7 +37,13 @@ from typing import Any, Optional
 
 import numpy as np
 
-from src.features.edit.core.audio_dsp import EffectChain, StripEQFilter, apply_pdc_delay_line
+from src.features.edit.core.audio_dsp import (
+    MASTER_SINK_ID,
+    EffectChain,
+    StripEQFilter,
+    apply_pdc_delay_line,
+    plan_edge_pdc,
+)
 from src.features.edit.core.channel_layout import (
     ChannelLayout,
     downmix_matrix,
@@ -136,7 +142,7 @@ class _TrackNode:
     __slots__ = (
         "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled",
         "output_bus_id", "bus_layout", "sends", "automation", "automation_mode",
-        "eq_filter", "effect_chain", "panner", "fx_sampler",
+        "automation_trim", "eq_filter", "effect_chain", "panner", "fx_sampler",
     )
 
     def __init__(self, track: Any, sample_rate: float) -> None:
@@ -170,6 +176,13 @@ class _TrackNode:
         # AUD-15400: 深拷贝关键帧数据，切断节点与 UI 模型 KeyframeTrack 的活引用
         # （浅拷贝只隔离 dict 结构，对象仍共享，导出线程与 UI 编辑并发读写竞态）。
         self.automation = _snapshot_automation(getattr(track, "automation", {}))
+        # B03：volume trim 线性倍率（模型 automation_trim 的离线消费）。
+        # 仅 volume 参与 trim（pan/mute 无 trim 合同）；与实时 mix_samples
+        # 同语义：乘在曲线值/静态值上各一次。非法值经模型 clamp 回 1.0。
+        self.automation_trim = {
+            "volume": float(getattr(track, "automation_trim_factor",
+                                    lambda _p: 1.0)("volume")),
+        }
 
         # DSP 处理器（有状态，按 track 独立）
         self.eq_filter = StripEQFilter(sample_rate)
@@ -224,11 +237,14 @@ class AudioGraphRenderer:
         # MX-03: Master 条带（EQ/FX；音量后、限幅器前，与 mix_samples 同构）
         self._master_eq: Optional[StripEQFilter] = None
         self._master_chain: Optional[EffectChain] = None
-        # P0 · PDC 状态（configure_from_sequence 重算；render 前为空恒等）
+        # P0/B02 · PDC 状态（configure_from_sequence 重算；render 前为空恒等）
         self._pdc_track_max = 0
         self._pdc_bus_max = 0
         self._pdc_master_lat = 0
+        self._pdc_total = 0
+        self._pdc_arrival: dict[str, int] = {}
         self._pdc_delay: dict[str, int] = {}
+        self._pdc_send_edges: dict[str, int] = {}
         self._pdc_lines: dict[str, np.ndarray] = {}
         # P0 · Clip FX PDC：每轨 clip 链最大算法延迟（导出循环经
         # note_clip_chain_latency 申报；configure 时未知 → 空 = 恒等）。
@@ -338,47 +354,118 @@ class AudioGraphRenderer:
         """成员轨的 VCA 倍率（configure 后缓存；非成员=1）。"""
         return self._vca_factors.get(track_id, 1.0)
 
-    # ── P0 · PDC：延迟声明聚合与输出端延迟线 ─────────────────────────
+    # ── P0/B02 · PDC：DAG 边级延迟规划与输出端延迟线 ─────────────────
+
+    def _node_latency_samples(self, node_id: str) -> tuple[int, int]:
+        """节点固有延迟 (chain_lat, clip_lat)（规划与 tap 语义共用）。"""
+        node = self._nodes.get(node_id)
+        chain = getattr(node, "effect_chain", None) if node else None
+        chain_lat = 0
+        if chain is not None:
+            try:
+                chain_lat = int(chain.latency_samples())
+            except Exception:  # noqa: BLE001 — 声明异常按 0
+                chain_lat = 0
+        clip_lat = int(self._track_clip_lat.get(node_id, 0) or 0)
+        return max(0, chain_lat), max(0, clip_lat)
 
     def _recompute_pdc(self) -> None:
-        track_lat: dict[str, int] = {}
-        bus_lat: dict[str, int] = {}
-        for nid, node in self._nodes.items():
-            chain = getattr(node, "effect_chain", None)
-            lat = 0
-            if chain is not None:
-                try:
-                    lat = int(chain.latency_samples())
-                except Exception:  # noqa: BLE001 — 声明异常按 0
-                    lat = 0
-            # P0 · Clip FX PDC：轨节点延迟 = 轨链延迟 + 该轨 clip 链最大
-            # 延迟（同轨 clip 间先由相对延迟线对齐到 clip_max，轨级再统一
-            # 推迟 clip_max——与实时 mix_samples 同语义）。
-            lat += int(self._track_clip_lat.get(nid, 0) or 0)
-            (bus_lat if node.is_bus else track_lat)[nid] = max(0, lat)
+        """B02：DAG 边级 PDC 规划（取代旧"轨级 max + Bus 级 max"两级近似）。
+
+        每个节点声明固有延迟（链 + clip 最大）；图展开为边（主路输出边
+        + 每条 send 独立边，pre/post tap 按取样内容携带的延迟计），
+        `plan_edge_pdc` 计算每条边的补偿量；同一源的各路径在共同下游
+        汇合点对齐。Bus 环（含环下游，topological_sort_buses 剔除的集合）
+        不参与渲染，其边不参与规划。
+
+        延迟线键：主路边 = node_id（兼容既有 _apply_pdc/_pdc_lines 语义），
+        send 边 = "node|s{i}|target"（同 (u, v) 的多条 send 各自独立线）。
+        """
+        # 1) 节点固有延迟
+        lat: dict[str, int] = {}
+        chain_lat: dict[str, int] = {}
+        clip_lat: dict[str, int] = {}
+        for nid in self._nodes:
+            c_lat, k_lat = self._node_latency_samples(nid)
+            chain_lat[nid] = c_lat
+            clip_lat[nid] = k_lat
+            lat[nid] = c_lat + k_lat
         master_lat = 0
         if self._master_chain is not None:
             try:
                 master_lat = int(self._master_chain.latency_samples())
             except Exception:  # noqa: BLE001
                 master_lat = 0
-        self._pdc_track_max = max(track_lat.values(), default=0)
-        self._pdc_bus_max = max(bus_lat.values(), default=0)
-        self._pdc_master_lat = max(0, master_lat)
-        self._pdc_delay: dict[str, int] = {}
-        for nid, lat in track_lat.items():
-            delay = self._pdc_track_max - lat
+        master_lat = max(0, master_lat)
+        lat[MASTER_SINK_ID] = master_lat
+
+        # 2) Bus 环检测（与 render_bus_stage 同一拓扑排序 → 同一剔除集合）
+        bus_ids = [nid for nid, n in self._nodes.items() if n.is_bus]
+        _sorted_buses, cycle_buses = topological_sort_buses(
+            bus_ids, self._build_routing_dict())
+        cycle = set(cycle_buses)
+
+        # 3) 边展开（主路 + sends；环内节点与其入边不参与）
+        edges: list[tuple[str, str, str, int]] = []
+        send_keys: set[str] = set()
+        for nid, node in self._nodes.items():
+            if nid in cycle:
+                continue
+            target = node.output_bus_id
+            if target is not None and (target not in self._nodes
+                                       or target in cycle):
+                # AUD-15402 兜底语义：未知/环目标 → master（渲染路由一致）
+                target = MASTER_SINK_ID
+            elif target is None:
+                target = MASTER_SINK_ID
+            # 主路边：tap = 节点链输出（tap_latency = 全节点延迟）
+            edges.append((nid, target, nid, lat[nid]))
+            # send 边：pre_fader tap 取 clip 求和块（携带 clip 延迟），
+            # post_fader tap 取链输出（携带全节点延迟）。
+            for idx, send_entry in enumerate(node.sends):
+                send_target, send_level, send_tap, send_muted = (
+                    unpack_send(send_entry))
+                if send_level <= 0.0 or send_muted:
+                    continue
+                if (send_target not in self._nodes or send_target in cycle
+                        or not self._nodes[send_target].is_bus):
+                    continue  # 渲染路由会跳过：不参与规划
+                key = f"{nid}|s{idx}|{send_target}"
+                tap_latency = clip_lat[nid] if send_tap == "pre_fader" else lat[nid]
+                edges.append((nid, send_target, key, tap_latency))
+                send_keys.add(key)
+
+        # 4) 规划（单边上限 60s @ 当前采样率；超限截断防无界内存）
+        max_delay = int(self._sample_rate * 60)
+        edge_delay, arrival, total = plan_edge_pdc(
+            lat, edges, MASTER_SINK_ID, max_edge_delay=max_delay)
+        for key, delay in edge_delay.items():
+            if delay >= max_delay:
+                logger.error(
+                    "AudioGraphRenderer: PDC edge %r delay %d samples hit the "
+                    "%ds cap; output alignment for this edge is clamped",
+                    key, delay, int(max_delay / max(1, self._sample_rate)))
+        self._pdc_track_max = 0  # 旧字段保留为 0（诊断接口已改用 arrival）
+        self._pdc_bus_max = 0
+        self._pdc_master_lat = master_lat
+        self._pdc_total = int(total)
+        self._pdc_arrival = dict(arrival)
+        # 主路边延迟（键=node_id；仅记录 >0，消费方 get(node, 0) 语义不变）
+        self._pdc_delay = {}
+        for nid in self._nodes:
+            delay = int(edge_delay.get(nid, 0))
             if delay > 0:
                 self._pdc_delay[nid] = delay
-        for nid, lat in bus_lat.items():
-            delay = self._pdc_bus_max - lat
-            if delay > 0:
-                self._pdc_delay[nid] = delay
+        # send 边延迟（键=边 key "node|s{i}|target"；路由点按 enumerate
+        # 索引定位，与规划同一枚举口径）
+        self._pdc_send_edges = {
+            key: int(edge_delay.get(key, 0)) for key in send_keys
+        }
         # 延迟线缓冲（feed 后保留尾部，输出为"缓冲 + 新块"的前段）。
-        self._pdc_lines: dict[str, np.ndarray] = {}
+        self._pdc_lines = {}
         # P0 · Clip FX PDC：轨级 clip 延迟申报变化 → 相对延迟线一并清空
         # （调用时序：导出循环在块循环前申报；渲染中途不重入）。
-        self._clip_pdc_lines: dict[str, np.ndarray] = {}
+        self._clip_pdc_lines = {}
 
     def note_clip_chain_latency(self, track_id: str, latency_samples: int) -> None:
         """申报某轨 clip FX 链的最大算法延迟（P0 · Clip FX PDC）。
@@ -396,21 +483,64 @@ class AudioGraphRenderer:
         self._recompute_pdc()
 
     def pdc_total_samples(self) -> int:
-        """最迟路径的总补偿延迟（轨级 + Bus 级 + Master 链声明）。
+        """主 sink 的总算法延迟（arrival[Master] + Master 链声明）。
 
         尾音/输出长度预算必须计入本值——延迟线把内容推迟这么多样本，
-        drain 不延长会截掉尾部内容。
+        drain 不延长会截掉尾部内容。B02：取代旧"轨级 max + Bus 级 max"
+        两级近似，等于最迟路径的真实补偿总量。
         """
-        return self._pdc_track_max + self._pdc_bus_max + self._pdc_master_lat
+        return int(getattr(self, "_pdc_total", 0))
 
     def reset_pdc_state(self) -> None:
         """seek/重开：清空延迟线（避免残留内容错位）。"""
         self._pdc_lines = {}
 
     def _apply_pdc(self, node_id: str, samples: np.ndarray) -> np.ndarray:
-        """节点输出端延迟线：把该路径对齐到同级最迟链。"""
+        """主路边延迟线（键=node_id；render_track_block 输出对齐到该节点
+        主路目标的到达时间）。"""
         return apply_pdc_delay_line(
             self._pdc_lines, node_id, self._pdc_delay.get(node_id, 0), samples)
+
+    def _send_edge_key(self, node_id: str, send_index: int,
+                       send_target: str) -> str:
+        return f"{node_id}|s{int(send_index)}|{send_target}"
+
+    def apply_send_edge_delay(self, node_id: str, send_index: int,
+                              send_target: str, samples: np.ndarray) -> np.ndarray:
+        """send 边延迟线（公共接口；导出循环/实时混音在 send 路由点调用）。
+
+        send 内容与主路在同一节点输出取样（pre/post tap 语义由规划期的
+        tap_latency 区分），经本边线推迟到该 send 目标的到达时间。
+        """
+        key = self._send_edge_key(node_id, send_index, send_target)
+        return apply_pdc_delay_line(
+            self._pdc_lines, key,
+            int(self._pdc_send_edges.get(key, 0)), samples)
+
+    def advance_node_pdc_edges(self, node_id: str, num_samples: int) -> None:
+        """节点整块无声（mute/被跳过）时推进其全部出边延迟线（喂零）。
+
+        被推迟的内容必须按绝对时间继续流出；线宽取既有缓冲的行数
+        （空线无内容可推进，等实际内容流动时按其宽度建立）。
+        """
+        delay = self._pdc_delay.get(node_id, 0)
+        if delay > 0:
+            buffered = self._pdc_lines.get(node_id)
+            if buffered is not None and buffered.shape[-1] > 0:
+                apply_pdc_delay_line(
+                    self._pdc_lines, node_id, delay,
+                    np.zeros((buffered.shape[0], num_samples), dtype=np.float32))
+        for key, edge_delay in self._pdc_send_edges.items():
+            if not key.startswith(f"{node_id}|s"):
+                continue
+            if edge_delay <= 0:
+                continue
+            buffered = self._pdc_lines.get(key)
+            if buffered is None or buffered.shape[-1] == 0:
+                continue
+            apply_pdc_delay_line(
+                self._pdc_lines, key, edge_delay,
+                np.zeros((buffered.shape[0], num_samples), dtype=np.float32))
 
     def master_sidechain_sources(self) -> set:
         """MX-03: Master 链引用的外部侧链检源 track_id 集合（导出拼 tap 用）。"""
@@ -609,8 +739,9 @@ class AudioGraphRenderer:
                 mute_gate = (mute_ramp <= 0.5).astype(samples.dtype)
                 mute_gate = self._apply_declick_edges(mute_gate, self._sample_rate)
                 if not np.any(mute_gate):
-                    # P0 · PDC：整块静音也要喂零推进延迟线（时间对齐）。
-                    self._apply_pdc(track_id, np.zeros_like(samples))
+                    # P0/B02 · PDC：整块静音也要喂零推进该节点全部出边
+                    # 延迟线（被推迟内容按绝对时间继续流出）。
+                    self.advance_node_pdc_edges(track_id, samples.shape[-1])
                     return None
             vol_track = auto.get("volume")
             if vol_track is not None and getattr(vol_track, "keyframes", None):
@@ -643,13 +774,16 @@ class AudioGraphRenderer:
                 self._clip_pdc_lines, str(clip_pdc_key),
                 int(clip_pdc_delay), samples)
 
-        # volume（§3.2: ramp 时逐样本）；P1 · VCA 推子级倍率一并应用
-        # （pre-fader send 的 tap 在轨链之前，不受 VCA 影响）。
+        # volume（§3.2: ramp 时逐样本）；B03：trim 倍率与 P1 · VCA 推子级
+        # 倍率一并应用（trim×VCA 各乘一次，pre-fader send 的 tap 在轨链
+        # 之前，不受二者影响）。与模型 get_automation_value 同语义。
         vca_factor = self.vca_factor_for(track_id)
+        trim_factor = node.automation_trim.get("volume", 1.0)
         if volume_ramp is not None:
-            samples = samples * (volume_ramp * vca_factor)[np.newaxis, :]
+            samples = samples * ((volume_ramp * trim_factor)
+                                 * vca_factor)[np.newaxis, :]
         else:
-            samples = samples * (volume * vca_factor)
+            samples = samples * (volume * trim_factor * vca_factor)
 
         # pan（RMA-08: 按源声道数选算法——mono=equal-power，stereo=balance unity-center；
         # §3.2: ramp 时逐样本）
@@ -716,8 +850,10 @@ class AudioGraphRenderer:
         if mute_gate is not None:
             samples = samples * mute_gate[np.newaxis, :samples.shape[-1]]
 
-        # P0 · PDC：输出端延迟线对齐同级最迟链（sends/侧链 tap 同步延迟）。
-        return self._apply_pdc(track_id, samples)
+        # B02 · PDC：节点处理到此为止（未延迟）。主路/send 各边在路由点
+        # 分别经独立延迟线对齐到各自目标的到达时间（route_track_output /
+        # 导出循环的 send 路由）。
+        return samples
 
     # ── 路由：把处理后样本累积到 bus_inputs 或 master ──
 
@@ -778,6 +914,9 @@ class AudioGraphRenderer:
     ) -> None:
         """把普通轨处理后的样本路由到 bus_inputs 或 master（与 mix_samples 一致）。
 
+        B02 · PDC：``samples`` 为未延迟的节点输出；主路边与每条 send 边
+        在此分别经独立延迟线对齐到各自目标的到达时间。
+
         output_bus_id 非 None → 累积到 bus_inputs[output_bus_id]
         并行处理 sends → bus_inputs[send_bus_id] *= level
         MX-14: pre_fader send 消费 pre_fader_samples（轨链前输入）；未提供时
@@ -786,12 +925,14 @@ class AudioGraphRenderer:
         node = self._nodes.get(track_id)
         target = node.output_bus_id if node else None
         n = samples.shape[-1]
+        # B02: 主路边延迟（键=node_id；未知目标兜底 master 与规划一致）
+        routed = self._apply_pdc(track_id, samples)
         if target is not None:
             if self._is_known_bus(target):
                 if target not in bus_inputs:
                     bus_inputs[target] = self._new_bus_buffer(target, output)
                 bus_inputs[target][:, :n] += self._upmix_to_bus(
-                    samples, node.bus_layout if node else ChannelLayout.STEREO,
+                    routed, node.bus_layout if node else ChannelLayout.STEREO,
                     target)
             else:
                 # AUD-15402: 未知 bus 目标（如 bus 已删除但轨的路由未清理）。
@@ -802,12 +943,12 @@ class AudioGraphRenderer:
                     "AudioGraphRenderer: track %r routes to unknown bus %r; "
                     "falling back to master", track_id, target,
                 )
-                output[:, :n] += samples
+                output[:, :n] += routed
         else:
-            output[:, :n] += samples
+            output[:, :n] += routed
         # sends（并行；MX-14 4 元组 + 独立 mute + pre/post tap）
         if node is not None:
-            for send_entry in node.sends:
+            for send_index, send_entry in enumerate(node.sends):
                 send_bus_id, send_level, send_tap, send_muted = (
                     unpack_send(send_entry))
                 if send_level <= 0.0 or send_muted:
@@ -835,12 +976,16 @@ class AudioGraphRenderer:
                     else:
                         src = pre_fader_samples
                     sn = min(src.shape[-1], n)
+                    src_delayed = self.apply_send_edge_delay(
+                        track_id, send_index, send_bus_id, src)
                     bus_inputs[send_bus_id][:, :sn] += (
-                        self._upmix_to_bus(src, src_layout, send_bus_id)
+                        self._upmix_to_bus(src_delayed, src_layout, send_bus_id)
                         [:, :sn] * send_level)
                 else:
+                    send_delayed = self.apply_send_edge_delay(
+                        track_id, send_index, send_bus_id, samples)
                     bus_inputs[send_bus_id][:, :n] += (
-                        self._upmix_to_bus(samples, src_layout, send_bus_id)
+                        self._upmix_to_bus(send_delayed, src_layout, send_bus_id)
                         * send_level)
 
     # ── Bus 阶段（拓扑序，与 mix_samples 阶段 2 一致）──
@@ -1001,16 +1146,16 @@ class AudioGraphRenderer:
                                       for iid, buf in raw_map.items()}
                     bus_samples = node.effect_chain.process(
                         bus_samples, sidechain_by_id=sc_map)
-                # P0 · PDC：Bus 输出端延迟线对齐同级最迟 Bus 链
-                # （sends/下游路由同步延迟；跨块状态保存在延迟线里）。
-                bus_samples = self._apply_pdc(bus_id, bus_samples)
+                # B02 · PDC：bus_samples 保持未延迟；主路边/send 边在路由点
+                # 分别经独立延迟线对齐（跨块状态保存在延迟线里）。
                 # 路由：Bus→Bus 或 →Master（output_bus_id）。P2 环绕
                 # Bus 路由：跨布局走 routing_matrix（上混/降混；Bus→Master
                 # 为 BS.775 降混，LFE 默认排除）。
                 target = node.output_bus_id
                 if target is not None and target in bus_inputs:
+                    bus_delayed = self._apply_pdc(bus_id, bus_samples)
                     bus_inputs[target][:, c0:cN] += self._upmix_to_bus(
-                        bus_samples, node.bus_layout, target)
+                        bus_delayed, node.bus_layout, target)
                 else:
                     if target is not None and not self._is_known_bus(target):
                         # AUD-15402: Bus 输出指向未注册 bus——兜底进 master 并告警
@@ -1018,17 +1163,24 @@ class AudioGraphRenderer:
                             "AudioGraphRenderer: bus %r routes to unknown bus %r; "
                             "falling back to master", bus_id, target,
                         )
+                    bus_delayed = self._apply_pdc(bus_id, bus_samples)
                     output[:, c0:cN] += self._downmix_to_master(
-                        bus_samples, node.bus_layout, output.shape[0])
+                        bus_delayed, node.bus_layout, output.shape[0])
                 # RMA-06: Bus sends（并行 tap；MX-14: pre_fader 取 Bus 输入）。
-                for send_entry in node.sends:
+                for send_index, send_entry in enumerate(node.sends):
                     send_bus_id, send_level, send_tap, send_muted = (
                         unpack_send(send_entry))
                     if send_level <= 0.0 or send_muted:
                         continue
                     if send_bus_id in bus_inputs:
-                        send_src = (bus_input if send_tap == "pre_fader"
-                                    else bus_samples)
+                        if send_tap == "pre_fader":
+                            # B02: pre tap = Bus 输入（未过链），经该 send
+                            # 边的 pre 延迟线（规划期 tap_latency=0）。
+                            send_src = self.apply_send_edge_delay(
+                                bus_id, send_index, send_bus_id, bus_input)
+                        else:
+                            send_src = self.apply_send_edge_delay(
+                                bus_id, send_index, send_bus_id, bus_samples)
                         bus_inputs[send_bus_id][:, c0:cN] += \
                             self._upmix_to_bus(send_src, node.bus_layout,
                                                send_bus_id) * send_level

@@ -1710,6 +1710,21 @@ class EditPage(QWidget):
                 logger.debug(f"Audio track registered: {track.track_id} ({track.name})")
 
         # AM-05: master 状态同步到引擎（与 edit_controller 一致，但此处是唯一真相源）。
+        # B03: VCA 覆盖同步——模型 TimelineSequence.vca_factor_for 是唯一
+        # 真相源；实时混音此前没有任何生产调用方下发（仅测试手动 set），
+        # VCA 推子/静音在预览中无声。成员增删/重开/undo 后随图重建刷新。
+        if self._current_timeline is not None:
+            try:
+                set_vca = getattr(audio_mgr, "set_vca_overrides", None)
+                if callable(set_vca):
+                    vca_factors = {
+                        track.track_id: float(
+                            self._current_timeline.vca_factor_for(track.track_id))
+                        for track in audio_tracks
+                    }
+                    set_vca(vca_factors)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_vca_overrides failed: %s", e)
         if self._current_timeline is not None:
             try:
                 audio_mgr.set_master_volume(float(getattr(self._current_timeline, "master_volume", 1.0)))
@@ -1861,6 +1876,14 @@ class EditPage(QWidget):
                 set_auto_mode(track_id, str(getattr(track, "automation_mode", "off") or "off"))
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_automation_mode failed for %s: %s", track_id, e)
+        # B03/P1-5: volume trim 同步到引擎（此前仅 edit_controller 的 lane
+        # 被动路径同步；图重建路径漏同步 → 重开工程后 trim 预览失效）。
+        set_trim = getattr(audio_mgr, "set_track_automation_trim", None)
+        if callable(set_trim):
+            try:
+                set_trim(track_id, dict(getattr(track, "automation_trim", {}) or {}))
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_track_automation_trim failed for %s: %s", track_id, e)
         # 路由（output_bus_id + sends + is_bus；MX-14: send 4 元组带 tap/mute）
         set_routing = getattr(audio_mgr, "set_track_routing", None)
         if callable(set_routing):
@@ -1933,10 +1956,17 @@ class EditPage(QWidget):
             return _sig_value(auto)
 
         def _sends_sig(track: Any) -> Any:
-            """Send 列表签名（target_bus_id + level + enabled）。"""
+            """Send 列表签名（B01：target + level + tap + muted + enabled）。
+
+            tap 决定取样点（pre/post fader 听感不同），muted 独立断开该
+            send 贡献——二者此前遗漏，改字段不触发重同步（审计反例
+            send_tap/send_muted）。
+            """
             sends = getattr(track, "sends", ()) or ()
             return tuple(
                 (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)),
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)),
                  bool(getattr(s, "enabled", True)))
                 for s in sends
             )
@@ -2052,6 +2082,9 @@ class EditPage(QWidget):
                 _automation_sig(track),
                 # AM-07: 自动化模式（off/read/write/touch/latch）影响是否读取曲线
                 str(getattr(track, "automation_mode", "off") or "off"),
+                # B01/P1-5: volume trim 倍率（改变离线/实时听感；此前遗漏
+                # 导致 trim 编辑不触发引擎重同步，审计反例 automation_trim）
+                _sig_value(getattr(track, "automation_trim", {}) or {}),
                 # AM-02/AM-05: 路由字段（is_bus / output_bus_id / sends）
                 is_bus,
                 getattr(track, "output_bus_id", None),
@@ -2080,6 +2113,17 @@ class EditPage(QWidget):
             _sig_value(getattr(timeline, "master_effect_chain", None))
             if timeline is not None else None,
         )
+        # B01: VCA 组（gain/mute/成员变化改变实时听感，审计反例 vca_gain）。
+        # 稳定序（按 vca_id）避免 dict/tuple 顺序扰动。
+        vca_sig = tuple(sorted(
+            (
+                str(getattr(v, "vca_id", "")),
+                float(getattr(v, "gain_db", 0.0)),
+                bool(getattr(v, "muted", False)),
+                tuple(sorted(str(m) for m in getattr(v, "member_track_ids", ()) or ())),
+            )
+            for v in (getattr(timeline, "vcas", ()) or ())
+        ))
 
         return (
             round(float(timeline_fps), 6),
@@ -2088,6 +2132,7 @@ class EditPage(QWidget):
             tuple(track_entries),
             master_auto_sig,
             master_strip_sig,
+            vca_sig,
         )
 
     # ------------------------------------------------------------------
