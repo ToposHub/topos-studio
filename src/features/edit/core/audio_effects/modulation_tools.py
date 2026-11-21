@@ -49,6 +49,30 @@ class _Lfo:
 PCT_TO_DB = 0.12
 
 
+def _waveform_values(name: str, frac: np.ndarray, cycle: np.ndarray,
+                     seed: int) -> np.ndarray:
+    """FX-19 波形函数：frac ∈ [0,1) → [−1,1]；random 按整周期 S&H
+    （default_rng([seed, cycle])——绝对周期索引，跨块确定性）。"""
+    if name == "triangle":
+        # 与正弦相位对齐：frac 0 → −1，0.5 → +1（分段线性）。
+        return np.where(frac < 0.5, 4.0 * frac - 1.0, 3.0 - 4.0 * frac)
+    if name == "square":
+        return np.where(frac < 0.5, 1.0, -1.0)
+    if name == "saw_up":
+        return 2.0 * frac - 1.0
+    if name == "saw_down":
+        return 1.0 - 2.0 * frac
+    if name == "random":
+        values = np.empty_like(frac)
+        # 每个跨过的整周期计算一次 S&H（周期数有限——廉价）。
+        for c in np.unique(cycle):
+            rng = np.random.default_rng([int(seed), int(c)])
+            values[cycle == c] = rng.uniform(-1.0, 1.0)
+        return values
+    # 未知波形回退正弦。
+    return np.sin(2.0 * np.pi * frac)
+
+
 class TransientDesignerEffect(AudioEffect):
     """差分包络瞬态塑形（attack 增益独立于 sustain）。
 
@@ -192,6 +216,11 @@ class TremoloAutoPanEffect(AudioEffect):
         self._params: dict = {"enabled": True, "mode": "tremolo",
                               "rate_hz": 4.0, "depth": 0.7,
                               "shape": "sine"}
+        # FX-19 新波形支路状态：相位基准 + 绝对样本位置。
+        self._phase_base: Optional[float] = None
+        self._phase_pos_base = 0
+        self._phase_pos_end = 0
+        self._phase_rate: Optional[float] = None
         self._lfo = _Lfo(4.0)
 
     def set_params(self, params: object,
@@ -208,6 +237,10 @@ class TremoloAutoPanEffect(AudioEffect):
 
     def reset_state(self) -> None:
         self._lfo.reset()
+        self._phase_base = None
+        self._phase_pos_base = 0
+        self._phase_pos_end = 0
+        self._phase_rate = None
 
     @property
     def is_active(self) -> bool:
@@ -227,6 +260,9 @@ class TremoloAutoPanEffect(AudioEffect):
             return samples
         depth = float(np.clip(self._params.get("depth", 0.7), 0.0, 1.0))
         mode = str(self._params.get("mode", "tremolo"))
+        waveform = str(self._params.get("waveform", "") or "")
+        if waveform and waveform != "sine":
+            return self._process_waveform(samples, waveform, mode, depth)
         lfo = self._lfo.advance(n, self._sample_rate)
         if mode == "auto_pan" and samples.shape[0] >= 2:
             pan = depth * lfo
@@ -239,6 +275,48 @@ class TremoloAutoPanEffect(AudioEffect):
         amplitude = 1.0 - depth * (0.5 - 0.5 * lfo)
         return np.ascontiguousarray(
             samples * amplitude[np.newaxis, :], dtype=np.float32)
+
+    # ── FX-19：波形扩展（绝对样本相位积分——跨块位精确） ────────
+    _WAVEFORMS = ("triangle", "square", "saw_up", "saw_down", "random")
+
+    def _process_waveform(self, samples: np.ndarray, waveform: str,
+                          mode: str, depth: float) -> np.ndarray:
+        """新波形支路：相位 = 相位基准 + (s − 基准点)·rate/fs（绝对
+        样本公式——任意分块位精确）；random = 按整周期 S&H（seed
+        确定性）。square/saw 平滑与占空比待后续批次（现输出纯形状）。"""
+        n = samples.shape[-1]
+        rate = float(np.clip(self._params.get("rate_hz", 4.0), 0.01, 50.0))
+        seed = int(self._params.get("random_seed", 0))
+        # 相位基准（rate 变化点重置——相位连续）。
+        if self._phase_base is None or self._phase_rate != rate:
+            if self._phase_base is not None:
+                self._phase_base = (self._phase_base
+                                    + (self._phase_pos_end
+                                       - self._phase_pos_base) * self._phase_rate
+                                    / self._sample_rate)
+            else:
+                self._phase_base = 0.0
+            self._phase_pos_base = self._phase_pos_end
+            self._phase_rate = rate
+        s = np.arange(self._phase_pos_end,
+                      self._phase_pos_end + n, dtype=np.float64)
+        frac = np.mod(self._phase_base + (s - self._phase_pos_base)
+                      * rate / self._sample_rate, 1.0)
+        cycle = np.floor(self._phase_base + (s - self._phase_pos_base)
+                         * rate / self._sample_rate).astype(np.int64)
+        values = _waveform_values(waveform, frac, cycle, seed)
+        if mode == "auto_pan" and samples.shape[0] >= 2:
+            pan = depth * values
+            left_gain = np.sqrt(0.5 * (1.0 - pan))
+            right_gain = np.sqrt(0.5 * (1.0 + pan))
+            out = samples.copy()
+            out[0] *= left_gain
+            out[1] *= right_gain
+        else:
+            amplitude = 1.0 - depth * (0.5 - 0.5 * values)
+            out = samples * amplitude[np.newaxis, :]
+        self._phase_pos_end += n
+        return np.ascontiguousarray(out, dtype=np.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

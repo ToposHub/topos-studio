@@ -4293,35 +4293,57 @@ class TransientDesignerParams:
 
 @dataclass(frozen=True)
 class TremoloAutoPanParams:
-    """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。"""
+    """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。
+
+    FX-19（2026-11-21 计划）：``waveform`` 扩展 sine/triangle/square/
+    saw_up/saw_down/random；空/缺省/"sine" → 旧正弦路径（冻结）。
+    """
     mode: str = "tremolo"  # "tremolo" | "auto_pan"
     rate_hz: float = 4.0
     depth: float = 0.7
     shape: str = "sine"
     enabled: bool = True
+    waveform: str = ""
+    random_seed: int = 0
+
+    _WAVEFORMS = ("sine", "triangle", "square", "saw_up", "saw_down",
+                  "random")
 
     @staticmethod
     def default() -> "TremoloAutoPanParams":
         return TremoloAutoPanParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "mode": self.mode, "rate_hz": self.rate_hz,
             "depth": self.depth, "shape": self.shape,
             "enabled": self.enabled,
         }
+        if self.waveform:
+            data["waveform"] = self.waveform
+            data["random_seed"] = self.random_seed
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TremoloAutoPanParams":
         mode = str(data.get("mode", "tremolo") or "tremolo")
         if mode not in ("tremolo", "auto_pan"):
             mode = "tremolo"
+        waveform = str(data.get("waveform", "") or "")
+        if waveform not in ("", *TremoloAutoPanParams._WAVEFORMS):
+            waveform = ""
+        try:
+            seed = int(data.get("random_seed", 0))
+        except (TypeError, ValueError):
+            seed = 0
         return TremoloAutoPanParams(
             mode=mode,
             rate_hz=_params_f("rate_hz", data, 4.0),
             depth=_params_f("depth", data, 0.7),
             shape=str(data.get("shape", "sine") or "sine"),
             enabled=bool(data.get("enabled", True)),
+            waveform=waveform,
+            random_seed=seed,
         )
 
 
