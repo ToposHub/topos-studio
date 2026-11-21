@@ -74,6 +74,8 @@ class DynamicEqEffect(AudioEffect):
         self._gain_state: float = 0.0                  # 平滑后的动态 dB
         self._last_detector_db = -120.0
         self._last_dyn_db = 0.0
+        # FX-02 多段支路：每段独立 detector/包络/输出滤波状态。
+        self._mb_states: list = []
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -93,13 +95,26 @@ class DynamicEqEffect(AudioEffect):
         self._rms_state = None
         self._sos_state = None
         self._gain_state = 0.0
+        for state in self._mb_states:
+            state.reset()
+        self._mb_states = []
 
     @property
     def is_active(self) -> bool:
         p = self._params
+        if self._bands_of(p):
+            return bool(p.get("enabled", True)) and _SCIPY and any(
+                bool(band.get("enabled", True))
+                or abs(float(band.get("static_gain_db", 0.0))) > 1e-6
+                for band in p["bands"])
         return (bool(p.get("enabled", True)) and _SCIPY
                 and (bool(p.get("dynamic_enabled", True))
                      or abs(float(p.get("gain_db", 0.0))) > 1e-6))
+
+    @staticmethod
+    def _bands_of(params: dict) -> list:
+        bands = params.get("bands") or ()
+        return [band for band in bands if isinstance(band, dict)]
 
     def tail_estimate_samples(self) -> int:
         return 0
@@ -131,6 +146,11 @@ class DynamicEqEffect(AudioEffect):
     def process(self, samples: np.ndarray) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
             return samples
+        if self._bands_of(self._params):
+            return self._process_multiband(samples)
+        return self._process_single(samples)
+
+    def _process_single(self, samples: np.ndarray) -> np.ndarray:
         n = samples.shape[-1]
         if n == 0 or self._bp_ba is None:
             return samples
@@ -202,3 +222,163 @@ class DynamicEqEffect(AudioEffect):
             "dynamic_gain_db": round(self._last_dyn_db, 3),
             "frequency": float(self._params.get("frequency", 3000.0)),
         }
+
+
+class _BandState:
+    """FX-02 多段支路的每段跨块状态（detector/包络/输出滤波独立）。"""
+
+    def __init__(self, band_index: int) -> None:
+        self.band_index = band_index
+        self.bp_ba: Optional[tuple] = None
+        self.coeff_key: Optional[tuple] = None
+        self.bp_state: Optional[np.ndarray] = None
+        self.rms_b: Optional[np.ndarray] = None
+        self.rms_state: Optional[np.ndarray] = None
+        self.sos_state: Optional[np.ndarray] = None  # (1, ch, 2)
+        self.gain_state = 0.0
+        self.sample_pos = 0  # 绝对样本时钟（增益网格对齐）
+        self.cell_gain = 0.0  # 当前网格格的增益（格续块复用）
+
+    def reset(self) -> None:
+        self.bp_state = None
+        self.rms_state = None
+        self.sos_state = None
+        self.gain_state = 0.0
+        self.sample_pos = 0
+        self.cell_gain = 0.0
+
+
+def _band_detector_coeffs(band: dict, sample_rate: float) -> Optional[tuple]:
+    """段检测带通（butter2，带宽由 q 推导）；非法频点返回 None。"""
+    freq = float(np.clip(float(band.get("frequency_hz", 3000.0)),
+                         20.0, sample_rate * 0.45))
+    q = float(np.clip(float(band.get("q", 1.4)), 0.1, 20.0))
+    bw = freq / q
+    low = max(10.0, freq - bw / 2.0)
+    high = min(sample_rate * 0.49, freq + bw / 2.0)
+    try:
+        return butter(2, [low, high], btype="band", fs=sample_rate,
+                      output="ba")
+    except ValueError:
+        return None
+
+
+def _mb_process_band(band: dict, state: _BandState, samples: np.ndarray,
+                     sample_rate: float) -> np.ndarray:
+    """单段处理：功率聚合检源（反相安全）→ 动态增益 → 段 biquad。
+
+    与旧单段路径的波形平均检源不同：多段支路对每声道独立带通后按
+    **功率平均**聚合（反相立体声不抵消——计划 FX-02 合同）。
+    """
+    from scipy.signal import lfilter, sosfilt
+
+    n = samples.shape[-1]
+    channels = samples.shape[0]
+    # 检测系数缓存键（频率/q 决定；避免逐块比较 numpy 数组元组）。
+    coeff_key = (round(float(band.get("frequency_hz", 3000.0)), 4),
+                 round(float(band.get("q", 1.4)), 4),
+                 round(float(sample_rate), 3))
+    if state.bp_ba is None or state.coeff_key != coeff_key:
+        state.bp_ba = _band_detector_coeffs(band, sample_rate)
+        state.coeff_key = coeff_key
+        state.bp_state = None
+        state.rms_state = None
+        state.rms_b = None
+    if state.bp_ba is None:
+        return samples.astype(np.float32)
+    order = max(len(state.bp_ba[0]), len(state.bp_ba[1])) - 1
+    # scipy lfilter(axis=-1) 的 zi 形状 = (ch, order)（axis 维替换为阶数）。
+    if (state.bp_state is None
+            or state.bp_state.shape != (samples.shape[0], order)):
+        state.bp_state = np.zeros((samples.shape[0], order),
+                                  dtype=np.float64)
+    _rms_expected = ((state.rms_b.shape[0] - 1,)
+                     if state.rms_b is not None else ())
+    if state.rms_state is None or state.rms_state.shape != _rms_expected:
+        win = max(1, int(0.05 * sample_rate))
+        state.rms_b = np.full(win, 1.0 / win, dtype=np.float64)
+        state.rms_state = np.zeros(win - 1, dtype=np.float64)
+    # 逐声道带通 + 功率聚合（同声道功率平均——反相不抵消）。
+    band_sig, state.bp_state = lfilter(
+        state.bp_ba[0], state.bp_ba[1], samples.astype(np.float64),
+        axis=-1, zi=state.bp_state)
+    mean_power = np.mean(band_sig ** 2, axis=0)
+    ms, state.rms_state = lfilter(state.rms_b, [1.0], mean_power,
+                                  zi=state.rms_state)
+    detector_db = 20.0 * np.log10(np.sqrt(np.maximum(ms, 1e-16)) + 1e-12)
+
+    threshold = float(band.get("threshold_dbfs", -30.0))
+    slope = float(np.clip(float(band.get("slope", 0.5)), 0.0, 1.0))
+    max_cut = float(np.clip(float(band.get("max_cut_db", 9.0)), 0.0, 30.0))
+    max_boost = float(np.clip(float(band.get("max_boost_db", 0.0)),
+                              0.0, 24.0))
+    over = detector_db - threshold
+    target_db = np.where(
+        over > 0.0,
+        -np.minimum(max_cut, over * slope),
+        np.minimum(max_boost, -over * slope))
+    if not bool(band.get("dynamic_enabled", True)):
+        target_db = np.zeros_like(target_db)
+
+    attack = max(0.05, float(band.get("attack_ms", 8.0))) / 1000.0
+    release = max(1.0, float(band.get("release_ms", 120.0))) / 1000.0
+    a_attack = float(np.exp(-1.0 / (attack * sample_rate)))
+    a_release = float(np.exp(-1.0 / (release * sample_rate)))
+    # attack/release 判定按**运行态**逐样本比较（旧单段路径用调用入口
+    # 状态整块判定——分块语义不同，按计划 v0–v4 冻结不动）。
+    smooth_db = np.empty_like(target_db)
+    gain_state = state.gain_state
+    for i in range(n):
+        coeff = a_attack if target_db[i] < gain_state else a_release
+        gain_state = coeff * gain_state + (1.0 - coeff) * target_db[i]
+        smooth_db[i] = gain_state
+    state.gain_state = float(gain_state)
+
+    static_gain = float(band.get("static_gain_db", 0.0))
+    freq = float(np.clip(float(band.get("frequency_hz", 3000.0)),
+                         20.0, sample_rate * 0.45))
+    q = float(np.clip(float(band.get("q", 1.4)), 0.1, 20.0))
+    out = np.empty_like(samples)
+    if state.sos_state is None or state.sos_state.shape != (1, channels, 2):
+        state.sos_state = np.zeros((1, channels, 2), dtype=np.float64)
+    # 增益子块按**绝对样本时钟**对齐 GAIN_BLOCK 网格；每格系数取格首
+    # 样本的平滑增益（瞬时值——跨块分块一致；计划 FX-02："任意块长下
+    # 按持续样本时钟更新动态系数"）。
+    pos = state.sample_pos
+    offset = pos % GAIN_BLOCK
+    cell_gain = state.cell_gain
+    start = 0
+    while start < n:
+        if offset == 0:
+            # 新格：增益取**格首样本**的平滑值（跨块一致——格续块
+            # 复用携带值，不以续块起点重取）。
+            cell_gain = static_gain + float(smooth_db[start])
+        take = min(GAIN_BLOCK - offset, n - start)
+        sos = rbj_bell_sos(freq, q, cell_gain, sample_rate)
+        seg, state.sos_state = sosfilt(
+            sos, samples[:, start:start + take].astype(np.float64),
+            axis=-1, zi=state.sos_state)
+        out[:, start:start + take] = seg.astype(np.float32)
+        start += take
+        offset = (offset + take) % GAIN_BLOCK
+    state.sample_pos = pos + n
+    state.cell_gain = cell_gain
+    return np.ascontiguousarray(out, dtype=np.float32)
+
+
+def _mb_process_multiband(self, samples: np.ndarray) -> np.ndarray:
+    """多段动态 EQ（FX-02 新支路）：稳定段 ID = 列表序号；每段独立
+    detector/包络/输出滤波状态；禁用段直通。"""
+    bands = self._bands_of(self._params)
+    if len(self._mb_states) != len(bands):
+        self._mb_states = [_BandState(index) for index in range(len(bands))]
+    out = np.array(samples, dtype=np.float32, copy=True)
+    for band, state in zip(bands, self._mb_states):
+        if not bool(band.get("enabled", True)):
+            continue
+        out = _mb_process_band(band, state, out, self._sample_rate)
+    return np.ascontiguousarray(out, dtype=np.float32)
+
+
+# 挂到类上（保持模块级实现便于直测）。
+DynamicEqEffect._process_multiband = _mb_process_multiband

@@ -3992,6 +3992,10 @@ class DynamicEqParams:
     dynamic_enabled: bool = True
     slope: float = 0.5
     enabled: bool = True
+    # FX-02（2026-11-21 计划）：多段版本。空 = 旧单段路径（v0–v4 原样）。
+    # 每段：frequency_hz/q/static_gain_db/threshold_dbfs/max_cut_db/
+    # max_boost_db/attack_ms/release_ms/enabled；稳定段 ID = 列表序号。
+    bands: tuple = ()
 
     @staticmethod
     def default() -> "DynamicEqParams":
@@ -4005,10 +4009,38 @@ class DynamicEqParams:
             "attack_ms": self.attack_ms, "release_ms": self.release_ms,
             "dynamic_enabled": self.dynamic_enabled, "slope": self.slope,
             "enabled": self.enabled,
+            "bands": [dict(band) for band in self.bands],
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        data = dict(band) if isinstance(band, dict) else {}
+
+        def _num(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "enabled": bool(data.get("enabled", True)),
+            "frequency_hz": _num("frequency_hz", 3000.0),
+            "q": _num("q", 1.4),
+            "static_gain_db": _num("static_gain_db", 0.0),
+            "threshold_dbfs": _num("threshold_dbfs", -30.0),
+            "max_cut_db": _num("max_cut_db", 9.0),
+            "max_boost_db": _num("max_boost_db", 0.0),
+            "attack_ms": _num("attack_ms", 8.0),
+            "release_ms": _num("release_ms", 120.0),
+            "slope": _num("slope", 0.5),
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "DynamicEqParams":
+        raw_bands = data.get("bands") or ()
+        bands = tuple(DynamicEqParams._normalize_band(band)
+                      for band in raw_bands) if isinstance(
+            raw_bands, (list, tuple)) else ()
         return DynamicEqParams(
             frequency=_params_f("frequency", data, 3000.0),
             q=_params_f("q", data, 1.4),
@@ -4021,6 +4053,7 @@ class DynamicEqParams:
             dynamic_enabled=bool(data.get("dynamic_enabled", True)),
             slope=_params_f("slope", data, 0.5),
             enabled=bool(data.get("enabled", True)),
+            bands=bands,
         )
 
 
