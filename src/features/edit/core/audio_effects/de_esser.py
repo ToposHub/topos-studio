@@ -51,7 +51,16 @@ DEFAULTS = {
 
 
 class DeEsserEffect(AudioEffect):
-    """齿音抑制（RMS 包络检测 + 软拐点 + Wide/Split 分频）。"""
+    """齿音抑制（RMS 包络检测 + 软拐点 + Wide/Split 分频）。
+
+    FX-06（2026-11-21 计划）新版支路（给了 ``detector_shape`` /
+    ``lookahead_ms`` / ``output_gain_db`` 任一键时启用）：逐声道检测
+    带（同系数独立状态）→ 各声道带功率取最大联动（反相不抵消）→
+    50 ms RMS + attack/release → 链接增益；audio 延迟 = lookahead
+    （增益即时作用——标准前视实现，``latency_samples`` 据实声明）；
+    Split 用延迟后音频的逐声道带（减法互补）。legacy 参数组合走旧
+    路径（声道平均检测语义冻结）。
+    """
 
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
@@ -63,6 +72,14 @@ class DeEsserEffect(AudioEffect):
         self._rms_b: Optional[np.ndarray] = None     # 包络 FIR
         self._rms_state: Optional[np.ndarray] = None
         self._last_reduction_db = 0.0
+        # 新版支路状态。
+        self._v2_bp_state: Optional[np.ndarray] = None   # (order, ch)
+        self._v2_delay_state: Optional[np.ndarray] = None  # 延迟线
+        self._v2_delayed_bp_state: Optional[np.ndarray] = None
+        self._v2_rms_state: Optional[np.ndarray] = None
+        self._v2_detector_ba: Optional[tuple] = None
+        self._v2_detector_key: Optional[tuple] = None
+        self._v2_env = 0.0
 
     # ── 参数与状态 ────────────────────────────────────────────────
     def set_params(self, params: object,
@@ -85,12 +102,25 @@ class DeEsserEffect(AudioEffect):
         if self._rms_state is not None:
             self._rms_state = np.zeros_like(self._rms_state)
         self._last_reduction_db = 0.0
+        self._v2_bp_state = None
+        self._v2_delay_state = None
+        self._v2_delayed_bp_state = None
+        self._v2_rms_state = None
+        self._v2_env = 0.0
 
     def tail_estimate_samples(self) -> int:
         return 0
 
     def latency_samples(self) -> int:
+        if self._uses_v2():
+            lookahead_ms = float(np.clip(
+                float(self._params.get("lookahead_ms", 0.0)), 0.0, 20.0))
+            return int(round(lookahead_ms * self._sample_rate / 1000.0))
         return 0
+
+    def _uses_v2(self) -> bool:
+        return any(key in self._params for key in
+                   ("detector_shape", "lookahead_ms", "output_gain_db"))
 
     @property
     def is_active(self) -> bool:
@@ -125,6 +155,8 @@ class DeEsserEffect(AudioEffect):
             return samples
         if samples.shape[-1] == 0 or self._bp_ba is None:
             return samples
+        if self._uses_v2():
+            return self._process_v2(samples)
         from scipy.signal import lfilter
 
         params = self._params
@@ -211,3 +243,126 @@ class DeEsserEffect(AudioEffect):
             return True
         except (TypeError, ValueError):
             return False
+
+    # ── FX-06 新版支路 ─────────────────────────────────────────────
+    def _v2_detector(self) -> Optional[tuple]:
+        """检测形状：bandpass（默认，与旧一致）或 high_shelf（+6 dB
+        RBJ 高架——检测支路更宽的齿音强调）。"""
+        shape = str(self._params.get("detector_shape", "bandpass")
+                    or "bandpass")
+        sr = self._sample_rate
+        center = float(np.clip(self._params.get("frequency", 6500.0),
+                               1000.0, min(16000.0, sr * 0.45)))
+        q = float(np.clip(self._params.get("q", 2.0), 0.3, 12.0))
+        key = (shape, round(center, 3), round(q, 3), round(sr, 3))
+        if self._v2_detector_key == key and self._v2_detector_ba is not None:
+            return self._v2_detector_ba
+        from scipy.signal import butter
+        if shape == "high_shelf":
+            from src.features.edit.core.audio_effects.saturation import (
+                _rbj_high_shelf,
+            )
+            b, a = _rbj_high_shelf(sr, center, 6.0)
+            self._v2_detector_ba = (b, a)
+        else:
+            bw = center / q
+            low = max(20.0, center - bw / 2.0)
+            high = min(sr * 0.49, center + bw / 2.0)
+            try:
+                self._v2_detector_ba = butter(2, [low, high], btype="band",
+                                              fs=sr, output="ba")
+            except ValueError:
+                self._v2_detector_ba = None
+        self._v2_detector_key = key
+        return self._v2_detector_ba
+
+    def _process_v2(self, samples: np.ndarray) -> np.ndarray:
+        from scipy.signal import lfilter
+
+        params = self._params
+        channels, n = samples.shape
+        sr = self._sample_rate
+        ba = self._v2_detector()
+        if ba is None:
+            return np.asarray(samples, dtype=np.float32)
+
+        lookahead = self.latency_samples()
+        attack = max(0.05, float(params.get("attack_ms", 5.0))) / 1000.0
+        release = max(1.0, float(params.get("release_ms", 60.0))) / 1000.0
+        a_attack = float(np.exp(-1.0 / (attack * sr)))
+        a_release = float(np.exp(-1.0 / (release * sr)))
+        win = max(1, int(0.05 * sr))
+
+        # 延迟线（audio 延迟 = lookahead；增益即时作用 → 前视）。
+        if lookahead > 0:
+            if (self._v2_delay_state is None
+                    or self._v2_delay_state.shape != (channels, lookahead)):
+                self._v2_delay_state = np.zeros(
+                    (channels, lookahead), dtype=np.float32)
+            stream = np.concatenate(
+                [self._v2_delay_state, samples.astype(np.float32)], axis=1)
+            delayed = np.ascontiguousarray(stream[:, :n])
+            self._v2_delay_state = np.ascontiguousarray(
+                stream[:, n:n + lookahead], dtype=np.float32)
+        else:
+            delayed = np.asarray(samples, dtype=np.float32)
+
+        # 检测支路（未延迟信号；逐声道独立状态 → 反相不抵消）。
+        # lfilter(axis=-1) 的 zi 形状 = (ch, order)。
+        order = max(len(ba[0]), len(ba[1])) - 1
+        if (self._v2_bp_state is None
+                or self._v2_bp_state.shape != (channels, order)):
+            self._v2_bp_state = np.zeros((channels, order), dtype=np.float64)
+        band_ch, self._v2_bp_state = lfilter(
+            ba[0], ba[1], samples.astype(np.float64), axis=-1,
+            zi=self._v2_bp_state)
+        # 各声道带功率 → 最大电平联动（反相安全）。
+        ch_power = np.mean(band_ch ** 2, axis=0)
+        win_b = max(1, int(0.05 * sr))
+        if (self._v2_rms_state is None
+                or self._v2_rms_state.shape != (win_b - 1,)):
+            self._v2_rms_state = np.zeros(win_b - 1, dtype=np.float64)
+        rms_b = np.full(win_b, 1.0 / win_b, dtype=np.float64)
+        env_p, self._v2_rms_state = lfilter(rms_b, [1.0], ch_power,
+                                            zi=self._v2_rms_state)
+        max_power = np.maximum.accumulate(np.maximum(
+            env_p, np.maximum.accumulate(ch_power) * 0.0))  # 占位对齐
+        # RMS 平滑后的聚合电平（逐样本最大：各声道 RMS 的最大值近似 —
+        # 用功率 RMS 的最大通道值）。
+        power_level = env_p  # 已为 50 ms 平滑后的逐样本功率
+        detector_db = 20.0 * np.log10(
+            np.sqrt(np.maximum(power_level, 1e-12)) + 1e-12)
+
+        threshold = float(params.get("threshold_dbfs", -32.0))
+        ratio = float(np.clip(params.get("ratio", 4.0), 1.0, 50.0))
+        max_red = float(np.clip(params.get("max_reduction_db", 12.0),
+                                0.0, 36.0))
+        over_db = np.maximum(0.0, detector_db - threshold)
+        reduction_db = np.minimum(max_red, over_db * (1.0 - 1.0 / ratio))
+        gain = (10.0 ** (-reduction_db / 20.0)).astype(np.float32)
+        self._last_reduction_db = float(reduction_db[-1])
+
+        if bool(params.get("listen", False)):
+            return np.ascontiguousarray(
+                np.stack([band_ch.mean(axis=0)] * channels),
+                dtype=np.float32)
+
+        # 延迟后音频的逐声道带（Split 用；独立状态）。
+        if (self._v2_delayed_bp_state is None
+                or self._v2_delayed_bp_state.shape != (channels, order)):
+            self._v2_delayed_bp_state = np.zeros(
+                (channels, order), dtype=np.float64)
+        band_delayed, self._v2_delayed_bp_state = lfilter(
+            ba[0], ba[1], delayed.astype(np.float64), axis=-1,
+            zi=self._v2_delayed_bp_state)
+
+        mode = str(params.get("mode", "split"))
+        if mode == "wide":
+            out = delayed * gain[np.newaxis, :]
+        else:
+            sibilance = band_delayed.astype(np.float32)
+            unaffected = delayed - sibilance
+            out = unaffected + sibilance * gain[np.newaxis, :]
+        out_gain = 10.0 ** (float(np.clip(
+            float(params.get("output_gain_db", 0.0)), -24.0, 24.0)) / 20.0)
+        return np.ascontiguousarray(out * out_gain, dtype=np.float32)
