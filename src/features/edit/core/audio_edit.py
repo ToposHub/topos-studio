@@ -133,6 +133,16 @@ PROCESSORS: dict[str, dict[str, Any]] = {
             "per voice, length preserving, pre-rendered)."
         ),
     },
+    # FX-08（2026-11-21 计划）：自动音高校正（长度保持，预渲染）。
+    "pitch_correction": {
+        "algorithm_version": 1,
+        "length_preserving": True,
+        "pre_render": True,
+        "description": (
+            "Monophonic automatic pitch correction: F0 tracking, scale "
+            "quantization, stable-note time-preserving rendering."
+        ),
+    },
 }
 KNOWN_PROCESSOR_IDS = frozenset(PROCESSORS)
 # 预渲染处理器：作为一组在基底 PCM 中烘焙（先于 inline 步骤），缓存按
@@ -1057,6 +1067,16 @@ def render_to_step_insertion(
                     progress=progress, cancel_check=cancel_check)
             elif processor_id == "delete_range":
                 out = _render_delete_range_step(out, params, sample_rate)
+            elif processor_id == "pitch_correction":
+                from src.features.edit.core.audio_effects.pitch_correction                     import render_pitch_correction
+                out = render_pitch_correction(
+                    out,
+                    sample_rate,
+                    ref_a4_hz=float(params.get("ref_a4_hz", 440.0)),
+                    strength=float(params.get("strength", 100.0)),
+                    retune_ms=float(params.get("retune_ms", 45.0)),
+                    bypass_notes=tuple(params.get("bypass_notes") or ()),
+                )
             elif processor_id == "doubler":
                 from src.features.edit.core.audio_effects.doubler import (
                     doubles_from_params,
