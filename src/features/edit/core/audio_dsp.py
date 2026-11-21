@@ -3727,6 +3727,8 @@ class DynamicsEffect(AudioEffect):
         self._makeup = 0.0
         self._makeup_linear: float = 1.0
         self.last_gr_db = 0.0
+        # FX-03：分段遥测（E/G、C、L 各自非负 GR；检测电平；限幅过冲）。
+        self._last_overshoot_db = -120.0
 
     def set_params(self, params: Optional[dict], sample_rate: Optional[float] = None) -> None:
         """更新三模块参数。子 dict 缺键由各子效果器的默认值承接（容错语义）。"""
@@ -3762,10 +3764,14 @@ class DynamicsEffect(AudioEffect):
             处理后的 (channels, n)（旁路时原样返回）。
         """
         if not self._enabled:
+            self._reset_telemetry()
             return samples
         out = self._eg.process(samples)
         out = self._comp.process(out, sidechain=sidechain)
         out = self._lim.process(out)
+        # FX-03：限幅过冲 = 限幅后（Make Up 前）块峰——过冲表读数。
+        self._last_overshoot_db = float(
+            20.0 * np.log10(max(float(np.max(np.abs(out))), 1e-9)))
         # DY-01: Make Up = post-dynamics 节点（Lim 之后，Comp 旁路不失效）
         if abs(self._makeup_linear - 1.0) > 1e-9:
             out = out * self._makeup_linear
@@ -3781,12 +3787,43 @@ class DynamicsEffect(AudioEffect):
             self.last_gr_db = 0.0
         return out
 
+    def _reset_telemetry(self) -> None:
+        """旁路/关闭清零（FX-03：表计不得沿用旧读数——含子模块 GR）。"""
+        self.last_gr_db = 0.0
+        self._last_overshoot_db = -120.0
+        for sub in (self._eg, self._comp, self._lim):
+            if hasattr(sub, "last_gr_db"):
+                sub.last_gr_db = 0.0
+            if hasattr(sub, "last_detector_db"):
+                sub.last_detector_db = -120.0
+
+    def collect_telemetry(self) -> dict:
+        """FX-03：分段遥测（表计口径 = 块末状态）。
+
+        E/G、C、L 三根表各自取子模块**实际**非负 GR（不用最大值填满
+        三根表）；detector_dbfs 为压缩器检测电平；limiter_overshoot_dbfs
+        为限幅后（Make Up 前）块峰。旁路/关闭全部清零。
+        """
+        return {
+            "eg_gr_db": max(0.0, float(getattr(self._eg, "last_gr_db", 0.0)
+                                       or 0.0)),
+            "comp_gr_db": max(0.0, float(getattr(self._comp, "last_gr_db",
+                                                 0.0) or 0.0)),
+            "lim_gr_db": max(0.0, float(getattr(self._lim, "last_gr_db",
+                                                0.0) or 0.0)),
+            "detector_dbfs": round(float(getattr(self._comp,
+                                                 "last_detector_db", -120.0)
+                                         or -120.0), 3),
+            "limiter_overshoot_dbfs": round(self._last_overshoot_db, 3),
+            "makeup_db": float(self._makeup),
+        }
+
     def reset_state(self) -> None:
         """重置三模块的包络/延迟状态（seek/暂停后调用）。"""
         self._eg.reset_state()
         self._comp.reset_state()
         self._lim.reset_state()
-        self.last_gr_db = 0.0
+        self._reset_telemetry()
 
     @property
     def sc_source(self) -> str:
