@@ -3139,6 +3139,8 @@ class SaturationEffect(AudioEffect):
         self._k: float = 0.0  # 实际波形整形系数
         self._enabled: bool = False
         self._recompute_k()
+        # FX-14：版本化模型分支（缺键 → legacy；multiband 委托新单元）。
+        self._multiband: Optional["object"] = None
 
     def _recompute_k(self) -> None:
         """由 drive（0..100）计算实际 k 系数。"""
@@ -3164,6 +3166,17 @@ class SaturationEffect(AudioEffect):
                                     0.0, 100.0, _SAT_DEFAULT_DRIVE)
         self._enabled = bool(params.get("enabled", True))
         self._recompute_k()
+        # FX-14：multiband 模型按需实例化并转发参数（legacy 不触碰）。
+        if str(params.get("model_profile", "legacy") or "legacy") == \
+                "multiband":
+            if self._multiband is None:
+                from src.features.edit.core.audio_effects.saturation import (
+                    MultibandSaturationEffect,
+                )
+                self._multiband = MultibandSaturationEffect(self._sample_rate)
+            self._multiband.set_params(params, sample_rate=sample_rate)
+        elif self._multiband is not None:
+            self._multiband.set_params({"enabled": False})
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用 sigmoid 谐波失真。
@@ -3174,6 +3187,8 @@ class SaturationEffect(AudioEffect):
         Returns:
             失真后的 samples，同 shape（旁路或 drive=0 时原样返回）。
         """
+        if self._multiband is not None and self._enabled:
+            return self._multiband.process(samples)
         if not self._enabled or self._k <= 1e-9 or \
                 samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
@@ -3189,11 +3204,24 @@ class SaturationEffect(AudioEffect):
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
-        """无状态效果，无需重置。"""
-        pass
+        """legacy 无状态；multiband 分支重置过采样/滤波历史。"""
+        if self._multiband is not None:
+            self._multiband.reset_state()
+
+    def latency_samples(self) -> int:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.latency_samples()
+        return 0
+
+    def tail_estimate_samples(self) -> int:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.tail_estimate_samples()
+        return 0
 
     @property
     def is_active(self) -> bool:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.is_active
         return self._enabled and self._k > 1e-9
 
 

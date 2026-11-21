@@ -3139,16 +3139,37 @@ class SaturationParams:
 
     sigmoid WaveShaper，移植自 audio_pro 的 Saturation。
 
+    FX-14（2026-11-21 计划）：版本化模型 ``model_profile``——缺键读作
+    legacy（旧声音逐样本保留）；``multiband`` 为三段互补分频新模型
+    （audio_effects/saturation.py），仅新建或用户明确升级才启用。
+
     Attributes:
-        drive: 驱动量（0..100，0=无失真直通，100=强过载）
+        drive: 驱动量（0..100，0=无失真直通，100=强过载；legacy）
         enabled: 是否启用（False=旁路直通）
+        model_profile: "legacy" | "multiband"
+        mb_xover_low_hz / mb_xover_high_hz: 互补分频点（20 Hz..0.45·fs）
+        mb_oversampling: 过采样档位（1|2|4；R>1 声明 20 样本延迟）
+        mb_mix: 干湿比（0..1；干声按声明延迟对齐）
+        mb_output_gain_db: 输出增益（dB）
+        mb_bands: 三段 (enabled/model/drive_db/tone_db/bias_pct/level_db)
     """
     drive: float = 0.0
     enabled: bool = True
+    model_profile: str = "legacy"
+    mb_xover_low_hz: float = 250.0
+    mb_xover_high_hz: float = 2500.0
+    mb_oversampling: int = 1
+    mb_mix: float = 1.0
+    mb_output_gain_db: float = 0.0
+    mb_bands: tuple = ()
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.drive <= 100.0):
             raise ValueError(f"drive must be in [0, 100]: {self.drive}")
+        if self.model_profile not in ("legacy", "multiband"):
+            raise ValueError(
+                f"model_profile must be 'legacy'|'multiband': "
+                f"{self.model_profile!r}")
 
     @staticmethod
     def default() -> "SaturationParams":
@@ -3158,13 +3179,62 @@ class SaturationParams:
         return {
             "drive": self.drive,
             "enabled": self.enabled,
+            "model_profile": self.model_profile,
+            "mb_xover_low_hz": self.mb_xover_low_hz,
+            "mb_xover_high_hz": self.mb_xover_high_hz,
+            "mb_oversampling": self.mb_oversampling,
+            "mb_mix": self.mb_mix,
+            "mb_output_gain_db": self.mb_output_gain_db,
+            "mb_bands": list(self.mb_bands),
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        data = dict(band) if isinstance(band, dict) else {}
+        model = str(data.get("model", "tape") or "tape").lower()
+        if model not in ("tape", "tube", "transistor"):
+            model = "tape"
+
+        def _num(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "enabled": bool(data.get("enabled", False)),
+            "model": model,
+            "drive_db": _num("drive_db", 0.0),
+            "tone_db": _num("tone_db", 0.0),
+            "bias_pct": _num("bias_pct", 0.0),
+            "level_db": _num("level_db", 0.0),
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "SaturationParams":
+        profile = str(data.get("model_profile", "legacy") or "legacy")
+        if profile not in ("legacy", "multiband"):
+            profile = "legacy"
+        raw_bands = data.get("mb_bands") or ()
+        bands = tuple(
+            SaturationParams._normalize_band(band)
+            for band in list(raw_bands)[:3])
+        while len(bands) < 3:
+            bands = bands + (SaturationParams._normalize_band({}),)
+        try:
+            oversampling = int(data.get("mb_oversampling", 1))
+        except (TypeError, ValueError):
+            oversampling = 1
         return SaturationParams(
             drive=float(data.get("drive", 0.0)),
             enabled=bool(data.get("enabled", True)),
+            model_profile=profile,
+            mb_xover_low_hz=float(data.get("mb_xover_low_hz", 250.0)),
+            mb_xover_high_hz=float(data.get("mb_xover_high_hz", 2500.0)),
+            mb_oversampling=oversampling if oversampling in (1, 2, 4) else 1,
+            mb_mix=float(data.get("mb_mix", 1.0)),
+            mb_output_gain_db=float(data.get("mb_output_gain_db", 0.0)),
+            mb_bands=bands,
         )
 
 
