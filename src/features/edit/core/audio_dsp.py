@@ -4512,3 +4512,91 @@ class MasterLimiter:
             guard = self._threshold / np.maximum(sample_peak, self._threshold)
             out = out * guard
         return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FX-12：环绕声像（ITU BS.775 扬声器方位角 + VBAP 扇区对增益）
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 工程选定扬声器水平角（度；0=正前，负=左）。LFE 不参加水平投影。
+_SURROUND_AZIMUTHS: Dict[int, Dict[str, Optional[float]]] = {
+    6: {"L": -30.0, "R": 30.0, "C": 0.0, "LFE": None,
+        "Ls": -110.0, "Rs": 110.0},
+    8: {"L": -30.0, "R": 30.0, "C": 0.0, "LFE": None,
+        "Ls": -110.0, "Rs": 110.0, "Lss": -90.0, "Rss": 90.0},
+}
+
+
+def surround_speaker_azimuths(channel_count: int) -> Dict[str, Optional[float]]:
+    """布局声道标签 → 水平方位角（LFE 为 None）。未支持的布局返回 {}。"""
+    labels = _SURROUND_AZIMUTHS.get(int(channel_count))
+    return dict(labels) if labels else {}
+
+
+def _pair_gains(left_deg: float, right_deg: float,
+                azimuth_deg: float) -> Tuple[float, float]:
+    """VBAP 扇区对增益：方向向量解非负权重，平方和归一（计划公式）。
+
+    目标方位在扇区外时抛 ``ValueError``（调用方负责角度回绕与退化
+    扇区）；LFE 不进入方向表。
+    """
+    left, right, target = (np.deg2rad(v) for v in
+                           (left_deg, right_deg, azimuth_deg))
+    speakers = np.array([[np.cos(left), np.cos(right)],
+                         [np.sin(left), np.sin(right)]])
+    gains = np.linalg.solve(speakers, [np.cos(target), np.sin(target)])
+    if gains.min() < -1e-9:
+        raise ValueError(
+            f"azimuth {azimuth_deg} outside speaker pair "
+            f"({left_deg}, {right_deg})")
+    gains = np.maximum(gains, 0.0)
+    norm = float(np.linalg.norm(gains))
+    if norm < 1e-9:
+        return 0.0, 0.0
+    return float(gains[0] / norm), float(gains[1] / norm)
+
+
+def surround_panner_gains(channel_count: int, azimuth_deg: float) -> np.ndarray:
+    """mono 源置于 ``azimuth_deg`` 的逐声道增益（顺序 = channel_labels）。
+
+    纯函数（引擎/测试/可视化共用）；LFE 恒 0；目标方位落在扬声器
+    方向本身 → 单声道命中；扇区中点 → 双扬声器等功率（平方和 1）。
+    """
+    table = surround_speaker_azimuths(channel_count)
+    if not table:
+        return np.zeros(int(channel_count), dtype=np.float64)
+    labels = list(table.keys())
+    gains = np.zeros(len(labels), dtype=np.float64)
+    # 候选扬声器（参与水平投影的）按方位角排序，取环绕目标的两邻居。
+    active = [(table[label], index) for index, label in enumerate(labels)
+              if table[label] is not None]
+    active.sort()
+    # 方向精确命中 → 单扬声器。
+    for angle, index in active:
+        if abs(angle - azimuth_deg) < 1e-6:
+            gains[index] = 1.0
+            return gains
+    # 扇区查找：目标在 (angle_i, angle_{i+1}) 内（含 ±180 回绕）。
+    count = len(active)
+    for i in range(count):
+        a0, i0 = active[i]
+        a1, i1 = active[(i + 1) % count]
+        span = a1 - a0
+        wrapped = span < 0
+        if wrapped:
+            span += 360.0
+        rel = (azimuth_deg - a0) % 360.0
+        if 0.0 < rel < span:
+            if wrapped:
+                g0, g1 = _pair_gains(a0, a1 + 360.0, azimuth_deg
+                                     if azimuth_deg >= a0
+                                     else azimuth_deg + 360.0)
+            else:
+                g0, g1 = _pair_gains(a0, a1, azimuth_deg)
+            gains[i0] = g0
+            gains[i1] = g1
+            return gains
+    # 未落入任何扇区（浮点边界）：最近扬声器兜底。
+    nearest = min(active, key=lambda entry: abs(entry[0] - azimuth_deg))
+    gains[nearest[1]] = 1.0
+    return gains
