@@ -1,0 +1,83 @@
+{
+  "audit_date": "2026-11-22",
+  "scope": "read-only synthetic probes; no media/device/project mutations",
+  "source_revision": "37dd3accd9048c2c88e83d0523bb62cf5e1fe6c2",
+  "source_state": "working tree including approved mixer UI changes",
+  "python": "3.12.14",
+  "numpy": "2.5.2",
+  "sample_rate": 48000,
+  "probes": {
+    "dag_pdc": {
+      "entry": "AudioGraphRenderer._recompute_pdc/render_bus_stage",
+      "fixture": "sample 100; dry->Master; wet->bus1(100)->bus2(200)->Master",
+      "observed_pulse_positions": [
+        100,
+        500
+      ],
+      "observed_declared_total_pdc_samples": 200,
+      "observed_node_padding_samples": {
+        "bus1": 100
+      },
+      "expected": "one aligned pulse at sample 400, amplitude 2.0",
+      "contract_satisfied": false
+    },
+    "automation_trim_export": {
+      "entry": "AudioGraphRenderer._TrackNode/render_track_block",
+      "input_amplitude": 0.5,
+      "model_trimmed_gain": 0.5,
+      "expected_output_amplitude": 0.25,
+      "observed_output_amplitude": 0.5,
+      "contract_satisfied": false
+    },
+    "delivery_qc_missing_measurements": {
+      "entry": "delivery_preset.evaluate_delivery",
+      "measurement": {
+        "FullMix": {
+          "integrated_lufs": -23.0
+        }
+      },
+      "missing_measurements": [
+        "true_peak_dbtp",
+        "peak_dbfs"
+      ],
+      "observed_findings": [],
+      "observed_passed": true,
+      "expected_passed": false,
+      "contract_satisfied": false
+    },
+    "audible_field_signatures": {
+      "entries": [
+        "EditPage._build_audio_timeline_signature",
+        "AudioGraphSnapshot.stable_hash"
+      ],
+      "live_signature_changed": {
+        "send_tap": false,
+        "send_muted": false,
+        "automation_trim": false,
+        "vca_gain": false,
+        "clip_gain_control": true
+      },
+      "snapshot_hash_changed": {
+        "send_tap": false,
+        "send_muted": false,
+        "automation_trim": false,
+        "vca_gain": false,
+        "clip_gain_control": false
+      },
+      "expected": "every independently audible field changes both signatures",
+      "contract_satisfied": false,
+      "scope_note": "snapshot currently acts mainly as a validation gate; do not replace the live signature with its hash yet"
+    },
+    "vca_with_read_volume_automation": {
+      "entry": "AudioMixer.mix_samples volume_ramp versus VCA factor",
+      "input_amplitude": 0.5,
+      "vca_linear_factor": 0.5,
+      "volume_automation_value": 1.0,
+      "observed_without_volume_automation": 0.25,
+      "observed_with_read_volume_automation": 0.5,
+      "expected_output_amplitude_in_both_cases": 0.25,
+      "contract_satisfied": false
+    }
+  },
+  "interpretation": "Unmet contracts are backend roadmap tasks. This probe deliberately does not repair production code."
+}

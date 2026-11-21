@@ -30,6 +30,7 @@ from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
 from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
+from src.features.edit.ui.edit_properties_panel import EditPropertiesPanel
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel, ViewMode
 from src.features.edit.ui.program_viewer import ProgramViewerWidget
@@ -59,12 +60,12 @@ class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin,
         self.timeline_panel = TimelinePanel()
         self.program_viewer_widget = ProgramViewerWidget()
         self.edit_viewport = EditViewport(self.program_viewer_widget, SourceViewerWidget())
-        self.edit_properties_panel = QWidget()
+        self.edit_properties_panel = EditPropertiesPanel()
         self.media_pool_panel = MediaPoolPanel(self)
         self.media_pool_panel.hide()
         self.edit_effects_panel = EditEffectsPanel()
         self.status_bar = self.statusBar()
-        self.edit_page = SimpleNamespace(_current_timeline=None, _audio_manager=None)
+        self.edit_page = SimpleNamespace(_current_timeline=None, _audio_manager=None, _fps=24.0)
         self.dock_audio_mixer = self.make_dock("Audio Mixer", self.audio_mixer_panel, "editMixer")
         self.dock_program_viewer = self.make_dock("Viewport", self.edit_viewport, "programViewer")
         self.dock_edit_timeline = self.make_dock("Timeline", self.timeline_panel, "editTimeline")
@@ -94,6 +95,8 @@ class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin,
         panel.add_bus_requested.connect(self._on_mixer_add_bus_requested)
         panel.recording_settings_requested.connect(self._on_mixer_recording_settings)
         self.timeline_panel.timeline_view.timeline_changed.connect(self.sync_timeline)
+        self.edit_properties_panel.clips_param_batch_changed.connect(self._on_edit_clips_param_batch_changed)
+        self.edit_properties_panel.effect_open_dialog_requested.connect(self._on_edit_effect_open_dialog_requested)
 
         split = QAction("Split", self)
         split.setShortcut(QKeySequence("Ctrl+Shift+X"))
@@ -111,6 +114,8 @@ class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin,
 
     def sync_timeline(self, timeline: TimelineSequence) -> None:
         self.edit_page._current_timeline = timeline
+        self._restore_properties_panel_from_timeline(
+            timeline, [clip.clip_id for clip in self.edit_properties_panel._current_clips])
         self._sync_audio_mixer_from_current_timeline()
 
     def show_mixer(self) -> None:
@@ -161,7 +166,7 @@ def test_volume_and_insert_rack_share_commands_across_workspaces(project_host, q
     assert host.edit_viewport.parentWidget() is host.dock_audio_viewer.widget()
     assert host.edit_viewport.source_pane.isHidden()
     assert not host.edit_viewport.program_pane.isHidden()
-    assert host.edit_properties_panel.parentWidget() is host.dock_properties
+    assert host.edit_properties_panel.parentWidget() is host.dock_audio_properties.widget()
     assert strip._effect_list.count() == panel._master_mixer._effect_list.count() == 1
     assert strip._eq_badge.isHidden()
     assert strip.width() == panel._master_mixer.width() == 96
@@ -867,15 +872,22 @@ def test_project_mixer_factory_positions_console_left_and_timeline_below(project
     assert host._seed_audio_workspace_layout()
     assert host.restoreState(host.page_layouts["Mixer"])
     host.show_mixer()
-    console, viewer, timeline, _, pool, effects = host._audio_workspace_docks()
+    console, viewer, timeline, _, pool, effects, properties = host._audio_workspace_docks()
     qtbot.waitUntil(lambda: all(not dock.visibleRegion().isEmpty()
-                                for dock in (console, viewer, timeline, effects)))
-    assert pool in host.tabifiedDockWidgets(effects)
-    assert console.geometry().right() < effects.geometry().left() < viewer.geometry().left()
+                                for dock in (console, viewer, timeline, pool, properties)))
+    assert effects.isHidden()
+    assert console.geometry().right() < pool.geometry().left() < viewer.geometry().left()
+    assert host.dockWidgetArea(properties) == Qt.DockWidgetArea.RightDockWidgetArea
+    assert 280 <= properties.width() <= 400
     assert host.dockWidgetArea(effects) == Qt.DockWidgetArea.TopDockWidgetArea
     assert console.geometry().bottom() < timeline.geometry().top()
-    assert timeline.width() == host.width()
+    assert timeline.geometry().right() < properties.geometry().left()
     pool_shortcut = DockTabAction(pool, host)
+    pool_shortcut.sync()
+    assert pool_shortcut.isChecked()
+    effects.show()
+    effects.raise_()
+    assert pool in host.tabifiedDockWidgets(effects)
     pool_shortcut.sync()
     assert not pool_shortcut.isChecked()
     pool_shortcut.trigger()
@@ -904,7 +916,7 @@ def test_older_mixer_layout_moves_library_and_preserves_foreground_tab(
     assert host._seed_audio_workspace_layout()
     assert host.restoreState(host.page_layouts["Mixer"])
     host.show_mixer()
-    console, viewer, timeline, editor, pool, effects = host._audio_workspace_docks()
+    console, viewer, timeline, editor, pool, effects, _ = host._audio_workspace_docks()
     if library_below:
         host.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, effects)
     else:
@@ -929,6 +941,7 @@ def test_older_mixer_layout_moves_library_and_preserves_foreground_tab(
     monkeypatch.setattr(host, "_save_current_layout_to_store", lambda _page: None)
     host._migrate_mixer_media_docks_layout()
     qtbot.waitUntil(lambda: not pool.visibleRegion().isEmpty())
+    qtbot.waitUntil(lambda: console.geometry().right() < pool.geometry().left() < viewer.geometry().left())
     assert host.dockWidgetArea(effects) == Qt.DockWidgetArea.TopDockWidgetArea
     assert not pool.visibleRegion().isEmpty() and effects.visibleRegion().isEmpty()
     assert effects.isHidden() is hide_effects
@@ -1164,7 +1177,9 @@ def test_mixer_ignores_removed_output_in_saved_layout(project_host, qtbot, float
     old_output.hide()
     old_output.setParent(None)
     assert host.restoreState(state)
-    qtbot.waitUntil(lambda: timeline.width() == host.width())
+    properties = host.dock_audio_properties
+    qtbot.waitUntil(lambda: timeline.geometry().right() < properties.geometry().left()
+                   and timeline.width() >= host.width() - properties.width() - 12)
     assert editor in host.tabifiedDockWidgets(timeline)
     assert host.findChild(QDockWidget, "dockAudioMasterOutput") is None
 
@@ -1875,6 +1890,34 @@ def test_sends_are_reachable_from_track_menu(project_host: ProjectHost, monkeypa
     monkeypatch.setattr(QMenu, "exec", choose_routing)
     strip._on_label_context_menu(QPoint())
     assert requested == ["audio-track"]
+
+
+def test_routing_overview_opens_owned_editor_and_shares_timeline_history(
+    project_host: ProjectHost, qtbot: QtBot,
+) -> None:
+    host = project_host
+    panel = host.audio_mixer_panel
+    view = host.timeline_panel.timeline_view
+    panel.add_bus_requested.emit()
+    bus = next(track for track in view.get_timeline().audio_tracks if track.is_bus)
+    host.show_mixer()
+    panel.track_show_routing.connect(host._on_mixer_show_routing)
+    qtbot.mouseClick(panel.routing_overview_button, Qt.MouseButton.LeftButton)
+    overview = panel._routing_overview
+    overview.table.selectRow(0)
+    qtbot.mouseClick(overview.edit_button, Qt.MouseButton.LeftButton)
+    editor = host._routing_dialog
+    assert editor.parentWidget() is host
+    assert editor.isVisible()
+    index = editor._output_combo.findData(bus.track_id)
+    editor._output_combo.setCurrentIndex(index)
+    assert view.get_timeline().get_track_by_id("audio-track").output_bus_id == bus.track_id
+    assert overview.table.item(0, 2).text() == bus.name
+    editor.close()
+    view.undo()
+    assert view.get_timeline().get_track_by_id("audio-track").output_bus_id is None
+    assert overview.table.item(0, 2).text() == I18N.tr("audio.mixer.master", "Master")
+    overview.close()
 
 
 @pytest.mark.parametrize("narrow", [False, True], ids=["standard", "compact"])

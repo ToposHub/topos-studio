@@ -495,6 +495,8 @@ class PageManagementMixin:
         if page_name == "Mixer" and hasattr(self, "_migrate_mixer_media_docks_layout"):
             # Place added Mixer panels once after the saved Qt layout is restored.
             schedule(0, self._migrate_mixer_media_docks_layout)
+        if page_name == "Mixer" and hasattr(self, "_migrate_mixer_properties_layout"):
+            schedule(0, self._migrate_mixer_properties_layout)
         if page_name == "Deliver" and hasattr(self, "_migrate_deliver_layout"):
             # Old Deliver layouts had a separate queue dock and could restore
             # the settings dock at a collapsed width.  The queue now lives

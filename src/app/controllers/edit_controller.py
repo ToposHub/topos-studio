@@ -41,7 +41,7 @@ from fractions import Fraction
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional
 
-from PyQt6.QtWidgets import QMessageBox, QFileDialog
+from PyQt6.QtWidgets import QMessageBox, QFileDialog, QWidget
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QPixmap
 
@@ -2463,6 +2463,10 @@ class EditControllerMixin:
 
         track_id = clip.track_id
 
+        if param_type == "audio_clip":
+            self._on_edit_clips_param_batch_changed([(clip_id, param_type, param_path, value)])
+            return
+
         # A1: 混合模式切换 → SetClipBlendModeCommand（多选时批量作用于所选片段）
         if param_type == "blend_mode":
             from src.features.edit.core.commands import SetClipBlendModeCommand
@@ -2722,6 +2726,9 @@ class EditControllerMixin:
                 "is_solo": bool(getattr(track, 'is_solo', False)),
                 "is_bus": getattr(track, "is_bus", False),
                 "output_bus_id": getattr(track, "output_bus_id", None),
+                "sends": [{"target_bus_id": send.target_bus_id, "level": send.level,
+                           "enabled": send.enabled, "muted": send.muted, "tap": send.tap}
+                          for send in (getattr(track, "sends", ()) or ())],
                 # W8: Strip EQ 参数（None=禁用）
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
@@ -4745,6 +4752,12 @@ class EditControllerMixin:
 
     # ── AM-08 阶段 4.2: Routing UI ──
 
+    @staticmethod
+    def _mixer_routing_sequence(view: Any) -> Any:
+        """Read the canonical view API; retain older host adapters' property."""
+        getter = getattr(view, "get_timeline", None)
+        return getter() if callable(getter) else getattr(view, "timeline", None)
+
     def _on_mixer_show_routing(self, track_id: str) -> None:
         """AM-08 阶段 4.2: 打开 Routing 对话框。
 
@@ -4754,9 +4767,8 @@ class EditControllerMixin:
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
         if tview is None:
             return
-        try:
-            sequence = tview.timeline
-        except Exception:
+        sequence = EditControllerMixin._mixer_routing_sequence(tview)
+        if sequence is None:
             return
         track = sequence.get_track_by_id(track_id) if hasattr(sequence, 'get_track_by_id') else None
         if track is None:
@@ -4815,7 +4827,7 @@ class EditControllerMixin:
             output_bus_id=getattr(track, "output_bus_id", None),
             sends=getattr(track, "sends", ()) or (),
             bus_tracks=bus_tracks,
-            parent=self.window if hasattr(self, "window") else None,
+            parent=tview.window() if isinstance(tview, QWidget) else None,
             routing_snapshot=routing_snapshot,
         )
         dialog.routing_committed.connect(self._on_mixer_routing_committed)
@@ -4889,7 +4901,7 @@ class EditControllerMixin:
         new_sends = payload.get("sends", []) or []
 
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
-        sequence = getattr(tview, 'timeline', None) if tview is not None else None
+        sequence = EditControllerMixin._mixer_routing_sequence(tview)
         if sequence is None:
             return
         try:
@@ -4969,7 +4981,7 @@ class EditControllerMixin:
         tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
         if tview is None:
             return
-        sequence = getattr(tview, 'timeline', None)
+        sequence = EditControllerMixin._mixer_routing_sequence(tview)
         if sequence is None:
             return
 
@@ -5007,7 +5019,7 @@ class EditControllerMixin:
                 cmd = SetTrackOutputBusCommand.create(track_id, output_bus_id)
                 tview._execute_command(cmd)
                 # 重新获取 track（命令执行后 timeline 已变）
-                track = tview.timeline.get_track_by_id(track_id)
+                track = EditControllerMixin._mixer_routing_sequence(tview).get_track_by_id(track_id)
 
             # sends diff：以 target_bus_id 为 key 比较（简化：整体替换）
             old_sends = {s.target_bus_id: s for s in (track.sends or ())}
@@ -5019,7 +5031,7 @@ class EditControllerMixin:
                     cmd = RemoveSendCommand.create(track_id, old_s.send_id)
                     tview._execute_command(cmd)
             # 重新获取
-            track = tview.timeline.get_track_by_id(track_id)
+            track = EditControllerMixin._mixer_routing_sequence(tview).get_track_by_id(track_id)
             old_sends = {s.target_bus_id: s for s in (track.sends or ())}
 
             # 添加新的 + 更新已变化的（MX-14: tap/muted 参与 diff 与提交）
@@ -5299,6 +5311,33 @@ class EditControllerMixin:
             clip = timeline.get_clip_by_id(clip_id)
             if clip is None:
                 continue
+            if group == "audio_clip":
+                from src.features.edit.core.commands import SetClipAudioGainCommand, UpdateClipSampleFieldsCommand
+                from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+
+                track = timeline.get_track_by_id(clip.track_id)
+                if track is None or track.track_type != "audio":
+                    return
+                if path == "gain_db":
+                    gain = max(-48.0, min(12.0, float(value)))
+                    if gain != clip.audio_gain_db:
+                        commands.append(SetClipAudioGainCommand.create((clip_id,), gain))
+                elif path in ("fade_in_ms", "fade_out_ms"):
+                    samples = round(max(0.0, min(float(value), clip.timeline_duration / float(timeline.fps) * 1000.0))
+                                    / 1000.0 * AUDIO_REFERENCE_SAMPLE_RATE)
+                    field = "fade_in_samples" if path == "fade_in_ms" else "fade_out_samples"
+                    if samples != getattr(clip, field):
+                        commands.append(UpdateClipSampleFieldsCommand.create(clip.track_id, clip, **{field: samples}))
+                elif path == "reset":
+                    if clip.effective_fade_in_frames(float(timeline.fps)) or clip.effective_fade_out_frames(float(timeline.fps)):
+                        commands.append(UpdateClipSampleFieldsCommand.create(
+                            clip.track_id, clip, fade_in_samples=0, fade_out_samples=0))
+                    if clip.audio_gain_db != 0.0:
+                        commands.append(SetClipAudioGainCommand.create((clip_id,), 0.0))
+                else:
+                    return
+                batch_clip_ids.append(clip_id)
+                continue
             if group == "speed" and ChangeClipSpeedCommand is not None:
                 current_speed = (
                     clip.speed if isinstance(clip.speed, SpeedParams)
@@ -5502,8 +5541,11 @@ class EditControllerMixin:
                 if gp is not None:
                     generator_params = gp
         try:
+            timeline = getattr(self.edit_page, "_current_timeline", None)
+            track = timeline.get_track_by_id(clip.track_id) if timeline is not None else None
             self.edit_properties_panel.set_clip(
                 clip, self.edit_page._fps,
+                track=track,
                 media_type=media_type, solid_color=solid_color,
                 generator_params=generator_params,
             )
@@ -6846,6 +6888,13 @@ class EditControllerMixin:
         if clip is None:
             return
         if getattr(self, "current_page", None) == "Mixer":
+            view = self._edit_timeline_view()
+            selection_classes = get_selection_classes()
+            if view is not None and selection_classes is not None:
+                view.set_selection(selection_classes["TimelineSelection"]().with_clip_selected(
+                    clip.clip_id, clip.track_id, timeline.timeline_id))
+            self._show_clip_in_properties(clip)
+            self.edit_properties_panel.scroll_to_effect(effect_id)
             effect = clip.get_effect_by_id(effect_id)
             if effect is not None:
                 self._on_edit_effect_open_dialog_requested(clip_id, effect_id, effect.effect_type)
@@ -7813,7 +7862,13 @@ class EditControllerMixin:
             ) if c is not None
         ]
         if not clips:
+            clear = getattr(panel, "clear", None)
+            if callable(clear):
+                clear()
             return
+        update_tracks = getattr(panel, "update_clip_tracks", None)
+        if callable(update_tracks):
+            update_tracks([timeline.get_track_by_id(clip.track_id) for clip in clips])
         update_clips = getattr(panel, 'update_clips', None)
         if callable(update_clips):
             update_clips(clips)

@@ -257,6 +257,8 @@ class RotaryKnob(QWidget):
 # 4. 自定义控件: LevelMeter (立体声电平表 + 峰值保持 + 压缩衰减 GR 表)
 # ============================================================================
 class LevelMeter(QWidget):
+    peakReset = pyqtSignal()
+
     def __init__(self, stereo: bool = True, show_gr: bool = True, parent=None):
         super().__init__(parent)
         self.stereo = stereo
@@ -335,12 +337,14 @@ class LevelMeter(QWidget):
 
         return changed
 
-    def reset_clip(self):
+    def reset_clip(self) -> None:
         self.clipped_l = False
         self.clipped_r = False
         self.peak_l = self.level_l
         self.peak_r = self.level_r
+        self._hold_ticks_l = self._hold_ticks_r = 0
         self.update()
+        self.peakReset.emit()
 
     def clear_levels(self) -> None:
         self.level_l = self.level_r = -60.0

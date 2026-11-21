@@ -251,6 +251,7 @@ class WorkspacePanelBar(QToolBar):
         group("Mixer", "activity", "", "dock_audio_clip_editor", right=True, foreground_tab=True)
         group("Mixer", "folder-open", "", "dock_audio_media_pool", foreground_tab=True)
         group("Mixer", "waves", "", "dock_audio_effects", foreground_tab=True)
+        group("Mixer", "sliders-horizontal", "", "dock_audio_properties", right=True)
         deliver_page = getattr(window, "deliver_page", None)
         queue = getattr(deliver_page, "render_queue_visibility_action", None)
         if isinstance(queue, QAction):
