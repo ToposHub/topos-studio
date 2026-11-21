@@ -14,6 +14,10 @@ from unittest.mock import MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from src.features.composite.core.node_engine import NodeGraph
 from src.features.composite.core.layer_stack_controller import LayerStackController
@@ -126,6 +130,46 @@ def test_timeline_side_maps_media_drop_to_layer_insert(qapp):
     assert calls[0][1] in (0, 1)
 
 
+@pytest.mark.parametrize("surface", ["_tree_view", "_timeline_view"])
+@pytest.mark.parametrize("extension, accepted", [("png", True), ("mov", True),
+                                                 ("obj", True), ("wav", False)])
+def test_empty_layer_canvas_accepts_supported_local_drops(
+    qtbot, surface: str, extension: str, accepted: bool,
+) -> None:
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_view_mode(KeyframesModel.VIEW_MODE_LAYERS)
+    panel.set_composition_active(False)
+    calls = []
+    panel.set_media_drop_handler(lambda mime, target, index: calls.append((target, index)) or True)
+    panel.resize(900, 310)
+    panel.show()
+
+    canvas = getattr(panel, surface)
+    assert canvas.isEnabled() and canvas.acceptDrops()
+    assert not panel._toolbar.isEnabled()
+    assert panel.findChild(QWidget, "KeyframesEmptyStateOverlay") is None
+    if surface == "_timeline_view":
+        QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=QPoint(150, 24))
+        assert panel._state.current_frame == 0
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(f"/tmp/drop/first.{extension}")])
+    pos = QPoint(40, 80)
+    event_args = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                  Qt.KeyboardModifier.NoModifier)
+    enter = QDragEnterEvent(pos, *event_args)
+    QApplication.sendEvent(canvas, enter)
+    assert enter.isAccepted() is accepted
+    if accepted:
+        drop = QDropEvent(QPointF(pos), *event_args)
+        QApplication.sendEvent(canvas, drop)
+        assert drop.isAccepted()
+        assert calls == [(None, 0)]
+    else:
+        assert not calls
+
+
 def test_node_material_delete_removes_layer_transform_merge_and_undoes(qapp):
     """Node-mode deletion reverse-syncs the Layers panel in one undo step."""
     page = CompositePage()
@@ -224,7 +268,7 @@ def test_keyframes_panel_registered():
     reg = _fresh_registry_with_composite()
     desc = reg.get("composite.keyframes")
     assert desc is not None
-    assert desc.fallback_title == "Keyframes"
+    assert desc.fallback_title == "Layer Timeline"
     assert desc.dock_attr == "dock_composite_keyframes"
     assert desc.category == "Composite"
     assert "Composite" in desc.page_ids

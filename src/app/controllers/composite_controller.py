@@ -34,6 +34,7 @@ composite page switching, and composite graph/state data retrieval.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from dataclasses import replace
@@ -94,6 +95,78 @@ class CompositeControllerMixin:
     Intended to be mixed into MainWindow so that all ``self.*`` attribute
     references resolve against the MainWindow instance.
     """
+
+    def _create_comp_clip_from_media_drop(self, mime_data: object) -> bool:
+        """Publish the clip and its first media batch together."""
+        from src.features.composite.core.media_drop_payload import (
+            MEDIA_TYPE_VIDEO, resolve_drop_payloads,
+        )
+        from src.shared.media.format_registry import get_media_type
+        from src.shared.project.composition_merge import merge_composition_record
+
+        page = getattr(self, "composite_page", None)
+        if page is None or not self._composite_available or page.has_active_composition():
+            return False
+        payloads = [payload for payload in resolve_drop_payloads(mime_data, project=self._current_edit_project)
+                    if get_media_type(payload.path) in ("image", "video", "model")]
+        if not payloads:
+            return False
+        if self._current_edit_project is None and not self._ensure_edit_project():
+            return False
+        project = self._current_edit_project
+        if project is None:
+            return False
+
+        primary = next((media for media in payloads if media.width > 0 and media.height > 0), None)
+        width, height = (primary.width, primary.height) if primary is not None else (1920, 1080)
+        videos = [media for media in payloads if media.media_type == MEDIA_TYPE_VIDEO]
+        fps = 24.0
+        for media in videos:
+            try:
+                rate = float(media.extras.get("fps", 0))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(rate) and rate > 0:
+                fps = rate
+                break
+        # Video nodes currently advance one source frame per composition frame.
+        duration = max((media.duration for media in videos if media.duration > 0), default=round(10 * fps))
+
+        try:
+            staged, _, _, graph_id = project.create_empty_comp_clip(
+                name=project.next_comp_clip_name(),
+                width=width, height=height,
+                fps=fps, duration_frames=max(1, duration), background_color=(0.0, 0.0, 0.0, 0.0),
+            )
+            empty_graph = staged.compositions[graph_id]
+            before, graph_data = page.build_initial_media_graph(empty_graph, payloads)
+            populated = merge_composition_record(empty_graph, graph_data, graph_id)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            logger.warning("Could not create a composition from the media drop", exc_info=True)
+            return False
+
+        previous_id = getattr(self, "_current_composite_id", "")
+        self._current_edit_project = replace(staged, compositions={**staged.compositions, graph_id: populated})
+        try:
+            self._switch_to_composite_page(graph_id)
+            if not page.has_active_composition():
+                raise RuntimeError("The newly created composition could not be opened")
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            self._current_edit_project = project
+            self._current_composite_id = previous_id
+            page.set_edit_project(project)
+            page.reset_to_empty_workspace()
+            logger.warning("Could not open the dropped-media composition", exc_info=True)
+            return False
+
+        page.set_edit_project(self._current_edit_project)
+        self.edit_project_dirty = True
+        media_pool = getattr(self, "media_pool_panel", None)
+        if media_pool is not None:
+            media_pool.set_project(self._current_edit_project)
+        page.record_external_composite_edit(before, populated)
+        self._refresh_edit_preview_after_composite_change()
+        return True
 
     def _prepare_composite_data_for_open(
         self, composite_id: str, composite_data: object

@@ -1117,7 +1117,8 @@ def _restore_graph_in_place(graph: Any, data: dict[str, Any]) -> None:
 
     restored = NodeGraph.from_dict(data)
     # 保留原 graph 上的锁、渲染缓存和 expression manager，只替换持久化状态。
-    for key in ("nodes", "connections", "backdrops", "_sticky_notes", "_node_groups", "_viewport_state", "_viewer_state"):
+    for key in ("nodes", "connections", "backdrops", "_sticky_notes", "_node_groups",
+                "_viewport_state", "_viewer_state", "_layer_stacks", "_layers", "fps", "duration_frames"):
         setattr(graph, key, getattr(restored, key))
     # from_dict 把恢复节点绑定到了临时 restored graph 上：GroupNode 的
     # 子图求值引用必须指回存活对象，否则组求值永远走空缓存（直通）。

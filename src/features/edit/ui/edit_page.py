@@ -3203,7 +3203,7 @@ class EditPage(QWidget):
 
         viewer = self._source_viewer
         asset = getattr(viewer, "current_asset", None) if viewer else None
-        if asset is None:
+        if asset is None or getattr(viewer, "preview_only", False):
             return
         project = None
         if self._main_window is not None:
@@ -3355,7 +3355,7 @@ class EditPage(QWidget):
         Returns:
             (asset_id, in_frame, out_frame) or (None, None, None) if unavailable.
         """
-        if self._source_viewer is None:
+        if self._source_viewer is None or getattr(self._source_viewer, "preview_only", False):
             logger.warning("Source edit: no source viewer")
             return (None, None, None)
         asset = self._source_viewer.current_asset
@@ -3380,7 +3380,8 @@ class EditPage(QWidget):
         if self._timeline_panel is None or self._source_viewer is None:
             return
         can_edit = (
-            self._source_viewer.in_point is not None
+            not getattr(self._source_viewer, "preview_only", False)
+            and self._source_viewer.in_point is not None
             and self._source_viewer.out_point is not None
             and self._source_viewer.in_point <= self._source_viewer.out_point
         )

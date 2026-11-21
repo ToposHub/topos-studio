@@ -58,6 +58,62 @@ def test_old_saved_splitter_state_cannot_restore_wide_gutter(qapp, qtbot) -> Non
     assert splitter.sizes()[0] < splitter.sizes()[1]
 
 
+def test_opt_in_resize_grip_adds_visible_drag_target(qapp: QApplication, qtbot: QtBot) -> None:
+    splitter = PanelSplitter(Qt.Orientation.Horizontal)
+    qtbot.addWidget(splitter)
+    splitter.setStyleSheet(DARK_THEME)
+    splitter.addWidget(QWidget())
+    splitter.addWidget(QWidget())
+    splitter.resize(400, 300)
+    splitter.show()
+    qapp.processEvents()
+    handle = splitter.handle(1)
+    old_width = handle.width()
+    old_state = splitter.saveState()
+
+    splitter.set_resize_grip(True)
+    assert splitter.restoreState(old_state)
+    qapp.processEvents()
+    assert splitter.handleWidth() > PANEL_RULE_WIDTH
+    assert handle.width() > old_width
+    assert handle.cursor().shape() == Qt.CursorShape.SplitHCursor
+
+    image = _render(handle)
+    center = handle.contentsRect().center()
+    assert image.pixelColor(center).name() == C.TEXT_HINT
+    assert image.pixelColor(center.x(), center.y() - 14).name() == C.PANEL_DIVIDER
+    assert image.pixelColor(center.x() - 3, center.y()).name() == C.BG_PANEL
+
+    before = splitter.sizes()
+    press = QPoint(1, handle.height() // 2)
+    assert splitter.childAt(handle.mapTo(splitter, press)) is handle
+    qtbot.mousePress(handle, Qt.MouseButton.LeftButton, pos=press)
+    qtbot.mouseMove(handle, pos=press + QPoint(30, 0))
+    qtbot.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=press + QPoint(30, 0))
+    assert splitter.sizes()[0] > before[0]
+
+    splitter.set_resize_grip(False)
+    assert splitter.handleWidth() == PANEL_RULE_WIDTH
+
+
+def test_composite_exposes_only_its_layers_splitter_grip(qapp: QApplication, qtbot: QtBot) -> None:
+    from src.features.composite.ui.keyframes_model import KeyframesModel
+    from src.features.composite.ui.keyframes_panel import KeyframesPanel
+
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    other = PanelSplitter()
+    qtbot.addWidget(other)
+    assert panel._splitter.handleWidth() == PANEL_RULE_WIDTH
+
+    panel.set_layer_view_mode(KeyframesModel.VIEW_MODE_LAYERS)
+    assert panel._splitter.handleWidth() > PANEL_RULE_WIDTH
+    assert panel._right_splitter.handleWidth() == other.handleWidth() == PANEL_RULE_WIDTH
+
+    panel.set_layer_view_mode(KeyframesModel.VIEW_MODE_NODES)
+    assert panel._splitter.handleWidth() == PANEL_RULE_WIDTH
+
+
 def test_nested_rules_join_and_follow_native_drag(qapp, qtbot) -> None:
     outer = PanelSplitter(Qt.Orientation.Vertical)
     qtbot.addWidget(outer)

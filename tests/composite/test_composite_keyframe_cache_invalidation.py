@@ -83,6 +83,42 @@ def test_time_range_node_needs_frame_in_scheduler_and_evaluator():
     assert _node_needs_frame_cache(ns) is True
 
 
+def test_changed_time_gate_dirties_downstream_at_same_playhead():
+    from src.features.composite.core.layer_model import Layer, LayerStack
+
+    graph, source, effect, output = _animated_graph()
+    graph.set_layer_stack(LayerStack(stack_id="main", name="Main",
+                                     output_node_id=output.id))
+    layer = Layer(layer_id="layer", name="Layer", root_node_id=source.id)
+    graph.upsert_layer("main", layer)
+    scheduler = RenderScheduler()
+    scheduler.plan(graph.snapshot(frame_number=5))
+
+    layer.in_frame = 10
+    graph.bump_generation()
+    plan = scheduler.plan(graph.snapshot(frame_number=5))
+
+    assert {source.id, effect.id, output.id} <= set(plan.dirty_node_ids)
+
+
+def test_video_cache_key_changes_when_the_bar_moves_at_same_playhead():
+    from unittest.mock import MagicMock
+    from src.features.composite.nodes.video_frame_node import VideoFrameNode
+    from src.features.composite.render.cache_manager import CacheManager
+
+    graph = NodeGraph()
+    video = VideoFrameNode()
+    graph.add_node(video)
+    video.time_range = {"comp_start": 4, "comp_end": 20}
+    before = graph.snapshot(frame_number=8).nodes[video.id]
+    video.time_range = {"comp_start": 6, "comp_end": 22}
+    after = graph.snapshot(frame_number=8).nodes[video.id]
+    cache = CacheManager(MagicMock())
+    for mode in ("preview", "export"):
+        assert (cache.compute_key(before, {}, render_mode=mode, frame_number=8)
+                != cache.compute_key(after, {}, render_mode=mode, frame_number=8))
+
+
 def test_context_animated_node_needs_frame_in_scheduler_and_evaluator():
     """Node-declared context animation must invalidate on playhead moves."""
     from src.features.composite.nodes.text_node import TextNode

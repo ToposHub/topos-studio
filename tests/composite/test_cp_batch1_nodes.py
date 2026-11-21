@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from src.features.composite.core.format import BBox
 from src.features.composite.core.node_engine import NODE_REGISTRY, NODE_CATEGORIES
 from src.features.composite.nodes.base_node import TextureResult
-from src.features.composite.nodes.blend_node import BLEND_MODES
+from src.features.composite.core.layer_model import LAYER_MERGE_MATTE_PARAM, LAYER_MERGE_OWNER_PARAM
+from src.features.composite.nodes.blend_node import BLEND_MODES, MergeNode
 
 pytestmark = pytest.mark.composite_core
 
@@ -239,6 +240,77 @@ class TestBlendNewModesGPU(_GLHarness):
         # 预乘域：0.5*0.4 + 0 = 0.2（两路各按自身 alpha 贡献）
         assert np.allclose(got[:, :, 0], 0.2, atol=1e-3)
         assert np.allclose(got[:, :, 2], 0.2, atol=1e-3)
+
+
+class TestManagedLayerMergeGPU(_GLHarness):
+    @pytest.mark.parametrize("background", [None, (0.0, 0.0, 1.0, 1.0)])
+    def test_opacity_and_matte_each_apply_once(self, harness, qapp, background):
+        merge = MergeNode()
+        merge.set_parameter(LAYER_MERGE_OWNER_PARAM, "foreground")
+        merge.set_parameter(LAYER_MERGE_MATTE_PARAM, True)
+        merge.set_parameter("mask_channel", "alpha")
+        merge.set_parameter("opacity", 0.5)
+        foreground = np.full((_H, _W, 4), (1.0, 0.0, 0.0, 1.0), dtype=np.float32)
+        matte = np.full((_H, _W, 4), (0.0, 0.0, 0.0, 0.5), dtype=np.float32)
+        inputs = {"A": self._upload(harness, foreground), "mask": self._upload(harness, matte)}
+        expected = (0.25, 0.0, 0.0, 0.25)
+        if background is not None:
+            inputs["B"] = self._upload(harness, np.full((_H, _W, 4), background, dtype=np.float32))
+            expected = (0.25, 0.0, 0.75, 1.0)
+
+        marker = merge.evaluate(inputs, harness.ctx, harness.fb_manager)
+        output = harness._dispatch_merge_effect(marker)
+        assert np.allclose(self._read(harness, output["result"]), expected, atol=1e-4)
+
+    @pytest.mark.parametrize("offset", [0, 3])
+    def test_small_matte_keeps_its_canvas_bounds_and_pixel_centers(self, harness, qapp, offset):
+        merge = MergeNode()
+        merge.set_parameter(LAYER_MERGE_OWNER_PARAM, "foreground")
+        merge.set_parameter(LAYER_MERGE_MATTE_PARAM, True)
+        merge.set_parameter("mask_channel", "alpha")
+        foreground = np.full((_H, _W, 4), (1.0, 0.0, 0.0, 1.0), dtype=np.float32)
+        background = np.full((_H, _W, 4), (0.0, 0.0, 1.0, 1.0), dtype=np.float32)
+        matte_width = _W // 2
+        matte = np.ones((_H, matte_width, 4), dtype=np.float32)
+        matte[:, 0, 3] = 0.5
+        matte_input = self._upload(harness, matte).with_updates(
+            bbox=BBox(x=offset, y=0, width=matte_width, height=_H))
+        marker = merge.evaluate(
+            {"A": self._upload(harness, foreground), "B": self._upload(harness, background),
+             "mask": matte_input},
+            harness.ctx, harness.fb_manager)
+        output = harness._dispatch_merge_effect(marker)
+
+        expected = background.copy()
+        expected[:, offset:offset + matte_width] = foreground[:, :matte_width]
+        expected[:, offset] = (0.5, 0.0, 0.5, 1.0)
+        assert np.allclose(self._read(harness, output["result"]), expected, atol=1e-4)
+
+    @pytest.mark.parametrize("premultiplied", [False, True])
+    def test_luma_matte_matches_in_straight_and_premultiplied_inputs(self, harness, qapp, premultiplied):
+        merge = MergeNode()
+        merge.set_parameter(LAYER_MERGE_OWNER_PARAM, "foreground")
+        merge.set_parameter(LAYER_MERGE_MATTE_PARAM, True)
+        foreground = np.full((_H, _W, 4), (1.0, 0.0, 0.0, 1.0), dtype=np.float32)
+        rgb = 0.25 if premultiplied else 1.0
+        matte = np.full((_H, _W, 4), (rgb, rgb, rgb, 0.25), dtype=np.float32)
+        matte_input = self._upload(harness, matte).with_updates(alpha_premultiplied=premultiplied)
+        marker = merge.evaluate({"A": self._upload(harness, foreground), "mask": matte_input},
+                                harness.ctx, harness.fb_manager)
+        output = harness._dispatch_merge_effect(marker)
+        assert np.allclose(self._read(harness, output["result"]), (0.25, 0.0, 0.0, 0.25), atol=1e-4)
+
+    def test_multiply_retains_nonoverlapping_foreground(self, harness, qapp):
+        merge = MergeNode()
+        merge.set_parameter(LAYER_MERGE_OWNER_PARAM, "foreground")
+        merge.set_parameter("blend_mode", "multiply")
+        foreground = np.full((_H, _W, 4), (1.0, 0.0, 0.0, 0.5), dtype=np.float32)
+        background = np.full((_H, _W, 4), (0.0, 0.0, 1.0, 0.5), dtype=np.float32)
+        marker = merge.evaluate(
+            {"A": self._upload(harness, foreground), "B": self._upload(harness, background)},
+            harness.ctx, harness.fb_manager)
+        output = harness._dispatch_merge_effect(marker)
+        assert np.allclose(self._read(harness, output["result"]), (0.25, 0.0, 0.25, 0.75), atol=1e-4)
 
 
 class TestGrainDeGrainGPU(_GLHarness):

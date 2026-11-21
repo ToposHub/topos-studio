@@ -66,7 +66,7 @@ from PyQt6.QtCore import (
     QByteArray, QMimeData,
 )
 from PyQt6.QtGui import (
-    QPainter, QColor, QPen, QImage,
+    QPainter, QColor, QPen, QImage, QImageReader,
     QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon, QDrag,
 )
 
@@ -1586,7 +1586,7 @@ class _CpuFallbackDecodeWorker:
         self._signals = _CpuFallbackDecodeSignals()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        # (asset_path, frame, generation, target_size) 或 _CLOSE
+        # (asset_path, frame, generation, target_size, still) 或 _CLOSE
         self._request: Optional[tuple] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -1627,12 +1627,14 @@ class _CpuFallbackDecodeWorker:
         frame: int,
         generation: int,
         target_size: Optional[tuple[int, int]],
+        *,
+        still: bool = False,
     ) -> None:
         """提交解码请求（latest-wins：只保留最新一条）。"""
         with self._cond:
             if not self._running:
                 return
-            self._request = (asset_path, int(frame), int(generation), target_size)
+            self._request = (asset_path, int(frame), int(generation), target_size, still)
             self._cond.notify()
 
     def close_decoder(self) -> None:
@@ -1656,7 +1658,19 @@ class _CpuFallbackDecodeWorker:
                 if request is self._CLOSE:
                     self._dispose_decoder()
                     continue
-                asset_path, frame, generation, target_size = request
+                asset_path, frame, generation, target_size, still = request
+                if still:
+                    self._dispose_decoder()
+                    started = time.perf_counter()
+                    reader = QImageReader(asset_path)
+                    reader.setAutoTransform(True)
+                    image = reader.read()
+                    if image.isNull():
+                        self._signals.decode_failed.emit(frame, reader.errorString(), generation)
+                    else:
+                        elapsed_ms = (time.perf_counter() - started) * 1000
+                        self._signals.frame_ready.emit(frame, image, elapsed_ms, generation)
+                    continue
                 key = (asset_path, target_size)
                 if self._decoder_key != key:
                     self._dispose_decoder()
@@ -1783,6 +1797,7 @@ class SourceViewerWidget(QWidget):
 
         # State
         self._current_asset: Optional[MediaAsset] = None
+        self._preview_only = False
         self._current_frame: int = 0
         self._in_point: Optional[int] = None
         self._out_point: Optional[int] = None
@@ -1995,6 +2010,10 @@ class SourceViewerWidget(QWidget):
         """当前打开的素材（F2.1 Source Patch 对话框等外部入口用）。"""
         return self._current_asset
 
+    @property
+    def preview_only(self) -> bool:
+        return self._preview_only
+
     def set_source_channel_map(self, channel_map: Optional[tuple]) -> None:
         """F2.1：更新当前素材的源声道映射（scrub 试听下次重建生效）。"""
         self._scrub_source_channel_map = channel_map
@@ -2006,6 +2025,9 @@ class SourceViewerWidget(QWidget):
         audio_source_path: Optional[str] = None,
         audio_offset_seconds: float = 0.0,
         interpretation_fps: Optional[float] = None,
+        *,
+        preview_only: bool = False,
+        initial_preview: QImage | None = None,
     ) -> None:
         """
         Open a media asset for preview.
@@ -2024,6 +2046,7 @@ class SourceViewerWidget(QWidget):
             self.close_source()
 
         self._current_asset = asset
+        self._preview_only = preview_only
         self._scrub_source_channel_map = source_channel_map
         self._scrub_audio_source_path = audio_source_path
         self._scrub_audio_offset = float(audio_offset_seconds or 0.0)
@@ -2077,6 +2100,7 @@ class SourceViewerWidget(QWidget):
 
         # Bump generation on asset change to invalidate all pending GPU results
         self._gpu_generation += 1
+        self._gpu_expected_frame = -1
         self._gpu_watchdog_timer.stop()
         self._gpu_pending_frame = -1
         self._last_good_qimage = None
@@ -2103,6 +2127,7 @@ class SourceViewerWidget(QWidget):
         # Update UI
         self.toolbar.set_source_name(asset.display_name)
         self.toolbar.set_enabled(True)
+        self.toolbar.btn_source_patch.setEnabled(not preview_only)
         self.toolbar.update_play_state(False)
         self.viewer.set_playback_state(False, self._fps)
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
@@ -2124,6 +2149,10 @@ class SourceViewerWidget(QWidget):
         # Load the (possibly restored) current frame — single request after
         # the generation bump so stale results from the previous asset or a
         # pre-restore position can never overwrite the restored frame.
+        if initial_preview is not None and not initial_preview.isNull():
+            if asset.is_image or (asset.is_video and self._current_frame == 0):
+                # The poster stays visible until the exact source frame arrives.
+                self.viewer.submit_qimage(initial_preview)
         self._load_frame(self._current_frame)
 
         # E22: source_opened 信号已删除（无接收者）
@@ -2228,6 +2257,7 @@ class SourceViewerWidget(QWidget):
 
         # Reset state
         self._current_asset = None
+        self._preview_only = False
         self._time_domain = None
         self._current_frame = 0
         self._media_display_width = None
@@ -2783,7 +2813,7 @@ class SourceViewerWidget(QWidget):
     def _sync_scrub_audio_for_asset(self) -> None:
         """Prepare a single-track audio preview graph for the source asset."""
         asset = self._current_asset
-        if asset is None or not getattr(asset, "is_video", False):
+        if asset is None or not (getattr(asset, "is_video", False) or getattr(asset, "is_audio", False)):
             self._cleanup_scrub_audio_manager()
             return
         if (
@@ -2880,13 +2910,10 @@ class SourceViewerWidget(QWidget):
         return self._scrub_audio_manager
 
     def _start_source_audio(self, start_frame: int) -> None:
-        """Begin continuous audio playback from ``start_frame`` (no-op if the
-        asset has no audio graph or isn't video).
+        """Begin continuous audio playback when the source has an audio graph.
 
         R04：VFR 源的起播位置经时间域秒域换算（视频/音频同一秒轴）。
         """
-        if self._current_asset is None or not getattr(self._current_asset, "is_video", False):
-            return
         manager = self._audio_playback_manager()
         if manager is None:
             return
@@ -3219,6 +3246,8 @@ class SourceViewerWidget(QWidget):
         asset = self._current_asset
         if asset is None:
             return None, "no_source_asset"
+        if self._preview_only:
+            return None, "no_source_asset"
         total = int(self._total_frames or 0)
         if total <= 0:
             return None, "no_frames"
@@ -3283,6 +3312,11 @@ class SourceViewerWidget(QWidget):
 
     def _load_image_frame(self) -> None:
         """Load an image asset."""
+        if self._preview_only:
+            if not self._shutdown_prepared:
+                self._cpu_worker.request(
+                    self._current_asset.path, 0, self._gpu_generation, target_size=None, still=True)
+            return
         try:
             from PyQt6.QtGui import QPixmap
             pixmap = QPixmap(self._current_asset.path)
@@ -3470,8 +3504,10 @@ class SourceViewerWidget(QWidget):
         # （AUD-20902: 暂存待传，paintGL 内完成 GL 上传）
         self.viewer.submit_qimage(
             image,
-            display_width=self._media_display_width or image.width(),
-            display_height=self._media_display_height or image.height(),
+            display_width=(image.width() if self._current_asset.is_image
+                           else self._media_display_width or image.width()),
+            display_height=(image.height() if self._current_asset.is_image
+                            else self._media_display_height or image.height()),
         )
         self._frame_cache_lru_put(frame, image)
         self._last_good_qimage = image

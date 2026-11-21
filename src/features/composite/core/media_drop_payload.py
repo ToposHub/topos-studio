@@ -31,7 +31,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from src.shared.media.format_registry import MODEL_3D_EXTENSIONS
+from src.shared.media.format_registry import get_media_type
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +65,6 @@ MEDIA_TYPE_TO_NODE_TYPE = {
     MEDIA_TYPE_SEQUENCE: "image_input",  # sequences use image_input for now
     MEDIA_TYPE_MODEL3D: "model3d",
 }
-
-# AUD-5004: audio extensions recognised when classifying by path.  Audio is
-# deliberately absent from MEDIA_TYPE_TO_NODE_TYPE — there is no layer source
-# node for it, so resolve_drop_payloads rejects audio drops with a log line
-# instead of creating an image_input layer pointing at a sound file.
-AUDIO_EXTENSIONS = (
-    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus",
-    ".aiff", ".aif", ".wma",
-)
 
 
 @dataclass
@@ -124,6 +115,18 @@ class MediaDropPayload:
             import os
             return os.path.splitext(os.path.basename(self.path))[0]
         return self.asset_id
+
+
+def accepts_layer_media_drop(mime_data: Any) -> bool:
+    """Check the drag format without resolving project assets or opening files."""
+    if mime_data is None:
+        return False
+    if any(mime_data.hasFormat(mime_type) for mime_type in (
+            MIME_TYPE_MEDIA_POOL_ASSETS, MIME_TYPE_MEDIA_POOL_ASSET,
+            MIME_TYPE_TOPOS_MEDIA_ASSET)):
+        return True
+    return any(get_media_type(path) in MEDIA_TYPE_TO_NODE_TYPE
+               for path in _local_paths_from_mime(mime_data))
 
 
 def parse_media_pool_mime(mime_data: Any) -> List[str]:
@@ -210,10 +213,12 @@ def resolve_drop_payloads(mime_data: Any,
             MediaDropPayload(
                 asset_id=f"path:{path}",
                 path=path,
-                media_type=_classify_media_type(None, path),
+                media_type=media_type,
+                duration=0 if media_type == MEDIA_TYPE_VIDEO else 1,
                 name="",
             )
             for path in fallback_paths
+            if (media_type := get_media_type(path)) in MEDIA_TYPE_TO_NODE_TYPE
         ]
         return _reject_audio_payloads(payloads)
 
@@ -261,12 +266,14 @@ def resolve_asset_ids(asset_ids: List[str],
             # MediaPool includes local URLs alongside the authoritative asset
             # ids. Pairing them by order keeps drag/drop usable even when a
             # panel was opened before its EditProject reference was rebound.
-            if index < len(fallback):
+            if (index < len(fallback)
+                    and (media_type := get_media_type(fallback[index])) in MEDIA_TYPE_TO_NODE_TYPE):
                 path = fallback[index]
                 payloads.append(MediaDropPayload(
                     asset_id=aid,
                     path=path,
-                    media_type=_classify_media_type(None, path),
+                    media_type=media_type,
+                    duration=0 if media_type == MEDIA_TYPE_VIDEO else 1,
                 ))
                 continue
             logger.warning("Media drop: asset %r not found; skipped.", aid)
@@ -353,12 +360,12 @@ def _payload_from_asset(asset_id: str, asset: Any) -> MediaDropPayload:
     raw_duration = _get(asset, "duration")
     if raw_duration is None:
         raw_duration = _get(asset, "total_frames")
-    duration = _coerce_int(raw_duration, default=1)
+    duration = _coerce_int(raw_duration, default=0)
     if duration <= 0:
         # Video/model duration is in frames; image/sequence is a single
         # frame. A model with no probe metadata still gets a usable one-frame
         # source marker; the layer itself uses the composition range.
-        duration = 1 if media_type in (MEDIA_TYPE_IMAGE, MEDIA_TYPE_MODEL3D) else 0
+        duration = 0 if media_type == MEDIA_TYPE_VIDEO else 1
     width = _coerce_int(_get(asset, "width"), default=0)
     height = _coerce_int(_get(asset, "height"), default=0)
     name = (_get(asset, "name", "")
@@ -402,20 +409,10 @@ def _classify_media_type(value: Optional[str], path: str) -> str:
         # broken image_input node pointing at the sound file.
         if v in ("audio", "sound", "music", "snd"):
             return MEDIA_TYPE_AUDIO
-    # Fallback: classify by extension.
-    p = (path or "").lower()
-    img_exts = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr", ".bmp",
-                ".webp", ".dpx", ".hdr")
-    vid_exts = (".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm", ".mxf")
-    if any(p.endswith(ext) for ext in MODEL_3D_EXTENSIONS):
-        return MEDIA_TYPE_MODEL3D
-    if p.endswith(vid_exts):
-        return MEDIA_TYPE_VIDEO
-    if p.endswith(AUDIO_EXTENSIONS):
-        return MEDIA_TYPE_AUDIO
-    if p.endswith(img_exts):
-        return MEDIA_TYPE_IMAGE
-    return MEDIA_TYPE_IMAGE  # safe default
+    media_type = get_media_type(path)
+    if media_type in MEDIA_TYPE_TO_NODE_TYPE or media_type == MEDIA_TYPE_AUDIO:
+        return media_type
+    return MEDIA_TYPE_IMAGE  # Preserve asset metadata compatibility for legacy projects.
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:

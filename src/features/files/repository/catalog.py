@@ -526,7 +526,8 @@ class FilesCatalog:
     # ------------------------------------------------------------ 搜索
 
     def search(self, query: str, *, library_id: str = "", limit: int = 200,
-               offset: int = 0, within_library_roots: bool = False) -> tuple[list[dict[str, Any]], int]:
+               offset: int = 0, within_library_roots: bool = False,
+               folder: str | None = None) -> tuple[list[dict[str, Any]], int]:
         """FTS 检索（trigram）；<3 字符回落 LIKE，返回 (rows, total)。"""
         query = query.strip()
         with self._read() as cursor:
@@ -554,6 +555,10 @@ class FilesCatalog:
                 placeholders = ",".join("?" for _ in libraries)
                 scope = f" AND assets_fts.library_id IN ({placeholders})"
                 args.extend(library.library_id for library in libraries)
+            if folder is not None:
+                prefix = nfc(folder).rstrip(os.sep) + os.sep
+                scope += " AND substr(assets_fts.path, 1, length(?)) = ?"
+                args.extend((prefix, prefix))
             total = cursor.execute(
                 f"SELECT COUNT(*) FROM assets_fts WHERE {where}{scope}", args
             ).fetchone()[0]

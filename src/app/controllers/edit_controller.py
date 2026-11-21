@@ -8663,6 +8663,9 @@ class EditControllerMixin:
         Deliver 借用中同样安全：借走的是 Program/Timeline，Source 释放
         只作用于本 widget；浮动 dock 内的 widget 亦经同一所有者清理。
         """
+        library = getattr(self, "media_pool_library_browser", None)
+        if library is not None:
+            library.cancel_source_preview()
         source = getattr(self, "source_viewer_widget", None)
         if source is not None:
             try:

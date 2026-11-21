@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from types import SimpleNamespace
+
+import pytest
+from PyQt6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PyQt6.QtGui import QDropEvent
 
 from src.app.controllers.composite_controller import CompositeControllerMixin
 from src.app.main_window import PageContextManager, PageType
 from src.features.edit.core.project import EditProject
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, Rational, TimelineSequence
+from src.features.composite.core.media_drop_payload import MIME_TYPE_MEDIA_POOL_ASSETS
+from src.features.composite.ui.composite_page import CompositePage
+from src.features.composite.ui.keyframes_panel import KeyframesPanel
 
 
 class _FakeCompositePage:
@@ -127,6 +135,82 @@ def test_timeline_comp_clip_names_are_project_unique_and_numbered() -> None:
     )
     second_graph = project.compositions[second_graph_id]
     assert second_graph["name"] == "Comp Clip 2"
+
+
+@pytest.mark.parametrize("target", ["node", "layer", "timeline"])
+def test_initial_media_drop_creates_one_persisted_composition(qapp, target) -> None:
+    project, timeline, clip = _project_with_timeline_clip()
+    project, _, _, _ = project.create_empty_comp_clip(name="comp clip 1")
+    project = project.import_asset(path="/tmp/card.png", media_type="image", metadata={}, display_name="Card")
+    image_id = next(asset.asset_id for asset in project.assets.values() if asset.path == "/tmp/card.png")
+    project = project.import_asset(path="/tmp/action.mts", media_type="video",
+                                   metadata={"fps": 60, "total_frames": 600}, display_name="Action")
+    action_id = next(asset.asset_id for asset in project.assets.values() if asset.path == "/tmp/action.mts")
+    host = _Controller(project, timeline, playhead=0)
+    page = CompositePage()
+    panel = KeyframesPanel()
+    host.composite_page = page
+    page.set_keyframes_panel(panel)
+    page.set_edit_project(project)
+    page.set_initial_media_drop_handler(host._create_comp_clip_from_media_drop)
+    page.reset_to_empty_workspace()
+    try:
+        mime = QMimeData()
+        mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS, json.dumps([clip.asset_id, image_id, action_id]).encode())
+        drop = QDropEvent(QPointF(25, 75), Qt.DropAction.CopyAction, mime,
+                          Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        views = {"node": page._node_editor, "layer": panel._tree_view, "timeline": panel._timeline_view}
+        views[target].dropEvent(drop)
+        assert drop.isAccepted() and page.has_active_composition()
+        assert len(host._current_edit_project.comp_clips) == 2
+        saved = host._current_edit_project.compositions[host._current_composite_id]
+        assert saved["name"] == "Comp Clip 2"
+        assert saved["fps"] == 24 and saved["duration_frames"] == 600
+        assert saved["width"] == 1920 and saved["height"] == 1080
+        assert saved["comp_clip_id"] == host._current_edit_project.active_comp_clip_id
+        assert host._current_edit_project.get_comp_clip_by_graph_id(host._current_composite_id).comp_clip_id == saved["comp_clip_id"]
+        assert len(saved["layers"]) == 4  # Three media sources and the transparent background.
+        assert {node["type"] for node in saved["nodes"]} >= {"video_frame", "image_input", "merge", "output"}
+        assert host.edit_project_dirty
+        page.undo()
+        assert not any(node.node_type in ("video_frame", "image_input") for node in page.node_graph.nodes.values())
+        assert len(page.node_graph.get_all_layers()) == 1
+        host._sync_composite_graph_to_edit_project(host._current_composite_id, page.get_composite_data())
+        assert len(host._current_edit_project.compositions[host._current_composite_id]["layers"]) == 1
+        page.redo()
+        assert sum(node.node_type in ("video_frame", "image_input") for node in page.node_graph.nodes.values()) == 3
+        assert len(page.node_graph.get_all_layers()) == 4
+    finally:
+        page.close()
+        panel.close()
+
+
+def test_initial_drop_does_not_publish_a_partial_composition(qapp, monkeypatch) -> None:
+    project, timeline, _ = _project_with_timeline_clip()
+    host = _Controller(project, timeline, playhead=0)
+    page = CompositePage()
+    host.composite_page = page
+    page.set_initial_media_drop_handler(host._create_comp_clip_from_media_drop)
+    page.reset_to_empty_workspace()
+    try:
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile("/tmp/notes.txt"), QUrl.fromLocalFile("/tmp/voice.wav")])
+        assert not page._handle_initial_media_drop(mime)
+        mime.setUrls([QUrl.fromLocalFile("/tmp/source.mov"), QUrl.fromLocalFile("/tmp/card.png")])
+        add_layer = page._add_dropped_media_layer
+
+        def fail_second(controller, payload, index: int) -> None:
+            if index == 1:
+                raise ValueError("Invalid second layer")
+            add_layer(controller, payload, index)
+
+        monkeypatch.setattr(page, "_add_dropped_media_layer", fail_second)
+        assert not page._handle_initial_media_drop(mime)
+        assert host._current_edit_project is project
+        assert not page.has_active_composition()
+        assert host.switched_page is None
+    finally:
+        page.close()
 
 
 def test_timeline_context_uses_live_clip_range_and_timeline_format() -> None:

@@ -3569,6 +3569,7 @@ class EditProject:
         comp_clip = CompClipData.create_empty(
             asset_id=comp_asset_id,
             graph_id=graph_id,
+            comp_clip_id=comp_clip_id,
             name=name,
             width=width,
             height=height,
@@ -3615,7 +3616,7 @@ class EditProject:
         ), comp_clip_id, comp_asset_id, graph_id
 
     def next_comp_clip_name(self) -> str:
-        """Return the next user-facing name for a timeline-created Comp Clip.
+        """Return the next user-facing name for a generated Comp Clip.
 
         Comp Clips are project objects, so their names must be allocated from
         the project snapshot rather than from a UI counter.  This keeps the
@@ -3629,7 +3630,7 @@ class EditProject:
             if name is None and isinstance(value, dict):
                 name = value.get("name")
             if name:
-                existing_names.add(str(name).strip())
+                existing_names.add(str(name).strip().casefold())
 
         # Include media assets and graph names as a compatibility fallback for
         # projects written by older versions where comp_clips was incomplete.
@@ -3637,16 +3638,16 @@ class EditProject:
             if getattr(asset, "media_type", "") == "comp_clip":
                 name = str(getattr(asset, "display_name", "") or "").strip()
                 if name:
-                    existing_names.add(name)
+                    existing_names.add(name.casefold())
         for value in self.compositions.values():
             name = getattr(value, "name", None)
             if name is None and isinstance(value, dict):
                 name = value.get("name")
             if name:
-                existing_names.add(str(name).strip())
+                existing_names.add(str(name).strip().casefold())
 
         index = 1
-        while f"Comp Clip {index}" in existing_names:
+        while f"comp clip {index}" in existing_names:
             index += 1
         return f"Comp Clip {index}"
 
@@ -4704,7 +4705,7 @@ def _derive_timecode_flags(
     return (tc_fps, drop_frame)
 
 
-def probe_media_metadata(path: str) -> dict[str, Any]:
+def probe_media_metadata(path: str, *, include_pts_index: bool = True) -> dict[str, Any]:
     """
     探测媒体文件元数据。
 
@@ -4904,16 +4905,17 @@ def probe_media_metadata(path: str) -> dict[str, Any]:
                 
                 # F5.4：VFR PTS 索引构建——逐包 demux 抽取秒表；仅 VFR
                 # 素材写入 metadata（CFR 不写，插入路径零开销走 CFR 数学）。
-                try:
-                    from src.shared.media.ffmpeg_source import (
-                        extract_pts_index_seconds, looks_vfr,
-                    )
-                    pts_seconds = extract_pts_index_seconds(path)
-                    if pts_seconds and looks_vfr(pts_seconds):
-                        metadata["pts_index"] = pts_seconds
-                        metadata["is_vfr"] = True
-                except Exception as e:  # noqa: BLE001 — 索引失败不阻断导入
-                    logger.warning(f"VFR PTS index build failed for {path}: {e}")
+                if include_pts_index:
+                    try:
+                        from src.shared.media.ffmpeg_source import (
+                            extract_pts_index_seconds, looks_vfr,
+                        )
+                        pts_seconds = extract_pts_index_seconds(path)
+                        if pts_seconds and looks_vfr(pts_seconds):
+                            metadata["pts_index"] = pts_seconds
+                            metadata["is_vfr"] = True
+                    except Exception as e:  # noqa: BLE001 — 索引失败不阻断导入
+                        logger.warning(f"VFR PTS index build failed for {path}: {e}")
 
                 # 探测音频流信息（修复 V-05/V-09 问题）+ P0 补齐：
                 # 逐轨 audio_tracks（分离声道/多轨素材）、采样格式与位深、
@@ -4986,6 +4988,7 @@ def get_media_type(path: str) -> str:
 
     Args:
         path: 文件路径
+        include_pts_index: 是否逐包检查 VFR 时间戳。只读快速预览可跳过。
 
     Returns:
         媒体类型（image, video, audio, subtitle, image_sequence）

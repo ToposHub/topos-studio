@@ -19,7 +19,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytest
 
 from src.features.composite.core.node_engine import NodeGraph, Connection
-from src.features.composite.core.layer_model import Layer, LayerStack
+from src.features.composite.core.layer_model import (
+    BOTTOM_UP_LAYER_STACK_VERSION, LEGACY_LAYER_STACK_VERSION,
+    LAYER_MERGE_MATTE_PARAM, LAYER_MERGE_OWNER_PARAM, Layer, LayerStack,
+)
 from src.features.composite.core.layer_stack_compiler import (
     LayerStackCompiler, CompileChange, CompileResult,
     MERGE_PORT_FOREGROUND, MERGE_PORT_BACKGROUND, MERGE_OUTPUT_PORT,
@@ -64,7 +67,7 @@ def _apply_changes(graph: NodeGraph, changes):
                              ch.dst_node_id, ch.dst_port_name)
 
 
-def _build_graph(num_layers: int) -> tuple:
+def _build_graph(num_layers: int, version: int = LEGACY_LAYER_STACK_VERSION) -> tuple:
     """Build a graph with an Output and ``num_layers`` source+transform pairs.
 
     Returns ``(graph, stack, layers_map)`` where layers_map is
@@ -77,7 +80,7 @@ def _build_graph(num_layers: int) -> tuple:
     out = OutputNode(node_id="out")
     graph.add_node(out)
 
-    stack = LayerStack(stack_id="main", output_node_id="out")
+    stack = LayerStack(stack_id="main", output_node_id="out", version=version)
     layers = {}
     for i in range(num_layers):
         src = ConstantNode(node_id=f"src{i}")
@@ -257,6 +260,152 @@ class TestCompilerReuse(unittest.TestCase):
         _apply_changes(graph, second.changes)
         order = graph.topological_sort()
         self.assertEqual(len(order), len(graph.nodes))
+
+
+class TestBottomUpLayerStack:
+    def test_middle_layer_blends_and_masks_only_its_own_image(self):
+        graph, stack, layers = _build_graph(4, BOTTOM_UP_LAYER_STACK_VERSION)
+        middle = layers["L1"]
+        middle.blend_mode = "multiply"
+        middle.opacity = 0.3
+        middle.track_matte_layer_id = "L3"
+        result = LayerStackCompiler(graph).compile(stack, layers)
+        assert result.ok
+        _apply_changes(graph, result.changes)
+        top_merge, middle_merge, bottom_merge = result.merge_node_ids
+        conns = _conn_tuples(graph)
+        assert ("t2", "result", bottom_merge, "A") in conns
+        assert not any(dst == bottom_merge and port == "B" for _, _, dst, port in conns)
+        assert ("t1", "result", middle_merge, "A") in conns
+        assert (bottom_merge, "result", middle_merge, "B") in conns
+        assert ("t3", "result", middle_merge, "mask") in conns
+        assert ("t0", "result", top_merge, "A") in conns
+        assert (middle_merge, "result", top_merge, "B") in conns
+        assert (top_merge, "result", "out", "image") in conns
+        params = graph.get_node(middle_merge).parameters
+        assert params[LAYER_MERGE_OWNER_PARAM] == "L1"
+        assert params[LAYER_MERGE_MATTE_PARAM] is True
+        assert params["blend_mode"] == "multiply"
+        assert params["opacity"] == pytest.approx(0.3)
+
+    def test_merge_animation_stays_with_layer_through_reorder_and_undo(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+        from src.features.composite.core.undo_stack import UndoStack
+        from src.shared.keyframe import Keyframe, KeyframeTrack
+
+        graph, stack, layers = _build_graph(3, BOTTOM_UP_LAYER_STACK_VERSION)
+        undo = UndoStack()
+        controller = LayerStackController(graph, undo_stack=undo)
+        first = controller.rebuild()
+        top_id, middle_id, bottom_id = first.merge_node_ids
+        middle_merge = graph.get_node(middle_id)
+        middle_merge.set_keyframe_track("opacity", KeyframeTrack("opacity", [Keyframe(5, 0.25)]))
+        track = middle_merge.keyframe_tracks["opacity"]
+
+        assert controller.move_layer("L1", 2)
+        assert stack.generated_merge_node_ids == [top_id, bottom_id, middle_id]
+        assert graph.get_node(middle_id).keyframe_tracks["opacity"] == track
+        assert controller.set_layer_visibility("L1", False)
+        assert graph.get_node(middle_id).keyframe_tracks["opacity"] == track
+        assert undo.undo()
+        assert undo.undo()
+        assert controller.main_stack().generated_merge_node_ids == [top_id, middle_id, bottom_id]
+        assert graph.get_node(middle_id).keyframe_tracks["opacity"] == track
+        assert undo.redo()
+        assert controller.main_stack().generated_merge_node_ids == [top_id, bottom_id, middle_id]
+        reloaded = NodeGraph.from_dict(graph.to_dict())
+        assert reloaded.get_main_layer_stack().version == BOTTOM_UP_LAYER_STACK_VERSION
+        assert reloaded.get_node(middle_id).parameters[LAYER_MERGE_OWNER_PARAM] == "L1"
+        assert reloaded.get_node(middle_id).keyframe_tracks["opacity"] == track
+
+    def test_owner_survives_appending_effect_and_preserves_side_branch(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+
+        graph, stack, layers = _build_graph(2, BOTTOM_UP_LAYER_STACK_VERSION)
+        controller = LayerStackController(graph)
+        top_merge, _ = controller.rebuild().merge_node_ids
+        side_branch = TransformNode(node_id="side")
+        effect = TransformNode(node_id="effect")
+        graph.add_node(side_branch)
+        graph.add_node(effect)
+        assert graph.connect(top_merge, "result", "side", "image")
+
+        assert controller.add_node_to_layer("L0", "effect")
+        conns = _conn_tuples(graph)
+        assert ("effect", "result", top_merge, "A") in conns
+        assert (top_merge, "result", "side", "image") in conns
+        assert controller.move_layer("L0", 1)
+        assert (top_merge, "result", "side", "image") in _conn_tuples(graph)
+        assert not controller.remove_layer("L0")
+        assert graph.get_layer("L0") is not None
+        assert (top_merge, "result", "side", "image") in _conn_tuples(graph)
+
+    def test_removing_a_shared_matte_keeps_its_free_node_branch(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+
+        graph, stack, layers = _build_graph(2, BOTTOM_UP_LAYER_STACK_VERSION)
+        controller = LayerStackController(graph)
+        layers["L0"].track_matte_layer_id = "L1"
+        target_merge, = controller.rebuild().merge_node_ids
+        graph.add_node(TransformNode(node_id="side"))
+        assert graph.connect("t1", "result", "side", "image")
+
+        assert controller.remove_layer("L1")
+        assert graph.get_layer("L0").track_matte_layer_id is None
+        assert ("t1", "result", "side", "image") in _conn_tuples(graph)
+        assert ("t1", "result", target_merge, "mask") not in _conn_tuples(graph)
+
+    def test_manual_input_conflict_preserves_graph_and_layer_order(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+
+        graph, stack, layers = _build_graph(2, BOTTOM_UP_LAYER_STACK_VERSION)
+        controller = LayerStackController(graph)
+        top_merge, _ = controller.rebuild().merge_node_ids
+        graph.add_node(ConstantNode(node_id="manual"))
+        graph.disconnect("t0", "result", top_merge, "A")
+        assert graph.connect("manual", "result", top_merge, "A")
+
+        assert not controller.move_layer("L0", 1)
+        assert stack.layer_ids == ["L0", "L1"]
+        assert ("manual", "result", top_merge, "A") in _conn_tuples(graph)
+
+    def test_hiding_the_only_solo_layer_restores_ordinary_visible_layers(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+
+        graph, stack, layers = _build_graph(2, BOTTOM_UP_LAYER_STACK_VERSION)
+        controller = LayerStackController(graph)
+        top_merge, bottom_merge = controller.rebuild().merge_node_ids
+        assert controller.set_layer_solo("L0", True)
+        assert (top_merge, "result", "out", "image") in _conn_tuples(graph)
+
+        assert controller.set_layer_visibility("L0", False)
+        assert (bottom_merge, "result", "out", "image") in _conn_tuples(graph)
+        assert stack.generated_merge_node_ids == [top_merge, bottom_merge]
+
+    def test_promoting_an_output_dependent_layer_below_its_source_rejects_cycle(self):
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+
+        graph, stack, layers = _build_graph(2, BOTTOM_UP_LAYER_STACK_VERSION)
+        controller = LayerStackController(graph)
+        top_merge, _ = controller.rebuild().merge_node_ids
+        graph.add_node(TransformNode(node_id="dependent"))
+        assert graph.connect(top_merge, "result", "dependent", "image")
+        connections = _conn_tuples(graph)
+
+        assert controller.promote_node_to_layer("dependent", insert_index=1) is None
+        assert controller.main_stack().layer_ids == ["L0", "L1"]
+        assert _conn_tuples(graph) == connections
+
+    def test_legacy_project_without_version_retains_top_down_chain(self):
+        graph, stack, layers = _build_graph(3)
+        data = stack.to_dict()
+        del data["version"]
+        loaded = LayerStack.from_dict(data)
+        assert loaded.version == LEGACY_LAYER_STACK_VERSION
+        result = LayerStackCompiler(graph).compile(loaded, layers)
+        _apply_changes(graph, result.changes)
+        first, second = result.merge_node_ids
+        assert (first, "result", second, "A") in _conn_tuples(graph)
 
 
 class TestCompilerPortOrderLock(unittest.TestCase):

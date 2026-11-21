@@ -102,10 +102,9 @@ class MainWindowAdapter:
         page.composite_gpu_scope_ready.connect(self._on_gpu_scope_ready)
         # Output node "Render Output" button → composite render-output flow
         page.render_output_requested.connect(self._mw._on_composite_render_output)
-        # Empty-state CTA reuses the existing Media Pool creation workflow.
-        create_comp_clip = getattr(self._mw, "_on_create_empty_comp_clip", None)
-        if callable(create_comp_clip):
-            page.create_empty_comp_clip_requested.connect(create_comp_clip)
+        create_from_drop = getattr(self._mw, "_create_comp_clip_from_media_drop", None)
+        if callable(create_from_drop):
+            page.set_initial_media_drop_handler(create_from_drop)
 
         if self._runtime._node_editor:
             editor = self._runtime._node_editor
@@ -146,7 +145,7 @@ class MainWindowAdapter:
 
         if self._runtime.page:
             self._runtime.dock_composite = create_dock_func(
-                I18N.tr("panel.composite", "Node Graph"),
+                I18N.tr("panel.node_graph", "Node Graph"),
                 self._runtime.page,
                 "dockComposite"
             )
@@ -185,10 +184,10 @@ class MainWindowAdapter:
             )
             docks["perf"] = self._runtime.dock_perf
 
-        # P3: Fusion-style Keyframes panel (bottom dock).
+        # The animation editor is the layer workspace's primary timeline.
         if self._runtime.keyframes_panel:
             self._runtime.dock_keyframes = create_dock_func(
-                I18N.tr("panel.keyframes", "Keyframes"),
+                I18N.tr("panel.layer_timeline", "Layer Timeline"),
                 self._runtime.keyframes_panel,
                 "dockCompositeKeyframes"
             )

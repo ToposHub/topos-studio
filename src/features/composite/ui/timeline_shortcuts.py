@@ -59,6 +59,15 @@ CMD_ADD_KEYFRAME = "edit.add_keyframe"
 CMD_REMOVE_KEYFRAME = "edit.remove_keyframe"
 CMD_SET_WORK_IN = "edit.set_work_in"
 CMD_SET_WORK_OUT = "edit.set_work_out"
+CMD_GOTO_LAYER_IN = "nav.layer_in"
+CMD_GOTO_LAYER_OUT = "nav.layer_out"
+CMD_GOTO_WORK_IN = "nav.work_in"
+CMD_GOTO_WORK_OUT = "nav.work_out"
+CMD_MOVE_LAYER_IN = "layer.move_in"
+CMD_MOVE_LAYER_OUT = "layer.move_out"
+CMD_TRIM_LAYER_IN = "layer.trim_in"
+CMD_TRIM_LAYER_OUT = "layer.trim_out"
+CMD_SET_WORK_AREA_FROM_LAYER = "edit.set_work_area_from_layer"
 CMD_FOCUS_POSITION = "focus.position"
 CMD_FOCUS_SCALE = "focus.scale"
 CMD_FOCUS_ROTATION = "focus.rotation"
@@ -72,6 +81,8 @@ CMD_SELECT_ALL = "select.all"
 CMD_COPY = "edit.copy"
 CMD_PASTE = "edit.paste"
 CMD_DELETE = "edit.delete"
+CMD_DUPLICATE_LAYER = "layer.duplicate"
+CMD_RENAME_LAYER = "layer.rename"
 CMD_UNDO = "edit.undo"
 CMD_REDO = "edit.redo"
 CMD_FIT_SELECTION = "view.fit_selection"
@@ -119,6 +130,9 @@ DEFAULT_AE_BINDINGS: Dict[str, str] = {
     "Cmd+V": CMD_PASTE,
     "Delete": CMD_DELETE,
     "Backspace": CMD_DELETE,
+    "Ctrl+D": CMD_DUPLICATE_LAYER,
+    "Cmd+D": CMD_DUPLICATE_LAYER,
+    "F2": CMD_RENAME_LAYER,
     "Ctrl+Z": CMD_UNDO,
     "Cmd+Z": CMD_UNDO,
     "Ctrl+Y": CMD_REDO,
@@ -130,6 +144,18 @@ DEFAULT_AE_BINDINGS: Dict[str, str] = {
     "Enter": CMD_EDIT_VALUE,
     "Esc": CMD_CANCEL,
     "Shift+F3": CMD_TOGGLE_GRAPH_EDITOR,
+}
+
+AE_LAYER_TIMING_BINDINGS: Dict[str, str] = {
+    "I": CMD_GOTO_LAYER_IN,
+    "O": CMD_GOTO_LAYER_OUT,
+    "Shift+Home": CMD_GOTO_WORK_IN,
+    "Shift+End": CMD_GOTO_WORK_OUT,
+    "[": CMD_MOVE_LAYER_IN,
+    "]": CMD_MOVE_LAYER_OUT,
+    "Alt+[": CMD_TRIM_LAYER_IN,
+    "Alt+]": CMD_TRIM_LAYER_OUT,
+    "Cmd+Alt+B": CMD_SET_WORK_AREA_FROM_LAYER,
 }
 
 
@@ -350,7 +376,7 @@ class ShortcutDispatcher:
         command. Returns ``None`` to mean "no double-tap effect, use the
         matched command as-is".
         """
-        if seq not in {"U", "E"}:
+        if seq not in ("U", "E"):
             # Reset streak for non-U/E keys so U…K…U doesn't false-positive.
             if matched:
                 self._last_key = seq
@@ -361,10 +387,7 @@ class ShortcutDispatcher:
         if (self._last_key == seq and self._last_key_command is not None
                 and 0.0 <= now - self._last_key_ms <= self.double_tap_ms):
             # Second tap within window → upgrade.
-            upgraded = {
-                "U": (CMD_FILTER_ANIMATED, CMD_FILTER_MODIFIED),
-                "E": (CMD_FILTER_EXPRESSION, CMD_FILTER_EXPRESSION),
-            }[seq][1]
+            upgraded = CMD_FILTER_MODIFIED if seq == "U" else CMD_FILTER_EXPRESSION
             self._last_key = None
             self._last_key_command = None
             return upgraded

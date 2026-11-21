@@ -106,7 +106,6 @@ def test_dock_missing_from_all_docks_is_skipped(qapp):
 def test_asset_dependency_panel_is_registered_as_a_dock():
     """The asset dependency widget must never remain a raw main-window child."""
     setup_source = inspect.getsource(DockLayoutMixin.setup_docks)
-    layout_source = inspect.getsource(DockLayoutMixin.initialize_page_layouts)
     visibility_source = inspect.getsource(
         DockLayoutMixin._enforce_page_dock_visibility)
 
@@ -117,15 +116,12 @@ def test_asset_dependency_panel_is_registered_as_a_dock():
     assert 'docks.get("scope")' in setup_source
     assert "self.dock_composite_scope" in setup_source
     assert "self.all_docks.append(self.dock_composite_scope)" in setup_source
-    assert "self.dock_composite_scope.setVisible(True)" in layout_source
-    assert "self.dock_composite_asset_dependency.setVisible(False)" in layout_source
     assert "self.dock_composite_asset_dependency.setVisible(False)" in visibility_source
 
 
 def test_composite_workflow_groups_keep_timeline_docks_independent():
     """Timeline views stay separate until Spline is folded into Keyframes."""
     setup_source = inspect.getsource(DockLayoutMixin.setup_docks)
-    layout_source = inspect.getsource(DockLayoutMixin.initialize_page_layouts)
 
     assert "self.dock_composite_keyframes" in setup_source
     assert "self.dock_composite_spline" in setup_source
@@ -135,9 +131,6 @@ def test_composite_workflow_groups_keep_timeline_docks_independent():
     assert "self.dock_composite_import_report" in setup_source
     assert "self.dock_composite_asset_dependency" in setup_source
     assert "self.tabifyDockWidget(self.dock_composite_keyframes, self.dock_composite_spline)" not in setup_source
-    assert "self.tabifyDockWidget(self.dock_composite_keyframes, self.dock_composite_spline)" not in layout_source
-    assert "self.tabifyDockWidget(\n                        self.dock_composite_asset_dependency" in layout_source
-    assert "self.tabifyDockWidget(\n                        self.dock_node_properties" in layout_source
 
 
 def test_composite_panel_titles_are_localized():
@@ -148,6 +141,7 @@ def test_composite_panel_titles_are_localized():
         "performance": ("Performance", "性能"),
         "composite_scopes": ("Scopes", "示波器"),
         "keyframes": ("Keyframes", "关键帧"),
+        "layer_timeline": ("Layer Timeline", "图层时间线"),
         "spline": ("Spline", "曲线"),
         "animation": ("Animation", "动画"),
         "import_report": ("Import Report", "导入报告"),

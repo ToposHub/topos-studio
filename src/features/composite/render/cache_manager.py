@@ -291,6 +291,14 @@ class CacheManager:
             if frame_remap_sig:
                 frame_suffix += f":{frame_remap_sig}"
 
+        time_range = getattr(ns, "time_range", None)
+        timing_suffix = ""
+        if time_range and time_range.get("enabled", True):
+            # Video nodes position source frame zero at comp_start. A bar
+            # move can change that origin at a fixed playhead frame.
+            timing_suffix = (f":tr{time_range.get('comp_start')},"
+                             f"{time_range.get('comp_end')}")
+
         # LOD level suffix: include Level of Detail for viewport optimization
         lod_suffix = ""
         if lod_level > 0:
@@ -312,7 +320,8 @@ class CacheManager:
 
         return (f"{ns.node_type}:{ns.node_id}:{params_hash}:{upstream}:"
                 f"{disabled_flag}:rm={render_mode}{color_suffix}{roi_suffix}"
-                f"{format_suffix}{alpha_suffix}{proxy_suffix}{frame_suffix}{lod_suffix}"
+                f"{format_suffix}{alpha_suffix}{proxy_suffix}{frame_suffix}"
+                f"{timing_suffix}{lod_suffix}"
                 f"{scene_suffix}{runtime_suffix}{quality_suffix}")
 
     def compute_key_from_string(self, key_string: str) -> str:

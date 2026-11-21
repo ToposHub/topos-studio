@@ -126,6 +126,18 @@ def test_project_publication_consumes_transaction_sequence_before_version_ui_ref
     host._clip_version_request_host.on_project_changed.assert_called_once_with(old, new)
 
 
+def test_timeline_import_publication_refreshes_project_media_pool() -> None:
+    host = _FileHost()
+    host.media_pool_panel.set_project = MagicMock()
+    updated = host._current_edit_project.import_asset("/tmp/new-library.wav", "audio", {})
+
+    host._on_timeline_project_changed(updated)
+
+    assert host._current_edit_project is updated
+    host.timeline_panel.set_project.assert_called_once_with(updated)
+    host.media_pool_panel.set_project.assert_called_once_with(updated, check_offline=False)
+
+
 def test_sequence_publication_monotonic_on_undo_and_redo_and_consumed_only_once() -> None:
     host = _FileHost()
     for expected_revision, sid in [(10, "new"), (11, "old"), (12, "new")]:
@@ -179,6 +191,7 @@ def test_color_global_undo_and_menu_use_version_project_history(qtbot) -> None:
     from src.features.edit.core.color_versions import SaveColorVersionCommand, versions_state
     host = _FileHost()
     host.current_page = "Color"
+    host._cancel_warper_gestures = MagicMock()
     host._color_session_manager = ColorSessionManager()
     host._color_session_manager.set_current_session(ColorSession.create_timeline_clip(
         "p", "asset", "c", "tl", "old", "/media.mov"))
@@ -257,6 +270,7 @@ def test_redo_newer_engine_edit_uses_engine_instead_of_version_history() -> None
     owner = SimpleNamespace(
         _clip_version_request_host=SimpleNamespace(history_target=lambda **kwargs: None),
         canvas=SimpleNamespace(sam_mode_active=False),
+        _cancel_warper_gestures=MagicMock(),
         _edit_undo_redo_target=lambda **kwargs: None,
         _composite_available=False,
         engine=SimpleNamespace(redo=MagicMock(return_value=True)),

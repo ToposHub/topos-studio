@@ -308,6 +308,9 @@ class _FakeUrlMime:
     def hasUrls(self) -> bool:
         return True
 
+    def hasFormat(self, mime_type: str) -> bool:
+        return False
+
     def urls(self):
         class _U:
             def __init__(self, p): self._p = p

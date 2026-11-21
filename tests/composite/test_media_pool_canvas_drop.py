@@ -22,8 +22,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from PyQt6.QtCore import QMimeData, QPointF, Qt
-from PyQt6.QtGui import QDropEvent
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.node_editor_widget import (
@@ -60,6 +61,7 @@ def page(qapp) -> Iterator[CompositePage]:
     # Bind the editor's actions object to the page's live graph (the ctor
     # builds from its own empty composition; rebind defensively).
     page._node_editor.build_from_graph(page._node_graph)
+    page.set_composition_active(True)
     yield page
     page.close()
 
@@ -138,9 +140,52 @@ def test_pool_drop_without_actions_binding_is_noop(qapp) -> None:
     """Pre-bind (no graph yet) the editor must not crash the drop path."""
     page = CompositePage()
     try:
+        page.set_composition_active(True)
         page._node_editor._actions = None
         before = len(page._node_graph.nodes)
         _drop_pool_assets(page, ["asset-img"])
         assert len(page._node_graph.nodes) == before
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("extension, eligible, handled", [
+    (None, True, True), ("png", True, True), ("mov", True, False), ("wav", False, False),
+])
+def test_empty_graph_viewport_routes_media_to_bootstrap(
+    qtbot, extension: Optional[str], eligible: bool, handled: bool,
+) -> None:
+    page = CompositePage()
+    qtbot.addWidget(page)
+    calls = []
+    active_drops = []
+    page.set_initial_media_drop_handler(lambda mime: calls.append(mime) or handled)
+    page._node_editor.assets_dropped.connect(lambda *args: active_drops.append(args))
+    page.resize(800, 360)
+    page.show()
+
+    viewport = page._node_editor.viewport()
+    assert viewport.isEnabled() and viewport.acceptDrops()
+    assert not page._node_editor.shortcuts_enabled()
+    assert page.findChild(QWidget, "compositeEmptyStateOverlay") is None
+
+    mime = QMimeData()
+    if extension is not None:
+        mime.setUrls([QUrl.fromLocalFile(f"/tmp/drop/first.{extension}")])
+    else:
+        mime.setData(MIME_TYPE_MEDIA_POOL_ASSETS, b'["asset-first"]')
+    pos = QPoint(40, 40)
+    event_args = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                  Qt.KeyboardModifier.NoModifier)
+    enter = QDragEnterEvent(pos, *event_args)
+    QApplication.sendEvent(viewport, enter)
+    assert enter.isAccepted() is eligible
+    if not eligible:
+        assert not calls
+        return
+
+    drop = QDropEvent(QPointF(pos), *event_args)
+    QApplication.sendEvent(viewport, drop)
+    assert drop.isAccepted() is handled
+    assert calls == [mime]
+    assert not active_drops

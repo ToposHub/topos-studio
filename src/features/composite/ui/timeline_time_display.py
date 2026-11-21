@@ -31,10 +31,11 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QLabel, QLineEdit, QMenu, QVBoxLayout, QWidget,
+    QBoxLayout, QLabel, QLineEdit, QMenu, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C, timeline_timecode_font
 from . import timeline_layout
 
 
@@ -68,6 +69,7 @@ class TimelineTimeDisplay(QWidget):
         self._current_frame = 0
         self._editing = False
         self._compact = bool(compact)
+        self._single_line = False
         self._menu_display_mode = "frame"
         # AUD-11110: Qt emits editingFinished immediately after returnPressed
         # when Enter commits the edit. This flag marks "a commit attempt is
@@ -86,6 +88,38 @@ class TimelineTimeDisplay(QWidget):
         if abs(fps - self._fps) < 1e-9:
             return
         self._fps = fps
+        self._refresh_labels()
+
+    def set_single_line(self, enabled: bool) -> None:
+        """Use the Edit timeline presentation for the Layer header."""
+        if enabled == self._single_line:
+            return
+        self._exit_edit()
+        self._single_line = enabled
+        layout = self.layout()
+        layout.setDirection(QBoxLayout.Direction.LeftToRight if enabled else QBoxLayout.Direction.TopToBottom)
+        layout.setSpacing(8 if enabled else 0)
+        layout.setContentsMargins(6, 0 if self._compact or enabled else 2,
+                                  6, 0 if self._compact or enabled else 2)
+        if enabled:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+            font = timeline_timecode_font()
+            details = QFont(font)
+            details.setPixelSize(11)
+            self._top_label.setFont(font)
+            self._top_label.setMinimumWidth(self._top_label.fontMetrics().horizontalAdvance("88:88:88:88"))
+            self._bottom_label.setFont(details)
+            self._edit.setFont(font)
+        else:
+            self.setFixedWidth(_COMPACT_WIDTH_PX if self._compact else _FIXED_WIDTH_PX)
+            self._top_label.setMinimumWidth(0)
+            self._top_label.setFont(self._legacy_main_font)
+            self._bottom_label.setFont(self._legacy_details_font)
+            self._edit.setFont(self._legacy_edit_font)
+        self._bottom_label.setSizePolicy(QSizePolicy.Policy.Ignored if enabled else QSizePolicy.Policy.Preferred,
+                                         QSizePolicy.Policy.Preferred)
+        self.setStyleSheet(self._stylesheet())
         self._refresh_labels()
 
     def set_display_mode(self, mode: str) -> None:
@@ -135,22 +169,26 @@ class TimelineTimeDisplay(QWidget):
         f.setBold(True)
         f.setFamily("Menlo, Consolas, Monaco, monospace")
         self._top_label.setFont(f)
+        self._legacy_main_font = f
         self._top_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(self._top_label)
 
         # Bottom line: small blue "frame (fps)".
         self._bottom_label = QLabel(self)
+        self._bottom_label.setObjectName("TimelineFrameDetails")
         f2 = QFont(self._bottom_label.font())
         f2.setPointSize(7 if self._compact else 8)
         f2.setFamily("Menlo, Consolas, Monaco, monospace")
         self._bottom_label.setFont(f2)
+        self._legacy_details_font = f2
         self._bottom_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(self._bottom_label)
 
         # Edit overlay: hidden until the user clicks. Sits over the labels.
         self._edit = QLineEdit(self)
+        self._legacy_edit_font = self._edit.font()
         self._edit.setFrame(False)
         self._edit.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._edit.returnPressed.connect(self._on_edit_commit)
@@ -161,12 +199,15 @@ class TimelineTimeDisplay(QWidget):
     def _stylesheet(self) -> str:
         blue = timeline_layout.resolve_token("accent_blue")
         error = timeline_layout.resolve_token("error")
-        bg = timeline_layout.resolve_token("header_bg")
+        bg = C.TIMELINE_TIMECODE_BG if self._single_line else timeline_layout.resolve_token("header_bg")
+        text = C.TIMELINE_TIMECODE_TEXT if self._single_line else blue
+        details = C.TEXT_LABEL if self._single_line else blue
         return (
             f"QWidget#TimelineTimeDisplay {{ background-color: {bg};"
             f" border: 1px solid transparent; border-radius: 2px; }}"
-            f"QLabel {{ color: {blue}; border: none; }}"
-            f"QLineEdit {{ background-color: {bg}; color: {blue};"
+            f"QLabel {{ color: {text}; border: none; }}"
+            f"QLabel#TimelineFrameDetails {{ color: {details}; }}"
+            f"QLineEdit {{ background-color: {bg}; color: {text};"
             f" border: 1px solid {blue}; border-radius: 2px;"
             f" padding: 0 2px; selection-background-color: {blue};"
             f" selection-color: {bg}; }}"
@@ -194,6 +235,8 @@ class TimelineTimeDisplay(QWidget):
     def _format_bottom(self, frame: int) -> str:
         # Always show raw frame + fps on the bottom line (plan §16.3 B1).
         fps_str = f"{self._fps:g}"
+        if self._single_line:
+            return f"{frame:d} · {fps_str} fps"
         return f"{frame:d} ({fps_str})"
 
     def _frame_to_timecode(self, frame: int) -> str:
@@ -203,6 +246,11 @@ class TimelineTimeDisplay(QWidget):
         undefined for negative frames, and the panel doesn't use them.
         """
         f = max(0, int(frame))
+        if self._single_line:
+            total_seconds, ff = divmod(f, max(1, round(self._fps)))
+            minutes, ss = divmod(total_seconds, 60)
+            hh, mm = divmod(minutes, 60)
+            return f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
         ff = int(round(f % self._fps))
         total_seconds = int(f // self._fps)
         ss = total_seconds % 60

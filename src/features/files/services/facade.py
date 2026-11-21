@@ -333,11 +333,13 @@ class FilesFacade:
             wrap=lambda result: result,
         )
 
-    def tree(self, path: str, *, request_id: str, listener: Listener) -> None:
+    def tree(self, path: str, *, request_id: str, listener: Listener,
+             follow_symlinks: bool = True) -> None:
         """目录树子节点；同路径新请求作废旧请求。"""
         self._submit(
             key=f"tree:{identity_key(path)}", request_id=request_id,
-            work=lambda: self.query.tree(path),
+            work=lambda: (self.query.tree(path) if follow_symlinks
+                          else self.query.tree(path, follow_symlinks=False)),
             listener=listener,
             wrap=lambda result: result,
         )

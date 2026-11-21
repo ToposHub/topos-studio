@@ -251,8 +251,8 @@ class WorkspacePanelBar(QToolBar):
         group("Composite", "sliders-horizontal", I18N.tr("panel.node_properties", "Node Properties"),
               "dock_node_properties", "dock_composite_scene_outliner", "dock_composite_material",
               right=True)
-        group("Composite", "chart-line-up", I18N.tr("workspace.animation", "Animation"),
-              "dock_composite_keyframes", "dock_composite_spline")
+        group("Composite", "stack", "", "dock_composite_keyframes")
+        group("Composite", "tree-structure", "", "dock_composite")
         group("Composite", "chart-line", "", "dock_composite_scope", right=True)
         group("Mixer", "faders", "", "dock_audio_console")
         group("Mixer", "monitor-play", "", "dock_audio_viewer", right=True)

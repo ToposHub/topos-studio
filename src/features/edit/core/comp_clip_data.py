@@ -103,11 +103,13 @@ class CompClipData:
         height: int = 1080,
         fps: float = 24.0,
         duration_frames: int = 240,
+        *,
+        comp_clip_id: str | None = None,
     ) -> CompClipData:
         """创建空白 Comp Clip"""
         now = time.time()
         return CompClipData(
-            comp_clip_id=str(uuid.uuid4()),
+            comp_clip_id=comp_clip_id or str(uuid.uuid4()),
             asset_id=asset_id,
             graph_id=graph_id,
             name=name,

@@ -59,6 +59,67 @@ def _add_source(g, i):
     return src.id
 
 
+def test_generated_layer_and_effect_duplicate_with_independent_nodes():
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    undo = UndoStack()
+    controller = LayerStackController(graph, undo)
+    layer_id = controller.create_generated_layer("text", "Title", {"text": "Title"})
+    layer = graph.get_layer(layer_id)
+    source_id, root_id = layer.source_node_id, layer.root_node_id
+    assert graph.get_node(source_id).parameters["text"] == "Title"
+    undo.undo()
+    assert graph.get_layer(layer_id) is None
+    assert graph.get_node(source_id) is None
+    assert graph.get_node(root_id) is None
+    undo.redo()
+
+    blur_id = controller.add_layer_effect(layer_id, "blur")
+    assert blur_id is not None
+    assert root_id == graph.get_layer(layer_id).root_node_id
+    clone_id = controller.duplicate_layer(layer_id)
+    assert clone_id is not None
+    clone_blur, = (node_id for node_id in controller.node_ids_for_layer(clone_id)
+                   if graph.get_node(node_id).node_type == "blur")
+    assert clone_blur != blur_id
+    assert controller.remove_layer(clone_id)
+    assert graph.get_node(clone_blur) is None
+    assert graph.get_node(blur_id) is not None
+
+
+def test_v2_default_layer_effect_wraps_transform_and_removes_atomically():
+    from src.features.composite.nodes.timeline_clip_input_node import TimelineClipInputNode
+    from src.features.composite.nodes.topos_color_node import ToposColorNode
+
+    graph = NodeGraph()
+    source = TimelineClipInputNode(node_id="source")
+    color = ToposColorNode(node_id="color")
+    output = OutputNode(node_id="out")
+    for node in (source, color, output):
+        graph.add_node(node)
+    assert graph.connect(source.id, source.outputs[0].name, color.id, color.inputs[0].name)
+    assert graph.connect(color.id, color.outputs[0].name, output.id, "image")
+    undo = UndoStack()
+    controller = LayerStackController(graph, undo, layer_stack_version=2)
+    assert controller.project_from_node_graph() == 1
+    layer_id, = controller.main_stack().layer_ids
+    assert controller.can_add_layer_effect(layer_id)
+    effect_id = controller.add_layer_effect(layer_id, "blur")
+    assert effect_id
+    root_id = graph.get_layer(layer_id).root_node_id
+    assert graph.get_node(root_id).node_type == "transform"
+    merge = controller.layer_merge_node(layer_id)
+    assert merge is not None
+    assert controller.set_layer_opacity(layer_id, 0.35)
+    assert graph.get_node(merge.id).parameters["opacity"] == 0.35
+    assert controller.remove_layer_effect(layer_id, effect_id)
+    assert graph.get_node(effect_id) is None
+    assert graph.get_node(color.id) is not None
+    undo.undo()
+    assert graph.get_node(effect_id) is not None
+    assert graph.get_node(root_id).node_type == "transform"
+
+
 class TestAddMedia(unittest.TestCase):
 
     def test_create_precomp_and_compile_nested_child(self):

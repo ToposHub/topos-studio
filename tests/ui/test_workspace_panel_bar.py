@@ -287,6 +287,27 @@ def test_edit_switch_recovers_preview_space_and_restores_selected_tab(qtbot) -> 
     assert restored.dock_edit_info.width() == 275
 
 
+def test_composite_toolbar_opens_node_graph_without_closing_timeline(qtbot: QtBot) -> None:
+    window = _Window(_Config())
+    qtbot.addWidget(window)
+    graph = window.add_panel("dock_composite", Qt.DockWidgetArea.TopDockWidgetArea)
+    graph.setWindowTitle("Node Graph")
+    timeline = window.add_panel("dock_composite_keyframes", Qt.DockWidgetArea.BottomDockWidgetArea)
+    timeline.setWindowTitle("Layer Timeline")
+    graph.hide()
+    bar = window.create_panel_bar("Composite")
+    window.show()
+
+    assert graph.toggleViewAction() in bar.actions()
+    assert timeline.toggleViewAction() in bar.actions()
+    graph.toggleViewAction().trigger()
+    assert not graph.isHidden()
+    assert not timeline.isHidden()
+    graph.toggleViewAction().trigger()
+    assert graph.isHidden()
+    assert not timeline.isHidden()
+
+
 def test_color_toolbar_filters_work_mode_and_replaces_the_active_tool(qtbot) -> None:
     window = _Window(_Config(), mode="image")
     qtbot.addWidget(window)

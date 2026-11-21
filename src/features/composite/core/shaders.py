@@ -77,6 +77,9 @@ uniform bool u_output_unpremult; // S2-B: unpremultiply output to straight alpha
 uniform float u_mix;             // Mix control: 0=fully background B, 1=full merge result
 uniform int u_mask_channel;      // Mask channel selection: 0=luma, 1=R, 2=G, 3=B, 4=A
 uniform bool u_mask_invert;      // Invert mask value
+uniform bool u_layer_composite;  // Managed layer blend and Track Matte behavior
+uniform bool u_transparent_background;
+uniform bool u_mask_straight;
 in vec2 v_uv;
 out vec4 fragColor;
 
@@ -95,7 +98,8 @@ out vec4 fragColor;
 //
 // Returns:
 //   Sampled color, or transparent (0.0, 0.0, 0.0, 0.0) if outside bbox
-vec4 sampleLayer(sampler2D tex, vec2 out_uv, vec4 bbox, vec2 resolution, vec4 output_bbox) {
+vec4 sampleLayer(sampler2D tex, vec2 out_uv, vec4 bbox, vec2 resolution, vec4 output_bbox,
+                 float center_offset) {
     // Convert output UV to output pixel coordinates
     vec2 out_pixel = out_uv * output_bbox.zw;
 
@@ -107,11 +111,13 @@ vec4 sampleLayer(sampler2D tex, vec2 out_uv, vec4 bbox, vec2 resolution, vec4 ou
         return vec4(0.0);
     }
 
-    // Map local pixel to input texture UV
-    // Use half-pixel offset for correct sampling
-    vec2 uv = (local + vec2(0.5)) / resolution;
+    vec2 uv = (local + vec2(center_offset)) / resolution;
 
     return texture(tex, uv);
+}
+
+vec4 sampleLayer(sampler2D tex, vec2 out_uv, vec4 bbox, vec2 resolution, vec4 output_bbox) {
+    return sampleLayer(tex, out_uv, bbox, resolution, output_bbox, 0.5);
 }
 
 // Legacy: Sample a texture at its natural position within the output canvas.
@@ -151,22 +157,17 @@ void main() {
     // S2-A: Sample A and B with bbox mapping if available
     vec4 a;
     vec4 b;
-    vec4 m;
 
     if (u_use_bbox_mapping) {
         // Use new bbox-based sampling for correct spatial alignment
         a = sampleLayer(u_texture_a, v_uv, u_bbox_a, u_resolution_a, u_output_bbox);
-        b = sampleLayer(u_texture_b, v_uv, u_bbox_b, u_resolution_b, u_output_bbox);
-        if (u_has_mask) {
-            m = sampleLayer(u_texture_mask, v_uv, u_bbox_mask, u_resolution_mask, u_output_bbox);
-        }
+        b = u_transparent_background ? vec4(0.0) :
+            sampleLayer(u_texture_b, v_uv, u_bbox_b, u_resolution_b, u_output_bbox);
     } else {
         // Legacy: sample at origin (backward compatibility)
         a = sampleAtOrigin(u_texture_a, v_uv, u_resolution_a);
-        b = sampleAtOrigin(u_texture_b, v_uv, u_resolution_b);
-        if (u_has_mask) {
-            m = texture(u_texture_mask, v_uv);
-        }
+        b = u_transparent_background ? vec4(0.0) :
+            sampleAtOrigin(u_texture_b, v_uv, u_resolution_b);
     }
 
     // Convert each input to premultiplied independently (in-shader, no temp textures)
@@ -179,9 +180,23 @@ void main() {
     //   u_mask_invert:  invert the selected mask value
     float mask_val = 1.0;
     if (u_has_mask) {
+        vec4 m;
+        if (u_layer_composite) {
+            // Track Mattes use their own pixel bounds. Fragment UVs already
+            // identify pixel centers, including when the matte is cropped.
+            m = sampleLayer(u_texture_mask, v_uv, u_bbox_mask, u_resolution_mask,
+                            u_output_bbox, 0.0);
+        } else if (u_use_bbox_mapping) {
+            m = sampleLayer(u_texture_mask, v_uv, u_bbox_mask, u_resolution_mask, u_output_bbox);
+        } else {
+            m = texture(u_texture_mask, v_uv);
+        }
         if (u_mask_channel == 0) {
             // Rec.709 luma
             mask_val = dot(m.rgb, vec3(0.2126, 0.7152, 0.0722));
+            if (u_layer_composite && u_mask_straight) {
+                mask_val *= m.a;
+            }
         } else if (u_mask_channel == 1) {
             mask_val = m.r;
         } else if (u_mask_channel == 2) {
@@ -194,6 +209,10 @@ void main() {
         if (u_mask_invert) {
             mask_val = 1.0 - mask_val;
         }
+    }
+    if (u_layer_composite) {
+        // Track Matte is coverage, even when its source carries HDR values.
+        mask_val = clamp(mask_val, 0.0, 1.0);
     }
     float effect = u_opacity * mask_val;
 
@@ -402,6 +421,21 @@ void main() {
             out_alpha = fg.a + b.a * (1.0 - fg.a);
     }
 
+    if (u_layer_composite) {
+        if (b.a <= 0.0) {
+            // The exposed foreground retains its color over empty space.
+            blended_rgb = fg.rgb;
+            out_alpha = fg.a;
+        } else if ((u_blend_mode >= 4 && u_blend_mode <= 11) ||
+                   (u_blend_mode >= 19 && u_blend_mode <= 27)) {
+            // Apply the blend function only where the two alpha coverages
+            // overlap, retaining the foreground color in uncovered areas.
+            vec3 backdrop = b.rgb * (1.0 - fg.a);
+            blended_rgb = backdrop + mix(fg.rgb, blended_rgb - backdrop,
+                                          min(b.a, 1.0));
+        }
+    }
+
     // S2-B: Alpha clamping for add/subtract modes (preserve HDR color, clamp alpha)
     // Only apply alpha clamp for modes that can produce negative/overflow alpha
     // Modes 2 (add) and 3 (subtract) can produce alpha outside [0, 1]
@@ -410,10 +444,9 @@ void main() {
     }
 
     // S3-A: Mix control — blend between background B (original) and the merge
-    // result by u_mix * mask_val. mix=0 returns pure B, mix=1 returns full
-    // merge result. Independent from opacity (opacity modulates the foreground,
-    // mix controls the overall effect strength against the background).
-    float mix_amount = clamp(u_mix * mask_val, 0.0, 1.0);
+    // result. Free Merge nodes also modulate the mix by the mask. Managed
+    // layer mattes apply once, to the foreground's contribution above.
+    float mix_amount = clamp(u_mix * (u_layer_composite ? 1.0 : mask_val), 0.0, 1.0);
     blended_rgb = mix(b.rgb, blended_rgb, mix_amount);
     out_alpha = mix(b.a, out_alpha, mix_amount);
 
