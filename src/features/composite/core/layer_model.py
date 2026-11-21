@@ -125,6 +125,9 @@ class Layer:
     # identifiable, repairable "transform missing" state (deleted main
     # Transform); re-attaching a wired Transform claims the role again.
     transform_node_id: Optional[str] = None
+    # B05 per-layer audio definition; None keeps the pre-audio behavior
+    # (image merges never gain an audio track from old projects).
+    audio: Optional[Any] = None
 
     # ── Layer state (AE parity) ──
     enabled: bool = True
@@ -169,6 +172,9 @@ class Layer:
             "root_node_id": self.root_node_id,
             "source_node_id": self.source_node_id,
             "transform_node_id": self.transform_node_id,
+            "audio": (self.audio.to_dict()
+                      if getattr(self.audio, "to_dict", None) is not None
+                      else None),
             "enabled": self.enabled,
             "solo": self.solo,
             "locked": self.locked,
@@ -215,6 +221,7 @@ class Layer:
             root_node_id=data["root_node_id"],
             source_node_id=data.get("source_node_id"),
             transform_node_id=data.get("transform_node_id"),
+            audio=_parse_layer_audio(data.get("audio")),
             enabled=data.get("enabled", True),
             solo=data.get("solo", False),
             locked=data.get("locked", False),
@@ -288,6 +295,14 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_layer_audio(raw: Any) -> Optional[Any]:
+    """Parse the optional per-layer audio block (B05); None keeps old behavior."""
+    if raw is None:
+        return None
+    from .comp_audio import LayerAudio
+    return LayerAudio.from_dict(raw)
 
 
 # ── LayerMap: convenience container used by the controller / compiler ──────
