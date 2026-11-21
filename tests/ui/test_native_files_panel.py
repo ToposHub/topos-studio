@@ -2,7 +2,9 @@
 from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, Qt
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QFrame
+from pytestqt.qtbot import QtBot
 
+from src.app.ui.native_files_locations import MountedVolume
 from src.app.ui.native_files_panel import NativeFilesPanel
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
@@ -168,6 +170,32 @@ def test_real_thumbnail_decode_and_directory_change_clear_old_images(qtbot):
     assert not panel._images
 
 
+def test_density_drag_defers_thumbnail_delivery_until_release(qtbot: QtBot) -> None:
+    panel = _panel(qtbot)
+    first, second = panel.model.entries[1:]
+    panel.set_thumbnail(first.path, _png_bytes())
+    requests: list[str] = []
+    pause_states: list[bool] = []
+    panel.thumbnail_requested.connect(lambda path, _: requests.append(path))
+    panel.thumbnail_dispatch_paused.connect(pause_states.append)
+    slider = panel.density_slider
+    previous = panel._preferences().density
+
+    slider.setSliderDown(True)
+    slider.setValue(219 if previous != 219 else 220)
+    assert panel._image_for_entry(first) is not None
+    assert panel._image_for_entry(second) is None
+    panel.set_thumbnail(second.path, _png_bytes())
+    assert second.path not in panel._images
+    assert panel._preferences().density == previous
+    assert requests == [] and pause_states == [True]
+    qtbot.waitUntil(lambda: panel.icon_view.thumbnailSize() == slider.value())
+
+    slider.setSliderDown(False)
+    assert panel._preferences().density == slider.value()
+    qtbot.waitUntil(lambda: second.path in panel._images and pause_states == [True, False])
+
+
 def test_thumbnail_lru_releases_evicted_image_for_refetch(qtbot):
     panel = _panel(qtbot)
     entries = [{"name": str(i), "path": f"/media/{i}.png", "type": "image"} for i in range(129)]
@@ -321,6 +349,57 @@ def test_home_tree_expands_lazily_and_reveals_without_navigation_loop(qtbot):
     panel.locations.set_children(panel.home_path + "/Movies", [{"name": "Footage", "path": panel.home_path + "/Movies/Footage"}])
     assert panel.locations.currentIndex().data(panel.locations.PATH_ROLE) == panel.home_path + "/Movies/Footage"
     assert directories == []
+
+
+def test_mount_changes_preserve_other_tree_nodes_and_allow_volume_navigation(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    tree = panel.locations
+    home = tree.home_item
+    first = MountedVolume("/Volumes/Scratch", "Scratch", b"first")
+    usb = MountedVolume("/Volumes/USB", "USB", b"second")
+    requests: list[str] = []
+    directories: list[str] = []
+    tree.tree_requested.connect(requests.append)
+    tree.directory_requested.connect(directories.append)
+    tree.start()
+    tree.set_children(panel.home_path, [{"name": "Pictures", "path": panel.home_path + "/Pictures"}])
+
+    tree.reveal(first.path + "/Shots")
+    tree.set_volumes((first, usb))
+    assert requests == [panel.home_path, first.path]
+    scratch = tree._nodes[first.path]
+    tree.set_children(first.path, [{"name": "Shots", "path": first.path + "/Shots"}])
+    assert tree.currentIndex().data(tree.PATH_ROLE) == first.path + "/Shots"
+    assert directories == []
+
+    tree.set_volumes((first,))
+    assert tree.home_item is home and tree.isExpanded(home.index())
+    assert tree._nodes[first.path] is scratch and tree.isExpanded(scratch.index())
+    assert tree.currentIndex().data(tree.PATH_ROLE) == first.path + "/Shots"
+    assert usb.path not in tree._nodes
+    tree.clicked.emit(scratch.index())
+    assert directories == [first.path]
+
+    tree.set_volumes(())
+    assert tree.item_model.rowCount() == 1
+    assert first.path + "/Shots" not in tree._nodes
+    tree.set_volumes((usb,))
+    assert tree.item_model.rowCount() == 2
+    assert tree._nodes[usb.path].index().isValid()
+
+
+def test_reveal_windows_drive_keeps_absolute_path(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="C:/Users/creator")
+    qtbot.addWidget(panel)
+    tree = panel.locations
+    drive = MountedVolume("E:/", "Media", b"drive")
+    tree.set_volumes((drive,))
+    with qtbot.waitSignal(tree.tree_requested) as requested:
+        tree.reveal("E:/Projects")
+    assert requested.args == ["E:/"]
+    tree.set_children("E:/", [{"name": "Projects", "path": "E:\\Projects"}])
+    assert tree.currentIndex().data(tree.PATH_ROLE) == "E:/Projects"
 
 
 def test_home_tree_error_retries_and_reload_discards_old_nodes(qtbot):

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import unicodedata
+from pathlib import Path
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QPoint, QRect, QSettings, QUrl
+from pytestqt.qtbot import QtBot
 
 from src.features.files.contracts import identity_key, normalize_path
 
@@ -17,6 +19,7 @@ def test_unicode_forms_share_identity():
 
 def test_windows_and_unc_paths_are_normalized_not_url_guessed():
     assert normalize_path("C:\\Media\\clip.mov") == "C:/Media/clip.mov"
+    assert normalize_path("E:\\") == "E:/"
     assert normalize_path("\\\\server\\share\\folder") == "//server/share/folder"
 
 
@@ -44,3 +47,25 @@ def test_narrow_panel_keeps_primary_controls_reachable(qtbot):
         assert widget.mapTo(panel, widget.rect().center()).x() >= 0
     assert panel.sidebar.width() >= 112
     assert panel.inspector.width() >= 200
+
+
+def test_gallery_toolbar_fits_when_inspector_is_open(qtbot: QtBot, tmp_path: Path) -> None:
+    from src.app.ui.native_files_panel import NativeFilesPanel
+    from src.app.ui.native_files_prefs import NativeFilesPreferences
+
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
+    panel = NativeFilesPanel(preferences=prefs)
+    qtbot.addWidget(panel)
+    panel.resize(1246, 650)
+    panel.show()
+    assert panel.gallery_toolbar.isAncestorOf(panel.density_slider)
+    assert panel.gallery_toolbar.geometry().bottom() < panel.pages.geometry().top()
+
+    panel.resize(380, 520)
+    panel.inspector_button.click()
+    toolbar = panel.gallery_toolbar
+    qtbot.waitUntil(lambda: panel.inspector.isVisible() and panel.flag_combo.isHidden())
+    for widget in (panel.type_combo, panel.density_slider):
+        assert widget.isVisible()
+        qtbot.waitUntil(lambda: toolbar.rect().contains(QRect(widget.mapTo(toolbar, QPoint()), widget.size())))
+    assert panel.more_button.geometry().right() < panel.width()

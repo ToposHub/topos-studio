@@ -5,11 +5,16 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import QPoint, QSettings
+from PyQt6.QtWidgets import QMenu
+from pytestqt.qtbot import QtBot
 
 from src.app.ui import native_files_panel as panel_module
 from src.app.ui.native_files_panel import NativeFilesPanel
+from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.features.files.contracts import Entry
 
 
@@ -164,11 +169,47 @@ def test_pin_current_directory_emits_path(panel):
     assert pinned == ["/Users/creator/Media"]
 
 
-def test_scan_status_toggles_button(panel):
+def test_tools_menu_opens_recent_location_and_starts_scan(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
+    path = "/Users/creator/Design & Photos"
+    prefs.remember_location(path)
+    panel = NativeFilesPanel(home_path="/Users/creator", preferences=prefs)
+    qtbot.addWidget(panel)
+
+    def choose_tools(menu: QMenu, _position: QPoint) -> None:
+        recent = next(action.menu() for action in menu.actions() if action.text() == "最近访问")
+        location = recent.actions()[0]
+        assert location.text() == "Design && Photos"
+        assert location.toolTip() == path
+        location.trigger()
+        next(action for action in menu.actions() if action.text() == "开始索引").trigger()
+
+    monkeypatch.setattr(panel_module.QMenu, "exec", choose_tools)
+    with qtbot.waitSignal(panel.directory_requested) as requested, qtbot.waitSignal(panel.scan_requested):
+        panel.more_button.click()
+    assert requested.args == [path]
+
+
+def test_scan_status_toggles_button(panel, qtbot):
+    assert panel.scan_label.isHidden()
+    assert panel.scan_button.isHidden()
     panel.show_scan_status({"running": True, "phase": "枚举", "scanned": 3, "total": 9})
+    assert not panel.scan_label.isHidden()
+    assert not panel.scan_button.isHidden()
     assert "取消" in panel.scan_button.text()
     assert "3/9" in panel.scan_label.text()
+    with qtbot.waitSignal(panel.scan_cancel_requested):
+        panel.scan_button.click()
     panel.show_scan_status({"running": False, "phase": "完成",
                             "last_result": {"added": 4}})
+    assert panel.scan_button.isHidden()
     assert "开始索引" in panel.scan_button.text()
     assert "新增 4" in panel.scan_label.text()
+    panel.show_scan_status({"running": True, "phase": "索引中"})
+    panel.scan_failed("读取失败")
+    assert panel.scan_button.isHidden()
+    assert "读取失败" in panel.scan_label.toolTip()
+    with qtbot.waitSignal(panel.scan_requested):
+        panel.toggle_scan()

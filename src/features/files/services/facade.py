@@ -86,6 +86,8 @@ class FilesFacade:
                  tasks: FilesTaskService | None = None,
                  journal: OperationJournal | None = None) -> None:
         self._catalog = catalog
+        from src.features.files.services.thumbnail_cache import ThumbnailCache
+        self._thumbnail_cache = ThumbnailCache(catalog.locator)
         # B3 生产接线：崩溃可恢复的写路径必须有持久 job_log（None=纯内存
         # 运行仅用于测试注入）。任务与批改名共用同一 journal。
         self.journal = journal if journal is not None else OperationJournal(catalog)
@@ -112,6 +114,13 @@ class FilesFacade:
         self._closed = False
 
     # ------------------------------------------------------------ 统计/生命周期
+
+    def thumbnail_bytes(self, path: str, version: int, *, cancel: threading.Event) -> bytes:
+        from src.features.files.services.media import thumbnail_bytes
+
+        if cancel.is_set():
+            raise ValueError("缩略图请求已取消")
+        return self._thumbnail_cache.get_or_create(path, version, lambda: thumbnail_bytes(path, cancel=cancel))
 
     @property
     def dropped_results(self) -> int:

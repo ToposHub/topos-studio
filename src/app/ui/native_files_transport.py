@@ -4,8 +4,7 @@ D1 换轨：目录/树/搜索/集合/元数据/任务/库/扫描/批改名走 **
 （同进程、有界 worker、代际作废），预览/比较为本地直读；这些路由不再依赖
 旧 HTTP 服务。缩略图/胶片条走共享解码器与有界本地任务；工具由原生命令宿主启动。
 
-信号契约与本类的公共方法签名保持不变；面板/控制器零改动。回调在 facade
-worker 线程触发信号，Qt 按接收者亲和自动队列到 GUI 线程。
+目录结果先进入 GUI 线程队列，再核对导航代际，避免已入队的旧请求回写面板。
 """
 from __future__ import annotations
 
@@ -19,6 +18,7 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
+from src.app.ui.native_files_locations import mounted_data_volumes
 from src.features.files.contracts import (
     FilesErrorCode,
     QueryRequest,
@@ -26,7 +26,7 @@ from src.features.files.contracts import (
 )
 from src.features.files.repository import FilesDataLocator
 from src.features.files.repository.catalog import FilesCatalog, nfc
-from src.features.files.services.facade import FilesFacade, read_file_bytes
+from src.features.files.services.facade import FacadeOutcome, FilesFacade, read_file_bytes
 from src.features.files.transactions import CancelToken
 from src.shared.plugins.services import ItemResult
 
@@ -69,13 +69,14 @@ class NativeFilesTransport(QObject):
     loading = pyqtSignal(str)
     loaded = pyqtSignal(str, list)
     failed = pyqtSignal(str, str)
-    # D3 分页：目录页元信息（path, total, truncated），先于 loaded 送达
+    # Apply pagination after the panel has installed the page's rows.
     page_meta = pyqtSignal(str, int, bool)
     thumbnail_loaded = pyqtSignal(str, bytes)
     thumbnail_failed = pyqtSignal(str)
     thumbnail_pending = pyqtSignal(str)
     tree_loaded = pyqtSignal(str, list)
     tree_failed = pyqtSignal(str, str)
+    volumes_loaded = pyqtSignal(tuple)
     metadata_applied = pyqtSignal(list, dict, str)
     metadata_failed = pyqtSignal(list, dict, str)
     # 服务确认后的最终 user 快照：UI 一律按此回显（不自行推算）
@@ -114,6 +115,8 @@ class NativeFilesTransport(QObject):
     _thumbnail_done = pyqtSignal(str, object)
     _strip_done = pyqtSignal(str, object)
     _tree_done = pyqtSignal(object, str)
+    _volumes_done = pyqtSignal(object)
+    _directory_done = pyqtSignal(int, str, object)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
@@ -135,6 +138,8 @@ class NativeFilesTransport(QObject):
         self._thumbnail_done.connect(self._finish_local_thumbnail, Qt.ConnectionType.QueuedConnection)
         self._strip_done.connect(self._finish_local_strip, Qt.ConnectionType.QueuedConnection)
         self._tree_done.connect(self._finish_tree, Qt.ConnectionType.QueuedConnection)
+        self._volumes_done.connect(self._finish_volumes, Qt.ConnectionType.QueuedConnection)
+        self._directory_done.connect(self._finish_directory, Qt.ConnectionType.QueuedConnection)
         self._generation = 0        # HTTP 缩略图代际（沿用原语义）
         self._nav_generation = 0    # 数据面导航代际：cancel() 后迟到结果作废
         self._preview_seq = 0       # 预览请求身份：同路径重开/取消都作废旧读取
@@ -143,10 +148,12 @@ class NativeFilesTransport(QObject):
         self._scan_cancel: CancelToken | None = None
         self._scan_state: dict[str, Any] = {"running": False, "phase": "空闲"}
         self._thumbnail_queue: deque[tuple[str, int]] = deque()
+        self._thumbnail_dispatch_paused = False
         self._thumbnail_attempted: set[tuple[str, int]] = set()
         self._thumbnail_replies: dict[str, _ThumbnailRead] = {}
         self._thumbnail_versions: dict[str, int] = {}
-        self._tree_pending_paths: set[str] = set()
+        self._tree_pending_paths: dict[str, str] = {}
+        self._volumes_pending = False
         # [FR-15/17] 比较会话化：session_id → 剩余队列 / 在途标记
         self._compare_sessions: dict[str, deque[str]] = {}
         self._compare_busy: set[str] = set()
@@ -191,6 +198,27 @@ class NativeFilesTransport(QObject):
         return False
 
     # ------------------------------------------------------------ 目录树（facade）
+    def load_volumes(self) -> None:
+        if self._closed or self._volumes_pending:
+            return
+        facade = self._runtime()
+        if facade is None:
+            return
+        self._volumes_pending = True
+        facade.run(key="mounted-volumes", request_id=uuid.uuid4().hex, work=mounted_data_volumes,
+                   listener=lambda outcome: self._volumes_done.emit(outcome) if not self._closed else None)
+
+    def _finish_volumes(self, outcome: FacadeOutcome) -> None:
+        self._volumes_pending = False
+        if not self._closed and outcome.error is None:
+            self.volumes_loaded.emit(outcome.result)
+
+    def invalidate_tree_root(self, root: str) -> None:
+        prefix = root.rstrip("/") + "/"
+        for path in tuple(self._tree_pending_paths):
+            if path == root or path.startswith(prefix):
+                del self._tree_pending_paths[path]
+
     def load_tree(self, path: str) -> None:
         """Load one expanded node, independently of content navigation.
 
@@ -207,15 +235,16 @@ class NativeFilesTransport(QObject):
         if facade is None:
             self.tree_failed.emit(path, self._runtime_error_message())
             return
-        self._tree_pending_paths.add(path)
-        facade.tree(path, request_id=uuid.uuid4().hex,
+        request_id = uuid.uuid4().hex
+        self._tree_pending_paths[path] = request_id
+        facade.tree(path, request_id=request_id,
                     listener=lambda outcome, p=path: self._tree_done.emit(outcome, p)
                     if not self._closed else None)
 
-    def _finish_tree(self, outcome, path: str) -> None:
-        self._tree_pending_paths.discard(path)
-        if self._closed:
+    def _finish_tree(self, outcome: FacadeOutcome, path: str) -> None:
+        if self._closed or self._tree_pending_paths.get(path) != outcome.request_id:
             return
+        self._tree_pending_paths.pop(path)
         if outcome.error is not None:
             self.tree_failed.emit(path, str(outcome.error.message or "目录树读取失败。"))
             return
@@ -264,8 +293,14 @@ class NativeFilesTransport(QObject):
             if key[0] == path and key not in active
         )
 
+    def set_thumbnail_dispatch_paused(self, paused: bool) -> None:
+        self._thumbnail_dispatch_paused = paused
+        if not paused:
+            self._pump_thumbnails()
+
     def _pump_thumbnails(self) -> None:
-        from src.features.files.services.media import thumbnail_bytes
+        if self._thumbnail_dispatch_paused:
+            return
         while (not self._closed and self._thumbnail_queue
                and len(self._thumbnail_replies) < self.MAX_THUMBNAIL_CONCURRENCY):
             path, version = self._thumbnail_queue.popleft()
@@ -285,7 +320,8 @@ class NativeFilesTransport(QObject):
                     self._thumbnail_done.emit(key, outcome)
 
             facade.run(key=f"thumbnail:{request_id}", request_id=request_id,
-                       work=lambda p=path, token=cancel: thumbnail_bytes(p, cancel=token),
+                       work=lambda p=path, v=version, token=cancel, runtime=facade:
+                           runtime.thumbnail_bytes(p, v, cancel=token),
                        listener=deliver)
 
     def _finish_local_thumbnail(self, request_id: str, outcome: Any) -> None:
@@ -324,18 +360,24 @@ class NativeFilesTransport(QObject):
                 request, library_id=record.library_id if record else "",
                 limit=limit, offset=int(offset))
 
-        def _deliver(outcome) -> None:
-            if self._closed or generation != self._nav_generation:
-                return
-            if outcome.error is not None:
-                self.failed.emit(path, _dir_error_message(outcome.error))
-                return
-            result = outcome.result
-            self.page_meta.emit(path, result.total, result.truncated)
-            self.loaded.emit(path, list(result.entries))
+        def _deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                self._directory_done.emit(generation, path, outcome)
 
         facade.run(key=f"list:{identity_key(path)}", request_id=request.request_id,
                    work=_work, listener=_deliver)
+
+    def _finish_directory(self, generation: int, path: str, outcome: FacadeOutcome) -> None:
+        # The request can become stale after the worker posts its Qt event.
+        if self._closed or generation != self._nav_generation:
+            return
+        if outcome.error is not None:
+            self.failed.emit(path, _dir_error_message(outcome.error))
+            return
+        result = outcome.result
+        self.loaded.emit(path, list(result.entries))
+        if not self._closed and generation == self._nav_generation:
+            self.page_meta.emit(path, result.total, result.truncated)
 
     # ------------------------------------------------------------ 元数据写入（facade）
     def patch_metadata(self, paths: list[str], patch: dict[str, Any],
