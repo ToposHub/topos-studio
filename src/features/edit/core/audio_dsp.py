@@ -3903,6 +3903,10 @@ def _ensure_effect_registry() -> dict:
             ExciterEffect,
         )
         _EFFECT_CLASS_REGISTRY["exciter"] = ExciterEffect
+        from src.features.edit.core.audio_effects.subharmonic import (
+            SubharmonicEffect,
+        )
+        _EFFECT_CLASS_REGISTRY["subharmonic"] = SubharmonicEffect
     return _EFFECT_CLASS_REGISTRY
 
 

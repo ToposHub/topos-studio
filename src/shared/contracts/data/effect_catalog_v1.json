@@ -1057,6 +1057,42 @@
     },
     {
       "category": "audio",
+      "description": "Confidence-gated octave-down generator for bass sources",
+      "effect_type": "subharmonic",
+      "name": "Subharmonic",
+      "params": {
+        "sh_mix": {
+          "default": 0.5,
+          "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "sh_octave1_gain_db": {
+          "default": -6.0,
+          "label": "Oct 1",
+          "max": 0.0,
+          "min": -36.0,
+          "type": "float"
+        },
+        "sh_octave2_gain_db": {
+          "default": -12.0,
+          "label": "Oct 2",
+          "max": 0.0,
+          "min": -36.0,
+          "type": "float"
+        },
+        "sh_source_center_hz": {
+          "default": 90.0,
+          "label": "Source Center",
+          "max": 180.0,
+          "min": 45.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
       "description": "dB-domain attack/sustain shaping with 3 dB knee",
       "effect_type": "transient_designer",
       "name": "Transient Designer",

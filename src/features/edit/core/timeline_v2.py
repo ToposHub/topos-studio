@@ -3240,6 +3240,56 @@ class SaturationParams:
 
 @dataclass(frozen=True)
 @preserves_param_extras
+class SubharmonicParams:
+    """次谐波发生器（FX-16 · 2026-11-21 计划）：置信度门控八度生成。"""
+    enabled: bool = True
+    sh_source_center_hz: float = 90.0
+    sh_source_bandwidth_hz: float = 60.0
+    sh_octave1_gain_db: float = -6.0
+    sh_octave2_gain_db: float = -12.0
+    sh_sub_lpf_hz: float = 120.0
+    sh_attack_ms: float = 20.0
+    sh_release_ms: float = 150.0
+    sh_mix: float = 0.5
+    sh_output_gain_db: float = 0.0
+
+    @staticmethod
+    def default() -> "SubharmonicParams":
+        return SubharmonicParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "sh_source_center_hz": self.sh_source_center_hz,
+            "sh_source_bandwidth_hz": self.sh_source_bandwidth_hz,
+            "sh_octave1_gain_db": self.sh_octave1_gain_db,
+            "sh_octave2_gain_db": self.sh_octave2_gain_db,
+            "sh_sub_lpf_hz": self.sh_sub_lpf_hz,
+            "sh_attack_ms": self.sh_attack_ms,
+            "sh_release_ms": self.sh_release_ms,
+            "sh_mix": self.sh_mix,
+            "sh_output_gain_db": self.sh_output_gain_db,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SubharmonicParams":
+        return SubharmonicParams(
+            enabled=bool(data.get("enabled", True)),
+            sh_source_center_hz=float(data.get("sh_source_center_hz", 90.0)),
+            sh_source_bandwidth_hz=float(
+                data.get("sh_source_bandwidth_hz", 60.0)),
+            sh_octave1_gain_db=float(data.get("sh_octave1_gain_db", -6.0)),
+            sh_octave2_gain_db=float(data.get("sh_octave2_gain_db", -12.0)),
+            sh_sub_lpf_hz=float(data.get("sh_sub_lpf_hz", 120.0)),
+            sh_attack_ms=float(data.get("sh_attack_ms", 20.0)),
+            sh_release_ms=float(data.get("sh_release_ms", 150.0)),
+            sh_mix=float(data.get("sh_mix", 0.5)),
+            sh_output_gain_db=float(data.get("sh_output_gain_db", 0.0)),
+        )
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
 class ExciterParams:
     """激励器（FX-15 · 2026-11-21 计划）：两段谐波支路并回干声。
 
@@ -3620,6 +3670,7 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["multiband_comp"] = MultibandCompParams
         _EFFECT_PARAM_REGISTRY["convolution_reverb"] = ConvolutionReverbParams
         _EFFECT_PARAM_REGISTRY["exciter"] = ExciterParams
+        _EFFECT_PARAM_REGISTRY["subharmonic"] = SubharmonicParams
         _EFFECT_PARAM_REGISTRY["transient_designer"] = TransientDesignerParams
         _EFFECT_PARAM_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanParams
         _EFFECT_PARAM_REGISTRY["chorus_flanger"] = ChorusFlangerParams

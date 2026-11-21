@@ -297,6 +297,23 @@ CHORUS_FLANGER_EFFECT = EffectDefinition(
     icon="audio_track",
 )
 
+SUBHARMONIC_EFFECT = EffectDefinition(
+    effect_type="subharmonic",
+    name="Subharmonic",
+    category="audio",
+    description="Confidence-gated octave-down generator for bass sources",
+    params_schema={
+        "sh_source_center_hz": _float_schema(90.0, 45.0, 180.0, 1.0,
+                                             "Source Center", "Hz"),
+        "sh_octave1_gain_db": _float_schema(-6.0, -36.0, 0.0, 0.5,
+                                            "Oct 1", "dB"),
+        "sh_octave2_gain_db": _float_schema(-12.0, -36.0, 0.0, 0.5,
+                                            "Oct 2", "dB"),
+        "sh_mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
+    },
+    icon="audio_track",
+)
+
 EXCITER_EFFECT = EffectDefinition(
     effect_type="exciter",
     name="Exciter",
@@ -473,8 +490,8 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
     "multiband_comp", "convolution_reverb", "transient_designer",
     "tremolo_auto_pan", "chorus_flanger", "phaser",
-    # P2（2026-11-21 计划 FX-15）：激励器
-    "exciter",
+    # P2（2026-11-21 计划 FX-15/FX-16）：激励器 / 次谐波
+    "exciter", "subharmonic",
 })
 
 
@@ -956,6 +973,7 @@ class EffectRegistry:
         self.register(PHASER_EFFECT)
         # P2（2026-11-21 计划 FX-15）：激励器
         self.register(EXCITER_EFFECT)
+        self.register(SUBHARMONIC_EFFECT)
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an
