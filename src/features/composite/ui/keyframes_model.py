@@ -500,8 +500,15 @@ class KeyframesModel:
             layer_row_id = f"layer:{row.layer_id}"
             transform_row_id = f"{layer_row_id}:group:transform"
             layer_root = headings[layer_row_id].node_id
-            transform_property = (row.node_id == layer_root or
-                                  (row.param_name == "opacity" and row.parent_row_id == transform_row_id))
+            focus_layer = graph.get_layer(row.layer_id) \
+                if callable(getattr(graph, "get_layer", None)) else None
+            layer_transform = getattr(focus_layer, "transform_node_id", None)
+            # B01: transform properties live on the registered main
+            # Transform, which may differ from the chain head.
+            transform_property = (row.node_id == layer_root
+                                  or row.node_id == layer_transform
+                                  or (row.param_name == "opacity"
+                                      and row.parent_row_id == transform_row_id))
             if not effects and not self._matches_layer_property_focus(
                     graph, row, tokens, transform_property=transform_property):
                 continue
@@ -608,6 +615,10 @@ class KeyframesModel:
         node_type = getattr(node, "node_type", "")
         if node_type in _MASK_NODE_TYPES:
             return "masks"
+        if node.id == getattr(layer, "transform_node_id", None):
+            # B01: the registered main Transform belongs to the transform
+            # group even when it is not the chain head.
+            return "transform"
         if node_type == "transform" or node_type == "transform3d":
             return "transform"
         if (node.id == layer.source_node_id or node_type in _MEDIA_NODE_TYPES

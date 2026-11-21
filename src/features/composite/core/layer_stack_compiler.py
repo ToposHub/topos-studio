@@ -802,16 +802,32 @@ class LayerStackCompiler:
                 self._project_root_opacity(layer, result)
             self._project_layer_parent(layer, layers, result)
 
+    def _parent_projection_node(self, layer: Layer):
+        """The node that carries this layer's parenting transform.
+
+        B01: parenting binds the registered main Transform; the chain head
+        may be an effect without parent support.  Layers without a live
+        registered Transform keep the legacy chain-head projection.
+        """
+        registered = getattr(layer, "transform_node_id", None)
+        if registered:
+            node = self.graph.get_node(registered)
+            if node is not None:
+                return node
+        return self.graph.get_node(layer.root_node_id)
+
     def _project_layer_parent(self, layer: Layer, layers: Dict[str, Layer],
                               result: CompileResult) -> None:
-        root = self.graph.get_node(layer.root_node_id)
-        if root is None or not getattr(root, "supports_parent_transform", False):
+        node = self._parent_projection_node(layer)
+        if node is None or not getattr(node, "supports_parent_transform", False):
             return
         parent_layer = layers.get(layer.parent_layer_id) if layer.parent_layer_id else None
-        parent_id = parent_layer.root_node_id if parent_layer is not None else None
-        if getattr(root, "parent_id", None) != parent_id:
+        parent_node = self._parent_projection_node(parent_layer) \
+            if parent_layer is not None else None
+        parent_id = parent_node.id if parent_node is not None else None
+        if getattr(node, "parent_id", None) != parent_id:
             result.changes.append(CompileChange(
-                kind="connect", src_node_id=layer.root_node_id, dst_node_id=layer.root_node_id,
+                kind="connect", src_node_id=node.id, dst_node_id=node.id,
                 src_port_name="__parent__", dst_port_name=parent_id or ""))
 
     def _project_root_opacity(self, layer: Layer,

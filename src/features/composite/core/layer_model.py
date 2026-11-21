@@ -118,6 +118,13 @@ class Layer:
     name: str
     root_node_id: str
     source_node_id: Optional[str] = None
+    # B01 stable layer roles: the layer's main Transform node.  This is a
+    # registered role, not an inference from the chain head — effects may sit
+    # above or below the Transform without changing which node owns
+    # translate/scale/pivot.  A stale id whose node no longer exists marks an
+    # identifiable, repairable "transform missing" state (deleted main
+    # Transform); re-attaching a wired Transform claims the role again.
+    transform_node_id: Optional[str] = None
 
     # ── Layer state (AE parity) ──
     enabled: bool = True
@@ -161,6 +168,7 @@ class Layer:
             "name": self.name,
             "root_node_id": self.root_node_id,
             "source_node_id": self.source_node_id,
+            "transform_node_id": self.transform_node_id,
             "enabled": self.enabled,
             "solo": self.solo,
             "locked": self.locked,
@@ -206,6 +214,7 @@ class Layer:
             name=data.get("name", "Layer"),
             root_node_id=data["root_node_id"],
             source_node_id=data.get("source_node_id"),
+            transform_node_id=data.get("transform_node_id"),
             enabled=data.get("enabled", True),
             solo=data.get("solo", False),
             locked=data.get("locked", False),

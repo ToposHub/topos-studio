@@ -328,6 +328,66 @@ def test_reinserting_transform_restores_layer_controls(qapp, method):
         properties.close()
 
 
+def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
+    """B01: with an effect above the layer Transform, the Layers view keeps
+    transform semantics and the role survives a save/reload round-trip."""
+    from src.features.composite.nodes.blur_node import BlurNode
+    from src.features.composite.core.layer_stack_compiler import MERGE_PORT_FOREGROUND
+
+    page = CompositePage()
+    panel = KeyframesPanel()
+    properties = NodePropertiesPanel()
+    page.set_properties_panel(properties)
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    editor = page._node_editor
+    page._evaluate_graph = MagicMock()
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="source"))
+    blur = BlurNode(node_id="blur_above")
+    graph.add_node(blur)
+    layer_id = controller.add_media_layer("Footage", "source")
+    layer = graph.get_layer(layer_id)
+    transform_id = layer.transform_node_id
+    merge = controller.layer_merge_node(layer_id)
+    assert transform_id is not None and transform_id != layer.source_node_id
+
+    graph.disconnect(transform_id, "result", merge.id, MERGE_PORT_FOREGROUND)
+    assert graph.connect(transform_id, "result", blur.id, "image")
+    assert graph.connect(blur.id, "result", merge.id, MERGE_PORT_FOREGROUND)
+    assert controller.adopt_wired_layer_effect(
+        layer_id, blur.id, "result", (merge.id, MERGE_PORT_FOREGROUND))
+    editor.build_from_graph(graph)
+    page.set_keyframes_panel(panel)
+    panel.set_view_mode("layers")
+    try:
+        assert graph.get_layer(layer_id).root_node_id == blur.id
+        # The Layers view shows the registered Transform's params under the
+        # transform group, not the Blur chain head's.
+        assert controller.layer_transform_node(layer_id).id == transform_id
+        assert any(row.layer_id == layer_id and row.node_id == transform_id
+                   and row.param_name == "translate_x"
+                   for row in panel._model.rows)
+        # Adding an effect through the panel splices ahead of the Transform
+        # instead of wrapping the Blur in a second Transform.
+        effect_id = controller.add_layer_effect(layer_id, "blur")
+        assert effect_id is not None
+        assert [n.id for n in graph.nodes.values()
+                if n.node_type == "transform"] == [transform_id]
+
+        page.load_composite_data(page.get_composite_data())
+        restored = page.node_graph.get_layer(layer_id)
+        assert restored.root_node_id == blur.id
+        assert restored.transform_node_id == transform_id
+        assert page._layer_stack_controller.layer_transform_node(
+            layer_id).id == transform_id
+    finally:
+        page.close()
+        panel.close()
+        properties.close()
+
+
 @pytest.mark.parametrize("reason", ["other_layer", "locked", "managed_conflict"])
 def test_refused_transform_drop_preserves_existing_cables(qapp, reason):
     page = CompositePage()

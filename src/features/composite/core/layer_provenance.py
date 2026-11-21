@@ -27,6 +27,44 @@ class NodeProvenance:
 
 
 @dataclass(frozen=True)
+class LayerRoles:
+    """Stable role contract for one layer's managed image chain (B01).
+
+    ``transform`` is the layer's registered main Transform (never a second
+    copy of the values); ``effects`` lists every other node on the chain in
+    upstream→downstream order (the chain head included when it is an
+    effect); ``foreground`` is the final image feed ``(node_id, port)``
+    that plugs into the managed Merge / Output chain.
+    """
+
+    source: Optional[str]
+    transform: Optional[str]
+    effects: Tuple[str, ...]
+    foreground: Tuple[str, str]
+    managed_merge: Optional[str]
+    # The registered transform role points at a node that no longer exists
+    # (deleted main Transform) — an identifiable, repairable state.
+    transform_missing: bool = False
+    # A legacy chain without a registered role offered several transform
+    # candidates; no stable reference was written.
+    transform_ambiguous: bool = False
+
+
+def choose_legacy_transform(
+        main_chain: Tuple[str, ...],
+        transform_ids: "frozenset[str]") -> Optional[str]:
+    """Pick the unique legacy Transform on an explicit image main chain.
+
+    Legacy projects predating the stable role field identified the layer
+    Transform implicitly.  Only a chain with exactly one Transform node
+    yields a stable reference; ambiguous chains stay unresolved so callers
+    can surface a repair diagnostic instead of guessing.
+    """
+    candidates = [node_id for node_id in main_chain if node_id in transform_ids]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+@dataclass(frozen=True)
 class LayerProvenance:
     """Complete, immutable description of one layer's graph ownership."""
 
@@ -126,6 +164,10 @@ class LayerProvenanceResolver:
                     role = "source"
                 elif target == provenance.root_node_id:
                     role = "root"
+                elif target == getattr(layer, "transform_node_id", None):
+                    # B01: a registered main Transform that is not the chain
+                    # head used to be misreported as a plain effect.
+                    role = "transform"
                 else:
                     role = "effect"
                 result.append(NodeProvenance(

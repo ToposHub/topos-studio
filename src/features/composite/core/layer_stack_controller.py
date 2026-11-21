@@ -64,7 +64,9 @@ from .layer_stack_validator import LayerStackValidator
 from .layer_provenance import (
     LayerProvenance,
     LayerProvenanceResolver,
+    LayerRoles,
     NodeProvenance,
+    choose_legacy_transform,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +181,129 @@ class LayerStackController(QObject if _HAVE_QT else object):
                      if (node := self.graph.get_node(node_id)) is not None
                      and node.parameters.get(LAYER_MERGE_OWNER_PARAM) == layer_id), None)
 
+    # ── Stable layer roles (B01) ────────────────────────────────────────
+
+    def layer_roles(self, layer_id: str) -> Optional[LayerRoles]:
+        """Resolve the stable role contract for one layer's image chain.
+
+        ``source``/``transform``/``effects``/``foreground``/``managed_merge``
+        come from registered references first; legacy layers without a
+        registered Transform are backfilled only when the explicit image
+        main chain offers exactly one candidate (B01 §1.2-1.4).
+        """
+        layer = self.graph.get_layer(layer_id)
+        if layer is None:
+            return None
+        from .layer_stack_compiler import _output_port_of
+
+        root_id = layer.root_node_id
+        chain = self._layer_main_chain(layer)
+        transform_id, missing, ambiguous = self._resolve_layer_transform(
+            layer, chain)
+
+        interior = chain[1:-1] if (len(chain) > 1 and chain[-1] == layer.source_node_id) \
+            else chain[1:]
+        effects = tuple(reversed(
+            [node_id for node_id in interior if node_id != transform_id]))
+        if root_id and root_id not in (transform_id, layer.source_node_id):
+            effects = effects + (root_id,)
+
+        merge = self.layer_merge_node(layer_id)
+        foreground = (root_id, _output_port_of(self.graph, root_id)) \
+            if root_id and self.graph.get_node(root_id) is not None \
+            else (root_id, "")
+        return LayerRoles(
+            source=layer.source_node_id,
+            transform=transform_id,
+            effects=effects,
+            foreground=foreground,
+            managed_merge=merge.id if merge is not None else None,
+            transform_missing=missing,
+            transform_ambiguous=ambiguous,
+        )
+
+    def layer_transform_node(self, layer_id: str) -> Optional[Any]:
+        """Return the layer's live main Transform node, or None."""
+        roles = self.layer_roles(layer_id)
+        if roles is None or roles.transform is None:
+            return None
+        return self.graph.get_node(roles.transform)
+
+    def _layer_main_chain(self, layer: Layer) -> List[str]:
+        """Walk the layer's explicit image main chain, chain head → source.
+
+        The walk excludes precomp/group boundaries and nodes owned by other
+        layers (their root/source/transform) so a shared upstream branch can
+        never leak into this layer's role resolution (B01 §1.4).
+        """
+        chain = [layer.root_node_id]
+        source_id = layer.source_node_id
+        if not source_id:
+            return chain
+        foreign: set[str] = set()
+        for other in self.graph.get_all_layers():
+            if other.layer_id == layer.layer_id:
+                continue
+            for node_id in (other.root_node_id, other.source_node_id,
+                            getattr(other, "transform_node_id", None)):
+                if node_id:
+                    foreign.add(node_id)
+        inputs = {(c.dst_node_id, c.dst_port_name): c.src_node_id
+                  for c in self.graph.connections}
+        while chain[-1] != source_id:
+            node = self.graph.get_node(chain[-1])
+            if node is None:
+                break
+            if getattr(node, "node_type", "") in {"precomp", "group"}:
+                break
+            port = next((port for port in node.inputs
+                         if port.data_type == "image"), None)
+            previous_id = inputs.get((node.id, port.name)) \
+                if port is not None else None
+            if not previous_id or previous_id in chain or previous_id in foreign:
+                break
+            chain.append(previous_id)
+        return chain
+
+    def _resolve_layer_transform(
+            self, layer: Layer,
+            chain: List[str]) -> tuple[Optional[str], bool, bool]:
+        """Return ``(transform_id, missing, ambiguous)`` for one layer.
+
+        Registered references win; the legacy chain-head convention and the
+        unique-candidate backfill only run when no role is registered.  A
+        backfilled unique candidate is written back as the stable reference.
+        """
+        registered = getattr(layer, "transform_node_id", None)
+        if registered:
+            node = self.graph.get_node(registered)
+            if node is not None and node.node_type == "transform":
+                return registered, False, False
+            # Registered but detached: identifiable, repairable missing state.
+            return None, True, False
+
+        root = self.graph.get_node(layer.root_node_id) \
+            if layer.root_node_id else None
+        if root is not None and root.node_type == "transform":
+            self._register_layer_transform(layer, root.id)
+            return root.id, False, False
+
+        transform_ids = frozenset(
+            node_id for node_id, node in self.graph.nodes.items()
+            if getattr(node, "node_type", "") == "transform")
+        candidate = choose_legacy_transform(tuple(chain), transform_ids)
+        if candidate is not None:
+            self._register_layer_transform(layer, candidate)
+            return candidate, False, False
+        ambiguous = any(node_id in transform_ids for node_id in chain)
+        return None, False, ambiguous
+
+    def _register_layer_transform(self, layer: Layer, node_id: str) -> None:
+        """Persist the stable transform role on the layer instance."""
+        if getattr(layer, "transform_node_id", None) == node_id:
+            return
+        layer.transform_node_id = node_id
+
     def layer_relationships(self, stack_id: Optional[str] = None
                             ) -> List[Dict[str, Any]]:
         """Return a read-only relation index for one LayerStack.
@@ -248,12 +373,12 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self._restore(copy.deepcopy(snapshot))
 
     def layer_ids_for_node(self, node_id: str) -> List[str]:
-        """Return layers that own ``node_id`` as source or live root.
+        """Return layers that own ``node_id`` as source, root or transform.
 
-        A media Layer owns both the source node and the automatically-created
-        Transform root.  Keeping this lookup in the controller gives the
-        NodeGraph editor a safe reverse-sync entry point: deleting either
-        owned node can remove the Layer and let the compiler reclaim its
+        A media Layer owns its source node, its chain head and — since B01 —
+        its registered main Transform.  Keeping this lookup in the controller
+        gives the NodeGraph editor a safe reverse-sync entry point: deleting
+        any owned node can remove the Layer and let the compiler reclaim its
         generated Merge chain.
         """
         node_id = str(node_id or "")
@@ -262,7 +387,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
         return [
             layer.layer_id
             for layer in self.graph.get_all_layers()
-            if node_id in {layer.source_node_id, layer.root_node_id}
+            if node_id in {layer.source_node_id, layer.root_node_id,
+                           getattr(layer, "transform_node_id", None)}
         ]
 
     def provenance_for_layer(self, layer_id: str,
@@ -575,6 +701,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             name=name or "Layer",
             root_node_id=root_node_id,
             source_node_id=source_node_id,
+            transform_node_id=auto_transform.id if auto_transform is not None else None,
             layer_type=layer_type,
             blend_mode=blend_mode,
             opacity=opacity,
@@ -635,16 +762,22 @@ class LayerStackController(QObject if _HAVE_QT else object):
             raise
 
     def _layer_effect_input(self, layer_id: str) -> Optional[Any]:
+        """The connection feeding the layer Transform's image input.
+
+        B01: the insertion point resolves through the stable transform role,
+        so effects keep splicing ahead of the real Transform even when the
+        chain head is another effect (e.g. Constant → Transform → Blur).
+        """
         layer = self.graph.get_layer(layer_id)
         stack = self._stack_for_layer(layer_id)
         if (layer is None or stack is None or layer.locked
                 or not layer.managed or not stack.managed):
             return None
-        root = self.graph.get_node(layer.root_node_id)
-        if root is None or root.node_type != "transform":
+        transform = self.layer_transform_node(layer_id)
+        if transform is None:
             return None
         return next((conn for conn in self.graph.connections
-                     if conn.dst_node_id == root.id
+                     if conn.dst_node_id == transform.id
                      and conn.dst_port_name == "image"), None)
 
     def can_prepare_layer_transform(self, layer_id: str) -> bool:
@@ -652,6 +785,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         stack = self._stack_for_layer(layer_id)
         if (layer is None or stack is None or layer.locked or not layer.managed
                 or not stack.managed or stack.version < BOTTOM_UP_LAYER_STACK_VERSION):
+            return False
+        # B01: a layer with a live registered Transform already offers the
+        # contract; wrapping again would duplicate the transform values.
+        if self.layer_transform_node(layer_id) is not None:
             return False
         root = self.graph.get_node(layer.root_node_id)
         return bool(root is not None and not root.supports_parent_transform
@@ -672,6 +809,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if not layer.source_node_id:
             layer.source_node_id = source.id
         layer.root_node_id = transform.id
+        # B01: the wrapper becomes the layer's registered main Transform.
+        layer.transform_node_id = transform.id
         return True
 
     def prepare_layer_transform(self, layer_id: str) -> bool:
@@ -751,8 +890,20 @@ class LayerStackController(QObject if _HAVE_QT else object):
         return node.id
 
     def layer_effect_ids(self, layer_id: str) -> List[str]:
+        """Removable effect node ids, ordered upstream → downstream.
+
+        B01: the registered main Transform is never listed, even when it is
+        not the chain head.  The chain head itself is managed by
+        :meth:`remove_layer_root_node` and is excluded here.
+        """
         layer = self.graph.get_layer(layer_id)
-        return list(reversed(self._layer_image_chain(layer)[1:-1])) if layer is not None else []
+        if layer is None:
+            return []
+        roles = self.layer_roles(layer_id)
+        if roles is None:
+            return []
+        return [node_id for node_id in roles.effects
+                if node_id != layer.root_node_id]
 
     def remove_layer_effect(self, layer_id: str, node_id: str) -> bool:
         layer = self.graph.get_layer(layer_id)
@@ -1103,6 +1254,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
             return False
         updated = replace(layer, root_node_id=effect_id,
                           source_node_id=layer.source_node_id or layer.root_node_id)
+        if effect.node_type == "transform":
+            # B01: adopting a wired Transform claims (or repairs) the role.
+            updated = replace(updated, transform_node_id=effect_id)
         layers = self.layers_map()
         layers[layer_id] = updated
         result = self.compiler.compile(stack, layers)
@@ -1473,6 +1627,12 @@ class LayerStackController(QObject if _HAVE_QT else object):
         new_layer.name = f"{layer.name} copy"
         new_layer.root_node_id = new_root_id
         new_layer.source_node_id = new_source_id
+        # B01: the clone's transform role follows its cloned chain.  A stale
+        # (missing) reference is carried over so the copy reports the same
+        # repairable state instead of silently dropping the role.
+        if layer.transform_node_id:
+            new_layer.transform_node_id = node_ids.get(
+                layer.transform_node_id, layer.transform_node_id)
         # Insert directly above the original (plan §6.3: Ctrl+D).
         idx = stack.layer_ids.index(layer_id)
         stack.layer_ids.insert(idx, new_layer_id)
@@ -1642,6 +1802,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
                 layer.root_node_id, layer.root_node_id)
             new_layer.source_node_id = (node_id_map.get(layer.source_node_id)
                                         if layer.source_node_id else None)
+            if layer.transform_node_id:
+                new_layer.transform_node_id = node_id_map.get(
+                    layer.transform_node_id, layer.transform_node_id)
             new_layer.name = f"{layer.name} copy"
             layer_id_map[old_layer_id] = new_layer.layer_id
             new_layers.append(new_layer)
@@ -1759,13 +1922,17 @@ class LayerStackController(QObject if _HAVE_QT else object):
         elif prop == "parent_layer_id" and value is not None:
             if value not in stack.layer_ids or value == layer_id:
                 return False
-            root = self.graph.get_node(layer.root_node_id)
+            # B01: parenting binds the registered main Transform, not the
+            # chain head (which may be an effect without parent support).
+            node = self.layer_transform_node(layer_id) \
+                or self.graph.get_node(layer.root_node_id)
             parent = self.graph.get_layer(value)
-            parent_root = (self.graph.get_node(parent.root_node_id)
-                           if parent is not None else None)
-            if (root is None or parent_root is None
-                    or not getattr(root, "supports_parent_transform", False)
-                    or not getattr(parent_root, "supports_parent_transform", False)
+            parent_node = (self.layer_transform_node(value)
+                           or (self.graph.get_node(parent.root_node_id)
+                               if parent is not None else None))
+            if (node is None or parent_node is None
+                    or not getattr(node, "supports_parent_transform", False)
+                    or not getattr(parent_node, "supports_parent_transform", False)
                     or self._would_create_parent_cycle(layer_id, value)):
                 return False
         before = self._snapshot()
@@ -1835,7 +2002,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
         shared = {
             node_id for other in self.graph.get_all_layers()
             if other.layer_id != layer_id
-            for node_id in (other.root_node_id, other.source_node_id)
+            for node_id in (other.root_node_id, other.source_node_id,
+                            getattr(other, "transform_node_id", None))
             if node_id in chain
         }
         incoming: dict[str, list[str]] = {}
@@ -1949,17 +2117,22 @@ class LayerStackController(QObject if _HAVE_QT else object):
         # is always allowed (the node may have lost support after the
         # parent was set, e.g. its root was swapped to an effect node).
         if parent_layer_id is not None:
-            root = self.graph.get_node(layer.root_node_id)
-            if root is None or not getattr(
-                    root, "supports_parent_transform", False):
+            # B01: capability follows the registered main Transform; the
+            # chain head may be an effect node that never carries parent
+            # transform support.
+            node = self.layer_transform_node(layer_id) \
+                or self.graph.get_node(layer.root_node_id)
+            if node is None or not getattr(
+                    node, "supports_parent_transform", False):
                 return False
-            # The parent layer's root must also support parenting.
+            # The parent layer's transform must also support parenting.
             parent_layer = self.graph.get_layer(parent_layer_id)
             if parent_layer is None or parent_layer_id not in stack.layer_ids:
                 return False
-            parent_root = self.graph.get_node(parent_layer.root_node_id)
-            if parent_root is None or not getattr(
-                    parent_root, "supports_parent_transform", False):
+            parent_node = self.layer_transform_node(parent_layer_id) \
+                or self.graph.get_node(parent_layer.root_node_id)
+            if parent_node is None or not getattr(
+                    parent_node, "supports_parent_transform", False):
                 return False
         # Reject self / cycle.
         if parent_layer_id is not None:

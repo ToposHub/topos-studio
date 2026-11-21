@@ -538,7 +538,10 @@ class KeyframesPanel(QWidget):
                 layer = controller.layers_map()[layer.layer_id]
             root = controller.graph.get_node(layer.root_node_id)
             merge = controller.layer_merge_node(layer.layer_id) if token == "opacity" else None
-            node = merge if merge is not None else root
+            # B01: transform shortcuts keyframe the registered main
+            # Transform, which may sit below an effect chain head.
+            transform = controller.layer_transform_node(layer.layer_id)
+            node = merge if merge is not None else (transform or root)
             if node is None:
                 return
             definitions = node.get_param_defs()
