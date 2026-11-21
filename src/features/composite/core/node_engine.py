@@ -512,6 +512,10 @@ class NodeGraph:
         # Flat layer index for the stacks above; rebuilt when stacks mutate.
         # Stored as a dict {layer_id: Layer} for O(1) lookup by the compiler.
         self._layers: Dict[str, Any] = {}  # layer_id -> Layer
+        # Composition-owned markers (B04): stable UUID → marker.  Pure
+        # metadata — never affects evaluation, but rides in to_dict/from_dict
+        # so save/copy/migration preserve them without Qt.
+        self._markers: Dict[str, Any] = {}
         self._viewport_state: Dict[str, Any] = {}  # node_editor viewport state (zoom, center)
         self._viewer_state: Dict[str, Any] = {}  # composite viewer state (viewing_node_id, etc.)
         # Project-level timing metadata.  Timeline-backed composites refresh
@@ -1293,6 +1297,36 @@ class NodeGraph:
     def get_layer(self, layer_id: str) -> Optional[Any]:
         with self._lock:
             return self._layers.get(layer_id)
+
+    # ── Composition markers (B04) ───────────────────────────────────────
+
+    def get_markers(self) -> List[Any]:
+        """Return composition markers ordered by frame then id."""
+        with self._lock:
+            return sorted(self._markers.values(),
+                          key=lambda m: (int(m.frame), m.marker_id))
+
+    def upsert_marker(self, marker: Any) -> bool:
+        """Insert or update one marker by its stable id (no re-render)."""
+        marker_id = getattr(marker, "marker_id", None)
+        if not isinstance(marker_id, str) or not marker_id:
+            return False
+        with self._lock:
+            self._markers[marker_id] = marker
+        return True
+
+    def remove_marker(self, marker_id: str) -> Optional[Any]:
+        with self._lock:
+            return self._markers.pop(str(marker_id), None)
+
+    def replace_markers(self, markers: Dict[str, Any]) -> None:
+        """Swap the full marker map (undo/redo restore path)."""
+        with self._lock:
+            self._markers = dict(markers)
+
+    def get_marker_map(self) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self._markers)
 
     def get_all_layers(self) -> List[Any]:
         """Return all layers across all stacks, in stack-insertion order."""
@@ -2602,6 +2636,10 @@ class NodeGraph:
                 data["layers"] = {
                     lid: layer.to_dict() for lid, layer in self._layers.items()
                 }
+            # Composition markers (B04): additive; older readers ignore.
+            if self._markers:
+                data["markers"] = [marker.to_dict()
+                                   for marker in self.get_markers()]
 
             # Serialize UI state (viewport and viewer)
             if self._viewport_state:
@@ -2708,6 +2746,11 @@ class NodeGraph:
         # Deserialize layer stacks (AE/Nuke hybrid, plan §3).  Tolerates
         # absence so pre-layer projects load unchanged.
         graph._load_layer_state(data.get("layer_stacks"), data.get("layers"))
+
+        # Composition markers (B04): tolerant parse keeps corrupt entries
+        # from breaking project load.
+        from src.features.composite.core.composite_markers import parse_markers
+        graph._markers = parse_markers(data.get("markers"))
 
         # Deserialize UI state (viewport and viewer) (AUD-5105): copy, never
         # alias the caller's dict, and ignore wrong-typed payloads instead

@@ -9109,7 +9109,8 @@ class CompositePage(QWidget):
                     pass
         video_param_edit = apply_video_range_edit(
             node, self._node_graph, layers_map, time_range,
-            previous_start=previous_start)
+            previous_start=previous_start,
+            previous_bounds=layer_before)
         range_payload = {key: value for key, value in time_range.items()
                          if key not in {"edit", "layer_id"}}
         # Old node rows and saved node ranges still use the node-level

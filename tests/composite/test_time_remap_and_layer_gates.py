@@ -639,3 +639,249 @@ class TestReverseLoopSnapshotPropagation(unittest.TestCase):
         self.assertFalse(gate_active(gate, 25))
         snap = g.snapshot(frame_number=15)
         self.assertIsNotNone(snap.frame_overrides.get("video"))
+
+
+# ── B03: rational layer-time contract ──────────────────────────────────────
+
+class TestRationalLayerTime(unittest.TestCase):
+    """Exact frame-rate math, fps-aware trims and layer-time edit plans."""
+
+    def test_fps_fraction_recovers_exact_rates(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import fps_fraction
+        self.assertEqual(fps_fraction(24), Fraction(24))
+        # Plain 29.97 is exactly 2997/100; the NTSC rate carries more digits.
+        self.assertEqual(fps_fraction(29.97), Fraction(2997, 100))
+        self.assertEqual(fps_fraction(30000 / 1001), Fraction(30000, 1001))
+        self.assertEqual(fps_fraction("30000/1001"), Fraction(30000, 1001))
+        self.assertEqual(fps_fraction((30000, 1001)), Fraction(30000, 1001))
+        self.assertEqual(fps_fraction(25.0), Fraction(25))
+        self.assertEqual(fps_fraction(None), Fraction(0))
+        self.assertEqual(fps_fraction("bogus"), Fraction(0))
+
+    def test_half_open_and_inclusive_round_trip(self):
+        from src.features.composite.core.layer_time import (
+            half_open_range, inclusive_range)
+        self.assertEqual(half_open_range(3, 9), (3, 10))
+        self.assertEqual(inclusive_range(3, 10), (3, 9))
+        self.assertEqual(inclusive_range(*half_open_range(0, 99)), (0, 99))
+
+    def test_source_frame_cfr_cross_rate_exact(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import source_frame_cfr
+        # Comp 25 fps over a 24 fps source: every 25 comp frames advance the
+        # source by exactly 24 frames.
+        frames = [source_frame_cfr(
+            f, in_frame=0, end_exclusive=50, source_origin=Fraction(0),
+            comp_fps=Fraction(25), source_fps=Fraction(24)) for f in range(50)]
+        self.assertEqual(frames[0], 0)
+        self.assertEqual(frames[25], 24)
+        self.assertEqual(frames[49], 47)  # floor(49*24/25)
+        # Outside the half-open layer range → None.
+        self.assertIsNone(source_frame_cfr(
+            50, in_frame=0, end_exclusive=50, source_origin=Fraction(0),
+            comp_fps=Fraction(25), source_fps=Fraction(24)))
+        # NTSC source: comp 30/1.001 math stays exact.
+        self.assertEqual(source_frame_cfr(
+            1001, in_frame=0, end_exclusive=2000, source_origin=Fraction(0),
+            comp_fps=Fraction(30), source_fps=Fraction(30000, 1001)), 1000)
+
+    def test_trim_in_uses_source_frame_deltas_not_comp_deltas(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import LayerTiming, plan_trim_in
+        timing = LayerTiming(in_frame=0, out_frame=49, source_in=0,
+                             source_out=47, comp_fps=Fraction(25),
+                             source_fps=Fraction(24))
+        # Advancing the head by 25 comp frames advances the source by 24.
+        plan = plan_trim_in(timing, 25)
+        self.assertEqual(plan.layer.source_in, 24)
+        self.assertEqual(plan.layer.in_frame, 25)
+        self.assertTrue(plan.fps_aware)
+        # Same-rate trims stay integer-identical to legacy behavior.
+        same = LayerTiming(in_frame=0, out_frame=49, source_in=0,
+                           source_out=49, comp_fps=Fraction(24),
+                           source_fps=Fraction(24))
+        self.assertEqual(plan_trim_in(same, 10).layer.source_in, 10)
+        # Unknown fps degrades to 1:1 and is flagged.
+        unknown = LayerTiming(in_frame=0, out_frame=49, source_in=0,
+                              source_out=49, comp_fps=0, source_fps=0)
+        plan = plan_trim_in(unknown, 10)
+        self.assertEqual(plan.layer.source_in, 10)
+        self.assertFalse(plan.fps_aware)
+        self.assertTrue(plan.notes)
+
+    def test_trim_out_keeps_cut_source_frame_exact(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import LayerTiming, plan_trim_out
+        timing = LayerTiming(in_frame=0, out_frame=49, source_in=0,
+                             source_out=47, comp_fps=Fraction(25),
+                             source_fps=Fraction(24))
+        # Shrinking the tail to comp frame 24 inclusive (25 frames) keeps
+        # exactly 24 source frames: source_out = 23.
+        plan = plan_trim_out(timing, 24)
+        self.assertEqual(plan.layer.out_frame, 24)
+        self.assertEqual(plan.layer.source_out, 23)
+        # Growing the tail past the explicit source window only extends it.
+        grown = plan_trim_out(timing, 74)
+        self.assertEqual(grown.layer.source_out, 47 + 24)
+
+    def test_slide_and_slip_separate_concerns(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import (
+            LayerTiming, plan_slide, plan_slip)
+        timing = LayerTiming(in_frame=10, out_frame=59, source_in=3,
+                             source_out=52, comp_fps=Fraction(25),
+                             source_fps=Fraction(24))
+        slide = plan_slide(timing, 7)
+        self.assertEqual((slide.layer.in_frame, slide.layer.out_frame), (17, 66))
+        self.assertEqual((slide.layer.source_in, slide.layer.source_out), (3, 52))
+        self.assertEqual(slide.keyframe_shift, 7)
+        slip = plan_slip(timing, 25)
+        self.assertEqual((slip.layer.in_frame, slip.layer.out_frame), (10, 59))
+        self.assertEqual(slip.layer.source_in, 3 + 24)
+
+    def test_split_cut_belongs_to_right_instance(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import (
+            LayerTiming, plan_split)
+        timing = LayerTiming(in_frame=0, out_frame=49, source_in=0,
+                             source_out=47, comp_fps=Fraction(25),
+                             source_fps=Fraction(24))
+        plan = plan_split(timing, 25, asset_id="asset-1")
+        left, right = plan.layer, plan.peer
+        # The cut frame belongs to the right instance.
+        self.assertEqual((left.in_frame, left.out_frame), (0, 24))
+        self.assertEqual((right.in_frame, right.out_frame), (25, 49))
+        # Source windows are contiguous and frame-exact across the cut.
+        self.assertEqual(right.source_in, 24)
+        self.assertEqual(left.source_out, 23)
+        self.assertEqual(right.source_in, left.source_out + 1)
+        self.assertEqual(plan.shared_asset_id, "asset-1")
+        self.assertEqual(plan.peer_keyframe_shift, 25)
+        # Cuts outside the range are rejected.
+        with self.assertRaises(ValueError):
+            plan_split(timing, 0)
+        with self.assertRaises(ValueError):
+            plan_split(timing, 50)
+
+    def test_stretch_reports_exact_rate(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import (
+            LayerTiming, plan_stretch)
+        timing = LayerTiming(in_frame=0, out_frame=23)
+        plan = plan_stretch(timing, 48)
+        self.assertEqual(plan.layer.out_frame, 47)
+        self.assertIn("rate=2/1", plan.notes[0])
+
+    def test_apply_video_range_edit_is_fps_aware(self):
+        from src.features.composite.ui.timeline_commands import apply_video_range_edit
+        from src.features.composite.nodes.transform_node import TransformNode
+
+        for comp_fps, source_fps, head_delta, expected_source_delta in (
+                (25.0, 24.0, 25, 24),
+                (24.0, 24.0, 10, 10),
+                (30.0, 30000 / 1001, 1001, 1000),
+        ):
+            g = NodeGraph()
+            g.fps = comp_fps
+            video = VideoFrameNode(node_id="v")
+            video.set_parameter("fps", source_fps)
+            video.set_parameter("source_in", 0)
+            video.set_parameter("source_out", 10_000)
+            transform = TransformNode(node_id="t")
+            g.add_node(video)
+            g.add_node(transform)
+            g.connect("v", "result", "t", "image")
+            from src.features.composite.core.layer_model import Layer
+            layers = {"l1": Layer(layer_id="l1", name="A",
+                                  root_node_id="t", source_node_id="v",
+                                  in_frame=0, out_frame=10_000)}
+            result = apply_video_range_edit(
+                transform, g, layers,
+                {"comp_start": head_delta, "comp_end": 10_000,
+                 "edit": "trim_in"},
+                previous_start=0, previous_bounds=(0, 10_000))
+            self.assertIsNotNone(result)
+            self.assertTrue(result["fps_aware"])
+            self.assertEqual(result["after"]["source_in"], expected_source_delta)
+
+    def test_apply_video_range_edit_flags_unknown_fps(self):
+        from src.features.composite.ui.timeline_commands import apply_video_range_edit
+        from src.features.composite.nodes.transform_node import TransformNode
+        g = NodeGraph()
+        video = VideoFrameNode(node_id="v")  # fps param stays 0 (unknown)
+        transform = TransformNode(node_id="t")
+        g.add_node(video)
+        g.add_node(transform)
+        g.connect("v", "result", "t", "image")
+        from src.features.composite.core.layer_model import Layer
+        layers = {"l1": Layer(layer_id="l1", name="A",
+                              root_node_id="t", source_node_id="v",
+                              in_frame=0, out_frame=100)}
+        result = apply_video_range_edit(
+            transform, g, layers,
+            {"comp_start": 10, "comp_end": 100, "edit": "trim_in"},
+            previous_start=0, previous_bounds=(0, 100))
+        self.assertIsNotNone(result)
+        self.assertFalse(result["fps_aware"])
+        self.assertEqual(result["after"]["source_in"], 10)
+
+    def test_shared_source_conflict_is_diagnosable(self):
+        from src.features.composite.core.layer_model import Layer, LayerStack
+        from src.features.composite.core.layer_time import shared_read_node_conflicts
+        from src.features.composite.core.layer_stack_validator import (
+            LayerStackValidator,
+        )
+        stack = LayerStack(stack_id="s1")
+        stack.layer_ids = ["l1", "l2"]
+        layers = {
+            "l1": Layer(layer_id="l1", name="A", root_node_id="r1",
+                        source_node_id="shared", in_frame=0, out_frame=10),
+            "l2": Layer(layer_id="l2", name="B", root_node_id="r2",
+                        source_node_id="shared", in_frame=20, out_frame=30),
+        }
+        conflicts = shared_read_node_conflicts([stack], layers.get)
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["code"], "layer.shared_source_range")
+        self.assertEqual(conflicts[0]["node_id"], "shared")
+        self.assertEqual(set(conflicts[0]["layer_ids"]), {"l1", "l2"})
+
+        class _FakeGraph:
+            nodes: dict = {}
+
+            def get_node(self, node_id):
+                return None
+
+            def topological_sort(self):
+                return []
+        validator = LayerStackValidator(_FakeGraph())
+        report = validator.validate(stack, layers)
+        self.assertTrue(report.has("shared_source_range"))
+        # Same range on both layers is not a conflict.
+        layers["l2"].in_frame, layers["l2"].out_frame = 0, 10
+        self.assertFalse(shared_read_node_conflicts([stack], layers.get))
+
+    def test_shared_source_layers_intersect_gates(self):
+        """Two layers over one read node at different times hide the source.
+
+        The intersection of divergent ranges is empty — the conservative
+        safety gate.  The B03 fix is an independent read node per layer
+        (same asset id, shared decode cache); until then the conflict is
+        flagged by shared_read_node_conflicts / the validator warning.
+        """
+        gates = compute_layer_frame_gates_helper()
+        self.assertEqual(gates, (15, 14))  # inverted ⇒ never visible
+
+
+def compute_layer_frame_gates_helper():
+    from src.features.composite.core.layer_model import Layer, LayerStack
+    from src.features.composite.core.time_remap import compute_layer_frame_gates
+    stack = LayerStack(stack_id="s1")
+    stack.layer_ids = ["l1", "l2"]
+    layers = {
+        "l1": Layer(layer_id="l1", name="A", root_node_id="r1",
+                    source_node_id="shared", in_frame=0, out_frame=14),
+        "l2": Layer(layer_id="l2", name="B", root_node_id="r2",
+                    source_node_id="shared", in_frame=15, out_frame=20),
+    }
+    return compute_layer_frame_gates([stack], layers.get)["shared"]

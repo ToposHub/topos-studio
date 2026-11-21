@@ -976,7 +976,8 @@ def layer_bar_edit_bounds(start: int, end: int, target: int, edit: str, *,
 def apply_video_range_edit(target_node: Any, graph: Any,
                            layers_map: Optional[Mapping[str, Any]],
                            new_range: Mapping[str, Any], *,
-                           previous_start: Optional[int] = None
+                           previous_start: Optional[int] = None,
+                           previous_bounds: Optional[Tuple[int, int]] = None
                            ) -> Optional[Dict[str, Any]]:
     """Link a Keyframes-panel bar edit to the video source's playback range.
 
@@ -986,16 +987,27 @@ def apply_video_range_edit(target_node: Any, graph: Any,
       * ``slide``    — body drag: the clip moves with its material, the
         source range is untouched.
 
+    B03: source deltas are computed with the exact rational frame-rate
+    contract (``core/layer_time``), so trimming in a 25 fps composition a
+    24 fps clip advances the source by 24 frames per 25 comp frames —
+    never by the raw comp delta.  When either frame rate is unknown the
+    legacy 1:1 delta applies and the result is flagged ``fps_aware=False``
+    (diagnosable degradation).
+
     Args:
         target_node: Node whose bar was dragged (root node for layer rows).
-        graph: NodeGraph used to resolve layer source nodes.
+        graph: NodeGraph used to resolve layer source nodes and comp fps.
         layers_map: layer_id -> Layer mapping (layer stack projection).
         new_range: The ``range_changed`` payload: ``comp_start``/``comp_end``
             plus an ``edit`` key (``trim_in`` | ``trim_out`` | ``slide``).
+        previous_start: composition start before the drag (undo anchor).
+        previous_bounds: ``(old_in, old_out)`` inclusive composition bounds
+            of the dragged layer bar, enabling duration-exact tail trims.
 
     Returns:
-        ``{"node_id", "before": {...}, "after": {...}}`` parameter snapshot
-        for undo when the video source params changed, else ``None``.
+        ``{"node_id", "before": {...}, "after": {...}, "fps_aware": bool}``
+        parameter snapshot for undo when the video source params changed,
+        else ``None``.
     """
     video_node = _video_source_node_for(target_node, graph, layers_map)
     if video_node is None:
@@ -1027,26 +1039,50 @@ def apply_video_range_edit(target_node: Any, graph: Any,
     params = getattr(video_node, "parameters", {})
     before: Dict[str, Any] = {}
     after: Dict[str, Any] = {}
+    fps_aware = True
 
+    from src.features.composite.core.layer_time import (
+        LayerTiming, plan_trim_in, plan_trim_out,
+    )
+    old_source_in = int(params.get("source_in", 0) or 0)
+    old_source_out = int(params.get("source_out", -1))
+    source_fps = float(params.get("fps", 0.0) or 0.0)
+    comp_fps = float(getattr(graph, "fps", 0.0) or 0.0)
     if edit == "trim_in":
-        old_in = int(params.get("source_in", 0) or 0)
-        new_in = max(0, old_in + (new_start - old_start))
-        if new_in != old_in:
-            before["source_in"] = old_in
-            after["source_in"] = new_in
+        old_out = (previous_bounds[1] if previous_bounds is not None
+                   else new_end)
+        timing = LayerTiming(
+            in_frame=int(old_start), out_frame=int(old_out),
+            source_in=old_source_in, source_out=old_source_out,
+            comp_fps=comp_fps, source_fps=source_fps)
+        plan = plan_trim_in(timing, new_start)
+        fps_aware = plan.fps_aware
+        if plan.layer.source_in != old_source_in:
+            before["source_in"] = old_source_in
+            after["source_in"] = plan.layer.source_in
     else:  # trim_out
-        old_in = int(params.get("source_in", 0) or 0)
-        old_out = int(params.get("source_out", -1))
-        new_out = old_in + (new_end - new_start)
-        if new_out != old_out:
-            before["source_out"] = old_out
+        if previous_bounds is not None:
+            timing = LayerTiming(
+                in_frame=int(previous_bounds[0]), out_frame=int(previous_bounds[1]),
+                source_in=old_source_in, source_out=old_source_out,
+                comp_fps=comp_fps, source_fps=source_fps)
+            plan = plan_trim_out(timing, new_end)
+            fps_aware = plan.fps_aware
+            new_out = plan.layer.source_out
+        else:
+            # Node-level bars without prior bounds keep the legacy
+            # duration math (1:1 frame delta).
+            new_out = old_source_in + (new_end - new_start)
+        if new_out != old_source_out:
+            before["source_out"] = old_source_out
             after["source_out"] = new_out
 
     if not after:
         return None
     for key, value in after.items():
         video_node.set_parameter(key, value)
-    return {"node_id": video_node.id, "before": before, "after": after}
+    return {"node_id": video_node.id, "before": before, "after": after,
+            "fps_aware": fps_aware}
 
 
 def video_source_node_for(target_node: Any, graph: Any,

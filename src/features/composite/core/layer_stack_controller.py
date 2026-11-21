@@ -55,6 +55,7 @@ from .layer_model import (
     LAYER_TYPE_3D,
     TRACK_MATTE_MODES,
 )
+from .composite_markers import DEFAULT_MARKER_COLOR
 from .layer_stack_compiler import (
     LayerStackCompiler, CompileChange, CompileResult,
     MERGE_NODE_TYPE, MERGE_PORT_FOREGROUND, MERGE_PORT_BACKGROUND,
@@ -100,6 +101,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
     # Emitted after any layer change with the affected stack_id (or "" for
     # a global refresh).  UI panels connect to this to rebuild.
     layer_stack_changed = pyqtSignal(str) if _HAVE_QT else None
+    # Emitted when composition markers change (B04); markers never affect
+    # rendering so this is separate from layer_stack_changed.
+    composition_markers_changed = pyqtSignal(str) if _HAVE_QT else None
     # Emitted when the compiler hit a conflict (plan §4.5).  Carries the
     # human-readable reason; the UI asks the user how to proceed.
     layer_stack_conflict = pyqtSignal(str, str) if _HAVE_QT else None
@@ -2095,6 +2099,122 @@ class LayerStackController(QObject if _HAVE_QT else object):
         return self.set_layer_property(
             layer_id, "label_color", color,
             description="Change layer label color")
+
+    # ── Composition markers (B04) ───────────────────────────────────────
+
+    def _emit_markers_changed(self) -> None:
+        if _HAVE_QT and self.composition_markers_changed is not None:
+            self.composition_markers_changed.emit("")
+
+    def add_marker(self, frame: int, name: str = "",
+                   duration: Optional[int] = None,
+                   color: str = DEFAULT_MARKER_COLOR,
+                   description: str = "") -> Optional[str]:
+        """Create one composition marker with a stable UUID (one undo)."""
+        from .composite_markers import CompositeMarker
+        try:
+            frame = int(frame)
+        except (TypeError, ValueError):
+            return None
+        marker = CompositeMarker(
+            marker_id=CompositeMarker.new_id(), frame=frame, name=str(name),
+            duration=duration, color=color)
+        before = self.graph.get_marker_map()
+        if not self.graph.upsert_marker(marker):
+            return None
+        self._push_marker_undo(before, self.graph.get_marker_map(),
+                               description or f"Add marker at frame {frame}",
+                               "marker_add")
+        self._emit_markers_changed()
+        return marker.marker_id
+
+    def _edit_marker(self, marker_id: str, changes: Dict[str, Any],
+                     description: str, action_type: str) -> bool:
+        """Apply one field update addressed by stable marker UUID."""
+        from dataclasses import replace as _dc_replace
+        current = self.graph.get_marker_map().get(str(marker_id))
+        if current is None:
+            return False
+        try:
+            updated = _dc_replace(current, **changes)
+        except (TypeError, ValueError):
+            return False
+        before = self.graph.get_marker_map()
+        if not self.graph.upsert_marker(updated):
+            return False
+        self._push_marker_undo(before, self.graph.get_marker_map(),
+                               description, action_type)
+        self._emit_markers_changed()
+        return True
+
+    def rename_marker(self, marker_id: str, name: str,
+                      description: str = "") -> bool:
+        name = str(name)
+        return self._edit_marker(
+            marker_id, {"name": name},
+            description or f"Rename marker to {name!r}", "marker_rename")
+
+    def move_marker(self, marker_id: str, frame: int,
+                    description: str = "") -> bool:
+        """Move one marker; a drag gesture commits this exactly once."""
+        try:
+            frame = int(frame)
+        except (TypeError, ValueError):
+            return False
+        return self._edit_marker(
+            marker_id, {"frame": frame},
+            description or f"Move marker to frame {frame}", "marker_move")
+
+    def set_marker_duration(self, marker_id: str, duration: Optional[int],
+                            description: str = "") -> bool:
+        if duration is not None:
+            try:
+                duration = int(duration)
+            except (TypeError, ValueError):
+                return False
+            if duration < 0:
+                return False
+        return self._edit_marker(
+            marker_id, {"duration": duration},
+            description or "Set marker duration", "marker_duration")
+
+    def set_marker_color(self, marker_id: str, color: str,
+                         description: str = "") -> bool:
+        return self._edit_marker(
+            marker_id, {"color": str(color)},
+            description or "Set marker color", "marker_color")
+
+    def remove_marker(self, marker_id: str,
+                      description: str = "") -> bool:
+        before = self.graph.get_marker_map()
+        if self.graph.remove_marker(marker_id) is None:
+            return False
+        self._push_marker_undo(before, self.graph.get_marker_map(),
+                               description or "Remove marker", "marker_remove")
+        self._emit_markers_changed()
+        return True
+
+    def markers(self) -> List[Any]:
+        """Ordered read-only projection for rulers and export consumers."""
+        return self.graph.get_markers()
+
+    def _push_marker_undo(self, before: Dict[str, Any], after: Dict[str, Any],
+                          description: str, action_type: str) -> None:
+        """One undo step per marker command; restores the exact marker map."""
+        if self.undo_stack is None:
+            return
+        try:
+            from .undo_stack import UndoAction
+        except Exception:
+            return
+        action = UndoAction(
+            action_type, {"before": before, "after": after},
+            undo_fn=lambda d: self.graph.replace_markers(d["before"]),
+            redo_fn=lambda d: self.graph.replace_markers(d["after"]),
+            description=description,
+        )
+        action.is_compressed = False
+        self.undo_stack.push(action)
 
     # ── Parent (plan §7) ───────────────────────────────────────────────
 
