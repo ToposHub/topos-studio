@@ -1307,7 +1307,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.canvas.engine = self.engine
         self.engine.canvas_ref = self.canvas  # P4-2 SAFETY: Enable paint/render cycle detection
         self.canvas.config_manager = self.config_manager
-        self.library_panel = LibraryPanel()
+        self.library_panel = LibraryPanel(parent=self)
 
         self.files_panel = FilesPanel(self)  # 传入 self 作为 parent
 
@@ -1506,6 +1506,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         if self._edit_available:
             if MediaPoolPanel is not None and self.media_pool_panel is None:
                 self.media_pool_panel = MediaPoolPanel()
+                self.media_pool_panel.media_import_status.connect(
+                    lambda message: self.status_bar.showMessage(message, 5000))
+                self.media_pool_panel.open_ai_library_requested.connect(self.files_panel.open_ai_library)
+                self.media_pool_panel.ai_library_import_status.connect(self.files_panel.show_ai_library_import_status)
+                self.media_pool_panel.ai_library_import_status.connect(self.library_panel.show_ai_library_import_status)
             if ProgramViewerWidget is not None and self.program_viewer_widget is None:
                 self.program_viewer_widget = ProgramViewerWidget()
             if SourceViewerWidget is not None and self.source_viewer_widget is None:
@@ -1937,6 +1942,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # Files 面板不支持视频打开，请使用 Library 面板
         self.files_panel.directory_navigation_requested.connect(self.library_panel.follow_directory)
         self.library_panel.directory_navigation_requested.connect(self.files_panel.follow_directory)
+        self.files_panel.library_registry_changed.connect(self.library_panel.refresh_library_registry)
+        self.library_panel.library_registry_changed.connect(self.files_panel.refresh_library_registry)
+        self.files_panel.ai_analysis_changed.connect(self.library_panel.refresh_ai_marks)
+        self.library_panel.ai_analysis_changed.connect(self.files_panel.refresh_ai_marks)
+        self.files_panel.transfer_directories_changed.connect(self.library_panel.refresh_transfer_directories)
+        self.library_panel.transfer_directories_changed.connect(self.files_panel.refresh_transfer_directories)
 
         # 新增：星级评定双向同步 (Files → Library)
         self.files_panel.rating_changed.connect(self.library_panel.refresh_file_rating)

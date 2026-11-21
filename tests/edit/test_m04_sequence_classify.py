@@ -66,35 +66,21 @@ class TestClassify:
 class TestImportBatchWiring:
     def test_batch_groups_sequence_into_single_asset(self, qtbot):
         """导入批接线：连号静帧 → 一个 image_sequence 素材，其余照常。"""
-        import os
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PyQt6.QtWidgets import QApplication
-        app = QApplication.instance() or QApplication([])
         from src.features.edit.ui.media_pool_panel import MediaPoolPanel
         from src.features.edit.core.project import EditProject
 
         project = EditProject(project_id="p", name="P")
-        panel = MediaPoolPanel.__new__(MediaPoolPanel)
-        panel._project = project
+        panel = MediaPoolPanel()
+        qtbot.addWidget(panel)
+        panel.set_project(project)
         panel._active_import_batch_id = "b1"
-        panel._active_import_target_bin_id = None
-        panel._import_folder_root = None
-        panel._import_cancelled = False
         panel._import_in_progress = True
-        panel._pending_import_files = []
-        finished = []
-        panel.project_changed = type("S", (), {
-            "emit": staticmethod(lambda *a: finished.append(a))})()
-        panel.asset_imported = type("S", (), {
-            "emit": staticmethod(lambda *a, **k: None)})()
-        panel._maybe_auto_ensure_disk_proxy = lambda asset: None
-        panel._refresh_tree = lambda **k: None
-        panel._finish_import_batch = lambda: None
 
         seq = _paths(numbers=[1, 2, 3, 4])
         results = [(p, "image", {"width": 1920, "height": 1080}, None)
                    for p in seq]
-        panel._on_import_batch_finished("b1", "p", results)
+        with qtbot.waitSignal(panel.project_changed):
+            panel._on_import_batch_finished("b1", "p", results)
 
         updated = panel._project
         images = [a for a in updated.assets.values()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.request
+from dataclasses import replace
 
 import pytest
 
@@ -156,17 +158,91 @@ def test_openai_compat_posts_to_complete_glm_coding_endpoint(
     assert captured["url"] == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
 
 
-def test_deepseek_v4_flash_disables_reasoning_for_content_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_openai_tool_wire_names_alias_dotted_ids_and_replay_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.ai_editing.tool_facade import LIBRARY_SEARCH_TOOL
+
+    wire_base = "topos_search_library_media"
+    tools = [
+        {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+        for name in (LIBRARY_SEARCH_TOOL, wire_base)
+    ]
+    requests = []
+
+    def urlopen(request: object, *, timeout: float) -> _Response:
+        body = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+        requests.append(body)
+        alias, unchanged = [tool["function"]["name"] for tool in body["tools"]]
+        assert alias == f"{wire_base}_1" and unchanged == wire_base
+        if len(requests) == 2:
+            assert body["messages"][-2]["tool_calls"][0]["function"]["name"] == alias
+            assert body["messages"][-1]["name"] == alias
+            return _Response({"choices": [{"message": {"content": "找到素材"}, "finish_reason": "stop"}]})
+        return _Response({"choices": [{
+            "message": {"tool_calls": [{"id": "call-1", "function": {
+                "name": alias, "arguments": '{"query":"车流"}',
+            }}]},
+            "finish_reason": "tool_calls",
+        }]})
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    client = OpenAICompatClient(_profile("openai"), "key", policy=LLMRequestPolicy(max_retries=0))
+    messages = [{"role": "user", "content": "根据脚本找素材"}]
+    call, = client.complete_with_tools(messages, tools).tool_calls
+    assert call.tool_name == LIBRARY_SEARCH_TOOL and call.arguments == {"query": "车流"}
+    messages.extend([
+        {"role": "assistant", "tool_calls": [{"id": call.call_id, "type": "function",
+         "function": {"name": call.tool_name, "arguments": json.dumps(call.arguments)}}]},
+        {"role": "tool", "tool_call_id": call.call_id, "name": call.tool_name, "content": "{}"},
+    ])
+    assert client.complete_with_tools(messages, tools).text == "找到素材"
+    assert messages[-2]["tool_calls"][0]["function"]["name"] == LIBRARY_SEARCH_TOOL
+    assert messages[-1]["name"] == tools[0]["function"]["name"] == LIBRARY_SEARCH_TOOL
+
+
+def test_chat_lan_profile_needs_no_bearer_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.app.controllers.ai_editing_mixin import _language_credentials_available
+
+    profile = replace(_profile("openai"), endpoint="http://192.168.5.10:8000/v1")
     store = FakeCredentialStore()
+    assert _language_credentials_available(profile, store)
+    assert not _language_credentials_available(replace(profile, endpoint="https://chat.example/v1"), store)
+
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> _Response:
+        assert request.get_header("Authorization") is None
+        return _Response({"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    client = OpenAICompatClient(profile, "", policy=LLMRequestPolicy(max_retries=0))
+    assert client.complete([{"role": "user", "content": "ping"}]) == "ok"
+    with pytest.raises(LLMError, match="HTTPS"):
+        OpenAICompatClient(profile, "not-sent")
+
+
+def test_chat_bearer_header_is_sent_initially_but_not_forwarded_on_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> _Response:
+        assert request.get_header("Authorization") == "Bearer test-key"
+        forwarded = urllib.request.HTTPRedirectHandler().redirect_request(
+            request, None, 302, "Found", {}, "https://other.example/chat/completions",
+        )
+        assert forwarded.get_header("Authorization") is None
+        assert forwarded.data is None
+        return _Response({"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    client = OpenAICompatClient(_profile("openai"), "test-key", policy=LLMRequestPolicy(max_retries=0))
+    assert client.complete([{"role": "user", "content": "ping"}]) == "ok"
+
+
+@pytest.mark.parametrize("model_id", ["deepseek-flash", "deepseek-v4-flash"])
+def test_deepseek_flash_disables_reasoning_for_content_payload(
+    monkeypatch: pytest.MonkeyPatch, model_id: str,
+) -> None:
     profile = AiProviderProfile(
-        profile_id="deepseek-v4-flash",
-        display_name="DeepSeek V4 Flash",
+        profile_id="deepseek-flash",
+        display_name="DeepSeek Flash",
         provider_kind="openai",
         endpoint="https://api.deepseek.com",
-        model_id="deepseek-v4-flash",
-        credential_ref="topos:deepseek-v4-flash",
+        model_id=model_id,
     )
     captured: dict[str, object] = {}
 

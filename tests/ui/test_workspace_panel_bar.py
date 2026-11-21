@@ -1,11 +1,21 @@
 """Panel switches share real Qt dock state without taking viewport ownership."""
 
-from PyQt6.QtCore import QPoint, QSize, Qt
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QDockWidget, QHBoxLayout, QMainWindow, QMenu, QToolBar, QWidget
+from pathlib import Path
 
+from pytest import MonkeyPatch
+from PyQt6.QtCore import QPoint, QPointF, QSettings, QSize, Qt
+from PyQt6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QImage
+from PyQt6.QtWidgets import QApplication, QDockWidget, QHBoxLayout, QMainWindow, QMenu, QToolBar, QWidget
+from pytestqt.qtbot import QtBot
+
+from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
+from src.app.ui.files_panel import FilesPanel
+from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.app.ui.workspace_panel_bar import WorkspacePanelBar
+from src.features.edit.core.project import EditProject
+from src.features.edit.ui.media_pool_panel import MediaPoolPanel
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import DARK_THEME
 
 
@@ -61,6 +71,114 @@ def _edit_window(qtbot, config: _Config) -> tuple[_Window, WorkspacePanelBar]:
     info = window.add_panel("dock_edit_info", right)
     window.tabifyDockWidget(props, info)
     return window, window.create_panel_bar("Edit")
+
+
+def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Menu actions and viewport drops share the same Edit project and worker."""
+    monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    preferences = NativeFilesPreferences(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
+    monkeypatch.setattr("src.app.ui.native_files_prefs.NativeFilesPreferences", lambda: preferences)
+
+    class Window(_Window, DockLayoutMixin):
+        current_page = "Library"
+
+    window = Window(_Config())
+    qtbot.addWidget(window)
+    window.centralWidget().hide()
+    area = Qt.DockWidgetArea.LeftDockWidgetArea
+    files = window.add_panel("dock_files", area)
+    dock = window.add_panel("dock_edit_media_pool", area)
+    files.setWidget(browser := FilesPanel(window, include_plugins=False))
+    window.files_panel = browser
+    dock.setWidget(pool := MediaPoolPanel())
+    window.media_pool_panel = pool
+    dock.hide()
+    pool.auto_project_needed.connect(lambda: pool.set_project(EditProject.create("Library import")))
+    bar = window.create_panel_bar("Library")
+    window.resize(1220, 760)
+    window.show()
+
+    try:
+        panel = browser._native_panel
+        media_dir = tmp_path / "Test Media"
+        media_dir.mkdir()
+        paths = [media_dir / filename for filename in ("first.png", "second.png", "third.png")]
+        image = QImage(24, 24, QImage.Format.Format_RGB32)
+        image.fill(QColor("darkorange"))
+        for path in paths:
+            assert image.save(str(path))
+        transport = browser._native_transport
+        with qtbot.waitSignal(transport.library_changed):
+            transport.pin_library(str(media_dir))
+        qtbot.waitUntil(lambda: panel.is_browsable_path(str(media_dir)))
+        panel.navigate(str(media_dir))
+        qtbot.waitUntil(lambda: panel.current_path == str(media_dir) and panel.proxy.rowCount() == 3)
+        panel.view_combo.setCurrentIndex(panel.view_combo.findData("grid"))
+        view = panel.icon_view
+        flag = panel.selection.SelectionFlag
+
+        def trigger_import_at(index: int) -> None:
+            row = panel.proxy.index(index, 0)
+            qtbot.waitUntil(lambda: view.indexAt(view.visualRect(row).center()) == row)
+            menu = panel._build_context_menu(view, view.visualRect(row).center())
+            label = I18N.tr("files.native.add_to_media_pool", "添加到媒体池")
+            next(action for action in menu.actions() if action.text() == label).trigger()
+
+        # Right-click a single file with the pool closed, then import a batch
+        # including that same file. It must only appear once in the project.
+        with qtbot.waitSignal(pool.media_import_status):
+            trigger_import_at(0)
+        assert len(pool.get_project().assets) == 1
+        for row in (0, 1):
+            panel.selection.select(panel.proxy.index(row, 0), flag.Select | flag.Rows)
+        with qtbot.waitSignal(pool.media_import_status):
+            trigger_import_at(1)
+        assert len(pool.get_project().assets) == 2
+
+        toggle = window.findChild(QAction, "workspace_library_media_pool")
+        button = bar.widgetForAction(toggle)
+        qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+        qtbot.waitUntil(lambda: pool.isVisible() and pool.y() > browser.content_stack.y())
+        assert browser.hosts_media_pool(pool)
+        window.resize(1220, 500)
+        qtbot.waitUntil(lambda: pool.x() > browser.content_stack.x())
+        assert pool.y() == browser.content_stack.y()
+
+        panel.selection.select(panel.proxy.index(2, 0), flag.ClearAndSelect | flag.Rows)
+        mime = panel.mime_data_for_selection()
+        viewport = pool.grid_view.viewport()
+        pos = viewport.rect().center()
+        action = Qt.DropAction.CopyAction
+        press = Qt.MouseButton.LeftButton
+        mods = Qt.KeyboardModifier.NoModifier
+        enter = QDragEnterEvent(pos, action, mime, press, mods)
+        drop = QDropEvent(QPointF(pos), action, mime, press, mods)
+        with qtbot.waitSignal(pool.media_import_status):
+            QApplication.sendEvent(viewport, enter)
+            QApplication.sendEvent(viewport, drop)
+        assert drop.isAccepted()
+        assert set(a.path for a in pool.get_project().assets.values()) == {str(p) for p in paths}
+        assert all(path.is_file() for path in paths)
+        window.resize(1220, 760)
+        qtbot.waitUntil(lambda: pool.y() > browser.content_stack.y())
+
+        # The exact same widget goes back to Edit and keeps its project.
+        window.set_library_media_pool_visible(False)
+        window.current_page = "Edit"
+        bar.set_page("Edit")
+        dock.show()
+        assert dock.widget() is pool and len(pool.get_project().assets) == 3
+        window.current_page = "Library"
+        dock.hide()
+        bar.set_page("Library")
+        assert toggle.isChecked() and browser.hosts_media_pool(pool)
+        toggle.trigger()
+        assert not pool.isVisible() and dock.widget() is pool
+    finally:
+        browser.shutdown()
+        assert browser.wait_for_shutdown(3)
 
 
 def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch) -> None:

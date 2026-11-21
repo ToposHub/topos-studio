@@ -38,18 +38,19 @@ class Qwen25OmniAudioProvider(LazyModelLoader):
         "描述：<一句话中文描述>"
     )
 
-    def __init__(self):
+    def __init__(self, *, local_model_path: str | None = None) -> None:
         super().__init__(provider_id=self.provider_id, model_pack_id=self.MODEL_PACK_ID)
+        self._local_model_path = local_model_path
 
     def _check_dependencies(self) -> bool:
         try:
-            import transformers  # noqa: F401
+            from transformers import Qwen2_5OmniForConditionalGeneration  # noqa: F401
             import torch  # noqa: F401
             import soundfile  # noqa: F401
         except ImportError:
             return False
         # 模型文件检查（避免 is_available=True 但加载时联网/崩溃）
-        return is_model_pack_installed(self.MODEL_PACK_ID) or _is_in_hf_cache(self.MODEL_HF_ID)
+        return bool(self._local_model_path) or is_model_pack_installed(self.MODEL_PACK_ID) or _is_in_hf_cache(self.MODEL_HF_ID)
 
     def _load_model(self) -> Any:
         from transformers import AutoProcessor, Qwen2_5OmniForConditionalGeneration
@@ -58,11 +59,12 @@ class Qwen25OmniAudioProvider(LazyModelLoader):
         device, dtype = resolve_torch_device()
         logger.info("加载 Qwen2.5-Omni-7B AWQ（device=%s）...", device)
 
-        local_path = self._resolve_local_or_hf(self.MODEL_HF_ID)
-        processor = AutoProcessor.from_pretrained(local_path)
+        local_path = self._local_model_path or self._resolve_local_or_hf(self.MODEL_HF_ID)
+        load_options = {"local_files_only": True} if self._local_model_path else {}
+        processor = AutoProcessor.from_pretrained(local_path, **load_options)
         # enable_audio_output=False：我们只要文本理解，不要合成语音，省显存
         model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-            local_path, torch_dtype=dtype, device_map=device,
+            local_path, torch_dtype=dtype, device_map=device, enable_audio_output=False, **load_options,
         )
         return {"model": model, "processor": processor, "device": device}
 
@@ -103,7 +105,7 @@ class Qwen25OmniAudioProvider(LazyModelLoader):
 
         with torch.no_grad():
             output_ids = model.generate(
-                **inputs, max_new_tokens=200, use_audio_in_video=False,
+                **inputs, max_new_tokens=200, use_audio_in_video=False, return_audio=False,
             )
 
         generated = processor.batch_decode(

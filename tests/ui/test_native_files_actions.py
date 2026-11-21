@@ -8,13 +8,16 @@ import time
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QPoint, QSettings
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, QSettings, Qt, QUrl
+from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PyQt6.QtWidgets import QApplication, QAbstractItemView, QMenu
 from pytestqt.qtbot import QtBot
 
 from src.app.ui import native_files_panel as panel_module
 from src.app.ui.native_files_panel import NativeFilesPanel
+from src.app.ui.native_files_locations import MountedVolume
 from src.app.ui.native_files_prefs import NativeFilesPreferences
+from src.app.ui.native_files_transfer import cut_token, local_file_paths
 from src.features.files.contracts import Entry
 
 
@@ -152,13 +155,108 @@ def test_paste_without_urls_reports_and_does_not_call_service(panel):
     assert "剪贴板" in panel.meta_status.text()
 
 
+def _drop(view: QAbstractItemView, point: QPoint, mime: QMimeData, *, source: QAbstractItemView | None = None,
+          modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier) -> Qt.DropAction:
+    class Drop(QDropEvent):
+        def source(self) -> QAbstractItemView | None:
+            return source
+
+    actions = Qt.DropAction.CopyAction if source is not None else Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+    button = Qt.MouseButton.LeftButton
+    QApplication.sendEvent(view.viewport(), QDragEnterEvent(point, actions, mime, button, modifiers))
+    QApplication.sendEvent(view.viewport(), QDragMoveEvent(point, actions, mime, button, modifiers))
+    drop = Drop(QPointF(point), actions, mime, button, modifiers)
+    QApplication.sendEvent(view.viewport(), drop)
+    return drop.dropAction() if drop.isAccepted() else Qt.DropAction.IgnoreAction
+
+
+def test_drop_on_sidebar_folders_home_and_disk(panel: NativeFilesPanel, qtbot: QtBot) -> None:
+    panel.resize(1000, 650)
+    panel.show()
+    library = "/media/footage_01"
+    pictures = library + "/Pictures"
+    disk = "/Volumes/Archive"
+    panel.show_libraries([{"path": library, "name": "footage_01", "library_id": "test"}])
+    tree = panel.locations
+    library_index = tree.model().index(0, 0)
+    tree.set_children(library, [{"path": pictures, "name": "Pictures"}])
+    tree.expand(library_index)
+    tree.set_volumes((MountedVolume(disk, "Archive", b"disk"),))
+    disk_group = next(tree.model().index(row, 0) for row in range(tree.model().rowCount())
+                      if tree.model().index(row, 0).data() in {"磁盘", "Drives"})
+    tree.expand(disk_group)
+    calls = []
+    panel.file_task_requested.connect(lambda *args: calls.append(args))
+    mime = QMimeData()
+    source = "/media/Desktop/shot #1.mov"
+    mime.setUrls([QUrl.fromLocalFile(source), QUrl.fromLocalFile(source), QUrl("https://example.test/shot.mov")])
+    for index, destination in ((tree.model().index(0, 0, library_index), pictures),
+                               (tree.home_item.index(), panel.home_path),
+                               (tree.model().index(0, 0, disk_group), disk)):
+        tree.scrollTo(index)
+        qtbot.waitUntil(lambda: tree.visualRect(index).isValid())
+        assert _drop(tree, tree.visualRect(index).center(), mime) == Qt.DropAction.CopyAction
+        assert calls[-1] == ("copy", [source], {"policy": "rename", "options": {"destination": destination}})
+
+    assert _drop(tree, tree.visualRect(disk_group).center(), mime) == Qt.DropAction.IgnoreAction
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("layout", ("adaptive", "masonry", "grid", "list"))
+def test_gallery_drop_copies_foreign_files_and_moves_own_files_with_shift(
+    panel: NativeFilesPanel, layout: str,
+) -> None:
+    panel.resize(1000, 650)
+    panel.show()
+    panel.view_combo.setCurrentIndex(panel.view_combo.findData(layout))
+    view = panel.pages.currentWidget()
+    index = next(panel.proxy.index(row, 0) for row in range(panel.proxy.rowCount())
+                 if panel.proxy.index(row, 0).data(panel_module.FilesEntryModel.ENTRY_ROLE).is_dir)
+    point = view.visualRect(index).center()
+    calls = []
+    panel.file_task_requested.connect(lambda *args: calls.append(args))
+    mime = QMimeData()
+    path = "/tmp/Desktop/clip.mov"
+    mime.setUrls([QUrl.fromLocalFile(path)])
+    assert _drop(view, point, mime, modifiers=Qt.KeyboardModifier.ShiftModifier) == Qt.DropAction.CopyAction
+    assert _drop(view, point, mime, source=view, modifiers=Qt.KeyboardModifier.ShiftModifier) == Qt.DropAction.CopyAction
+    assert [op for op, _, _ in calls] == ["copy", "move"]
+    assert all(args[1:] == ([path], {"policy": "rename", "options": {"destination": "/Users/creator/Media/Shots"}})
+               for args in calls)
+
+    panel.show_library_results({"files": [], "total": 0})
+    assert _drop(view, point, mime) == Qt.DropAction.IgnoreAction
+    assert len(calls) == 2
+
+
+def test_cut_and_sidebar_paste_move_only_selected_files(panel: NativeFilesPanel, qtbot: QtBot) -> None:
+    path = "/Users/creator/Media/a.mov"
+    index = next(panel.proxy.index(row, 0) for row in range(panel.proxy.rowCount())
+                 if panel.proxy.index(row, 0).data() == "a.mov")
+    panel.selection.select(index, panel.selection.SelectionFlag.Select | panel.selection.SelectionFlag.Rows)
+    widget = panel.pages.currentWidget()
+    qtbot.keyClick(widget, Qt.Key.Key_X, modifier=Qt.KeyboardModifier.ControlModifier)
+    token = cut_token(QApplication.clipboard().mimeData())
+    calls = []
+    panel.file_task_requested.connect(lambda *args: calls.append(args))
+    panel.locations.setCurrentIndex(panel.locations.home_item.index())
+    qtbot.keyClick(panel.locations, Qt.Key.Key_V, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert token
+    assert calls == [("move", [path], {"policy": "rename",
+                                      "options": {"destination": panel.home_path, "cut_token": token}})]
+    panel.apply_task_result({"operation": "move", "cut_token": token,
+                             "successes": [{"path": path, "to": panel.home_path + "/a.mov"}]})
+    assert not local_file_paths(QApplication.clipboard().mimeData())
+
+
 def test_libraries_list_populates_and_navigates(panel):
     navigated = []
     panel.directory_requested.connect(lambda path: navigated.append(path))
-    panel.show_libraries([{"path": "/Users/creator/Media", "name": "Media"}])
-    assert panel.library_list.count() == 1
-    row = panel.library_list.item(0)
-    panel._open_list_path(row)
+    panel.show_libraries([{"path": "/Users/creator/Media", "name": "Media", "library_id": "media"}])
+    tree = panel.locations
+    index = tree.item_model.index(0, 0)
+    assert tree.library_root(index)
+    tree.clicked.emit(index)
     assert navigated[-1] == "/Users/creator/Media"
 
 

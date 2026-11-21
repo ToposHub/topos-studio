@@ -428,6 +428,10 @@ class PageManagementMixin:
                 restore_deliver_panels()
         if from_page == "Mixer" and page_name != "Mixer":
             self._restore_edit_panels_from_mixer()
+        if from_page == "Library" and page_name != "Library":
+            show_library_pool = getattr(self, "set_library_media_pool_visible", None)
+            if callable(show_library_pool):
+                show_library_pool(False)
 
         # Update buttons UI
         for name, btn in self.page_buttons.items():

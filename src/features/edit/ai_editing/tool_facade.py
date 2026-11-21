@@ -11,6 +11,7 @@
 | topos.get_project_snapshot | read | 范围/timeline/detail | 脱敏 snapshot + revision |
 | topos.inspect_subtitle_track | read | track_id/options | 字幕质量报告 |
 | topos.search_assets | read | 文本/标签/时段/类型 | ID 列表与摘要 |
+| topos.search_library_media | read | 镜头描述/关键词 | 全局素材候选及源片段入出点 |
 | topos.get_asset_analysis | read | asset_id/分析类型 | scene/transcript/tag/audio |
 | topos.validate_edit_plan | preview | EditPlan | diff + diagnostics |
 | topos.apply_edit_plan | write+approval | 已验证 plan + token | new revision + undo group |
@@ -57,6 +58,11 @@ from src.shared.render_diagnostics import (
     SOURCE_EFFECT_PASS,
     get_render_diagnostic_sink,
 )
+
+LIBRARY_SEARCH_TOOL = "topos.search_library_media"
+_LIBRARY_SEARCH_LIMIT = 40
+_LIBRARY_SEARCH_DEFAULT_LIMIT = 12
+_LIBRARY_SEARCH_QUERY_LIMIT = 500
 
 
 # ---------------------------------------------------------------------- #
@@ -206,6 +212,26 @@ def list_tool_definitions() -> list[ToolDefinition]:
                 },
             },
             output_description="SemanticSegment 列表",
+        ),
+        ToolDefinition(
+            name=LIBRARY_SEARCH_TOOL, permission=ToolPermission.READ,
+            description=(
+                "在全局 AI 素材库索引里按镜头描述、台词或关键词查找实际素材。"
+                "按脚本选素材时，按场景提交简短查询。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": _LIBRARY_SEARCH_QUERY_LIMIT},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": _LIBRARY_SEARCH_LIMIT},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            output_description=(
+                "实际候选、在线状态和匹配证据。start_seconds/end_seconds 为源媒体入出点，"
+                "null 表示索引中缺少时段。"
+            ),
         ),
         ToolDefinition(
             name="topos.get_asset_analysis", permission=ToolPermission.READ,
@@ -467,9 +493,12 @@ class ToolFacade:
         mcp_gateway: Any | None = None,
         capability_catalog: CapabilityCatalog | None = None,
         plugin_registry: Any | None = None,
+        *,
+        library_search: Callable[[str, int], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._session = session
         self._analysis = analysis_service
+        self._library_search = library_search
         self._audit_sink = audit_sink
         self._approval_service = approval_service
         # M6：本地帮助索引（§9）；None 时 search_help/explain_diagnostic 返回"未配置"。
@@ -551,6 +580,7 @@ class ToolFacade:
         tools = [
             t for t in list_tool_definitions()
             if t.permission in allowed and self._capability_catalog.get(t.name) is not None
+            and (t.name != LIBRARY_SEARCH_TOOL or self._library_search is not None)
         ]
         # MCP 网关工具（READ 级）合并进目录；不可用时 gateway 自己返回空列表。
         if self._mcp_gateway is not None:
@@ -606,6 +636,8 @@ class ToolFacade:
     def is_tool_declared(self, tool_name: str) -> bool:
         """Whether a tool is declared by the catalog or an active MCP gateway."""
 
+        if tool_name == LIBRARY_SEARCH_TOOL and self._library_search is None:
+            return False
         if self._capability_catalog.get(tool_name) is not None:
             return True
         if self._mcp_gateway is not None and tool_name.startswith("topos.mcp."):
@@ -742,6 +774,8 @@ class ToolFacade:
                 return self._json_safe({"ok": True, "report": report})
             if tool_name == "topos.search_assets":
                 return self._search_assets(args)
+            if tool_name == LIBRARY_SEARCH_TOOL:
+                return self._search_library_media(args)
             if tool_name == "topos.get_asset_analysis":
                 return self._get_analysis(args)
             if tool_name == "topos.validate_edit_plan":
@@ -809,6 +843,24 @@ class ToolFacade:
         return self._json_safe(
             {"ok": True, "segments": [sanitize_untrusted(s.to_dict()) for s in results]}
         )
+
+    def _search_library_media(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self._library_search is None:
+            return {"ok": False, "error": "全局素材库工具未连接。"}
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip() or len(query) > _LIBRARY_SEARCH_QUERY_LIMIT:
+            return {"ok": False, "error": "请提供简短的镜头描述或关键词。"}
+        limit = args.get("limit", _LIBRARY_SEARCH_DEFAULT_LIMIT)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _LIBRARY_SEARCH_LIMIT:
+            return {"ok": False, "error": "候选数量必须是 1 到 40 之间的整数。"}
+        fields = (
+            "asset_id", "name", "kind", "online", "start_seconds", "end_seconds", "text", "tags", "score",
+        )
+        candidates = [
+            {field: hit.get(field) for field in fields}
+            for hit in self._library_search(query.strip(), limit)[:limit]
+        ]
+        return self._json_safe({"ok": True, "candidates": sanitize_untrusted(candidates)})
 
     def _get_analysis(self, args: dict[str, Any]) -> dict[str, Any]:
         if self._analysis is None:

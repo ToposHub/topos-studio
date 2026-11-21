@@ -19,6 +19,7 @@ SetAssetInOutCommand / SetAssetMarkersCommand / CreateSubclipCommand）。
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from dataclasses import replace
@@ -288,6 +289,7 @@ def create_manual_subclip(
     display_name: str | None = None,
     target_bin_id: str | None = None,
     subclip_asset_id: str | None = None,
+    audio_frame_rate: float | None = None,
 ) -> tuple[EditProject, MediaAsset]:
     """从素材（或其 In/Out 范围）创建手工子片段。
 
@@ -305,7 +307,8 @@ def create_manual_subclip(
     if is_subclip(parent):
         raise SourceRangeError(
             "子片段不能再创建子片段；请回到父素材。")
-    if parent.media_type not in ("video", "image_sequence"):
+    is_audio = parent.media_type == "audio" and audio_frame_rate is not None
+    if parent.media_type not in ("video", "image_sequence") and not is_audio:
         raise SourceRangeError(
             f"仅视频/图片序列支持子片段，{parent.media_type} 不支持。")
     if (isinstance(start_frame, bool) or not isinstance(start_frame, int)
@@ -314,7 +317,15 @@ def create_manual_subclip(
     if start_frame < 0 or end_frame <= start_frame:
         raise SourceRangeError(
             f"子片段范围不合法: [{start_frame}, {end_frame}]。")
+    fps = parent.fps
     total = _known_total_frames(parent)
+    if is_audio:
+        duration = parent.duration_seconds
+        if (audio_frame_rate is None or not math.isfinite(audio_frame_rate) or audio_frame_rate <= 0
+                or duration is None or not math.isfinite(duration) or duration <= 0):
+            raise SourceRangeError("音频子片段需要有效的源时长和帧率。")
+        fps = audio_frame_rate
+        total = math.ceil(duration * fps)
     if total is None:
         raise SourceRangeError(
             f"素材 {parent.display_name} 总帧数未知，无法核验子片段范围。")
@@ -322,7 +333,6 @@ def create_manual_subclip(
         raise SourceRangeError(
             f"子片段尾帧 {end_frame} 超出素材总帧数 {total}。")
 
-    fps = parent.metadata.get("fps")
     duration_seconds: Optional[float] = None
     if isinstance(fps, (int, float)) and not isinstance(fps, bool) and fps > 0:
         duration_seconds = (end_frame - start_frame + 1) / float(fps)
@@ -348,6 +358,8 @@ def create_manual_subclip(
         SUBCLIP_THUMB_FRAME: start_frame,
         "total_frames": end_frame - start_frame + 1,
     }
+    if is_audio:
+        metadata["fps"] = fps
 
     name = display_name or f"{parent.display_name} [{start_frame}-{end_frame}]"
     subclip_asset = MediaAsset(

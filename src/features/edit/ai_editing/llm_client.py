@@ -30,7 +30,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from src.features.edit.ai_editing.provider_profiles import (
     AiProviderProfile,
@@ -171,6 +171,34 @@ def _max_tokens_cap_from_rejection(message: str, requested: int) -> int:
     return max(1024, requested // 2)
 
 
+def _language_request(
+    url: str, headers: dict[str, str], method: str, data: bytes | None = None,
+) -> urllib.request.Request:
+    request = urllib.request.Request(url, data=data, method=method)
+    for name, value in headers.items():
+        if name.lower() in {"authorization", "api-key", "x-api-key"}:
+            request.add_unredirected_header(name, value)
+        else:
+            request.add_header(name, value)
+    return request
+
+
+def validate_language_endpoint(endpoint: str, api_key: str = "") -> SplitResult:
+    """Validate the recipient while retaining legacy HTTPS API-version queries."""
+    from src.shared.ai_models.generation.media_inference import (
+        MediaInferenceConfigurationError,
+        validate_media_endpoint,
+    )
+
+    try:
+        parsed = urlsplit(endpoint)
+        recipient = urlunsplit(parsed._replace(query="")) if parsed.scheme == "https" else endpoint
+        validated, _ = validate_media_endpoint(recipient, api_key)
+        return validated
+    except (ValueError, MediaInferenceConfigurationError) as exc:
+        raise LLMError(str(exc), code="LLM_INVALID_ENDPOINT") from None
+
+
 def _post_json(
     url: str,
     headers: dict[str, str],
@@ -181,12 +209,7 @@ def _post_json(
     """POST JSON with bounded retries and stable error codes."""
     policy = policy or LLMRequestPolicy()
     data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={**headers, "Content-Type": "application/json"},
-        method="POST",
-    )
+    req = _language_request(url, {**headers, "Content-Type": "application/json"}, "POST", data)
     for attempt in range(policy.max_retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=policy.timeout_seconds) as resp:
@@ -281,7 +304,8 @@ def _post_multipart_file(
             conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
             conn = conn_cls(parsed.netloc, timeout=policy.timeout_seconds)
             conn.putrequest("POST", request_path)
-            conn.putheader("Authorization", headers.get("Authorization", ""))
+            if headers.get("Authorization"):
+                conn.putheader("Authorization", headers["Authorization"])
             conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
             conn.putheader("Content-Length", str(len(prefix) + size + len(suffix)))
             conn.endheaders()
@@ -342,7 +366,7 @@ def _get_json(
 ) -> dict[str, Any]:
     """GET JSON，用于轮询 File API 的处理状态。"""
     policy = policy or LLMRequestPolicy()
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = _language_request(url, headers, "GET")
     try:
         with urllib.request.urlopen(req, timeout=policy.timeout_seconds) as resp:
             value = json.loads(resp.read().decode("utf-8"))
@@ -427,11 +451,8 @@ def _stream_sse_text(
 ) -> tuple[str, dict[str, Any], str]:
     """Consume OpenAI/Anthropic-compatible SSE without blocking the UI thread."""
     data = json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={**headers, "Content-Type": "application/json", "Accept": "text/event-stream"},
-        method="POST",
+    request = _language_request(
+        url, {**headers, "Content-Type": "application/json", "Accept": "text/event-stream"}, "POST", data,
     )
     for attempt in range(policy.max_retries + 1):
         received = False
@@ -516,15 +537,8 @@ def _stream_responses_text(
     of whether the active profile uses Chat Completions or Responses.
     """
     data = json.dumps({**body, "stream": True}).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            **headers,
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        },
-        method="POST",
+    request = _language_request(
+        url, {**headers, "Content-Type": "application/json", "Accept": "text/event-stream"}, "POST", data,
     )
     for attempt in range(policy.max_retries + 1):
         received = False
@@ -734,6 +748,59 @@ def _local_document_text(file_path: str, filename: str) -> str | None:
 # ---------------------------------------------------------------------- #
 
 
+_OPENAI_FUNCTION_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _openai_tool_names(tools: list[dict[str, Any]]) -> dict[str, str]:
+    """Allocate legal wire names without changing the editor's tool IDs."""
+    names: set[str] = set()
+    for tool in tools:
+        function = tool.get("function", {})
+        if isinstance(function, dict) and isinstance(function.get("name"), str):
+            names.add(function["name"])
+    used = {name for name in names if _OPENAI_FUNCTION_NAME.fullmatch(name)}
+    aliases: dict[str, str] = {}
+    for name in sorted(names - used):
+        stem = re.sub(r"[^A-Za-z0-9_-]", "_", name)[:64] or "tool"
+        alias = stem
+        index = 1
+        while alias in used:
+            suffix = f"_{index}"
+            alias = stem[:64 - len(suffix)] + suffix
+            index += 1
+        aliases[name] = alias
+        used.add(alias)
+    return aliases
+
+
+def _encode_openai_tool_names(
+    messages: list[dict[str, Any]], tools: list[dict[str, Any]], aliases: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not aliases:
+        return messages, tools
+
+    def encode_name(value: dict[str, Any]) -> dict[str, Any]:
+        alias = aliases.get(value.get("name"))
+        return {**value, "name": alias} if alias is not None else value
+
+    def encode_function(value: dict[str, Any]) -> dict[str, Any]:
+        function = value.get("function")
+        if isinstance(function, dict):
+            return {**value, "function": encode_name(function)}
+        return value
+
+    wire_messages = []
+    for message in messages:
+        if message.get("tool_calls"):
+            calls = [encode_function(call) for call in message["tool_calls"]]
+            wire_messages.append({**message, "tool_calls": calls})
+        elif message.get("role") == "tool":
+            wire_messages.append(encode_name(message))
+        else:
+            wire_messages.append(message)
+    return wire_messages, [encode_function(tool) for tool in tools]
+
+
 class OpenAICompatClient:
     """OpenAI 兼容协议 client（``/v1/chat/completions``）。
 
@@ -741,7 +808,7 @@ class OpenAICompatClient:
     - ``provider_kind == "openai"``：endpoint 如 ``https://api.openai.com``，
       鉴权 ``Authorization: Bearer {api_key}``。
     - ``provider_kind == "ollama"``：endpoint 如 ``http://localhost:11434``，
-      无需 key（Ollama 默认不鉴权，传 ``Bearer`` 会被忽略）；走其内置的
+      无需 key；走其内置的
       ``/v1/chat/completions`` 兼容端点。
     """
 
@@ -764,10 +831,10 @@ class OpenAICompatClient:
             raise LLMError("endpoint（URL）未配置")
         if not profile.model_id:
             raise LLMError("model_id（模型 ID）未配置")
+        validate_language_endpoint(profile.endpoint, self._api_key)
 
     def _headers(self) -> dict[str, str]:
-        # OpenAI 与 Ollama 都接受 Bearer 头；Ollama 忽略它
-        return {"Authorization": f"Bearer {self._api_key}"}
+        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
     def _request_thinking_options(self) -> dict[str, Any]:
         """Return provider-specific reasoning options for structured requests.
@@ -785,7 +852,7 @@ class OpenAICompatClient:
         unrelated OpenAI-compatible providers retain their defaults.
         """
         model = self._profile.model_id.lower()
-        if model.startswith("deepseek-v4-flash"):
+        if model == "deepseek-flash" or model.startswith("deepseek-v4-flash"):
             return {"type": "disabled"}
         # glm-5.x reasoning models: reasoning eats the whole max_tokens quota
         # on HTML/JSON generation, producing empty content (finish=length).
@@ -1035,11 +1102,14 @@ class OpenAICompatClient:
             ToolCallResponse,
         )
 
+        aliases = _openai_tool_names(tools)
+        wire_messages, wire_tools = _encode_openai_tool_names(messages, tools, aliases)
+        original_names = {alias: name for name, alias in aliases.items()}
         body: dict[str, Any] = {
             "model": self._profile.model_id,
-            "messages": messages,
+            "messages": wire_messages,
             "temperature": temperature,
-            "tools": tools,
+            "tools": wire_tools,
             "tool_choice": "auto",
         }
         if thinking:
@@ -1069,7 +1139,8 @@ class OpenAICompatClient:
                 continue
             func = tc.get("function") or {}
             call_id = str(tc.get("id") or "")
-            tool_name = str(func.get("name") or "")
+            wire_name = str(func.get("name") or "")
+            tool_name = original_names.get(wire_name, wire_name)
             raw_args = func.get("arguments")
             if isinstance(raw_args, str):
                 try:
@@ -1124,9 +1195,10 @@ class OpenAIResponsesClient:
             raise LLMError("endpoint（URL）未配置")
         if not profile.model_id:
             raise LLMError("model_id（模型 ID）未配置")
+        validate_language_endpoint(profile.endpoint, self._api_key)
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._api_key}"}
+        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
     def complete(
         self,
@@ -1447,6 +1519,7 @@ class AnthropicClient:
             raise LLMError("model_id（模型 ID）未配置")
         if not api_key:
             raise LLMError("Claude 需要 API key")
+        validate_language_endpoint(profile.endpoint, self._api_key)
 
     def _headers(self) -> dict[str, str]:
         return {

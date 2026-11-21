@@ -368,14 +368,14 @@ def test_mount_changes_preserve_other_tree_nodes_and_allow_volume_navigation(qtb
     tree.reveal(first.path + "/Shots")
     tree.set_volumes((first, usb))
     assert requests == [panel.home_path, first.path]
-    scratch = tree._nodes[first.path]
+    scratch = tree._volume_roots[first.path]
     tree.set_children(first.path, [{"name": "Shots", "path": first.path + "/Shots"}])
     assert tree.currentIndex().data(tree.PATH_ROLE) == first.path + "/Shots"
     assert directories == []
 
     tree.set_volumes((first,))
     assert tree.home_item is home and tree.isExpanded(home.index())
-    assert tree._nodes[first.path] is scratch and tree.isExpanded(scratch.index())
+    assert tree._volume_roots[first.path] is scratch and tree.isExpanded(scratch.index())
     assert tree.currentIndex().data(tree.PATH_ROLE) == first.path + "/Shots"
     assert usb.path not in tree._nodes
     tree.clicked.emit(scratch.index())
@@ -386,7 +386,7 @@ def test_mount_changes_preserve_other_tree_nodes_and_allow_volume_navigation(qtb
     assert first.path + "/Shots" not in tree._nodes
     tree.set_volumes((usb,))
     assert tree.item_model.rowCount() == 2
-    assert tree._nodes[usb.path].index().isValid()
+    assert tree._volume_roots[usb.path].index().isValid()
 
 
 def test_reveal_windows_drive_keeps_absolute_path(qtbot: QtBot) -> None:
@@ -400,6 +400,69 @@ def test_reveal_windows_drive_keeps_absolute_path(qtbot: QtBot) -> None:
     assert requested.args == ["E:/"]
     tree.set_children("E:/", [{"name": "Projects", "path": "E:\\Projects"}])
     assert tree.currentIndex().data(tree.PATH_ROLE) == "E:/Projects"
+
+
+def test_nested_registered_libraries_have_independent_rows_and_share_reads(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    tree = panel.locations
+    parent, child = f"{panel.home_path}/Movies", f"{panel.home_path}/Movies/Footage"
+    panel.show_libraries([
+        {"library_id": "library", "name": "Movies", "path": parent},
+        {"library_id": "footage", "name": "Footage", "path": child},
+    ])
+    tree.set_children(panel.home_path, [{"name": "Movies", "path": parent}])
+    tree.set_children(parent, [{"name": "Footage", "path": child}])
+    requests: list[str] = []
+    tree.tree_requested.connect(requests.append)
+    branch = tree._nodes[child]["library:library"]
+    separate_root = tree._library_roots["footage"]
+    assert tree.library_root(separate_root.index())
+    assert not tree.library_root(branch.index())
+    tree._expanded(branch.index())
+    tree._expanded(separate_root.index())
+    assert requests == [child]
+    tree.set_children(child, [{"name": "Day 1", "path": child + "/Day 1"}])
+    assert branch.child(0).text() == separate_root.child(0).text() == "Day 1"
+    preserved = branch.child(0)
+    tree.set_children(child, [
+        {"name": "Day 1", "path": child + "/Day 1"},
+        {"name": "Day 2", "path": child + "/Day 2"},
+    ])
+    assert branch.child(0) is preserved
+    assert branch.child(1).text() == "Day 2"
+
+
+def test_removing_nested_mount_preserves_outer_volume_root(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="/home/creator")
+    qtbot.addWidget(panel)
+    tree = panel.locations
+    base = MountedVolume("/mnt/base", "Base", b"base")
+    nested = MountedVolume("/mnt/base/nested", "Nested", b"nested")
+    tree.set_volumes((base, nested))
+    root = tree._volume_roots[base.path]
+    tree.set_children(base.path, [{"name": "Nested", "path": nested.path}])
+    assert root.child(0) is not tree._volume_roots[nested.path]
+    tree.set_volumes((base,))
+    assert tree._volume_roots[base.path] is root
+    assert root.child(0).data(tree.PATH_ROLE) == nested.path
+
+
+def test_removing_last_tree_alias_invalidates_an_inflight_read(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    tree = panel.locations
+    path = f"{panel.home_path}/Media"
+    children = [{"name": "Media", "path": path}]
+    tree.set_children(panel.home_path, children)
+    with qtbot.waitSignal(tree.tree_requested) as original:
+        tree.setExpanded(tree.home_item.child(0).index(), True)
+    with qtbot.waitSignal(tree.tree_path_removed) as invalidated:
+        tree.set_children(panel.home_path, [])
+    tree.set_children(panel.home_path, children)
+    with qtbot.waitSignal(tree.tree_requested) as new:
+        tree.setExpanded(tree.home_item.child(0).index(), True)
+    assert original.args == invalidated.args == new.args == [path]
 
 
 def test_home_tree_error_retries_and_reload_discards_old_nodes(qtbot):

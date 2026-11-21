@@ -34,6 +34,31 @@ _missing_manifest_warned: set[str] = set()
 _COMFY_PROBE_TIMEOUT_S = 10.0
 
 
+def _search_global_ai_library(query: str, limit: int) -> list[dict[str, Any]]:
+    """Resolve the Files index from the assistant tool worker."""
+    from src.features.files.repository import FilesDataLocator
+    from src.features.files.repository.catalog import FilesCatalog
+    from src.features.files.services.ai_library import AILibraryService
+
+    catalog = FilesCatalog(FilesDataLocator.default())
+    try:
+        return AILibraryService(catalog).search(query, limit=limit)
+    finally:
+        catalog.close()
+
+
+def _language_credentials_available(profile: Any, credential_store: Any) -> bool:
+    from src.features.edit.ai_editing.llm_client import validate_language_endpoint
+    from src.shared.ai_models.generation.media_inference import is_local_media_endpoint
+
+    secret = credential_store.get_secret(profile.credential_ref) if profile.credential_ref else None
+    endpoint = validate_language_endpoint(profile.endpoint, secret or "")
+    kind = profile.provider_kind.lower()
+    if secret or kind in {"ollama", "local_http", "openai_compat"}:
+        return True
+    return kind in {"openai", "openai_responses", "deepseek"} and is_local_media_endpoint(endpoint)
+
+
 @contextmanager
 def _comfy_probe_timeout(client: Any, seconds: float = _COMFY_PROBE_TIMEOUT_S) -> Iterator[None]:
     """AUD-2205: 临时收窄 ComfyUI client 的 HTTP 超时，退出时恢复原值。
@@ -461,7 +486,7 @@ class AiEditingMixin:
         self._teardown_ai_editing()
 
         try:
-            from src.app.controllers.ai_edit_controller import AiEditController
+            from src.app.controllers.ai_edit_controller import AiEditController, resolve_language_profile
             from src.app.controllers.ai_edit_host_bridge_impl import (
                 MainWindowAiEditHostBridge,
             )
@@ -531,10 +556,13 @@ class AiEditingMixin:
                 saved_effort = load_user_ai_config().get("reasoning_effort")
                 if saved_effort in ("low", "medium", "high"):
                     reasoning_effort = saved_effort
-                active = ModelRouter(registry.list()).route(
-                    ModelRouteRequest(task="editorial_planning", allow_fallback=False),
-                    active_profile_id=registry.active_profile_id,
-                ).profile if registry.active_profile_id else None
+                language_profile = resolve_language_profile(registry)
+                active = None
+                if language_profile is not None:
+                    active = ModelRouter(registry.list()).route(
+                        ModelRouteRequest(task="editorial_planning", allow_fallback=False),
+                        active_profile_id=language_profile.profile_id,
+                    ).profile
                 if active is not None:
                     active_profile_id = active.profile_id
                     if credential_store is None:
@@ -544,13 +572,7 @@ class AiEditingMixin:
                     from src.features.edit.ai_editing.startup_diagnostics import (
                         run_startup_diagnostics,
                     )
-                    secret_available = bool(
-                        active.provider_kind in {"ollama", "local_http", "openai_compat"}
-                        or (
-                            active.credential_ref
-                            and credential_store.get_secret(active.credential_ref)
-                        )
-                    )
+                    secret_available = _language_credentials_available(active, credential_store)
                     self._ai_startup_diagnostics = run_startup_diagnostics(
                         profile=active,
                         credential_available=secret_available,
@@ -868,6 +890,11 @@ class AiEditingMixin:
                 )
             except Exception:
                 logger.debug("p1 dependencies build failed", exc_info=True)
+            from src.features.edit.ai_editing.tool_facade import ToolFacade
+
+            chat_tool_facade = ToolFacade(
+                session, analysis_service=analysis_service, library_search=_search_global_ai_library,
+            )
             controller = AiEditController(
                 panel=panel, service=service, bridge=bridge,
                 runtime=shared_runtime, session_store=session_store,
@@ -883,6 +910,7 @@ class AiEditingMixin:
                 skill_plugin_host=p1_deps.get("skill_plugin_host"),
                 profile_registry=registry,
                 credential_store=credential_store,
+                chat_tool_facade=chat_tool_facade,
             )
             self._ai_approval_service = approval_service
             self._ai_assistant_service = service

@@ -17,11 +17,13 @@ class FilesCardDelegate(QStyledItemDelegate):
     def __init__(
         self, entry_role: int, image_for_entry: Callable[[Entry], QImage | None],
         parent: QWidget, strip_for_entry: Callable[[Entry], QImage | None] | None = None,
+        *, ai_analyzed: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__(parent)
         self.entry_role = entry_role
         self.image_for_entry = image_for_entry
         self.strip_for_entry = strip_for_entry
+        self.ai_analyzed = ai_analyzed
         self.card_width = 180
         self.layout_mode = "grid"
         self.grid_fill = False
@@ -114,6 +116,17 @@ class FilesCardDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(rating_rect, 4, 4)
             painter.setPen(QColor(C.ORANGE))
             painter.drawText(rating_rect, Qt.AlignmentFlag.AlignCenter, "★" * entry.user.rating)
+
+        if self.ai_analyzed is not None and self.ai_analyzed(entry.path):
+            ai_rect = QRectF(cover.right() - 31, cover.top() + (29 if entry.user.rating else 8), 23, 18)
+            badge_font.setBold(True)
+            painter.setFont(badge_font)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(18, 18, 18, 216))
+            painter.drawRoundedRect(ai_rect, 4, 4)
+            painter.setPen(QColor(C.ORANGE))
+            painter.drawText(ai_rect, Qt.AlignmentFlag.AlignCenter, "AI")
+            badge_font.setBold(False)
 
         title_font = QFont(option.font)
         title_font.setPointSizeF(10)

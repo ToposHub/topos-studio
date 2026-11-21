@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.features.files.repository import FilesCatalog, FilesDataLocator
+from src.features.files.services.query import FilesQueryService
 from src.features.files.transactions import (
     FileOperationService,
     OperationJournal,
@@ -42,6 +43,27 @@ def _seed(env, name: str = "a.png", *, rating: int = 4) -> Path:
     return asset
 
 
+@pytest.mark.parametrize("replace_directory", [False, True])
+def test_create_library_rolls_back_only_the_directory_it_created(
+    env, monkeypatch: pytest.MonkeyPatch, replace_directory: bool,
+) -> None:
+    tmp, catalog, _library, _lib, service, _journal = env
+    destination = tmp / "Production"
+    displaced = tmp / "Displaced"
+
+    def fail_to_register(path: Path, _name: str) -> None:
+        if replace_directory:
+            path.rename(displaced)
+            path.mkdir()
+        raise OSError("registry write failed")
+
+    monkeypatch.setattr(catalog, "register_library", fail_to_register)
+    with pytest.raises(OSError, match="registry write failed"):
+        service.create_library(str(tmp), destination.name)
+    assert destination.exists() is replace_directory
+    assert displaced.exists() is replace_directory
+
+
 # ---------------------------------------------------------------- 单文件随行
 
 
@@ -64,7 +86,28 @@ def test_move_carries_metadata_tags_collections_and_fts(env):
     assert catalog.collection_member_paths(cid) == [str(moved)]
     rows, total = catalog.search("a.png", library_id=library.library_id)
     assert total >= 1 and rows[0]["path"] == str(moved), "FTS 键已迁移"
+    assert FilesQueryService(catalog).search("a.png", library_id=library.library_id).total == 0
     assert journal.get(_last_job_id(journal))["state"] == "completed"
+
+
+def test_move_transfers_metadata_to_the_receiving_library(env) -> None:
+    root, catalog, source, _, service, _ = env
+    asset = _seed(env)
+    target = root / "receiving"
+    target.mkdir()
+    destination = catalog.register_library(target)
+    (target / asset.name).write_bytes(b"existing")
+
+    outcome = service.move(source.library_id, asset, target, policy="rename")
+
+    assert outcome.ok
+    moved = Path(outcome.destination)
+    assert moved != target / asset.name and moved.read_bytes() == b"payload"
+    assert (target / asset.name).read_bytes() == b"existing"
+    assert catalog.asset(destination.library_id, moved)["rating"] == 4
+    assert catalog.tags_of(destination.library_id, moved) == ["选片"]
+    assert catalog.asset(source.library_id, asset) is None
+    assert catalog.asset(source.library_id, moved) is None
 
 
 def _last_job_id(journal: OperationJournal) -> str:

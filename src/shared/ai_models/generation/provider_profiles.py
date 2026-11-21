@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,6 +22,8 @@ from src.shared.ai_models.generation.user_ai_config import (
     load_user_ai_config,
     save_user_ai_config,
 )
+
+ZHIPU_VISION_PROVIDER_KIND = "zhipu_vision_mcp"
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,15 @@ class AiProviderProfile:
         """是否允许上传分析数据（需 modality + 数据策略双满足）。"""
         return self.data_policy.allow_media_upload and "media_upload" in self.modalities
 
+    @property
+    def routed_capabilities(self) -> tuple[str, ...]:
+        if self.provider_kind == ZHIPU_VISION_PROVIDER_KIND:
+            return ("vision",)
+        values = self.capabilities or _infer_capabilities(self.provider_kind, self.modalities)
+        if self.provider_kind in {"volcengine_seedream", "volcengine_ark_image"}:
+            values = tuple(value for value in values if value not in {"vision", "vision_understanding"})
+        return tuple(dict.fromkeys("vision" if value == "vision_understanding" else value for value in values))
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "profile_id": self.profile_id,
@@ -128,6 +140,7 @@ class AiProviderProfile:
             # of the features catalog here broke profile loading entirely
             # whenever the edit side was packaged away.
             capabilities = _infer_capabilities(provider_kind, modalities)
+        timeout = float(lm.get("request_timeout_seconds", 120.0))
         return AiProviderProfile(
             profile_id=str(data["profile_id"]),
             display_name=str(data["display_name"]),
@@ -141,14 +154,14 @@ class AiProviderProfile:
             capabilities=capabilities,
             data_policy=DataPolicy(
                 execution=str(dp.get("execution", "local")),
-                allow_media_upload=bool(dp.get("allow_media_upload", False)),
-                retain_prompts=bool(dp.get("retain_prompts", False)),
+                allow_media_upload=dp.get("allow_media_upload") is True,
+                retain_prompts=dp.get("retain_prompts") is True,
             ),
             limits=ProviderLimits(
                 max_context_tokens=int(lm.get("max_context_tokens", 200_000)),
                 max_parallel_jobs=int(lm.get("max_parallel_jobs", 1)),
                 monthly_cost_alert=lm.get("monthly_cost_alert"),
-                request_timeout_seconds=float(lm.get("request_timeout_seconds", 120.0)),
+                request_timeout_seconds=timeout if isfinite(timeout) and timeout > 0 else 120.0,
                 max_retries=int(lm.get("max_retries", 2)),
                 max_cost_units_per_request=lm.get("max_cost_units_per_request"),
             ),
@@ -234,7 +247,17 @@ class ProfileRegistry:
         self._active_by_capability: dict[str, str] = {}
 
     def add(self, profile: AiProviderProfile) -> None:
+        previous = self._profiles.get(profile.profile_id)
         self._profiles[profile.profile_id] = profile
+        if previous is not None and previous.routed_capabilities != profile.routed_capabilities:
+            self._active_by_capability = {
+                capability: profile_id for capability, profile_id in self._active_by_capability.items()
+                if profile_id != profile.profile_id or capability in profile.routed_capabilities
+            }
+            if (self._active_profile_id == profile.profile_id
+                    and "language" in previous.routed_capabilities
+                    and "language" not in profile.routed_capabilities):
+                self._active_profile_id = ""
 
     def remove(self, profile_id: str) -> None:
         self._profiles.pop(profile_id, None)
@@ -264,31 +287,38 @@ class ProfileRegistry:
         self._active_profile_id = profile_id
         profile = self._profiles.get(profile_id)
         if profile is not None:
-            capabilities = profile.capabilities or _infer_capabilities(
-                profile.provider_kind, profile.modalities,
-            )
-            for capability in capabilities:
+            for capability in profile.routed_capabilities:
                 self._active_by_capability[capability] = profile_id
 
     def set_active_for_capability(self, capability: str, profile_id: str) -> None:
         """Set the active profile for one routed capability."""
+        capability = "vision" if capability == "vision_understanding" else capability
+        if not profile_id:
+            self._active_by_capability.pop(capability, None)
+            if capability == "language":
+                self._active_profile_id = ""
+            return
         profile = self._profiles.get(profile_id)
         if profile is None:
             raise KeyError(f"profile {profile_id!r} not registered")
-        capabilities = profile.capabilities or _infer_capabilities(
-            profile.provider_kind, profile.modalities,
-        )
-        if capability not in capabilities:
+        if capability not in profile.routed_capabilities:
             raise ValueError(f"profile {profile_id!r} does not provide {capability!r}")
         self._active_by_capability[capability] = profile_id
+        if capability == "language":
+            self._active_profile_id = profile_id
 
     def active_profile_for_capability(self, capability: str) -> AiProviderProfile | None:
-        profile_id = self._active_by_capability.get(capability, "")
-        return self._profiles.get(profile_id) if profile_id else None
+        capability = "vision" if capability == "vision_understanding" else capability
+        profile = self._profiles.get(self._active_by_capability.get(capability, ""))
+        return profile if profile and capability in profile.routed_capabilities else None
 
     def is_active(self, profile_id: str) -> bool:
         """Whether a profile is active globally or for at least one capability."""
-        return profile_id == self._active_profile_id or profile_id in self._active_by_capability.values()
+        profile = self._profiles.get(profile_id)
+        return profile is not None and (
+            profile_id == self._active_profile_id
+            or any(self._active_by_capability.get(cap) == profile_id for cap in profile.routed_capabilities)
+        )
 
     def to_list(self) -> list[dict[str, Any]]:
         """序列化为 list[dict]（用户设置持久化；不含 secret）。"""
@@ -309,7 +339,7 @@ class ProfileRegistry:
         与 credentials，旧 ConfigManager 仍只保存非 secret 配置。
         """
         config.set(self.CONFIG_KEY_PROFILES, self.to_list(), auto_save=False)
-        config.set(self.CONFIG_KEY_ACTIVE, self._active_profile_id, auto_save=True)
+        config.set(self.CONFIG_KEY_ACTIVE, self._active_profile_id, auto_save=False)
         config.set(self.CONFIG_KEY_ACTIVE_BY_CAPABILITY, dict(self._active_by_capability), auto_save=True)
 
     def load_from_config(self, config: Any) -> None:
@@ -335,22 +365,13 @@ class ProfileRegistry:
                 continue
             self._profiles[profile.profile_id] = profile
         active = config.get(self.CONFIG_KEY_ACTIVE)
-        if isinstance(active, str) and active and active in self._profiles:
-            self._active_profile_id = active
-            self.set_active(active)
         raw_active_by_capability = config.get(self.CONFIG_KEY_ACTIVE_BY_CAPABILITY)
-        if isinstance(raw_active_by_capability, dict):
-            for capability, profile_id in raw_active_by_capability.items():
-                if isinstance(capability, str) and isinstance(profile_id, str) and profile_id in self._profiles:
-                    try:
-                        self.set_active_for_capability(capability, profile_id)
-                    except ValueError:
-                        continue
+        self._load_routes(active, raw_active_by_capability)
 
     def save_to_user_file(self, path: Path | None = None) -> None:
         """保存 profile 与 active id 到用户级 ``~/.topos`` 文件。"""
 
-        data = load_user_ai_config(path)
+        data = load_user_ai_config(path, strict=True)
         data["profiles"] = self.to_list()
         data["active_profile_id"] = self._active_profile_id
         data["active_profile_ids"] = dict(self._active_by_capability)
@@ -375,18 +396,27 @@ class ProfileRegistry:
             self._profiles[profile.profile_id] = profile
         self._active_profile_id = ""
         active = data.get("active_profile_id")
-        if isinstance(active, str) and active in self._profiles:
-            self._active_profile_id = active
-            self.set_active(active)
         raw_active_by_capability = data.get("active_profile_ids")
-        if isinstance(raw_active_by_capability, dict):
-            for capability, profile_id in raw_active_by_capability.items():
-                if isinstance(capability, str) and isinstance(profile_id, str) and profile_id in self._profiles:
-                    try:
-                        self.set_active_for_capability(capability, profile_id)
-                    except ValueError:
-                        continue
+        self._load_routes(active, raw_active_by_capability)
         return True
+
+    def _load_routes(self, active: Any, routes: Any) -> None:
+        if isinstance(active, str) and active in self._profiles:
+            if not isinstance(routes, dict):
+                self.set_active(active)
+            else:
+                self._active_profile_id = active
+        if not isinstance(routes, dict):
+            return
+        for capability, profile_id in routes.items():
+            if isinstance(capability, str) and isinstance(profile_id, str) and profile_id in self._profiles:
+                try:
+                    self.set_active_for_capability(capability, profile_id)
+                except ValueError:
+                    continue
+        profile = self.active_profile
+        if "language" not in routes and profile is not None and "language" in profile.routed_capabilities:
+            self.set_active_for_capability("language", profile.profile_id)
 
     @property
     def active_profile_id(self) -> str:

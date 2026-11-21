@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
@@ -91,7 +92,38 @@ from src.features.edit.ai_editing.goal_round_driver import GoalRoundDriver
 from src.features.edit.ai_editing.context_spill import ContextSpillStore
 from src.features.edit.ai_editing.tool_operation_ledger import ToolOperationLedger
 
+if TYPE_CHECKING:
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile
+    from src.features.edit.ai_editing.tool_facade import ToolFacade
+
 logger = logging.getLogger(__name__)
+
+_LIBRARY_SEARCH_REQUEST = re.compile(
+    r"(?:搜索|检索|查找|寻找|找|匹配|挑选|筛选|推荐)[^\n，。！？]{0,12}(?:素材|镜头|画面)"
+    r"|(?:素材库|素材候选)[^\n，。！？]{0,12}(?:搜索|检索|查找|匹配)"
+)
+
+
+def _is_language_profile(profile: Any) -> bool:
+    capabilities = getattr(profile, "routed_capabilities", None)
+    if capabilities is None:
+        capabilities = getattr(profile, "capabilities", ()) or ()
+    if capabilities:
+        return "language" in capabilities
+    modalities = getattr(profile, "modalities", ()) or ()
+    return not modalities or "text" in modalities
+
+
+def resolve_language_profile(registry: Any) -> AiProviderProfile | None:
+    """Resolve the same language model for validation, chat and editorial plans."""
+    getter = getattr(registry, "active_profile_for_capability", None)
+    if callable(getter):
+        profile = getter("language")
+        if profile is not None:
+            return profile
+    profile = getattr(registry, "active_profile", None)
+    return profile if profile is not None and _is_language_profile(profile) else None
+
 
 # 自由对话（unknown 分支 → LLM chat）的系统提示与温度映射。
 # 温度与 LLMVariantPlanner 保持一致（low→0.8 / medium→0.6 / high→0.3）。
@@ -468,6 +500,7 @@ class AiEditController(QObject):
         skill_plugin_host: Any = None,
         profile_registry: Any = None,
         credential_store: Any = None,
+        chat_tool_facade: ToolFacade | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -516,6 +549,7 @@ class AiEditController(QObject):
         )
         self._profile_registry: Any = profile_registry
         self._credential_store: Any = credential_store
+        self._chat_tool_facade = chat_tool_facade
         self._teaching_context_provider: Any = None
         self._teaching_request_handler: Any = None
         self._teaching_motion_graphic_mode_handler: Any = None
@@ -1329,6 +1363,17 @@ class AiEditController(QObject):
         Returns:
             True 表示已分发（不再走旧路径）；False 表示分发失败需回退。
         """
+        if (
+            self.__dict__.get("_chat_tool_facade") is not None
+            and self._pending_route is None
+            and any(context in text for context in ("脚本", "分镜", "镜头描述", "全局素材库"))
+            and _LIBRARY_SEARCH_REQUEST.search(text)
+            and self._can_use_llm_chat()
+        ):
+            # This explicit request queries the library. Words inside the script
+            # may otherwise trigger an unrelated analysis or editing skill.
+            self._start_chat(text)
+            return True
         try:
             scope = self._build_chat_scope()
             # 澄清往返：pending_route 存在时，本次输入是澄清答案
@@ -2060,43 +2105,11 @@ class AiEditController(QObject):
 
     def _can_use_llm_chat(self) -> bool:
         """是否具备 LLM 自由对话能力（profile 已配置 + credential_store 可用）。"""
-        if self._profile_registry is None or self._credential_store is None:
-            return False
-        try:
-            if self._profile_registry.active_profile is not None:
-                return True
-            # A user may configure a capability-specific language model
-            # without designating a global default.  Structured HTML/Motion
-            # Graphic calls can safely use that explicit route.
-            getter = getattr(self._profile_registry, "active_profile_for_capability", None)
-            return bool(callable(getter) and getter("language") is not None)
-        except Exception:  # noqa: BLE001
-            return False
+        return self._credential_store is not None and self._chat_profile_for_mode("normal") is not None
 
-    def _chat_profile_for_mode(self, chat_mode: str) -> Any | None:
-        """Select the user-configured model for a chat transport.
-
-        Motion Graphic authoring is a language-generation task.  Respect the
-        existing ``language`` capability route when the user configured one;
-        do not perform paid/provider fallback here.  Attachments remain
-        validated against this exact choice below, so routing cannot silently
-        send media to a profile that lacks the corresponding input capability.
-        """
-        registry = self._profile_registry
-        if registry is None:
-            return None
-        if chat_mode in {
-            "teaching_html_generate", "teaching_motion_graphic_build",
-        }:
-            getter = getattr(registry, "active_profile_for_capability", None)
-            if callable(getter):
-                try:
-                    routed = getter("language")
-                except Exception:  # noqa: BLE001 - a bad registry must not crash chat
-                    routed = None
-                if routed is not None:
-                    return routed
-        return getattr(registry, "active_profile", None)
+    def _chat_profile_for_mode(self, chat_mode: str) -> AiProviderProfile | None:
+        """Ordinary chat and structured authoring share the language route."""
+        return resolve_language_profile(self._profile_registry)
 
     @staticmethod
     def _attachment_input_kind(attachment: object) -> str:
@@ -2477,6 +2490,9 @@ class AiEditController(QObject):
         existing chat callbacks so the UI behaviour stays identical.
         """
 
+        lookup = getattr(self._profile_registry, "active_profile_for_capability", None)
+        if not callable(lookup) or lookup("language") is None:
+            return False
         driver = self._get_v2_chat_driver()
         if driver is None:
             return False
@@ -2619,13 +2635,16 @@ class AiEditController(QObject):
             logger.debug("queue active V2 follow-up failed", exc_info=True)
             return False
 
-    def _try_build_tool_facade(self) -> Any:
+    def _try_build_tool_facade(self) -> ToolFacade | None:
         """B2: 尝试用当前 EditSession 构造 ToolFacade（只读工具集）。
 
         EditSession.current() 在工程打开后可用；未绑定时返回 None，
         ChatRunDriver 会降级为纯对话（不使用工具循环）。
         """
 
+        facade = self.__dict__.get("_chat_tool_facade")
+        if facade is not None:
+            return facade
         try:
             from src.features.edit.ai_editing.edit_api import EditSession
             from src.features.edit.ai_editing.tool_facade import ToolFacade
@@ -6231,39 +6250,19 @@ class AiEditController(QObject):
             has_active_run = True
         registry_list = getattr(self._profile_registry, "list", None)
         profiles = registry_list() if callable(registry_list) else ()
+        active = self._chat_profile_for_mode(self._chat_mode)
         state = ComposerFooterState(
             permission=self._current_permission,
             context_used=context_used,
             context_compressed=context_compressed,
-            context_limit=(
-                self._profile_registry.active_profile.limits.max_context_tokens
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else 200_000
+            context_limit=active.limits.max_context_tokens if active is not None else 200_000,
+            profile_label=active.display_name if active is not None else "",
+            model_label=active.model_id if active is not None else "",
+            profile_options=tuple(
+                (profile.profile_id, profile.display_name, profile.model_id)
+                for profile in profiles if _is_language_profile(profile)
             ),
-            profile_label=(
-                self._profile_registry.active_profile.display_name
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else ""
-            ),
-            model_label=(
-                self._profile_registry.active_profile.model_id
-                if self._profile_registry is not None
-                and self._profile_registry.active_profile is not None
-                else ""
-            ),
-            profile_options=(
-                tuple(
-                    (p.profile_id, p.display_name, p.model_id)
-                    for p in profiles
-                )
-                if self._profile_registry is not None else ()
-            ),
-            active_profile_id=(
-                getattr(self._profile_registry, "active_profile_id", "")
-                if self._profile_registry is not None else ""
-            ),
+            active_profile_id=active.profile_id if active is not None else "",
             mode=self._current_assistant_mode,
             reasoning_effort=self._current_reasoning_effort,
             has_active_run=has_active_run,
@@ -6276,10 +6275,7 @@ class AiEditController(QObject):
     def _context_budget(self) -> Any:
         """返回当前 Profile 的上下文预算（无 Profile 时使用 200k 默认值）。"""
         from src.features.edit.ai_editing.context_bundle import TokenBudget
-        active = (
-            self._profile_registry.active_profile
-            if self._profile_registry is not None else None
-        )
+        active = self._chat_profile_for_mode(self._chat_mode)
         limit = active.limits.max_context_tokens if active is not None else 200_000
         return TokenBudget(limit=max(1_024, int(limit)))
 
@@ -6305,10 +6301,14 @@ class AiEditController(QObject):
         if registry is None or not profile_id:
             return
         profile = registry.get(profile_id)
-        if profile is None:
+        if profile is None or not _is_language_profile(profile):
             return
         try:
-            registry.set_active(profile_id)
+            bind = getattr(registry, "set_active_for_capability", None)
+            if callable(bind):
+                bind("language", profile_id)
+            else:
+                registry.set_active(profile_id)
             registry.save_to_user_file()
         except Exception:
             logger.debug("saving selected AI profile failed", exc_info=True)
@@ -6366,7 +6366,7 @@ class AiEditController(QObject):
         except Exception:
             logger.debug("saving reasoning effort failed", exc_info=True)
         # Profile 不变，只重建 planner 以使后续请求使用新的推理强度。
-        active = self._profile_registry.active_profile if self._profile_registry is not None else None
+        active = self._chat_profile_for_mode(self._chat_mode)
         if active is not None and self._credential_store is not None:
             try:
                 from src.features.edit.ai_editing.llm_variant_planner import LLMVariantPlanner

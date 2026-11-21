@@ -36,32 +36,35 @@ class Qwen3VLCaptioner(LazyModelLoader):
         "格式：\n描述：<一句话描述>\n标签：<标签1>,<标签2>,..."
     )
 
-    def __init__(self):
+    def __init__(self, *, local_model_path: str | None = None) -> None:
         super().__init__(provider_id=self.provider_id, model_pack_id=self.MODEL_PACK_ID)
+        self._local_model_path = local_model_path
 
     def _check_dependencies(self) -> bool:
         try:
-            import transformers  # noqa: F401
+            from transformers import Qwen3VLForConditionalGeneration  # noqa: F401
             import torch  # noqa: F401
         except ImportError:
             return False
         # 模型文件检查（避免 is_available=True 但加载时联网/崩溃）
-        return is_model_pack_installed(self.MODEL_PACK_ID) or _is_in_hf_cache(self.MODEL_HF_ID)
+        return bool(self._local_model_path) or is_model_pack_installed(self.MODEL_PACK_ID) or _is_in_hf_cache(self.MODEL_HF_ID)
 
     def _load_model(self) -> Any:
         """加载 Qwen3-VL 模型 + processor。"""
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         from apps.topos_vault.providers.model_loader import resolve_torch_device
 
         device, dtype = resolve_torch_device()
         logger.info("加载 Qwen3-VL-8B AWQ（device=%s）...", device)
 
-        local_path = self._resolve_local_or_hf(self.MODEL_HF_ID)
-        processor = AutoProcessor.from_pretrained(local_path)
-        model = AutoModelForCausalLM.from_pretrained(
+        local_path = self._local_model_path or self._resolve_local_or_hf(self.MODEL_HF_ID)
+        load_options = {"local_files_only": True} if self._local_model_path else {}
+        processor = AutoProcessor.from_pretrained(local_path, **load_options)
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
             local_path,
             torch_dtype=dtype,
             device_map=device,
+            **load_options,
         )
         logger.info("Qwen3-VL 加载完成")
         return {"model": model, "processor": processor, "device": device}
@@ -77,7 +80,8 @@ class Qwen3VLCaptioner(LazyModelLoader):
         processor = self.model["processor"]
         device = self.model["device"]
 
-        image = Image.open(image_path).convert("RGB")
+        with Image.open(image_path) as source:
+            image = source.convert("RGB")
 
         # 构造对话消息：content 里的 image 块给 PIL.Image（也支持路径字符串，按版本兼容）
         messages = [

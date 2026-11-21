@@ -80,6 +80,8 @@ class AgentPresetRegistry:
 def create_default_agent_preset_registry() -> AgentPresetRegistry:
     """Return safe, read-oriented editing presets."""
 
+    from src.features.edit.ai_editing.tool_facade import LIBRARY_SEARCH_TOOL
+
     return AgentPresetRegistry((
         AgentPreset(
             preset_id="editorial_assistant",
@@ -90,7 +92,7 @@ def create_default_agent_preset_registry() -> AgentPresetRegistry:
             ),
             tool_allowlist=(
                 "topos.get_project_snapshot", "topos.search_assets",
-                "topos.get_asset_analysis", "topos.get_capabilities",
+                LIBRARY_SEARCH_TOOL, "topos.get_asset_analysis", "topos.get_capabilities",
             ),
             max_iterations=6,
             max_tool_calls=12,

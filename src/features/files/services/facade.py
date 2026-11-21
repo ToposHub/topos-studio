@@ -14,7 +14,10 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+if TYPE_CHECKING:
+    from src.features.files.services.ai_library import LibraryAnalysisPolicy
 
 from src.features.files.contracts import (
     FilesError,
@@ -26,7 +29,7 @@ from src.features.files.contracts import (
     permission_error,
     unsupported_error,
 )
-from src.features.files.repository.catalog import FilesCatalog
+from src.features.files.repository.catalog import FilesCatalog, LibraryRecord
 from src.features.files.services.domain import (
     FilesCollectionsService,
     FilesMetadataService,
@@ -94,12 +97,12 @@ class FilesFacade:
         self.query = query or FilesQueryService(catalog)
         self.metadata = metadata or FilesMetadataService(catalog)
         self.scan = scan or FilesScanService(catalog)
+        self._operations = FileOperationService(catalog, journal=self.journal)
         self.tasks = tasks or FilesTaskService(
-            catalog, journal=self.journal)
+            catalog, journal=self.journal, operations=self._operations)
         self.libraries = FilesLibraryService(catalog)
         self.collections = FilesCollectionsService(catalog)
-        self._planner = BatchRenamePlanner(
-            catalog, service=FileOperationService(catalog, journal=self.journal))
+        self._planner = BatchRenamePlanner(catalog, service=self._operations)
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="files-facade")
         if max_pending < max_workers or max_workers < 1:
@@ -114,6 +117,89 @@ class FilesFacade:
         self._closed = False
 
     # ------------------------------------------------------------ 统计/生命周期
+
+    def search_ai_library(
+        self, query: str, *, limit: int = 40, library_id: str | None = None,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
+        only_unanalyzed: bool = False, cancel: CancelToken | None = None,
+    ) -> list[dict[str, Any]]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).search(
+            query, limit=limit, library_id=library_id, folder=folder, kinds=kinds, recursive=recursive,
+            only_unanalyzed=only_unanalyzed, cancel=cancel,
+        )
+
+    def ai_library_analyzed_paths(self, paths: Sequence[str], *, cancel: CancelToken | None = None) -> set[str]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_status(paths, cancel=cancel)
+
+    def build_ai_library(
+        self, analyze: Callable, *, revision: str, cancel: CancelToken,
+        progress: Callable[[int, int], None],
+        additional_analyzers: Callable[[str], Sequence[Callable]] | None = None,
+        library_id: str | None = None,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None,
+        recursive: bool = True, force: bool = False,
+        only_unanalyzed: bool = False,
+        per_library_scope: dict[str, tuple[tuple[str, ...], bool]] | None = None,
+    ) -> dict[str, Any]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).build_index(
+            analyze, analyzer_revision=revision, cancel=cancel, progress=progress,
+            additional_analyzers=additional_analyzers, library_id=library_id,
+            folder=folder, kinds=kinds, recursive=recursive, force=force,
+            only_unanalyzed=only_unanalyzed, per_library_scope=per_library_scope,
+        )
+
+    def ai_library_analysis_policy(self, library_id: str, *, folder: str | None = None) -> LibraryAnalysisPolicy:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_policy(library_id, folder=folder)
+
+    def ai_library_scope_stamp(self, library_id: str, *, folder: str | None = None) -> tuple[str, str] | None:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).analysis_scope_stamp(library_id, folder=folder)
+
+    def ai_library_analysis_policies(self) -> list[dict[str, Any]]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        service = AILibraryService(self._catalog)
+        return [{"library_id": record.library_id, "name": record.name, "path": record.root,
+                 **service.analysis_policy(record.library_id).to_dict()}
+                for record in self.libraries.list_libraries()]
+
+    def set_ai_library_analysis_policy(
+        self, library_id: str, policy: LibraryAnalysisPolicy, *, folder: str | None = None,
+        expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        from src.features.files.services.ai_library import AILibraryService
+
+        AILibraryService(self._catalog).set_analysis_policy(
+            library_id, policy, folder=folder, expected_scope_stamp=expected_scope_stamp,
+        )
+
+    def copy_to_ai_library(self, sources: list[str], destination: str) -> ServiceResult:
+        root = Path(destination).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("素材库目标必须是文件夹")
+        record = self.libraries.library_for_path(root) or self.libraries.register(root)
+        return self.tasks.start_task(record.library_id, "copy", sources,
+                                     options={"destination": str(root)}, policy="rename")
+
+    def register_library(self, directory: str, name: str = "") -> LibraryRecord:
+        root = Path(directory)
+        if not root.is_absolute():
+            raise ValueError("请选择绝对路径。")
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            raise NotADirectoryError(directory)
+        if name:
+            return self._operations.create_library(str(root), name)
+        return self.libraries.register(root)
 
     def thumbnail_bytes(self, path: str, version: int, *, cancel: threading.Event) -> bytes:
         from src.features.files.services.media import thumbnail_bytes

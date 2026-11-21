@@ -795,6 +795,10 @@ class FilesPluginsController(QObject):
         window.activateWindow()
 
     def _open_ai_library(self, paths: tuple[str, ...]) -> None:
+        native_library = getattr(self.panel, "ai_library_requested", None)
+        if native_library is not None:
+            native_library.emit()
+            return
         from src.app.ui.ai_library_window import AILibraryWindow
         if self._ai_library_window is None:
             window = AILibraryWindow(self.panel.window())
