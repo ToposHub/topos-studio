@@ -412,3 +412,41 @@ def test_dot_on_wire_is_one_undo(page, qapp):
     page.redo()
     assert page.node_graph.get_node(dot.id) is not None
     assert (dot.id, "output", "c", "image") in page._graph_cable_keys()
+
+
+def test_rejected_cable_edit_reports_reason_code_without_mutation(page, qapp):
+    """B02: a refused gesture exposes a reason code and keeps cables intact."""
+    from src.features.composite.core.graph_edit import EDIT_TYPE_MISMATCH
+    from src.features.composite.nodes.scene3d_node import Scene3DNode
+
+    editor = _wiring_page(page, qapp)
+    _node(page, Scene3DNode, "s3d", 600, 0)
+    editor.build_from_graph(page.node_graph)
+    before = page._graph_cable_keys()
+
+    # Image output dragged into a scene-typed input: type mismatch.
+    assert page._edit_graph_cables(
+        (), (("a", "result", "s3d", "in"),), allow_pending_transform=False) is False
+    assert page._graph_cable_keys() == before
+    assert page._last_graph_edit_issues
+    assert page._last_graph_edit_issues[0].code == EDIT_TYPE_MISMATCH
+
+
+def test_stale_gesture_revision_cancels_edit(page, qapp):
+    """B02: an edit proposed against an outdated revision is rejected."""
+    editor = _wiring_page(page, qapp)
+    before = page._graph_cable_keys()
+
+    stale = page.node_graph.generation + 3
+    assert page._edit_graph_cables(
+        (("a", "result", "c", "image"),),
+        (("a", "result", "e", "image"),),
+        expected_revision=stale) is False
+    assert page._graph_cable_keys() == before
+    assert page._last_graph_edit_issues[0].code == "edit.stale_revision"
+
+    # The same edit against the current revision applies ("e" is free).
+    assert page._edit_graph_cables(
+        (("a", "result", "c", "image"),),
+        (("a", "result", "e", "image"),)) is True
+    assert ("a", "result", "e", "image") in page._graph_cable_keys()

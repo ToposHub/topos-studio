@@ -38,6 +38,7 @@ from src.features.composite.render.render_scheduler import RenderRequest, Reques
 from src.features.composite.render.prefetch_scheduler import PrefetchScheduler, PrefetchPrediction
 from src.features.composite.nodes.node_state import NodeState
 from src.features.composite.core.node_engine import Connection, NodeGraph, NODE_REGISTRY
+from src.features.composite.core.graph_edit import GraphEditCommand
 from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 from src.features.composite.core.layer_stack_controller import (
     ACTION_ATTACH_NODE_TO_LAYER, LayerStackController,
@@ -318,6 +319,9 @@ class CompositePage(QWidget):
 
         # Node graph (data model)
         self._node_graph = NodeGraph()
+        # B02: reason-coded rejection of the most recent graph edit gesture,
+        # for diagnostics and tests (empty tuple after a clean apply).
+        self._last_graph_edit_issues: tuple = ()
 
         # Thumbnail manager for node previews
         self._thumbnail_manager: Optional[NodeThumbnailManager] = None
@@ -2682,8 +2686,15 @@ class CompositePage(QWidget):
                            allow_pending_transform: bool = False,
                            moved_node: str | None = None,
                            position: QPointF | None = None,
-                           created_dot: DotNode | None = None) -> bool:
-        """Apply an entire routing gesture and give it one undo record."""
+                           created_dot: DotNode | None = None,
+                           expected_revision: int = -1) -> bool:
+        """Apply an entire routing gesture and give it one undo record.
+
+        ``expected_revision`` carries the graph generation observed when the
+        gesture started (B02 optimistic concurrency): a concurrently edited
+        graph rejects the stale gesture instead of applying it blindly.
+        Rejections are stored reason-coded in ``_last_graph_edit_issues``.
+        """
         graph = self._node_graph
         controller = self._layer_stack_controller
         old_edges = self._graph_cable_keys()
@@ -2740,10 +2751,18 @@ class CompositePage(QWidget):
         added_edges = tuple(Connection(*edge) for edge in added if edge not in old_edges)
         if not remove_keys <= old_edges:
             return False
-        if not graph.edit_connections(removed_edges, added_edges):
+        self._last_graph_edit_issues = ()
+        result = graph.apply_edit(GraphEditCommand(
+            removed=removed_edges, added=added_edges,
+            expected_revision=expected_revision))
+        if not result.ok:
+            self._last_graph_edit_issues = result.issues
+            logger.warning("Cable edit rejected (%s): %s", result.primary_code,
+                           "; ".join(issue.message for issue in result.issues))
             return False
         if binding is not None and not controller.adopt_wired_layer_effect(*binding):
-            graph.edit_connections(added_edges, removed_edges, positions=positions)
+            graph.apply_edit(GraphEditCommand(
+                removed=added_edges, added=removed_edges, positions=positions))
             return False
 
         node = graph.get_node(moved_node) if moved_node is not None else None

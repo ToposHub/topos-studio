@@ -29,6 +29,8 @@ AE 导航开启时，图层属性快捷键作用于选中图层，未选图层�
 
 每层还登记稳定的主 Transform 角色（`Layer.transform_node_id`，B01）。效果可以位于该 Transform 之上或之下（如 Constant → Transform → Blur → 本层 Merge A），效果插入、删除、变换快捷键、查看器手柄、父级投影与复制都通过角色解析而不是链首类型推断：`LayerStackController.layer_roles()` 返回 source/transform/effects/foreground/managed_merge 契约。主 Transform 被删除时保留悬空引用作为可识别的缺失状态，重新接线后由事务认领恢复；旧工程沿本层图像主链回溯，唯一候选才回填稳定引用，多候选标记为歧义并诊断。
 
+所有连线编辑统一经 `NodeGraph.apply_edit`（`core/graph_edit.py`，B02）：候选边表在图锁内一次性完成端口存在、类型、容量、成环、过时 revision 与重复命令 ID 校验，通过后单次发布并递增 generation/topology_revision；拒绝路径零修改并返回点分原因码（`edit.cycle`、`edit.capacity` 等），供吸附提示与诊断消费。画布手势在拖线开始时捕获 graph generation，松手时以乐观 revision 提交，图被并发修改则整笔手势拒绝。图层控制器的撤销恢复直接按快照重建连接列表（含多输入端口的边顺序），不再逐条 replay `connect()`。
+
 节点图的 Merge 以 A、B、Mask 标识前景、背景和遮罩，由图层栈生成的 Merge 带图层标记。节点端口与连线两端都可拖拽，目标只有一个兼容端口时可将线放到节点主体上。按住 Shift 拖线端可以复制分支。拖动时显示吸附目标和将替换的线，松手后由 CompositePage 提交，NodeGraph.edit_connections 先验证整次改线的端口类型、容量和成环条件。
 
 把处理节点放到高亮的线上只修改该分支。选中分叉节点新建效果时，原有分支保留，新效果接在独立支线上。在线插入或改接作为一条撤销记录提交。插入图层主线时同时更新图层所引用的节点和节点图，背景累积链仍依据图层顺序生成。

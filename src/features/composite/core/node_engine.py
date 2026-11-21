@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 from src.features.composite.nodes.base_node import Node, Connection, TextureResult
 from src.features.composite.core.graph_snapshot import GraphSnapshot, NodeSnapshot, ConnectionSnapshot
+from src.features.composite.core.graph_edit import (
+    GraphEditCommand, GraphEditIssue, GraphEditResult,
+    EDIT_CAPACITY, EDIT_CYCLE, EDIT_DUPLICATE_COMMAND, EDIT_EDGE_MISSING,
+    EDIT_NODE_MISSING, EDIT_PORT_MISSING, EDIT_STALE_REVISION,
+    EDIT_TYPE_MISMATCH,
+)
 from src.features.composite.nodes.color_node import COLORNode
 from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.image_input_node import ImageInputNode
@@ -519,6 +525,8 @@ class NodeGraph:
         self._lock = threading.RLock()  # Thread safety for graph reads/writes
         self._generation: int = 0  # Incremented on every mutation
         self._topology_revision: int = 0  # Incremented on connect/disconnect
+        # B02: recent apply_edit command ids, used to dedupe double commits.
+        self._edit_command_ids: deque = deque(maxlen=128)
 
         # ── Expression System ──
         # Expression manager for dependency tracking and propagation
@@ -1348,42 +1356,128 @@ class NodeGraph:
         with self._lock:
             return self._would_create_cycle(src_node_id, dst_node_id)
 
-    def edit_connections(self, removed: tuple[Connection, ...],
-                         added: tuple[Connection, ...], *,
-                         positions: tuple[int, ...] | None = None) -> bool:
-        """Validate an entire cable edit before publishing any of its edges."""
+    def apply_edit(self, command: GraphEditCommand) -> GraphEditResult:
+        """Validate an entire cable edit on a staging list and publish once.
+
+        B02 unified write entry: capacity, port type, directed-cycle,
+        stale-revision and duplicate-command checks all run against the
+        staged candidate *before* anything is published; a rejected edit
+        leaves the graph untouched and returns machine-readable reason
+        codes instead of a bare ``False``.
+        """
         with self._lock:
+            revision = self._generation
+            command_id = command.command_id
+            if (command.expected_revision >= 0
+                    and command.expected_revision != revision):
+                return GraphEditResult.rejected(GraphEditIssue(
+                    EDIT_STALE_REVISION,
+                    f"Graph changed since the gesture started "
+                    f"(expected revision {command.expected_revision}, "
+                    f"current {revision})."), revision, command_id)
+            if command_id:
+                if command_id in self._edit_command_ids:
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_DUPLICATE_COMMAND,
+                        f"Edit command {command_id!r} was already applied."),
+                        revision, command_id)
+
+            removed = tuple(command.removed)
+            added = tuple(command.added)
+            positions = command.positions
             if any(edge not in self.connections for edge in removed):
-                return False
+                missing = next(edge for edge in removed
+                               if edge not in self.connections)
+                return GraphEditResult.rejected(GraphEditIssue(
+                    EDIT_EDGE_MISSING,
+                    f"Removed edge {missing.src_node_id}:{missing.src_port_name} "
+                    f"→ {missing.dst_node_id}:{missing.dst_port_name} is not "
+                    f"present."), revision, command_id)
             proposed = [edge for edge in self.connections if edge not in removed]
             for index, edge in enumerate(added):
                 if edge in proposed:
                     continue
                 source = self.nodes.get(edge.src_node_id)
                 destination = self.nodes.get(edge.dst_node_id)
-                output = source.get_output_port(edge.src_port_name) if source else None
-                input_port = destination.get_input_port(edge.dst_port_name) if destination else None
-                if output is None or input_port is None or output.data_type != input_port.data_type:
-                    return False
+                if source is None or destination is None:
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_NODE_MISSING,
+                        f"Edge endpoint node missing for "
+                        f"{edge.src_node_id} → {edge.dst_node_id}.",
+                        node_id=edge.src_node_id
+                        if source is None else edge.dst_node_id), revision,
+                        command_id)
+                output = source.get_output_port(edge.src_port_name)
+                input_port = destination.get_input_port(edge.dst_port_name)
+                if output is None or input_port is None:
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_PORT_MISSING,
+                        f"Port missing for {edge.src_node_id}:{edge.src_port_name} "
+                        f"→ {edge.dst_node_id}:{edge.dst_port_name}.",
+                        node_id=edge.src_node_id if output is None
+                        else edge.dst_node_id,
+                        port=edge.src_port_name if output is None
+                        else edge.dst_port_name), revision, command_id)
+                if output.data_type != input_port.data_type:
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_TYPE_MISMATCH,
+                        f"{output.data_type} output {edge.src_port_name!r} cannot "
+                        f"feed {input_port.data_type} input {edge.dst_port_name!r}.",
+                        node_id=edge.src_node_id, port=edge.src_port_name),
+                        revision, command_id)
                 occupied = sum(existing.dst_node_id == edge.dst_node_id
                                and existing.dst_port_name == edge.dst_port_name
                                for existing in proposed)
-                if input_port.max_connections > 0 and occupied >= input_port.max_connections:
-                    return False
-                if self._would_create_cycle(edge.src_node_id, edge.dst_node_id, proposed):
-                    return False
+                if (input_port.max_connections > 0
+                        and occupied >= input_port.max_connections):
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_CAPACITY,
+                        f"Input {edge.dst_port_name!r} on {edge.dst_node_id} is "
+                        f"full ({occupied}/{input_port.max_connections}).",
+                        node_id=edge.dst_node_id,
+                        port=edge.dst_port_name), revision, command_id)
+                if self._would_create_cycle(edge.src_node_id, edge.dst_node_id,
+                                            proposed):
+                    return GraphEditResult.rejected(GraphEditIssue(
+                        EDIT_CYCLE,
+                        f"Connecting {edge.src_node_id} → {edge.dst_node_id} "
+                        f"would create a cycle.",
+                        node_id=edge.dst_node_id), revision, command_id)
                 if positions is None:
                     proposed.append(edge)
                 else:
                     proposed.insert(positions[index], edge)
             if proposed == self.connections:
-                return True
-            self.connections = proposed
-            for node_id in {edge.dst_node_id for edge in (*removed, *added)}:
-                self._mark_dirty_downstream(node_id)
-            self._generation += 1
-            self._topology_revision += 1
-            return True
+                return GraphEditResult.applied(revision, command_id)
+
+            original = self.connections
+            try:
+                self.connections = proposed
+                for node_id in {edge.dst_node_id for edge in (*removed, *added)}:
+                    self._mark_dirty_downstream(node_id)
+                self._generation += 1
+                self._topology_revision += 1
+            except Exception:
+                # Mid-publication failure must not leave a half-applied edit.
+                self.connections = original
+                raise
+            if command_id:
+                self._edit_command_ids.append(command_id)
+                if len(self._edit_command_ids) > 128:
+                    self._edit_command_ids.popleft()
+            return GraphEditResult.applied(self._generation, command_id)
+
+    def edit_connections(self, removed: tuple[Connection, ...],
+                         added: tuple[Connection, ...], *,
+                         positions: tuple[int, ...] | None = None) -> bool:
+        """Validate an entire cable edit before publishing any of its edges.
+
+        Thin compatibility wrapper over :meth:`apply_edit` (B02); callers
+        that need rejection reasons should call ``apply_edit`` directly.
+        """
+        return self.apply_edit(GraphEditCommand(
+            removed=tuple(removed), added=tuple(added),
+            positions=positions)).ok
 
     def connect(self, src_node_id: str, src_port_name: str,
                 dst_node_id: str, dst_port_name: str) -> bool:

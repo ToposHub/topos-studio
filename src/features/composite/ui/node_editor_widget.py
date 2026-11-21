@@ -362,6 +362,9 @@ class NodeEditorWidget(QGraphicsView):
         self._drag_acceptance: dict[tuple[str, str, str, str], bool] = {}
         self._replaced_cables: list[ConnectionItem] = []
         self.edit_cables: Optional[Callable[..., bool]] = None
+        # B02: graph generation captured when a cable gesture starts; the
+        # committed edit is rejected if the graph changed underneath.
+        self._cable_gesture_revision: int = -1
         self.can_connect_cable: Optional[Callable[[tuple[str, str, str, str], bool], bool]] = None
         self.insert_cable_dot: Optional[Callable[[tuple[str, str, str, str], QPointF], bool]] = None
         self.group_node_creation: Optional[Callable[[], AbstractContextManager[None]]] = None
@@ -3016,9 +3019,20 @@ class NodeEditorWidget(QGraphicsView):
         for item in self._backdrop_items.values():
             self._refresh_backdrop_containment(item)
 
+    def _capture_cable_gesture_revision(self) -> None:
+        """Record the graph generation at the start of a cable gesture (B02).
+
+        The committed edit carries this revision; a graph that changed while
+        the user was dragging rejects the stale gesture instead of applying
+        it onto an outdated topology.
+        """
+        graph = getattr(self, "_node_graph", None)
+        self._cable_gesture_revision = int(getattr(graph, "generation", -1))
+
     def _start_connection_drag(self, port: PortItem, scene_pos: QPointF) -> None:
         """Start dragging a connection from an output port (forward drag)."""
         self._dragging_connection = True
+        self._capture_cable_gesture_revision()
         self._drag_src_port = port
         self._drag_dst_port = None
         self._drag_direction = "forward"
@@ -3039,6 +3053,7 @@ class NodeEditorWidget(QGraphicsView):
         The user drags from an input port to find an output port to connect from.
         """
         self._dragging_connection = True
+        self._capture_cable_gesture_revision()
         self._drag_src_port = None
         self._drag_dst_port = port
         self._drag_direction = "reverse"
@@ -3147,10 +3162,15 @@ class NodeEditorWidget(QGraphicsView):
         if not moved or (new is not None and old == new):
             return
         if self.edit_cables and (new is not None or (old is not None and empty)):
-            self.edit_cables((old,) if old else (), (new,) if new else (),
-                             replace_input=not copying, allow_pending_transform=old is None and not copying)
+            kwargs: dict = {"replace_input": not copying,
+                            "allow_pending_transform": old is None and not copying}
+            if self._cable_gesture_revision >= 0:
+                kwargs["expected_revision"] = self._cable_gesture_revision
+            self.edit_cables((old,) if old else (), (new,) if new else (), **kwargs)
+            self._cable_gesture_revision = -1
         elif self.edit_cables is None and old is None and new is not None and self._actions:
             self._actions.connect(*new)
+            self._cable_gesture_revision = -1
 
     def _find_non_overlapping_position(self, x: float, y: float) -> tuple:
         """Adjust (x, y) so the new node doesn't overlap existing nodes.

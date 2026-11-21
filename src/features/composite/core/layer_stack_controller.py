@@ -2667,18 +2667,28 @@ class LayerStackController(QObject if _HAVE_QT else object):
                     continue
                 self.graph.add_node(rebuilt)
 
-        # Connections: rebuild from snapshot.
-        self.graph.connections = []
-        for conn in (snapshot.get("connections") or []):
+        # Connections: rebuild exactly from the snapshot (B02).  Replaying
+        # through graph.connect() re-validates each edge and can silently
+        # drop or reorder edges that the snapshot legitimately contains;
+        # multi-input port order is part of the undo contract.
+        from src.features.composite.nodes.base_node import Connection
+        snapshot_connections = list(snapshot.get("connections") or [])
+        rebuilt_connections: List[Any] = []
+        for conn in snapshot_connections:
             try:
-                self.graph.connect(conn["src_node_id"], conn["src_port_name"],
-                                   conn["dst_node_id"], conn["dst_port_name"])
-            except Exception as e:
-                # tolerate missing nodes during partial restore
-                logger.warning("LayerStackController: restore connect "
-                               "%s.%s -> %s.%s failed: %s",
-                               conn["src_node_id"], conn["src_port_name"],
-                               conn["dst_node_id"], conn["dst_port_name"], e)
+                rebuilt_connections.append(Connection(
+                    conn["src_node_id"], conn["src_port_name"],
+                    conn["dst_node_id"], conn["dst_port_name"]))
+            except (KeyError, TypeError):
+                continue
+        self.graph.connections = rebuilt_connections
+        for node_id in {c.dst_node_id for c in rebuilt_connections}:
+            self.graph._mark_dirty_downstream(node_id)
+        if snapshot_connections:
+            # Direct list restoration bypasses the per-edge revision bumps;
+            # bump once so renderers see a fresh topology.
+            self.graph._generation += 1
+            self.graph._topology_revision += 1
 
         # Re-hydrate expression dependencies from the snapshot.  Expressions
         # live on NodeGraph._expression_manager (graph-level), not on
