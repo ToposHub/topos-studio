@@ -299,3 +299,24 @@ QT_QPA_PLATFORM=offscreen TOPOS_HEADLESS_GL=1 .venv/bin/python -m pytest -q \
 真实素材目录为 `/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/`，`multitask` 后有一个空格。用 `2K_h264.mp4` 查拖放与范围、`2K_Prores4444_Alpha.mov` 查透明边及图层主链、`4K_H264.mov` 查高分辨率。其余机器可用样本副本。音频先探测流，再用明确 PCM 脉冲和视频闪白做对照；PSD 使用可分发的独立 fixture。大型缓存和样本输出写临时目录。
 
 **结项条件。** 正常生产入口可用，旧工程可读，撤销重做覆盖，相关渲染、真机和故障测试通过。登记复跑材料和命令后更新对应状态。
+
+## 6. 实施状态登记（2026-11-22，B11 批次）
+
+本节登记各任务的提交号、测试范围与剩余限制；复跑命令同 §5（从仓库根目录，`QT_QPA_PLATFORM=offscreen TOPOS_HEADLESS_GL=1 .venv/bin/python -m pytest -q …`）。
+
+| 任务 | 提交 | 覆盖 | 剩余限制 |
+| --- | --- | --- | --- |
+| B01 稳定图层角色 | 1f87bd23 | `Layer.transform_node_id` 稳定角色 + `layer_roles()` 契约；Blur 后置加效果/删除保护/快捷键/父级/复制/锁/撤销/序列化往返；旧链唯一候选回填、双 Transform 歧义诊断 | 查看器手柄（Viewer overlay）尚未接 `layer_transform_node`，仍按 root 渲染 |
+| B02 原子接线 | 1f87bd23 后续 | `NodeGraph.apply_edit` 原因码事务（环/容量/类型/端口/过时 revision/重复命令 ID），失败零修改；`_restore` 精确恢复连接顺序；手势乐观 revision | 预设导入与脚本的写入口仍走 `CompositeEditService`，未全部迁到 `apply_edit` |
+| B03 有理时间 | 同批 | `layer_time.py` 分数帧率（NTSC 恢复）、`source_frame_cfr`、slide/trim/slip/split/stretch 纯计划；裁边按帧率换算（25↔24、30↔29.97 精确）；共享读取节点 `shared_source_range` 诊断 | slip/split 的 UI 手势与 VFR 时间戳索引适配层未接；共享素材两层的独立读取节点自动拆分未做（当前靠诊断引导） |
+| B04 合成标记 | 同批 | UUID 标记 CRUD 各一步撤销；同帧独立删除；schema v12 迁移规整；缩短合成保留越界标记 | 标尺 UI 投影与右键菜单尚未接 `composition_markers_changed` |
+| B05 音频计划 | 同批 | `AudioPlan`/`LayerAudio`（mute>solo 优先）、`sample_boundary` 共享端点（含计划 NTSC 例）、波形分桶与缓存键、`Layer.audio` 往返 | AudioMixer/设备仲裁的真实播放接线与异步探测 UI 未接（纯契约层） |
+| B06 导出混音 | 同批 | `comp_audio_mix`：精确 PCM 长度、脉冲落位、两路线性叠加、五态导出诊断 | `composite_render_output` 的 mux 接线与 ffprobe 对拍未做（需真实编码样本） |
+| B07 PSD | 同批 | psd-tools 锁版本；清单/指纹/同名不猜名；直通 alpha 解码、`clip_psd_patch` 手算例、导入策略与支持矩阵；无依赖 PSD 字节夹具 | 16 位/PSB 用真实样本对拍未做；合成页一次提交建层的事务接线未接 |
+| B08 图层样式 | 同批 | 版本化 `LayerStyleEffect`+溯源；`shadow_under` golden；未验证样式合并+诊断；halo 窗 | GLSL 效果与 Effect Catalog 注册未做（CPU 参考实现就位） |
+| B09 外部引用 | 同批 | `CompRef`（pinned/follow）、DFS 环路径、done 复用、深度限、三因分离审计 | 工程读服务/资源解析/PrecompNode 的装载接线未接（纯契约层） |
+| B10 通道/窗口 | 同批 | RGB/A 选择按预乘契约恢复（alpha0/负/HDR）；半开窗口空/负坐标、模糊/裁剪/变换/合并传播、ROI≠全幅缓存键 | 节点能力表声明与 tile 调度消费窗口未接；4K 性能基准未跑 |
+
+**回归状态。** 本批次全量：`tests/composite` + 5 个 UI/接线/打开上下文文件共 7800+ 用例通过（含本批新增 100+）。`tests/edit/test_audio_waveform.py` 26 例通过（B05 夹具结构参考）。真机（中文/英文、双屏、窄窗）与真实素材（`/Volumes/Project_1/…/tests/test_videos/`、PSD 独立 fixture）验收留待下一批 UI 接线时一并执行。
+
+**环境。** macOS 15.3（darwin 24.3.0 x64），Python 3.12.13，psd-tools 1.27.0，PyQt6 offscreen + ModernGL（TOPOS_HEADLESS_GL=1）。
