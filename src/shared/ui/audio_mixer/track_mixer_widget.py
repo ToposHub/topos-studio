@@ -238,6 +238,8 @@ class TrackMixerWidget(QWidget):
         "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
         "multiband_comp", "convolution_reverb", "transient_designer",
         "tremolo_auto_pan", "chorus_flanger", "phaser",
+        # P2（2026-11-21 计划 FX-15/FX-16）：激励器 / 次谐波
+        "exciter", "subharmonic",
     })
 
     # 信号（track_id 统一为 str，与 EditTrack.track_id UUID 一致）
