@@ -11,6 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from src.features.edit.ai_editing.mcp_vision_gateway import (
+    ZHIPU_VISION_ORIGIN, ZHIPU_VISION_PROFILE_ID, ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_TOOL,
+)
+
 
 SOURCE_LOCAL = "local"
 SOURCE_OLLAMA = "ollama"
@@ -18,8 +22,8 @@ SOURCE_PRESET = "preset"
 SOURCE_CUSTOM = "custom"
 
 SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("本地安装模型", SOURCE_LOCAL),
-    ("本地 Ollama", SOURCE_OLLAMA),
+    ("本机模型", SOURCE_LOCAL),
+    ("Ollama 服务", SOURCE_OLLAMA),
     ("第三方服务预设", SOURCE_PRESET),
     ("自定义 API", SOURCE_CUSTOM),
 )
@@ -55,6 +59,50 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "适用于本机 vLLM / llama.cpp / LM Studio 等 OpenAI 兼容服务",
     ),
     AiProviderPreset(
+        "openai-compatible-vision",
+        "自建服务 · OpenAI 兼容视觉",
+        SOURCE_CUSTOM,
+        "openai",
+        "http://127.0.0.1:8000/v1",
+        "",
+        ("vision",),
+        ("image",),
+        "可填写局域网服务器地址，再获取或输入视觉模型 ID",
+    ),
+    AiProviderPreset(
+        ZHIPU_VISION_PROFILE_ID,
+        "智谱 · 视觉 MCP",
+        SOURCE_PRESET,
+        ZHIPU_VISION_PROVIDER_KIND,
+        ZHIPU_VISION_ORIGIN,
+        ZHIPU_VISION_TOOL,
+        ("vision",),
+        ("image",),
+        "智谱 GLM Coding Plan · npx 启动官方 stdio 服务，需要 Node.js 18+",
+    ),
+    AiProviderPreset(
+        "model-studio-vision",
+        "阿里云百炼 · 千问视觉",
+        SOURCE_PRESET,
+        "openai",
+        "",
+        "",
+        ("vision",),
+        ("image",),
+        "从百炼控制台复制当前工作空间的 OpenAI 兼容地址和视觉模型 ID",
+    ),
+    AiProviderPreset(
+        "openai-timed-asr",
+        "OpenAI · 带时间码的转录",
+        SOURCE_PRESET,
+        "openai",
+        "https://api.openai.com/v1",
+        "whisper-1",
+        ("asr",),
+        ("asr",),
+        "OpenAI 兼容转录接口；自建服务可修改地址和模型 ID",
+    ),
+    AiProviderPreset(
         "openai-chat",
         "OpenAI · Chat",
         SOURCE_PRESET,
@@ -75,6 +123,17 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "Anthropic Messages 接口",
+    ),
+    AiProviderPreset(
+        "deepseek-flash",
+        "DeepSeek · Flash",
+        SOURCE_PRESET,
+        "deepseek",
+        "https://api.deepseek.com",
+        "deepseek-flash",
+        ("language", "vision_understanding"),
+        ("text", "tool_call", "image"),
+        "DeepSeek OpenAI 兼容接口，支持对话、工具调用和图片理解",
     ),
     AiProviderPreset(
         "deepseek-chat",
@@ -128,7 +187,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "volcengine_seedream",
         "https://ark.cn-beijing.volces.com/api/plan/v3",
         "doubao-seedream-5.0-lite",
-        ("vision", "image"),
+        ("image",),
         ("image",),
         "Seedream 图片生成；Medium 套餐可用能力以控制台为准",
     ),
@@ -149,7 +208,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         SOURCE_PRESET,
         "volcengine_plan_asr",
         "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
-        "volc.seedasr.sauc.duration",
+        "volc.bigasr.auc_turbo",
         ("asr",),
         (),
         "文件识别端点；Resource-Id 可按控制台实际开通资源调整",
@@ -163,7 +222,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "text-embedding-3-small",
         ("embedding",),
         (),
-        "向量化接口配置预设；当前仅保存配置，运行时适配器按需接入",
+        "支持测试向量化接口；素材库当前使用全文索引",
     ),
     AiProviderPreset(
         "local-qwen-asr",
@@ -208,7 +267,11 @@ def presets_for_category(category: str) -> tuple[AiProviderPreset, ...]:
     }.get(category, set())
     if not wanted:
         return ()
-    return tuple(item for item in PROVIDER_PRESETS if wanted.intersection(item.capabilities))
+    return tuple(
+        item for item in PROVIDER_PRESETS
+        if wanted.intersection(item.capabilities)
+        or (category == "vision" and "vision_understanding" in item.capabilities)
+    )
 
 
 def infer_capabilities(provider_kind: str, modalities: Iterable[str]) -> tuple[str, ...]:

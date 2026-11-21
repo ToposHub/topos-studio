@@ -448,6 +448,12 @@ def test_task_mkdir_joins_name_option(qtbot, env):
             transport.run_task("mkdir", [str(env.lib)], options={"name": "新建"})
         assert received.args[0]["successes"]
         assert (env.lib / "新建").is_dir()
+
+        missing = env.lib / "removed"
+        with qtbot.waitSignal(transport.task_finished, timeout=8000) as failed:
+            transport.run_task("mkdir", [str(missing)], options={"name": "子目录"})
+        assert failed.args[0]["failures"]
+        assert not missing.exists()
     finally:
         transport.shutdown()
 
@@ -474,29 +480,196 @@ def test_cancel_queued_mutation_before_worker_can_start(qtbot, env):
 # 常用位置 / 索引 / 搜索 / 集合
 # ---------------------------------------------------------------------------
 
-def test_libraries_pin_unpin_roundtrip(qtbot, env):
+def test_libraries_add_rename_remove_roundtrip(qtbot, env):
     transport = make_transport(env)
+    original = env.lib / "original.png"
+    original.write_bytes(b"media")
     try:
         with qtbot.waitSignal(transport.library_changed, timeout=8000) as changed:
             transport.pin_library(str(env.lib))
-        assert changed.args == [True, "已固定为常用位置"]
+        assert changed.args[0] is True
         with qtbot.waitSignal(transport.libraries_loaded, timeout=8000) as listed:
             transport.load_libraries()
         assert [item["path"] for item in listed.args[0]] == [str(env.lib)]
         assert listed.args[0][0]["library_id"] == env.library.library_id
 
-        with qtbot.waitSignal(transport.library_changed, timeout=8000) as unpinned:
-            transport.unpin_library(str(env.lib))
-        assert unpinned.args[0] is True
+        with qtbot.waitSignal(transport.library_changed, timeout=8000) as renamed:
+            transport.rename_library(env.library.library_id, "Projects")
+        assert renamed.args[0] is True
+        record, = env.catalog.libraries()
+        assert (record.library_id, record.name, record.root) == (
+            env.library.library_id, "Projects", str(env.lib),
+        )
+
+        with qtbot.waitSignal(transport.library_changed, timeout=8000) as removed:
+            transport.remove_library(env.library.library_id)
+        assert removed.args[0] is True
+        assert original.read_bytes() == b"media"
         with qtbot.waitSignal(transport.libraries_loaded, timeout=8000) as after:
             transport.load_libraries()
         assert after.args[0] == []
 
         with qtbot.waitSignal(transport.library_changed, timeout=8000) as unknown:
-            transport.unpin_library(str(env.lib))
+            transport.remove_library(env.library.library_id)
         assert unknown.args[0] is False
-        assert "不在常用位置" in unknown.args[1]
     finally:
+        transport.shutdown()
+
+
+def test_ai_scope_uses_selected_kind_and_folder_policy(qtbot, env, monkeypatch):
+    from src.app.services import ai_library_analysis as adapter
+    from src.features.files.services.ai_library import MediaEvidence
+    from src.shared.ai_models.generation.provider_profiles import AiProviderProfile, ProfileRegistry
+
+    root = env.lib.resolve()
+    folder = root / "selected"
+    nested = folder / "nested"
+    nested.mkdir(parents=True)
+    image = folder / "source.png"
+    for path in (image, nested / "nested.png", folder / "another.wav", root / "outside.png"):
+        path.write_bytes(path.name.encode())
+    registry = ProfileRegistry()
+    for profile_id in ("global", "selected"):
+        registry.add(AiProviderProfile(profile_id, profile_id, endpoint="http://localhost:9991/v1",
+                                       model_id=profile_id, capabilities=("vision",)))
+    registry.set_active_for_capability("vision", "global")
+    monkeypatch.setattr(adapter, "_load_profiles", lambda: registry)
+    monkeypatch.setattr(adapter.LibraryAnalyzer, "revision", property(lambda _: "test-revision"))
+    calls: list[tuple[str, str, str]] = []
+
+    def analyze(analyzer: adapter.LibraryAnalyzer, path: str, kind: str) -> tuple[MediaEvidence, ...]:
+        if analyzer._mode == "basic":
+            return ()
+        route = analyzer._authorized_route("vision")
+        calls.append((route.profile.profile_id, path, kind))
+        return (MediaEvidence("annotated content"),)
+
+    monkeypatch.setattr(adapter.LibraryAnalyzer, "__call__", analyze)
+    library_id = env.library.library_id
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+            transport.save_ai_library_settings(library_id, "profiles", (), folder=str(folder),
+                                               models={"image": "selected"}, kinds=("image",), recursive=False)
+        assert saved.args == [""]
+        with qtbot.waitSignal(transport.ai_library_settings_loaded) as loaded:
+            transport.load_ai_library_settings(library_id, folder=str(folder))
+        snapshot, = loaded.args
+        assert snapshot["library_id"] == library_id and snapshot["folder"] == str(folder)
+        assert snapshot["scope_policy"] == {"mode": "profiles", "approved_routes": [],
+                                            "models": {"image": "selected"}, "kinds": ["image"],
+                                            "recursive": False}
+        assert snapshot["libraries"][0]["mode"] == "basic"
+        assert {row["profile_id"] for row in snapshot["models"] if row["kind"] == "image"} == {"global", "selected"}
+
+        for force, pending_only, call_count in ((False, False, 1), (False, True, 1), (True, False, 2)):
+            with qtbot.waitSignal(transport.ai_library_index_status,
+                                  check_params_cb=lambda state: not state.get("running")) as done:
+                transport.start_ai_library_index(library_id, folder=str(folder), force=force,
+                                                 only_unanalyzed=pending_only)
+            assert "error" not in done.args[0]
+            assert calls == [("selected", str(image), "image")] * call_count
+
+        with qtbot.waitSignal(transport.ai_library_results) as found:
+            transport.search_ai_library("scope", "annotated", library_id, folder=str(folder),
+                                        kinds=("image",), recursive=False)
+        assert (found.args[0], found.args[2]) == ("scope", "")
+        assert [hit["path"] for hit in found.args[1]] == [str(image)]
+
+        with qtbot.waitSignal(transport.ai_analysis_marks_loaded) as marked:
+            transport.load_ai_analysis_marks(str(folder), [str(image), str(nested / "nested.png")])
+        assert marked.args == [str(folder), [str(image)]]
+
+        with qtbot.waitSignal(transport.ai_library_results) as pending:
+            transport.search_ai_library("pending", "", library_id, folder=str(folder), kinds=("image",),
+                                        recursive=True, only_unanalyzed=True)
+        assert pending.args[2] == ""
+        assert [hit["path"] for hit in pending.args[1]] == [str(nested / "nested.png")]
+
+        with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+            transport.save_ai_library_settings(library_id, "profiles", (), models={"image": "global"},
+                                               kinds=("image",), recursive=False)
+        assert saved.args == [""]
+        with qtbot.waitSignal(transport.ai_library_index_status,
+                              check_params_cb=lambda state: not state.get("running")) as done:
+            transport.start_ai_library_index(force=True)
+        assert "error" not in done.args[0]
+        assert calls[2:] == [("global", str(root / "outside.png"), "image")]
+    finally:
+        facade = transport._facade
+        transport.shutdown()
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        assert stopped.wait(2)
+
+
+def test_ai_scope_reports_missing_model_or_unapproved_service_before_scanning(qtbot, env, monkeypatch):
+    from src.app.services import ai_library_analysis as adapter
+    from src.shared.ai_models.generation.provider_profiles import AiProviderProfile, DataPolicy, ProfileRegistry
+
+    registry = ProfileRegistry()
+    registry.add(AiProviderProfile(
+        "remote", "Remote visual", endpoint="https://never-contacted.invalid/v1", model_id="model",
+        capabilities=("vision",), modalities=("image", "media_upload"), data_policy=DataPolicy("cloud", True),
+    ))
+    monkeypatch.setattr(adapter, "_load_profiles", lambda: registry)
+    transport = make_transport(env)
+    facade = transport._facade
+    library_id = env.library.library_id
+
+    def no_scan(*args, **kwargs):
+        raise AssertionError("Explicitly unconfigured or unapproved scope must not scan")
+
+    monkeypatch.setattr(facade, "build_ai_library", no_scan)
+    try:
+        for profile, required, expected in (("missing", True, "模型"), ("remote", False, "授权")):
+            with qtbot.waitSignal(transport.ai_library_settings_saved) as saved:
+                transport.save_ai_library_settings(library_id, "profiles", (), models={"image": profile},
+                                                   kinds=("image",))
+            assert saved.args == [""]
+            with qtbot.waitSignal(transport.ai_library_index_status,
+                                  check_params_cb=lambda state: not state.get("running")) as done:
+                transport.start_ai_library_index(library_id)
+            state, = done.args
+            assert expected in state["error"]
+            assert bool(state.get("model_setup_required")) is required
+            if required:
+                assert state["kind"] == "image"
+    finally:
+        transport.shutdown()
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        assert stopped.wait(2)
+
+
+def test_ai_analysis_marks_discard_cancelled_previous_view(qtbot, env, monkeypatch):
+    transport = make_transport(env)
+    facade = transport._facade
+    entered = threading.Event()
+    release = threading.Event()
+    cancelled = threading.Event()
+
+    def read(paths, *, cancel):
+        entered.set()
+        if release.wait(2) and cancel.requested:
+            cancelled.set()
+        return set(paths)
+
+    monkeypatch.setattr(facade, "ai_library_analyzed_paths", read)
+    received: list[tuple[str, list[str]]] = []
+    transport.ai_analysis_marks_loaded.connect(lambda path, marks: received.append((path, marks)))
+    try:
+        transport.load_ai_analysis_marks("old-view", [str(env.lib / "sample.png")])
+        qtbot.waitUntil(entered.is_set)
+        transport.load_ai_analysis_marks("new-view", [])
+        release.set()
+        qtbot.waitUntil(cancelled.is_set)
+        stopped = threading.Event()
+        facade.when_idle(stopped.set)
+        qtbot.waitUntil(stopped.is_set)
+        assert received == [("new-view", [])]
+    finally:
+        release.set()
         transport.shutdown()
 
 

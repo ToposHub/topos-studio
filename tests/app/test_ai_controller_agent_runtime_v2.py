@@ -86,6 +86,16 @@ class TestStartChatV2Fallback:
         )
         assert result is False
 
+    def test_legacy_global_language_profile_keeps_non_v2_chat(self):
+        from types import SimpleNamespace
+
+        ctrl = _bare_controller()
+        profile = _language_registry().active_profile_for_capability("language")
+        ctrl._profile_registry = SimpleNamespace(active_profile=profile)
+        ctrl._credential_store = FakeCredentialStore()
+        assert ctrl._chat_profile_for_mode("normal") is profile
+        assert not ctrl._start_chat_v2("hi", [{"role": "user", "content": "hi"}], temperature=0.6)
+
 
 class TestFlagDefaultsOn:
     def test_v2_flag_defaults_on(self):

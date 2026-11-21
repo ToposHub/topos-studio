@@ -178,6 +178,48 @@ def _build(qapp):
     return controller, service, panel, host
 
 
+def test_script_library_retrieval_reaches_chat_before_analysis_router(qapp, monkeypatch) -> None:
+    from src.features.ai_harness.invocation_router import InvocationRouter
+    from src.features.edit.ai_editing.tool_facade import ToolFacade
+
+    controller, _, _, _ = _build(qapp)
+    controller.router = InvocationRouter()
+    controller._chat_tool_facade = ToolFacade(EditSession.current(), library_search=lambda query, limit: [])
+    requests = []
+    monkeypatch.setattr(controller, "_can_use_llm_chat", lambda: True)
+    monkeypatch.setattr(controller, "_start_chat", requests.append)
+    text = "按脚本搜索全局素材，开场场景是夜晚车流。"
+
+    assert controller._dispatch_via_router(text)
+    assert requests == [text]
+    assert controller._try_build_tool_facade() is controller._chat_tool_facade
+
+
+def test_chat_prefers_language_binding_over_legacy_global_profile(qapp) -> None:
+    from types import SimpleNamespace
+
+    from src.app.controllers.ai_edit_controller import resolve_language_profile
+    from src.features.edit.ai_editing.provider_profiles import AiProviderProfile, ProfileRegistry
+
+    controller, _, _, _ = _build(qapp)
+    registry = ProfileRegistry()
+    language = AiProviderProfile(profile_id="chat", display_name="Chat", capabilities=("language",))
+    voice = AiProviderProfile(profile_id="voice", display_name="Voice", capabilities=("asr",))
+    registry.add(language)
+    registry.add(voice)
+    registry.set_active_for_capability("language", language.profile_id)
+    registry.set_active(voice.profile_id)
+    controller._profile_registry = registry
+    controller._credential_store = object()
+    assert controller._chat_profile_for_mode("normal") is language
+    assert controller._chat_profile_for_mode("teaching_html_generate") is language
+    assert controller._can_use_llm_chat()
+    assert resolve_language_profile(SimpleNamespace(active_profile=language)) is language
+    assert resolve_language_profile(SimpleNamespace(active_profile=voice)) is None
+    registry.set_active_for_capability("language", "")
+    assert not controller._can_use_llm_chat()
+
+
 def test_controller_routes_state_to_panel(qapp):
     controller, service, panel, host = _build(qapp)
     states = []

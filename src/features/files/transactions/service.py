@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any, Callable
 import sqlite3
 
-from src.features.files.repository.catalog import CatalogError, FilesCatalog, nfc
+from src.features.files.contracts import is_valid_folder_name
+from src.features.files.repository.catalog import CatalogError, FilesCatalog, LibraryRecord, nfc
 from src.features.files.transactions.journal import OperationJournal
 from src.features.files.transactions.ops import (
     CancelToken,
     FileTransactionService,
+    OpError,
 )
 from src.features.files.transactions.trash_service import TrashOutcome, TrashService
 
@@ -43,12 +45,18 @@ class IdentityPropagation:
         self._catalog = catalog
 
     def on_moved(self, library_id: str, old: str, new: str) -> int:
-        """文件走 move_asset_rows，目录走 move_subtree；幂等（无行则 0）。
+        """Update the catalog ownership and path after a published move.
 
         回调在移动完成后执行：目录判断看新路径（旧路径已不存在）。
         """
+        if not library_id:
+            return 0
         old_path, new_path = Path(old), Path(new)
-        if new_path.is_dir() or (not new_path.exists() and old_path.is_dir()):
+        is_dir = new_path.is_dir() or (not new_path.exists() and old_path.is_dir())
+        target = self._catalog.library_for_path(new_path)
+        if target is not None and target.library_id != library_id:
+            return self._catalog.move_to_library(library_id, target.library_id, old_path, new_path, is_dir=is_dir)
+        if is_dir:
             counts = self._catalog.move_subtree(library_id, old_path, new_path)
             return counts["assets"]
         moved = self._catalog.move_asset_rows(library_id, old_path, new_path)
@@ -154,12 +162,35 @@ class FileOperationService:
 
     # ------------------------------------------------------------ 回收站
 
-    def mkdir(self, target: str | Path) -> ItemOutcome:
+    def mkdir(self, target: str | Path, *, parents: bool = True) -> ItemOutcome:
         """新建目录（无身份迁移）；冲突/类型错误走统一词表。"""
         with self._catalog._lock:
-            result = self._ops.mkdir(target)
+            result = self._ops.mkdir(target, parents=parents)
         return ItemOutcome(result.source, result.destination, result.status,
                            result.code, result.message)
+
+    def create_library(self, parent: str, name: str) -> LibraryRecord:
+        name = name.strip()
+        if not is_valid_folder_name(name):
+            raise ValueError("请输入有效的单级文件夹名称。")
+        target = Path(parent).resolve(strict=True) / name
+        with self._catalog._lock:
+            result = self._ops.mkdir(target, parents=False)
+            if not result.ok:
+                raise OpError(result.code, result.message)
+            created = target.lstat()
+            try:
+                return self._catalog.register_library(target, name)
+            except (OSError, ValueError, CatalogError) as exc:
+                try:
+                    current = target.lstat()
+                    if (created.st_dev, created.st_ino) == (current.st_dev, current.st_ino):
+                        target.rmdir()
+                except FileNotFoundError:
+                    pass
+                except OSError as cleanup_error:
+                    raise RuntimeError(f"素材库登记失败，已创建的文件夹仍在 {target}。{exc}") from cleanup_error
+                raise
 
     def trash(self, library_id: str, paths: list[str | Path]) -> list[TrashOutcome]:
         return self.trash_service.trash(paths, library_id)

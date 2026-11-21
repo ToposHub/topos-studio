@@ -229,7 +229,7 @@ class FileTransactionService:
         return self._transfer(src, destination, policy=policy, remove_source=False,
                               cancel=cancel, on_identity_moved=None)
 
-    def mkdir(self, path: str | Path) -> OpResult:
+    def mkdir(self, path: str | Path, *, parents: bool = True) -> OpResult:
         target = Path(path)
         existing = _lstat(target)
         if existing is not None:
@@ -239,7 +239,7 @@ class FileTransactionService:
             return OpResult(str(target), status="conflict", code="DEST_EXISTS",
                             message="同名非目录项已存在")
         try:
-            os.makedirs(target, exist_ok=False)
+            target.mkdir(parents=parents)
         except OSError as exc:
             raise _map_oserror(exc, str(target)) from exc
         return OpResult(str(target), str(target))
@@ -511,7 +511,7 @@ class FileTransactionService:
                         try:
                             self._copy_payload(child_src, tmp, cancel=cancel)
                             os.chmod(tmp, stat.S_IMODE(os.lstat(child_src).st_mode))
-                            os.link(tmp, child_dst)
+                            _rename_noreplace(tmp, child_dst)
                         finally:
                             try:
                                 os.unlink(tmp)

@@ -17,10 +17,11 @@ from src.shared.ui.style_sheet import C
 class ResolvePoolDelegate(GridDelegate):
     """Compact 16:9 posters, or a poster with existing metadata beside it."""
 
+    THUMBNAIL_CELL_PADDING = 34
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.metadata_mode: bool = False
-        self.poster_inset: int = 0
         self.show_duration_badge: bool = False
         self._identity_icons = {name: pool_icon(name, C.TEXT_PRIMARY) for name in ("info", "video", "audio", "image")}
 
@@ -32,7 +33,7 @@ class ResolvePoolDelegate(GridDelegate):
             name = QRect(poster.right() + 12, rect.top() + 10,
                          max(0, rect.right() - poster.right() - 22), 22)
             return poster, name
-        width = max(1, min(self.thumb_size[0] - self.poster_inset, rect.width() - 12))
+        width = max(1, min(self.thumb_size[0], rect.width() - 12))
         height = max(1, round(width * 9 / 16))
         poster = QRect(rect.left() + (rect.width() - width) // 2,
                        rect.top() + 6, width, height)
@@ -271,8 +272,11 @@ class ResolvePoolDelegate(GridDelegate):
         if self.metadata_mode:
             width = self.view.viewport().width() if self.view is not None else 380
             return QSize(max(1, width), 106)
-        width = max(1, self.thumb_size[0])
-        return QSize(width + 34, round(width * 9 / 16) + 34)
+        return self.thumbnail_cell_size()
+
+    def thumbnail_cell_size(self) -> QSize:
+        width, height = self.thumb_size
+        return QSize(width + self.THUMBNAIL_CELL_PADDING, height + self.THUMBNAIL_CELL_PADDING)
 
     def updateEditorGeometry(self, editor: QWidget, option: QStyleOptionViewItem,
                              index: QModelIndex) -> None:

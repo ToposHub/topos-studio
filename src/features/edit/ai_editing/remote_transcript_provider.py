@@ -13,6 +13,7 @@ future endpoint can be adjusted in Preferences without changing the editor.
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -24,6 +25,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 from src.features.edit.ai_editing.analysis_models import (
     AnalysisProvenance,
@@ -37,15 +39,28 @@ from src.features.edit.ai_editing.analysis_models import (
 from src.features.edit.ai_editing.credential_store import CredentialStore
 from src.features.edit.ai_editing.provider_profiles import AiProviderProfile
 from src.features.edit.ai_editing.timebase import ProviderTimebase, TimebaseService
+from src.shared.ai_models.generation.media_inference import (
+    MediaInferenceConfigurationError,
+    is_local_media_endpoint,
+    validate_media_endpoint,
+)
 from src.shared.media.metadata import Rational
 
 
 _MAX_AUDIO_BYTES = 100 * 1024 * 1024
 _DEFAULT_ASR_RESOURCE_ID = "volc.seedasr.sauc.duration"
+_FLASH_ASR_RESOURCE_ID = "volc.bigasr.auc_turbo"
+_FLASH_ASR_PATH = "/auc/bigmodel/recognize/flash"
 
 
 class RemoteTranscriptError(RuntimeError):
     """Sanitized remote ASR error; response bodies are never included."""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str,
+                         headers: Any, newurl: str) -> None:
+        return None
 
 
 class RemoteTranscriptProvider:
@@ -64,7 +79,7 @@ class RemoteTranscriptProvider:
         self._profile = profile
         self._credential_store = credential_store
         self._asset_path_provider = asset_path_provider
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener
         self._timebase = TimebaseService()
 
     @property
@@ -72,12 +87,13 @@ class RemoteTranscriptProvider:
         return self._profile.profile_id
 
     def is_available(self) -> bool:
-        return bool(
-            self._profile.endpoint
-            and self._credential_store.get_secret(self._profile.credential_ref)
-        )
+        return self.validate_options() is None
 
     def validate_options(self, _options: dict[str, Any] | None = None) -> str | None:
+        secret = self._credential_store.get_secret(self._profile.credential_ref) or ""
+        return self._validate_configuration(secret)
+
+    def _validate_configuration(self, secret: str) -> str | None:
         # ASR uploads the source media itself.  Do not infer consent merely
         # from selecting a cloud preset; the explicit media-upload checkbox
         # is required for every remote transcription request.
@@ -85,7 +101,14 @@ class RemoteTranscriptProvider:
             return "当前 ASR Profile 未允许素材上传，请在 AI editing → 语音模型中勾选上传策略"
         if not self._profile.endpoint:
             return "当前 ASR Profile 未配置 URL"
-        if not self._credential_store.get_secret(self._profile.credential_ref):
+        try:
+            endpoint, _ = validate_media_endpoint(self._profile.endpoint, secret)
+            protocol = self._protocol()
+            if protocol == "openai_transcription":
+                self._audio_transcription_url()
+        except (MediaInferenceConfigurationError, RemoteTranscriptError) as exc:
+            return str(exc)
+        if not secret and (not is_local_media_endpoint(endpoint) or protocol != "openai_transcription"):
             return "当前 ASR Profile 未配置 API Key"
         return None
 
@@ -98,7 +121,8 @@ class RemoteTranscriptProvider:
         progress: Any | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[AssetAnalysis, tuple[Any, ...]]:
-        validation = self.validate_options(options)
+        secret = self._credential_store.get_secret(self._profile.credential_ref) or ""
+        validation = self._validate_configuration(secret)
         if validation:
             raise RemoteTranscriptError(validation)
         if self._asset_path_provider is None:
@@ -110,11 +134,11 @@ class RemoteTranscriptProvider:
             raise RemoteTranscriptError("音频文件超过远程 ASR 的 100 MB 限制")
         if progress is not None:
             progress(0.1, "正在将音频发送到已选择的第三方 ASR")
-        payload = self._request(path, options or {})
+        payload = self._request(path, secret, options or {})
         if progress is not None:
             progress(0.8, "第三方 ASR 已返回，正在整理时间码")
         segments = self._segments_from_payload(payload, fps=fps, path=path)
-        if not segments:
+        if not segments and not payload.get("_volcengine_silence"):
             raise RemoteTranscriptError("第三方 ASR 返回了空转录结果")
         provenance = AnalysisProvenance(
             provider=self.provider_id,
@@ -136,10 +160,13 @@ class RemoteTranscriptProvider:
 
     def _protocol(self) -> str:
         kind = self._profile.provider_kind.lower()
-        return "volcengine_v3_asr" if kind.startswith("volcengine_") else "openai_transcription"
+        if kind.startswith("volcengine_") and "asr" in kind:
+            return "volcengine_v3_asr"
+        if kind in {"", "openai", "openai_compat", "openai_responses", "local_http", "deepseek", "ollama"}:
+            return "openai_transcription"
+        raise RemoteTranscriptError("当前 Profile 协议不支持语音转文字接口。")
 
-    def _request(self, path: str, options: Mapping[str, Any]) -> dict[str, Any]:
-        secret = self._credential_store.get_secret(self._profile.credential_ref) or ""
+    def _request(self, path: str, secret: str, options: Mapping[str, Any]) -> dict[str, Any]:
         if self._protocol() == "volcengine_v3_asr":
             return self._request_volcengine(path, secret, options)
         return self._request_openai(path, secret, options)
@@ -147,21 +174,40 @@ class RemoteTranscriptProvider:
     def _request_volcengine(
         self, path: str, secret: str, options: Mapping[str, Any],
     ) -> dict[str, Any]:
+        endpoint = self._profile.endpoint.strip()
+        resource = self._profile.model_id.strip() or _DEFAULT_ASR_RESOURCE_ID
+        flash = resource == _FLASH_ASR_RESOURCE_ID or urlsplit(endpoint).path.rstrip("/").endswith(_FLASH_ASR_PATH)
+        audio = Path(path).read_bytes()
+        if flash:
+            audio_format = Path(path).suffix.lower().lstrip(".")
+            if audio_format not in {"wav", "mp3", "ogg"}:
+                raise RemoteTranscriptError("火山方舟极速语音识别需要 WAV、MP3 或 OGG 音频。")
+            if resource == _DEFAULT_ASR_RESOURCE_ID:
+                resource = _FLASH_ASR_RESOURCE_ID
+            data = json.dumps({
+                "user": {"uid": "topos"},
+                "audio": {"data": base64.b64encode(audio).decode("ascii"), "format": audio_format},
+                "request": {"model_name": "bigmodel", "show_utterances": True},
+            }).encode("utf-8")
+            content_type = "application/json"
+        else:
+            data = audio
+            content_type = "application/octet-stream"
         task_id = str(uuid.uuid4())
         request = urllib.request.Request(
-            self._profile.endpoint,
-            data=Path(path).read_bytes(),
+            endpoint,
+            data=data,
             headers={
                 "X-Api-Key": secret,
-                "X-Api-Resource-Id": self._profile.model_id or _DEFAULT_ASR_RESOURCE_ID,
+                "X-Api-Resource-Id": resource,
                 "X-Api-Request-Id": task_id,
                 "X-Api-Sequence": "-1",
-                "Content-Type": "application/octet-stream",
+                "Content-Type": content_type,
                 "Accept": "application/json",
             },
             method="POST",
         )
-        return self._open_json(request)
+        return self._open_json(request, volcengine_flash=flash)
 
     def _request_openai(
         self, path: str, secret: str, options: Mapping[str, Any],
@@ -188,28 +234,39 @@ class RemoteTranscriptProvider:
             Path(path).read_bytes(), b"\r\n",
             f"--{boundary}--\r\n".encode(),
         ])
+        headers = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+        }
+        if secret:
+            headers["Authorization"] = f"Bearer {secret}"
         request = urllib.request.Request(
             self._audio_transcription_url(),
             data=b"".join(chunks),
-            headers={
-                "Authorization": f"Bearer {secret}",
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "Accept": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
         return self._open_json(request)
 
     def _audio_transcription_url(self) -> str:
-        endpoint = self._profile.endpoint.rstrip("/")
-        if endpoint.endswith("/audio/transcriptions"):
-            return endpoint
-        return endpoint + "/audio/transcriptions"
+        endpoint = urlsplit(self._profile.endpoint.strip())
+        path = endpoint.path.rstrip("/")
+        if path.endswith(("/chat/completions", "/responses", "/embeddings", "/audio/speech")):
+            raise RemoteTranscriptError("请填写 ASR 的 Base URL 或 /audio/transcriptions 接口。")
+        if not path.endswith("/audio/transcriptions"):
+            path += "/audio/transcriptions"
+        return urlunsplit(endpoint._replace(path=path, fragment=""))
 
-    def _open_json(self, request: urllib.request.Request) -> dict[str, Any]:
+    def _open_json(self, request: urllib.request.Request, *, volcengine_flash: bool = False) -> dict[str, Any]:
         try:
             response = self._open(request)
             with response:
+                if volcengine_flash:
+                    status = getattr(response, "headers", {}).get("X-Api-Status-Code")
+                    if status == "20000003":
+                        return {"_volcengine_silence": True}
+                    if status and status != "20000000":
+                        raise RemoteTranscriptError("火山方舟极速语音识别请求失败。")
                 raw = response.read(_MAX_AUDIO_BYTES)
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403):
@@ -229,14 +286,18 @@ class RemoteTranscriptProvider:
 
     def _open(self, request: urllib.request.Request) -> Any:
         timeout = max(0.1, float(self._profile.limits.request_timeout_seconds))
-        if self._opener is not urllib.request.urlopen:
+        if self._opener is not None:
             return self._opener(request, timeout=timeout)
         try:
             import certifi
             context = ssl.create_default_context(cafile=certifi.where())
-            return self._opener(request, timeout=timeout, context=context)
-        except (ImportError, OSError, TypeError):
-            return self._opener(request, timeout=timeout)
+        except (ImportError, OSError):
+            context = ssl.create_default_context()
+        handlers = [_NoRedirect(), urllib.request.HTTPSHandler(context=context)]
+        if is_local_media_endpoint(urlsplit(request.full_url)):
+            handlers.append(urllib.request.ProxyHandler({}))
+        opener = urllib.request.build_opener(*handlers)
+        return opener.open(request, timeout=timeout)
 
     def _segments_from_payload(
         self, payload: Mapping[str, Any], *, fps: str, path: str,

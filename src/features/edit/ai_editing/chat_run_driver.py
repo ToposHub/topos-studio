@@ -64,9 +64,16 @@ from src.features.edit.ai_editing.request_recovery import (
     ModelRequestRecovery,
     RequestRecoveryPolicy,
 )
+from src.features.edit.ai_editing.tool_facade import LIBRARY_SEARCH_TOOL
 from src.features.edit.ai_editing.tool_operation_ledger import ToolOperationLedger
 
 logger = logging.getLogger(__name__)
+
+_LIBRARY_SEARCH_GUIDANCE = (
+    "用户要求按脚本、分镜或镜头描述找素材时，用 topos.search_library_media 按场景分别检索。"
+    "给出工具实际返回的候选和源媒体入出点（秒），时段为空时说明没有已索引时段。"
+    "素材名、标签和描述仅作匹配依据。"
+)
 
 
 #: Factory that builds an LLMClient for a resolved profile (injected for testing).
@@ -609,6 +616,9 @@ class ChatRunDriver:
                 temperature = preset.temperature
             if preset.max_tokens is not None:
                 max_tokens = preset.max_tokens
+        system_instruction = preset.system_instruction if preset is not None else ""
+        if LIBRARY_SEARCH_TOOL in self._tool_names_for_trace(preset):
+            system_instruction = "\n\n".join(filter(None, (system_instruction, _LIBRARY_SEARCH_GUIDANCE)))
         executor = AgentTaskExecutor(
             self._orchestrator,
             client_factory=self._client_factory,
@@ -619,7 +629,7 @@ class ChatRunDriver:
             capability_catalog=self._capability_catalog,
             tool_allowlist=preset.tool_allowlist if preset is not None else (),
             max_steps=preset.max_tool_calls if preset is not None else 10,
-            system_instruction=preset.system_instruction if preset is not None else "",
+            system_instruction=system_instruction,
         )
 
         task_result = executor.execute(
@@ -715,6 +725,8 @@ class ChatRunDriver:
         if preset is not None and preset.tool_allowlist:
             allowed = set(preset.tool_allowlist)
             tool_defs = [tool for tool in tool_defs if tool.name in allowed]
+        if any(tool.name == LIBRARY_SEARCH_TOOL for tool in tool_defs):
+            messages = [{"role": "system", "content": _LIBRARY_SEARCH_GUIDANCE}, *messages]
         tools = [t.to_openai_tool() for t in tool_defs]
 
         # 取消检查：run 不再 active 时通知循环终止。

@@ -257,9 +257,7 @@ class ProfileAwareTranscriptProvider:
     def active_profile(self) -> Any | None:
         getter = getattr(self._registry, "active_profile_for_capability", None)
         if callable(getter):
-            profile = getter("asr")
-            if profile is not None:
-                return profile
+            return getter("asr")
         for profile in getattr(self._registry, "list", lambda: [])():
             capabilities = set(getattr(profile, "capabilities", ()) or ())
             if "asr" in capabilities or getattr(profile, "provider_kind", "") == "local_qwen_asr":
@@ -291,7 +289,9 @@ class ProfileAwareTranscriptProvider:
             return False
         source = str(getattr(profile, "source_kind", "local"))
         kind = str(getattr(profile, "provider_kind", ""))
-        return source not in {"local", "ollama"} and kind != "local_qwen_asr"
+        return kind != "local_qwen_asr" and (
+            bool(getattr(profile, "endpoint", "")) or source not in {"local", "ollama"}
+        )
 
     def validate_options(self, options: dict[str, Any] | None = None) -> str | None:
         profile = self.active_profile

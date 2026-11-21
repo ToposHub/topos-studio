@@ -21,6 +21,7 @@ from src.features.edit.ai_editing.edit_project_service import ProjectSequences
 from src.features.edit.ai_editing.jobs import JobKind
 from src.features.edit.ai_editing.models import EditOperation, EditPlan, OperationKind, PlanTarget
 from src.features.edit.ai_editing.tool_facade import (
+    LIBRARY_SEARCH_TOOL,
     SanitizedText,
     ToolDefinition,
     ToolFacade,
@@ -150,6 +151,63 @@ def test_execution_mode_is_host_owned_and_fails_closed(facade):
     assert f.execution_mode("topos.apply_edit_plan") == ToolExecutionMode.EXCLUSIVE
     assert f.execution_mode("topos.cancel_job") == ToolExecutionMode.EXCLUSIVE
     assert f.execution_mode("topos.unknown") == ToolExecutionMode.EXCLUSIVE
+
+
+def test_global_library_search_uses_index_candidates_and_redacts_path(facade) -> None:
+    project_facade, _ = facade
+    calls = []
+
+    def search(query: str, limit: int) -> list[dict]:
+        calls.append((query, limit))
+        return [{
+            "asset_id": "indexed-1", "path": "/private/footage.mov", "name": "夜间车流.mov",
+            "kind": "video", "online": True, "start_seconds": 1.5, "end_seconds": 3.25,
+            "text": "夜间车流", "tags": ["外景"], "score": 0.9,
+        }]
+
+    assert not project_facade.is_tool_declared(LIBRARY_SEARCH_TOOL)
+    assert LIBRARY_SEARCH_TOOL not in {tool.name for tool in project_facade.list_tools()}
+    search_facade = ToolFacade(project_facade._session, library_search=search)
+    tools = {tool.name: tool for tool in search_facade.list_tools()}
+    assert tools[LIBRARY_SEARCH_TOOL].permission == ToolPermission.READ
+    result = search_facade.invoke(LIBRARY_SEARCH_TOOL, {"query": " 夜间车流 ", "limit": 6})
+    assert result["ok"] and calls == [("夜间车流", 6)]
+    hit, = result["candidates"]
+    assert "path" not in hit
+    assert hit["name"] == {"value": "夜间车流.mov", "trust": "untrusted", "source": "untrusted"}
+    assert hit["text"]["trust"] == hit["tags"][0]["trust"] == "untrusted"
+    assert (hit["start_seconds"], hit["end_seconds"]) == (1.5, 3.25)
+    assert not search_facade.invoke(LIBRARY_SEARCH_TOOL, {"query": "x", "limit": 41})["ok"]
+    assert calls == [("夜间车流", 6)]
+
+
+def test_global_search_host_reads_persisted_timed_evidence(facade, tmp_path, monkeypatch) -> None:
+    from src.app.controllers.ai_editing_mixin import _search_global_ai_library
+    from src.features.files.repository import FilesDataLocator
+    from src.features.files.repository.catalog import FilesCatalog
+    from src.features.files.services.ai_library import AILibraryService, MediaEvidence
+
+    monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    source = tmp_path / "media"
+    source.mkdir()
+    (source / "night.mov").write_bytes(b"indexed media")
+    catalog = FilesCatalog(FilesDataLocator.default())
+    try:
+        catalog.register_library(source)
+        report = AILibraryService(catalog).build_index(
+            lambda path, kind: [MediaEvidence("夜间车流", 2.0, 7.0)],
+        )
+        assert report["indexed"] == 1
+    finally:
+        catalog.close()
+
+    project_facade, _ = facade
+    search_facade = ToolFacade(project_facade._session, library_search=_search_global_ai_library)
+    result = search_facade.invoke(LIBRARY_SEARCH_TOOL, {"query": "夜间车流"})
+    hit, = result["candidates"]
+    assert result["ok"] and hit["online"]
+    assert hit["name"]["value"] == "night.mov"
+    assert (hit["start_seconds"], hit["end_seconds"]) == (2.0, 7.0)
 
 
 def test_mcp_tools_remain_exclusive_even_if_declared_parallel(facade):

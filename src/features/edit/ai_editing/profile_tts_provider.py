@@ -52,9 +52,7 @@ class ProfileAwareTtsProvider:
     def active_profile(self) -> AiProviderProfile | None:
         getter = getattr(self._registry, "active_profile_for_capability", None)
         if callable(getter):
-            profile = getter("tts")
-            if profile is not None:
-                return profile
+            return getter("tts")
         for profile in getattr(self._registry, "list", lambda: [])():
             capabilities = set(getattr(profile, "capabilities", ()) or ())
             if "tts" in capabilities or "voice" in getattr(profile, "modalities", ()):

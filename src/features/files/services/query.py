@@ -51,6 +51,12 @@ def classify(name: str) -> str:
     return "other"
 
 
+def child_directories(root: Path) -> list[Path]:
+    """List immediate visible subdirectories, propagating directory read errors."""
+    children = [child for child in root.iterdir() if not child.name.startswith(".") and child.is_dir()]
+    return sorted(children, key=lambda child: child.name.lower())
+
+
 class FilesQueryService:
     """目录浏览/树/全库搜索：磁盘为真值，catalog 叠加用户与技术列。"""
 
@@ -154,11 +160,7 @@ class FilesQueryService:
     def tree(self, path: str) -> list[dict[str, str]]:
         root = Path(normalize_path(path))
         try:
-            children = sorted(
-                (child for child in root.iterdir()
-                 if child.is_dir() and not child.name.startswith(".")),
-                key=lambda child: child.name.lower(),
-            )
+            children = child_directories(root)
         except OSError:
             return []
         return [{"name": child.name, "path": nfc(child)} for child in children]
@@ -166,10 +168,10 @@ class FilesQueryService:
     def search(self, query: str, *, library_id: str, request_id: str = "",
                limit: int = 200, offset: int = 0) -> QueryResult:
         rows, total = self._catalog.search(
-            query, library_id=library_id, limit=limit, offset=offset)
+            query, library_id=library_id, limit=limit, offset=offset, within_library_roots=True)
         entries = []
         for row in rows:
-            asset = self._catalog.asset(library_id, row["path"]) or {}
+            asset = self._catalog.asset(row["library_id"], row["path"]) or {}
             entries.append(Entry(
                 path=row["path"], name=os.path.basename(row["path"]),
                 kind=classify(row["path"]), size_bytes=asset.get("size"),
@@ -199,11 +201,8 @@ class FilesLibraryService:
     def unpin(self, library_id: str) -> bool:
         return self._catalog.unregister_library(library_id)
 
+    def rename(self, library_id: str, name: str) -> bool:
+        return self._catalog.rename_library(library_id, name)
+
     def library_for_path(self, path: str | Path) -> LibraryRecord | None:
-        target = nfc(Path(path).resolve())
-        best: LibraryRecord | None = None
-        for record in self._catalog.libraries():
-            if target == record.root or target.startswith(record.root.rstrip("/") + "/"):
-                if best is None or len(record.root) > len(best.root):
-                    best = record
-        return best
+        return self._catalog.library_for_path(path)

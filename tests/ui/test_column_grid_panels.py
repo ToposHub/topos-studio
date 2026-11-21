@@ -2,8 +2,8 @@
 
 The controller tiles an icon-mode view with N columns whose width derives
 from the live viewport (flush right, no dead strip).  These tests pin the
-math on a bare view first, then verify each ported panel (Media Pool,
-Library, Presets, 3D LUT) actually drives its grid through it.
+math on a bare view first, then verify the layouts used by Media Pool,
+Library, Presets, and 3D LUT.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QVBoxLayout, QWidget
 
 from src.shared.ui.column_grid import ColumnGridController
 
-_ALL_KEYS = ("probe_columns", "media_pool_columns", "library_columns",
+_ALL_KEYS = ("probe_columns", "library_columns",
              "presets_columns", "lut_columns")
 
 
@@ -182,32 +182,41 @@ def test_presets_panel_column_zoom(qapp, monkeypatch, tmp_path,
         panel.deleteLater()
 
 
-def test_media_pool_column_zoom(qapp, clean_column_settings):
+@pytest.mark.parametrize("legacy_columns, saved_width, expected_width", [
+    (None, None, 180), (4, None, 144), (8, ["180"], 96),
+])
+def test_media_pool_thumbnail_width_migrates_and_persists(qapp, tmp_path, monkeypatch,
+                                                          legacy_columns, saved_width, expected_width):
     pytest.importorskip("src.features.edit.ui.media_pool_panel")
-    from src.features.edit.ui.media_pool_panel import MediaPoolPanel
-    panel = MediaPoolPanel()
-    panel.resize(560, 360)
-    panel.show()
-    _process_ui(qapp)
+    from src.features.edit.ui import media_pool_panel
+
+    def settings(org: str, app: str) -> QSettings:
+        return QSettings(str(tmp_path / f"{app}.ini"), QSettings.Format.IniFormat)
+
+    monkeypatch.setattr(media_pool_panel, "QSettings", settings)
+    legacy = settings("ToposColor", "ColumnGrids")
+    if legacy_columns is not None:
+        legacy.setValue("media_pool_columns", legacy_columns)
+    if saved_width is not None:
+        settings("ToposColor", "MediaPool").setValue("thumbnail_width", saved_width)
+    panel = media_pool_panel.MediaPoolPanel()
+    restored = None
     try:
-        assert panel.thumb_slider.minimum() == 1
-        assert panel.thumb_slider.maximum() == 8
-        panel._column_grid.apply_columns(3)
-        _process_ui(qapp, rounds=3)
-        view = panel.grid_view
-        # Media Pool hides the scrollbar when empty, reserving its width
-        # in the layout to prevent oscillation at the overflow threshold.
-        reserved = view.verticalScrollBar().sizeHint().width()
-        remaining = view.viewport().width() - reserved - view.gridSize().width() * 3
-        assert 0 <= remaining < 5
-        assert not view.verticalScrollBar().isVisible()
-        assert panel.grid_delegate.thumb_size[1] == round(
-            panel.grid_delegate.thumb_size[0] * 9 / 16)
-        assert panel._thumb_width == view.iconSize().width()
+        assert panel.get_thumb_size() == expected_width
+        assert panel.thumb_slider.minimum() == 96
+        assert panel.thumb_slider.maximum() == 320
+        assert not panel.thumb_slider.invertedAppearance()
+        panel.set_thumb_size(176)
+        assert panel.thumb_slider.value() == 176
+        restored = media_pool_panel.MediaPoolPanel()
+        assert restored.get_thumb_size() == 176
+        assert restored.grid_view.iconSize() == QSize(176, 99)
     finally:
-        panel.hide()
         panel.close()
         panel.deleteLater()
+        if restored is not None:
+            restored.close()
+            restored.deleteLater()
 
 
 def test_library_reuses_files_four_layout_model(qapp, tmp_path, monkeypatch):

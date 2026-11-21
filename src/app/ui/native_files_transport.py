@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
@@ -23,11 +24,13 @@ from src.features.files.contracts import (
     FilesErrorCode,
     QueryRequest,
     identity_key,
+    is_valid_folder_name,
 )
 from src.features.files.repository import FilesDataLocator
 from src.features.files.repository.catalog import FilesCatalog, nfc
 from src.features.files.services.facade import FacadeOutcome, FilesFacade, read_file_bytes
 from src.features.files.transactions import CancelToken
+from src.shared.i18n.i18n import I18N
 from src.shared.plugins.services import ItemResult
 
 
@@ -88,6 +91,7 @@ class NativeFilesTransport(QObject):
     task_started = pyqtSignal(dict)
     task_finished = pyqtSignal(dict)
     task_failed = pyqtSignal(str)
+    folder_created = pyqtSignal(str, str, str)
     search_loaded = pyqtSignal(dict)
     search_failed = pyqtSignal(str)
     collections_loaded = pyqtSignal(list)
@@ -100,8 +104,15 @@ class NativeFilesTransport(QObject):
     recovery_applied = pyqtSignal(dict)         # D5' 恢复判定结果
     libraries_loaded = pyqtSignal(list)
     library_changed = pyqtSignal(bool, str)
+    library_registry_changed = pyqtSignal()
     scan_status_loaded = pyqtSignal(dict)
     scan_failed = pyqtSignal(str)
+    ai_library_results = pyqtSignal(str, list, str)
+    ai_library_copy_finished = pyqtSignal(str)
+    ai_library_index_status = pyqtSignal(dict)
+    ai_library_settings_loaded = pyqtSignal(dict)
+    ai_library_settings_saved = pyqtSignal(str)
+    ai_analysis_marks_loaded = pyqtSignal(str, list)
     thumbnail_retry_done = pyqtSignal(str, bool)
     batch_rename_preview_ready = pyqtSignal(dict)
     batch_rename_preview_failed = pyqtSignal(str, str)  # [FR-13] message, session_id
@@ -117,6 +128,9 @@ class NativeFilesTransport(QObject):
     _tree_done = pyqtSignal(object, str)
     _volumes_done = pyqtSignal(object)
     _directory_done = pyqtSignal(int, str, object)
+    _ai_library_index_done = pyqtSignal(object)
+    _ai_library_settings_done = pyqtSignal(object, object, object)
+    _ai_analysis_marks_done = pyqtSignal(object, str, int)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
@@ -140,12 +154,21 @@ class NativeFilesTransport(QObject):
         self._tree_done.connect(self._finish_tree, Qt.ConnectionType.QueuedConnection)
         self._volumes_done.connect(self._finish_volumes, Qt.ConnectionType.QueuedConnection)
         self._directory_done.connect(self._finish_directory, Qt.ConnectionType.QueuedConnection)
+        self._ai_library_index_done.connect(self._finish_ai_library_index, Qt.ConnectionType.QueuedConnection)
+        self._ai_library_settings_done.connect(self._finish_ai_library_settings, Qt.ConnectionType.QueuedConnection)
+        self._ai_analysis_marks_done.connect(self._finish_ai_analysis_marks, Qt.ConnectionType.QueuedConnection)
         self._generation = 0        # HTTP 缩略图代际（沿用原语义）
         self._nav_generation = 0    # 数据面导航代际：cancel() 后迟到结果作废
         self._preview_seq = 0       # 预览请求身份：同路径重开/取消都作废旧读取
         self._closed = False
         self._running_jobs: dict[str, CancelToken] = {}
         self._scan_cancel: CancelToken | None = None
+        self._ai_library_index_cancel: CancelToken | None = None
+        self._ai_library_index_state: dict[str, Any] = {}
+        self._ai_library_settings_request_id = ""
+        self._ai_analysis_marks_request_id = ""
+        self._ai_library_search_cancel: CancelToken | None = None
+        self._ai_analysis_marks_cancel: CancelToken | None = None
         self._scan_state: dict[str, Any] = {"running": False, "phase": "空闲"}
         self._thumbnail_queue: deque[tuple[str, int]] = deque()
         self._thumbnail_dispatch_paused = False
@@ -197,6 +220,298 @@ class NativeFilesTransport(QObject):
             self.plugin_launch_finished.emit(plugin_id, False, "请通过原生插件命令打开工具。")
         return False
 
+    # ------------------------------------------------------------ AI 素材库
+    def search_ai_library(
+        self, request_id: str, query: str, library_id: str | None = None, *,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
+        only_unanalyzed: bool = False,
+    ) -> None:
+        if self._closed:
+            return
+        if self._ai_library_search_cancel is not None:
+            self._ai_library_search_cancel.request()
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_results.emit(request_id, [], self._runtime_error_message())
+            return
+        cancel = self._ai_library_search_cancel = CancelToken()
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed and not cancel.requested:
+                if outcome.error is not None:
+                    self.ai_library_results.emit(request_id, [], str(outcome.error.message))
+                else:
+                    self.ai_library_results.emit(request_id, outcome.result, "")
+
+        facade.run(key="ai-library-search", request_id=request_id, listener=deliver,
+                   work=lambda: facade.search_ai_library(query, library_id=library_id, folder=folder,
+                                                         kinds=kinds, recursive=recursive,
+                                                         only_unanalyzed=only_unanalyzed, cancel=cancel))
+
+    def load_ai_analysis_marks(self, path: str, paths: list[str]) -> None:
+        """Resolve card badges independently of directory and thumbnail delivery."""
+        if self._closed:
+            return
+        if self._ai_analysis_marks_cancel is not None:
+            self._ai_analysis_marks_cancel.request()
+        request_id = self._ai_analysis_marks_request_id = uuid.uuid4().hex
+        generation = self._nav_generation
+        candidates = tuple(dict.fromkeys(paths))
+        facade = self._runtime() if candidates else None
+        if facade is None:
+            self.ai_analysis_marks_loaded.emit(path, [])
+            return
+        cancel = self._ai_analysis_marks_cancel = CancelToken()
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed and not cancel.requested:
+                self._ai_analysis_marks_done.emit(outcome, path, generation)
+
+        facade.run(key="ai-library-marks", request_id=request_id, listener=deliver,
+                   work=lambda: facade.ai_library_analyzed_paths(candidates, cancel=cancel))
+
+    def _finish_ai_analysis_marks(self, outcome: FacadeOutcome, path: str, generation: int) -> None:
+        if (self._closed or generation != self._nav_generation
+                or outcome.request_id != self._ai_analysis_marks_request_id):
+            return
+        self.ai_analysis_marks_loaded.emit(path, [] if outcome.error else list(outcome.result))
+
+    def copy_to_ai_library(self, sources: list[str], destination: str) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_copy_finished.emit(self._runtime_error_message())
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.ai_library_copy_finished.emit(str(outcome.error.message))
+                self.load_libraries()
+                self.library_registry_changed.emit()
+                return
+            items = outcome.result.items
+            copied = sum(item.ok for item in items)
+            message = f"已复制 {copied} 项，失败 {len(items) - copied} 项。"
+            if copied != len(items):
+                failed = next(item for item in items if not item.ok)
+                message += f" {failed.message or failed.error_code}"
+            self.ai_library_copy_finished.emit(message)
+            self.load_libraries()
+            self.library_registry_changed.emit()
+
+        facade.run(key="ai-library-copy", request_id=uuid.uuid4().hex,
+                   work=lambda: facade.copy_to_ai_library(sources, destination), listener=deliver)
+
+    def start_ai_library_index(self, library_id: str | None = None, *,
+                               folder: str | None = None, force: bool = False,
+                               only_unanalyzed: bool = False, kinds: tuple[str, ...] | None = None,
+                               recursive: bool = True) -> None:
+        if self._ai_library_index_cancel is not None:
+            return
+        if force and only_unanalyzed:
+            self._ai_library_index_state = {"error": I18N.tr(
+                "files.ai_library.conflicting_scan_options", "强制重分析与仅分析待处理素材不能同时启用。")}
+            self.ai_library_index_status.emit(dict(self._ai_library_index_state))
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_index_status.emit({"error": self._runtime_error_message()})
+            return
+        cancel = CancelToken()
+        self._ai_library_index_cancel = cancel
+        self._ai_library_index_state = {"running": True, "done": 0, "total": 0}
+        self.ai_library_index_status.emit(dict(self._ai_library_index_state))
+
+        def work() -> dict[str, Any]:
+            from contextlib import ExitStack
+
+            from src.app.services.ai_library_analysis import (
+                LibraryAnalyzer, MediaRoute, active_media_routes, configured_library_routes,
+            )
+
+            libraries = facade.libraries.list_libraries()
+            if not libraries:
+                raise ValueError("先添加一个素材目录。")
+            if library_id is None and folder is not None:
+                raise ValueError("请先选择子目录所属的素材库。")
+            roots = {record.library_id: record.root for record in libraries
+                     if library_id is None or record.library_id == library_id}
+            policies = {owner_id: facade.ai_library_analysis_policy(owner_id, folder=folder) for owner_id in roots}
+            if library_id is not None and library_id not in policies:
+                raise ValueError("该素材库已移除，请重新选择。")
+            policies = {
+                owner_id: replace(
+                    policy, kinds=tuple(kind for kind in policy.kinds if kinds is None or kind in kinds),
+                    recursive=policy.recursive and recursive,
+                )
+                for owner_id, policy in policies.items()
+            }
+            explicit_routes: dict[str, tuple[MediaRoute, ...]] = {}
+            for owner_id, policy in policies.items():
+                if not policy.kinds or policy.mode != "profiles" or policy.models is None:
+                    continue
+                routes, missing = configured_library_routes(policy)
+                if missing:
+                    labels = {"image": "图片", "video": "视频", "audio": "音频"}
+                    return {"error": I18N.tr(
+                        "files.ai_library.model_setup_required", "请先配置用于分析{kinds}的模型。",
+                        kinds="、".join(I18N.tr(f"files.native.kind.{kind}", labels[kind]) for kind in missing)),
+                        "model_setup_required": True, "kind": missing[0]}
+                blocked = [route.profile.display_name for route in routes if route.requires_upload and (
+                    not route.profile.allows_media_upload or route.approval not in policy.approved_routes
+                )]
+                if blocked:
+                    return {"error": I18N.tr(
+                        "files.ai_library.model_upload_required", "此目录尚未授权向以下模型发送素材：{models}",
+                        models="、".join(dict.fromkeys(blocked)))}
+                explicit_routes[owner_id] = routes
+
+            analyzer = LibraryAnalyzer(cancel=cancel)
+            last_update = 0.0
+            policy_messages: list[str] = []
+
+            def additional_analyzers(owner_id: str) -> tuple[LibraryAnalyzer, ...]:
+                # Libraries are scanned sequentially. Release the previous
+                # directory's MCP process before opening the next one.
+                sessions.close()
+                policy = policies.get(owner_id)
+                if policy is None:
+                    return ()
+                if policy.mode != "profiles":
+                    return ()
+                profiles = []
+                routes = explicit_routes.get(owner_id)
+                if routes is None:
+                    routes = tuple(active_media_routes().values())
+                if policy.models is None and not routes:
+                    policy_messages.append("有目录选择了已绑定模型，但视觉和语音转文字均未绑定可用配置。")
+                for route in routes:
+                    if route.requires_upload and (
+                        not route.profile.allows_media_upload or route.approval not in policy.approved_routes
+                    ):
+                        policy_messages.append(f"{route.profile.display_name} 未获得此目录的当前上传授权。")
+                        continue
+                    analyzer = LibraryAnalyzer(
+                        cancel=cancel, mode=route.capability, route=route,
+                        read_policy=lambda: facade.ai_library_analysis_policy(owner_id, folder=folder),
+                        scope_path=folder or roots[owner_id],
+                    )
+                    sessions.callback(analyzer.close)
+                    profiles.append(analyzer)
+                return tuple(profiles)
+
+            def progress(done: int, total: int) -> None:
+                nonlocal last_update
+                now = time.monotonic()
+                if not self._closed and (now - last_update >= 0.15 or done == total):
+                    last_update = now
+                    self.ai_library_index_status.emit({"running": True, "done": done, "total": total})
+
+            with ExitStack() as sessions:
+                per_library_scope = {owner_id: (policy.kinds, policy.recursive) for owner_id, policy in policies.items()}
+                report = facade.build_ai_library(
+                    analyzer, revision=analyzer.revision, cancel=cancel, progress=progress,
+                    additional_analyzers=additional_analyzers, library_id=library_id,
+                    folder=folder, kinds=kinds, recursive=recursive, force=force,
+                    per_library_scope=per_library_scope, only_unanalyzed=only_unanalyzed,
+                )
+            messages = {item["message"] for item in report["warnings"]}
+            report["warnings"].extend(
+                {"message": message} for message in dict.fromkeys(policy_messages) if message not in messages
+            )
+            return report
+
+        facade.run(key="ai-library-index", request_id=uuid.uuid4().hex, work=work,
+                   listener=lambda outcome: self._ai_library_index_done.emit(outcome) if not self._closed else None)
+
+    def _finish_ai_library_index(self, outcome: FacadeOutcome) -> None:
+        self._ai_library_index_cancel = None
+        if self._closed:
+            return
+        self._ai_library_index_state = ({"error": str(outcome.error.message)}
+                                        if outcome.error is not None else dict(outcome.result))
+        self.ai_library_index_status.emit(dict(self._ai_library_index_state))
+
+    def stop_ai_library_index(self) -> None:
+        if self._ai_library_index_cancel is not None:
+            self._ai_library_index_cancel.request()
+
+    def ai_library_index_state(self) -> dict[str, Any]:
+        return dict(self._ai_library_index_state)
+
+    def load_ai_library_settings(self, library_id: str | None = None, *, folder: str | None = None) -> None:
+        request_id = self._ai_library_settings_request_id = uuid.uuid4().hex
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_settings_loaded.emit({"error": self._runtime_error_message(),
+                                                  "library_id": library_id, "folder": folder})
+            return
+
+        def work() -> dict[str, Any]:
+            from pathlib import Path
+
+            from src.app.services.ai_library_analysis import active_media_routes, library_model_options
+
+            if folder is not None and library_id is None:
+                raise ValueError("请先选择子目录所属的素材库。")
+            libraries = facade.ai_library_analysis_policies()
+            scope_library, scope_folder = library_id, folder
+            if folder is not None:
+                requested = next((row for row in libraries if row["library_id"] == library_id), None)
+                target = Path(nfc(folder))
+                if requested is not None and target.is_relative_to(Path(requested["path"])):
+                    owners = (row for row in libraries if target.is_relative_to(Path(row["path"])))
+                    owner = max(owners, key=lambda row: len(Path(row["path"]).parts))
+                    scope_library = owner["library_id"]
+                    scope_folder = None if target == Path(owner["path"]) else folder
+            stamp = facade.ai_library_scope_stamp(scope_library, folder=scope_folder) if scope_library else None
+            policy = facade.ai_library_analysis_policy(scope_library, folder=scope_folder) if scope_library else None
+            return {"libraries": libraries,
+                    "routes": [route.summary() for route in active_media_routes().values()],
+                    "models": library_model_options(), "scope_policy": policy.to_dict() if policy else None,
+                    "scope_stamp": stamp, "scope_library": scope_library, "scope_folder": scope_folder}
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                self._ai_library_settings_done.emit(outcome, library_id, folder)
+
+        facade.run(key="ai-library-settings", request_id=request_id, work=work, listener=deliver)
+
+    def _finish_ai_library_settings(self, outcome: FacadeOutcome, library_id: str | None, folder: str | None) -> None:
+        if self._closed or outcome.request_id != self._ai_library_settings_request_id:
+            return
+        snapshot = {"error": str(outcome.error.message)} if outcome.error else outcome.result
+        self.ai_library_settings_loaded.emit({**snapshot, "library_id": library_id, "folder": folder})
+
+    def save_ai_library_settings(
+        self, library_id: str, mode: str, approved_routes: tuple[str, ...], *,
+        folder: str | None = None, models: dict[str, str] | None = None,
+        kinds: tuple[str, ...] = ("image", "video", "audio"), recursive: bool = True,
+        expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_settings_saved.emit(self._runtime_error_message())
+            return
+
+        choices = tuple(models.items()) if models is not None else None
+
+        def work() -> None:
+            from src.features.files.services.ai_library import LibraryAnalysisPolicy
+
+            policy = LibraryAnalysisPolicy(mode, approved_routes, choices, kinds, recursive)
+            facade.set_ai_library_analysis_policy(
+                library_id, policy, folder=folder, expected_scope_stamp=expected_scope_stamp,
+            )
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                self.ai_library_settings_saved.emit(str(outcome.error.message) if outcome.error else "")
+
+        facade.run(key=f"ai-library-policy:{library_id}:{folder or ''}", request_id=uuid.uuid4().hex,
+                   work=work, listener=deliver)
+
     # ------------------------------------------------------------ 目录树（facade）
     def load_volumes(self) -> None:
         if self._closed or self._volumes_pending:
@@ -218,6 +533,13 @@ class NativeFilesTransport(QObject):
         for path in tuple(self._tree_pending_paths):
             if path == root or path.startswith(prefix):
                 del self._tree_pending_paths[path]
+
+    def reload_tree(self, path: str) -> None:
+        self.invalidate_tree_path(path)
+        self.load_tree(path)
+
+    def invalidate_tree_path(self, path: str) -> None:
+        self._tree_pending_paths.pop(path, None)
 
     def load_tree(self, path: str) -> None:
         """Load one expanded node, independently of content navigation.
@@ -448,10 +770,28 @@ class NativeFilesTransport(QObject):
             self.metadata_applied.emit(list(job.paths), dict(job.patch), "已保存")
 
     # ------------------------------------------------------------ 文件任务（facade）
+    def create_folder(self, request_id: str, parent: str, name: str, *, cancel: CancelToken | None = None) -> None:
+        """Run a standard mkdir and send its result to the requesting picker."""
+        name = name.strip()
+        if not os.path.isabs(parent) or not is_valid_folder_name(name):
+            message = I18N.tr("files.add_library.invalid_name", "请输入有效的单级文件夹名称。")
+            self.folder_created.emit(request_id, "", message)
+            return
+
+        def complete(report: dict[str, Any], error: str) -> None:
+            successes = report.get("successes", ())
+            failures = report.get("failures", ())
+            destination = successes[0]["to"] if successes else ""
+            self.folder_created.emit(request_id, destination, error or (failures[0]["error"] if failures else ""))
+
+        self.run_task("mkdir", [parent], options={"name": name}, cancel=cancel, on_complete=complete)
+
     def run_task(
         self, operation: str, targets: list[str], *,
         policy: str = "error",
         options: dict[str, Any] | None = None,
+        cancel: CancelToken | None = None,
+        on_complete: Callable[[dict[str, Any], str], None] | None = None,
     ) -> None:
         """提交文件任务：mkdir/rename/copy/move/trash/restore/purge。
 
@@ -459,10 +799,18 @@ class NativeFilesTransport(QObject):
         task_started（复用为进度快照，UI 只读 completed/total）。
         """
         if self._closed or not targets:
+            if on_complete is not None:
+                on_complete({}, self._runtime_error_message())
             return
+
+        def fail(message: str) -> None:
+            self.task_failed.emit(message)
+            if on_complete is not None:
+                on_complete({}, message)
+
         facade = self._runtime()
         if facade is None:
-            self.task_failed.emit(self._runtime_error_message())
+            fail(self._runtime_error_message())
             return
         options = dict(options or {})
         targets = list(targets)
@@ -470,11 +818,12 @@ class NativeFilesTransport(QObject):
             # UI 语义：目标目录 + 新名字 → 服务接收完整路径
             name = str(options.pop("name"))
             if name in {".", ".."} or any(char in name for char in "/\\:\0"):
-                self.task_failed.emit("新文件夹名称不能包含路径。")
+                fail("新文件夹名称不能包含路径。")
                 return
             targets = [os.path.join(targets[0], name)]
+            options["parents"] = False
         job_id = f"task-{operation}-{uuid.uuid4().hex[:10]}"
-        cancel = CancelToken()
+        cancel = cancel if cancel is not None else CancelToken()
         self._running_jobs[job_id] = cancel
         # 首发（completed=0）附完整调用参数：任务列表据此提供"重试失败项"
         self.task_started.emit({
@@ -494,7 +843,7 @@ class NativeFilesTransport(QObject):
             for raw in targets:
                 record = facade.libraries.library_for_path(raw)
                 library_id = trash_owners.get(str(raw), "") if operation in {"restore", "purge"} else record.library_id if record else ""
-                groups.setdefault(library_id, []).append(nfc(raw))
+                groups.setdefault(library_id, []).append(raw if operation in {"mkdir", "copy", "move"} else nfc(raw))
             items: list[ItemResult] = []
             for library_id, group in groups.items():
                 offset = len(items)
@@ -514,7 +863,7 @@ class NativeFilesTransport(QObject):
             if self._closed:
                 return
             if outcome.error is not None:
-                self.task_failed.emit(str(outcome.error.message or "文件操作未能提交"))
+                fail(str(outcome.error.message or "文件操作未能提交"))
                 return
             items = list(outcome.result)
             successes = [{"path": item.path, "to": item.result or ""}
@@ -524,11 +873,16 @@ class NativeFilesTransport(QObject):
                          "code": str(item.error_code or "")}
                         for item in items if not item.ok]
             cancelled = any(item.error_code == "CANCELLED" for item in items)
-            self.task_finished.emit({
+            report = {
                 "job_id": job_id, "operation": operation,
                 "total": len(items), "completed": len(items),
                 "successes": successes, "failures": failures,
-                "cancelled": cancelled})
+                "cancelled": cancelled}
+            if operation == "move" and options.get("cut_token"):
+                report["cut_token"] = options["cut_token"]
+            self.task_finished.emit(report)
+            if on_complete is not None:
+                on_complete(report, "")
 
         facade.run(key=f"task:{job_id}", request_id=job_id,
                    work=_work, listener=_deliver)
@@ -566,18 +920,24 @@ class NativeFilesTransport(QObject):
                    listener=_deliver)
 
     def pin_library(self, path: str) -> None:
-        self._library_change(
-            lambda facade: facade.libraries.register(path), "已固定为常用位置")
+        self.register_library(path, "")
 
-    def unpin_library(self, path: str) -> None:
-        def _work(facade: FilesFacade) -> str:
-            target = identity_key(path)
-            match = next((record for record in facade.libraries.list_libraries()
-                          if identity_key(record.root) == target), None)
-            if match is None:
-                return "该目录不在常用位置中"
-            return "" if facade.libraries.unpin(match.library_id) else "取消固定失败"
-        self._library_change(_work, "已取消固定")
+    def register_library(self, directory: str, name: str) -> None:
+        self._library_change(
+            lambda facade: facade.register_library(directory, name),
+            I18N.tr("files.ai_library.library_added", "已添加素材库。"))
+
+    def rename_library(self, library_id: str, name: str) -> None:
+        self._library_change(
+            lambda facade: "" if facade.libraries.rename(library_id, name) else
+            I18N.tr("files.ai_library.library_missing", "该素材库已移除，请重新选择。"),
+            I18N.tr("files.ai_library.library_renamed", "已更新素材库名称。"))
+
+    def remove_library(self, library_id: str) -> None:
+        self._library_change(
+            lambda facade: "" if facade.libraries.unpin(library_id) else
+            I18N.tr("files.ai_library.library_missing", "该素材库已移除，请重新选择。"),
+            I18N.tr("files.ai_library.library_removed", "已移除素材库。"))
 
     def _library_change(self, work: Callable[[FilesFacade], Any],
                         ok_message: str) -> None:
@@ -598,6 +958,7 @@ class NativeFilesTransport(QObject):
             self.library_changed.emit(bool(ok), message)
             if ok:
                 self.load_libraries()
+                self.library_registry_changed.emit()
 
         facade.run(key=f"library:{uuid.uuid4().hex}", request_id=uuid.uuid4().hex,
                    work=lambda: work(facade), listener=_deliver)
@@ -1041,7 +1402,7 @@ class NativeFilesTransport(QObject):
                    work=lambda: facade.tasks.list_trash(), listener=_deliver)
 
     # ------------------------------------------------------------ 全库搜索（facade）
-    def search_library(self, query: str, *, limit: int = 200, offset: int = 0) -> None:
+    def search_library(self, query: str, limit: int = 200, offset: int = 0) -> None:
         """跨目录搜索：只读索引，不扫盘；结果显式带 total/truncated。
 
         [FR-09] 与目录列表同一套失效规则：新请求作废旧搜索；切目录
@@ -1122,6 +1483,8 @@ class NativeFilesTransport(QObject):
     def cancel(self) -> None:
         self._generation += 1
         self._nav_generation += 1
+        if self._ai_analysis_marks_cancel is not None:
+            self._ai_analysis_marks_cancel.request()
         self._media_cancel.set()
         self._media_cancel = threading.Event()
         self._thumbnail_replies.clear()
@@ -1134,6 +1497,9 @@ class NativeFilesTransport(QObject):
         if self._closed:
             return
         self._closed = True
+        self.stop_ai_library_index()
+        if self._ai_library_search_cancel is not None:
+            self._ai_library_search_cancel.request()
         for session_id in list(self._compare_sessions):
             self.cancel_compare(session_id)
         self._compare_sessions.clear()

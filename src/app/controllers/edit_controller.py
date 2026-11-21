@@ -8210,7 +8210,7 @@ class EditControllerMixin:
             )
             return
 
-        if asset.media_type == "video":
+        if asset.media_type == "video" or (asset.media_type == "audio" and asset.metadata.get("is_subclip")):
             # R08（媒体池复查）：经范围服务统一取插入窗口——子片段范围
             # 与素材级 In/Out 都生效（此前这里固定 0..全长，媒体池里
             # "添加到时间线"忽略子片段/入出点）。

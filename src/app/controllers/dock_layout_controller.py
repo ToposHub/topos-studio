@@ -1944,11 +1944,15 @@ class DockLayoutMixin:
 
         # 1. Library Layout
         for d in self.all_docks: d.setVisible(False)
-        self.dock_viewport.setVisible(True)
-        self.dock_library.setVisible(True)
-        self.dock_info.setVisible(True)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_library)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
+        if self._current_work_mode() == "video":
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
+            self.dock_files.show()
+        else:
+            self.dock_viewport.show()
+            self.dock_library.show()
+            self.dock_info.show()
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_library)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
         self.page_layouts["Library"] = self.saveState()
 
         # 2. Edit Layout (P1 phase) - conditional
@@ -3897,6 +3901,19 @@ class DockLayoutMixin:
         QTimer.singleShot(150, _clamp_safely)
         QTimer.singleShot(400, _clamp_safely)
 
+    def set_library_media_pool_visible(self, visible: bool) -> None:
+        """Move the live pool between the Library browser and its Edit dock."""
+        pool = self.media_pool_panel
+        dock = self.dock_edit_media_pool
+        if self.current_page != "Library" or pool is None or dock is None:
+            return
+        browser = self.files_panel if self._current_work_mode() == "video" else self.library_panel
+        if visible:
+            browser.show_media_pool(pool)
+        elif browser.hosts_media_pool(pool):
+            dock.setWidget(pool)
+            pool.show()
+
     # ------------------------------------------------------------------
     # _enforce_page_dock_visibility
     # ------------------------------------------------------------------
@@ -3945,6 +3962,8 @@ class DockLayoutMixin:
                 d = getattr(self, attr, None)
                 if d is not None:
                     d.setVisible(False)
+            if self.current_page == "Library" and self.dock_files.isHidden():
+                self.dock_files.show()
         elif work_mode == "image":
             if getattr(self, "dock_color_timeline_clips", None) is not None:
                 self.dock_color_timeline_clips.setVisible(False)

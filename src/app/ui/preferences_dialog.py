@@ -2110,7 +2110,7 @@ class PreferencesDialog(QDialog):
                 self._category_list.setCurrentRow(row)
                 return
 
-    def _apply_settings(self) -> None:
+    def _apply_settings(self) -> bool:
         """Collect all settings and apply to config (without closing)."""
         cfg = self._config_manager
 
@@ -2255,6 +2255,7 @@ class PreferencesDialog(QDialog):
 
         # Write all at once
         cfg.save_config()
+        return not module_apply_failures
 
     def _on_apply(self) -> None:
         """Apply settings without closing dialog."""
@@ -2270,7 +2271,10 @@ class PreferencesDialog(QDialog):
 
     def _on_save(self) -> None:
         """Apply settings and close dialog."""
-        self._apply_settings()
+        self._applied = True
+        with self._tracking_config_writes():
+            if self._apply_settings() is False:
+                return
         
         # Check if locale changed -> need restart
         locale = self._widgets['locale'].currentData()
@@ -2295,6 +2299,9 @@ class PreferencesDialog(QDialog):
 
     def _on_cancel(self) -> None:
         """Restore settings and close dialog."""
+        self.reject()
+
+    def reject(self) -> None:
         # If Apply was pressed, restore everything it wrote: the host config
         # snapshot, Files plugin intent and module page side
         # effects (see the helpers below).
@@ -2303,7 +2310,7 @@ class PreferencesDialog(QDialog):
             self._restore_plugin_state_snapshot()
             self._rollback_module_pages()
         self._restore_preview_snapshot()
-        self.reject()
+        super().reject()
 
     def _tracking_config_writes(self):
         """[AUD-03904] Record which config keys Apply touches.

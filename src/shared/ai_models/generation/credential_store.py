@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from src.shared.ai_models.generation.provider_profiles import CredentialStore
 from src.shared.ai_models.generation.user_ai_config import (
@@ -284,6 +284,24 @@ class HybridCredentialStore:
     def delete_secret(self, credential_ref: str) -> None:
         self._secure_store.delete_secret(credential_ref)
         self._file_store.delete_secret(credential_ref)
+
+    def snapshot_for_rollback(self, credential_ref: str) -> Callable[[], None]:
+        """Restore the original backend copies, independent of the preferred backend."""
+        contents = (
+            (self._secure_store, self._secure_store.get_secret(credential_ref)),
+            (self._file_store, self._file_store.get_secret(credential_ref)),
+        )
+
+        def restore() -> None:
+            for store, original in contents:
+                if store.get_secret(credential_ref) == original:
+                    continue
+                if original is None:
+                    store.delete_secret(credential_ref)
+                else:
+                    store.set_secret(credential_ref, original)
+
+        return restore
 
 
 class FileCredentialStore:

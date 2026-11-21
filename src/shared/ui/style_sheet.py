@@ -628,6 +628,13 @@ NODE_GROUP_BOX_STYLE = f"""
 # 对话框通用模板
 # ============================================================================
 
+PRIMARY_DIALOG_BUTTON_STYLE = f"""
+    QPushButton {{ background: {C.ORANGE_PRESS}; border-color: {C.ORANGE_PRESS}; color: white; }}
+    QPushButton:hover, QPushButton:focus {{ border-color: {C.ORANGE_HOVER}; }}
+    QPushButton:hover {{ background: {C.ORANGE_HOVER}; color: {C.BG_DEEPEST}; }}
+    QPushButton:disabled {{ background: {C.BG_BUTTON}; border-color: {C.BORDER_MID}; color: {C.TEXT_HINT}; }}
+"""
+
 # --- 通用暗色对话框 ---
 DIALOG_BASE_STYLE = f"""
     QDialog {{ background-color: {C.BG_PANEL}; }}
