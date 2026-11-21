@@ -160,16 +160,44 @@ class _GrainModule:
         }
 
     def install_capture(self, capture: dict) -> bool:
-        """H09：装载捕获资产（确定性重放：历史/锚点/seed 逐一恢复）。"""
+        """H09：装载捕获资产（确定性重放：历史/锚点/seed 逐一恢复）。
+
+        FX-22（2026-11-21 计划）修复：
+        - 回卷环：写入超过一圈后锚点按 ``anchor % cap`` 恢复相位
+          （旧实现 clamp 到 cap → mod 后为 0，读位错一格相位）；
+        - 异采样率：捕获 ``sample_rate`` 与当前不一致时按内容时长
+          重采样历史（保持冻结内容的时长与音高），锚点同比例缩放。
+        """
         hist = capture.get("history")
         if not isinstance(hist, np.ndarray) or hist.ndim != 2:
             return False
         ch, length = hist.shape[0], hist.shape[1]
+        capture_rate = capture.get("sample_rate")
+        try:
+            capture_rate = float(capture_rate) if capture_rate else None
+        except (TypeError, ValueError):
+            capture_rate = None
+        if capture_rate is not None and abs(
+                capture_rate - self._sr) > 1.0:
+            from scipy.signal import resample_poly
+            from math import gcd
+            g = gcd(int(round(capture_rate)), int(round(self._sr)))
+            up = int(round(self._sr)) // g
+            down = int(round(capture_rate)) // g
+            hist = np.stack([
+                resample_poly(hist[c], up, down) for c in range(ch)
+            ]).astype(np.float64)
+            anchor_in = int(capture.get("anchor", hist.shape[1]))
+            anchor = int(round(anchor_in * up / down))
+        else:
+            anchor = int(capture.get("anchor", length))
         self._hist = np.zeros((2, self._cap), dtype=np.float64)
-        n = min(length, self._cap)
+        n = min(hist.shape[1], self._cap)
         self._hist[0, :n] = hist[0, :n]
-        self._hist[1, :n] = (hist[1, :n] if ch > 1 else hist[0, :n])
-        self._written = min(int(capture.get("anchor", n)), self._cap)
+        self._hist[1, :n] = (hist[1, :n] if hist.shape[0] > 1
+                             else hist[0, :n])
+        # 回卷环相位：anchor 按容量取模（未回卷时与原值一致）。
+        self._written = int(anchor) % self._cap
         self.set_seed(int(capture.get("seed", self._seed)))
         self._density_phase = 0.0
         self._fb_ring = None
