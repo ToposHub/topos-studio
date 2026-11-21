@@ -11,12 +11,13 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QMenu,
-    QScrollArea
+    QScrollArea, QTabWidget,
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPoint, QPointF, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
-    QPainterPath, QFont, QMouseEvent, QPolygonF, QImage, QPixmap, QKeySequence, QShortcut
+    QPainterPath, QFont, QFontMetrics, QMouseEvent, QPolygonF, QImage, QPixmap, QKeySequence, QResizeEvent,
+    QShortcut, QRegion, QAction, QActionGroup, QContextMenuEvent,
 )
 
 
@@ -25,6 +26,9 @@ from src.features.edit.ui.fade_overlay import (
     FADE_HANDLE_HIT_HEIGHT, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_SIZE,
     paint_fade_curve_point, paint_fade_ramp, paint_fade_tab,
 )
+from src.features.mixer.spectrogram import DB_FLOOR, Spectrogram, fraction_frequency, frequency_fraction
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
 
 # =====================================================================
 # 1. 全局色彩系统与声学常量（与 EQ-UI.py 保持一致的暗色工作室美学）
@@ -34,7 +38,7 @@ ACCENT_GREEN   = "#4CD490"  # 波形主体 / 安全电平 / 干净度良好
 ACCENT_AMBER   = "#F0A848"  # 淡入淡出曲线 / 警告电平 / 增益调节
 ACCENT_RED     = "#F26D6D"  # 削波过载 (>0dBFS) / 静音与频谱修复
 ACCENT_BLUE    = "#6495FA"  # 辅助网格 / 标尺
-ACCENT_VIOLET  = "#B67CF8"  # 语图高能量过渡色
+ACCENT_VIOLET  = "#B67CF8"  # 频谱图高能量过渡色
 
 # 跨平台字体栈（QSS 用）。注意：macOS 的 QSS 会为字体列表中【任何一个】缺失
 # 字体族触发 qt.qpa.fonts 警告并付出 ~230ms 别名填充开销，因此列表只保留
@@ -81,15 +85,15 @@ def freq_to_note_name(hz: float) -> str:
 
 
 def build_spectrogram_lut() -> list[tuple[int, int, int]]:
-    """生成 256 级低眩光工作室热力图 LUT（深海蓝 -> 钴蓝 -> 冰晶青 -> 琥珀金 -> 珊瑚红 -> 暖白）"""
+    """Build a heat map with a dark floor and increasing luminance."""
     stops = [
-        (0.00, (14, 17, 26)),
-        (0.22, (24, 48, 98)),
-        (0.45, (36, 138, 196)),
-        (0.66, (76, 212, 144)),
-        (0.84, (240, 168, 72)),
-        (0.95, (242, 96, 96)),
-        (1.00, (255, 244, 228)),
+        (0.00, (13, 15, 20)),
+        (0.20, (27, 32, 66)),
+        (0.40, (72, 45, 121)),
+        (0.58, (160, 55, 124)),
+        (0.76, (228, 103, 71)),
+        (0.90, (250, 169, 82)),
+        (1.00, (255, 241, 206)),
     ]
     lut: list[tuple[int, int, int]] = []
     for i in range(256):
@@ -109,32 +113,14 @@ def build_spectrogram_lut() -> list[tuple[int, int, int]]:
 
 SPEC_LUT = build_spectrogram_lut()
 _SPEC_LUT_RGB = np.asarray(SPEC_LUT, dtype=np.uint8)
-_WAVE_SHADES = 48
-_WAVE_RMS, _WAVE_EDGE, _WAVE_GHOST, _WAVE_GHOST_EDGE, _WAVE_MUTED, _WAVE_MUTED_EDGE = range(
-    1 + 2 * _WAVE_SHADES, 7 + 2 * _WAVE_SHADES)
+WAVE_BACKGROUND = "#1B1D21"
+WAVE_PEAK = "#68BBA2"
+WAVE_MUTED = "#565F6E"
 
 
 @lru_cache(maxsize=1)
 def _waveform_colors() -> list[int]:
-    """Indexed colors for the dense waveform (peak, peak + RMS, and the edges)."""
-    shades = _WAVE_SHADES
-    peak = [QColor(36 + i * 40 // (shades - 1), 170 + i * 42 // (shades - 1),
-                   132 + i * 12 // (shades - 1), 30 + i * 100 // (shades - 1))
-            for i in range(shades)]
-    # The RMS layer sits in front of the peak fill, in the brighter center of the waveform.
-    rms = QColor(40, 216, 240, 105)
-    combined = []
-    rms_weight = rms.alphaF()
-    for color in peak:
-        peak_weight = color.alphaF() * (1.0 - rms_weight)
-        alpha = rms_weight + peak_weight
-        red = round((rms.red() * rms_weight + color.red() * peak_weight) / alpha)
-        green = round((rms.green() * rms_weight + color.green() * peak_weight) / alpha)
-        blue = round((rms.blue() * rms_weight + color.blue() * peak_weight) / alpha)
-        combined.append(QColor(red, green, blue, round(alpha * 255.0)))
-    extra = [rms, QColor(110, 238, 175, 200), QColor(255, 255, 255, 24),
-             QColor(255, 255, 255, 63), QColor(90, 98, 114, 24), QColor(110, 118, 136, 105)]
-    return [0] + [color.rgba() for color in peak + combined + extra]
+    return [QColor(color).rgb() for color in (WAVE_BACKGROUND, WAVE_PEAK, WAVE_MUTED)]
 
 
 # =====================================================================
@@ -653,14 +639,15 @@ class AudioOverviewMinimap(QWidget):
 
 
 # =====================================================================
-# 4. 核心画布：Audition 风格同步波形 + 频谱瀑布图编辑器
+# 4. 核心画布：同步波形 + 频谱图编辑器
 # =====================================================================
 class WaveformSpectralCanvas(QWidget):
     playheadMoved = pyqtSignal(float)
     playheadDragFinished = pyqtSignal()
     selectionChanged = pyqtSignal(float, float, float, float)  # t0, t1, f_low, f_high
-    selectionDragFinished = pyqtSignal()
+    selectionDragFinished = pyqtSignal(object)  # fixed time when dragging an existing edge
     viewportChanged = pyqtSignal(float, float)
+    spectralViewportChanged = pyqtSignal()
     previewGainChanged = pyqtSignal(float)
     gainCommitRequested = pyqtSignal(float, float, float)      # t0, t1, gain_db
     fadeChanged = pyqtSignal(float, float)                     # fade_in_sec, fade_out_sec
@@ -668,6 +655,7 @@ class WaveformSpectralCanvas(QWidget):
     spectralActionRequested = pyqtSignal(str, float, float, float, float)  # action, t0, t1, f_low, f_high
     spectralBrushApplied = pyqtSignal(list, float)        # [(t, freq), ...], radius_px 修复笔涂抹轨迹（已做本地视觉平滑）
     channelStateChanged = pyqtSignal(int, bool, bool)     # ch_idx, muted, phase_inverted
+    populateContextMenu = pyqtSignal(QMenu)
     markersChanged = pyqtSignal(list)                     # [{"time": float, "label": str}, ...]
     envelopeChanged = pyqtSignal(list)                    # [{"t": float, "db": float}, ...] 音量包络关键帧（按 t 升序）
 
@@ -683,20 +671,26 @@ class WaveformSpectralCanvas(QWidget):
         self._channels = 2
         self._peaks_min: list[list[float]] = [[], []]
         self._peaks_max: list[list[float]] = [[], []]
-        self._rms: list[list[float]] = [[], []]
-        self._wave_channels: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        self._wave_channels: list[tuple[np.ndarray, np.ndarray]] = []
+        self._waveform_samples: np.ndarray | None = None
         self._cache_wave_channels()
         self._spec_matrix: list[list[float]] = []  # [time_bins][freq_bins] 归一化 0.0~1.0
         self._spec_values: np.ndarray | None = None
         self._spec_image: QImage | None = None
+        self._spectrogram: Spectrogram | None = None
+        self._detail_spectrogram: Spectrogram | None = None
+        self._spectrum_images: tuple[QImage, ...] = ()
+        self._detail_images: tuple[QImage, ...] = ()
         self._spectrum_dirty = False
+        self._gain_wave_cache: QPixmap | None = None
 
         # 视图状态
         self._view_start = 0.0
         self._view_end = 10.0
         self._playhead = 0.0
         self._show_spectral = True
-        self._spectral_ratio = 0.44  # 频谱图占主画布高度比例
+        self._show_channels_separately = False
+        self._spectral_ratio = 0.50  # 默认与波形等高，可拖动分隔条调整
         self._spec_gain_boost = 0.0  # 仅视觉增强频谱底噪可见度 (dB)
         self._stretch_preview_ratio = 100.0  # 时间伸缩速率预览（画布投射目标落点虚线）
 
@@ -724,6 +718,8 @@ class WaveformSpectralCanvas(QWidget):
         self._drag_mode = ""  # "select_wave", "select_spec", "sel_left", "sel_right", "ruler_nav", "splitter", "gain_hud", "fade_in", "fade_out", "pan", "brush_paint"
         self._drag_anchor_t = 0.0
         self._drag_anchor_f = 0.0
+        self._spectral_drag_channel = 0
+        self._selection_press_x = 0.0
         self._selection_fixed_edge = 0.0
         self._drag_start_y = 0.0
         self._drag_start_gain = 0.0
@@ -782,18 +778,22 @@ class WaveformSpectralCanvas(QWidget):
         peaks_min: list[list[float]],
         peaks_max: list[list[float]],
         rms: list[list[float]],
-        spec_matrix: list[list[float]] | None = None,
+        spec_matrix: Spectrogram | list[list[float]] | None = None,
         *,
         preserve_edit_view: bool = False,
     ):
         self._sample_rate = max(8000, sample_rate)
         self._duration = max(0.01, duration_sec)
         self._channels = max(1, len(peaks_max))
+        extra_channels = max(0, self._channels - len(self._ch_muted))
+        self._ch_muted.extend([False] * extra_channels)
+        self._ch_phase_inv.extend([False] * extra_channels)
         self._peaks_min = peaks_min
         self._peaks_max = peaks_max
-        self._rms = rms
         self._cache_wave_channels()
         if not preserve_edit_view:
+            if self._drag_mode == "gain_hud":
+                self._drag_mode = ""
             self._view_start = 0.0
             self._view_end = self._duration
             self._playhead = 0.0
@@ -807,21 +807,43 @@ class WaveformSpectralCanvas(QWidget):
             self._env_hover_seg = -1
             self._env_selected_idx = -1
 
-        if spec_matrix and spec_matrix is not self._spec_matrix:
-            self._spec_matrix = spec_matrix
-            self._spec_values = None
-            self._rebuild_spectrogram_image()
-        elif not spec_matrix:
-            self._spec_matrix = []
-            self._spec_values = None
-            self._spec_image = None
+        self.setSpectrogram(spec_matrix)
         self._invalidate_cache()
 
+    def setSpectrogram(self, data: Spectrogram | list[list[float]] | None) -> None:
+        spectrum = data if isinstance(data, Spectrogram) else None
+        matrix = data if isinstance(data, list) else None
+        if spectrum is self._spectrogram and (matrix is self._spec_matrix or not (matrix or self._spec_matrix)):
+            return
+        self._spectrogram = spectrum
+        self._detail_spectrogram = None
+        self._detail_images = ()
+        self._spec_matrix = matrix or []
+        self._spec_values = None
+        self._rebuild_spectrogram_image()
+        self._invalidate_spectrogram()
+
+    def setDetailedSpectrogram(self, detail: Spectrogram) -> None:
+        self._detail_spectrogram = detail
+        self._detail_images = self._spectrogram_images(detail)
+        self._invalidate_spectrogram()
+
     def _cache_wave_channels(self) -> None:
-        self._wave_channels = [
-            (np.asarray(high), np.asarray(low), np.asarray(self._rms[ch] if ch < len(self._rms) else high))
-            for ch, (high, low) in enumerate(zip(self._peaks_max, self._peaks_min))
-        ]
+        self._wave_channels = [(np.asarray(high), np.asarray(low))
+                               for high, low in zip(self._peaks_max, self._peaks_min)]
+
+    def setWaveformSamples(self, samples: np.ndarray | None) -> None:
+        if samples is not self._waveform_samples:
+            self._waveform_samples = samples
+            self._invalidate_cache()
+
+    def set_channels_separate(self, separate: bool) -> None:
+        if separate != self._show_channels_separately:
+            self.cancel_fade_drag()
+            self._show_channels_separately = separate
+            if self._spectrogram is not None:
+                self._rebuild_spectrogram_image()
+            self._invalidate_cache()
 
     def setSpectralVisible(self, visible: bool):
         if visible != self._show_spectral:
@@ -838,7 +860,8 @@ class WaveformSpectralCanvas(QWidget):
     def _invalidate_spectrogram(self) -> None:
         if self._show_spectral:
             self._spectrum_dirty = True
-            self.update(self._wave_and_spec_rects()[1].toAlignedRect())
+            pane = self._wave_and_spec_rects()[1]
+            self.update(pane.adjusted(-pane.left(), 0, 0, 0).toAlignedRect())
 
     def setViewport(self, start_sec: float, end_sec: float):
         start = max(0.0, min(self._duration - 0.005, start_sec))
@@ -846,6 +869,7 @@ class WaveformSpectralCanvas(QWidget):
         if (start, end) != (self._view_start, self._view_end):
             self._view_start, self._view_end = start, end
             self._invalidate_cache()
+            self.spectralViewportChanged.emit()
 
     def setPlayhead(self, sec: float):
         sec = max(0.0, min(self._duration, sec))
@@ -861,19 +885,14 @@ class WaveformSpectralCanvas(QWidget):
         value = max(-36.0, min(24.0, round(gain_db, 1)))
         if value != self._preview_gain_db:
             self._preview_gain_db = value
-            self._invalidate_cache()
+            self._gain_wave_cache = None
+            self.update(self._wave_and_spec_rects()[0].toAlignedRect())
 
     def setEditChannel(self, ch: int):
         """设置增益编辑目标声道：-1=全部(L+R)，0=左声道，1=右声道"""
         if ch != self._edit_channel:
             self._edit_channel = ch
             self._invalidate_cache()
-
-    def _channel_gain_db(self, ch: int) -> float:
-        """返回该声道当前生效的预览增益（非目标声道恒为 0dB）"""
-        if self._edit_channel == -1 or self._edit_channel == ch:
-            return self._preview_gain_db
-        return 0.0
 
     def setFadeCurveType(self, curve_type: str) -> None:
         self.setFadeCurves(curve_type, curve_type)
@@ -910,6 +929,8 @@ class WaveformSpectralCanvas(QWidget):
             self.update()
 
     def clearSelection(self):
+        if self._drag_mode == "gain_hud":
+            self._drag_mode = ""
         self._sel_t0 = -1.0
         self._sel_t1 = -1.0
         self._is_2d_spectral_sel = False
@@ -944,12 +965,12 @@ class WaveformSpectralCanvas(QWidget):
     def is_selecting(self) -> bool:
         return self._drag_mode in ("select_wave", "select_spec", "sel_left", "sel_right")
 
-    def _notify_selection_changed(self) -> None:
+    def _notify_selection_changed(self, dirty: QRegion | None = None) -> None:
         self.selectionChanged.emit(self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high)
-        if abs(self._preview_gain_db) >= 0.05:
-            self._invalidate_cache()
-        else:
+        if dirty is None:
             self.update()
+        else:
+            self.update(dirty)
 
     def getSelection(self) -> tuple[float, float, float, float]:
         if self._sel_t1 > self._sel_t0 >= 0.0:
@@ -1145,7 +1166,7 @@ class WaveformSpectralCanvas(QWidget):
         return False
 
     def _apply_local_brush_heal(self, stroke: list[tuple[float, float]]):
-        """对语图矩阵执行局部视觉平滑修复，提供即时视觉反馈"""
+        """对频谱图矩阵执行局部视觉平滑修复，提供即时视觉反馈"""
         if not self._spec_matrix or not self._spec_matrix[0] or not stroke:
             return
         t_bins = len(self._spec_matrix)
@@ -1166,9 +1187,15 @@ class WaveformSpectralCanvas(QWidget):
         self._invalidate_spectrogram()
 
     # -----------------------------------------------------------------
-    # 语图 QImage 缓存构建（零外部依赖的高速像素缓冲）
+    # 频谱图 QImage 缓存构建（零外部依赖的高速像素缓冲）
     # -----------------------------------------------------------------
     def _rebuild_spectrogram_image(self):
+        if self._spectrogram is not None:
+            self._spectrum_images = self._spectrogram_images(self._spectrogram)
+            self._detail_images = self._spectrogram_images(self._detail_spectrogram)
+            self._spec_image = None
+            return
+        self._spectrum_images = ()
         if not self._spec_matrix or not self._spec_matrix[0]:
             self._spec_image = None
             return
@@ -1179,6 +1206,25 @@ class WaveformSpectralCanvas(QWidget):
         height, width = indices.shape
         img = QImage(pixels.tobytes(), width, height, width * 3, QImage.Format.Format_RGB888)
         self._spec_image = img.convertToFormat(QImage.Format.Format_RGB32)
+
+    def _spectrogram_images(self, spectrum: Spectrogram | None) -> tuple[QImage, ...]:
+        if spectrum is None:
+            return ()
+        boost = round(self._spec_gain_boost * 255.0 / -DB_FLOOR)
+        colors = [QColor(*SPEC_LUT[max(0, min(255, i + boost))]).rgb() for i in range(256)]
+        layers = spectrum.pixels
+        if not self._show_channels_separately and len(layers) > 1:
+            layers = np.max(layers, axis=0, keepdims=True)
+        images = []
+        for pixels in layers:
+            rows, columns = pixels.shape
+            stride = (columns + 3) & ~3
+            if columns != stride:
+                pixels = np.pad(pixels, ((0, 0), (0, stride - columns)))
+            image = QImage(pixels.tobytes(), columns, rows, stride, QImage.Format.Format_Indexed8)
+            image.setColorTable(colors)
+            images.append(image.convertToFormat(QImage.Format.Format_RGB32))
+        return tuple(images)
 
     # -----------------------------------------------------------------
     # 坐标映射工具
@@ -1201,11 +1247,49 @@ class WaveformSpectralCanvas(QWidget):
         body = self._body_rect()
         if not self._show_spectral:
             return body, QRectF(), -1.0
-        # 强制取整，保证分割条上下两条黑线落在精确物理像素上
+        # Keep both panes inside the body even in a short dock.
+        min_pane = min(42, body.height() * 0.5)
         split_y = float(round(body.top() + body.height() * (1.0 - self._spectral_ratio)))
-        wave_r = QRectF(body.left(), body.top(), body.width(), max(40.0, split_y - body.top() - 2.0))
-        spec_r = QRectF(body.left(), split_y + 2.0, body.width(), max(40.0, body.bottom() - split_y - 2.0))
+        split_y = max(body.top() + min_pane, min(body.bottom() - min_pane, split_y))
+        wave_r = QRectF(body.left(), body.top(), body.width(), split_y - body.top() - 2.0)
+        spec_r = QRectF(body.left(), split_y + 2.0, body.width(), body.bottom() - split_y - 2.0)
         return wave_r, spec_r, split_y
+
+    def _channel_pills(self, wave: QRectF) -> tuple[QRectF, ...]:
+        count = len(self._wave_channels)
+        if not count:
+            return ()
+        lanes = self._waveform_lanes(wave)
+        if len(lanes) > 1:
+            height = min(18.0, lanes[0].height() - 2.0)
+            return tuple(QRectF(6.0, lane.center().y() - height * 0.5, self._ml - 12.0, height)
+                         for lane in lanes)
+        step = min(18.0, (wave.height() - 2.0) / count)
+        top = wave.center().y() - (count * step - 2.0) * 0.5
+        return tuple(QRectF(6.0, top + ch * step, self._ml - 12.0, step - 2.0)
+                     for ch in range(count))
+
+    def _waveform_lanes(self, wave: QRectF) -> tuple[QRectF, ...]:
+        count = len(self._wave_channels)
+        if not self._show_channels_separately or count < 2:
+            return (wave,)
+        height = wave.height() / count
+        return tuple(QRectF(wave.left(), wave.top() + ch * height, wave.width(), height)
+                     for ch in range(count))
+
+    def _channel_is_muted(self, channel: int) -> bool:
+        return channel < len(self._ch_muted) and self._ch_muted[channel]
+
+    def _update_drag_gain(self, y: float) -> None:
+        gain = max(-36.0, min(24.0, round(self._drag_start_gain + (self._drag_start_y - y) * 0.15, 1)))
+        if gain != self._preview_gain_db:
+            self.setPreviewGain(gain)
+            self.previewGainChanged.emit(gain)
+
+    def _commit_selection_gain(self) -> None:
+        t0, t1, _, _ = self.getSelection()
+        if self.selection_gain_editable and t1 > t0 >= 0.0 and abs(self._preview_gain_db) >= 0.05:
+            self.gainCommitRequested.emit(t0, t1, self._preview_gain_db)
 
     def _time_to_x(self, sec: float, rect: QRectF) -> float:
         span = max(1e-6, self._view_end - self._view_start)
@@ -1219,13 +1303,67 @@ class WaveformSpectralCanvas(QWidget):
     def _freq_to_spec_y(self, freq: float, spec_r: QRectF) -> float:
         f_min, f_max = 20.0, max(1000.0, self._nyquist())
         f = max(f_min, min(f_max, freq))
-        norm = math.log10(f / f_min) / math.log10(f_max / f_min)
+        norm = (frequency_fraction(f, f_max) if self._spectrogram is not None
+                else math.log(f / f_min) / math.log(f_max / f_min))
         return spec_r.bottom() - norm * spec_r.height()
 
     def _spec_y_to_freq(self, y: float, spec_r: QRectF) -> float:
         f_min, f_max = 20.0, max(1000.0, self._nyquist())
         norm = max(0.0, min(1.0, (spec_r.bottom() - y) / max(1.0, spec_r.height())))
+        if self._spectrogram is not None:
+            return fraction_frequency(norm, f_max)
         return f_min * ((f_max / f_min) ** norm)
+
+    def _spectral_bands(self, pane: QRectF) -> tuple[QRectF, ...]:
+        if not pane.isValid():
+            return ()
+        count = max(1, len(self._spectrum_images))
+        height = pane.height() / count
+        return tuple(QRectF(pane.left(), pane.top() + i * height, pane.width(), height) for i in range(count))
+
+    def _spectral_channel_at(self, y: float, pane: QRectF) -> int:
+        count = max(1, len(self._spectrum_images))
+        index = int((y - pane.top()) / pane.height() * count)
+        return max(0, min(count - 1, index))
+
+    def _selection_edge_at(self, pos: QPointF, body: QRectF) -> str | None:
+        if not (self._sel_t1 > self._sel_t0 >= 0.0 and body.contains(pos)):
+            return None
+        left = abs(pos.x() - self._time_to_x(self._sel_t0, body))
+        right = abs(pos.x() - self._time_to_x(self._sel_t1, body))
+        if min(left, right) <= 6.0:
+            return "sel_left" if left < right else "sel_right"
+        return None
+
+    def _move_selection(self, pos: QPointF, wave: QRectF, spectrum: QRectF) -> None:
+        old = self._selection_rects(wave, spectrum)
+        old_values = self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high
+        if self._drag_mode in ("sel_left", "sel_right"):
+            edge_x = pos.x() - self._selection_press_x
+            time = self._x_to_time(edge_x, wave)
+            self._sel_t0, self._sel_t1 = sorted((self._selection_fixed_edge, time))
+        else:
+            time = self._x_to_time(pos.x(), wave)
+            self._sel_t0, self._sel_t1 = sorted((self._drag_anchor_t, time))
+            if self._drag_mode == "select_spec" and spectrum.isValid():
+                bands = self._spectral_bands(spectrum)
+                band = bands[min(self._spectral_drag_channel, len(bands) - 1)]
+                freq = self._spec_y_to_freq(pos.y(), band)
+                self._sel_f_low, self._sel_f_high = sorted((self._drag_anchor_f, freq))
+        if old_values == (self._sel_t0, self._sel_t1, self._sel_f_low, self._sel_f_high):
+            return
+        if self._stretch_preview_ratio != 100.0:
+            self._notify_selection_changed()
+            return
+        new = self._selection_rects(wave, spectrum)
+        old_fill, new_fill, borders = QRegion(), QRegion(), QRegion()
+        for rects, fill in ((old, old_fill), (new, new_fill)):
+            for rect in rects:
+                fill += QRegion(rect.toAlignedRect())
+                outer = QRegion(rect.adjusted(-2, -2, 2, 2).toAlignedRect())
+                inner = rect.adjusted(2, 2, -2, -2)
+                borders += outer.subtracted(QRegion(inner.toAlignedRect())) if inner.isValid() else outer
+        self._notify_selection_changed(old_fill.xored(new_fill).united(borders))
 
     def brush_stroke_payload(self, stroke, radius_px: float) -> dict:
         """§5 画笔：像素域笔迹 → 数据域载荷（提交前转换，缩放/重开可重现）。
@@ -1233,17 +1371,25 @@ class WaveformSpectralCanvas(QWidget):
         返回 ``{"strokes": [(t 秒, hz), ...], "time_radius_s": …,
         "bandwidth_oct": …}``；频谱面板不可见时按当前几何近似换算。
         """
-        import math as _math
         _, spec_r, _ = self._wave_and_spec_rects()
+        if spec_r.isValid():
+            bands = self._spectral_bands(spec_r)
+            spec_r = bands[min(self._spectral_drag_channel, len(bands) - 1)]
         width = max(1.0, spec_r.width() if not spec_r.isNull()
                     else max(1.0, self.width() - self._ml - self._mr))
         height = max(1.0, spec_r.height() if not spec_r.isNull() else 100.0)
         span = max(1e-6, self._view_end - self._view_start)
         time_radius_s = max(0.002, float(radius_px) / max(1.0, width / span))
-        f_min, f_max = 20.0, max(1000.0, self._nyquist())
-        decades_per_px = _math.log10(f_max / f_min) / height
-        bandwidth_oct = max(0.02, float(radius_px) * decades_per_px
-                            * _math.log2(10.0))
+        if spec_r.isValid() and stroke:
+            half_bands = []
+            for _time, frequency in stroke:
+                y = self._freq_to_spec_y(frequency, spec_r)
+                low = self._spec_y_to_freq(y + radius_px, spec_r)
+                high = self._spec_y_to_freq(y - radius_px, spec_r)
+                half_bands.append(0.5 * math.log2(high / low))
+            bandwidth_oct = max(0.02, float(np.median(half_bands)))
+        else:
+            bandwidth_oct = max(0.02, radius_px / height * math.log2(self._nyquist() / 20.0))
         return {
             "strokes": [(float(t), float(f)) for t, f in stroke],
             "time_radius_s": time_radius_s,
@@ -1256,6 +1402,13 @@ class WaveformSpectralCanvas(QWidget):
     def leaveEvent(self, event):
         self._mouse_pos = None
         self.update()
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        # Mouse presses already dispatch to the canvas or a region-specific menu.
+        # Qt posts a separate context event that would otherwise reach the dock.
+        event.accept()
+        if event.reason() == QContextMenuEvent.Reason.Keyboard:
+            self.show_context_menu(event.globalPos())
 
     def mousePressEvent(self, event):
         if self._drag_mode in {"fade_in", "fade_out", "fade_curve"}:
@@ -1274,6 +1427,18 @@ class WaveformSpectralCanvas(QWidget):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
 
+        if event.button() == Qt.MouseButton.LeftButton and self.selection_gain_editable:
+            if self._gain_commit_rect.contains(pos):
+                self._commit_selection_gain()
+                return
+            if self._gain_hud_rect.contains(pos):
+                self._drag_mode = "gain_hud"
+                self._drag_start_y = pos.y()
+                self._drag_start_gain = self._preview_gain_db
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                self.update(self._gain_hud_rect.toAlignedRect())
+                return
+
         if event.button() == Qt.MouseButton.LeftButton and self.fade_controls_editable:
             self._mouse_pos = pos
             if end := self._fade_tab_at(pos, wave_r):
@@ -1288,23 +1453,18 @@ class WaveformSpectralCanvas(QWidget):
                 self.setCursor(Qt.CursorShape.SizeVerCursor)
                 return
 
-        # 左侧声道轨头交互：点击 CH1/CH2 静音，右键反相/独奏
-        if pos.x() < self._ml and wave_r.top() <= pos.y() <= wave_r.bottom():
-            if not self.channel_monitor_enabled:
-                return
-            ch_count = max(1, len(self._peaks_max))
-            ch_h = wave_r.height() / ch_count
-            ch = min(ch_count - 1, int((pos.y() - wave_r.top()) / ch_h))
-            while len(self._ch_muted) <= ch:
-                self._ch_muted.append(False)
-                self._ch_phase_inv.append(False)
-            if event.button() == Qt.MouseButton.LeftButton:
+        # 左侧声道按钮：点击静音，右键反相/独奏。
+        if (self.channel_monitor_enabled and pos.x() < self._ml
+                and wave_r.top() <= pos.y() <= wave_r.bottom()):
+            ch = next((i for i, pill in enumerate(self._channel_pills(wave_r)) if pill.contains(pos)), None)
+            if ch is not None and event.button() == Qt.MouseButton.LeftButton:
                 self._ch_muted[ch] = not self._ch_muted[ch]
                 self.channelStateChanged.emit(ch, self._ch_muted[ch], self._ch_phase_inv[ch])
                 self._invalidate_cache()
-            elif event.button() == Qt.MouseButton.RightButton:
+                return
+            if ch is not None and event.button() == Qt.MouseButton.RightButton:
                 self._show_channel_menu(ch, event.globalPosition().toPoint())
-            return
+                return
 
         # 右键包络节点/曲线：快捷归零 / 删除 / 整体重置
         if (event.button() == Qt.MouseButton.RightButton and self.project_edits_enabled
@@ -1326,7 +1486,7 @@ class WaveformSpectralCanvas(QWidget):
                     menu.addSeparator()
                 act_clear = menu.addAction("重置全部音量包络线")
                 act_clear.triggered.connect(self.resetEnvelope)
-                menu.exec(event.globalPosition().toPoint())
+                self._open_context_menu(menu, event.globalPosition().toPoint())
                 return
 
         # 右键标尺：添加或清除标记点
@@ -1338,27 +1498,14 @@ class WaveformSpectralCanvas(QWidget):
             menu.addAction(f"在此处插入标记点 ({format_timecode(t)})", lambda: self.addMarker(t))
             if self._markers:
                 menu.addAction("清除全部标记点", self.clearMarkers)
-            menu.exec(event.globalPosition().toPoint())
+            self._open_context_menu(menu, event.globalPosition().toPoint())
             return
 
         if event.button() == Qt.MouseButton.RightButton:
-            if self._sel_t1 > self._sel_t0 >= 0.0 and body.contains(pos):
-                self._show_selection_context_menu(event.globalPosition().toPoint())
+            self.show_context_menu(event.globalPosition().toPoint())
             return
 
         if event.button() != Qt.MouseButton.LeftButton:
-            return
-
-        # 1. 悬浮增益 HUD
-        if self.selection_gain_editable and self._gain_commit_rect.contains(pos):
-            t0, t1, _, _ = self.getSelection()
-            self.gainCommitRequested.emit(t0, t1, self._preview_gain_db)
-            return
-        if self.selection_gain_editable and self._gain_hud_rect.contains(pos):
-            self._drag_mode = "gain_hud"
-            self._drag_start_y = pos.y()
-            self._drag_start_gain = self._preview_gain_db
-            self.setCursor(Qt.CursorShape.SizeVerCursor)
             return
 
         # 2. 拖拽分割线
@@ -1463,34 +1610,28 @@ class WaveformSpectralCanvas(QWidget):
                 self._env_selected_idx = -1
                 self.update()
 
-        # 5. 微调已有选区的左右边缘
-        if self._sel_t1 > self._sel_t0 >= 0.0 and body.contains(pos):
-            sx0 = self._time_to_x(self._sel_t0, body)
-            sx1 = self._time_to_x(self._sel_t1, body)
-            if abs(pos.x() - sx0) <= 6.0:
-                self._drag_mode = "sel_left"
-                self._selection_fixed_edge = self._sel_t1
-                return
-            if abs(pos.x() - sx1) <= 6.0:
-                self._drag_mode = "sel_right"
-                self._selection_fixed_edge = self._sel_t0
-                return
-
-        # 5.5 抓取波形区中的红色播放头拖拽定位（±5px 热区；
-        #     选区边缘与包络节点已在上序分支优先命中，避免抢走精细调节手势）
-        if (event.button() == Qt.MouseButton.LeftButton and body.contains(pos)
-                and abs(pos.x() - self._time_to_x(self._playhead, body)) <= 5.0):
-            self._drag_mode = "playhead"
-            self._playhead = max(0.0, min(self._duration, self._x_to_time(pos.x(), body)))
-            self.playheadMoved.emit(self._playhead)
-            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        edge = self._selection_edge_at(pos, body)
+        if (edge and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                and not (self._tool_mode == "brush" and spec_r.contains(pos))):
+            self._drag_mode = edge
+            moving, fixed = ((self._sel_t0, self._sel_t1) if edge == "sel_left"
+                             else (self._sel_t1, self._sel_t0))
+            self._selection_fixed_edge = fixed
+            self._selection_press_x = pos.x() - self._time_to_x(moving, body)
             self.update()
             return
 
         # 6. 在波形区拖拽 -> 建立全频段段落选区
         if wave_r.contains(pos):
             t = self._x_to_time(pos.x(), wave_r)
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                anchor = self._playhead
+                if self._sel_t1 > self._sel_t0 >= 0.0:
+                    anchor = self._sel_t1 if abs(t - self._sel_t0) < abs(t - self._sel_t1) else self._sel_t0
+                self.setSelection(anchor, t)
+                return
             self._drag_mode = "select_wave"
+            self._selection_press_x = pos.x()
             self._drag_anchor_t = t
             self._sel_t0 = t
             self._sel_t1 = t
@@ -1502,16 +1643,19 @@ class WaveformSpectralCanvas(QWidget):
             self._notify_selection_changed()
             return
 
-        # 7. 在语图区拖拽 -> 修复画笔涂抹 OR 建立 2D 频谱矩形选区
+        # 7. 在频谱图区拖拽 -> 修复画笔涂抹 OR 建立 2D 频谱矩形选区
         if self._show_spectral and spec_r.contains(pos):
             t = self._x_to_time(pos.x(), spec_r)
-            f = self._spec_y_to_freq(pos.y(), spec_r)
+            self._spectral_drag_channel = self._spectral_channel_at(pos.y(), spec_r)
+            band = self._spectral_bands(spec_r)[self._spectral_drag_channel]
+            f = self._spec_y_to_freq(pos.y(), band)
             if self._tool_mode == "brush":
                 self._drag_mode = "brush_paint"
                 self._brush_stroke = [(t, f)]
                 self.update()
                 return
             self._drag_mode = "select_spec"
+            self._selection_press_x = pos.x()
             self._drag_anchor_t = t
             self._drag_anchor_f = f
             self._sel_t0 = t
@@ -1531,6 +1675,12 @@ class WaveformSpectralCanvas(QWidget):
         wave_r, spec_r, split_y = self._wave_and_spec_rects()
 
         if not self._drag_mode:
+            if self.selection_gain_editable and self._gain_hud_rect.contains(pos):
+                cursor = (Qt.CursorShape.PointingHandCursor if self._gain_commit_rect.contains(pos)
+                          else Qt.CursorShape.SizeVerCursor)
+                self.setCursor(cursor)
+                self.update()
+                return
             if self.fade_controls_editable and self._fade_tab_at(pos, wave_r):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
                 self.update()
@@ -1556,20 +1706,15 @@ class WaveformSpectralCanvas(QWidget):
                     self.update()
                     return
             if pos.x() < self._ml and wave_r.top() <= pos.y() <= wave_r.bottom():
-                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                on_pill = self.channel_monitor_enabled and any(
+                    pill.contains(pos) for pill in self._channel_pills(wave_r))
+                self.setCursor(Qt.CursorShape.PointingHandCursor if on_pill else Qt.CursorShape.ArrowCursor)
             elif ruler.contains(pos):
                 self.setCursor(Qt.CursorShape.SizeAllCursor)
-            elif self._gain_hud_rect.isValid() and self._gain_hud_rect.contains(pos):
-                self.setCursor(Qt.CursorShape.SizeVerCursor)
             elif self._show_spectral and abs(pos.y() - split_y) <= 4.5 and body.left() <= pos.x() <= body.right():
                 self.setCursor(Qt.CursorShape.SplitVCursor)
-            elif self._sel_t1 > self._sel_t0 >= 0.0 and body.contains(pos):
-                sx0 = self._time_to_x(self._sel_t0, body)
-                sx1 = self._time_to_x(self._sel_t1, body)
-                if abs(pos.x() - sx0) <= 6.0 or abs(pos.x() - sx1) <= 6.0:
-                    self.setCursor(Qt.CursorShape.SizeHorCursor)
-                else:
-                    self.setCursor(Qt.CursorShape.IBeamCursor)
+            elif self._selection_edge_at(pos, body) and not (self._tool_mode == "brush" and spec_r.contains(pos)):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
             elif body.contains(pos):
                 self.setCursor(Qt.CursorShape.BlankCursor if (self._tool_mode == "brush" and spec_r.contains(pos)) else Qt.CursorShape.IBeamCursor)
             else:
@@ -1602,7 +1747,8 @@ class WaveformSpectralCanvas(QWidget):
 
         if self._drag_mode == "brush_paint" and self._show_spectral:
             t = self._x_to_time(pos.x(), spec_r)
-            f = self._spec_y_to_freq(pos.y(), spec_r)
+            bands = self._spectral_bands(spec_r)
+            f = self._spec_y_to_freq(pos.y(), bands[min(self._spectral_drag_channel, len(bands) - 1)])
             # 最小时间间距过滤，避免鼠标停顿堆积重复点
             if not self._brush_stroke or abs(t - self._brush_stroke[-1][0]) > 0.004:
                 self._brush_stroke.append((t, f))
@@ -1624,11 +1770,8 @@ class WaveformSpectralCanvas(QWidget):
             self._invalidate_cache()
 
         elif self._drag_mode == "gain_hud":
-            dy = self._drag_start_y - pos.y()
-            new_g = max(-36.0, min(24.0, round(self._drag_start_gain + dy * 0.15, 1)))
-            if new_g != self._preview_gain_db:
-                self.setPreviewGain(new_g)
-                self.previewGainChanged.emit(new_g)
+            if self.selection_gain_editable:
+                self._update_drag_gain(pos.y())
 
         elif self._drag_mode == "fade_in":
             t = max(0.0, min(self._duration - self._fade_out_sec, self._x_to_time(pos.x(), wave_r)))
@@ -1654,25 +1797,8 @@ class WaveformSpectralCanvas(QWidget):
                 self._fade_curve_preview = curve
                 self._refresh_processing_overlay()
 
-        elif self._drag_mode in ("sel_left", "sel_right"):
-            t = self._apply_magnetic_snap(self._x_to_time(pos.x(), body), body)
-            self._sel_t0, self._sel_t1 = sorted((t, self._selection_fixed_edge))
-            self._notify_selection_changed()
-
-        elif self._drag_mode == "select_wave":
-            t = self._x_to_time(pos.x(), body)
-            self._sel_t0 = min(self._drag_anchor_t, t)
-            self._sel_t1 = max(self._drag_anchor_t, t)
-            self._notify_selection_changed()
-
-        elif self._drag_mode == "select_spec" and self._show_spectral:
-            t = self._x_to_time(pos.x(), spec_r)
-            f = self._spec_y_to_freq(pos.y(), spec_r)
-            self._sel_t0 = min(self._drag_anchor_t, t)
-            self._sel_t1 = max(self._drag_anchor_t, t)
-            self._sel_f_low = min(self._drag_anchor_f, f)
-            self._sel_f_high = max(self._drag_anchor_f, f)
-            self._notify_selection_changed()
+        elif self.is_selecting():
+            self._move_selection(pos, wave_r, spec_r)
 
         elif self._drag_mode == "env_drag" and self._env_drag_indices:
             # Shift 锁单轴，Alt 0.1dB 精调；单点支持时间+电平双维调节，多点纯垂直平移
@@ -1718,6 +1844,14 @@ class WaveformSpectralCanvas(QWidget):
         button = Qt.MouseButton.MiddleButton if self._drag_mode == "pan" else Qt.MouseButton.LeftButton
         if event.button() != button:
             return
+        if self._drag_mode == "gain_hud":
+            self._drag_mode = ""
+            if self.selection_gain_editable:
+                self._update_drag_gain(event.position().y())
+                if self._preview_gain_db != self._drag_start_gain:
+                    self._commit_selection_gain()
+            self.update(self._wave_and_spec_rects()[0].toAlignedRect())
+            return
         if self._drag_mode == "fade_curve" and self._fade_curve_drag is not None:
             end, _, _, _ = self._fade_curve_drag
             curve = self._fade_curve_preview
@@ -1731,6 +1865,17 @@ class WaveformSpectralCanvas(QWidget):
             return
         selecting = self.is_selecting()
         seeking = self._drag_mode in ("playhead", "select_wave", "select_spec")
+        fixed_edge = None
+        if selecting:
+            wave, spectrum, _ = self._wave_and_spec_rects()
+            self._move_selection(event.position(), wave, spectrum)
+        if self._drag_mode in ("sel_left", "sel_right"):
+            fixed_edge = self._selection_fixed_edge
+            time = self._x_to_time(event.position().x() - self._selection_press_x, wave)
+            snapped = self._apply_magnetic_snap(time, wave)
+            if snapped != time and snapped != self._selection_fixed_edge:
+                self._sel_t0, self._sel_t1 = sorted((snapped, self._selection_fixed_edge))
+                self._notify_selection_changed()
         if self._drag_mode == "ruler_nav" and not self._ruler_dragged:
             self._playhead = self._ruler_anchor_sec
             self.playheadMoved.emit(self._playhead)
@@ -1754,11 +1899,12 @@ class WaveformSpectralCanvas(QWidget):
             self._refresh_processing_overlay()
         elif self._drag_mode in ("select_wave", "select_spec"):
             # 若只是极短点击而非拖拽选区，则清空选区仅保留播放头定位
-            if abs(self._sel_t1 - self._sel_t0) < (self._view_end - self._view_start) * 0.003:
+            if abs(event.position().x() - self._selection_press_x) < 1.0:
                 self.clearSelection()
         self._drag_mode = ""
         if selecting:
-            self.selectionDragFinished.emit()
+            self.selectionDragFinished.emit(fixed_edge)
+            self.update()
         if seeking:
             self.playheadDragFinished.emit()
 
@@ -1771,20 +1917,25 @@ class WaveformSpectralCanvas(QWidget):
         if len(self._peaks_max) > 1:
             solo_act = menu.addAction(f"仅独奏 CH{ch+1} (静音其他声道)")
             solo_act.triggered.connect(lambda: self._solo_channel(ch))
-        menu.exec(global_pos)
+        self._open_context_menu(menu, global_pos)
 
     def _toggle_ch_phase(self, ch: int):
         self._ch_phase_inv[ch] = not self._ch_phase_inv[ch]
         self.channelStateChanged.emit(ch, self._ch_muted[ch], self._ch_phase_inv[ch])
-        self.update()
+        self._invalidate_cache()
 
     def _solo_channel(self, ch: int):
-        for i in range(len(self._ch_muted)):
-            self._ch_muted[i] = (i != ch)
+        channel_count = len(self._wave_channels)
+        self._ch_muted[:channel_count] = [i != ch for i in range(channel_count)]
+        for i in range(channel_count):
             self.channelStateChanged.emit(i, self._ch_muted[i], self._ch_phase_inv[i])
-        self.update()
+        self._invalidate_cache()
 
     def mouseDoubleClickEvent(self, event):
+        if (event.button() == Qt.MouseButton.LeftButton and self.selection_gain_editable
+                and self._gain_hud_rect.contains(event.position())):
+            self.mousePressEvent(event)
+            return
         # 双击包络节点 -> 电平归零 0.0 dB（优先于全选手势，不误触）
         if event.button() == Qt.MouseButton.LeftButton and self.project_edits_enabled and self._env_enabled:
             wave_r, _, _ = self._wave_and_spec_rects()
@@ -1849,7 +2000,7 @@ class WaveformSpectralCanvas(QWidget):
         if previous != (self._view_start, self._view_end):
             self.viewportChanged.emit(self._view_start, self._view_end)
 
-    def _show_selection_context_menu(self, global_pos):
+    def show_context_menu(self, global_pos: QPoint) -> None:
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -1863,8 +2014,39 @@ class WaveformSpectralCanvas(QWidget):
             QMenu::item { padding: 5px 16px; border-radius: 3px; }
             QMenu::item:selected { background-color: #2A2E3A; color: #28D8F0; }
         """)
+
+        modes = QActionGroup(menu)
+        modes.setExclusive(True)
+        multichannel = len(self._wave_channels) > 1
+        for split, label in (
+            (False, I18N.tr("mixer.clip_editor.menu.merge_channels", "Show combined channels")),
+            (True, I18N.tr("mixer.clip_editor.menu.split_channels", "Show separate channels")),
+        ):
+            action = menu.addAction(label)
+            action.setObjectName("splitDisplayChannels" if split else "mergeDisplayChannels")
+            modes.addAction(action)
+            action.setCheckable(True)
+            action.setChecked(split == (multichannel and self._show_channels_separately))
+            action.setEnabled(multichannel)
+            action.triggered.connect(lambda _checked, separate=split: self.set_channels_separate(separate))
+
+        menu.addSeparator()
+        menu.addAction(I18N.tr("mixer.clip_editor.menu.select_all", "Select all"), self.selectAll)
+        has_selection = self._sel_t1 > self._sel_t0 >= 0.0
+        clear = menu.addAction(I18N.tr("mixer.clip_editor.menu.clear_selection", "Clear selection"), self.clearSelection)
+        clear.setEnabled(has_selection)
+        self._add_selection_menu_actions(menu, has_selection)
+        self._open_context_menu(menu, global_pos)
+
+    def _open_context_menu(self, menu: QMenu, global_pos: QPoint) -> None:
+        self.populateContextMenu.emit(menu)
+        menu.exec(global_pos)
+        menu.deleteLater()
+
+    def _add_selection_menu_actions(self, menu: QMenu, has_selection: bool) -> None:
         t0, t1, fl, fh = self.getSelection()
-        if self._is_2d_spectral_sel:
+        menu.addSeparator()
+        if has_selection and self._is_2d_spectral_sel and self._show_spectral:
             act_heal = menu.addAction(f"频谱修复 / 消除选区杂音 ({format_freq_short(fl)} - {format_freq_short(fh)})")
             act_heal.triggered.connect(lambda: self.spectralActionRequested.emit("heal", t0, t1, fl, fh))
             act_heal.setEnabled(self.project_edits_enabled)
@@ -1876,19 +2058,25 @@ class WaveformSpectralCanvas(QWidget):
             act_solo.setEnabled(self.channel_monitor_enabled)
             menu.addSeparator()
 
-        act_sil = menu.addAction("静音当前段落 (Silence)")
-        act_sil.triggered.connect(lambda: self.spectralActionRequested.emit("silence", t0, t1, fl, fh))
-        act_sil.setEnabled(self.project_edits_enabled)
-        act_trim = menu.addAction("裁剪保留当前段落 (Trim)")
-        act_trim.triggered.connect(lambda: self.spectralActionRequested.emit("trim", t0, t1, fl, fh))
-        act_trim.setEnabled(self.project_edits_enabled)
-        act_del = menu.addAction("删除当前段落 (Ripple Delete)")
-        act_del.triggered.connect(lambda: self.spectralActionRequested.emit("delete", t0, t1, fl, fh))
-        act_del.setEnabled(self.project_edits_enabled)
-        menu.exec(global_pos)
+        for command, label in (
+            ("silence", I18N.tr("mixer.clip_editor.menu.silence", "Silence selection")),
+            ("trim", I18N.tr("mixer.clip_editor.menu.trim", "Trim to selection")),
+            ("delete", I18N.tr("mixer.clip_editor.menu.delete", "Delete selection")),
+        ):
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked, name=command: self.spectralActionRequested.emit(name, t0, t1, fl, fh))
+            action.setEnabled(has_selection and self.project_edits_enabled)
+        if self.actions():
+            menu.addSeparator()
+            for action in self.actions():
+                if has_selection:
+                    menu.addAction(action)
+                else:
+                    menu.addAction(action.text()).setEnabled(False)
 
     # -----------------------------------------------------------------
-    # 绘制逻辑：时间标尺、波形包络、频谱瀑布图、选区、悬浮增益 HUD
+    # 绘制逻辑：时间标尺、波形包络、频谱图、选区、悬浮增益 HUD
     # -----------------------------------------------------------------
     # -----------------------------------------------------------------
     # 惯性滑行动力学 + 磁吸物理引力井（60Hz 物理帧率定时器）
@@ -1955,235 +2143,170 @@ class WaveformSpectralCanvas(QWidget):
         return best_t
 
     # -----------------------------------------------------------------
-    # 多级 LOD 采样点重建曲线 + Catmull-Rom 三次样条插值
+    # 多级波形绘制
     # -----------------------------------------------------------------
-    @staticmethod
-    def _build_catmull_rom_path(pts: list[QPointF]) -> QPainterPath:
-        """三次 Catmull-Rom 样条插值，将离散采样点平滑重建为模拟连续波形"""
-        path = QPainterPath()
-        n = len(pts)
-        if n == 0:
-            return path
-        path.moveTo(pts[0])
-        if n == 1:
-            return path
-        for i in range(n - 1):
-            p0 = pts[max(0, i - 1)]
-            p1 = pts[i]
-            p2 = pts[i + 1]
-            p3 = pts[min(n - 1, i + 2)]
-            c1 = QPointF(p1.x() + (p2.x() - p0.x()) / 6.0, p1.y() + (p2.y() - p0.y()) / 6.0)
-            c2 = QPointF(p2.x() - (p3.x() - p1.x()) / 6.0, p2.y() - (p3.y() - p1.y()) / 6.0)
-            path.cubicTo(c1, c2, p2)
-        return path
+    def _waveform_display_channels(self) -> tuple[tuple[int, ...], bool]:
+        channels = tuple(range(len(self._wave_channels)))
+        if self._edit_channel in channels:
+            channels = (self._edit_channel,)
+        audible = tuple(ch for ch in channels if not self._channel_is_muted(ch))
+        return audible or channels, bool(channels and not audible)
 
-    def _draw_channel_waveform_lod(
-        self,
-        p: QPainter,
-        wave_r: QRectF,
-        cy: float,
-        half_h: float,
-        p_max: np.ndarray,
-        p_min: np.ndarray,
-        p_rms: np.ndarray,
-        is_muted: bool,
-        is_inv: bool,
-        ch: int = -1,
+    def _draw_waveform_lod(
+        self, painter: QPainter, area: QRectF, channels: tuple[int, ...], muted: bool, *, preview_gain: bool,
     ) -> list[float]:
-        total_bins = len(p_max)
-        if total_bins < 2:
+        span = max(1e-6, self._view_end - self._view_start)
+        fraction = span / self._duration
+        pcm = self._waveform_samples
+        if pcm is not None and (channels[-1] >= len(pcm) or pcm.shape[1] * fraction > 262144):
+            pcm = None
+        step = pcm.shape[1] / self._duration if pcm is not None else 0.0
+        exact = pcm is not None and pcm.shape[1] >= 2 and area.width() >= 2.2 * max(1.0, span * step)
+        if exact:
+            first = max(0, math.floor(self._view_start * step) - 1)
+            last = min(pcm.shape[1], math.ceil(self._view_end * step) + 2)
+            sample_slice = slice(first, last)
+            times = np.arange(first, last) / step
+        else:
+            columns = int(area.width())
+            if columns < 2:
+                return []
+            sample_slice = None
+            times = self._view_start + np.arange(columns + 1) * (span / area.width())
+
+        extrema = self._visible_wave_extrema(channels, times, pcm, sample_slice)
+        if extrema is None:
             return []
+        hi, lo = extrema
+        if not exact:
+            times = times[:-1]
+        xs = area.left() + (times - self._view_start) * (area.width() / span)
 
-        # 按声道解析生效增益：单声道编辑目标下，非目标声道保持原样
-        gain_db = self._channel_gain_db(ch)
-        gain_linear = 10.0 ** (gain_db / 20.0)
-        has_sel = (self._sel_t1 > self._sel_t0 >= 0.0)
-        has_env = not self.waveform_includes_processing and self._env_enabled and bool(self._env_points)
-        fade_in = 0.0 if self.waveform_includes_processing else self._fade_in_sec
-        fade_out = 0.0 if self.waveform_includes_processing else self._fade_out_sec
-        show_ghost = (not is_muted) and (
-            abs(gain_db) >= 0.05 or fade_in > 0.001 or fade_out > 0.001 or has_env
-        )
+        scale = np.full(len(times), 10.0 ** (self._preview_gain_db / 20.0) if preview_gain else 1.0)
+        if not self.waveform_includes_processing:
+            if self._env_enabled and self._env_points:
+                scale *= [10.0 ** (self._eval_envelope_db(t) / 20.0) for t in times]
+            if self._fade_in_sec > 0.0:
+                affected = (0.0 <= times) & (times < self._fade_in_sec)
+                scale[affected] *= [self._eval_fade_curve(t / self._fade_in_sec) for t in times[affected]]
+            if self._fade_out_sec > 0.0:
+                affected = (times > self._duration - self._fade_out_sec) & (times <= self._duration)
+                scale[affected] *= [self._eval_fade_curve((self._duration - t) / self._fade_out_sec, fade_out=True)
+                                    for t in times[affected]]
+        hi, lo = hi * scale, lo * scale
+        clip_xs = [] if muted else xs[(hi >= 1.0) | (lo <= -1.0)].tolist()
+        hi *= self._amp_zoom
+        lo *= self._amp_zoom
 
-        # 计算当前视口下每个采样 bin 占据的像素宽度，决定 LOD 层级
-        vis_span = max(1e-6, self._view_end - self._view_start)
-        vis_bins = total_bins * (vis_span / self._duration)
-        px_per_bin = wave_r.width() / max(1.0, vis_bins)
-
-        clip_xs: list[float] = []
-
-        # =============================================================
-        # LOD 级别 B：微观采样点级视图 (px_per_bin >= 2.2)
-        # Catmull-Rom 三次样条模拟重建曲线 + 精密采样点圆环
-        # =============================================================
-        if px_per_bin >= 2.2:
-            i_start = max(0, int((self._view_start / self._duration) * total_bins) - 2)
-            i_end = min(total_bins - 1, int((self._view_end / self._duration) * total_bins) + 2)
-
-            sample_pts: list[QPointF] = []
-            ghost_pts: list[QPointF] = []
-
-            for i in range(i_start, i_end + 1):
-                t = (i / total_bins) * self._duration
-                x = self._time_to_x(t, wave_r)
-
-                # 取包络主极性点（若接入真实 PCM 采样数组，直接用 pcm[i] 效果更佳）
-                raw_v = p_max[i] if abs(p_max[i]) >= abs(p_min[i]) else p_min[i]
-                if is_inv:
-                    raw_v = -raw_v
-
-                in_target = (not has_sel) or (self._sel_t0 <= t <= self._sel_t1)
-                # 包络增益实时联动：波形振幅随包络插值同步缩放（LOD-B 微观视图）
-                env_linear = 10.0 ** (self._eval_envelope_db(t) / 20.0) if has_env else 1.0
-                clip_scale = (gain_linear if in_target else 1.0) * env_linear
-                if fade_in > 0.0 and t < fade_in:
-                    clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, t / fade_in)))
-                if fade_out > 0.0 and t > self._duration - fade_out:
-                    clip_scale *= self._eval_fade_curve(max(0.0, min(1.0, (self._duration - t) / fade_out)), fade_out=True)
-
-                if not is_muted and abs(raw_v * clip_scale) > 0.995:
-                    clip_xs.append(x)
-
-                v_disp = max(-1.0, min(1.0, raw_v * clip_scale * self._amp_zoom))
-                sample_pts.append(QPointF(x, cy - v_disp * half_h))
-
-                if show_ghost:
-                    v_ghost = max(-1.0, min(1.0, raw_v * self._amp_zoom))
-                    ghost_pts.append(QPointF(x, cy - v_ghost * half_h))
-
-            if show_ghost and len(ghost_pts) >= 2:
-                p.setPen(QPen(QColor(255, 255, 255, 55), 0.0))
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                p.drawPolyline(QPolygonF(ghost_pts))
-
-            if len(sample_pts) >= 2:
-                show_points = px_per_bin >= 5.5
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                p.setPen(QPen(QColor(110, 118, 136, 110) if is_muted else QColor("#74F5B4"), 0.0))
-                if show_points:
-                    p.drawPath(self._build_catmull_rom_path(sample_pts))
-                else:
-                    p.drawPolyline(QPolygonF(sample_pts))
-
-                if show_points and not is_muted:
-                    p.setPen(QPen(QColor("#0B0E14"), 1.0))
-                    p.setBrush(QColor(ACCENT_CYAN))
-                    for pt in sample_pts:
-                        if wave_r.left() <= pt.x() <= wave_r.right():
-                            p.drawEllipse(pt, 2.5, 2.5)
-            return clip_xs
-
-        # =============================================================
-        # LOD A：逐像素列保留极值，直接生成波形包络的栅格。
-        # =============================================================
-        cols = int(wave_r.width())
-        if cols < 2:
-            return []
-        columns = np.arange(cols + 1, dtype=np.float64)
-        times = self._view_start + columns * (vis_span / wave_r.width())
-        indices = np.clip((times * (total_bins / self._duration)).astype(np.intp), 0, total_bins - 1)
-        hi = self._wave_column_extrema(p_max, indices, np.maximum)
-        lo = self._wave_column_extrema(p_min, indices, np.minimum)
-        rms = self._wave_column_extrema(p_rms, indices, np.maximum)
-        if is_inv:
-            hi, lo = -lo, -hi
-        times = times[:-1]
-        xs = wave_r.left() + columns[:-1]
-        scale = np.ones(cols)
-        if gain_linear != 1.0:
-            if has_sel:
-                scale[(times >= self._sel_t0) & (times <= self._sel_t1)] = gain_linear
-            else:
-                scale.fill(gain_linear)
-        if has_env:
-            scale *= [10.0 ** (self._eval_envelope_db(t) / 20.0) for t in times]
-        if fade_in > 0.0:
-            affected = times < fade_in
-            scale[affected] *= [self._eval_fade_curve(t / fade_in) for t in times[affected]]
-        if fade_out > 0.0:
-            affected = times > self._duration - fade_out
-            scale[affected] *= [self._eval_fade_curve((self._duration - t) / fade_out, fade_out=True)
-                                for t in times[affected]]
-        if not is_muted:
-            clip_xs = xs[(hi * scale > 0.995) | (lo * scale < -0.995)].tolist()
-        scale *= self._amp_zoom
-        area = QRectF(wave_r.left(), cy - half_h, wave_r.width(), 2.0 * half_h)
-        self._draw_wave_columns(p, area, hi, lo, rms, scale, is_muted, show_ghost)
-
+        if exact:
+            self._draw_wave_samples(painter, area, xs, hi, lo, muted, show_points=area.width() >= 5.5 * span * step)
+        else:
+            self._draw_wave_columns(painter, area, hi, lo, muted)
         return clip_xs
+
+    def _visible_wave_extrema(
+        self, channels: tuple[int, ...], times: np.ndarray, pcm: np.ndarray | None,
+        sample_slice: slice | None,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        extrema = None
+        for ch in channels:
+            high, low = self._wave_channels[ch] if pcm is None else (pcm[ch], pcm[ch])
+            count = min(len(high), len(low))
+            if count < 2:
+                continue
+            if sample_slice is not None:
+                high, low = high[sample_slice], low[sample_slice]
+            else:
+                indices = np.clip((times * (count / self._duration)).astype(np.intp), 0, count - 1)
+                high = self._wave_column_extrema(high, indices, np.maximum)
+                low = self._wave_column_extrema(low, indices, np.minimum)
+            if not self.waveform_includes_processing and ch < len(self._ch_phase_inv) and self._ch_phase_inv[ch]:
+                high, low = -low, -high
+            # Keep the outer peaks of both channels, including signals with opposite polarity.
+            extrema = (high, low) if extrema is None else (np.maximum(extrema[0], high), np.minimum(extrema[1], low))
+        return extrema
+
+    def _draw_wave_samples(
+        self, painter: QPainter, area: QRectF, xs: np.ndarray, hi: np.ndarray, lo: np.ndarray,
+        muted: bool, *, show_points: bool,
+    ) -> None:
+        cy, half_h = area.center().y(), area.height() * 0.5
+        top = cy - np.clip(hi, -1.0, 1.0) * half_h
+        upper = QPolygonF([QPointF(x, y) for x, y in zip(xs, top)])
+        color = QColor(WAVE_MUTED if muted else WAVE_PEAK)
+        painter.setPen(QPen(color, 1.1))
+        if np.array_equal(hi, lo):
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolyline(upper)
+            if show_points and not muted:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                for point in upper:
+                    if area.left() <= point.x() <= area.right():
+                        painter.drawEllipse(point, 1.7, 1.7)
+        else:
+            bottom = cy - np.clip(lo, -1.0, 1.0) * half_h
+            points = list(upper) + [QPointF(x, y) for x, y in zip(reversed(xs), reversed(bottom))]
+            painter.setBrush(color)
+            painter.drawPolygon(QPolygonF(points))
 
     @staticmethod
     def _wave_column_extrema(samples: np.ndarray, edges: np.ndarray, reducer: np.ufunc) -> np.ndarray:
         # Adjacent columns share the bin crossing their pixel boundary so peaks
-        # remain visible while panning. reduceat also handles repeated bin edges.
-        return reducer(reducer.reduceat(samples, edges)[:-1], samples[edges[1:]])
+        # remain visible while panning. Bound the final reduceat range to the view.
+        first, last = edges[0], edges[-1]
+        visible = samples[first:last + 1]
+        indices = edges - first
+        return reducer(reducer.reduceat(visible, indices)[:-1], visible[indices[1:]])
 
-    def _draw_wave_columns(self, p: QPainter, area: QRectF,
-                           hi: np.ndarray, lo: np.ndarray, rms: np.ndarray,
-                           scale: np.ndarray, muted: bool, ghost: bool) -> None:
-        cols = len(hi)
-        rows = max(2, round(area.height() * self.devicePixelRatioF()))
-        stride = (cols + 3) & ~3
+    def _draw_wave_columns(
+        self, painter: QPainter, area: QRectF, hi: np.ndarray, lo: np.ndarray, muted: bool,
+    ) -> None:
+        # Rasterize just the visible outline. Sample zoom paints separately at native DPI.
+        columns = len(hi)
+        rows = max(2, round(area.height()))
         center = (rows - 1) * 0.5
-        indices = np.zeros((rows, stride), dtype=np.uint8)
-        pixels = indices[:, :cols]
-        row = np.arange(rows)[:, None]
-        col = np.arange(cols)
-
-        if ghost:
-            top = np.rint(center * (1.0 - np.clip(hi * self._amp_zoom, -1.0, 1.0))).astype(np.intp)
-            bottom = np.rint(center * (1.0 - np.clip(lo * self._amp_zoom, -1.0, 1.0))).astype(np.intp)
-            np.copyto(pixels, _WAVE_GHOST, where=(row >= top) & (row <= bottom))
-            pixels[top, col] = pixels[bottom, col] = _WAVE_GHOST_EDGE
-
-        top = np.rint(center * (1.0 - np.clip(hi * scale, -1.0, 1.0))).astype(np.intp)
-        bottom = np.rint(center * (1.0 - np.clip(lo * scale, -1.0, 1.0))).astype(np.intp)
-        inside_peak = (row >= top) & (row <= bottom)
-        if muted:
-            np.copyto(pixels, _WAVE_MUTED, where=inside_peak)
-            pixels[top, col] = pixels[bottom, col] = _WAVE_MUTED_EDGE
-        else:
-            shade = 1 + (abs(row - center) * ((_WAVE_SHADES - 1) / center)).astype(np.uint8)
-            level = center * np.clip(rms * scale, 0.0, 1.0)
-            inside_rms = abs(row - center) <= level
-            if ghost:
-                np.copyto(pixels, shade, where=inside_peak)
-                np.copyto(pixels, _WAVE_RMS, where=inside_rms & ~inside_peak)
-                np.copyto(pixels, shade + _WAVE_SHADES, where=inside_rms & inside_peak)
-            else:
-                pixels[:] = np.where(
-                    inside_peak, shade + inside_rms * np.uint8(_WAVE_SHADES),
-                    inside_rms * np.uint8(_WAVE_RMS))
-            pixels[top, col] = pixels[bottom, col] = _WAVE_EDGE
-
-        # QImage borrows this byte buffer until the immediate draw finishes.
-        buffer = indices.tobytes()
-        image = QImage(buffer, cols, rows, stride, QImage.Format.Format_Indexed8)
+        scanlines = np.arange(rows)[:, None]
+        image = QImage(columns, rows, QImage.Format.Format_Indexed8)
         image.setColorTable(_waveform_colors())
-        p.drawImage(area, image)
+        buffer = image.bits()
+        buffer.setsize(image.sizeInBytes())
+        pixels = np.frombuffer(buffer, dtype=np.uint8).reshape(rows, image.bytesPerLine())[:, :columns]
+
+        top = np.rint(center * (1.0 - np.clip(hi, -1.0, 1.0)))
+        bottom = np.rint(center * (1.0 - np.clip(lo, -1.0, 1.0)))
+        np.logical_and(scanlines >= top, scanlines <= bottom, out=pixels)
+        if muted:
+            pixels *= 2
+        painter.drawImage(area, image)
 
     # -----------------------------------------------------------------
     # 渲染管线：视网膜级离屏双缓冲金字塔
-    # 静态层（标尺/波形/幽灵轮廓/语图/分割条）按 devicePixelRatio 缓存进高分
+    # 静态层（标尺/波形/频谱图/分割条）按 devicePixelRatio 缓存进高分
     # QPixmap；播放头、十字准星、谐波梳、磁吸激光等轻量矢量层逐帧叠画，
     # 播放/悬停时 CPU 占用大幅下降（4K/5K 全屏播放不掉帧的关键）。
     # -----------------------------------------------------------------
     def _invalidate_cache(self):
-        """凡是改变波形、语图、视口缩放、增益预览、淡入淡出的操作，均调用此方法"""
+        """凡是改变波形、频谱图、视口缩放、增益预览、淡入淡出的操作，均调用此方法"""
         self._cache_dirty = True
         self.update()
 
     def resizeEvent(self, event):
         self._cache_dirty = True
         super().resizeEvent(event)
+        self.spectralViewportChanged.emit()
 
-    def _rebuild_static_cache(self):
+    def _rebuild_static_cache(self) -> None:
+        self._gain_wave_cache = None
         dpr = max(1.0, self.devicePixelRatioF())
         w_px = max(1, int(round(self.width() * dpr)))
         h_px = max(1, int(round(self.height() * dpr)))
-        pix = QPixmap(w_px, h_px)
-        pix.setDevicePixelRatio(dpr)
-        pix.fill(QColor("#1E1E22"))
+        pix = getattr(self, "_static_cache", None)
+        if (pix is None or pix.width() != w_px or pix.height() != h_px
+                or pix.devicePixelRatio() != dpr):
+            pix = QPixmap(w_px, h_px)
+            pix.setDevicePixelRatio(dpr)
+            pix.fill(QColor("#1E1E22"))
 
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2199,12 +2322,12 @@ class WaveformSpectralCanvas(QWidget):
         self._draw_time_ruler(p, ruler)
 
         # 2. 波形面板底色与波形
-        p.fillRect(wave_r, QColor("#1D1D20"))
+        p.fillRect(wave_r, QColor(WAVE_BACKGROUND))
         self._draw_waveform_pane(p, wave_r)
 
-        # 3. 频谱瀑布图底色与语图
+        # 3. 频谱图底色与频谱图
         if self._show_spectral and spec_r.isValid():
-            self._draw_spectrogram_pane(p, spec_r)
+            self._paint_spectrogram_content(p, spec_r)
 
         # 4. 统一在最顶层绘制所有正交 1px 黑线（对齐到 .5 物理像素中心，锐利无重影且完全连通）
         gutter_x = math.floor(self._ml) - 0.5
@@ -2216,7 +2339,7 @@ class WaveformSpectralCanvas(QWidget):
         # 左侧刻度槽右边界竖线（从顶部贯穿到底部）
         p.drawLine(QPointF(gutter_x, 0.0), QPointF(gutter_x, self.height()))
 
-        # 波形与语图之间的 4px 分割条
+        # 波形与频谱图之间的 4px 分割条
         if self._show_spectral and spec_r.isValid():
             top_y = split_y - 2.5
             bot_y = split_y + 2.5
@@ -2261,13 +2384,42 @@ class WaveformSpectralCanvas(QWidget):
         ruler = self._ruler_rect()
         body = self._body_rect()
         wave_r, spec_r, _ = self._wave_and_spec_rects()
+        if abs(self._preview_gain_db) >= 0.05:
+            self._paint_gain_wave(p, wave_r)
 
         # 2. 动态交互层：选区遮罩、悬浮 HUD、磁吸激光闪光、标记点、播放头、谐波游标
         if self.waveform_includes_processing:
             self._draw_fade_overlays(p, wave_r)
-        self._draw_selection_overlay(p, body, wave_r, spec_r)
+        selection = self._draw_selection_overlay(p, wave_r, spec_r)
         self._draw_dynamic_overlays(p, ruler, body, wave_r, spec_r)
         self._draw_fade_controls(p, wave_r)
+        if selection is not None and self.selection_gain_editable and not self.is_selecting():
+            self._draw_selection_gain(p, wave_r, selection.center().x())
+
+    def _paint_gain_wave(self, painter: QPainter, wave: QRectF) -> None:
+        area = wave
+        if self._sel_t1 > self._sel_t0 >= 0.0:
+            left = self._time_to_x(self._sel_t0, wave)
+            right = self._time_to_x(self._sel_t1, wave)
+            area = wave.intersected(QRectF(left, wave.top(), right - left, wave.height()))
+        elif self.is_selecting():
+            return
+        if not area.isValid():
+            return
+        if self._gain_wave_cache is None:
+            dpr = self.devicePixelRatioF()
+            pixmap = QPixmap(math.ceil(self.width() * dpr), math.ceil(wave.height() * dpr))
+            pixmap.setDevicePixelRatio(dpr)
+            pixmap.fill(QColor(WAVE_BACKGROUND))
+            with QPainter(pixmap) as background:
+                background.setRenderHint(QPainter.RenderHint.Antialiasing)
+                background.translate(0.0, -wave.top())
+                self._draw_waveform_pane(background, wave, preview_gain=True)
+            self._gain_wave_cache = pixmap
+        painter.save()
+        painter.setClipRect(area, Qt.ClipOperation.IntersectClip)
+        painter.drawPixmap(QPointF(0.0, wave.top()), self._gain_wave_cache)
+        painter.restore()
 
     def _draw_dynamic_overlays(self, p: QPainter, ruler: QRectF, body: QRectF, wave_r: QRectF, spec_r: QRectF):
         # 1. 磁吸对齐瞬间激光脉冲反馈（配合惯性/磁吸物理引擎）
@@ -2295,7 +2447,7 @@ class WaveformSpectralCanvas(QWidget):
                 p.setFont(QFont(MONO_FONT_FAM, 7, QFont.Weight.Bold))
                 p.drawText(flag, Qt.AlignmentFlag.AlignCenter, m["label"])
 
-        # 3. 高对比度播放头（深色外描边 + 红色高亮芯，亮色语图上依然锐利）
+        # 3. 高对比度播放头（深色外描边 + 红色高亮芯，亮色频谱图上依然锐利）
         if self._view_start <= self._playhead <= self._view_end:
             px = self._time_to_x(self._playhead, body)
             p.setPen(QPen(QColor(6, 9, 14, 215), 2.8))
@@ -2318,7 +2470,7 @@ class WaveformSpectralCanvas(QWidget):
             p.drawLine(QPointF(px - 4.0, ruler.top() + 1.5), QPointF(px + 4.0, ruler.top() + 1.5))
 
         # 4. 鼠标十字准星 + iZotope RX 级“谐波泛音梳状游标”
-        if self._mouse_pos is not None and body.contains(self._mouse_pos):
+        if not self.is_selecting() and self._mouse_pos is not None and body.contains(self._mouse_pos):
             mx, my = self._mouse_pos.x(), self._mouse_pos.y()
             p.setPen(QPen(QColor(255, 255, 255, 26), 1.0, Qt.PenStyle.DashLine))
             p.drawLine(QPointF(mx, body.top()), QPointF(mx, body.bottom()))
@@ -2326,20 +2478,21 @@ class WaveformSpectralCanvas(QWidget):
 
             cur_t = self._x_to_time(mx, body)
             if self._show_spectral and spec_r.contains(self._mouse_pos):
-                f0 = self._spec_y_to_freq(my, spec_r)
+                band = self._spectral_bands(spec_r)[self._spectral_channel_at(my, spec_r)]
+                f0 = self._spec_y_to_freq(my, band)
                 note = freq_to_note_name(f0)
                 hud_txt = f"{format_timecode(cur_t)}  •  {format_freq_short(f0)} ({note})"
 
                 # 向上投射 2f0 ~ 8f0 泛音梳状标尺
                 p.save()
-                p.setClipRect(spec_r)
+                p.setClipRect(band, Qt.ClipOperation.IntersectClip)
                 p.setFont(QFont(MONO_FONT_FAM, 7))
                 last_fy = my
                 for n in range(2, 9):
                     fn = f0 * n
                     if fn > self._nyquist():
                         break
-                    fy = self._freq_to_spec_y(fn, spec_r)
+                    fy = self._freq_to_spec_y(fn, band)
                     if (last_fy - fy) < 9.0:
                         continue
                     last_fy = fy
@@ -2368,14 +2521,7 @@ class WaveformSpectralCanvas(QWidget):
             else:
                 hud_txt = f"{format_timecode(cur_t)}"
 
-            # 时间码 HUD 固定在波形右下角（远离顶部淡入淡出角标与增益 HUD）；
-            # 若与选区时长胶囊（底缘居中于选区中点）重叠则自动左移让位
             hud_x = body.right() - 182.0
-            if self._sel_t1 > self._sel_t0 >= 0.0:
-                cap_mid = (self._time_to_x(self._sel_t0, body) + self._time_to_x(self._sel_t1, body)) * 0.5
-                # 仅当两个底缘胶囊的水平区间真正相交时才左移让位
-                if hud_x < cap_mid + 36.0 and hud_x + 174.0 > cap_mid - 36.0:
-                    hud_x = max(body.left() + 4.0, cap_mid - 36.0 - 6.0 - 174.0)
             hud_rect = QRectF(hud_x, wave_r.bottom() - 24.0, 174, 19)
             p.setPen(QPen(QColor("#323846"), 1.0))
             p.setBrush(QColor(14, 16, 22, 225))
@@ -2388,12 +2534,16 @@ class WaveformSpectralCanvas(QWidget):
         # （置于动态层：静态缓存重建成本高，悬停移动不应触发整体重绘）
         if self._show_spectral and spec_r.isValid():
             p.save()
-            p.setClipRect(spec_r)
+            bands = self._spectral_bands(spec_r)
+            channel = (min(self._spectral_drag_channel, len(bands) - 1) if self._brush_stroke
+                       else self._spectral_channel_at(self._mouse_pos.y(), spec_r) if self._mouse_pos else 0)
+            band = bands[channel]
+            p.setClipRect(band, Qt.ClipOperation.IntersectClip)
             if self._brush_stroke:
                 b_path = QPainterPath()
                 for idx_pt, (bt, bf) in enumerate(self._brush_stroke):
                     bx = self._time_to_x(bt, spec_r)
-                    by = self._freq_to_spec_y(bf, spec_r)
+                    by = self._freq_to_spec_y(bf, band)
                     if idx_pt == 0:
                         b_path.moveTo(bx, by)
                     else:
@@ -2467,13 +2617,13 @@ class WaveformSpectralCanvas(QWidget):
                 else:
                     curve_path.lineTo(x, y)
 
-        if has_pts:
+        if has_pts and in_env_mode:
             area_path = QPainterPath(curve_path)
             area_path.lineTo(wave_r.right(), y_zero)
             area_path.lineTo(wave_r.left(), y_zero)
             area_path.closeSubpath()
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(182, 124, 248, 22 if in_env_mode else 12))
+            p.setBrush(QColor(182, 124, 248, 22))
             p.drawPath(area_path)
 
         # 悬停整段线段时的高亮预览
@@ -2618,6 +2768,10 @@ class WaveformSpectralCanvas(QWidget):
 
     def _draw_time_ruler(self, p: QPainter, ruler: QRectF):
         p.fillRect(ruler, QColor("#222226"))
+        p.setPen(QColor("#8E96A8"))
+        p.setFont(QFont(MONO_FONT_FAM, 7))
+        p.drawText(QRectF(0, ruler.top(), ruler.left() - 1.0, ruler.height()),
+                   Qt.AlignmentFlag.AlignCenter, "dBFS")
         # 注：底部分隔线已移至 _rebuild_static_cache 统一绘制（.5 像素对齐）
 
         span = max(0.01, self._view_end - self._view_start)
@@ -2647,112 +2801,94 @@ class WaveformSpectralCanvas(QWidget):
                     p.drawLine(QPointF(sx, ruler.bottom() - 3.5), QPointF(sx, ruler.bottom() - 1.0))
             t += step
 
-    def _draw_waveform_pane(self, p: QPainter, wave_r: QRectF):
+    def _draw_waveform_pane(self, p: QPainter, wave_r: QRectF, *, preview_gain: bool = False) -> None:
         p.save()
         p.setClipRect(QRectF(0, wave_r.top(), self.width(), wave_r.height()))
+        self._draw_channel_pills(p, wave_r)
 
-        ch_count = len(self._wave_channels)
-        ch_h = wave_r.height() / max(1, ch_count)
-
-        for ch, (p_max, p_min, p_rms) in enumerate(self._wave_channels):
-            top = wave_r.top() + ch * ch_h
-            cy = top + ch_h * 0.5
-            half_h = ch_h * 0.45
-            is_muted = ch < len(self._ch_muted) and self._ch_muted[ch]
-            is_inv = ch < len(self._ch_phase_inv) and self._ch_phase_inv[ch]
-
-            # 左侧精密 dB 刻度线与带状态灯的 CH 开关徽章
-            p.setPen(QColor("#788094"))
-            p.setFont(QFont(MONO_FONT_FAM, 7))
-            p.drawText(QRectF(2, top + 2, self._ml - 11, 12), Qt.AlignmentFlag.AlignRight, "0dB")
-            p.drawText(QRectF(2, top + ch_h - 14, self._ml - 11, 12), Qt.AlignmentFlag.AlignRight, "-∞")
-
-            # 右边缘对齐 -6dB 虚线的短刻度针
-            p.setPen(QPen(QColor("#3A4152"), 1.0))
-            p.drawLine(QPointF(self._ml - 6.0, cy - half_h * 0.5), QPointF(self._ml - 1.0, cy - half_h * 0.5))
-            p.drawLine(QPointF(self._ml - 6.0, cy + half_h * 0.5), QPointF(self._ml - 1.0, cy + half_h * 0.5))
-
-            ch_pill = QRectF(6, cy - 10, self._ml - 12, 20)
-            pill_border = QColor("#323746") if is_muted else (QColor(ACCENT_AMBER) if is_inv else QColor("#267A8E"))
-            pill_bg = QColor("#171920") if is_muted else QColor("#10222A")
-            p.setPen(QPen(pill_border, 1.0))
-            p.setBrush(pill_bg)
-            p.drawRoundedRect(ch_pill, 4.0, 4.0)
-
-            # 徽章左侧微型 LED 状态点（绿=正常 / 琥珀=反相 / 灰=静音）
-            led_col = QColor("#4A5060") if is_muted else (QColor(ACCENT_AMBER) if is_inv else QColor(ACCENT_GREEN))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(led_col)
-            p.drawEllipse(QPointF(ch_pill.left() + 6.0, ch_pill.center().y()), 2.0, 2.0)
-
-            p.setPen(QColor("#687082") if is_muted else QColor("#E4E9F5"))
-            p.setFont(QFont(MONO_FONT_FAM, 7, QFont.Weight.Bold))
-            p.drawText(
-                QRectF(ch_pill.left() + 8.0, ch_pill.top(), ch_pill.width() - 9.0, ch_pill.height()),
-                Qt.AlignmentFlag.AlignCenter,
-                f"CH{ch+1}{'Ø' if is_inv else ''}",
-            )
-
-            if ch > 0:
-                p.setPen(QPen(QColor("#232732"), 1.0))
-                p.drawLine(QPointF(0, top), QPointF(wave_r.right(), top))
-
-            # 中心 0 电平线 & -6dB 参考虚线
-            p.setPen(QPen(QColor("#2D3342"), 1.0))
-            p.drawLine(QPointF(wave_r.left(), cy), QPointF(wave_r.right(), cy))
-            p.setPen(QPen(QColor("#1F2430"), 1.0, Qt.PenStyle.DotLine))
-            p.drawLine(QPointF(wave_r.left(), cy - half_h * 0.5), QPointF(wave_r.right(), cy - half_h * 0.5))
-            p.drawLine(QPointF(wave_r.left(), cy + half_h * 0.5), QPointF(wave_r.right(), cy + half_h * 0.5))
-
-            # 多级 LOD 波形渲染：逐列峰值包络 <-> 微观 Catmull-Rom 采样点重建曲线，
-            # 调节增益/淡变时自动叠加 Before/After 幽灵参考轮廓
-            clip_xs = self._draw_channel_waveform_lod(
-                p, wave_r, cy, half_h, p_max, p_min, p_rms, is_muted,
-                is_inv and not self.waveform_includes_processing, ch
-            )
-
-            # 单声道编辑目标可视化：目标声道左缘琥珀标记条，非目标声道轻微压暗
-            if self._edit_channel >= 0:
-                if ch == self._edit_channel:
-                    p.fillRect(QRectF(wave_r.left(), top, 3.0, ch_h), QColor(ACCENT_AMBER))
-                else:
-                    p.fillRect(QRectF(wave_r.left(), top, wave_r.width(), ch_h), QColor(6, 8, 12, 110))
-
-            # 穿透波形的微弱 0dB 中心基准线（绘制在填充之上，提升对称读数精度）
-            if not is_muted:
-                p.setPen(QPen(QColor(255, 255, 255, 24), 1.0))
-                p.drawLine(QPointF(wave_r.left(), cy), QPointF(wave_r.right(), cy))
-
-            if is_muted:
-                p.setPen(QColor("#788092"))
-                p.setFont(QFont("Helvetica Neue", 8, QFont.Weight.Bold))
-                p.drawText(QRectF(wave_r.left() + 10, top + 6, 80, 16), Qt.AlignmentFlag.AlignLeft, "MUTED")
-
-            # 相邻的削波柱合为一段，避免为贴近的一组峰值重复描边。
-            if clip_xs:
-                start = end = clip_xs[0]
-                warning = QColor(ACCENT_RED)
-                for cx in clip_xs[1:]:
-                    if cx - end > 1.0:
-                        p.fillRect(QRectF(start, top + 2, end - start + 1, 5), warning)
-                        start = cx
-                    end = cx
-                p.fillRect(QRectF(start, top + 2, end - start + 1, 5), warning)
+        lanes = self._waveform_lanes(wave_r)
+        if len(lanes) == 1:
+            channels, muted = self._waveform_display_channels()
+            self._draw_waveform_lane(p, wave_r, channels, muted, preview_gain=preview_gain)
+        else:
+            for ch, lane in enumerate(lanes):
+                self._draw_waveform_lane(p, lane, (ch,), self._channel_is_muted(ch),
+                                         preview_gain=preview_gain and self._edit_channel in (-1, ch))
+                if ch > 0:
+                    p.setPen(QPen(QColor("#30343C"), 1.0))
+                    p.drawLine(QPointF(lane.left(), lane.top()), QPointF(lane.right(), lane.top()))
 
         if not self.waveform_includes_processing:
             self._draw_fade_overlays(p, wave_r)
         p.restore()
 
+    def _draw_waveform_lane(
+        self, p: QPainter, wave_r: QRectF, channels: tuple[int, ...], muted: bool, *, preview_gain: bool,
+    ) -> None:
+        cy = wave_r.center().y()
+        half_h = wave_r.height() * 0.45
+        if channels:
+            area = QRectF(wave_r.left(), cy - half_h, wave_r.width(), 2.0 * half_h)
+            p.save()
+            p.setClipRect(wave_r, Qt.ClipOperation.IntersectClip)
+            clip_xs = self._draw_waveform_lod(p, area, channels, muted, preview_gain=preview_gain)
+
+            # Adjacent clipped columns share a single warning bar.
+            if clip_xs:
+                start = end = clip_xs[0]
+                warning = QColor(ACCENT_RED)
+                for x in clip_xs[1:]:
+                    if x - end > 1.0:
+                        p.fillRect(QRectF(start, wave_r.top() + 2, end - start + 1, 3), warning)
+                        start = x
+                    end = x
+                p.fillRect(QRectF(start, wave_r.top() + 2, end - start + 1, 3), warning)
+            p.restore()
+
+        # The dBFS scale gives the magnitude on both sides of the zero line.
+        if wave_r.height() >= 108.0 and len(self._wave_channels) <= 2:
+            top_db = -20.0 * math.log10(self._amp_zoom)
+            half_db = top_db + 20.0 * math.log10(0.5)
+            p.setFont(QFont(MONO_FONT_FAM, 7))
+            for y, value in ((cy - half_h, top_db), (cy - half_h * 0.5, half_db),
+                             (cy + half_h * 0.5, half_db), (cy + half_h, top_db)):
+                label_y = min(wave_r.bottom() - 13.0, max(wave_r.top() + 1.0, y - 6.0))
+                p.setPen(QColor("#818A9A"))
+                p.drawText(QRectF(1.0, label_y, self._ml - 12.0, 12.0),
+                           Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                           str(round(value)).replace("-", "−"))
+                p.setPen(QPen(QColor("#485261"), 0.0))
+                p.drawLine(QPointF(self._ml - 5.0, y), QPointF(self._ml - 1.0, y))
+        p.setPen(QPen(QColor(146, 159, 177, 23), 0.0))
+        for y in (cy - half_h * 0.5, cy + half_h * 0.5):
+            p.drawLine(QPointF(wave_r.left(), y), QPointF(wave_r.right(), y))
+        p.setPen(QPen(QColor(165, 186, 193, 45), 0.0))
+        p.drawLine(QPointF(wave_r.left(), cy), QPointF(wave_r.right(), cy))
+
+    def _draw_channel_pills(self, painter: QPainter, wave: QRectF) -> None:
+        pills = self._channel_pills(wave)
+        painter.setFont(QFont(MONO_FONT_FAM, 7, QFont.Weight.Bold))
+        for ch, pill in enumerate(pills):
+            muted = self._channel_is_muted(ch)
+            inverted = ch < len(self._ch_phase_inv) and self._ch_phase_inv[ch]
+            highlighted = ch == self._edit_channel or inverted
+            border = ACCENT_AMBER if highlighted else ("#323746" if muted else "#385952")
+            painter.setPen(QPen(QColor(border), 1.0))
+            painter.setBrush(QColor("#171920" if muted else "#1A2A29"))
+            painter.drawRoundedRect(pill, 4.0, 4.0)
+
+            led = "#4A5060" if muted else (ACCENT_AMBER if inverted else ACCENT_GREEN)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(led))
+            painter.drawEllipse(QPointF(pill.left() + 6.0, pill.center().y()), 2.0, 2.0)
+            painter.setPen(QColor("#8C95A6" if muted else "#E4E9F5"))
+            label = ("L", "R")[ch] if len(pills) == 2 else f"CH{ch + 1}"
+            painter.drawText(pill.adjusted(9.0, 0.0, -2.0, 0.0), Qt.AlignmentFlag.AlignCenter,
+                             f"{label}{'Ø' if inverted else ''}")
+
     def _fade_ranges(self) -> tuple[tuple[str, float, float], ...]:
         return (("in", 0.0, self._fade_in_sec),
                 ("out", self._duration, self._duration - self._fade_out_sec))
-
-    def _fade_bands(self, wave_r: QRectF) -> tuple[QRectF, ...]:
-        count = max(1, len(self._peaks_max))
-        height = wave_r.height() / count
-        return tuple(QRectF(wave_r.left(), wave_r.top() + channel * height + 1.0,
-                            wave_r.width(), max(1.0, height - 2.0))
-                     for channel in range(count))
 
     def _fade_tabs(self, wave_r: QRectF) -> tuple[tuple[str, float], ...]:
         inset = FADE_HANDLE_SIZE / 2.0
@@ -2773,6 +2909,7 @@ class WaveformSpectralCanvas(QWidget):
 
     def _fade_curve_points(self, wave_r: QRectF) -> tuple[tuple[str, QPointF, float], ...]:
         points = []
+        lanes = self._waveform_lanes(wave_r)
         for end, edge, time in self._fade_ranges():
             if edge == time or abs(self._time_to_x(time, wave_r) - self._time_to_x(edge, wave_r)) < 24.0:
                 continue
@@ -2780,7 +2917,8 @@ class WaveformSpectralCanvas(QWidget):
             if not wave_r.left() + 3.0 <= x <= wave_r.right() - 3.0:
                 continue
             midpoint = self._eval_fade_curve(0.5, fade_out=end == "out")
-            for band in self._fade_bands(wave_r):
+            for lane in lanes:
+                band = lane.adjusted(0.0, 1.0, 0.0, -1.0)
                 if band.height() >= 18.0:
                     y = band.bottom() - band.height() * midpoint
                     points.append((end, QPointF(x, y), band.height()))
@@ -2818,14 +2956,14 @@ class WaveformSpectralCanvas(QWidget):
         return _display_fade_factor(curve, u)
 
     def _draw_fade_overlays(self, p: QPainter, wave_r: QRectF) -> None:
-        bands = self._fade_bands(wave_r)
+        lanes = self._waveform_lanes(wave_r)
         for end, edge, time in self._fade_ranges():
             if edge == time:
                 continue
             x = self._time_to_x(edge, wave_r)
             span = self._time_to_x(time, wave_r) - x
-            for band in bands:
-                paint_fade_ramp(p, band, x, span,
+            for lane in lanes:
+                paint_fade_ramp(p, lane.adjusted(0.0, 1.0, 0.0, -1.0), x, span,
                                 lambda progress: self._eval_fade_curve(progress, fade_out=end == "out"),
                                 outline=QColor(181, 188, 203, 155))
 
@@ -2839,188 +2977,141 @@ class WaveformSpectralCanvas(QWidget):
             p.setFont(QFont("Helvetica Neue", 7, QFont.Weight.Bold))
             p.drawText(badge, Qt.AlignmentFlag.AlignCenter, f"视图放大 +{boost_db:.1f}dB")
 
-    def _draw_spectrogram_pane(self, p: QPainter, spec_r: QRectF):
-        p.save()
-        p.setFont(QFont("Menlo", 7))
-        for f_tick in (60, 250, 1000, 4000, 12000, 20000):
-            if f_tick <= self._nyquist():
-                fy = self._freq_to_spec_y(f_tick, spec_r)
-                p.setPen(QColor("#737A8C"))
-                lbl = f"{f_tick // 1000}k" if f_tick >= 1000 else str(f_tick)
-                p.drawText(QRectF(4, fy - 7, self._ml - 10, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, lbl)
+    def _paint_spectrogram_content(self, painter: QPainter, pane: QRectF) -> None:
+        painter.save()
+        painter.fillRect(QRectF(0, pane.top(), pane.left(), pane.height()), QColor("#27272B"))
+        painter.setFont(QFont(MONO_FONT_FAM, 7))
+        bands = self._spectral_bands(pane)
+        spectrum, images = self._spectrogram, self._spectrum_images
+        source_start, source_end = 0.0, self._duration
+        detail = self._detail_spectrogram
+        if detail is not None:
+            detail_start = detail.start_sample / detail.total_samples * self._duration
+            detail_end = detail.end_sample / detail.total_samples * self._duration
+            if detail_start <= self._view_start and self._view_end <= detail_end:
+                spectrum, images = detail, self._detail_images
+                source_start, source_end = detail_start, detail_end
+        if spectrum is None and self._spec_image is not None:
+            images = (self._spec_image,)
+        source_span = source_end - source_start
+        for index, band in enumerate(bands):
+            if index < len(images):
+                image = images[index]
+                x = (self._view_start - source_start) / source_span * image.width()
+                width = (self._view_end - self._view_start) / source_span * image.width()
+                painter.drawImage(band, image, QRectF(x, 0, width, image.height()))
+            else:
+                painter.fillRect(band, QColor("#0D0F14"))
+            if index:
+                painter.fillRect(QRectF(0, band.top(), band.right(), 1), QColor("#101116"))
+            painter.setPen(QColor("#A9AEC0"))
+            label = (("L", "R")[index] if len(bands) == 2 else f"CH{index + 1}") if len(bands) > 1 else ""
+            painter.drawText(QRectF(3, band.top() + 2, self._ml - 8, 12),
+                             Qt.AlignmentFlag.AlignRight, f"{label} Hz".strip())
+            last_y = band.top() + 8.0
+            for hz in (20000, 16000, 12000, 8000, 4000, 2000, 1000, 500, 250, 100, 50):
+                if hz >= self._nyquist():
+                    continue
+                y = self._freq_to_spec_y(hz, band)
+                if y - last_y < 13.0 or y > band.bottom() - 5.0:
+                    continue
+                last_y = y
+                painter.setPen(QColor("#7D859B"))
+                value = f"{hz // 1000}k" if hz >= 1000 else str(hz)
+                painter.drawText(QRectF(3, y - 6, self._ml - 11, 12),
+                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, value)
+                painter.drawLine(QPointF(band.left() - 5, y), QPointF(band.left() - 1, y))
+        painter.restore()
 
-        p.restore()
-        self._paint_spectrogram_content(p, spec_r)
+    def _selection_rects(self, wave: QRectF, spectrum: QRectF) -> tuple[QRectF, ...]:
+        if not self._sel_t1 > self._sel_t0 >= 0.0:
+            return ()
+        left = max(wave.left(), self._time_to_x(self._sel_t0, wave))
+        right = min(wave.right(), self._time_to_x(self._sel_t1, wave))
+        if right <= left:
+            return ()
+        rects = [QRectF(left, wave.top(), right - left, wave.height())]
+        for band in self._spectral_bands(spectrum):
+            top = self._freq_to_spec_y(self._sel_f_high, band) if self._is_2d_spectral_sel else band.top()
+            bottom = self._freq_to_spec_y(self._sel_f_low, band) if self._is_2d_spectral_sel else band.bottom()
+            rects.append(QRectF(left, top, right - left, max(1.0, bottom - top)).intersected(band))
+        return tuple(rects)
 
-    def _paint_spectrogram_content(self, p: QPainter, spec_r: QRectF) -> None:
-        p.save()
-        p.setClipRect(spec_r, Qt.ClipOperation.IntersectClip)
-        p.fillRect(spec_r, QColor("#141417"))
-        if self._spec_image is not None and not self._spec_image.isNull():
-            img_w = self._spec_image.width()
-            img_h = self._spec_image.height()
-            sx0 = (self._view_start / self._duration) * img_w
-            sx1 = (self._view_end / self._duration) * img_w
-            width = min(float(img_w), max(1.0, sx1 - sx0))
-            src_rect = QRectF(min(sx0, img_w - width), 0.0, width, float(img_h))
-            p.drawImage(spec_r, self._spec_image, src_rect)
-
-        p.setPen(QPen(QColor(255, 255, 255, 18), 1.0, Qt.PenStyle.DotLine))
-        for f_tick in (60, 250, 1000, 4000, 12000):
-            if f_tick <= self._nyquist():
-                fy = self._freq_to_spec_y(f_tick, spec_r)
-                p.drawLine(QPointF(spec_r.left(), fy), QPointF(spec_r.right(), fy))
-
-        # 达芬奇风格：语图面板边界由上方 1px 黑线分割条定义，去掉旧版描边
-
-        # 右侧悬浮 dBFS 色阶标尺（增加深色磨砂胶囊衬底，防止亮色语图遮挡文字）
-        bar_w, bar_h = 7.0, min(106.0, spec_r.height() - 20.0)
-        if bar_h > 30.0:
-            bx = spec_r.right() - bar_w - 10.0
-            by = spec_r.top() + 10.0
-            backdrop = QRectF(bx - 34.0, by - 5.0, bar_w + 39.0, bar_h + 10.0)
-            p.setPen(QPen(QColor("#2C3240"), 1.0))
-            p.setBrush(QColor(11, 13, 18, 210))
-            p.drawRoundedRect(backdrop, 4.0, 4.0)
-
-            scale_rect = QRectF(bx, by, bar_w, bar_h)
-            lut_grad = QLinearGradient(scale_rect.bottomLeft(), scale_rect.topLeft())
-            for stop_i in (0, 56, 115, 168, 214, 242, 255):
-                r, g, b = SPEC_LUT[stop_i]
-                lut_grad.setColorAt(stop_i / 255.0, QColor(r, g, b, 240))
-
-            p.setPen(QPen(QColor("#383E4E"), 1.0))
-            p.setBrush(lut_grad)
-            p.drawRoundedRect(scale_rect, 1.5, 1.5)
-
-            p.setFont(QFont("Menlo", 7))
-            p.setPen(QColor("#C6CDD9"))
-            p.drawText(QRectF(bx - 32, by - 3, 28, 12), Qt.AlignmentFlag.AlignRight, "0dB")
-            p.drawText(QRectF(bx - 32, by + bar_h * 0.5 - 6, 28, 12), Qt.AlignmentFlag.AlignRight, "-40")
-            p.drawText(QRectF(bx - 32, by + bar_h - 9, 28, 12), Qt.AlignmentFlag.AlignRight, "-80")
-
-        p.restore()
-
-    def _draw_selection_overlay(self, p: QPainter, body: QRectF, wave_r: QRectF, spec_r: QRectF):
+    def _draw_selection_overlay(self, painter: QPainter, wave: QRectF, spectrum: QRectF) -> QRectF | None:
         self._gain_hud_rect = QRectF()
         self._gain_commit_rect = QRectF()
-        has_sel = (self._sel_t1 > self._sel_t0 >= 0.0)
-        if not has_sel:
-            return
+        rects = self._selection_rects(wave, spectrum)
+        if not rects:
+            return None
+        painter.save()
+        painter.setClipRect(self._body_rect(), Qt.ClipOperation.IntersectClip)
+        wave_selection = rects[0]
+        painter.fillRect(wave_selection, QColor(112, 187, 205, 64))
+        painter.setPen(QPen(QColor(156, 226, 238, 230), 1.0))
+        for x in (wave_selection.left(), wave_selection.right()):
+            painter.drawLine(QPointF(x, wave_selection.top()), QPointF(x, wave_selection.bottom()))
+        for box in rects[1:]:
+            tint = QColor(244, 198, 123, 50) if self._is_2d_spectral_sel else QColor(187, 210, 227, 49)
+            painter.fillRect(box, tint)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            border = QColor(248, 207, 143, 205) if self._is_2d_spectral_sel else QColor(174, 213, 226, 180)
+            painter.setPen(QPen(border, 1.0))
+            painter.drawRect(box)
+        painter.restore()
+        return wave_selection
 
-        sx0 = max(body.left(), self._time_to_x(self._sel_t0, body))
-        sx1 = min(body.right(), self._time_to_x(self._sel_t1, body))
-        if sx1 <= sx0:
-            return
-
-        p.save()
-        p.setClipRect(body)
-
-        # 1. 非选区微暗化遮罩，强化当前编辑区域的视觉聚焦（Spotlight）
-        dim_col = QColor(6, 8, 12, 72)
-        if sx0 > body.left():
-            p.fillRect(QRectF(body.left(), wave_r.top(), sx0 - body.left(), wave_r.height()), dim_col)
-        if sx1 < body.right():
-            p.fillRect(QRectF(sx1, wave_r.top(), body.right() - sx1, wave_r.height()), dim_col)
-
-        # 2. 波形区选区垂直光幕渐变高亮
-        w_sel = QRectF(sx0, wave_r.top(), sx1 - sx0, wave_r.height())
-        sel_grad = QLinearGradient(w_sel.topLeft(), w_sel.bottomLeft())
-        sel_grad.setColorAt(0.0, QColor(40, 216, 240, 42))
-        sel_grad.setColorAt(0.5, QColor(40, 216, 240, 16))
-        sel_grad.setColorAt(1.0, QColor(40, 216, 240, 42))
-        p.fillRect(w_sel, sel_grad)
-
-        # 选区边界发光竖线
-        p.setPen(QPen(QColor(40, 216, 240, 55), 3.5))
-        p.drawLine(QPointF(sx0, wave_r.top()), QPointF(sx0, wave_r.bottom()))
-        p.drawLine(QPointF(sx1, wave_r.top()), QPointF(sx1, wave_r.bottom()))
-        p.setPen(QPen(QColor(ACCENT_CYAN), 1.3))
-        p.drawLine(QPointF(sx0, wave_r.top()), QPointF(sx0, wave_r.bottom()))
-        p.drawLine(QPointF(sx1, wave_r.top()), QPointF(sx1, wave_r.bottom()))
-
-        # 左右边缘微抓手胶囊
-        if (sx1 - sx0) >= 14.0:
-            handle_h = min(24.0, wave_r.height() * 0.22)
-            hy = wave_r.center().y() - handle_h * 0.5
-            p.setPen(QPen(QColor("#0B0E14"), 1.0))
-            p.setBrush(QColor(ACCENT_CYAN))
-            p.drawRoundedRect(QRectF(sx0 - 2.2, hy, 4.4, handle_h), 2.2, 2.2)
-            p.drawRoundedRect(QRectF(sx1 - 2.2, hy, 4.4, handle_h), 2.2, 2.2)
-
-        # 3. 语图区选区高亮（支持 2D 频率框选）
-        if self._show_spectral and spec_r.isValid():
-            if self._is_2d_spectral_sel:
-                fy_top = self._freq_to_spec_y(self._sel_f_high, spec_r)
-                fy_bot = self._freq_to_spec_y(self._sel_f_low, spec_r)
-                s_box = QRectF(sx0, fy_top, sx1 - sx0, max(4.0, fy_bot - fy_top))
-                p.setPen(QPen(QColor(240, 168, 72, 65), 4.0))
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                p.drawRect(s_box)
-                p.setPen(QPen(QColor(ACCENT_AMBER), 1.4))
-                p.setBrush(QColor(240, 168, 72, 32))
-                p.drawRect(s_box)
-            else:
-                s_sel = QRectF(sx0, spec_r.top(), sx1 - sx0, spec_r.height())
-                p.fillRect(s_sel, QColor(40, 216, 240, 18))
-                p.setPen(QPen(QColor(40, 216, 240, 140), 1.0))
-                p.drawLine(QPointF(sx0, spec_r.top()), QPointF(sx0, spec_r.bottom()))
-                p.drawLine(QPointF(sx1, spec_r.top()), QPointF(sx1, spec_r.bottom()))
-
-        # 4. 悬浮毛玻璃药丸增益 HUD
-        if self.selection_gain_editable:
-            self._draw_selection_gain(p, body, wave_r, (sx0 + sx1) * 0.5)
-
-        # 选区精确时长胶囊
-        if (sx1 - sx0) >= 68.0:
-            dur_txt = f"Δ {self._sel_t1 - self._sel_t0:.3f}s"
-            dur_r = QRectF((sx0 + sx1) * 0.5 - 36.0, wave_r.bottom() - 21.0, 72.0, 17.0)
-            p.setPen(QPen(QColor("#303C50"), 1.0))
-            p.setBrush(QColor(11, 15, 22, 232))
-            p.drawRoundedRect(dur_r, 8.5, 8.5)
-            p.setPen(QColor(ACCENT_CYAN))
-            p.setFont(QFont(MONO_FONT_FAM, 7, QFont.Weight.Bold))
-            p.drawText(dur_r, Qt.AlignmentFlag.AlignCenter, dur_txt)
-
-        p.restore()
-
-    def _draw_selection_gain(self, p: QPainter, body: QRectF, wave_r: QRectF, center_x: float) -> None:
+    def _draw_selection_gain(self, p: QPainter, wave_r: QRectF, center_x: float) -> None:
         active_gain = abs(self._preview_gain_db) >= 0.05
-        hud_w = 124.0 if active_gain else 104.0
-        hud_h = 26.0
-        cx = max(body.left() + hud_w * 0.5 + 8.0, min(body.right() - hud_w * 0.5 - 8.0, center_x))
-        cy = wave_r.top() + 26.0
-        self._gain_hud_rect = QRectF(cx - hud_w * 0.5, cy - hud_h * 0.5, hud_w, hud_h)
+        show_confirm = active_gain and self._drag_mode != "gain_hud"
+        confirm_w = 0
+        if show_confirm:
+            confirm_text = I18N.tr("mixer.clip_editor.confirm_gain", "Confirm")
+            confirm_font = self.font()
+            confirm_font.setPixelSize(11)
+            confirm_font.setBold(True)
+            confirm_w = QFontMetrics(confirm_font, p.device()).horizontalAdvance(confirm_text) + 16
+        hud_w = min(104.0 + confirm_w, wave_r.width() - 8.0)
+        hud_h = 28.0
+        if hud_w <= confirm_w + 12 or wave_r.height() < hud_h + 10.0:
+            return
+        left = max(wave_r.left() + 4.0, min(wave_r.right() - hud_w - 4.0, center_x - hud_w * 0.5))
+        self._gain_hud_rect = QRectF(left, wave_r.top() + 8.0, hud_w, hud_h)
 
         # HUD 底部投影
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 150))
-        p.drawRoundedRect(self._gain_hud_rect.translated(0, 2.0), 13.0, 13.0)
+        p.drawRoundedRect(self._gain_hud_rect.translated(0, 2.0), 14.0, 14.0)
 
         hud_bg = QLinearGradient(self._gain_hud_rect.topLeft(), self._gain_hud_rect.bottomLeft())
         hud_bg.setColorAt(0.0, QColor(32, 37, 48, 245))
         hud_bg.setColorAt(1.0, QColor(16, 19, 26, 245))
         p.setPen(QPen(QColor(ACCENT_AMBER if active_gain else "#485166"), 1.2))
         p.setBrush(hud_bg)
-        p.drawRoundedRect(self._gain_hud_rect, 13.0, 13.0)
+        p.drawRoundedRect(self._gain_hud_rect, 14.0, 14.0)
 
         p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
         p.setPen(QColor(ACCENT_AMBER if active_gain else "#EAEEF7"))
-        txt_w = hud_w - 25.0 if active_gain else hud_w
         ch_tag = {0: "L ", 1: "R "}.get(self._edit_channel, "")
+        gain_text = f"{ch_tag}{self._preview_gain_db:+.1f} dB"
+        drag_text = f"↕ {gain_text}"
+        text_rect = self._gain_hud_rect.adjusted(5.0, 0.0, -confirm_w - 5.0, 0.0)
+        metrics = p.fontMetrics()
+        if metrics.horizontalAdvance(drag_text) > text_rect.width():
+            drag_text = metrics.elidedText(gain_text, Qt.TextElideMode.ElideRight, int(text_rect.width()))
         p.drawText(
-            QRectF(self._gain_hud_rect.left() + 2.0, self._gain_hud_rect.top(), txt_w, hud_h),
-            Qt.AlignmentFlag.AlignCenter,
-            f"↕ {ch_tag}{self._preview_gain_db:+.1f} dB",
+            text_rect, Qt.AlignmentFlag.AlignCenter, drag_text,
         )
 
-        if active_gain:
-            self._gain_commit_rect = QRectF(self._gain_hud_rect.right() - 22.5, self._gain_hud_rect.top() + 3.5, 19.0, 19.0)
+        if show_confirm:
+            self._gain_commit_rect = QRectF(self._gain_hud_rect.right() - confirm_w - 3.0,
+                                           self._gain_hud_rect.top() + 3.0, confirm_w, hud_h - 6.0)
+            hovered = self._mouse_pos is not None and self._gain_commit_rect.contains(self._mouse_pos)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(ACCENT_GREEN))
-            p.drawRoundedRect(self._gain_commit_rect, 9.5, 9.5)
+            p.setBrush(QColor("#70E5AB" if hovered else ACCENT_GREEN))
+            p.drawRoundedRect(self._gain_commit_rect, 11.0, 11.0)
+            p.setFont(confirm_font)
             p.setPen(QColor("#090C10"))
-            p.drawText(self._gain_commit_rect, Qt.AlignmentFlag.AlignCenter, "✓")
+            p.drawText(self._gain_commit_rect, Qt.AlignmentFlag.AlignCenter, confirm_text)
 
 
 # =====================================================================
@@ -3131,7 +3222,7 @@ class StereoOutputMeter(QWidget):
 
 
 # =====================================================================
-# 6. 主面板：Audition 风格音频片段波形与频谱编辑器
+# 6. 主面板：音频片段波形与频谱编辑器
 # =====================================================================
 # ------------------------- 后端对接指南 -------------------------------
 # 【对接方式】在剪辑时间线中右键音频片段触发"编辑"时，实例化
@@ -3152,7 +3243,7 @@ class StereoOutputMeter(QWidget):
 #      全声道操作仍走 gainApplied。后端仅对对应声道区间乘以增益系数。
 #    - canvas.setEditChannel(ch)：编辑目标声道切换（-1=全部/L+R），预览渲染、
 #      幽灵轮廓与提交信号随之切换；非目标声道在预览中自动压暗显示。
-#    - spectralRepairRequested(t0, t1, f_low, f_high, mode)：用户在语图
+#    - spectralRepairRequested(t0, t1, f_low, f_high, mode)：用户在频谱图
 #      框选某段时间的特定频段（如 50~80Hz 电源嗡嗡声、5k~8kHz 齿音）并
 #      触发修复时发出（右键菜单 / 顶部"修复 (H)"按钮 / 快捷键 H）。
 #      后端用带阻滤波 / 频谱插值处理该区域；mode 目前为 "heal"。
@@ -3161,7 +3252,7 @@ class StereoOutputMeter(QWidget):
 #    - commitAndCloseRequested()：用户点击"保存修改并返回剪辑"时触发，
 #      将处理后的音频缓存替换 / 非破坏性关联回时间线上的 Clip。
 #    - spectralBrushApplied([(t, f_hz), ...], radius_px)：修复笔涂抹轨迹
-#      （UI 已对语图矩阵做本地视觉平滑预览），后端沿轨迹做真实频谱修复。
+#      （UI 已对频谱图矩阵做本地视觉平滑预览），后端沿轨迹做真实频谱修复。
 #    - channelStateChanged(ch_idx, muted, phase_inverted)：左侧 CH 轨头
 #      点击静音 / 右键反相 / 独奏时发出，后端联动真实混音矩阵。
 #    - markersChanged([{"time", "label"}, ...])：M 键 / 右键标尺打点后发出，
@@ -3247,14 +3338,14 @@ class StereoOutputMeter(QWidget):
 #     调节（Alt 精调 / Shift 锁轴 / 0dB 磁吸）、双击归零、Alt+点击或右键删除、
 #     线段整段平移、选区 4 点防爆音推拉；波形振幅随包络实时缩放并显示幽灵
 #     原始轮廓。剩余工作：后端监听 envelopeChanged 按关键帧插值逐段应用增益。
-# 12. 语图纵轴（频率轴）缩放 + L/R/M/S 监听胶囊：左侧频率刻度槽支持滚轮
+# 12. 频谱图纵轴（频率轴）缩放 + L/R/M/S 监听胶囊：左侧频率刻度槽支持滚轮
 #     缩放频段（如局部放大 20Hz~500Hz 修电源嗡声），提升画笔涂抹精度；
-#     语图顶部加 L / R / M / S 通道切换胶囊。需要后端提供分声道 STFT
+#     频谱图顶部加 L / R / M / S 通道切换胶囊。需要后端提供分声道 STFT
 #     与中/侧(Mid/Side)矩阵。
 # 13. 一键高通低切与削波修复 (High-Pass / DeClip)：外景风噪、手持麦低频
 #     闷响用一键 80Hz / 100Hz 陡峭高通；麦克风过载平顶用 DeClip 削波修复。
 #     建议新增两个按钮 + 对应指令信号（如 highPassRequested(t0, t1, cutoff_hz)
-#     / declipRequested(t0, t1)），比手动框选语图更干净。
+#     / declipRequested(t0, t1)），比手动框选频谱图更干净。
 # 14. 剪辑点自动微交叉淡化 (Auto-Crossfade on Delete/Cut)：后端执行
 #     deleteRangeRequested 拼接时，默认在接缝处施加 5~10ms 等功率交叉淡化
 #     ——Z 过零点吸附只防极性跳变，防不了前后两段底噪纹理差异导致的"咔哒"。
@@ -3429,6 +3520,38 @@ class FadeCurveMiniPreview(QWidget):
         p.drawPath(path)
 
 
+class ClipEditorElidedLabel(QLabel):
+    """Keep varying text on one line and expose its full value on hover."""
+
+    def __init__(self, elide: Qt.TextElideMode = Qt.TextElideMode.ElideRight) -> None:
+        super().__init__()
+        self._full_text = ""
+        self._elide = elide
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self.setAccessibleName(text)
+        self.setToolTip(text)
+        self._refresh_text()
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:
+        metrics = self.fontMetrics()
+        return QSize(metrics.horizontalAdvance(self._full_text) + 2, metrics.height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.fontMetrics().height())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        super().setText(self.fontMetrics().elidedText(self._full_text, self._elide, self.width()))
+
+
 class ProcessStepRow(QFrame):
     """非破坏性处理栈中的单条 DSP 处理步骤（暗色硬件机架条目：状态色点 + 参数摘要 + 旁通开关 + 删除）"""
     toggled = pyqtSignal(str, bool)
@@ -3463,18 +3586,20 @@ class ProcessStepRow(QFrame):
         info_col = QVBoxLayout()
         info_col.setSpacing(0)
 
-        title_lbl = QLabel(f"{step_data['index']}. {step_data['label']}")
+        title_lbl = ClipEditorElidedLabel()
         title_lbl.setStyleSheet(
             f"color: {'#E4E4E8' if active else '#6E6E76'}; "
             f"font-size: 9px; font-weight: 700; border: none;"
         )
+        title_lbl.setText(f"{step_data['index']}. {step_data['label']}")
 
         sub_txt = "[旁通] " + step_data["detail"] if not self._enabled else step_data["detail"]
-        detail_lbl = QLabel(sub_txt)
+        detail_lbl = ClipEditorElidedLabel()
         detail_lbl.setStyleSheet(
             f"color: {'#9A9AA2' if active else '#55555C'}; "
             f"font-family: {MONO_FONT_CSS}; font-size: 8px; border: none;"
         )
+        detail_lbl.setText(sub_txt)
 
         info_col.addWidget(title_lbl)
         info_col.addWidget(detail_lbl)
@@ -3610,29 +3735,19 @@ class StudioAudioClipEditor(QWidget):
                 border-right: 1px solid #141416;
                 border-radius: 0px;
             }}
-            /* 右侧功能区：去掉独立卡片圆角与外边距，改为 1px 黑线上下分割 */
-            QFrame#GridRow {{
-                background-color: #27272B;
-                border: none;
-                border-bottom: 1px solid #141416;
-                border-radius: 0px;
-            }}
             QFrame#SideCard {{
                 background-color: #27272B;
                 border: none;
-                border-bottom: 1px solid #141416;
-                border-radius: 0px;
-            }}
-            QFrame#GridCell {{
-                background-color: #27272B;
-                border: none;
-                border-radius: 0px;
+                border-bottom: 1px solid #35353B;
             }}
             QLabel#CardHeader {{
-                color: #D0D0D8;
-                font-size: 9px;
+                color: #E0E0E6;
+                font-size: 11px;
                 font-weight: 700;
-                letter-spacing: 0.6px;
+            }}
+            QLabel#ClipParameterLabel {{
+                color: #ACACB7;
+                font-size: 10px;
             }}
             QFrame#ToolGroup {{
                 background-color: transparent;
@@ -3660,11 +3775,6 @@ class StudioAudioClipEditor(QWidget):
                 background-color: #182E38;
                 color: {ACCENT_CYAN};
                 border: 1px solid #24788C;
-            }}
-            QPushButton#GroupBtn[captured="true"] {{
-                background-color: #193026;
-                color: {ACCENT_GREEN};
-                border: 1px solid #2A7554;
             }}
             QPushButton#PrimaryBtn {{
                 background-color: #2E8B68;
@@ -3754,9 +3864,29 @@ class StudioAudioClipEditor(QWidget):
         # 在每组按钮下方画出分段底线；底部区域分割线只画在工具栏自身边界上，
         # 与概览条/参数面板之间保持通长的 1px 黑线分隔
         top_bar.setStyleSheet("QFrame#TopBar { background-color: #27272B; border-bottom: 1px solid #141416; }")
-        tb = QHBoxLayout(top_bar)
-        tb.setContentsMargins(8, 5, 8, 5)
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(8, 1, 8, 2)
+        top_layout.setSpacing(6)
+
+        # Only the command strip scrolls in a narrow dock. The panel toggle
+        # and the editor underneath it stay within the visible workspace.
+        toolbar_scroll = QScrollArea()
+        toolbar_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        toolbar_scroll.setWidgetResizable(True)
+        toolbar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        toolbar_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        toolbar_scroll.setStyleSheet("""
+            QScrollArea { background: #27272B; border: none; }
+            QScrollBar:horizontal { background: #202024; height: 5px; margin: 0px; }
+            QScrollBar::handle:horizontal { background: #55555F; border-radius: 2px; min-width: 24px; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+        """)
+        toolbar_content = QWidget()
+        tb = QHBoxLayout(toolbar_content)
+        tb.setContentsMargins(0, 0, 0, 0)
         tb.setSpacing(5)
+        toolbar_scroll.setWidget(toolbar_content)
+        top_layout.addWidget(toolbar_scroll, 1)
 
         # [组1] 走带与数码时间码舱
         self.btn_play = QPushButton("▶ 播放")
@@ -3844,7 +3974,7 @@ class StudioAudioClipEditor(QWidget):
         self.btn_tool_brush = QPushButton("✦ 修复笔")
         self.btn_tool_brush.setObjectName("GroupBtn")
         self.btn_tool_brush.setCheckable(True)
-        self.btn_tool_brush.setToolTip("污点修复画笔：在语图上涂抹消除口水音/爆音 (B)")
+        self.btn_tool_brush.setToolTip("污点修复画笔：在频谱图上涂抹消除口水音/爆音 (B)")
         self.btn_tool_brush.clicked.connect(lambda: self._set_tool_mode("brush"))
 
         self.btn_snap_zero = QPushButton("⌖ 过零")
@@ -3857,11 +3987,12 @@ class StudioAudioClipEditor(QWidget):
         tb.addWidget(_make_group(self.btn_tool_select, self.btn_tool_envelope, self.btn_tool_brush, self.btn_snap_zero))
 
         # [组3] 视图与缩放
-        self.btn_spectral = QPushButton("语图")
+        self.btn_spectral = QPushButton(I18N.tr("mixer.clip_editor.spectrogram", "Spectrogram"))
         self.btn_spectral.setObjectName("GroupBtn")
         self.btn_spectral.setCheckable(True)
         self.btn_spectral.setChecked(True)
-        self.btn_spectral.setToolTip("显示/隐藏频谱频率视图")
+        self.btn_spectral.setToolTip(I18N.tr(
+            "mixer.clip_editor.spectrogram_tip", "Show or hide the spectrogram (time, frequency, and level)"))
         self.btn_spectral.toggled.connect(self._on_spectral_toggled)
 
         btn_zoom_sel = QPushButton("缩放选区")
@@ -3878,9 +4009,7 @@ class StudioAudioClipEditor(QWidget):
         clip_btns = []
         for lbl_txt, tip_txt, slot_fn in (
             ("静音", "静音当前选区", self._emit_silence),
-            ("裁剪", "裁剪保留当前选区", self._emit_trim),
             ("删除", "删除当前选区 (Delete)", self._emit_delete),
-            ("标准化", "峰值标准化至 -1dBFS", self._emit_normalize),
         ):
             b = QPushButton(lbl_txt)
             b.setObjectName("GroupBtn")
@@ -3890,11 +4019,6 @@ class StudioAudioClipEditor(QWidget):
         tb.addWidget(_make_group(*clip_btns))
 
         # [组5] 降噪与频谱修复
-        self.btn_noise_print = QPushButton("采集噪声")
-        self.btn_noise_print.setObjectName("GroupBtn")
-        self.btn_noise_print.setToolTip("框选纯底噪段落后点击采集特征")
-        self.btn_noise_print.clicked.connect(self._emit_capture_noise)
-
         self.btn_denoise = QPushButton("降噪")
         self.btn_denoise.setObjectName("GroupBtn")
         self.btn_denoise.setToolTip("按右侧降噪衰减量执行谱减法降噪")
@@ -3904,7 +4028,7 @@ class StudioAudioClipEditor(QWidget):
         btn_heal.setObjectName("GroupBtn")
         btn_heal.setToolTip("频谱插值修复选区 (H)")
         btn_heal.clicked.connect(self._trigger_quick_heal)
-        tb.addWidget(_make_group(self.btn_noise_print, self.btn_denoise, btn_heal))
+        tb.addWidget(_make_group(self.btn_denoise, btn_heal))
 
         tb.addStretch()
 
@@ -3938,6 +4062,24 @@ class StudioAudioClipEditor(QWidget):
         btn_redo.clicked.connect(self._redo_process_stack)
         tb.addWidget(_make_group(btn_undo, btn_redo, trailing_sep=False))
 
+        self.btn_more = more = QPushButton(I18N.tr("mixer.clip_editor.menu.more", "More"))
+        more.setObjectName("GroupBtn")
+        more.setCursor(Qt.CursorShape.PointingHandCursor)
+        more.setFixedHeight(22)
+        more.setToolTip(I18N.tr("mixer.clip_editor.menu.more_tip", "Clip commands and channel display"))
+        more.clicked.connect(lambda: self.canvas.show_context_menu(more.mapToGlobal(more.rect().bottomLeft())))
+        top_layout.addWidget(more)
+
+        panel_label = I18N.tr("mixer.clip_editor.panel.toggle", "Tools")
+        self.btn_tools_panel = QPushButton(glyph_icon("panel-right", "#CFCFD6"), panel_label)
+        self.btn_tools_panel.setObjectName("GroupBtn")
+        self.btn_tools_panel.setCheckable(True)
+        self.btn_tools_panel.setChecked(True)
+        self.btn_tools_panel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_tools_panel.setFixedHeight(22)
+        self.btn_tools_panel.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        top_layout.addWidget(self.btn_tools_panel)
+
         root.addWidget(top_bar)
 
         # -------------------------------------------------------------
@@ -3966,6 +4108,13 @@ class StudioAudioClipEditor(QWidget):
         left_col.addWidget(mini_sep)
 
         self.canvas = WaveformSpectralCanvas()
+        self.action_normalize = QAction(
+            I18N.tr("mixer.clip_editor.menu.normalize", "Normalize peak to −1 dBFS"), self)
+        self.action_normalize.triggered.connect(self._emit_normalize)
+        self.action_capture_noise = QAction(
+            I18N.tr("mixer.clip_editor.menu.capture_noise", "Capture noise print"), self)
+        self.action_capture_noise.triggered.connect(self._emit_capture_noise)
+        self.canvas.addActions([self.action_normalize, self.action_capture_noise])
         self.canvas.playheadMoved.connect(self._on_canvas_playhead_moved)
         self.canvas.selectionChanged.connect(self._on_canvas_selection_changed)
         self.canvas.viewportChanged.connect(self._sync_viewport)
@@ -3982,27 +4131,50 @@ class StudioAudioClipEditor(QWidget):
 
         center_lay.addWidget(canvas_deck, 1)
 
-        # 右侧控制面板 + 电平表（参数网格 297px + 1px 竖线 + 电平表 44px = 342px，黑线贴合分割）
-        right_panel = QWidget()
-        right_panel.setFixedWidth(342)
-        right_panel.setStyleSheet("""
-            QWidget { background-color: #27272B; }
-            QFrame#GridCell { background-color: #27272B; border: none; }
-            QFrame#SideCard {
-                background-color: #27272B;
+        self.tools_panel = QTabWidget()
+        self.tools_panel.setObjectName("ClipEditorTools")
+        self.tools_panel.setFixedWidth(300)
+        self.tools_panel.setAccessibleName(panel_label)
+        self.tools_panel.setDocumentMode(True)
+        tabs = self.tools_panel.tabBar()
+        tabs.setObjectName("ClipEditorToolsTabs")
+        tabs.setDrawBase(False)
+        self.tools_panel.setStyleSheet("""
+            QTabWidget#ClipEditorTools::pane { border: none; border-radius: 0; }
+            QTabWidget#ClipEditorTools::tab-bar { alignment: left; }
+            QTabBar#ClipEditorToolsTabs {
+                background: #232327;
                 border: none;
-                border-bottom: 1px solid #141416;
-                border-radius: 0px;
+                border-radius: 0;
             }
-            QPushButton#MiniCellBtn {
-                background-color: #323238;
-                color: #CFCFD6;
+            QTabBar#ClipEditorToolsTabs::tab {
+                background-color: #232327;
+                color: #A3A3AE;
                 border: none;
+                border-bottom: 2px solid #171719;
+                border-radius: 0;
+                margin: 0;
+                min-width: 54px;
+                padding: 6px 8px 5px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QTabBar#ClipEditorToolsTabs::tab:hover { color: #E0E0E6; background-color: #303037; }
+            QTabBar#ClipEditorToolsTabs::tab:selected {
+                color: #E9E9EF;
+                background-color: #27272B;
+                border-bottom-color: #28A3B7;
+            }
+            QTabBar#ClipEditorToolsTabs::tab:focus { color: #FFFFFF; }
+            QPushButton#MiniCellBtn {
+                background-color: #33333A;
+                color: #CFCFD6;
+                border: 1px solid #3E3E46;
                 border-radius: 3px;
                 font-size: 10px;
                 font-weight: 600;
-                padding: 0px 2px;
-                height: 20px;
+                padding: 0px 6px;
+                height: 21px;
             }
             QPushButton#MiniCellBtn:hover {
                 background-color: #3C3C44;
@@ -4016,103 +4188,44 @@ class StudioAudioClipEditor(QWidget):
                 color: #28D8F0;
                 border: 1px solid #24788C;
             }
-            /* 面板内 QWidget 底色规则会与全局 QComboBox 同级冲突，这里显式保住深黑内凹下拉框 */
-            QComboBox {
-                background-color: #18181B;
-                color: #DCDCE2;
-                border: 1px solid #121214;
-                border-radius: 3px;
-                padding: 0px 5px;
-                font-size: 9px;
-                font-weight: 600;
-                height: 19px;
-            }
-        """)
-        rp_lay = QHBoxLayout(right_panel)
-        rp_lay.setContentsMargins(0, 0, 0, 0)
-        rp_lay.setSpacing(0)
-
-        right_container = QVBoxLayout()
-        right_container.setContentsMargins(0, 0, 0, 0)
-        right_container.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("""
+            QPushButton#MiniCellBtn:disabled { color: #81818B; border-color: #333339; }
             QScrollArea { background: #27272B; border: none; }
-            QScrollBar:vertical { background: #222226; width: 4px; margin: 0px; }
-            QScrollBar::handle:vertical { background: #42424A; border-radius: 2px; min-height: 24px; }
-            QScrollBar::handle:vertical:hover { background: #55555E; }
+            QScrollBar:vertical { background: #222226; width: 8px; margin: 0px; }
+            QScrollBar::handle:vertical { background: #505059; border-radius: 4px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #64646F; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
+        self._add_tools_tab(
+            I18N.tr("mixer.clip_editor.panel.clip", "Clip"),
+            self._build_gain_card(), self._build_fade_card(), self._build_time_pitch_card(),
+        )
+        self._add_tools_tab(
+            I18N.tr("mixer.clip_editor.panel.cleanup", "Cleanup"),
+            self._build_cleanliness_card(), self._build_loudness_card(),
+        )
+        self.process_stack_tab = self._add_tools_tab(
+            I18N.tr("mixer.clip_editor.panel.stack", "Stack"), self._build_process_stack_card(),
+        )
+        self.tools_panel.tabBar().setExpanding(True)
+        self.tools_panel.setUsesScrollButtons(False)
+        center_lay.addWidget(self.tools_panel)
 
-        def _make_grid_row(left_w: QWidget, right_w: QWidget) -> QFrame:
-            """达芬奇插件式双列网格行：左右等宽并排，中间 1px 竖向黑线，底部 1px 横向黑线"""
-            row_frame = QFrame()
-            row_frame.setObjectName("GridRow")
-            hl = QHBoxLayout(row_frame)
-            hl.setContentsMargins(0, 0, 0, 0)
-            hl.setSpacing(0)
-            hl.addWidget(left_w, 1)
-
-            v_div = QFrame()
-            v_div.setFixedWidth(1)
-            v_div.setStyleSheet("background-color: #141416; border: none;")
-            hl.addWidget(v_div)
-
-            hl.addWidget(right_w, 1)
-            return row_frame
-
-        cards_host = QWidget()
-        cards_host.setStyleSheet("background-color: #27272B;")
-        cards_col = QVBoxLayout(cards_host)
-        cards_col.setContentsMargins(0, 0, 0, 0)
-        cards_col.setSpacing(0)  # 关键：间距设为 0，让黑线无缝衔接
-
-        # 达芬奇 2×2 双列网格布局（按使用频率优先排布）：
-        # 第 1 行 [选区增益 | 淡入淡出与包络]，第 2 行 [干净度降噪 | 时间与音高]，
-        # 第 3 行全宽 LUFS 响度匹配，第 4 行全宽非破坏性处理栈
-        cards_col.addWidget(_make_grid_row(self._build_gain_card(), self._build_fade_card()))
-
-        cards_col.addWidget(_make_grid_row(self._build_cleanliness_card(), self._build_time_pitch_card()))
-
-        cards_col.addWidget(self._build_loudness_card())
-
-        cards_col.addWidget(self._build_process_stack_card())
-
-        cards_col.addStretch()
-
-        scroll.setWidget(cards_host)
-        right_container.addWidget(scroll, 1)
-
-        # 底部提交到时间线按钮（固定可见，顶部 1px 黑线隔开，不随卡片滚动）
-        if show_commit_button:
-            commit_wrap = QFrame()
-            commit_wrap.setStyleSheet("background-color: #27272B; border-top: 1px solid #141416;")
-            cw_lay = QVBoxLayout(commit_wrap)
-            cw_lay.setContentsMargins(8, 7, 8, 7)
-            commit_btn = QPushButton("✓ 保存修改并返回剪辑")
-            commit_btn.setObjectName("PrimaryBtn")
-            commit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            commit_btn.clicked.connect(self.commitAndCloseRequested.emit)
-            cw_lay.addWidget(commit_btn)
-            right_container.addWidget(commit_wrap)
-
-        rp_lay.addLayout(right_container, 1)
-
-        # 右侧监控列：双声道电平表贯穿全高（44px，与上下栏 1px 黑线完全对齐），李萨如示波器已移除
         meter_sep = QFrame()
         meter_sep.setFixedWidth(1)
         meter_sep.setStyleSheet("background-color: #141416; border: none;")
         self.output_meter = StereoOutputMeter()
-        rp_lay.addWidget(meter_sep)
-        rp_lay.addWidget(self.output_meter)
-
-        center_lay.addWidget(right_panel)
+        center_lay.addWidget(meter_sep)
+        center_lay.addWidget(self.output_meter)
         root.addLayout(center_lay, 1)
+        self.btn_tools_panel.toggled.connect(self._set_tools_panel_visible)
+        self._set_tools_panel_visible(True)
+
+        if show_commit_button:
+            commit_btn = QPushButton("✓ 保存修改并返回剪辑")
+            commit_btn.setObjectName("PrimaryBtn")
+            commit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            commit_btn.clicked.connect(self.commitAndCloseRequested.emit)
+            root.addWidget(commit_btn, 0, Qt.AlignmentFlag.AlignRight)
 
         # -------------------------------------------------------------
         # 3. 底部状态栏（#222226 + 顶部 1px 黑线）
@@ -4157,18 +4270,42 @@ class StudioAudioClipEditor(QWidget):
 
         root.addWidget(status_bar)
 
-    def _build_gain_card(self) -> QFrame:
-        # 达芬奇网格单元版：无彩色边框/状态点，直接继承 QFrame#GridCell 纯平样式
-        cell = QFrame()
-        cell.setObjectName("GridCell")
-        lay = QVBoxLayout(cell)
-        lay.setContentsMargins(8, 7, 8, 8)
-        lay.setSpacing(6)
+    def _set_tools_panel_visible(self, visible: bool) -> None:
+        self.tools_panel.setVisible(visible)
+        action = (I18N.tr("mixer.clip_editor.panel.hide", "Hide clip tools") if visible
+                  else I18N.tr("mixer.clip_editor.panel.show", "Show clip tools"))
+        self.btn_tools_panel.setToolTip(action)
+        self.btn_tools_panel.setAccessibleName(action)
 
-        hdr = QLabel("CLIP / SELECTION GAIN")
-        hdr.setObjectName("CardHeader")
-        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hdr)
+    def _add_tools_tab(self, title: str, *sections: QFrame) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for section in sections:
+            layout.addWidget(section)
+        layout.addStretch()
+        scroll.setWidget(body)
+        self.tools_panel.addTab(scroll, title)
+        return scroll
+
+    def _tool_section(self, title: str) -> tuple[QFrame, QVBoxLayout]:
+        section = QFrame()
+        section.setObjectName("SideCard")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(12, 9, 12, 10)
+        layout.setSpacing(6)
+        header = QLabel(title)
+        header.setObjectName("CardHeader")
+        layout.addWidget(header)
+        return section, layout
+
+    def _build_gain_card(self) -> QFrame:
+        cell, lay = self._tool_section(I18N.tr("mixer.clip_editor.panel.gain", "Gain"))
 
         # 增益作用声道切换：L+R（全部）/ L（仅左）/ R（仅右）
         tgt_row = QHBoxLayout()
@@ -4187,21 +4324,18 @@ class StudioAudioClipEditor(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(6)
-        left_v = QVBoxLayout()
-        left_v.setSpacing(3)
-        lbl = QLabel("音量增益")
-        lbl.setStyleSheet("color: #B4B4BE; font-size: 10px;")
+        lbl = QLabel(I18N.tr("mixer.clip_editor.panel.gain_level", "Gain level"))
+        lbl.setObjectName("ClipParameterLabel")
         self.gain_pill = EditableValuePill("0.0 dB", ACCENT_AMBER, width=62)
         self.gain_pill.setToolTip("拖拽左侧旋钮预览，双击胶囊输入精确增益 (-36.0 ~ +24.0 dB)")
         self.gain_pill.valueEdited.connect(self._on_gain_pill_edited)
-        left_v.addWidget(lbl)
-        left_v.addWidget(self.gain_pill)
 
         self.gain_knob = ProRotaryKnob(-36.0, 24.0, 0.0, 0.0, ACCENT_AMBER, mode="bipolar")
         self.gain_knob.valueChanged.connect(self._on_gain_knob_changed)
 
-        row.addLayout(left_v)
+        row.addWidget(lbl)
         row.addStretch()
+        row.addWidget(self.gain_pill)
         row.addWidget(self.gain_knob)
         lay.addLayout(row)
 
@@ -4225,17 +4359,7 @@ class StudioAudioClipEditor(QWidget):
         return cell
 
     def _build_cleanliness_card(self) -> QFrame:
-        # 达芬奇网格单元版：PEAK/RMS/FLOOR 读数框改为 #151518 深黑内凹框
-        cell = QFrame()
-        cell.setObjectName("GridCell")
-        lay = QVBoxLayout(cell)
-        lay.setContentsMargins(8, 7, 8, 8)
-        lay.setSpacing(6)
-
-        hdr = QLabel("CLEANLINESS & NOISE")
-        hdr.setObjectName("CardHeader")
-        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hdr)
+        cell, lay = self._tool_section(I18N.tr("mixer.clip_editor.panel.noise", "Noise & spectrum"))
 
         # 三栏深黑内凹读数框
         metrics_box = QFrame()
@@ -4277,55 +4401,51 @@ class StudioAudioClipEditor(QWidget):
         self.noise_val_lbl = _make_stat("FLOOR", "-58.2dB", ACCENT_AMBER)
         lay.addWidget(metrics_box)
 
-        # 语图底噪视觉增强旋钮（方便看清极微弱底噪）
+        # 频谱图底噪视觉增强旋钮（方便看清极微弱底噪）
         r1 = QHBoxLayout()
-        l1 = QVBoxLayout()
-        l1.setSpacing(2)
-        t1 = QLabel("底噪显影")
-        t1.setStyleSheet("color: #B4B4BE; font-size: 10px;")
-        self.spec_boost_pill = EditableValuePill("+0 dB", ACCENT_CYAN, width=58)
-        self.spec_boost_pill.setToolTip("提升语图暗部对比度，显影极微弱底噪痕迹 (0 ~ 36 dB)")
+        r1.setSpacing(6)
+        t1 = QLabel(I18N.tr("mixer.clip_editor.panel.spectrum_boost", "Spectrum boost"))
+        t1.setObjectName("ClipParameterLabel")
+        self.spec_boost_pill = EditableValuePill("+0 dB", ACCENT_CYAN, width=62)
+        self.spec_boost_pill.setToolTip("提升频谱图暗部对比度，显影极微弱底噪痕迹 (0 ~ 36 dB)")
         self.spec_boost_pill.valueEdited.connect(self._on_spec_boost_text)
-        l1.addWidget(t1)
-        l1.addWidget(self.spec_boost_pill)
 
         self.spec_boost_knob = ProRotaryKnob(0.0, 36.0, 0.0, 0.0, ACCENT_CYAN, mode="linear")
         self.spec_boost_knob.valueChanged.connect(self._on_spec_boost_knob)
-        r1.addLayout(l1)
+        r1.addWidget(t1)
         r1.addStretch()
+        r1.addWidget(self.spec_boost_pill)
         r1.addWidget(self.spec_boost_knob)
         lay.addLayout(r1)
 
         # 降噪衰减量旋钮
         r2 = QHBoxLayout()
-        l2 = QVBoxLayout()
-        l2.setSpacing(2)
-        t2 = QLabel("降噪衰减")
-        t2.setStyleSheet("color: #B4B4BE; font-size: 10px;")
-        self.denoise_pill = EditableValuePill("12.0 dB", ACCENT_GREEN, width=58)
+        r2.setSpacing(6)
+        t2 = QLabel(I18N.tr("mixer.clip_editor.panel.noise_reduction", "Noise reduction"))
+        t2.setObjectName("ClipParameterLabel")
+        self.denoise_pill = EditableValuePill("12.0 dB", ACCENT_GREEN, width=62)
         self.denoise_pill.setToolTip("谱减法降噪强度 (0 ~ 40 dB，过大易产生水声伪影)")
         self.denoise_pill.valueEdited.connect(self._on_denoise_text)
-        l2.addWidget(t2)
-        l2.addWidget(self.denoise_pill)
 
         self.denoise_knob = ProRotaryKnob(0.0, 40.0, 12.0, 12.0, ACCENT_GREEN, mode="linear")
         self.denoise_knob.valueChanged.connect(lambda v: self.denoise_pill.setText(f"{v:.1f} dB"))
-        r2.addLayout(l2)
+        r2.addWidget(t2)
         r2.addStretch()
+        r2.addWidget(self.denoise_pill)
         r2.addWidget(self.denoise_knob)
         lay.addLayout(r2)
 
-        # 底行：噪声采集状态 + FFT 窗口精度合并（低 FFT 高时间精度抓口水音，高 FFT 高频率精度抓交流嗡声）
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(4)
         self.noise_status_lbl = QLabel("● 未采集")
-        self.noise_status_lbl.setStyleSheet("color: #888892; font-size: 9px; font-weight: 600;")
-        self.noise_status_lbl.setToolTip("噪声特征未采集，降噪按自适应模式估计底噪；框选纯底噪段落点工具栏「采集噪声」可锁定特征")
-        bottom_row.addWidget(self.noise_status_lbl)
+        self.noise_status_lbl.setObjectName("ClipParameterLabel")
+        self.noise_status_lbl.setWordWrap(True)
+        self.noise_status_lbl.setToolTip("框选一段纯底噪，在右键菜单中选择「采集噪声」")
+        lay.addWidget(self.noise_status_lbl)
 
-        fft_lbl = QLabel("FFT")
-        fft_lbl.setStyleSheet("color: #9A9AA4; font-size: 10px; font-weight: 600;")
-        bottom_row.addWidget(fft_lbl)
+        fft_row = QHBoxLayout()
+        fft_lbl = QLabel(I18N.tr("mixer.clip_editor.panel.fft", "FFT window"))
+        fft_lbl.setObjectName("ClipParameterLabel")
+        fft_row.addWidget(fft_lbl)
+        fft_row.addStretch()
 
         self.fft_combo = QComboBox()
         self.fft_combo.addItems(["512 瞬态", "1024 均衡", "2048 人声", "4096 低频"])
@@ -4334,44 +4454,33 @@ class StudioAudioClipEditor(QWidget):
         self.fft_combo.currentTextChanged.connect(
             lambda txt: self.fftSizeChanged.emit(int(txt.split()[0]))
         )
-        bottom_row.addWidget(self.fft_combo, 1)
-        lay.addLayout(bottom_row)
+        fft_row.addWidget(self.fft_combo)
+        lay.addLayout(fft_row)
         return cell
 
     def _build_fade_card(self) -> QFrame:
-        # 达芬奇网格单元版：与增益卡并排，标题居中
-        cell = QFrame()
-        cell.setObjectName("GridCell")
-        lay = QVBoxLayout(cell)
-        lay.setContentsMargins(8, 7, 8, 8)
-        lay.setSpacing(6)
-
-        hdr = QLabel("FADE & ENVELOPE")
-        hdr.setObjectName("CardHeader")
-        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hdr)
+        cell, lay = self._tool_section(I18N.tr("mixer.clip_editor.panel.fade", "Fades & envelope"))
 
         row = QHBoxLayout()
-        row.setSpacing(3)
+        row.setSpacing(8)
         c1 = QVBoxLayout()
         c1.setSpacing(2)
-        l1 = QLabel("淡入(s)")
-        l1.setStyleSheet("color: #9A9AA4; font-size: 9px;")
-        self.fi_pill = EditableValuePill("0.00 s", ACCENT_BLUE, width=42)
+        l1 = QLabel(I18N.tr("mixer.clip_editor.panel.fade_in", "Fade in (s)"))
+        l1.setObjectName("ClipParameterLabel")
+        self.fi_pill = EditableValuePill("0.00 s", ACCENT_BLUE, width=72)
         self.fi_pill.setToolTip("双击输入淡入时长 (秒)，画布顶部蓝色手柄亦可拖拽")
         self.fi_pill.valueEdited.connect(self._on_fi_edited)
         c1.addWidget(l1)
         c1.addWidget(self.fi_pill)
 
         self.fade_preview = FadeCurveMiniPreview()
-        self.fade_preview.setFixedSize(34, 26)
+        self.fade_preview.setFixedSize(72, 29)
 
         c2 = QVBoxLayout()
         c2.setSpacing(2)
-        l2 = QLabel("淡出(s)")
-        l2.setAlignment(Qt.AlignmentFlag.AlignRight)
-        l2.setStyleSheet("color: #9A9AA4; font-size: 9px;")
-        self.fo_pill = EditableValuePill("0.00 s", ACCENT_BLUE, width=42)
+        l2 = QLabel(I18N.tr("mixer.clip_editor.panel.fade_out", "Fade out (s)"))
+        l2.setObjectName("ClipParameterLabel")
+        self.fo_pill = EditableValuePill("0.00 s", ACCENT_BLUE, width=72)
         self.fo_pill.setToolTip("双击输入淡出时长 (秒)，画布顶部蓝色手柄亦可拖拽")
         self.fo_pill.valueEdited.connect(self._on_fo_edited)
         c2.addWidget(l2)
@@ -4386,7 +4495,7 @@ class StudioAudioClipEditor(QWidget):
 
         # 一键对称防爆音微淡入/淡出预设（保留归零与最常用防爆 20ms）
         preset_row = QHBoxLayout()
-        preset_row.setSpacing(3)
+        preset_row.setSpacing(4)
         self.fade_preset_buttons: dict[float, QPushButton] = {}
         for sec_val, p_lbl in ((0.0, "归零"), (0.02, "防爆20m")):
             pb = QPushButton(p_lbl)
@@ -4395,11 +4504,10 @@ class StudioAudioClipEditor(QWidget):
             pb.clicked.connect(lambda checked=False, sv=sec_val: self._apply_symmetric_fade(sv))
             preset_row.addWidget(pb, 1)
             self.fade_preset_buttons[sec_val] = pb
-        lay.addLayout(preset_row)
 
         # 淡入淡出曲线形状切换组（线性 / S 曲线 / 对数）
         curve_row = QHBoxLayout()
-        curve_row.setSpacing(3)
+        curve_row.setSpacing(4)
         self._fade_curve_btns: dict[str, QPushButton] = {}
         for c_name, c_label in (("Linear", "线性"), ("S-Curve", "S曲线"), ("Log", "对数")):
             b = QPushButton(c_label)
@@ -4410,6 +4518,7 @@ class StudioAudioClipEditor(QWidget):
             curve_row.addWidget(b, 1)
             self._fade_curve_btns[c_name] = b
         lay.addLayout(curve_row)
+        lay.addLayout(preset_row)
 
         # 音量包络快捷控制条（顶部 1px 细黑线隔开）：启用 / 平滑曲线 / 重置
         env_sep = QFrame()
@@ -4419,8 +4528,8 @@ class StudioAudioClipEditor(QWidget):
 
         env_row = QHBoxLayout()
         env_row.setSpacing(3)
-        env_tag = QLabel("包络")
-        env_tag.setStyleSheet(f"color: {ACCENT_VIOLET}; font-size: 10px; font-weight: 700;")
+        env_tag = QLabel(I18N.tr("mixer.clip_editor.panel.envelope", "Envelope"))
+        env_tag.setObjectName("ClipParameterLabel")
         env_tag.setToolTip("包络常驻启用；顶部工具栏「✎ 包络」(V) 切换编辑模式")
 
         self.btn_env_smooth = QPushButton("平滑")
@@ -4438,48 +4547,37 @@ class StudioAudioClipEditor(QWidget):
         self.btn_env_reset.clicked.connect(self.canvas.resetEnvelope)
 
         env_row.addWidget(env_tag)
-        env_row.addWidget(self.btn_env_smooth, 1)
-        env_row.addWidget(self.btn_env_reset, 1)
+        env_row.addStretch()
+        env_row.addWidget(self.btn_env_smooth)
+        env_row.addWidget(self.btn_env_reset)
         lay.addLayout(env_row)
         return cell
 
     def _build_time_pitch_card(self) -> QFrame:
-        """时间伸缩与音高微调网格单元：速率% ↔ 目标时长s 双向换算 + 保持原调 / 磁带变速双模式"""
-        cell = QFrame()
-        cell.setObjectName("GridCell")
-        lay = QVBoxLayout(cell)
-        lay.setContentsMargins(8, 7, 8, 8)
-        lay.setSpacing(6)
+        cell, lay = self._tool_section(I18N.tr("mixer.clip_editor.panel.time_pitch", "Speed & pitch"))
 
-        # 1. 居中标题 + 保持原调开关
         hdr_row = QHBoxLayout()
-        hdr = QLabel("TIME & PITCH")
-        hdr.setObjectName("CardHeader")
-
-        keep_lbl = QLabel("保调")
-        keep_lbl.setStyleSheet("color: #9A9AA4; font-size: 9px; font-weight: 700;")
+        keep_lbl = QLabel(I18N.tr("mixer.clip_editor.panel.preserve_pitch", "Preserve pitch"))
+        keep_lbl.setObjectName("ClipParameterLabel")
         keep_lbl.setToolTip("开启：变长/变速不改变音高；关闭：物理磁带变速联动变调")
 
         self.preserve_pitch_sw = PowerToggleSwitch(checked=True)
         self.preserve_pitch_sw.setToolTip("保持原调 (Preserve Pitch)")
         self.preserve_pitch_sw.toggled.connect(self._on_preserve_pitch_toggled)
 
-        hdr_row.addStretch()
-        hdr_row.addWidget(hdr)
-        hdr_row.addStretch()
         hdr_row.addWidget(keep_lbl)
         hdr_row.addWidget(self.preserve_pitch_sw)
-        lay.addLayout(hdr_row)
+        hdr_row.addStretch()
 
         # 2. 伸缩速率（% 旋钮 + 胶囊） & 目标时长（s 可编辑胶囊，对齐画面切点）
         r_time = QHBoxLayout()
-        r_time.setSpacing(3)
+        r_time.setSpacing(8)
 
         c_ratio = QVBoxLayout()
         c_ratio.setSpacing(2)
-        l_ratio = QLabel("速率")
-        l_ratio.setStyleSheet("color: #B4B4BE; font-size: 9px;")
-        self.stretch_ratio_pill = EditableValuePill("100.0%", ACCENT_CYAN, width=42)
+        l_ratio = QLabel(I18N.tr("mixer.clip_editor.panel.speed", "Speed"))
+        l_ratio.setObjectName("ClipParameterLabel")
+        self.stretch_ratio_pill = EditableValuePill("100.0%", ACCENT_CYAN, width=62)
         self.stretch_ratio_pill.setToolTip("双击输入百分比 (50% ~ 200%，>100% 加快缩短)")
         self.stretch_ratio_pill.valueEdited.connect(self._on_stretch_ratio_edited)
         c_ratio.addWidget(l_ratio)
@@ -4487,9 +4585,9 @@ class StudioAudioClipEditor(QWidget):
 
         c_dur = QVBoxLayout()
         c_dur.setSpacing(2)
-        l_dur = QLabel("目标时长")
-        l_dur.setStyleSheet("color: #9A9AA4; font-size: 9px;")
-        self.target_dur_pill = EditableValuePill(f"{self._duration:.2f} s", ACCENT_CYAN, width=46)
+        l_dur = QLabel(I18N.tr("mixer.clip_editor.panel.duration", "Target duration"))
+        l_dur.setObjectName("ClipParameterLabel")
+        self.target_dur_pill = EditableValuePill(f"{self._duration:.2f} s", ACCENT_CYAN, width=72)
         self.target_dur_pill.setToolTip("直接输入目标秒数以对齐画面切点，自动反算速率")
         self.target_dur_pill.valueEdited.connect(self._on_target_dur_edited)
         c_dur.addWidget(l_dur)
@@ -4506,38 +4604,33 @@ class StudioAudioClipEditor(QWidget):
 
         # 3. 音高微调（-12 ~ +12 半音双极旋钮）
         r_pitch = QHBoxLayout()
-        c_pitch = QVBoxLayout()
-        c_pitch.setSpacing(2)
-        l_pitch = QLabel("音高 (半音)")
-        l_pitch.setStyleSheet("color: #B4B4BE; font-size: 10px;")
-        self.pitch_pill = EditableValuePill("0.0 st", ACCENT_VIOLET, width=58)
+        r_pitch.setSpacing(6)
+        l_pitch = QLabel(I18N.tr("mixer.clip_editor.panel.pitch", "Pitch (semitones)"))
+        l_pitch.setObjectName("ClipParameterLabel")
+        self.pitch_pill = EditableValuePill("0.0 st", ACCENT_VIOLET, width=62)
         self.pitch_pill.setToolTip("双击输入半音偏移 (-12.0 ~ +12.0 st，支持小数如 +0.5)")
         self.pitch_pill.valueEdited.connect(self._on_pitch_pill_edited)
-        c_pitch.addWidget(l_pitch)
-        c_pitch.addWidget(self.pitch_pill)
 
         self.pitch_knob = ProRotaryKnob(-12.0, 12.0, 0.0, 0.0, ACCENT_VIOLET, mode="bipolar")
         self.pitch_knob.valueChanged.connect(self._on_pitch_knob_changed)
 
-        r_pitch.addLayout(c_pitch)
+        r_pitch.addWidget(l_pitch)
         r_pitch.addStretch()
+        r_pitch.addWidget(self.pitch_pill)
         r_pitch.addWidget(self.pitch_knob)
         lay.addLayout(r_pitch)
 
-        # 4. 算法模式 + 重置（同排并列）
-        algo_row = QHBoxLayout()
-        algo_row.setSpacing(2)
         self.stretch_algo_combo = QComboBox()
         self.stretch_algo_combo.addItems(["人声", "复音", "瞬态"])
         self.stretch_algo_combo.setToolTip("选择时间伸缩 DSP 算法内核")
-        algo_row.addWidget(self.stretch_algo_combo, 1)
+        hdr_row.addWidget(self.stretch_algo_combo)
 
         self.time_pitch_reset_button = QPushButton("重置")
         self.time_pitch_reset_button.setObjectName("MiniCellBtn")
         self.time_pitch_reset_button.setToolTip("恢复 100% 速率与 0.0 st 音高")
         self.time_pitch_reset_button.clicked.connect(self._reset_time_pitch)
-        algo_row.addWidget(self.time_pitch_reset_button)
-        lay.addLayout(algo_row)
+        hdr_row.addWidget(self.time_pitch_reset_button)
+        lay.addLayout(hdr_row)
 
         # 5. 提交应用按钮
         self.time_pitch_action_button = apply_tp_btn = QPushButton("应用时间与音高")
@@ -4560,21 +4653,10 @@ class StudioAudioClipEditor(QWidget):
         return cell
 
     def _build_loudness_card(self) -> QFrame:
-        """全宽响度匹配栏（两块式）：标题行右侧行业标准预设 + 下行 OLED 读数与目标/限幅/一键匹配"""
-        card = QFrame()
-        card.setObjectName("SideCard")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(8, 7, 8, 8)
-        lay.setSpacing(6)
+        card, lay = self._tool_section(I18N.tr("mixer.clip_editor.panel.loudness", "Loudness match"))
 
-        # 块 1：标题 + 行业标准预设右置
-        hdr_row = QHBoxLayout()
-        hdr_row.setSpacing(4)
-        hdr = QLabel("LUFS LOUDNESS MATCH")
-        hdr.setObjectName("CardHeader")
-        hdr_row.addWidget(hdr)
-        hdr_row.addStretch()
-
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(4)
         self._lufs_preset_btns: dict[float, QPushButton] = {}
         for lufs_val, lbl_txt, tip_txt in (
             (-14.0, "-14网络", "B站 / YouTube / 抖音流媒体标准 (-14 LUFS)"),
@@ -4587,13 +4669,11 @@ class StudioAudioClipEditor(QWidget):
             b.setChecked(abs(lufs_val - self._target_lufs) < 0.1)
             b.setToolTip(tip_txt)
             b.clicked.connect(lambda checked=False, lv=lufs_val: self._set_target_lufs(lv))
-            hdr_row.addWidget(b)
+            preset_row.addWidget(b, 1)
             self._lufs_preset_btns[lufs_val] = b
-        lay.addLayout(hdr_row)
 
-        # 块 2：OLED 双读数 + 目标/限幅胶囊（单位 LU / dB 区分，悬停看说明）
         cfg_row = QHBoxLayout()
-        cfg_row.setSpacing(5)
+        cfg_row.setSpacing(8)
 
         oled = QFrame()
         oled.setStyleSheet("QFrame { background-color: #151518; border: 1px solid #101012; border-radius: 3px; }")
@@ -4615,23 +4695,35 @@ class StudioAudioClipEditor(QWidget):
             o_lay.addLayout(c, 1)
             return v
 
-        self.lufs_val_lbl = _stat_col("INTEGRATED", f"{self._current_lufs:.1f} LUFS", ACCENT_CYAN)
+        self.lufs_val_lbl = _stat_col(I18N.tr("mixer.clip_editor.panel.integrated", "Integrated"),
+                                     f"{self._current_lufs:.1f} LUFS", ACCENT_CYAN)
         v_div = QFrame()
         v_div.setFixedWidth(1)
         v_div.setStyleSheet("background-color: #242429; border: none;")
         o_lay.addWidget(v_div)
-        self.true_peak_lbl = _stat_col("TRUE PEAK", f"{self._current_true_peak:.1f} dBTP", ACCENT_GREEN)
-        cfg_row.addWidget(oled, 3)
+        self.true_peak_lbl = _stat_col(I18N.tr("mixer.clip_editor.panel.true_peak", "True peak"),
+                                      f"{self._current_true_peak:.1f} dBTP", ACCENT_GREEN)
+        lay.addWidget(oled)
+        lay.addLayout(preset_row)
 
-        self.target_lufs_pill = EditableValuePill(f"{self._target_lufs:.1f} LU", ACCENT_RED, width=54)
+        self.target_lufs_pill = EditableValuePill(f"{self._target_lufs:.1f} LU", ACCENT_RED, width=68)
         self.target_lufs_pill.setToolTip("目标响度 (LUFS)：双击输入自定义值 (-36.0 ~ -6.0)")
         self.target_lufs_pill.valueEdited.connect(self._on_target_lufs_edited)
-        cfg_row.addWidget(self.target_lufs_pill)
 
-        self.tp_ceil_pill = EditableValuePill(f"{self._true_peak_ceil:.1f} dB", ACCENT_AMBER, width=50)
+        self.tp_ceil_pill = EditableValuePill(f"{self._true_peak_ceil:.1f} dB", ACCENT_AMBER, width=68)
         self.tp_ceil_pill.setToolTip("真峰值保护上限 (True Peak Ceiling，防削波失真)")
         self.tp_ceil_pill.valueEdited.connect(self._on_tp_ceil_edited)
-        cfg_row.addWidget(self.tp_ceil_pill)
+        for label_text, pill in (
+            (I18N.tr("mixer.clip_editor.panel.target", "Target"), self.target_lufs_pill),
+            (I18N.tr("mixer.clip_editor.panel.ceiling", "Ceiling"), self.tp_ceil_pill),
+        ):
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            label = QLabel(label_text)
+            label.setObjectName("ClipParameterLabel")
+            col.addWidget(label)
+            col.addWidget(pill)
+            cfg_row.addLayout(col, 1)
         lay.addLayout(cfg_row)
 
         # 一键匹配按钮独占一行（实时显示所需增益补偿值）
@@ -4660,18 +4752,13 @@ class StudioAudioClipEditor(QWidget):
         return card
 
     def _build_process_stack_card(self) -> QFrame:
-        """全宽非破坏性处理栈机架列表：所有操作自动入栈，单步可旁通/删除，支持撤销/重做快照"""
         card = QFrame()
-        card.setObjectName("SideCard")
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(8, 7, 8, 8)
+        lay.setContentsMargins(12, 9, 12, 10)
         lay.setSpacing(6)
 
         # 1. 标题栏 + 激活计数徽标 + 清空按钮
         hdr_row = QHBoxLayout()
-        hdr = QLabel("PROCESS STACK")
-        hdr.setObjectName("CardHeader")
-
         self.stack_count_lbl = QLabel("0 步")
         self.stack_count_lbl.setStyleSheet(f"""
             background-color: #151518;
@@ -4689,7 +4776,6 @@ class StudioAudioClipEditor(QWidget):
         self.btn_clear_stack.setToolTip("清除全部处理步骤并恢复原始音频")
         self.btn_clear_stack.clicked.connect(self._clear_process_stack)
 
-        hdr_row.addWidget(hdr)
         hdr_row.addWidget(self.stack_count_lbl)
         hdr_row.addStretch()
         hdr_row.addWidget(self.btn_clear_stack)
@@ -5200,9 +5286,10 @@ class StudioAudioClipEditor(QWidget):
 
     def _rebuild_process_stack_ui(self):
         while self.stack_list_layout.count():
-            item = self.stack_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = self.stack_list_layout.takeAt(0).widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
 
         total = len(self._process_steps)
         active_cnt = sum(1 for s in self._process_steps if s.get("enabled", True))
@@ -5210,15 +5297,15 @@ class StudioAudioClipEditor(QWidget):
         self.btn_clear_stack.setEnabled(total > 0)
 
         if not self._process_steps:
-            empty = QLabel("暂无非破坏性处理步骤\n执行增益、降噪、响度或修复后自动入栈")
+            empty = QLabel(I18N.tr("mixer.clip_editor.panel.empty_stack", "No processing steps yet"))
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setStyleSheet("""
-                background-color: #151518;
-                color: #6E6E76;
-                border: 1px dashed #2A2A2E;
+                background-color: #202024;
+                color: #A1A1AB;
+                border: 1px solid #333339;
                 border-radius: 3px;
                 padding: 10px 6px;
-                font-size: 9px;
+                font-size: 10px;
             """)
             self.stack_list_layout.addWidget(empty)
             return
@@ -5257,11 +5344,6 @@ class StudioAudioClipEditor(QWidget):
     def _emit_capture_noise(self):
         t0, t1, _, _ = self.canvas.getSelection()
         self._has_noise_print = True
-        # 用动态属性切换样式（配合 QSS 的 [captured="true"] 规则），
-        # 避免硬编码 setStyleSheet 覆盖掉按钮原有的渐变与 hover 效果
-        self.btn_noise_print.setProperty("captured", True)
-        self.btn_noise_print.style().unpolish(self.btn_noise_print)
-        self.btn_noise_print.style().polish(self.btn_noise_print)
         self.noise_status_lbl.setText("● 已锁定")
         self.noise_status_lbl.setToolTip(f"已锁定噪声特征 ({t1 - t0:.2f}s)，降噪将按此特征谱减")
         self.noise_status_lbl.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 9px; font-weight: 700;")
@@ -5328,7 +5410,7 @@ class StudioAudioClipEditor(QWidget):
             p_min_r.append(-min(0.98, env_r * rng.uniform(0.88, 1.0)))
             rms_r.append(env_r * 0.56)
 
-        # 生成 240 x 96 语图矩阵：包含 60Hz 低频交流声横线 + 人声谐波峰 + 气音宽频带
+        # 生成 240 x 96 频谱图矩阵：包含 60Hz 低频交流声横线 + 人声谐波峰 + 气音宽频带
         t_bins, f_bins = 240, 96
         spec: list[list[float]] = []
         for tx in range(t_bins):
@@ -5384,7 +5466,6 @@ class StudioAudioClipEditor(QWidget):
                     self._demo_rms[ch_i][i] = min(1.0, self._demo_rms[ch_i][i] * scale)
         self.canvas._peaks_max = self._demo_peaks_max
         self.canvas._peaks_min = self._demo_peaks_min
-        self.canvas._rms = self._demo_rms
         self.canvas._cache_wave_channels()
         self.canvas._invalidate_cache()
         self.minimap.setAudioSummary(self._duration, self._demo_peaks_max[0])
@@ -5440,7 +5521,7 @@ class StudioAudioClipEditor(QWidget):
         peaks_min: list[list[float]],
         peaks_max: list[list[float]],
         rms: list[list[float]],
-        spectrogram_2d: list[list[float]] | None = None,
+        spectrogram_2d: Spectrogram | list[list[float]] | None = None,
         clip_name: str | None = None,
         cleanliness_report: dict | None = None,
         *,
@@ -5449,7 +5530,7 @@ class StudioAudioClipEditor(QWidget):
         """
         供后端 DSP 引擎加载真实音频可视化缓存：
         - peaks_min / peaks_max / rms: shape 为 [channels][num_bins]，取值范围 [-1.0, 1.0]
-        - spectrogram_2d: shape 为 [time_bins][freq_bins]，归一化能量 [0.0, 1.0]
+        - spectrogram_2d: 分声道频谱图，或演示用的 [time_bins][freq_bins] 矩阵
         """
         if clip_name:
             self._clip_name = clip_name

@@ -22,6 +22,8 @@ from PyQt6.QtCore import QMutex, QThread, pyqtSignal
 
 import numpy as np
 
+from src.features.mixer.spectrogram import Spectrogram
+
 logger = logging.getLogger(__name__)
 _active_workers: set[ClipPreviewWorker] = set()
 
@@ -37,7 +39,7 @@ class ClipPreviewResult:
     mins: np.ndarray
     maxs: np.ndarray
     rmss: np.ndarray
-    spectrogram: list
+    spectrogram: Spectrogram | list | None
     report: dict = field(default_factory=dict)
     length_maps: tuple[tuple[int, int, int], ...] = ()
 

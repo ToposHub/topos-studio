@@ -1528,10 +1528,12 @@ class ClipInstance:
 
         # Determine the order for new effect
         existing_effects = self.effects if isinstance(self.effects, tuple) else tuple(self.effects) if self.effects else ()
-        new_order = len(existing_effects)
-
         # If effect is EffectInstance, update its order
         if isinstance(effect, EffectInstance):
+            # A removed insert can leave gaps. New effects still go last.
+            orders = (item.get("order", 0) if isinstance(item, dict) else getattr(item, "order", 0)
+                      for item in existing_effects)
+            new_order = max(len(existing_effects), max(orders, default=-1) + 1)
             effect_with_order = effect.with_order(new_order)
             new_effects = existing_effects + (effect_with_order,)
         else:

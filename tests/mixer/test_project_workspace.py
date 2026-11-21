@@ -6,12 +6,16 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
-from PyQt6.QtGui import QAction, QImage, QKeySequence, QPainter
+from PyQt6.QtGui import (
+    QAction, QContextMenuEvent, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent,
+    QImage, QKeySequence, QMouseEvent, QPainter,
+)
 from PyQt6.QtWidgets import (
-    QApplication, QDockWidget, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QStyle, QStyleOptionComboBox, QTabBar, QVBoxLayout, QWidget,
+    QApplication, QDockWidget, QFrame, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QStyle, QStyleOptionComboBox, QTabBar, QToolButton, QVBoxLayout, QWidget,
 )
 from pytestqt.qtbot import QtBot
 
@@ -24,7 +28,7 @@ from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.app.ui.workspace_panel_bar import DockTabAction
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
-from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, SaturationParams, TimelineSequence
 from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel, ViewMode
@@ -316,9 +320,29 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     # P1-6：噪声采集/降噪随真实 PCM 启用（预览态）；频谱修复笔仍待后端。
     assert editor._panel.btn_denoise.isEnabled()
     qtbot.waitUntil(lambda: editor._panel.btn_tool_brush.isEnabled(), timeout=10000)
-    dock.setFloating(True)
+    menu_action = I18N.tr("dock.float", "Float")
+    chosen_actions = []
+
+    def use_panel_menu(menu: QMenu, *_args: object) -> None:
+        actions = menu.actions()
+        assert any(action.objectName() == "mergeDisplayChannels" for action in actions)
+        choices = [action for action in actions if action.text() == menu_action]
+        assert len(choices) == 1
+        chosen_actions.append(menu_action)
+        choices[0].trigger()
+
+    monkeypatch.setattr(QMenu, "exec", use_panel_menu)
+    canvas = editor._panel.canvas
+    wave_rect, _, _ = canvas._wave_and_spec_rects()
+    point = wave_rect.center().toPoint()
+    qtbot.mouseClick(canvas, Qt.MouseButton.RightButton, pos=point)
+    # The native context event often follows the mouse press even when it was handled.
+    context = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, point, canvas.mapToGlobal(point))
+    QApplication.sendEvent(canvas, context)
+    assert context.isAccepted() and chosen_actions == [menu_action]
     host._sync_floating_docks()
     assert dock.isFloating() and isinstance(dock.titleBarWidget(), FloatingDockTitleBar)
+    assert not dock.titleBarWidget().findChildren(QToolButton)
     dock.move(-20000, -20000)
     view.request_audio_clip_editor(clip.clip_id)
     assert QApplication.primaryScreen().availableGeometry().intersects(dock.geometry())
@@ -353,6 +377,10 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     panel = editor._panel
     panel.fadeApplied.emit(0.5, 0.25)
     canvas = panel.canvas
+    # Give the shorter fade room for its curve handle in the narrow floating dock.
+    dock.resize(800, 390)
+    qtbot.mouseClick(panel.btn_tools_panel, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: panel.tools_panel.isHidden() and canvas.width() > 600)
     for side, other in (("in", "out"), ("out", "in")):
         before = view.get_timeline()
         wave_rect, _, _ = canvas._wave_and_spec_rects()
@@ -376,17 +404,34 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
         assert getattr(view.get_timeline().get_clip_by_id(clip.clip_id), edited_field) == "smooth"
         editor.redo_requested.emit()
         assert getattr(view.get_timeline().get_clip_by_id(clip.clip_id), edited_field) == preview
-    assert editor._panel.btn_tab.isVisible()
-    editor._panel.btn_tab.click()
+    menu_action = I18N.tr("dock.dock", "Dock")
+    qtbot.mouseClick(editor._panel.btn_more, Qt.MouseButton.LeftButton)
     assert not dock.isFloating()
     assert dock in host.tabifiedDockWidgets(host.dock_audio_timeline)
+    menu_action = I18N.tr("dock.close", "Close")
+    host._show_dock_context_menu(QPoint(2, 2), dock)
+    assert not dock.isVisible()
+    assert chosen_actions[-1] == menu_action
+    view.request_audio_clip_editor(clip.clip_id)
+    assert dock.isVisible() and editor.clip_id == clip.clip_id
     host._sync_floating_docks()
     assert dock.titleBarWidget().maximumHeight() == 1
+
+    view.set_selection(TimelineSelection().with_clip_selected(clip.clip_id, clip.track_id,
+                                                               view.get_timeline().timeline_id))
+    host._open_project_audio_source_editor(asset.asset_id)
+    assert editor.clip_id is None and editor._asset.asset_id == asset.asset_id
+    menu_action = I18N.tr("dock.float", "Float")
+    qtbot.mouseClick(editor._panel.btn_more, Qt.MouseButton.LeftButton)
+    assert dock.isFloating() and editor.clip_id is None
+    menu_action = I18N.tr("dock.dock", "Dock")
+    qtbot.mouseClick(editor._panel.btn_more, Qt.MouseButton.LeftButton)
+    assert not dock.isFloating() and editor.clip_id is None
     host._restore_edit_panels_from_mixer()
-    assert editor.clip_id is None
+    assert editor.clip_id is None and editor._asset is None
 
 
-def test_double_click_and_tab_activation_follow_timeline_selection(project_host, qtbot, tmp_path) -> None:
+def test_double_click_and_tab_activation_follow_timeline_selection(project_host, qtbot, tmp_path, monkeypatch) -> None:
     host = project_host
     view = host.timeline_panel.timeline_view
     path = tmp_path / "two-clips.wav"
@@ -419,7 +464,6 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     assert panel.btn_timeline.height() == panel.btn_play.height()
     assert panel.btn_timeline.width() >= panel.btn_timeline.sizeHint().width()
     assert not panel.btn_timeline.icon().isNull()
-    assert panel.btn_tab.isHidden()
     assert editor._title.parentWidget() is panel.sel_info_lbl.parentWidget()
     assert editor._status.parentWidget() is panel.sel_info_lbl.parentWidget()
     assert editor._title.accessibleName() == asset.display_name
@@ -445,6 +489,13 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     view.set_selection(TimelineSelection())
     qtbot.mouseClick(tabs, Qt.MouseButton.LeftButton, pos=tabs.tabRect(clip_tab).center())
     assert editor.clip_id is None and editor._empty.isVisible()
+
+    shown_actions = []
+    monkeypatch.setattr(QMenu, "exec", lambda menu, *_args: shown_actions.extend(menu.actions()))
+    host._show_dock_context_menu(QPoint(2, 2), dock)
+    assert [action.text() for action in shown_actions] == [
+        I18N.tr("dock.float", "Float"), I18N.tr("dock.close", "Close"),
+    ]
 
 
 @pytest.mark.parametrize("mode", [ViewMode.LIST, ViewMode.GRID])
@@ -908,6 +959,188 @@ def test_mixer_effect_activation_applies_and_opens_clip_effect(project_host, mon
     assert view.get_timeline().get_clip_by_id(clip.clip_id).effects == ()
 
 
+def test_clip_effect_rack_targets_open_clip_and_updates_audition(
+    project_host: ProjectHost, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    sequence = view.get_timeline()
+    clip = sequence.audio_tracks[0].clips[0]
+    sibling = replace(clip, clip_id="other-clip", timeline_start=clip.timeline_duration)
+    view.load_timeline(sequence.with_clip_added(clip.track_id, sibling))
+    view.set_selection(TimelineSelection().with_clip_selected(
+        sibling.clip_id, sibling.track_id, sequence.timeline_id))
+    path = tmp_path / "rack.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(48000)
+        wav.writeframes(b"\x00\x20\x00\x18" * 48000 * 5)
+    asset = MediaAsset(asset_id=clip.asset_id, path=str(path), media_type="audio",
+                       display_name="Dialogue", metadata={"duration_seconds": 5.0})
+    host._current_edit_project = EditProject("rack-project", "Rack", assets={asset.asset_id: asset})
+    # The test host omits the Edit inspector and program renderer.
+    monkeypatch.setattr(host, "_update_properties_panel_after_effect_change", lambda _clip_id: None)
+    monkeypatch.setattr(host, "_request_program_viewer_update", lambda: None)
+
+    host.show_mixer()
+    view.request_audio_clip_editor(clip.clip_id)
+    editor = host.dock_audio_clip_editor.widget()
+    panel = editor._panel
+    rack = panel.effect_rack
+    assert panel.tools_panel.indexOf(rack) + 1 == panel.tools_panel.indexOf(panel.process_stack_tab)
+    qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=10000)
+    raw = panel._raw_pcm
+    panel.tools_panel.setCurrentWidget(rack)
+
+    def current_effects() -> tuple:
+        return view.get_timeline().get_clip_by_id(clip.clip_id).effects
+
+    def effect_action(menu: QMenu, effect_type: str) -> QAction | None:
+        for action in menu.actions():
+            if action.data() == effect_type:
+                return action
+            submenu = action.menu()
+            if submenu is not None and (found := effect_action(submenu, effect_type)):
+                return found
+        return None
+
+    choice = "saturation"
+
+    def choose_effect(menu: QMenu, *_args: object) -> None:
+        assert effect_action(menu, "spatial_panner") is None
+        action = effect_action(menu, choice)
+        assert action is not None
+        action.trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_effect)
+    qtbot.mouseClick(rack.add_button, Qt.MouseButton.LeftButton)
+    saturation, = current_effects()
+    assert saturation.effect_type == "saturation"
+    assert view.get_timeline().get_clip_by_id(sibling.clip_id).effects == ()
+    dialogs = host._get_clip_audio_effect_dialog_manager()
+    dialog = dialogs._dialogs[clip.clip_id, saturation.effect_id]
+    dialog.saturation_committed.emit(clip.clip_id, SaturationParams(drive=65.0))
+    assert current_effects()[0].params["drive"] == 65.0
+    assert editor._clip.effects[0].params == current_effects()[0].params
+    assert panel._clip_fx is not None and panel._clip_fx[0][0].params["drive"] == 65.0
+    assert np.any(raw)
+    qtbot.waitUntil(lambda: panel._last_preview.key == panel._preview_request_key
+                    or bool(panel._preview_failure_note), timeout=10000)
+    assert not panel._preview_failure_note
+    assert not np.allclose(panel._pcm, raw)
+    processed = panel._pcm
+    assert panel.canvas._waveform_samples is processed
+    assert panel.btn_bypass.isEnabled()
+    revision = view.get_timeline().revision
+    panel.btn_bypass.setChecked(True)
+    qtbot.waitUntil(lambda: np.array_equal(panel._pcm, raw), timeout=10000)
+    panel.btn_bypass.setChecked(False)
+    qtbot.waitUntil(lambda: np.array_equal(panel._pcm, processed), timeout=10000)
+    assert view.get_timeline().revision == revision
+    dialog.close()
+
+    row, = (row for row in rack.findChildren(QFrame, "ClipEffectRow") if not row.isHidden())
+    row.findChild(QToolButton, "ClipEffectToggle").click()
+    assert not current_effects()[0].is_enabled
+    qtbot.waitUntil(lambda: np.array_equal(panel._pcm, raw), timeout=10000)
+    view.undo()
+    qtbot.waitUntil(lambda: np.array_equal(panel._pcm, processed), timeout=10000)
+
+    panel.btn_tools_panel.setChecked(False)
+    choice = "delay"
+    wave_rect, _, _ = panel.canvas._wave_and_spec_rects()
+    qtbot.mouseClick(panel.canvas, Qt.MouseButton.RightButton, pos=wave_rect.center().toPoint())
+    assert not panel.tools_panel.isHidden() and panel.tools_panel.currentWidget() is rack
+    assert [effect.effect_type for effect in current_effects()] == ["saturation", "delay"]
+    dialogs.close_all()
+
+    def visible_rows() -> list[QFrame]:
+        return [row for row in rack.findChildren(QFrame, "ClipEffectRow") if not row.isHidden()]
+
+    qtbot.waitUntil(lambda: len(visible_rows()) == 2)
+    rows = visible_rows()
+    name = rows[0].findChild(QPushButton, "ClipEffectName")
+    qtbot.mouseClick(name, Qt.MouseButton.LeftButton)
+    assert not dialogs._dialogs
+    qtbot.mouseDClick(name, Qt.MouseButton.LeftButton)
+    assert (clip.clip_id, saturation.effect_id) in dialogs._dialogs
+    dialogs.close_all()
+    qtbot.keyClick(name, Qt.Key.Key_Return)
+    assert (clip.clip_id, saturation.effect_id) in dialogs._dialogs
+    dialogs.close_all()
+    assert not rows[0].findChild(QToolButton, "ClipEffectMoveUp").isEnabled()
+    assert not rows[1].findChild(QToolButton, "ClipEffectMoveDown").isEnabled()
+    qtbot.mouseClick(rows[1].findChild(QToolButton, "ClipEffectMoveUp"), Qt.MouseButton.LeftButton)
+    assert [effect.effect_type for effect in current_effects()] == ["delay", "saturation"]
+    qtbot.waitUntil(lambda: len(visible_rows()) == 2)
+    qtbot.mouseClick(visible_rows()[0].findChild(QToolButton, "ClipEffectMoveDown"),
+                     Qt.MouseButton.LeftButton)
+    assert [effect.effect_type for effect in current_effects()] == ["saturation", "delay"]
+    qtbot.waitUntil(lambda: len(visible_rows()) == 2)
+    first, last = visible_rows()
+    name = first.findChild(QPushButton, "ClipEffectName")
+    below_last_center = last.mapTo(rack, QPoint(last.width() // 2, last.height() - 3))
+
+    def drop_at_bottom(drag: QDrag, actions: Qt.DropAction) -> Qt.DropAction:
+        buttons = Qt.MouseButton.LeftButton
+        modifiers = Qt.KeyboardModifier.NoModifier
+        mime = drag.mimeData()
+        enter = QDragEnterEvent(below_last_center, actions, mime, buttons, modifiers)
+        move = QDragMoveEvent(below_last_center, actions, mime, buttons, modifiers)
+        drop = QDropEvent(QPointF(below_last_center), actions, mime, buttons, modifiers)
+        for event in (enter, move, drop):
+            event.source = drag.source
+            QApplication.sendEvent(rack, event)
+            assert event.isAccepted()
+            if event is move:
+                assert rack._drop_line.isVisible()
+            if event is enter or event is move:
+                assert [effect.effect_type for effect in current_effects()] == ["saturation", "delay"]
+        return Qt.DropAction.MoveAction
+
+    monkeypatch.setattr(QDrag, "exec", drop_at_bottom)
+    revision = view.get_timeline().revision
+    start = name.rect().center()
+    qtbot.mousePress(name, Qt.MouseButton.LeftButton, pos=start)
+    point = QPointF(start + QPoint(0, QApplication.startDragDistance() + 2))
+    QApplication.sendEvent(name, QMouseEvent(
+        QEvent.Type.MouseMove, point, point, Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    assert not rack._drop_line.isVisible()
+    assert view.get_timeline().revision == revision + 1
+    assert [effect.effect_type for effect in current_effects()] == ["delay", "saturation"]
+    view.undo()
+    qtbot.waitUntil(lambda: len(visible_rows()) == 2)
+    rows = visible_rows()
+    qtbot.mouseClick(rows[0].findChild(QToolButton, "ClipEffectRemove"), Qt.MouseButton.LeftButton)
+    assert [effect.effect_type for effect in current_effects()] == ["delay"]
+
+    view.undo()
+    assert [(effect.effect_type, effect.order) for effect in current_effects()] == [
+        ("saturation", 0), ("delay", 1)]
+    assert current_effects()[0].params["drive"] == 65.0
+    view.redo()
+    choice = "strip_eq"
+    rack.add_button.click()
+    assert [(effect.effect_type, effect.order) for effect in current_effects()] == [
+        ("delay", 1), ("strip_eq", 2)]
+    dialogs.close_all()
+    restored = TimelineSequence.from_dict(view.get_timeline().to_dict())
+    assert [effect.to_dict() for effect in restored.get_clip_by_id(clip.clip_id).effects] == [
+        effect.to_dict() for effect in current_effects()]
+
+    track = restored.get_track_by_id(clip.track_id)
+    editor.sync_clip(restored.with_track_updated(replace(track, is_locked=True)))
+    assert not rack.add_button.isEnabled()
+    locked_menu = QMenu()
+    rack.add_to_context_menu(locked_menu)
+    assert not locked_menu.actions()[0].isEnabled()
+    editor.open_source(asset, project=host._current_edit_project)
+    rack.add_to_context_menu(locked_menu := QMenu())
+    assert not rack.add_button.isEnabled() and not locked_menu.actions()
+
+
 @pytest.mark.parametrize("floating", [False, True])
 def test_mixer_ignores_removed_output_in_saved_layout(project_host, qtbot, floating) -> None:
     host = project_host
@@ -1280,21 +1513,29 @@ def test_clip_editor_canvas_selection_gain_commits_to_target_channel(project_hos
     clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
     host._open_project_audio_clip_editor(clip_id)
     panel = host.dock_audio_clip_editor.widget()._panel
-    qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=10000)
+    qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=10000)
     raw = panel._raw_pcm
     panel.canvas.setSelection(1.0, 3.0)
     panel._edit_ch_btns[0].click()
-    panel.canvas.setPreviewGain(-6.0)
     panel.canvas.repaint()
-    assert panel.canvas._gain_commit_rect.isValid()
-    qtbot.mouseClick(panel.canvas, Qt.MouseButton.LeftButton,
-                     pos=panel.canvas._gain_commit_rect.center().toPoint())
+    start = panel.canvas._gain_hud_rect.center().toPoint()
+    before = view.get_timeline()
+    qtbot.mouseClick(panel.canvas, Qt.MouseButton.LeftButton, pos=start)
+    assert view.get_timeline() is before
+    qtbot.mousePress(panel.canvas, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(panel.canvas, pos=start + QPoint(0, 30))
+    assert panel.canvas._preview_gain_db == -4.5
+    assert panel.canvas._gain_commit_rect.isEmpty()
+    assert view.get_timeline() is before
+    qtbot.mouseRelease(panel.canvas, Qt.MouseButton.LeftButton, pos=start + QPoint(0, 40))
 
     edited = view.get_timeline().get_clip_by_id(clip_id)
+    assert len(edited.audio_edit["steps"]) == 1
     step = edited.audio_edit["steps"][0]
     assert step["processor_id"] == "range_gain"
     assert step["params"]["channels"] == [0]
     assert (step["params"]["start"], step["params"]["end"]) == (48000, 144000)
+    assert step["params"]["gain_db"] == -6.0
     assert edited.audio_gain_db == 0.0
     qtbot.waitUntil(lambda: panel._pcm[0, 96000] < raw[0, 96000], timeout=10000)
     np.testing.assert_array_equal(panel._pcm[1], raw[1])
@@ -1327,7 +1568,7 @@ def test_clip_editor_native_retime_and_sample_microfade(project_host, qtbot, tmp
     host.sync_timeline(sequence)
     host._open_project_audio_clip_editor(clip.clip_id)
     panel = host.dock_audio_clip_editor.widget()._panel
-    qtbot.waitUntil(lambda: bool(panel.canvas._spec_matrix), timeout=10000)
+    qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=10000)
     assert panel._pcm.shape == (2, 120000)
     region = panel._pcm[0, 24000:72000]
     assert int(np.argmax(np.abs(np.fft.rfft(region)))) == 880
