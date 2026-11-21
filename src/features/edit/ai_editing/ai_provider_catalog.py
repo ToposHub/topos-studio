@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
+from urllib.parse import urlsplit
 
 from src.features.edit.ai_editing.mcp_vision_gateway import (
     ZHIPU_VISION_ORIGIN, ZHIPU_VISION_PROFILE_ID, ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_TOOL,
@@ -42,6 +43,8 @@ class AiProviderPreset:
     capabilities: tuple[str, ...]
     modalities: tuple[str, ...] = ()
     description: str = ""
+    label_en: str = ""
+    description_en: str = ""
 
 
 # Keep this list deliberately small and explicit.  It is configuration UI,
@@ -214,6 +217,30 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "文件识别端点；Resource-Id 可按控制台实际开通资源调整",
     ),
     AiProviderPreset(
+        "local-openai-compatible-embedding",
+        "本机 · OpenAI 兼容向量",
+        SOURCE_LOCAL,
+        "local_http",
+        "http://127.0.0.1:8000/v1",
+        "",
+        ("embedding",),
+        description="连接本机 OpenAI 兼容向量服务，可在模型列表中选择模型。",
+        label_en="Local · OpenAI-compatible embeddings",
+        description_en="Connect to a local OpenAI-compatible embedding server and select an available model.",
+    ),
+    AiProviderPreset(
+        "ollama-embedding",
+        "Ollama · 本机向量",
+        SOURCE_OLLAMA,
+        "ollama",
+        "http://127.0.0.1:11434/api/embed",
+        "",
+        ("embedding",),
+        description="使用 Ollama 原生向量接口，可选择已安装的嵌入模型。",
+        label_en="Ollama · Local embeddings",
+        description_en="Use Ollama's native embedding API and select an installed embedding model.",
+    ),
+    AiProviderPreset(
         "openai-embedding",
         "OpenAI · Embeddings",
         SOURCE_PRESET,
@@ -222,7 +249,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         "text-embedding-3-small",
         ("embedding",),
         (),
-        "支持测试向量化接口；素材库当前使用全文索引",
+        "使用 OpenAI 向量模型为素材库提供语义搜索。",
+        description_en="Use OpenAI embeddings for semantic library search.",
     ),
     AiProviderPreset(
         "local-qwen-asr",
@@ -322,8 +350,21 @@ def profile_supports_input(profile: object, input_kind: str) -> bool:
     """
     kind = str(input_kind or "file").lower()
     provider_kind = str(getattr(profile, "provider_kind", "") or "").lower()
+    model = str(getattr(profile, "model_id", "") or "").lower()
     modalities = {str(item).lower() for item in (getattr(profile, "modalities", ()) or ())}
     capabilities = {str(item).lower() for item in (getattr(profile, "capabilities", ()) or ())}
+    endpoint = str(getattr(profile, "endpoint", "") or "")
+    try:
+        official_deepseek = urlsplit(endpoint).hostname == "api.deepseek.com"
+    except ValueError:
+        official_deepseek = False
+    if provider_kind == "deepseek" or official_deepseek:
+        if kind != "image":
+            return False
+        if model in {"deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"}:
+            return False
+        if model == "deepseek-flash" or model.startswith("deepseek-v4-flash"):
+            return True
     if _is_known_volcengine_multimodal(profile):
         return True
     if "multimodal" in modalities or "multimodal_understanding" in capabilities:

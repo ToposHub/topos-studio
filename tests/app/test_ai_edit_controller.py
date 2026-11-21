@@ -155,6 +155,9 @@ class _FakePanel:
     def refresh_state(self, snapshot):
         self._real.refresh_state(snapshot)
 
+    def show_variant_preview(self, variant_id, preview, *, can_apply):
+        self.last_preview = variant_id, preview, can_apply
+
 
 def _build(qapp):
     from src.features.edit.ai_editing.edit_project_service import ProjectSequences
@@ -625,7 +628,8 @@ def test_generated_media_placement_uses_preview_approval_and_command_stack(qapp)
     assert approval.active_count() == 0
 
 
-def test_apply_revalidates_stale_preview_before_consuming_grant(qapp):
+@pytest.mark.parametrize("change_during_confirmation", [False, True])
+def test_apply_revalidates_stale_preview_before_consuming_grant(qapp, change_during_confirmation):
     """M2.2：手动编辑令 preview 过期后，AI 不得绕过 revision 校验提交。"""
     from src.features.edit.ai_editing.approval_service import ApprovalService
     from src.features.edit.ai_editing.transaction_service import _expected_commit_scope
@@ -657,18 +661,29 @@ def test_apply_revalidates_stale_preview_before_consuming_grant(qapp):
     panel.variant_selected.emit(variant.variant_id)
     plan = service.plan_repository.get_plan(variant.edit_plan_ref)
     assert plan is not None
+    preview_id, preview, can_apply = panel.last_preview
+    assert preview_id == variant.variant_id
+    assert preview.diff is not None and can_apply
+    assert host.committed == []
 
     # 模拟用户在确认前完成了一次手动编辑：plan.base_revision=0 现在已失效。
     from dataclasses import replace
     stale_sequence = replace(host._state.sequences["t1"], revision=1)
     from src.features.edit.ai_editing.edit_project_service import ProjectSequences
-    host._state = ProjectSequences(
+    stale_state = ProjectSequences(
         project=host._state.project, sequences={"t1": stale_sequence},
     )
     host._approval_service = ApprovalService()
     host.approval_grant = host._approval_service.issue_after_user_confirmation(
         _expected_commit_scope(plan), issued_by="test",
     )
+    if change_during_confirmation:
+        def change_timeline(_plan, _preview):
+            host._state = stale_state
+            return host.approval_grant
+        host.request_plan_approval = change_timeline
+    else:
+        host._state = stale_state
 
     panel.apply_requested.emit(variant.variant_id)
 

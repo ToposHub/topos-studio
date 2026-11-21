@@ -236,7 +236,7 @@ def test_probes_only_send_generated_media_and_allow_silence(server: tuple) -> No
     base, calls, responses = server
     responses["/v1/chat/completions"] = {"choices": [{"message": {"content": "Red"}}]}
     responses["/v1/audio/transcriptions"] = {"text": "", "segments": []}
-    responses["/v1/embeddings"] = {"data": [{"embedding": [0.25, -0.4]}]}
+    responses["/v1/embeddings"] = {"data": [{"index": 0, "embedding": [0.25, -0.4]}]}
     client = MediaInferenceClient(_profile(base))
 
     assert client.test("vision")
@@ -251,6 +251,72 @@ def test_probes_only_send_generated_media_and_allow_silence(server: tuple) -> No
     start = audio.index(b"RIFF")
     with wave.open(io.BytesIO(audio[start:]), "rb") as media:
         assert media.getframerate() == media.getnframes() == 16000
+    assert json.loads(calls[2][2])["input"] == ["Topos embedding probe"]
+
+
+def test_embedding_batches_preserve_input_order(server: tuple) -> None:
+    base, calls, responses = server
+    responses["/v1/embeddings"] = {"data": [
+        {"index": 1, "embedding": [0.5, -0.25]}, {"index": 0, "embedding": [0, 1]},
+    ]}
+    profile = replace(_profile(base, "local_http"), capabilities=("embedding",))
+    client = MediaInferenceClient(profile)
+
+    assert client.embed_texts(("合成文本一", "Synthetic text two")) == ((0.0, 1.0), (0.5, -0.25))
+    assert json.loads(calls[0][2]) == {"model": "test-model", "input": ["合成文本一", "Synthetic text two"]}
+
+
+@pytest.mark.parametrize("rows", [
+    [{"index": 0, "embedding": [1]}],
+    [{"index": 0, "embedding": [1]}, {"index": 0, "embedding": [1]}],
+    [{"index": 0, "embedding": [1]}, {"index": 2, "embedding": [1]}],
+    [{"index": 0, "embedding": [1]}, {"index": True, "embedding": [1]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1.0, "embedding": [1]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": [1, 2]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": [float("nan")]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": [float("inf")]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": [True]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": ["1"]}],
+    [{"index": 0, "embedding": [1]}, {"index": 1, "embedding": [0]}],
+    [{"index": 0, "embedding": [1] * 4097}, {"index": 1, "embedding": [1] * 4097}],
+])
+def test_embedding_rejects_malformed_vectors(server: tuple, rows: list[dict[str, Any]]) -> None:
+    base, _, responses = server
+    responses["/v1/embeddings"] = {"data": rows}
+    client = MediaInferenceClient(replace(_profile(base), capabilities=("embedding",)))
+
+    with pytest.raises(MediaInferenceError, match="向量"):
+        client.embed_texts(("First synthetic sample", "Second synthetic sample"))
+
+
+def test_embedding_bounds_and_off_host_permission_are_checked_before_http(server: tuple) -> None:
+    base, calls, _ = server
+    profile = replace(_profile(base), capabilities=("embedding",))
+    client = MediaInferenceClient(profile)
+    for texts in ((), (" ",), ("test",) * 33, ("x" * 8193,), ("資料" * 4000,) * 6, ("\ud800",)):
+        with pytest.raises(MediaInferenceConfigurationError):
+            client.embed_texts(texts)
+
+    public = MediaInferenceClient(replace(profile, endpoint="https://never-contacted.invalid/v1"))
+    ollama_cloud = MediaInferenceClient(replace(profile, provider_kind="ollama", model_id="test:cloud"))
+    for remote in (public, ollama_cloud):
+        with pytest.raises(MediaInferenceConfigurationError, match="授权"):
+            remote.embed_texts(("blocks before HTTP",))
+    assert calls == []
+
+
+def test_ollama_native_embedding_uses_explicit_endpoint(server: tuple) -> None:
+    base, calls, responses = server
+    responses["/prefix/api/embed"] = {"embeddings": [[1, 0], [0.5, -0.5]]}
+    responses["/prefix/api/tags"] = {"models": [{"name": "local-embedder"}]}
+    profile = replace(_profile(f"{base}/prefix/api/embed", "ollama"), capabilities=("embedding",))
+    client = MediaInferenceClient(profile)
+
+    assert client.embed_texts(("First", "Second")) == ((1.0, 0.0), (0.5, -0.5))
+    assert json.loads(calls[0][2])["truncate"] is False
+    assert client.list_models() == ["local-embedder"]
+    responses["/prefix/api/embed"] = {"embeddings": [[0.25, 0.5]]}
+    assert client.test("embedding")
 
 
 def test_anthropic_and_responses_use_their_own_endpoints_and_payloads(server: tuple) -> None:

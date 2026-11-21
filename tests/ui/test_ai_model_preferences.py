@@ -358,3 +358,87 @@ def test_preferences_discovery_and_vision_probe_over_http(qapp, qtbot, monkeypat
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+def test_embedding_preset_discovers_tests_and_saves_a_default_route(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(user_ai_config, "USER_AI_CONFIG_PATH", tmp_path / "ai_profiles.json")
+    requests: list[tuple[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append((self.path, None))
+            self._reply({"models": [{"name": "local-text-vectors"}]})
+
+        def do_POST(self) -> None:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append((self.path, body))
+            self._reply({"embeddings": [[0.25, 0.5]]})
+
+        def _reply(self, result: dict[str, Any]) -> None:
+            payload = json.dumps(result).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        registry = ProfileRegistry()
+        registry.add(AiProviderProfile("chat", "Chat", "openai", "https://never-contacted.invalid/v1", "chat"))
+        registry.set_active_for_capability("language", "chat")
+        registry.save_to_user_file()
+        config = _Config()
+        store = FakeCredentialStore()
+        page = AiEditingPreferencePage(credential_store=store)
+        widget = page.create_widget()
+        qtbot.addWidget(widget)
+        widget.show()
+        page.load(config)
+        page._widgets["category_tabs"].setCurrentIndex(3)
+        page._on_add_profile()
+        profile_id = page._current_profile_id
+        preset_picker = page._widgets["preset_id"]
+        assert preset_picker.currentData() == "local-openai-compatible-embedding"
+        assert page.registry.get(profile_id).endpoint == "http://127.0.0.1:8000/v1"
+        preset_picker.setCurrentIndex(preset_picker.findData("ollama-embedding"))
+        assert page.registry.get(profile_id).endpoint == "http://127.0.0.1:11434/api/embed"
+        page._widgets["endpoint"].setText(f"http://127.0.0.1:{server.server_port}/api/embed")
+        monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *_: ("local-text-vectors", True)))
+
+        page._on_discover_models()
+        qtbot.waitUntil(lambda: page.registry.get(profile_id).model_id == "local-text-vectors", timeout=4000)
+        page._on_test_connection()
+        qtbot.waitUntil(lambda: page._test_worker is None, timeout=4000)
+        assert requests == [
+            ("/api/tags", None),
+            ("/api/embed", {"model": "local-text-vectors", "input": ["Topos embedding probe"], "truncate": False}),
+        ]
+        assert page._probe_results[profile_id, "embedding"] == "向量化模型测试成功"
+
+        route = page._route_widgets["embedding"]
+        route.setCurrentIndex(route.findData(profile_id))
+        page.apply(config)
+
+        reopened = AiEditingPreferencePage(credential_store=store)
+        reopened_widget = reopened.create_widget()
+        qtbot.addWidget(reopened_widget)
+        reopened.load(config)
+        assert reopened._route_widgets["embedding"].currentData() == profile_id
+        active = reopened.registry.active_profile_for_capability("embedding")
+        assert active is not None and active.provider_kind == "ollama" and active.model_id == "local-text-vectors"
+        assert reopened._route_widgets["language"].currentData() == "chat"
+
+        page.rollback()
+        reopened.load(config)
+        assert reopened._route_widgets["embedding"].currentData() == ""
+        assert reopened._route_widgets["language"].currentData() == "chat"
+        widget.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)

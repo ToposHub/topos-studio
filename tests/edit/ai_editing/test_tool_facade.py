@@ -210,6 +210,28 @@ def test_global_search_host_reads_persisted_timed_evidence(facade, tmp_path, mon
     assert (hit["start_seconds"], hit["end_seconds"]) == (2.0, 7.0)
 
 
+def test_library_tool_skips_cancelled_requests_and_discards_late_hits(facade) -> None:
+    project_facade, _ = facade
+    cancelled = True
+    calls = []
+
+    def search(query, _limit, check):
+        nonlocal cancelled
+        calls.append(query)
+        assert not check()
+        cancelled = True
+        assert check()
+        return [{"name": "late.mov"}]
+
+    tools = ToolFacade(project_facade._session, cancellable_library_search=search)
+    prompt = {"query": "城市"}
+    assert not tools.invoke(LIBRARY_SEARCH_TOOL, prompt, cancel_check=lambda: cancelled)["ok"]
+    assert not calls
+    cancelled = False
+    assert not tools.invoke(LIBRARY_SEARCH_TOOL, prompt, cancel_check=lambda: cancelled)["ok"]
+    assert calls == ["城市"]
+
+
 def test_mcp_tools_remain_exclusive_even_if_declared_parallel(facade):
     f, _ = facade
 

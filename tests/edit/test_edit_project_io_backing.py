@@ -65,6 +65,18 @@ def io_with_loaded_project(qapp, tmp_path):
 
 
 class TestManualSaveAsCarriesBacking:
+    def test_replacing_another_project_archive_does_not_inherit_ai_modules(
+        self, io_with_loaded_project,
+    ) -> None:
+        from src.features.edit.core.project import EditProject
+
+        io, target, _ = io_with_loaded_project
+        _inject_unknown_module(target, "ai/analysis.json", {"records": [{"asset_id": "previous-target"}]})
+        assert io.save_project(target, EditProject.create("Replacement"))
+        with zipfile.ZipFile(target) as archive:
+            assert "ai/analysis.json" not in archive.namelist()
+            assert "future_module/data.json" not in archive.namelist()
+
     def test_save_as_preserves_unknown_module(
         self, qapp, io_with_loaded_project, tmp_path,
     ) -> None:
@@ -97,6 +109,28 @@ class TestManualSaveAsCarriesBacking:
         assert _wait_for_file(qapp, package)
         assert os.path.getmtime(package) >= before
         _assert_module_present(package, "future_module/data.json")
+
+    @pytest.mark.parametrize("close_first", [False, True])
+    def test_save_as_does_not_carry_modules_to_a_different_project(
+        self, qapp, io_with_loaded_project, tmp_path, close_first: bool,
+    ) -> None:
+        from src.features.edit.core.project import EditProject
+
+        io, source, _ = io_with_loaded_project
+        _inject_unknown_module(source, "ai/analysis.json", {"records": [{"asset_id": "from-source"}]})
+        assert io.load_project(source) is not None
+        if close_first:
+            io.set_current_filepath(None)
+
+        target = str(tmp_path / "new-project.topos")
+        assert io.save_project_as(target, EditProject.create("New project"))
+        assert _wait_for_file(qapp, target)
+        with zipfile.ZipFile(target) as archive:
+            names = set(archive.namelist())
+        assert "ai/analysis.json" not in names
+        assert "future_module/data.json" not in names
+
+        io.cleanup()
 
 
 class TestAutosaveCarriesBacking:

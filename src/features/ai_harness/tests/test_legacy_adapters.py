@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 pytestmark = pytest.mark.edit_core
@@ -72,6 +74,17 @@ class TestMapping:
         with pytest.raises(ValueError):
             invocation_to_workflow_input(inv)
 
+    @pytest.mark.parametrize("revision", [0, 12])
+    def test_scope_revision_overrides_legacy_input(self, revision: int) -> None:
+        invocation = Invocation(
+            source=InvocationSource.CHAT, skill_id="topos.voiceover_polish",
+            scope=InvocationScope(project_id="p1", timeline_id="t1", base_revision=revision),
+            inputs={"base_revision": 3},
+        )
+
+        assert invocation_to_workflow_input(invocation).base_revision == revision
+        assert invocation_to_skill_input(invocation).base_revision == revision
+
     def test_workflow_input_strips_prefix(self):
         # "topos.voiceover_polish" 与 "voiceover_polish" 都应映射成功
         for sid in ("topos.voiceover_polish", "voiceover_polish"):
@@ -102,7 +115,7 @@ class TestMapping:
 # ================================================================
 
 
-def _build_service_with_analysis(segs):
+def _build_service_with_analysis(segs, *, timeline_revision=0):
     """构造一个带分析证据的 AssistantService（复用既有测试模式）。"""
     from src.features.edit.ai_editing.brief_service import BriefService
     from src.features.edit.ai_editing.edit_api import EditSession
@@ -133,6 +146,7 @@ def _build_service_with_analysis(segs):
     seq = TimelineSequence(
         timeline_id="t1", name="Main", fps=Rational(24, 1),
         width=1920, height=1080, sample_rate=48000,
+        revision=timeline_revision,
         video_tracks=(EditTrack(track_id="v1", name="V1", track_type="video", index=0),),
     )
     asset = MediaAsset(
@@ -223,6 +237,27 @@ def _invocation(skill_id="topos.voiceover_polish", source=InvocationSource.WORKF
 
 
 class TestInvokeWorkflowPath:
+    def test_rough_cut_validates_on_existing_timeline_at_capture_revision(self) -> None:
+        from src.features.edit.ai_editing.edit_api import EditSession
+
+        svc, state = _build_service_with_analysis(_transcript_segs(), timeline_revision=12)
+        try:
+            invocation = _invocation(source=InvocationSource.CHAT)
+            invocation = replace(invocation, scope=replace(invocation.scope, base_revision=12))
+            workflow = invocation_to_workflow_input(invocation)
+            result = svc.run_workflow(workflow)
+
+            plan = svc.plan_repository.get_plan(result.variants[0].edit_plan_ref)
+            assert plan is not None and plan.base_revision == 12
+            assert not EditSession.current().preview(plan).has_errors
+
+            timeline = replace(state.sequences["t1"], revision=13)
+            changed_state = replace(state, sequences={"t1": timeline})
+            preview = svc.preview_plan(plan, changed_state)
+            assert preview is not None and preview.has_errors
+        finally:
+            EditSession.unbind()
+
     def test_workflow_succeeds_with_variants(self, service_with_evidence):
         svc, _ = service_with_evidence
         rt = HarnessRuntime()

@@ -364,7 +364,7 @@ def test_preferences_page_filters_presets_by_category(prefs_page):
     }
 
     tabs.setCurrentIndex(3)
-    assert preset_ids() == {"openai-embedding"}
+    assert preset_ids() == {"openai-embedding", "local-openai-compatible-embedding", "ollama-embedding"}
 
     tabs.setCurrentIndex(4)
     assert preset_ids() == set()

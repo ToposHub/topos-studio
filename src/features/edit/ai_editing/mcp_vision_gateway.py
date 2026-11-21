@@ -108,6 +108,10 @@ def _server_of_tool(tool_name: str) -> str:
     return ""
 
 
+def is_mcp_vision_tool(tool_name: str) -> bool:
+    return _server_of_tool(tool_name) == ZHIPU_VISION_PROFILE_ID
+
+
 def default_zhipu_key_provider(*, vision: bool = False) -> str | None:
     """Read a Zhipu key for the assistant's built-in MCP tools."""
     try:

@@ -94,3 +94,18 @@ def test_plain_text_profile_is_not_multimodal() -> None:
     assert not profile_supports_input(profile, "video")
     assert not profile_supports_input(profile, "audio")
     assert not profile_supports_input(profile, "file")
+
+
+def test_official_deepseek_profiles_distinguish_images_from_video() -> None:
+    profile = AiProviderProfile(
+        profile_id="flash", display_name="Flash", provider_kind="deepseek",
+        endpoint="https://api.deepseek.com", model_id="deepseek-flash",
+        modalities=("text", "multimodal"),
+    )
+    assert profile_supports_input(profile, "image")
+    assert not profile_supports_input(profile, "video")
+
+    from dataclasses import replace
+
+    pro = replace(profile, model_id="deepseek-v4-pro", modalities=("text", "image"))
+    assert not profile_supports_input(pro, "image")

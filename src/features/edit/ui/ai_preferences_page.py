@@ -55,6 +55,7 @@ from src.features.edit.ai_editing.mcp_vision_gateway import (
     ZHIPU_VISION_TOOL,
 )
 from src.features.edit.ai_editing.ai_provider_catalog import (
+    AiProviderPreset,
     SOURCE_OPTIONS,
     SOURCE_CUSTOM,
     SOURCE_LOCAL,
@@ -212,6 +213,15 @@ _PAGE_STYLE = f"""
 
 def _tr(key: str, zh: str, en: str) -> str:
     return I18N.tr(f"preferences.ai_editing.{key}", zh if I18N.get_current_locale().startswith("zh") else en)
+
+
+def _preset_text(preset: AiProviderPreset) -> tuple[str, str]:
+    key = f"preset_{preset.preset_id.replace('-', '_')}"
+    return (
+        _tr(f"{key}_label", preset.label, preset.label_en) if preset.label_en else preset.label,
+        _tr(f"{key}_description", preset.description, preset.description_en)
+        if preset.description_en else preset.description,
+    )
 
 
 def _label(text: str, style: str = "AiFieldLabel") -> QLabel:
@@ -511,6 +521,7 @@ class AiEditingPreferencePage:
             ("vision", _tr("route_vision", "素材视觉打标", "Visual tagging")),
             ("asr", _tr("route_asr", "语音转录", "Transcription")),
             ("tts", _tr("route_tts", "剪辑配音", "Voiceover")),
+            ("embedding", _tr("route_embedding", "素材语义搜索", "Library semantic search")),
         )
         for index, (capability, label) in enumerate(routes):
             combo = _combo()
@@ -542,11 +553,16 @@ class AiEditingPreferencePage:
                 _tr("route_none", "未指定", "Unassigned")
             )
             combo.addItem(empty_label, "")
+            active = self._registry.active_profile_for_capability(capability)
             for profile in self._registry.list():
-                if capability in profile.routed_capabilities:
-                    combo.addItem(profile.display_name, profile.profile_id)
-            profile = self._registry.active_profile_for_capability(capability)
-            self._set_combo_data(combo, profile.profile_id if profile else "")
+                if capability not in profile.routed_capabilities:
+                    continue
+                if capability == "embedding" and profile != active and not MediaInferenceClient.supports(
+                    profile.provider_kind, capability,
+                ):
+                    continue
+                combo.addItem(profile.display_name, profile.profile_id)
+            self._set_combo_data(combo, active.profile_id if active else "")
             combo.blockSignals(False)
 
     def _on_route_changed(self, capability: str) -> None:
@@ -1314,7 +1330,9 @@ class AiEditingPreferencePage:
         self._refresh_preset_options(preset_combo)
         if profile.preset_id and preset_combo.findData(profile.preset_id) < 0:
             preset = get_preset(profile.preset_id)
-            preset_combo.addItem(preset.label if preset else profile.preset_id, profile.preset_id)
+            label, description = _preset_text(preset) if preset else (profile.preset_id, "")
+            preset_combo.addItem(label, profile.preset_id)
+            preset_combo.setItemData(preset_combo.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
         self._set_combo_data(preset_combo, profile.preset_id)
         # 选中对应 provider_kind
         if kind_combo.findData(profile.provider_kind) < 0:
@@ -1421,8 +1439,9 @@ class AiEditingPreferencePage:
             combo.clear()
             combo.addItem(_tr("select_preset", "选择预设", "Select a preset"), "")
             for preset in presets_for_category(self._selected_category):
-                combo.addItem(preset.label, preset.preset_id)
-                combo.setItemData(combo.count() - 1, preset.description, Qt.ItemDataRole.ToolTipRole)
+                label, description = _preset_text(preset)
+                combo.addItem(label, preset.preset_id)
+                combo.setItemData(combo.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
             self._set_combo_data(combo, current_id)
             if combo.currentIndex() < 0:
                 combo.setCurrentIndex(0)
@@ -1440,7 +1459,8 @@ class AiEditingPreferencePage:
             self._set_combo_data(kind, "ollama")
             endpoint_value = endpoint.text().strip()  # type: ignore[union-attr]
             if not endpoint_value or (preset is not None and endpoint_value == preset.endpoint):
-                endpoint.setText("http://127.0.0.1:11434")  # type: ignore[union-attr]
+                ollama_embedding = get_preset("ollama-embedding") if self._selected_category == "embedding" else None
+                endpoint.setText(ollama_embedding.endpoint if ollama_embedding else "http://127.0.0.1:11434")  # type: ignore[union-attr]
             if preset is not None and model.text().strip() == preset.model_id:  # type: ignore[union-attr]
                 model.clear()  # type: ignore[union-attr]
             self._block_form_signals(False)
@@ -1493,7 +1513,7 @@ class AiEditingPreferencePage:
             return SOURCE_OLLAMA
         return SOURCE_CUSTOM
 
-    def _apply_preset(self, preset: Any) -> None:
+    def _apply_preset(self, preset: AiProviderPreset) -> None:
         """Copy non-secret preset fields into the current editor form."""
         self._block_form_signals(True)
         self._set_combo_data(self._widgets["source_kind"], preset.source_kind)

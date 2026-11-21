@@ -5,7 +5,7 @@ import wave
 
 import pytest
 from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QWidget
+from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from src.app.services import ai_library_analysis
@@ -15,6 +15,7 @@ from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.app.ui.native_files_transport import NativeFilesTransport
 from src.features.edit.core.asset_source_range import get_effective_source_range
 from src.features.edit.core.project import EditProject
+from src.features.edit.ui.ai_edit_assistant_panel import AiEditAssistantPanel
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel
 from src.features.files.repository.catalog import FilesCatalog
 from src.features.files.repository.locator import FilesDataLocator
@@ -202,6 +203,114 @@ def test_copying_into_library_leaves_source_and_registers_destination(tmp_path: 
         assert [library.root for library in facade.libraries.list_libraries()] == [str(folder)]
     finally:
         facade.shutdown(wait=True)
+        catalog.close()
+
+
+def test_vector_backfill_to_assistant_excerpt_and_project_index(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from src.app.controllers.ai_editing_mixin import _index_project_library_media, _search_global_ai_library
+    from src.app.services import ai_library_embeddings
+
+    monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    registry = ProfileRegistry()
+    profile = AiProviderProfile("vectors", "Studio Vectors", endpoint="https://embedding.test/v1",
+                                model_id="test-vectors", capabilities=("embedding",))
+    registry.add(profile)
+    registry.set_active_for_capability("embedding", profile.profile_id)
+    route = ai_library_embeddings.active_library_embedding_route(registry)
+    assert route is not None
+    monkeypatch.setattr(ai_library_embeddings, "active_library_embedding_route", lambda: route)
+    monkeypatch.setattr("src.app.services.ai_library_search.active_library_embedding_route", lambda: route)
+    calls: list[tuple[str, ...]] = []
+
+    def embed_texts(_route: object, texts: list[str]) -> tuple[tuple[float, float], ...]:
+        calls.append(tuple(texts))
+        return tuple((1., 0.) if "铃声" in value or value == "顾客推开店门" else (0., 1.) for value in texts)
+
+    monkeypatch.setattr(ai_library_embeddings, "_embed", embed_texts)
+    catalog = FilesCatalog(FilesDataLocator.default())
+    facade = FilesFacade(catalog)
+    transport = NativeFilesTransport(lambda: "", None, facade=facade)
+    window = RegisteredAILibraryWindow(transport)
+    assistant = AiEditAssistantPanel()
+    pool = MediaPoolPanel()
+    for widget in (window, assistant, pool):
+        qtbot.addWidget(widget)
+    assistant.library_candidate_import_requested.connect(pool.import_ai_library_candidate)
+    assistant.show()
+    archive = str(tmp_path / "cut.topos")
+    empty = EditProject.create("Library project")
+    pool.set_project(empty)
+    media = tmp_path / "media"
+    media.mkdir()
+    source = media / "sound.wav"
+    with wave.open(str(source), "wb") as audio:
+        audio.setparams((1, 2, 16_000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\x00\x00" * 48_000)
+    record = facade.libraries.register(media)
+    facade.build_ai_library(
+        lambda _path, _kind: (MediaEvidence("铃声响起", 1.0, 2.0, ("铃声",), "audio"),),
+        revision="fixture", cancel=CancelToken(), progress=lambda *_: None,
+    )
+    try:
+        window.set_library_scope(record.library_id)
+        with qtbot.waitSignal(transport.ai_library_settings_loaded):
+            window.refresh_library_registry()
+        query = "顾客推开店门"
+        assert _search_global_ai_library(query, 5) == [] and calls == []
+
+        monkeypatch.setattr(QMessageBox, "exec", lambda _dialog: QMessageBox.StandardButton.Cancel)
+        window.vector_button.click()
+        assert calls == []
+        monkeypatch.setattr(QMessageBox, "exec", lambda _dialog: QMessageBox.StandardButton.Yes)
+        with qtbot.waitSignal(transport.ai_library_index_status, timeout=3000,
+                              check_params_cb=lambda state: bool(state.get("vectors"))):
+            window.vector_button.click()
+        assert calls == [("铃声响起\n铃声",)]
+        hits = _search_global_ai_library(query, 5)
+        assert [hit["name"] for hit in hits] == ["sound.wav"]
+        assert calls[-1] == (query,)
+        assert _index_project_library_media(empty, archive, hits) == hits
+
+        context = object()
+        assistant.set_library_search_context(context)
+        assistant.library_candidates_received.emit(context, query, hits)
+        qtbot.waitUntil(assistant._library_results_button.isVisible)
+        assistant._library_results_button.click()
+        dialog = assistant._library_review
+        assert dialog is not None and dialog.isVisible()
+        add = next(button for button in dialog.findChildren(QPushButton)
+                   if button.text() == I18N.tr("files.ai_library.add_to_pool", "加入媒体池"))
+        with qtbot.waitSignal(pool.project_changed, timeout=5000) as changed:
+            add.click()
+        project = changed.args[0]
+        indexed, = _index_project_library_media(project, archive, hits)
+        assert get_effective_source_range(project.assets[indexed["project_asset_id"]]) == (24, 47)
+        assert (indexed["project_source_in_frame"], indexed["project_source_out_frame"]) == (24, 48)
+        assert list((tmp_path / "cache" / "project-ai").glob("*.sqlite3"))
+        from src.features.edit.core.edit_project_io import EditProjectIO
+
+        io = EditProjectIO()
+        try:
+            assert io.save_project(archive, project)
+            reopened = io.load_project(archive)
+            assert reopened is not None
+            assert _index_project_library_media(reopened[0], archive, hits) == [indexed]
+        finally:
+            io.cleanup()
+        assistant.set_library_search_context(None)
+        assert assistant._library_review is None
+
+        with qtbot.waitSignal(transport.ai_library_embedding_consent_changed):
+            transport.revoke_ai_library_embedding_consent(record.library_id, folder=None)
+        assert _search_global_ai_library(query, 5) == []
+        assert facade.ai_library_embedding_status(route.revision)["embedded"] == 1
+    finally:
+        transport.shutdown()
+        stopped = Event()
+        facade.when_idle(stopped.set)
+        assert stopped.wait(3)
         catalog.close()
 
 

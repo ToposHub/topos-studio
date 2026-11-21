@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 import uuid
 import wave
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -46,6 +47,10 @@ _MAX_AUDIO_BYTES = 25_000_000
 _MAX_IMAGE_BYTES = 40_000_000
 _MAX_IMAGE_PIXELS = 60_000_000
 _MAX_RESPONSE_BYTES = 4_000_000
+_MAX_EMBEDDING_BATCH = 32
+_MAX_EMBEDDING_TEXT_CHARS = 8192
+_MAX_EMBEDDING_INPUT_BYTES = 128_000
+_MAX_EMBEDDING_DIMENSION = 4096
 _CAPTION_PROMPT = (
     "用简明中文描述这张素材的可见内容，包含主要物体、人物、动作、环境和适合检索的细节。"
     "只描述能从画面中观察到的内容。"
@@ -161,6 +166,42 @@ class MediaInferenceClient:
             raise MediaInferenceError("此语音转文字服务需要 WAV、MP3 或 OGG 格式。")
         return self._transcribe(_read_media(path, _MAX_AUDIO_BYTES), suffix)
 
+    def embed_texts(self, texts: Sequence[str], *, allow_off_host: bool = False) -> tuple[tuple[float, ...], ...]:
+        """Embed a bounded batch. Callers must explicitly authorize off-host text."""
+        if "embedding" not in self._profile.routed_capabilities:
+            raise MediaInferenceConfigurationError("所选模型未声明向量化能力。")
+        if embedding_leaves_host(self._profile, self.is_loopback) and allow_off_host is not True:
+            raise MediaInferenceConfigurationError("向其他设备发送文本需要明确授权。")
+        return self._embed_texts(texts)
+
+    def _embed_texts(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        if not self.supports(self._kind, "embedding"):
+            raise MediaInferenceConfigurationError("当前协议不支持向量化。")
+        self._require_model()
+        if isinstance(texts, (str, bytes)) or not isinstance(texts, Sequence) or not 0 < len(texts) <= _MAX_EMBEDDING_BATCH:
+            raise MediaInferenceConfigurationError("向量化请求的文本数量超出限制。")
+        if any(not isinstance(text, str) or len(text) > _MAX_EMBEDDING_TEXT_CHARS or not text.strip() for text in texts):
+            raise MediaInferenceConfigurationError("向量化请求包含空文本或超长文本。")
+        request: dict[str, Any] = {"model": self._model, "input": list(texts)}
+        native_path = self._endpoint.path.rstrip("/")
+        native_ollama = self._kind == "ollama" and native_path.endswith("/api/embed")
+        if native_ollama:
+            request["truncate"] = False
+        try:
+            body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except UnicodeError:
+            raise MediaInferenceConfigurationError("向量化请求包含无效的文本编码。") from None
+        if len(body) > _MAX_EMBEDDING_INPUT_BYTES:
+            raise MediaInferenceConfigurationError("向量化请求的文本总大小超出限制。")
+        payload = self._request("embeddings", body, path=native_path if native_ollama else None,
+                                extra_headers={"Content-Type": "application/json"})
+        rows = payload.get("data")
+        if native_ollama:
+            ordered = payload.get("embeddings")
+            rows = ([{"index": index, "embedding": vector} for index, vector in enumerate(ordered)]
+                    if isinstance(ordered, list) and len(ordered) == len(texts) else None)
+        return _embedding_vectors(rows, len(texts))
+
     def test(self, capability: str) -> str:
         """Exercise the configured protocol with generated media or a short prompt."""
         if capability in {"vision", "vision_understanding"}:
@@ -178,12 +219,7 @@ class MediaInferenceClient:
             self._describe(None, "Reply with OK.")
             return "语言模型测试成功"
         if capability == "embedding" and self.supports(self._kind, capability):
-            self._require_model()
-            payload = self._request("embeddings", {"model": self._model, "input": "Topos"})
-            rows = payload.get("data")
-            vector = rows[0].get("embedding") if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
-            if not isinstance(vector, list) or not vector:
-                raise MediaInferenceError("服务未返回有效向量。")
+            self._embed_texts(("Topos embedding probe",))
             return "向量化模型测试成功"
         raise MediaInferenceConfigurationError("当前协议不支持测试所选能力。")
 
@@ -311,7 +347,7 @@ class MediaInferenceClient:
                 base = base.removesuffix(f"/{suffix}")
                 break
         if self._kind == "ollama":
-            base = base.removesuffix("/api/tags").removesuffix("/api")
+            base = base.removesuffix("/api/embed").removesuffix("/api/tags").removesuffix("/api")
         return base
 
     def _request(
@@ -406,6 +442,16 @@ def is_local_media_endpoint(parsed: SplitResult) -> bool:
     return any(_endpoint_network(parsed))
 
 
+def is_ollama_cloud_model(profile: AiProviderProfile) -> bool:
+    """A cloud-tagged Ollama model can forward requests even from loopback."""
+    tag = profile.model_id.strip().lower().rpartition(":")[2]
+    return profile.provider_kind.strip().lower() == "ollama" and (tag == "cloud" or tag.endswith("-cloud"))
+
+
+def embedding_leaves_host(profile: AiProviderProfile, is_loopback: bool) -> bool:
+    return not is_loopback or profile.data_policy.execution == "cloud" or is_ollama_cloud_model(profile)
+
+
 def _endpoint_network(parsed: SplitResult) -> tuple[bool, bool]:
     address = (parsed.hostname or "").lower().removesuffix(".")
     try:
@@ -469,6 +515,34 @@ def _text_blocks(content: object, block_type: str) -> str:
         item["text"].strip() for item in content if isinstance(item, dict)
         and item.get("type") == block_type and isinstance(item.get("text"), str)
     ).strip()
+
+
+def _embedding_vectors(rows: object, count: int) -> tuple[tuple[float, ...], ...]:
+    invalid = "模型服务返回的向量数量、索引或维度无效。"
+    if not isinstance(rows, list) or len(rows) != count:
+        raise MediaInferenceError(invalid)
+    dimension: int | None = None
+    by_index: dict[int, tuple[float, ...]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise MediaInferenceError(invalid)
+        index, vector = row.get("index"), row.get("embedding")
+        if (type(index) is not int or not 0 <= index < count or index in by_index
+                or not isinstance(vector, list) or not 0 < len(vector) <= _MAX_EMBEDDING_DIMENSION
+                or (dimension is not None and len(vector) != dimension)):
+            raise MediaInferenceError(invalid)
+        if any(type(value) not in (float, int) for value in vector):
+            raise MediaInferenceError("模型服务返回了无效的向量分量。")
+        try:
+            values = tuple(float(value) for value in vector)
+        except OverflowError:
+            raise MediaInferenceError("模型服务返回了无效的向量分量。") from None
+        norm = math.hypot(*values)
+        if not math.isfinite(norm) or norm == 0.0:
+            raise MediaInferenceError("模型服务返回了无效的向量分量。")
+        dimension = len(values)
+        by_index[index] = values
+    return tuple(by_index[index] for index in range(count))
 
 
 def _multipart(fields: dict[str, str], audio: bytes, suffix: str, boundary: str) -> bytes:

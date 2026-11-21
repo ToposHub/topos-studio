@@ -465,6 +465,38 @@ def tool_registry(language_registry):
 class TestToolLoopIntegration:
     """B2: When a ToolFacade is injected, ordinary chat can call read-only tools."""
 
+    def test_prepared_vision_context_hides_session_vision_tools(self, tool_registry) -> None:
+        from src.features.edit.ai_editing.tool_facade import ToolDefinition, ToolPermission
+
+        class VisionToolFacade(FakeToolFacade):
+            def list_tools(self, *, max_permission=None):
+                return [
+                    *super().list_tools(max_permission=max_permission),
+                    ToolDefinition(
+                        name="topos.mcp.analyze_image", permission=ToolPermission.READ,
+                        description="Analyze the session image", input_schema={"type": "object"},
+                    ),
+                ]
+
+        orchestrator = AgentOrchestrator()
+        client = FakeToolClient(reply="red circle")
+        driver = ChatRunDriver(
+            orchestrator, AssistantCapabilityRouter(tool_registry),
+            client_factory=lambda _profile: client, profile_registry=tool_registry,
+            tool_facade=VisionToolFacade(),
+        )
+        result = driver.run_chat(
+            session_id="s1", user_text="Describe the attachment",
+            messages=[{"role": "user", "content": "native media"}],
+            prepare_messages=lambda _cancelled: [{"role": "user", "content": "MCP: red circle"}],
+            omit_mcp_vision_tools=True,
+        )
+        assert result.succeeded
+        assert client.calls[0][1][-1]["content"] == "MCP: red circle"
+        names = {tool["function"]["name"] for tool in client.tools_calls[0]}
+        assert "topos.mcp.analyze_image" not in names
+        assert "topos.get_project_snapshot" in names
+
     def test_tool_loop_executes_tool_then_converges(self, tool_registry):
         from src.features.edit.ai_editing.tool_calling_client import (
             ToolCallRequest,

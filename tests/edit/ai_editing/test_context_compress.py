@@ -211,16 +211,23 @@ def test_context_compress_noop_without_store(qapp):
     controller._on_context_compress(bundle)  # 不抛错
 
 
-def test_context_compress_refreshes_footer(qapp):
-    """压缩后 footer 显示 context_compressed=True。"""
+def test_context_preview_compress_keeps_footer_model(qapp):
+    """Project-context preview compression preserves the actual chat model and budget state."""
+    from types import SimpleNamespace
     from src.features.edit.ui.ai_assistant_composer import ComposerFooterState
     store = AssistantSessionStore()
     footer_states: list[ComposerFooterState] = []
     controller = _make_controller(qapp, store=store)
     controller._panel.set_composer_footer = lambda s: footer_states.append(s)
+    controller._chat_profile_for_mode = lambda _: SimpleNamespace(
+        display_name="Configured model", model_id="configured-model", profile_id="p1",
+        limits=SimpleNamespace(max_context_tokens=200_000),
+    )
 
     bundle = _make_bundle([_make_block(content="历史", tokens=300)])
     controller._on_context_compress(bundle)
 
     assert len(footer_states) >= 1
-    assert footer_states[-1].context_compressed is True
+    assert footer_states[-1].model_label == "configured-model"
+    assert footer_states[-1].context_compressed is False
+    assert controller._active_context_bundle.blocks[-1].kind == "recent_summary"

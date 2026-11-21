@@ -4647,8 +4647,11 @@ class FileOpsMixin:
                 # the same file would trigger the dialog on every next launch.
                 self.edit_project_io.discard_autosave(original_filepath)
 
-        # Load project
-        result = self.edit_project_io.load_project(load_filepath)
+        # Keep this archive's AI payload local until its project services are bound.
+        loaded_ai_payload: dict[str, Any] = {}
+        result = self.edit_project_io.load_project(
+            load_filepath, receive_ai_payload=loaded_ai_payload.update,
+        )
         if result is None:
             QMessageBox.critical(
                 self,
@@ -4716,6 +4719,8 @@ class FileOpsMixin:
 
         # M1.2：重新装配 AI 子系统绑定到新打开的工程（teardown 旧 + setup 新）
         self._setup_ai_editing()
+        if loaded_ai_payload and self._current_edit_project is project:
+            self.edit_project_io.restore_loaded_ai_payload(loaded_ai_payload)
 
     def _restore_edit_ui_state(self, ui_state: UIState) -> None:
         """Restore UI state after loading project."""

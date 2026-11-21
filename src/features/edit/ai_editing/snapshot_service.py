@@ -102,6 +102,7 @@ def _build_track_summary(
             caption_metadata.to_dict()
             if caption_metadata is not None else None
         ),
+        track_role=track.track_role,
     )
 
 

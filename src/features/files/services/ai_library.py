@@ -19,11 +19,18 @@ from pathlib import Path
 from typing import Any, Literal
 
 from src.features.files.repository.catalog import FilesCatalog, LibraryRecord, nfc
+from src.features.files.services.ai_library_vectors import (
+    VECTOR_EVIDENCE_INDEX,
+    VECTOR_SCHEMA,
+    EmbedTexts,
+    EvidenceVectors,
+    model_identity,
+)
 from src.features.files.services.query import classify
 from src.features.files.transactions import CancelToken
 
 _SCHEMA_KEY = "ai_library_schema"
-_SCHEMA_VERSION = "2"
+_SCHEMA_VERSION = "3"
 _POLICY_KEY = "ai_library_analysis_policy"
 _MAX_QUERY_LENGTH = 1000
 _MEDIA_KINDS = ("image", "video", "audio")
@@ -331,6 +338,9 @@ class AILibraryService:
             key = str(catalog.locator.catalog_db.resolve())
             self._build_lock = _BUILD_LOCKS.get(key) or threading.Lock()
             _BUILD_LOCKS[key] = self._build_lock
+            vector_key = key + ":vectors"
+            self._vector_lock = _BUILD_LOCKS.get(vector_key) or threading.Lock()
+            _BUILD_LOCKS[vector_key] = self._vector_lock
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
@@ -348,15 +358,18 @@ class AILibraryService:
             existing = version(cursor)
             if existing == _SCHEMA_VERSION:
                 return
-            if existing not in ("", "1"):
+            if existing not in ("", "1", "2"):
                 raise RuntimeError(f"不支持的 AI 素材索引版本 {existing}")
             if not existing:
                 for statement in _SCHEMA:
                     cursor.execute(statement)
-            for statement in _SNAPSHOT_SCHEMA:
-                cursor.execute(statement)
+            if existing != "2":
+                for statement in _SNAPSHOT_SCHEMA:
+                    cursor.execute(statement)
             if existing == "1":
                 self._migrate_unique_legacy_evidence(cursor)
+            cursor.execute(VECTOR_SCHEMA)
+            cursor.execute(VECTOR_EVIDENCE_INDEX)
             cursor.execute(
                 """INSERT INTO settings VALUES ('', ?, ?)
                    ON CONFLICT(library_id, key) DO UPDATE SET value = excluded.value""",
@@ -828,6 +841,88 @@ class AILibraryService:
         except (OSError, ValueError):
             return False
 
+    def _matching_scopes(
+        self, library_id: str | None, folder: str | None,
+        kinds: tuple[str, ...] | None, recursive: bool,
+    ) -> tuple[_DirectoryScope, ...]:
+        scopes = self._scopes(library_id, folder, recursive)
+        media_kinds = _media_kinds(kinds)
+        if not scopes or not media_kinds:
+            return ()
+        if folder is not None:
+            _directory_identity(scopes[0].folder)
+        return tuple(replace(scope, kinds=media_kinds) for scope in scopes)
+
+    def embedding_status(
+        self, model_key: str, *, library_id: str | None = None, folder: str | None = None,
+        kinds: tuple[str, ...] | None = None, recursive: bool = True, cancel: _Cancel = None,
+    ) -> dict[str, int]:
+        """Report coverage of completed evidence in the current catalog scope."""
+        model_identity(model_key)
+        if not _cancelled(cancel) and (scopes := self._matching_scopes(library_id, folder, kinds, recursive)):
+            sql, params = _scope_sql(scopes, "i.kind")
+            eligible, embedded, _ = EvidenceVectors(self._catalog, sql, params, model_key).status()
+            if not _cancelled(cancel):
+                return {"eligible": eligible, "embedded": embedded, "pending": eligible - embedded}
+        return {"eligible": 0, "embedded": 0, "pending": 0}
+
+    def build_embeddings(
+        self, embed: EmbedTexts, *, model_key: str, library_id: str | None = None,
+        folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
+        cancel: _Cancel = None, progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, Any]:
+        """Backfill missing vectors from validated text evidence, one committed batch at a time."""
+        model_identity(model_key)
+        if not self._vector_lock.acquire(blocking=False):
+            raise RuntimeError("正在生成素材语义索引")
+        try:
+            scopes = self._matching_scopes(library_id, folder, kinds, recursive)
+            return self._backfill_embeddings(embed, model_key, scopes, cancel, progress)
+        finally:
+            self._vector_lock.release()
+
+    def _backfill_embeddings(
+        self, embed: EmbedTexts, model_key: str, scopes: tuple[_DirectoryScope, ...],
+        cancel: _Cancel, progress: Callable[[int, int], None] | None,
+    ) -> dict[str, Any]:
+        def cancelled() -> bool:
+            return _cancelled(cancel)
+
+        report: dict[str, Any] = {"eligible": 0, "embedded": 0, "skipped": 0, "pending": 0, "cancelled": cancelled()}
+        if not scopes or cancelled():
+            return report
+        sql, params = _scope_sql(scopes, "i.kind")
+        store = EvidenceVectors(self._catalog, sql, params, model_key)
+        eligible, existing, last = store.status()
+        pending = eligible - existing
+        report.update(eligible=eligible, skipped=existing, pending=pending)
+        if progress is not None:
+            progress(0, pending)
+        after = done = 0
+        while not cancelled() and (rows := store.pending_after(after, last)):
+            after = rows[-1]["id"]
+            locations = self._verified_locations(
+                {row["asset_id"] for row in rows}, {row["snapshot_id"] for row in rows},
+                scopes, sql, params, {}, cancel,
+            )
+            ready = [row for row in rows if locations.get((row["asset_id"], row["snapshot_id"]), {}).get("online")]
+            try:
+                stored = store.embed_batch(ready, embed, cancelled=cancelled)
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                if not cancelled():
+                    report["error"] = str(error)
+                break
+            if cancelled():
+                break
+            report["embedded"] += stored
+            report["skipped"] += len(rows) - stored
+            done += len(rows)
+            if progress is not None:
+                progress(min(done, pending), pending)
+        eligible, completed, _ = store.status()
+        report.update(eligible=eligible, pending=eligible - completed, cancelled=cancelled())
+        return report
+
     def analysis_status(self, paths: Sequence[str], *, cancel: _Cancel = None) -> set[str]:
         """Return paths with current, completed visual, audio or transcript evidence."""
         registered = self._catalog.libraries()
@@ -957,18 +1052,18 @@ class AILibraryService:
         self, query: str, limit: int = 40, *, library_id: str | None = None,
         folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
         only_unanalyzed: bool = False, cancel: _Cancel = None,
+        embedding: tuple[str, Sequence[float]] | None = None,
+        semantic_library_ids: frozenset[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Search saved evidence and manual metadata; return original paths and source seconds."""
         limit = max(1, min(100, int(limit)))
         query = _normalized_text(query[:_MAX_QUERY_LENGTH])
         terms = _query_terms(query)
-        scopes = self._scopes(library_id, folder, recursive)
-        kinds = _media_kinds(kinds)
-        if not scopes or not kinds or _cancelled(cancel):
+        if _cancelled(cancel):
             return []
-        if folder is not None:
-            _directory_identity(scopes[0].folder)
-        scopes = tuple(replace(scope, kinds=kinds) for scope in scopes)
+        scopes = self._matching_scopes(library_id, folder, kinds, recursive)
+        if not scopes:
+            return []
         if only_unanalyzed:
             return self._unanalyzed(scopes, query, terms, limit, cancel)
         sql, params = _scope_sql(scopes, "i.kind")
@@ -988,8 +1083,8 @@ class AILibraryService:
             asset_ids, snapshot_ids, scopes, sql, params,
             {asset_id: row["path"] for asset_id, row in assets.items()}, cancel,
         )
-        hits = []
-        matched_evidence = set()
+        lexical: list[tuple[tuple[str, int | str], dict[str, Any]]] = []
+        matched_evidence: set[str] = set()
         for row in evidence:
             asset_id = row["asset_id"]
             location = locations.get((asset_id, row["snapshot_id"]))
@@ -999,25 +1094,84 @@ class AILibraryService:
             if score <= 0:
                 continue
             matched_evidence.add(asset_id)
-            hits.append({
-                **location,
-                "start_seconds": row["start_seconds"], "end_seconds": row["end_seconds"],
-                "text": row["text"], "tags": json.loads(row["tags"]), "modality": row["modality"],
-                "score": score + 1.0,
-            })
+            lexical.append((("evidence", row["id"]), self._evidence_hit(row, location, score + 1.0)))
         for asset_id, row in assets.items():
             location = locations.get((asset_id, None))
             if location is None or asset_id in matched_evidence:
                 continue
-            hits.append({
+            lexical.append((("metadata", asset_id), {
                 **location,
                 "start_seconds": None, "end_seconds": None, "text": row["comment"],
                 "tags": row["tags"].split("\x1f") if row["tags"] else [], "modality": "metadata",
                 "score": _match_score(query, terms, row["search_text"]),
-            })
-        hits.sort(key=lambda hit: (not hit["online"], -hit["score"], hit["name"].casefold(),
-                                   hit["start_seconds"] or 0.0))
-        return [] if _cancelled(cancel) else hits[:limit]
+            }))
+        lexical.sort(key=lambda pair: self._hit_sort_key(pair[1]))
+        if embedding is not None and query and not _cancelled(cancel):
+            semantic_scopes = tuple(scope for scope in scopes if semantic_library_ids is None
+                                    or scope.library.library_id in semantic_library_ids)
+            if semantic_scopes:
+                semantic = self._semantic_hits(semantic_scopes, embedding, limit, cancel)
+                if semantic:
+                    return [] if _cancelled(cancel) else self._fuse_ranks(lexical, semantic)[:limit]
+        return [] if _cancelled(cancel) else [hit for _, hit in lexical[:limit]]
+
+    @staticmethod
+    def _evidence_hit(row: Any, location: dict[str, Any], score: float) -> dict[str, Any]:
+        return {
+            **location, "start_seconds": row["start_seconds"], "end_seconds": row["end_seconds"],
+            "text": row["text"], "tags": json.loads(row["tags"]), "modality": row["modality"],
+            "score": score,
+        }
+
+    @staticmethod
+    def _hit_sort_key(hit: dict[str, Any]) -> tuple[bool, float, str, float]:
+        return not hit["online"], -hit["score"], hit["name"].casefold(), hit["start_seconds"] or 0.0
+
+    def _semantic_hits(
+        self, scopes: tuple[_DirectoryScope, ...], embedding: tuple[str, Sequence[float]],
+        limit: int, cancel: _Cancel,
+    ) -> list[tuple[tuple[str, int | str], dict[str, Any]]]:
+        sql, params = _scope_sql(scopes, "i.kind")
+        model_key, query_vector = embedding
+
+        def current_locations(rows: Sequence[Any]) -> dict[tuple[str, int | None], dict[str, Any]]:
+            return self._verified_locations(
+                {row["asset_id"] for row in rows}, {row["snapshot_id"] for row in rows},
+                scopes, sql, params, {}, cancel,
+            )
+
+        def live_evidence(rows: Sequence[Any]) -> set[int]:
+            locations = current_locations(rows)
+            return {row["id"] for row in rows
+                    if locations.get((row["asset_id"], row["snapshot_id"]), {}).get("online")}
+
+        try:
+            rows = EvidenceVectors(self._catalog, sql, params, model_key).nearest(
+                query_vector, limit * 5, cancelled=lambda: _cancelled(cancel), live_evidence=live_evidence,
+            )
+        except (TypeError, ValueError, OverflowError):
+            return []
+        locations = current_locations(rows)
+        hits = []
+        for row in rows:
+            location = locations.get((row["asset_id"], row["snapshot_id"]))
+            if location is not None and location["online"]:
+                hits.append((("evidence", row["id"]), self._evidence_hit(row, location, 0.0)))
+        return hits
+
+    @staticmethod
+    def _fuse_ranks(
+        lexical: list[tuple[tuple[str, int | str], dict[str, Any]]],
+        semantic: list[tuple[tuple[str, int | str], dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        combined: dict[tuple[str, int | str], dict[str, Any]] = {}
+        for ranking in (lexical, semantic):
+            for rank, (key, hit) in enumerate(ranking, 1):
+                first_score = combined[key]["score"] if key in combined else 0.0
+                combined[key] = {**hit, "score": first_score + 1.0 / (60 + rank)}
+        # Dictionaries retain insertion order, so exact rank ties favor the
+        # lexical lane. A fused hit keeps the authorized semantic location.
+        return sorted(combined.values(), key=lambda hit: (not hit["online"], -hit["score"]))
 
     def _metadata_candidates(
         self, scope_sql: str, params: tuple[Any, ...], query: str, terms: tuple[str, ...], limit: int,

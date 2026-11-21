@@ -71,6 +71,21 @@ def _profile(*, modalities: tuple[str, ...] = ("video",), allow_upload: bool = F
     )
 
 
+def test_generation_provider_distinguishes_input_and_output_capabilities() -> None:
+    from dataclasses import replace
+    from src.features.edit.ai_editing.provider_profiles import FakeCredentialStore
+
+    store = FakeCredentialStore()
+    visual = replace(_profile(modalities=("image",)), capabilities=("vision",))
+    assert HttpGenerationProvider(visual, store).supported_modalities == ()
+    for kind in ("deepseek", "zhipu_vision_mcp"):
+        legacy_vision = replace(visual, provider_kind=kind, capabilities=())
+        assert HttpGenerationProvider(legacy_vision, store).supported_modalities == ()
+    generator = replace(visual, capabilities=("image_generation",))
+    assert HttpGenerationProvider(generator, store).supported_modalities == (GenerationModality.IMAGE,)
+    assert HttpGenerationProvider(_profile(), store).supported_modalities == (GenerationModality.VIDEO,)
+
+
 def _request(**kwargs: Any) -> GenerationRequest:
     values = dict(
         request_id="req-1",

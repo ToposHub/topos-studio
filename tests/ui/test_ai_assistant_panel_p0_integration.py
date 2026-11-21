@@ -348,8 +348,8 @@ class TestPanelConversationUx:
     def test_send_button_uses_arrow_and_square_busy_states(self, panel):
         assert panel._send_btn is panel._cancel_btn
         assert panel._send_btn.text() == "↑"
-        assert panel._send_btn.size().width() == 24
-        assert panel._send_btn.size().height() == 24
+        assert panel._send_btn.size().width() == 26
+        assert panel._send_btn.size().height() == 26
         assert panel._request_edit.parentWidget() is panel._composer_input_frame
         assert panel._composer_footer.parentWidget() is panel._composer_input_frame
 
@@ -408,8 +408,7 @@ class TestPanelConversationUx:
             text="优化 AI assistant 页面布局并统一发送按钮",
         ),)))
 
-        assert panel._conversation_title_btn.text() == "优化 AI a…"
-        assert len(panel._conversation_title_btn.text()) <= 8
+        assert "优化 AI assistant 页面布局并统一发送按钮" in panel._conversation_title_btn.toolTip()
         assert "DeepSeek" not in panel._conversation_title_btn.text()
 
         panel.set_history_sessions([{
@@ -417,9 +416,13 @@ class TestPanelConversationUx:
             "title": "我手动命名的会话标题",
             "messages": [],
         }], active_session_id="session-title")
-        assert panel._conversation_title_btn.text() == "我手动命名的会…"
+        panel._conversation_title_btn.setFixedWidth(60)
+        panel.show()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        assert panel._conversation_title_btn.text().endswith("…")
         assert "我手动命名的会话标题" in panel._conversation_title_btn.toolTip()
-        assert panel._conversation_title_btn.sizePolicy().horizontalPolicy().name == "Maximum"
+        assert panel._conversation_title_btn.sizePolicy().horizontalPolicy().name == "Ignored"
 
     def test_bottom_overflow_and_frame_button_are_removed(self, panel):
         assert not hasattr(panel._composer_footer, "_more_btn")

@@ -77,9 +77,10 @@ class TestWorkflowStoreI0:
         """不传 ai_workflows_data 的保存（其他产品）不覆盖已有条目。"""
         zf_path = str(tmp_path / "p.topos")
         store = _make_store()
-        ToposProjectIO.save(_make_project(), zf_path, ai_workflows_data=store)
+        project = _make_project()
+        ToposProjectIO.save(project, zf_path, ai_workflows_data=store)
         # 第二次保存不传 → 保留
-        ToposProjectIO.save(_make_project(), zf_path)
+        ToposProjectIO.save(project, zf_path)
         payload = _read_zip_json(zf_path, "ai_workflow/workflows.json")
         assert payload == store
 

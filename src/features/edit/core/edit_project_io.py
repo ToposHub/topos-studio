@@ -39,6 +39,7 @@ import json
 import shutil
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
 from dataclasses import dataclass
@@ -1256,6 +1257,13 @@ class EditProjectIO(QObject):
             backing_store if backing_store is not None
             else self._current_backing
         )
+        if effective_backing is not None:
+            backing_payload = effective_backing.payload
+            source_project_id = (
+                backing_payload.project_json.get("project_id") or backing_payload.manifest.get("project_id")
+            )
+            if source_project_id != project.project_id:
+                effective_backing = None
 
         # R02：LUT 资源会话并入保存载荷。显式参数优先；未传且会话有条目
         # （工程加载条目 + 会话导入）时合并索引，仅新导入文件需要写包。
@@ -1636,6 +1644,8 @@ class EditProjectIO(QObject):
         self,
         filepath: str | Path,
         include_ui_state: bool = True,
+        *,
+        receive_ai_payload: Callable[[dict[str, Any]], None] | None = None,
     ) -> Optional[
         tuple[EditProject, UIState | None, dict[str, TimelineSequence] | None]
     ]:
@@ -1648,6 +1658,8 @@ class EditProjectIO(QObject):
         Args:
             filepath: 文件路径
             include_ui_state: 是否包含 UI 状态
+            receive_ai_payload: 此次加载的 AI 数据接收器。调用方可暂存数据，
+                在新工程的 AI 服务装配后通过 restore_loaded_ai_payload 投递。
 
         Returns:
             元组：(EditProject, UIState 或 None, TimelineSequence 字典或 None)
@@ -1827,23 +1839,24 @@ class EditProjectIO(QObject):
                     "not preserve source-only modules", filepath, exc_info=True)
                 self._current_backing = None
 
-            # 投递 AI 持久化 payload（会话目录 + plan 仓库）给已注册的还原回调。
-            # 无 AI payload（旧工程/非 AI 工作流）或无回调时静默跳过。
-            if self._on_ai_payload_loaded_callback is not None:
+            # The application receives its own load's payload and restores it after
+            # binding the new services. Direct callers retain immediate delivery.
+            if receive_ai_payload is not None or self._on_ai_payload_loaded_callback is not None:
+                full_data = full_data or {}
                 ai_payload = {
-                    "session_catalog": (full_data or {}).get("ai_session_catalog"),
-                    "session": (full_data or {}).get("ai_session"),
-                    "plans": (full_data or {}).get("ai_plans"),
-                    "jobs": (full_data or {}).get("ai_jobs"),
-                    "analysis": (full_data or {}).get("ai_analysis"),
-                    "runtime": (full_data or {}).get("ai_runtime"),
-                    "trace": (full_data or {}).get("ai_trace"),
-                    "plugins": (full_data or {}).get("ai_plugins"),
+                    "session_catalog": full_data.get("ai_session_catalog"),
+                    "session": full_data.get("ai_session"),
+                    "plans": full_data.get("ai_plans"),
+                    "jobs": full_data.get("ai_jobs"),
+                    "analysis": full_data.get("ai_analysis"),
+                    "runtime": full_data.get("ai_runtime"),
+                    "trace": full_data.get("ai_trace"),
+                    "plugins": full_data.get("ai_plugins"),
                 }
-                try:
-                    self._on_ai_payload_loaded_callback(ai_payload)
-                except Exception:  # noqa: BLE001
-                    logger.debug("on_ai_payload_loaded callback failed", exc_info=True)
+                if receive_ai_payload is not None:
+                    receive_ai_payload(ai_payload)
+                else:
+                    self.restore_loaded_ai_payload(ai_payload)
 
             if self._on_teaching_animation_payload_loaded_callback is not None:
                 teaching_payload = (full_data or {}).get("teaching_animation")
@@ -1872,6 +1885,15 @@ class EditProjectIO(QObject):
             logger.error(f"Unsupported project format (not .topos ZIP): {filepath}")
             return None
 
+    def restore_loaded_ai_payload(self, payload: dict[str, Any]) -> None:
+        """Deliver the loaded payload to the currently registered AI services."""
+        callback = self._on_ai_payload_loaded_callback
+        if callback is not None:
+            try:
+                callback(payload)
+            except Exception:  # noqa: BLE001 - optional AI data must not block project opening
+                logger.debug("on_ai_payload_loaded callback failed", exc_info=True)
+
     def get_current_project(self) -> EditProject | None:
         """获取当前加载的项目"""
         return self._current_project
@@ -1881,8 +1903,10 @@ class EditProjectIO(QObject):
         return self._current_filepath
 
     def set_current_filepath(self, filepath: str | Path | None) -> None:
-        """Adopt a canonical project path after loading a recovery file."""
+        """Adopt a recovery file's canonical path or detach a closed project."""
         self._current_filepath = str(filepath) if filepath else None
+        if self._current_filepath is None:
+            self._current_backing = None
 
     def get_current_ui_state(self) -> UIState | None:
         """获取当前 UI 状态"""
