@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.features.edit.ai_editing.chat_run_driver import (
+    ChatMessagePreparer,
     ChatRunDriver,
     ChatRunResult,
     classify_chat_result,
@@ -56,6 +57,8 @@ class AgentV2ChatWorker(QThread):
         max_tokens: int | None = None,
         stream: bool = True,
         parent: QObject | None = None,
+        prepare_messages: ChatMessagePreparer | None = None,
+        omit_mcp_vision_tools: bool = False,
     ) -> None:
         super().__init__(parent)
         self._driver = driver
@@ -66,14 +69,27 @@ class AgentV2ChatWorker(QThread):
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._stream = stream
+        self._prepare_messages = prepare_messages
+        self._omit_mcp_vision_tools = omit_mcp_vision_tools
         #: Cooperative cancel flag (mirrors _ChatWorker.cancel_requested).
         self.cancel_requested: bool = False
 
     def run(self) -> None:  # noqa: D401 - QThread entry point
+        if self.cancel_requested:
+            self.cancelled.emit()
+            return
         on_delta: Callable[[str], None] | None = None
         if self._stream:
             on_delta = self.stream_delta.emit
         try:
+            options: dict[str, Any] = {}
+            if self._prepare_messages is not None:
+                def prepare(cancelled: Callable[[], bool]) -> list[dict[str, Any]]:
+                    return self._prepare_messages(lambda: self.cancel_requested or cancelled())
+
+                options["prepare_messages"] = prepare
+            if self._omit_mcp_vision_tools:
+                options["omit_mcp_vision_tools"] = True
             result: ChatRunResult = self._driver.run_chat(
                 session_id=self._session_id,
                 user_text=self._user_text,
@@ -83,6 +99,7 @@ class AgentV2ChatWorker(QThread):
                 max_tokens=self._max_tokens,
                 stream=self._stream,
                 on_delta=on_delta,
+                **options,
             )
         except Exception as exc:  # pragma: no cover - driver already catches, defensive
             self.failed.emit(str(exc))

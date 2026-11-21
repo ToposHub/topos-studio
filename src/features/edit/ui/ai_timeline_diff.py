@@ -1,5 +1,3 @@
-# DORMANT(2026-10-20 第五轮审计 E22): 已实现且有测试，但暂无生产入口（有意休眠）。
-# 接线前请勿在生产依赖；若半年内无接线计划建议删除。
 """AI Timeline Diff 面板 + 审批 dialog（Phase 9 UI-4）。
 
 按视频/音频/字幕轨显示 operation；高风险项置顶（TAEP §11.6 步骤 10）。
@@ -21,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -55,28 +53,31 @@ class _DiffEntryWidget(QFrame):
                  detail: str = "", high_risk: bool = False,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.Box)
-        bg = "#fdecea" if high_risk else "#f8f9fa"
-        border = "#e74c3c" if high_risk else "#ddd"
+        self.setObjectName("assistantDiffEntry")
+        bg = "#372a2b" if high_risk else "#2e2e33"
+        border = "#b57068" if high_risk else "#43434b"
         self.setStyleSheet(
-            f"QFrame {{ background: {bg}; border: 1px solid {border}; "
-            f"border-radius: 3px; margin: 1px; padding: 3px; }}"
+            f"QFrame#assistantDiffEntry {{ background: {bg}; border: 1px solid {border}; "
+            f"border-radius: 6px; }} QLabel {{ color: #e6e6eb; }}"
         )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setSpacing(4)
 
-        label_txt = f"[{change}] {clip_id}"
+        label_txt = f"{change}   {clip_id}"
         if track_id:
             label_txt += f"  ({track_id})"
         if high_risk:
             label_txt = "⚠ " + label_txt
         lbl = QLabel(label_txt)
+        lbl.setTextFormat(Qt.TextFormat.PlainText)
+        lbl.setWordWrap(True)
         lbl.setStyleSheet("font-weight: bold;")
         layout.addWidget(lbl)
         if detail:
             detail_lbl = QLabel(detail)
-            detail_lbl.setStyleSheet("color: gray;")
+            detail_lbl.setTextFormat(Qt.TextFormat.PlainText)
+            detail_lbl.setStyleSheet("color: #c3c3ca;")
             detail_lbl.setWordWrap(True)
             layout.addWidget(detail_lbl)
 
@@ -117,6 +118,7 @@ class AiTimelineDiffPanel(QWidget):
         self._container = QWidget()
         self._container_layout = QVBoxLayout(self._container)
         self._container_layout.setContentsMargins(0, 0, 0, 0)
+        self._container_layout.setSpacing(5)
         self._container_layout.addStretch()
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
@@ -179,13 +181,14 @@ class AiTimelineDiffPanel(QWidget):
             total = diff.get("total_changes", 0)
             dur_before = diff.get("duration_before", 0)
             dur_after = diff.get("duration_after", 0)
-            summary = tr("ai_diff.summary",
+            summary = _trf("ai_diff.summary",
                          "共 {n} 处变更 | 时长 {before}→{after} 帧 | 删除 {removed}",
                          n=total, before=dur_before, after=dur_after, removed=len(removed))
             if warnings:
                 summary += _trf("ai_diff.warning_count", " | 预检警告 {count} 项",
                                 count=len(warnings))
             self._summary_label.setText(summary)
+            self._summary_label.setWordWrap(True)
 
             self._stale_label.setVisible(stale)
             if stale:
@@ -198,16 +201,35 @@ class AiTimelineDiffPanel(QWidget):
             self._updating = False
 
     def _add_entry(self, entry: dict[str, Any], *, high_risk: bool) -> None:
-        change = entry.get("change", "?")
+        change = str(entry.get("change", ""))
+        change_label = {
+            "added": tr("ai_diff.added", "新增"),
+            "removed": tr("ai_diff.removed", "删除"),
+            "moved": tr("ai_diff.moved", "移动"),
+            "trimmed": tr("ai_diff.trimmed", "裁切"),
+        }.get(change, change)
         clip_id = entry.get("clip_id", "?")
         track_id = entry.get("track_id", "")
-        detail = ""
-        before = entry.get("before")
-        after = entry.get("after")
-        if before or after:
-            detail = f"{before} → {after}"
-        w = _DiffEntryWidget(change, clip_id, track_id, detail, high_risk=high_risk)
+        ranges = []
+        for key, label in (("timeline", tr("ai_diff.timeline_range", "时间线")),
+                           ("source", tr("ai_diff.source_range", "源片段"))):
+            before = self._format_frame_range(entry.get("before"), key)
+            after = self._format_frame_range(entry.get("after"), key)
+            if before and after and before != after:
+                ranges.append(f"{label}  {before} → {after}")
+            elif before or after:
+                ranges.append(f"{label}  {after or before}")
+        w = _DiffEntryWidget(change_label, clip_id, track_id, "\n".join(ranges), high_risk=high_risk)
         self._container_layout.insertWidget(self._container_layout.count() - 1, w)
+
+    @staticmethod
+    def _format_frame_range(state: object, key: str) -> str:
+        span = state.get(key) if isinstance(state, dict) else None
+        if not isinstance(span, dict) or not isinstance(span.get("start"), int):
+            return ""
+        start = span["start"]
+        duration = span.get("duration")
+        return str(start) if not isinstance(duration, int) else f"{start}–{start + duration - 1}"
 
     def _add_warning_entry(self, warning: str) -> None:
         """AUD-19619：预检警告条目（高风险样式，置顶区）。"""

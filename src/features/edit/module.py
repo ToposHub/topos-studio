@@ -694,7 +694,7 @@ class EditModule:
         panel_registry.register(PanelDescriptor(
             panel_id="edit.ai_assistant",
             title_key="panel.ai_edit_assistant",
-            fallback_title="AI assistant",
+            fallback_title="AI Assistant",
             feature_id="edit",
             category="Edit",
             page_ids=("Edit",),

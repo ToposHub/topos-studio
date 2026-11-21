@@ -612,6 +612,11 @@ class ToposProjectIO:
 
             # ---- Phase B: load existing payload to preserve unknown modules ----
             payload = ProjectArchivePayload.load_from_file(filepath)
+            destination_id = payload.project_json.get("project_id") or payload.manifest.get("project_id")
+            if destination_id and destination_id != project.project_id:
+                # Save As can explicitly replace a different project's archive.
+                # Its AI evidence and other modules belong to that project.
+                payload = ProjectArchivePayload()
             if should_cancel is not None and should_cancel():
                 logger.info("Save cancelled after payload read: %s", filepath)
                 return False

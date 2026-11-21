@@ -108,6 +108,8 @@ class NativeFilesTransport(QObject):
     scan_status_loaded = pyqtSignal(dict)
     scan_failed = pyqtSignal(str)
     ai_library_results = pyqtSignal(str, list, str)
+    ai_library_search_note = pyqtSignal(str, str)
+    ai_library_embedding_consent_changed = pyqtSignal()
     ai_library_copy_finished = pyqtSignal(str)
     ai_library_index_status = pyqtSignal(dict)
     ai_library_settings_loaded = pyqtSignal(dict)
@@ -224,7 +226,7 @@ class NativeFilesTransport(QObject):
     def search_ai_library(
         self, request_id: str, query: str, library_id: str | None = None, *,
         folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
-        only_unanalyzed: bool = False,
+        only_unanalyzed: bool = False, semantic: bool = True,
     ) -> None:
         if self._closed:
             return
@@ -236,17 +238,23 @@ class NativeFilesTransport(QObject):
             return
         cancel = self._ai_library_search_cancel = CancelToken()
 
+        def work() -> tuple[list[dict[str, Any]], str]:
+            from src.app.services.ai_library_search import search_library
+
+            return search_library(facade, query, library_id=library_id, folder=folder, kinds=kinds,
+                                  recursive=recursive, only_unanalyzed=only_unanalyzed,
+                                  semantic=semantic, allow_remote=semantic, cancel=cancel)
+
         def deliver(outcome: FacadeOutcome) -> None:
             if not self._closed and not cancel.requested:
                 if outcome.error is not None:
                     self.ai_library_results.emit(request_id, [], str(outcome.error.message))
                 else:
-                    self.ai_library_results.emit(request_id, outcome.result, "")
+                    hits, note = outcome.result
+                    self.ai_library_results.emit(request_id, hits, "")
+                    self.ai_library_search_note.emit(request_id, note)
 
-        facade.run(key="ai-library-search", request_id=request_id, listener=deliver,
-                   work=lambda: facade.search_ai_library(query, library_id=library_id, folder=folder,
-                                                         kinds=kinds, recursive=recursive,
-                                                         only_unanalyzed=only_unanalyzed, cancel=cancel))
+        facade.run(key="ai-library-search", request_id=request_id, listener=deliver, work=work)
 
     def load_ai_analysis_marks(self, path: str, paths: list[str]) -> None:
         """Resolve card badges independently of directory and thumbnail delivery."""
@@ -420,10 +428,125 @@ class NativeFilesTransport(QObject):
             report["warnings"].extend(
                 {"message": message} for message in dict.fromkeys(policy_messages) if message not in messages
             )
+            if not cancel.requested and not report.get("error"):
+                embedding_report = self._build_library_embeddings(
+                    facade, library_id, folder=folder, kinds=kinds, recursive=recursive, cancel=cancel,
+                    per_library_scope=per_library_scope, explicit=False,
+                )
+                if embedding_report:
+                    report["vectors"] = embedding_report
             return report
 
         facade.run(key="ai-library-index", request_id=uuid.uuid4().hex, work=work,
                    listener=lambda outcome: self._ai_library_index_done.emit(outcome) if not self._closed else None)
+
+    def _build_library_embeddings(
+        self, facade: FilesFacade, library_id: str | None, *, folder: str | None,
+        kinds: tuple[str, ...] | None, recursive: bool, cancel: CancelToken, explicit: bool,
+        per_library_scope: dict[str, tuple[tuple[str, ...], bool]] | None = None,
+        approval: str | None = None, expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        from src.app.services.ai_library_embeddings import active_library_embedding_route, library_embedder
+        from src.shared.ai_models.generation.media_inference import MediaInferenceError
+
+        try:
+            route = active_library_embedding_route()
+        except MediaInferenceError as exc:
+            return {"error": str(exc)}
+        if route is None:
+            return {"model_setup_required": True, "error": I18N.tr(
+                "files.ai_library.vector_setup_required", "请先在首选项中配置并设为默认向量模型。")} if explicit else {}
+        if approval is not None:
+            if library_id is None or not route.requires_upload or route.approval != approval:
+                return {"error": I18N.tr("files.ai_library.vector_route_changed", "向量模型已更换，请刷新后重新确认。")}
+            facade.set_ai_library_embedding_consent(library_id, approval, folder=folder,
+                                                     expected_scope_stamp=expected_scope_stamp)
+        totals: dict[str, Any] = {"embedded": 0, "skipped": 0, "pending": 0, "cancelled": False}
+        processed_scope = False
+        for library in facade.libraries.list_libraries():
+            if cancel.requested or (library_id is not None and library.library_id != library_id):
+                continue
+            owner = library.library_id
+            if per_library_scope is not None and owner not in per_library_scope:
+                continue
+            owner_kinds, owner_recursive = (per_library_scope or {}).get(owner, (kinds, recursive))
+            if owner_kinds == ():
+                continue
+            embedder = library_embedder(facade, owner, folder=folder, route=route)
+            if embedder is None or not embedder.is_authorized():
+                continue
+            processed_scope = True
+            last_update = 0.0
+
+            def progress(done: int, total: int) -> None:
+                nonlocal last_update
+                now = time.monotonic()
+                if not self._closed and (now - last_update >= 0.15 or done == total):
+                    last_update = now
+                    self.ai_library_index_status.emit({
+                        "running": True, "phase": "vectors", "done": done, "total": total,
+                    })
+
+            try:
+                current = facade.build_ai_library_embeddings(
+                    embedder, model_key=embedder.revision, library_id=owner, folder=folder,
+                    kinds=owner_kinds, recursive=owner_recursive, cancel=cancel, progress=progress,
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                totals["error"] = str(exc)
+                break
+            for key in ("embedded", "skipped", "pending"):
+                totals[key] += current.get(key, 0)
+            if current.get("error"):
+                totals["error"] = current["error"]
+                break
+        totals["cancelled"] = cancel.requested
+        if not processed_scope and not cancel.requested:
+            return {"error": I18N.tr("files.ai_library.vector_scope_required",
+                                     "请先选择素材库或文件夹并授权向量服务。")} if explicit else {}
+        return totals
+
+    def start_ai_library_embeddings(
+        self, library_id: str | None, *, folder: str | None, kinds: tuple[str, ...], recursive: bool,
+        approval: str | None = None, expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        if self._closed or self._ai_library_index_cancel is not None:
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_index_status.emit({"error": self._runtime_error_message()})
+            return
+        cancel = self._ai_library_index_cancel = CancelToken()
+        self._ai_library_index_state = {"running": True, "phase": "vectors", "done": 0, "total": 0}
+        self.ai_library_index_status.emit(dict(self._ai_library_index_state))
+
+        def work() -> dict[str, Any]:
+            return {"vectors": self._build_library_embeddings(
+                facade, library_id, folder=folder, kinds=kinds, recursive=recursive, cancel=cancel,
+                approval=approval, expected_scope_stamp=expected_scope_stamp, explicit=True,
+            )}
+
+        facade.run(key="ai-library-index", request_id=uuid.uuid4().hex, work=work,
+                   listener=lambda outcome: self._ai_library_index_done.emit(outcome) if not self._closed else None)
+
+    def revoke_ai_library_embedding_consent(self, library_id: str, *, folder: str | None) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.ai_library_settings_loaded.emit({"error": self._runtime_error_message()})
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.ai_library_settings_loaded.emit({"error": str(outcome.error.message), "library_id": library_id,
+                                                      "folder": folder})
+            else:
+                self.ai_library_embedding_consent_changed.emit()
+
+        facade.run(key=f"ai-library-vector-consent:{library_id}", request_id=uuid.uuid4().hex,
+                   work=lambda: facade.set_ai_library_embedding_consent(library_id, None, folder=folder),
+                   listener=deliver)
 
     def _finish_ai_library_index(self, outcome: FacadeOutcome) -> None:
         self._ai_library_index_cancel = None
@@ -452,6 +575,8 @@ class NativeFilesTransport(QObject):
             from pathlib import Path
 
             from src.app.services.ai_library_analysis import active_media_routes, library_model_options
+            from src.app.services.ai_library_embeddings import active_library_embedding_route
+            from src.shared.ai_models.generation.media_inference import MediaInferenceError
 
             if folder is not None and library_id is None:
                 raise ValueError("请先选择子目录所属的素材库。")
@@ -467,10 +592,19 @@ class NativeFilesTransport(QObject):
                     scope_folder = None if target == Path(owner["path"]) else folder
             stamp = facade.ai_library_scope_stamp(scope_library, folder=scope_folder) if scope_library else None
             policy = facade.ai_library_analysis_policy(scope_library, folder=scope_folder) if scope_library else None
+            route_error = ""
+            try:
+                route = active_library_embedding_route()
+            except MediaInferenceError as exc:
+                route, route_error = None, str(exc)
+            consent = (facade.ai_library_embedding_consent(scope_library, folder=scope_folder)
+                       if scope_library else None)
             return {"libraries": libraries,
                     "routes": [route.summary() for route in active_media_routes().values()],
                     "models": library_model_options(), "scope_policy": policy.to_dict() if policy else None,
-                    "scope_stamp": stamp, "scope_library": scope_library, "scope_folder": scope_folder}
+                    "scope_stamp": stamp, "scope_library": scope_library, "scope_folder": scope_folder,
+                    "embedding_route": route.summary() if route else None,
+                    "embedding_error": route_error, "embedding_consent": consent}
 
         def deliver(outcome: FacadeOutcome) -> None:
             if not self._closed:

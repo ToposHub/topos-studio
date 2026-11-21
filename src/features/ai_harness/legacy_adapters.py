@@ -44,6 +44,13 @@ class _EditorialRunContext:
     analyses: dict[str, Any] = field(default_factory=dict)
 
 
+def _invocation_base_revision(inv: Invocation) -> int:
+    """Use the captured timeline revision, with a fallback for old run records."""
+    if inv.scope.base_revision is not None:
+        return inv.scope.base_revision
+    return int(inv.inputs.get("base_revision", 0))
+
+
 def invocation_to_workflow_input(inv: Invocation) -> Any:
     """``Invocation`` -> 现有 ``WorkflowInput``。
 
@@ -72,7 +79,7 @@ def invocation_to_workflow_input(inv: Invocation) -> Any:
         asset_ids=inv.scope.selected_asset_ids,
         timeline_id=inv.scope.timeline_id,
         project_id=inv.scope.project_id,
-        base_revision=int(inv.inputs.get("base_revision", 0)),
+        base_revision=_invocation_base_revision(inv),
         brief_id=str(inv.inputs.get("brief_id", "default")),
         analysis_snapshot_hash=str(inv.inputs.get("analysis_snapshot_hash", "")),
         target_duration=int(inv.inputs.get("target_duration", 720)),
@@ -89,7 +96,7 @@ def invocation_to_skill_input(inv: Invocation) -> Any:
         asset_ids=inv.scope.selected_asset_ids,
         timeline_id=inv.scope.timeline_id,
         project_id=inv.scope.project_id,
-        base_revision=int(inv.inputs.get("base_revision", 0)),
+        base_revision=_invocation_base_revision(inv),
         brief_id=str(inv.inputs.get("brief_id", "default")),
         brief_summary=str(inv.inputs.get("brief_summary", "")),
         evidence_refs=tuple(inv.inputs.get("evidence_refs", ())),
@@ -490,7 +497,7 @@ class LegacyHarnessAdapter:
 
         ctx = run_ctx if run_ctx is not None else _EditorialRunContext()
         asset_ids = inv.scope.selected_asset_ids
-        base_revision = int(inv.inputs.get("base_revision", 0))
+        base_revision = _invocation_base_revision(inv)
         brief_id = inv.inputs.get("brief_id")
 
         if inv.skill_id == "topos.auto_caption":

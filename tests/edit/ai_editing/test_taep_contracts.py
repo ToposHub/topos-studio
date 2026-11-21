@@ -513,6 +513,40 @@ def test_validate_source_range_out_of_bounds():
     assert any(d.code == TaepDiagnosticCode.SOURCE_RANGE_INVALID for d in report.errors)
 
 
+def test_validate_library_subclip_uses_absolute_source_frames() -> None:
+    from dataclasses import replace
+    from src.features.edit.ai_editing.plan_compiler import compile_plan
+    from src.features.edit.core.asset_source_range import create_manual_subclip
+    from src.features.edit.core.commands import CommandStack
+
+    state = _state_with_asset()
+    master = replace(state.project.assets["a1"], metadata={"fps": 24.0, "duration_frames": 500, "total_frames": 500})
+    project = replace(state.project, assets={"a1": master})
+    project, child = create_manual_subclip(project, "a1", 240, 287)
+    state = replace(state, project=project)
+
+    def plan(start: int) -> EditPlan:
+        return EditPlan.create(
+            PlanTarget("p1", "t1"), base_revision=project.revision,
+            operations=(EditOperation("op1", OperationKind.ADD_CLIP, params={
+                "track_id": "v1", "asset_id": child.asset_id,
+                "source": {"start": start, "duration": 48},
+                "timeline": {"start": 0, "duration": 48},
+            }),),
+        )
+
+    assert validate_plan(plan(240), state=state).status == PlanStatus.VALID
+    original = state.sequences["t1"]
+    stack = CommandStack()
+    updated = stack.execute(compile_plan(plan(240)).macro, original)
+    clip, = updated.video_tracks[0].clips
+    assert (clip.asset_id, clip.source_start, clip.source_duration) == (child.asset_id, 240, 48)
+    assert stack.undo(updated) == original
+    for start in (239, 241):
+        errors = validate_plan(plan(start), state=state).errors
+        assert any(diag.code == TaepDiagnosticCode.SOURCE_RANGE_INVALID for diag in errors)
+
+
 def test_validate_asset_offline():
     from dataclasses import replace
 

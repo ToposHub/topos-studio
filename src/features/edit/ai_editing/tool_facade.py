@@ -29,6 +29,7 @@ prompt injection 隔离（TAEP §12 P6）：素材文件名、字幕文本、OCR
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
@@ -230,7 +231,7 @@ def list_tool_definitions() -> list[ToolDefinition]:
             },
             output_description=(
                 "实际候选、在线状态和匹配证据。start_seconds/end_seconds 为源媒体入出点，"
-                "null 表示索引中缺少时段。"
+                "null 表示索引中缺少时段。已在当前项目中时返回 project_asset_id 及可用的项目源帧范围。"
             ),
         ),
         ToolDefinition(
@@ -495,10 +496,13 @@ class ToolFacade:
         plugin_registry: Any | None = None,
         *,
         library_search: Callable[[str, int], list[dict[str, Any]]] | None = None,
+        cancellable_library_search: Callable[[str, int, Callable[[], bool]], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._session = session
         self._analysis = analysis_service
-        self._library_search = library_search
+        self._library_search = cancellable_library_search
+        if self._library_search is None and library_search is not None:
+            self._library_search = lambda query, limit, _cancelled: library_search(query, limit)
         self._audit_sink = audit_sink
         self._approval_service = approval_service
         # M6：本地帮助索引（§9）；None 时 search_help/explain_diagnostic 返回"未配置"。
@@ -775,7 +779,14 @@ class ToolFacade:
             if tool_name == "topos.search_assets":
                 return self._search_assets(args)
             if tool_name == LIBRARY_SEARCH_TOOL:
-                return self._search_library_media(args)
+                deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+
+                def cancelled() -> bool:
+                    return (callable(cancel_check) and cancel_check()) or (
+                        deadline is not None and time.monotonic() >= deadline
+                    )
+
+                return self._search_library_media(args, cancelled)
             if tool_name == "topos.get_asset_analysis":
                 return self._get_analysis(args)
             if tool_name == "topos.validate_edit_plan":
@@ -844,7 +855,7 @@ class ToolFacade:
             {"ok": True, "segments": [sanitize_untrusted(s.to_dict()) for s in results]}
         )
 
-    def _search_library_media(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _search_library_media(self, args: dict[str, Any], cancelled: Callable[[], bool]) -> dict[str, Any]:
         if self._library_search is None:
             return {"ok": False, "error": "全局素材库工具未连接。"}
         query = args.get("query")
@@ -856,9 +867,17 @@ class ToolFacade:
         fields = (
             "asset_id", "name", "kind", "online", "start_seconds", "end_seconds", "text", "tags", "score",
         )
+        if cancelled():
+            return {"ok": False, "error": "素材检索已取消。"}
+        hits = self._library_search(query.strip(), limit, cancelled)
+        if cancelled():
+            return {"ok": False, "error": "素材检索已取消。"}
         candidates = [
-            {field: hit.get(field) for field in fields}
-            for hit in self._library_search(query.strip(), limit)[:limit]
+            {field: hit.get(field) for field in fields} | {
+                field: hit[field] for field in ("project_asset_id", "project_source_in_frame", "project_source_out_frame")
+                if field in hit
+            }
+            for hit in hits[:limit]
         ]
         return self._json_safe({"ok": True, "candidates": sanitize_untrusted(candidates)})
 

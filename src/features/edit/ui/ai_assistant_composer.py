@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QBrush, QColor, QLinearGradient, QPainter, QPen
+from PyQt6.QtCore import QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QBrush, QColor, QLinearGradient, QPainter, QPen, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.shared.assets.icon_manager import icon_add
 from src.shared.i18n.i18n import tr
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.features.edit.ai_editing.assistant_modes import (
@@ -97,6 +98,7 @@ class ComposerFooterState:
     cost_estimate: str = ""             # "约 ¥0.12" / ""
     network_hint: str = ""              # "将上传 2 个素材到云" / ""
     has_active_run: bool = False        # 是否有运行中的 job（影响"新对话"可用性）
+    draft_token_limit: int | None = None
 
 
 @dataclass
@@ -304,6 +306,34 @@ class _ShimmerStatusLabel(QLabel):
 # ---------------------------------------------------------------------- #
 
 
+class AssistantElidingButton(QPushButton):
+    """Constrain long model and conversation names to their available width."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_label = ""
+        self._suffix = ""
+        self.setFlat(True)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(26)
+
+    def set_label(self, label: str, suffix: str = "") -> None:
+        self._full_label = label
+        self._suffix = suffix
+        self.setAccessibleName(label)
+        self._elide_label()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._elide_label()
+
+    def _elide_label(self) -> None:
+        metrics = self.fontMetrics()
+        width = max(0, self.width() - 16 - metrics.horizontalAdvance(self._suffix))
+        label = metrics.elidedText(self._full_label, Qt.TextElideMode.ElideRight, width)
+        self.setText(label + self._suffix)
+
+
 class AiAssistantComposer(QWidget):
     """底部控制栏（plan §10.2 P0.3）。
 
@@ -346,7 +376,7 @@ class AiAssistantComposer(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setContentsMargins(5, 2, 5, 4)
         layout.setSpacing(2)
 
         # 第 1 行：模式 · 权限 · Profile · 推理级别。
@@ -357,11 +387,13 @@ class AiAssistantComposer(QWidget):
         # 文件、截图、上下文和会话操作堆在输入框外面。
         self._add_btn = QToolButton()
         self._add_btn.setObjectName("assistant_add_button")
-        self._add_btn.setText("+")
-        self._add_btn.setFixedSize(24, 24)
+        self._add_btn.setIcon(icon_add("#bfc0c7"))
+        self._add_btn.setIconSize(QSize(12, 12))
+        self._add_btn.setFixedSize(26, 26)
         self._add_btn.setToolTip(tr(
             "ai_assistant.add_menu_tooltip", "添加图片、视频、音频、PDF、文档或上下文操作",
         ))
+        self._add_btn.setAccessibleName(self._add_btn.toolTip())
         self._add_btn.setStyleSheet(
             "QToolButton { border: none; background: transparent;"
             " color: #b8b8be; font-size: 19px; font-weight: 400;"
@@ -412,20 +444,20 @@ class AiAssistantComposer(QWidget):
         self._perm_combo.currentIndexChanged.connect(self._on_perm_changed)
         self._perm_combo.setVisible(False)
 
-        self._conversation_btn = QToolButton()
+        self._conversation_btn = AssistantElidingButton()
         self._conversation_btn.setObjectName("assistant_conversation_selector")
-        self._conversation_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._conversation_btn.setToolTip(tr(
             "ai_composer.conversation_selector_tooltip",
             "选择对话模式和权限",
         ))
         self._conversation_btn.setStyleSheet(
-            "QToolButton { border: none; background: transparent;"
-            " text-align: left; padding: 2px 3px; font-size: 11px; }"
-            "QToolButton:hover { color: #e87519; }"
+            "QPushButton { border: none; background: transparent; font-weight: normal;"
+            " text-align: left; padding: 2px 6px; font-size: 11px; border-radius: 5px; }"
+            "QPushButton:hover { color: #f2f2f4; background: #38383e; }"
+            "QPushButton:focus { background: #38383e; }"
         )
         self._conversation_btn.clicked.connect(self._show_conversation_menu)
-        row1.addWidget(self._conversation_btn)
+        row1.addWidget(self._conversation_btn, stretch=5)
 
         self._conversation_menu = QMenu(self._conversation_btn)
         self._mode_menu = self._conversation_menu.addMenu(
@@ -449,19 +481,19 @@ class AiAssistantComposer(QWidget):
             self._permission_menu.addAction(action)
         self._permission_menu.triggered.connect(self._on_permission_action)
 
-        self._profile_btn = QToolButton()
+        self._profile_btn = AssistantElidingButton()
         self._profile_btn.setObjectName("assistant_model_reasoning_selector")
-        self._profile_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._profile_btn.setToolTip(tr(
             "ai_composer.profile_tooltip", "选择模型和推理强度",
         ))
         self._profile_btn.clicked.connect(self._on_profile_clicked)
         self._profile_btn.setStyleSheet(
-            "QToolButton { border: none; background: transparent;"
-            " text-align: left; padding: 2px 3px; font-size: 11px; }"
-            "QToolButton:hover { color: #e87519; }"
+            "QPushButton { border: none; background: transparent; font-weight: normal;"
+            " text-align: left; padding: 2px 6px; font-size: 11px; border-radius: 5px; }"
+            "QPushButton:hover { color: #f2f2f4; background: #38383e; }"
+            "QPushButton:focus { background: #38383e; }"
         )
-        row1.addWidget(self._profile_btn, stretch=2)
+        row1.addWidget(self._profile_btn, stretch=6)
 
         self._reasoning_combo = ChevronComboBox()
         self._reasoning_combo.addItem(tr("ai_composer.reasoning_low", "低"), "low")
@@ -519,10 +551,9 @@ class AiAssistantComposer(QWidget):
         self._compress_btn.clicked.connect(self.context_compress_clicked.emit)
         self._compress_btn.setVisible(False)
 
-        row2.addStretch(1)
-
         self._cost_label = QLabel()
         self._cost_label.setStyleSheet("color: gray; font-size: 9px;")
+        self._cost_label.hide()
         row2.addWidget(self._cost_label)
 
         self._toolbar_layout = row2
@@ -609,11 +640,11 @@ class AiAssistantComposer(QWidget):
 
         menu.addSeparator()
         add_action(
-            tr("ai_assistant.add_scope", "素材 / 文件夹范围"),
+            tr("ai_assistant.add_scope", "查看项目上下文"),
             "scope",
             tooltip=tr(
                 "ai_assistant.add_scope_tooltip",
-                "选择本次对话使用的素材范围",
+                "查看素材和工程上下文摘要",
             ),
         )
         add_action(
@@ -621,7 +652,7 @@ class AiAssistantComposer(QWidget):
             "context",
         )
         add_action(
-            tr("ai_assistant.add_compress", "压缩上下文"),
+            tr("ai_assistant.compress_context_preview", "压缩上下文预览"),
             "compress",
         )
 
@@ -811,7 +842,9 @@ class AiAssistantComposer(QWidget):
     def _update_conversation_button(self) -> None:
         mode = self._mode_combo.currentText() or tr("ai_composer.mode_chat", "普通对话")
         permission = self._perm_combo.currentText() or _permission_label("propose")
-        self._conversation_btn.setText(f"{mode} · {permission} ⌄")
+        label = f"{mode} · {permission}"
+        self._conversation_btn.set_label(label, " ⌄")
+        self._conversation_btn.setToolTip(label)
 
     def _update_profile_reasoning_button(self) -> None:
         profile_text = self._profile_btn.property("assistant_profile_text")
@@ -820,7 +853,8 @@ class AiAssistantComposer(QWidget):
         reasoning_text = self._reasoning_combo.currentText() or tr(
             "ai_composer.reasoning_medium", "中"
         )
-        self._profile_btn.setText(f"{profile_text} · {reasoning_text} ⌄")
+        self._profile_btn.set_label(str(profile_text), f" · {reasoning_text} ⌄")
+        self._profile_btn.setToolTip(f"{profile_text} · {reasoning_text}")
 
     # ---------------- 状态回填 ---------------- #
 
@@ -903,6 +937,7 @@ class AiAssistantComposer(QWidget):
 
             # 成本 / 网络
             self._cost_label.setText(state.cost_estimate or "")
+            self._cost_label.setVisible(bool(state.cost_estimate))
             if state.network_hint:
                 self._network_label.setText("⚠ " + state.network_hint)
                 self._network_label.setVisible(True)

@@ -250,6 +250,15 @@ class TestContextInspector:
         # 检查器页是 stack 索引 5
         assert panel._stack.currentIndex() == 5
 
+    def test_scope_opens_context_preview_and_refresh_keeps_it_open(self, panel) -> None:
+        requested = []
+        panel.composer_scope_requested.connect(lambda: requested.append(True))
+        panel._request_edit.setPlainText("/scope")
+        panel._on_slash_navigation("accept")
+        panel.refresh_state(AssistantStateSnapshot(state=AssistantState.IDLE))
+        assert panel._stack.currentIndex() == panel._PAGE_CONTEXT_INSPECTOR
+        assert requested == [True]
+
     def test_set_context_bundle_renders_blocks(self, panel) -> None:
         """set_context_bundle → 检查器渲染每块（kind/优先级/token）。"""
         bundle = ContextBundle(blocks=(
@@ -313,7 +322,7 @@ class TestContextInspector:
         from PyQt6.QtWidgets import QPushButton
         buttons = card.findChildren(QPushButton)
         # 硬约束块无"排除"按钮
-        assert all("排除" not in b.text() and "Exclude" not in b.text() for b in buttons)
+        assert not buttons
 
     def test_evidence_block_has_exclude_button(self, panel) -> None:
         bundle = ContextBundle(blocks=(
@@ -327,7 +336,7 @@ class TestContextInspector:
         card = panel._ctx_blocks_layout.itemAt(0).widget()
         from PyQt6.QtWidgets import QPushButton
         buttons = card.findChildren(QPushButton)
-        assert any("排除" in b.text() or "Exclude" in b.text() for b in buttons)
+        assert any(b.text() in ("从预览中隐藏", "Hide from preview") for b in buttons)
 
     def test_exclude_button_emits_block_id(self, panel) -> None:
         bundle = ContextBundle(blocks=(
@@ -341,7 +350,7 @@ class TestContextInspector:
         card = panel._ctx_blocks_layout.itemAt(0).widget()
         from PyQt6.QtWidgets import QPushButton
         exclude_btn = next(b for b in card.findChildren(QPushButton)
-                           if "排除" in b.text() or "Exclude" in b.text())
+                           if b.text() in ("从预览中隐藏", "Hide from preview"))
         captured = []
         panel.context_block_excluded.connect(lambda bid: captured.append(bid))
         exclude_btn.click()

@@ -45,6 +45,9 @@ from src.features.edit.ai_editing.models import (
 from src.features.edit.ai_editing.semantic_index import SemanticIndex
 
 
+STANDALONE_VIDEO_TRACK_ID = "v1"
+
+
 # ---------------------------------------------------------------------- #
 # 规划策略
 # ---------------------------------------------------------------------- #
@@ -71,6 +74,9 @@ class PlannerInput:
     base_revision: int  # timeline base revision（乐观锁）
     analysis_snapshot_hash: str = ""
     target_duration: int = 720  # 帧（默认 30s@24fps）
+    # Standalone callers can use the fixture track ID. The assistant resolves
+    # the actual track from the same timeline snapshot as its base revision.
+    video_track_id: str = STANDALONE_VIDEO_TRACK_ID
 
 
 @dataclass(frozen=True)
@@ -304,7 +310,7 @@ class VariantPlanner:
                 kind=OperationKind.ADD_CLIP,
                 params={
                     "clip_id": f"clip-{beat_id}",
-                    "track_id": "v1",
+                    "track_id": inp.video_track_id,
                     "asset_id": dec.subject.asset_id,
                     "source": dec.subject.source.to_dict(),
                     "timeline": beat_range.to_dict(),

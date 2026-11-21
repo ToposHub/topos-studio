@@ -45,6 +45,7 @@ from src.features.edit.ai_editing.models import (
     ValidationReport,
 )
 from src.features.edit.ai_editing.schema import findings_to_diagnostics, validate_plan_structure
+from src.features.edit.core.asset_source_range import get_effective_source_range, is_subclip
 
 if TYPE_CHECKING:
     from src.features.edit.core.project import MediaAsset
@@ -272,12 +273,12 @@ def _validate_operation_domain(
         # source range 越界
         source = _frame_range_from(params, "source")
         if asset is not None and source is not None:
-            asset_duration = _asset_duration_frames(asset)
-            if asset_duration is not None and source.end > asset_duration:
+            first, stop = _source_bounds(asset)
+            if source.start < first or (stop is not None and source.end > stop):
                 diags.append(make_diagnostic(
                     DiagnosticSeverity.ERROR, TaepDiagnosticCode.SOURCE_RANGE_INVALID,
                     op_id=op.op_id, path=f"/operations/{op.op_id}/params/source",
-                    lang=lang, asset_id=asset_id, duration=asset_duration,
+                    lang=lang, asset_id=asset_id, duration=stop,
                     start=source.start, dur=source.duration,
                 ))
         # track 类型匹配（video clip → video track）
@@ -518,19 +519,28 @@ def _validate_operation_domain(
 # ---------------------------------------------------------------------- #
 
 
-def _asset_duration_frames(asset: MediaAsset) -> int | None:
-    """从 MediaAsset.metadata 推断时长（帧）。"""
+def _source_bounds(asset: MediaAsset) -> tuple[int, int | None]:
+    """Return source-file frame bounds. A subclip uses its parent's frame domain."""
+    if is_subclip(asset):
+        try:
+            start, end = get_effective_source_range(asset)
+            if start is not None and end is not None and 0 <= start <= end:
+                return start, end + 1
+        except (TypeError, ValueError):
+            pass
+        return 0, 0
     meta = getattr(asset, "metadata", {}) or {}
     if not isinstance(meta, dict):
-        return None
-    for key in ("duration_frames", "frame_count", "nb_frames"):
+        return 0, None
+    for key in ("duration_frames", "frame_count", "nb_frames", "total_frames"):
         val = meta.get(key)
         if val is not None:
             try:
-                return int(val)
-            except (TypeError, ValueError):
-                return None
-    return None
+                if int(val) > 0:
+                    return 0, int(val)
+            except (TypeError, ValueError, OverflowError):
+                continue
+    return 0, None
 
 
 def _clip_not_found_diag(op: EditOperation, clip_id: str, lang: str) -> Diagnostic:

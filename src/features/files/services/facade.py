@@ -10,6 +10,8 @@ request_id/generation/revision 身份；同一位置的新请求使旧请求作�
 """
 from __future__ import annotations
 
+import json
+import re
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -122,13 +124,85 @@ class FilesFacade:
         self, query: str, *, limit: int = 40, library_id: str | None = None,
         folder: str | None = None, kinds: tuple[str, ...] | None = None, recursive: bool = True,
         only_unanalyzed: bool = False, cancel: CancelToken | None = None,
+        embedding: tuple[str, Sequence[float]] | None = None,
+        semantic_library_ids: frozenset[str] | None = None,
     ) -> list[dict[str, Any]]:
         from src.features.files.services.ai_library import AILibraryService
 
         return AILibraryService(self._catalog).search(
             query, limit=limit, library_id=library_id, folder=folder, kinds=kinds, recursive=recursive,
-            only_unanalyzed=only_unanalyzed, cancel=cancel,
+            only_unanalyzed=only_unanalyzed, cancel=cancel, embedding=embedding,
+            semantic_library_ids=semantic_library_ids,
         )
+
+    def build_ai_library_embeddings(
+        self, embed: Callable[[Sequence[str]], Sequence[Sequence[float]]], *, model_key: str,
+        library_id: str | None = None, folder: str | None = None, kinds: tuple[str, ...] | None = None,
+        recursive: bool = True, cancel: CancelToken | None = None,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, Any]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).build_embeddings(
+            embed, model_key=model_key, library_id=library_id, folder=folder, kinds=kinds,
+            recursive=recursive, cancel=cancel, progress=progress,
+        )
+
+    def ai_library_embedding_status(
+        self, model_key: str, *, library_id: str | None = None, folder: str | None = None,
+        kinds: tuple[str, ...] | None = None, recursive: bool = True, cancel: CancelToken | None = None,
+    ) -> dict[str, int]:
+        from src.features.files.services.ai_library import AILibraryService
+
+        return AILibraryService(self._catalog).embedding_status(
+            model_key, library_id=library_id, folder=folder, kinds=kinds, recursive=recursive, cancel=cancel,
+        )
+
+    def _embedding_consent_scope(self, library_id: str, folder: str | None) -> tuple[str, tuple[str, str]]:
+        stamp = self.ai_library_scope_stamp(library_id, folder=folder)
+        if stamp is None:
+            raise ValueError("请先连接素材库。")
+        root = next((item.root for item in self.libraries.list_libraries() if item.library_id == library_id), None)
+        if root is None:
+            raise ValueError("素材目录已取消登记。")
+        relative = str(Path(folder).resolve().relative_to(Path(root).resolve())) if folder else "."
+        return f"ai_library_embedding_consent:{relative}", stamp
+
+    def ai_library_embedding_consent(self, library_id: str, *, folder: str | None = None) -> str | None:
+        try:
+            key, stamp = self._embedding_consent_scope(library_id, folder)
+        except (OSError, ValueError):
+            return None
+        with self._catalog._read() as cursor:
+            row = cursor.execute("SELECT value FROM settings WHERE library_id = ? AND key = ?",
+                                 (library_id, key)).fetchone()
+        if row:
+            try:
+                payload = json.loads(row[0])
+                if isinstance(payload, dict) and payload.get("stamp") == list(stamp):
+                    approval = payload.get("approval")
+                    if isinstance(approval, str) and re.fullmatch(r"[a-f0-9]{64}", approval):
+                        return approval
+            except (TypeError, ValueError):
+                pass
+        return None
+
+    def set_ai_library_embedding_consent(
+        self, library_id: str, approval: str | None, *, folder: str | None = None,
+        expected_scope_stamp: tuple[str, str] | None = None,
+    ) -> None:
+        key, stamp = self._embedding_consent_scope(library_id, folder)
+        if approval is not None and (expected_scope_stamp != stamp or not re.fullmatch(r"[a-f0-9]{64}", approval)):
+            raise ValueError("素材文件夹或服务已更换，请重新确认向量服务授权。")
+        with self._catalog._write() as cursor:
+            if approval is None:
+                cursor.execute("DELETE FROM settings WHERE library_id = ? AND key = ?", (library_id, key))
+            else:
+                cursor.execute(
+                    """INSERT INTO settings (library_id, key, value) VALUES (?, ?, ?)
+                       ON CONFLICT(library_id, key) DO UPDATE SET value = excluded.value""",
+                    (library_id, key, json.dumps({"stamp": stamp, "approval": approval})),
+                )
 
     def ai_library_analyzed_paths(self, paths: Sequence[str], *, cancel: CancelToken | None = None) -> set[str]:
         from src.features.files.services.ai_library import AILibraryService

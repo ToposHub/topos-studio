@@ -155,6 +155,8 @@ class RegisteredAILibraryWindow(QDialog):
         self._policies: dict[str, dict[str, Any]] = {}
         self._scope_policy: dict[str, Any] = {}
         self._scope_stamp: tuple[str, str] | None = None
+        self._embedding_route: dict[str, Any] = {}
+        self._embedding_consent: str | None = None
         self._models: dict[str, dict[str, dict[str, Any]]] = {kind: {} for kind, _, _ in self._MEDIA_LABELS}
         self.setWindowTitle(_tr("title", "AI 素材库"))
         self.setObjectName("AiLibrary")
@@ -289,6 +291,24 @@ class RegisteredAILibraryWindow(QDialog):
         self.save_policy_button.clicked.connect(self._save_directory_policy)
         scan_options.addWidget(self.save_policy_button)
         policy_layout.addLayout(scan_options)
+        vector_options = QHBoxLayout()
+        self.vector_status = QLabel(policy)
+        self.vector_status.setObjectName("AiLibraryNote")
+        self.vector_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.vector_status.setWordWrap(True)
+        vector_options.addWidget(self.vector_status, 1)
+        self.vector_model_button = QPushButton(_tr("vector_model", "向量模型…"), policy)
+        self.vector_model_button.clicked.connect(lambda: self.configure_models_requested.emit("embedding"))
+        vector_options.addWidget(self.vector_model_button)
+        self.revoke_vector_button = QPushButton(_tr("revoke_vector_access", "撤销云端授权"), policy)
+        self.revoke_vector_button.hide()
+        self.revoke_vector_button.clicked.connect(self._revoke_vector_access)
+        vector_options.addWidget(self.revoke_vector_button)
+        self.vector_button = QPushButton(_tr("update_vectors", "更新向量索引"), policy)
+        self.vector_button.setToolTip(_tr("update_vectors_hint", "使用已保存的描述、标签和转录。模型更换后可在这里补建索引。"))
+        self.vector_button.clicked.connect(self._start_vectors)
+        vector_options.addWidget(self.vector_button)
+        policy_layout.addLayout(vector_options)
         self.policy_status = QLabel(policy)
         self.policy_status.setObjectName("AiLibraryNote")
         self.policy_status.setTextFormat(Qt.TextFormat.PlainText)
@@ -315,6 +335,12 @@ class RegisteredAILibraryWindow(QDialog):
         self.search_edit.addAction(qta.icon("fa5s.search", color=C.TEXT_LABEL), QLineEdit.ActionPosition.LeadingPosition)
         self.search_edit.returnPressed.connect(self.search)
         search_row.addWidget(self.search_edit, 1)
+        self.search_mode = ChevronComboBox(self)
+        self.search_mode.setAccessibleName(_tr("search_mode", "检索方式"))
+        self.search_mode.addItem(_tr("hybrid_search", "混合检索"), True)
+        self.search_mode.addItem(_tr("keyword_search", "关键词"), False)
+        self.search_mode.currentIndexChanged.connect(self.search)
+        search_row.addWidget(self.search_mode)
         self.pending_only_check = QCheckBox(_tr("pending_only", "只看待分析"), self)
         self.pending_only_check.setToolTip(_tr("pending_only_hint", "显示待分析素材，扫描时跳过已有有效 AI 结果的文件。"))
         self.pending_only_check.toggled.connect(self._pending_filter_changed)
@@ -395,6 +421,8 @@ class RegisteredAILibraryWindow(QDialog):
         self._show_empty_results()
 
         transport.ai_library_results.connect(self._show_results)
+        transport.ai_library_search_note.connect(self._show_search_note)
+        transport.ai_library_embedding_consent_changed.connect(self.refresh_models)
         transport.ai_library_index_status.connect(self._show_index_status)
         transport.ai_library_copy_finished.connect(self._copy_finished)
         transport.ai_library_settings_loaded.connect(self._load_directory_policies)
@@ -432,6 +460,7 @@ class RegisteredAILibraryWindow(QDialog):
             self._request_id, query, self._library_scope, folder=self._folder_scope,
             kinds=self._selected_kinds(), recursive=self.recursive_check.isChecked(),
             only_unanalyzed=self.pending_only_check.isChecked(),
+            semantic=bool(self.search_mode.currentData()),
         )
 
     def _show_empty_results(self, *, queried: bool = False, error: str = "") -> None:
@@ -459,6 +488,7 @@ class RegisteredAILibraryWindow(QDialog):
             self._restore_draft = None
             self._scope_policy = {}
             self._scope_stamp = None
+            self._embedding_consent = None
             self.force_check.setChecked(False)
             self._loading_scope = True
             self._request_id = ""
@@ -577,6 +607,10 @@ class RegisteredAILibraryWindow(QDialog):
         else:
             self._show_empty_results(queried=bool(self._query), error=error)
 
+    def _show_search_note(self, request_id: str, note: str) -> None:
+        if request_id == self._request_id and note:
+            self.search_status.setText(" · ".join(filter(None, (self.search_status.text(), note))))
+
     def _selection_changed(self) -> None:
         hit = self._current_hit()
         self.import_button.setEnabled(bool(hit and hit["online"]))
@@ -680,6 +714,19 @@ class RegisteredAILibraryWindow(QDialog):
 
         self._scope_policy = snapshot.get("scope_policy") or self._policies.get(self._library_scope, {})
         self._scope_stamp = snapshot.get("scope_stamp") if self._library_scope is not None else None
+        self._embedding_route = snapshot.get("embedding_route") or {}
+        self._embedding_consent = snapshot.get("embedding_consent")
+        route = self._embedding_route
+        if route:
+            note = _tr("vector_ready", "向量模型 · {name}", name=route["name"])
+            if route.get("upload") and self._library_scope:
+                note += " · " + (
+                    _tr("vector_authorized", "当前范围已授权") if self._embedding_consent == route.get("approval")
+                    else _tr("vector_needs_authorization", "当前范围待授权")
+                )
+        else:
+            note = snapshot.get("embedding_error") or _tr("vector_not_configured", "未配置默认向量模型")
+        self.vector_status.setText(note)
         if self._folder_scope and not snapshot.get("scope_policy"):
             self._scope_policy = {}
         policy = self._restore_draft if self._restore_draft is not None else self._scope_policy
@@ -750,6 +797,43 @@ class RegisteredAILibraryWindow(QDialog):
     def _open_model_settings(self, kind: str) -> None:
         self.analysis_settings.setChecked(True)
         self.configure_models_requested.emit("speech" if kind == "audio" else "vision")
+
+    def _start_vectors(self) -> None:
+        owner, folder, stamp = self._library_scope, self._folder_scope, self._scope_stamp
+        route = self._embedding_route
+        approval = None
+        if not route or (route.get("upload") and route.get("upload_allowed") is False):
+            self.configure_models_requested.emit("embedding")
+            return
+        if route.get("upload") and owner and route.get("approval") != self._embedding_consent:
+            if stamp is None:
+                self._show_feedback(_tr("scope_unavailable", "授权前请连接并重新选择素材文件夹。"))
+                return
+            confirm = QMessageBox(self)
+            confirm.setIcon(QMessageBox.Icon.Question)
+            confirm.setWindowTitle(_tr("vector_consent_title", "允许云端向量检索？"))
+            confirm.setTextFormat(Qt.TextFormat.PlainText)
+            confirm.setText(_tr(
+                "vector_consent",
+                "{service}（{model}）会接收 {folder} 及其子文件夹已保存的描述、标签、转录和语义搜索词。"
+                "\n\n授权整个素材库时，剪辑助手的素材检索词也会发送给该服务。原始媒体文件留在本机。",
+                service=route["origin"], model=route["model"], folder=folder or self._policies[owner]["path"],
+            ))
+            confirm.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+            confirm.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            if confirm.exec() != QMessageBox.StandardButton.Yes:
+                return
+            if (owner, folder, stamp) != (self._library_scope, self._folder_scope, self._scope_stamp):
+                return
+            approval = route["approval"]
+        self._transport.start_ai_library_embeddings(
+            owner, folder=folder, kinds=self._selected_kinds(), recursive=self.recursive_check.isChecked(),
+            approval=approval, expected_scope_stamp=stamp,
+        )
+
+    def _revoke_vector_access(self) -> None:
+        if self._library_scope is not None:
+            self._transport.revoke_ai_library_embedding_consent(self._library_scope, folder=self._folder_scope)
 
     def _save_directory_policy(self) -> None:
         self._save_scope(start_scan=False)
@@ -875,6 +959,11 @@ class RegisteredAILibraryWindow(QDialog):
         self.analysis_mode_label.setVisible(scoped)
         self.save_policy_button.setEnabled(can_edit and has_types)
         self.configure_models_button.setEnabled(idle)
+        self.vector_model_button.setEnabled(idle)
+        self.vector_button.setEnabled(has_libraries and ready and has_types and not self._scope_error)
+        self.revoke_vector_button.setVisible(scoped and self._embedding_consent is not None)
+        self.revoke_vector_button.setEnabled(can_edit)
+        self.search_mode.setEnabled(not self.pending_only_check.isChecked())
         self.recursive_check.setEnabled(ready)
         self.force_check.setEnabled(can_edit and has_types and not self.pending_only_check.isChecked())
         for kind, picker in self.model_pickers.items():
@@ -895,12 +984,17 @@ class RegisteredAILibraryWindow(QDialog):
             done, total = state.get("done", 0), state.get("total", 0)
             self.analysis_progress.setRange(0, total)
             self.analysis_progress.setValue(done)
-            text = _tr("progress", "正在分析 {done} / {total}", done=done, total=total or "…")
+            if state.get("phase") == "vectors":
+                text = _tr("vector_progress", "正在更新向量 {done} / {total}", done=done, total=total or "…")
+            else:
+                text = _tr("progress", "正在分析 {done} / {total}", done=done, total=total or "…")
         elif "error" in state:
             text = str(state["error"])
         elif state:
-            text = _tr("summary", "已分析 {indexed} 项 · 跳过 {skipped} 项 · 离线 {offline} 项 · 失败 {failed} 项",
-                       **{key: state.get(key, 0) for key in ("indexed", "skipped", "offline", "failed")})
+            text = ""
+            if "indexed" in state:
+                text = _tr("summary", "已分析 {indexed} 项 · 跳过 {skipped} 项 · 离线 {offline} 项 · 失败 {failed} 项",
+                           **{key: state.get(key, 0) for key in ("indexed", "skipped", "offline", "failed")})
             if state.get("metadata_only"):
                 text += " · " + _tr("metadata_only", "{count} 项仅登记了文件信息",
                                      count=state["metadata_only"])
@@ -913,7 +1007,18 @@ class RegisteredAILibraryWindow(QDialog):
             if warnings:
                 messages = [str(warning.get("message", "")) for warning in warnings]
                 text += "\n" + "\n".join(dict.fromkeys(filter(None, messages)))
-            if self.isVisible():
+            vectors = state.get("vectors")
+            if vectors:
+                summary = str(vectors.get("error") or _tr(
+                    "vector_summary", "向量 · 已更新 {embedded} 段 · 已有 {skipped} 段 · 待更新 {pending} 段",
+                    **{key: vectors.get(key, 0) for key in ("embedded", "skipped", "pending")},
+                ))
+                if vectors.get("cancelled"):
+                    summary = _tr("cancelled", "已停止") + " · " + summary
+                text = "\n".join(filter(None, (text, summary)))
+                if self.isVisible():
+                    self.refresh_models()
+            elif self.isVisible():
                 self.search()
         else:
             text = ""

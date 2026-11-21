@@ -88,6 +88,7 @@ class TestIntentMatching:
         ("自动字幕", "subtitle"),
         ("口播精剪", "rough_cut"),
         ("剪一版 30 秒的", "rough_cut"),
+        ("Plan a rough cut using media in this project. List the clip order and estimated duration for review.", "rough_cut"),
         ("30 秒产品广告", "product_ad"),
         ("带货视频", "product_ad"),
         ("配音", "translate_dub"),

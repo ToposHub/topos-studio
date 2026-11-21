@@ -19,8 +19,13 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from contextlib import contextmanager
-from typing import Any, Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Iterator
+
+if TYPE_CHECKING:
+    from src.features.edit.core.project import EditProject
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +39,37 @@ _missing_manifest_warned: set[str] = set()
 _COMFY_PROBE_TIMEOUT_S = 10.0
 
 
-def _search_global_ai_library(query: str, limit: int) -> list[dict[str, Any]]:
+def _search_global_ai_library(
+    query: str, limit: int, cancelled: Callable[[], bool] | None = None,
+) -> list[dict[str, Any]]:
     """Resolve the Files index from the assistant tool worker."""
     from src.features.files.repository import FilesDataLocator
     from src.features.files.repository.catalog import FilesCatalog
-    from src.features.files.services.ai_library import AILibraryService
+    from src.app.services.ai_library_search import AssistantSearchCancel, search_library
+    from src.features.files.services.facade import FilesFacade
 
     catalog = FilesCatalog(FilesDataLocator.default())
+    facade = FilesFacade(catalog)
     try:
-        return AILibraryService(catalog).search(query, limit=limit)
+        cancel = AssistantSearchCancel(cancelled) if cancelled is not None else None
+        hits, _note = search_library(facade, query, limit=limit, allow_remote=True, cancel=cancel)
+        return hits
     finally:
+        facade.shutdown()
         catalog.close()
+
+
+def _index_project_library_media(
+    project: EditProject, archive: str | None, hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    from src.features.edit.ai_editing.project_media_index import sync_project_library_index
+    from src.shared.paths.paths import get_config_root
+
+    try:
+        return sync_project_library_index(Path(get_config_root()) / "cache" / "project-ai", project, archive, hits)
+    except (OSError, sqlite3.Error, ValueError):
+        logger.exception("Could not update the local project media index")
+        return hits
 
 
 def _language_credentials_available(profile: Any, credential_store: Any) -> bool:
@@ -892,8 +917,52 @@ class AiEditingMixin:
                 logger.debug("p1 dependencies build failed", exc_info=True)
             from src.features.edit.ai_editing.tool_facade import ToolFacade
 
+            library_context = object()
+            self._ai_library_search_context = library_context
+            set_library_context = getattr(panel, "set_library_search_context", None)
+            if callable(set_library_context):
+                set_library_context(library_context)
+            library_import = getattr(panel, "library_candidate_import_requested", None)
+            if library_import is not None:
+                try:
+                    library_import.disconnect(self._import_ai_assistant_library_candidate)
+                except (TypeError, RuntimeError):
+                    pass
+                library_import.connect(self._import_ai_assistant_library_candidate)
+            media_pool = getattr(self, "media_pool_panel", None)
+            show_import_status = getattr(panel, "show_library_import_status", None)
+            if media_pool is not None and callable(show_import_status) and hasattr(media_pool, "ai_library_import_status"):
+                try:
+                    media_pool.ai_library_import_status.disconnect(show_import_status)
+                except (TypeError, RuntimeError):
+                    pass
+                media_pool.ai_library_import_status.connect(show_import_status)
+
+            def search_project_library(
+                query: str, limit: int, cancel_check: Callable[[], bool],
+            ) -> list[dict[str, Any]]:
+                def cancelled() -> bool:
+                    return cancel_check() or self._ai_library_search_context is not library_context
+
+                if cancelled():
+                    return []
+                hits = _search_global_ai_library(query, limit, cancelled)
+                if cancelled():
+                    return []
+                project = getattr(self, "_current_edit_project", None)
+                if project is not None:
+                    hits = _index_project_library_media(
+                        project, getattr(self, "_current_edit_project_filepath", None), hits,
+                    )
+                if cancelled():
+                    return []
+                received = getattr(panel, "library_candidates_received", None)
+                if received is not None:
+                    received.emit(library_context, query, hits)
+                return hits
+
             chat_tool_facade = ToolFacade(
-                session, analysis_service=analysis_service, library_search=_search_global_ai_library,
+                session, analysis_service=analysis_service, cancellable_library_search=search_project_library,
             )
             controller = AiEditController(
                 panel=panel, service=service, bridge=bridge,
@@ -947,6 +1016,11 @@ class AiEditingMixin:
                 profile_id=active_profile_id,
                 profile_connected=profile_connected,
             )
+            if project is not None:
+                from PyQt6.QtCore import QThreadPool
+
+                archive = getattr(self, "_current_edit_project_filepath", None)
+                QThreadPool.globalInstance().start(lambda: _index_project_library_media(project, archive, []))
 
             logger.info("AI editing subsystem wired up")
 
@@ -1505,6 +1579,11 @@ class AiEditingMixin:
                         exc_info=True,
                     )
 
+    def _import_ai_assistant_library_candidate(self, hit: dict[str, Any]) -> None:
+        pool = getattr(self, "media_pool_panel", None)
+        if pool is not None and self._ai_library_search_context is not None:
+            pool.import_ai_library_candidate(hit)
+
     def _open_ai_model_preferences(self) -> None:
         """打开并定位到 Preferences 的 AI Editing 页面。"""
         open_preferences = getattr(self, "show_preferences_dialog", None)
@@ -1590,6 +1669,11 @@ class AiEditingMixin:
 
         在工程关闭/切换前调用。无装配时是 no-op。不抛。
         """
+        self._ai_library_search_context = None
+        library_panel = getattr(self, "ai_edit_assistant_panel", None)
+        set_library_context = getattr(library_panel, "set_library_search_context", None)
+        if callable(set_library_context):
+            set_library_context(None)
         project_id: str | None = None
         # 工程切换时 `_current_edit_project` 已可能指向新工程。优先从旧 service
         # 的启动配置取 project_id，才能撤销真正旧工程的 grants。
