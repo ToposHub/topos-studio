@@ -179,7 +179,16 @@ class TremoloAutoPanEffect(AudioEffect):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ChorusFlangerEffect(AudioEffect):
-    """调制延迟线：chorus（多声部长延迟无反馈）/ flanger（短延迟+反馈）。"""
+    """调制延迟线：chorus（多声部长延迟无反馈）/ flanger（短延迟+反馈）。
+
+    2026-11-21 计划 FX-18 修正：读头 = 写游标 − 期望延时（旧实现从
+    线首计数而写入在线尾，5 ms 首跳实测 2160 样本）；预分配环形缓冲，
+    移除逐样本整线 ``np.roll``；反馈样本持久、符号保留；声部相位间隔
+    跨块保持。延时钳制区间：``[1 样本, 容量−2]``，参数超界按界内取值。
+    """
+
+    _BASE_MS_MAX = 100.0
+    _DEPTH_MS_MAX = 50.0
 
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
@@ -189,8 +198,19 @@ class ChorusFlangerEffect(AudioEffect):
             "voices": 2, "mix": 0.5,
         }
         self._lfo = _Lfo(0.6)
-        self._delay_line = np.zeros((1, int(0.05 * sample_rate)),
-                                    dtype=np.float32)
+        self._channels = 1
+        self._line: Optional[np.ndarray] = None  # (ch, capacity) 环形
+        self._write_pos = 0
+        self._rebuild_line()
+
+    def _capacity(self) -> int:
+        max_ms = self._BASE_MS_MAX + self._DEPTH_MS_MAX
+        return int(max_ms * self._sample_rate / 1000.0) + 8
+
+    def _rebuild_line(self) -> None:
+        cap = self._capacity()
+        self._line = np.zeros((self._channels, cap), dtype=np.float32)
+        self._write_pos = 0
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -206,31 +226,28 @@ class ChorusFlangerEffect(AudioEffect):
 
     def reset_state(self) -> None:
         self._lfo.reset()
-        self._delay_line = np.zeros(
-            (1, int(0.05 * self._sample_rate)), dtype=np.float32)
+        self._line = np.zeros_like(self._line)
+        self._write_pos = 0
 
     @property
     def is_active(self) -> bool:
         return bool(self._params.get("enabled", True))
 
     def tail_estimate_samples(self) -> int:
-        # 反馈尾音预算：flanger 反馈衰减到 −60 dB 的时间（上限 1 s）。
-        fb = float(np.clip(self._params.get("feedback", 0.0), 0.0, 0.95))
+        # 反馈尾音预算：|feedback| 每圈衰减到 −60 dB 的时间（上限 1 s）。
+        # （修正旧实现的 −6 目标与 −60 dB 注释不一致。）
+        fb = abs(float(np.clip(self._params.get("feedback", 0.0),
+                               -0.95, 0.95)))
         if fb <= 0.0:
             return 0
-        cycles = max(1.0, -6.0 / (20.0 * np.log10(max(fb, 1e-6))))
+        cycles = max(1.0, -60.0 / (20.0 * np.log10(max(fb, 1e-6))))
         base_ms = float(self._params.get("base_ms", 18.0))
         tail = int(cycles * base_ms * self._sample_rate / 1000.0)
         return min(int(self._sample_rate), tail)
 
     def latency_samples(self) -> int:
+        # 调制延迟是效果本体（干湿内部对齐），非算法实现延迟。
         return 0
-
-    def _read_delay(self, line: np.ndarray, delay_samples: float) -> float:
-        idx = int(delay_samples)
-        frac = delay_samples - idx
-        idx = max(0, min(line.shape[-1] - 2, idx))
-        return float(line[idx] * (1.0 - frac) + line[idx + 1] * frac)
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
@@ -239,41 +256,61 @@ class ChorusFlangerEffect(AudioEffect):
         if n == 0:
             return samples
         params = self._params
-        mode = str(params.get("mode", "chorus"))
         rate = float(np.clip(params.get("rate_hz", 0.6), 0.01, 20.0))
-        depth = max(0.0, float(params.get("depth_ms", 3.0)))
-        base = max(0.5, float(params.get("base_ms", 18.0)))
-        feedback = float(np.clip(params.get("feedback", 0.0), 0.0, 0.95))
+        depth = float(np.clip(params.get("depth_ms", 3.0),
+                              0.0, self._DEPTH_MS_MAX))
+        base = float(np.clip(params.get("base_ms", 18.0),
+                             0.5, self._BASE_MS_MAX))
+        feedback = float(np.clip(params.get("feedback", 0.0),
+                                 -0.95, 0.95))
         voices = int(np.clip(params.get("voices", 2), 1, 4))
         mix = float(np.clip(params.get("mix", 0.5), 0.0, 1.0))
 
-        mono = samples.mean(axis=0) if samples.shape[0] > 1 else samples[0]
-        lfo = self._lfo.advance(n, self._sample_rate)
-        line = self._delay_line.reshape(-1)
-        max_delay = line.shape[-1] - 2
-        wet = np.zeros(n, dtype=np.float32)
+        channels = samples.shape[0]
+        if channels != self._channels:
+            self._channels = channels
+            self._rebuild_line()
+        line = self._line
+        cap = line.shape[-1]
+        max_delay = cap - 2
+
+        # 每样本 LFO 相位（ voices 均分相位间隔，跨块连续）。
+        steps = 2.0 * np.pi * rate / self._sample_rate
+        phases = self._lfo.phase + steps * np.arange(n, dtype=np.float64)
+        self._lfo.phase = float((self._lfo.phase + steps * n)
+                                % (2.0 * np.pi))
         base_samples = base * self._sample_rate / 1000.0
         depth_samples = depth * self._sample_rate / 1000.0
+
+        wet = np.zeros((channels, n), dtype=np.float32)
+        write_pos = self._write_pos
         for i in range(n):
+            write_pos = (write_pos + 1) % cap
             voice_sum = 0.0
+            delays = []
             for voice in range(voices):
-                phase = 2.0 * np.pi * voice / max(1, voices)
-                mod = np.sin(
-                    float(getattr(self._lfo, "phase", 0.0)) - 2.0 * np.pi
-                    * rate * (n - i) / self._sample_rate + phase)
-                delay = base_samples + depth_samples * mod
-                delay = max(1.0, min(float(max_delay), delay))
-                voice_sum += self._read_delay(line, delay)
-            wet[i] = voice_sum / voices
-            # 写入：干信号 + 反馈（flanger）。
-            write = mono[i] + feedback * wet[i]
-            line = np.roll(line, -1)
-            line[-1] = write
-        self._delay_line = line.reshape(1, -1)
+                offset = 2.0 * np.pi * voice / max(1, voices)
+                mod = np.sin(phases[i] + offset)
+                delays.append(float(np.clip(
+                    base_samples + depth_samples * mod, 1.0, max_delay)))
+            for ch in range(channels):
+                acc = 0.0
+                for delay in delays:
+                    # 读头 = 写游标 − 延时（分数采样线性内插）。
+                    pos = write_pos - delay
+                    idx = int(np.floor(pos))
+                    frac = pos - idx
+                    i0 = idx % cap
+                    i1 = (idx + 1) % cap
+                    acc += (float(line[ch, i0]) * (1.0 - frac)
+                            + float(line[ch, i1]) * frac)
+                w = acc / voices
+                wet[ch, i] = w
+                # 写入 = 干 + 反馈（符号保留；读段不含当前槽，delay≥1）。
+                line[ch, write_pos] = samples[ch, i] + feedback * w
+        self._write_pos = write_pos
         return np.ascontiguousarray(
-            samples * (1.0 - mix)
-            + (wet * mix)[np.newaxis, :] * (samples.shape[0] > 1 or 1),
-            dtype=np.float32)
+            samples * (1.0 - mix) + wet * mix, dtype=np.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,7 +318,14 @@ class ChorusFlangerEffect(AudioEffect):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PhaserEffect(AudioEffect):
-    """全通级联调制移相器（一阶全通级联，LFO 调制中心频率）。"""
+    """全通级联调制移相器（一阶全通级联，LFO 调制中心频率）。
+
+    2026-11-21 计划 FX-18 修正：反馈样本跨块持久（旧实现为块内临时
+    变量，501 样本切块与整块最大差 0.154）；级数放开到面板可存的
+    1–12 级（旧实例 ≤4 级行为不变）；频率钳制 [10 Hz, 0.45·fs]。
+    """
+
+    _STAGES_MAX = 12
 
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
@@ -291,6 +335,7 @@ class PhaserEffect(AudioEffect):
                               "feedback": 0.3}
         self._lfo = _Lfo(0.5)
         self._ap_states = np.zeros((4, 2), dtype=np.float64)
+        self._fb_state = 0.0  # 反馈样本跨块持久（旧实现为块内临时）
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -303,20 +348,28 @@ class PhaserEffect(AudioEffect):
             merged.update(params)
         self._params = merged
         self._lfo.rate_hz = float(merged.get("rate_hz", 0.5))
-        stages = int(np.clip(merged.get("stages", 4), 1, 4))
+        stages = int(np.clip(merged.get("stages", 4), 1, self._STAGES_MAX))
         if self._ap_states.shape[0] != stages:
+            # 拓扑变化：级数状态重建（后续批次再做交叉淡化）。
             self._ap_states = np.zeros((stages, 2), dtype=np.float64)
+            self._fb_state = 0.0
 
     def reset_state(self) -> None:
         self._lfo.reset()
-        self._ap_states = np.zeros((4, 2), dtype=np.float64)
+        self._ap_states = np.zeros_like(self._ap_states)
+        self._fb_state = 0.0
 
     @property
     def is_active(self) -> bool:
         return bool(self._params.get("enabled", True))
 
     def tail_estimate_samples(self) -> int:
-        return int(0.1 * self._sample_rate)
+        fb = abs(float(self._params.get("feedback", 0.3)))
+        if fb <= 1e-6:
+            return 0
+        cycles = max(1.0, -6.0 / (20.0 * np.log10(max(fb, 1e-6))))
+        tail = int(cycles * 0.01 * self._sample_rate)
+        return min(int(self._sample_rate), max(1, tail))
 
     def latency_samples(self) -> int:
         return 0
@@ -328,24 +381,28 @@ class PhaserEffect(AudioEffect):
         if n == 0:
             return samples
         params = self._params
-        stages = int(np.clip(params.get("stages", 4), 1, 4))
-        base = float(params.get("base_hz", 600.0))
+        stages = int(np.clip(params.get("stages", 4), 1, self._STAGES_MAX))
+        base = float(np.clip(params.get("base_hz", 600.0), 10.0, 20000.0))
         sweep = float(params.get("sweep_octaves", 2.5))
         mix = float(np.clip(params.get("mix", 0.5), 0.0, 1.0))
-        feedback = float(np.clip(params.get("feedback", 0.3), 0.0, 0.95))
+        feedback = float(np.clip(params.get("feedback", 0.3),
+                                 -0.95, 0.95))
         lfo = self._lfo.advance(n, self._sample_rate)
 
-        mono = samples.mean(axis=0) if samples.shape[0] > 1 else samples[0]
+        channels = samples.shape[0]
+        mono = samples.mean(axis=0) if channels > 1 else samples[0]
         out = np.empty(n, dtype=np.float32)
         states = self._ap_states
-        delayed = 0.0
+        delayed = self._fb_state
+        freq_ceiling = self._sample_rate * 0.45
         for i in range(n):
-            freq = base * (2.0 ** (sweep * float(lfo[i])))
-            freq = min(freq, self._sample_rate * 0.45)
+            freq = float(np.clip(
+                base * (2.0 ** (sweep * float(lfo[i]))),
+                10.0, freq_ceiling))
             tan = np.tan(np.pi * freq / self._sample_rate)
             a1 = (tan - 1.0) / (tan + 1.0)
             x = float(mono[i]) + feedback * delayed
-            for s in range(stages):
+            for s in range(states.shape[0]):
                 y = a1 * x + states[s, 0] - a1 * states[s, 1]
                 states[s, 0] = x
                 states[s, 1] = y
@@ -353,6 +410,7 @@ class PhaserEffect(AudioEffect):
             delayed = x
             out[i] = x
         self._ap_states = states
+        self._fb_state = delayed
         return np.ascontiguousarray(
             samples * (1.0 - mix) + (mix * out)[np.newaxis, :],
             dtype=np.float32)
