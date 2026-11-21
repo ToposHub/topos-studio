@@ -5,12 +5,14 @@ from typing import Any
 
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent, QTimer
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QScrollArea, QScrollBar, QWidget
 
 from src.features.mixer.effects import (
     EFFECT_CATALOG, EffectBrowserWidget, EffectInstance, EffectRackWidget,
     EffectWindowManager, create_panel, get_effect, stop_panel_timers,
 )
+from src.shared.ui.style_sheet import COMBO_DROPDOWN_VIEW_STYLE
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 @pytest.mark.parametrize("descriptor", EFFECT_CATALOG, ids=lambda entry: entry.effect_id)
@@ -21,6 +23,9 @@ def test_every_registered_panel_constructs_without_backend(qapp: QApplication, d
     assert descriptor.parameter_schema["type"] == "object"
     panel = create_panel(descriptor.effect_id, "测试轨道")
     assert isinstance(panel, QWidget)
+    for combo in panel.findChildren(QComboBox):
+        assert isinstance(combo, ChevronComboBox)
+        assert combo.view().styleSheet() == COMBO_DROPDOWN_VIEW_STYLE
     stop_panel_timers(panel)
     assert all(not timer.isActive() for timer in panel.findChildren(QTimer))
     panel.close()
@@ -34,6 +39,23 @@ def test_catalog_has_unique_stable_ids_and_clip_tool_scope() -> None:
     assert get_effect("clip_editor").scope == ("clip",)
     with pytest.raises(KeyError):
         create_panel("../unsafe_module")
+
+
+@pytest.mark.parametrize("effect_id", ["declick_dehum", "pitch_correction", "exciter", "subharmonic", "doubler"])
+def test_design_only_effect_window_fits_whole_panel(qapp: QApplication, effect_id: str) -> None:
+    parent = QWidget()
+    manager = EffectWindowManager(parent)
+    window = manager.open(EffectInstance.create(effect_id, "owner"), "Speech")
+    try:
+        window.resize(1, 1)
+        assert not window.findChildren(QScrollArea)
+        assert all(not bar.isVisible() for bar in window.findChildren(QScrollBar))
+        assert window.rect().contains(window.panel.geometry())
+        assert window.panel.width() >= window.panel.layout().minimumSize().width()
+        assert window.panel.height() >= window.panel.layout().minimumSize().height()
+    finally:
+        manager.dispose_all()
+        parent.deleteLater()
 
 
 def test_window_close_and_reopen_preserve_parameters_and_pause_timers(qapp: QApplication) -> None:

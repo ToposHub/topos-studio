@@ -131,12 +131,12 @@ class TestFxParamDialog:
         widget = TrackMixerWidget("t1", "Dialogue", "A1")
         menu = QMenu(widget)
         widget._populate_add_effect_menu(menu)
-        texts = {action.text() for action in menu.actions()}
-        for effect_type in NEW_FX:
-            from src.shared.ui.audio_mixer.track_mixer_widget import (
-                _effect_display_name,
-            )
-            assert _effect_display_name(effect_type) in texts, effect_type
+        effect_types = {
+            action.data()
+            for category in menu.actions()
+            for action in category.menu().actions()
+        }
+        assert set(NEW_FX) <= effect_types
 
     def test_generic_editor_roundtrip_through_chain(self, qapp):
         """通用对话框提交 → 机架链实例参数更新 → committed 信号。"""

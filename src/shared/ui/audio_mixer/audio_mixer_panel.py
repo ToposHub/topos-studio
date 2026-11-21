@@ -950,18 +950,14 @@ class AudioMixerPanel(QWidget):
         return bool(getattr(self, "_lufs_metering_active", False))
 
     def _recompute_spectrum_metering(self) -> None:
-        """CW-A1: 汇总所有 strip 的 EQ 对话框打开状态，通知频谱计算开关。
-
-        无任何 EQ 对话框时关闭（FFT 占播放线程表计点开销），
-        有则开启。状态未变化时不重复 emit。
-        """
+        """Subscribe to playback FFT only while a strip has a visible consumer."""
         active = False
         mixers = list(self._track_mixers.values())
         if self._master_mixer is not None:
             mixers.append(self._master_mixer)  # MX-03: Master EQ 对话框纳入汇总
         for mixer in mixers:
             try:
-                has_dlg = bool(mixer._iter_eq_dialogs())
+                has_dlg = mixer.has_spectrum_consumers()
             except (AttributeError, RuntimeError):
                 has_dlg = False
             if has_dlg:

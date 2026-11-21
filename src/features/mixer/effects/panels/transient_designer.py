@@ -5,13 +5,16 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -708,6 +711,7 @@ class ProTransientVisualizerWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_transient_demo()
+        self._processor_controls = False
         self._show_input_ghost = True
         self._show_gain_trace = True
         self._show_xy_puck = True
@@ -738,6 +742,9 @@ class ProTransientVisualizerWidget(QWidget):
     def setState(self, state: dict):
         self._state = state
         self.update()
+
+    def use_processor_controls(self) -> None:
+        self._processor_controls = True
 
     def pushEnvelopeFrame(
         self,
@@ -896,7 +903,7 @@ class ProTransientVisualizerWidget(QWidget):
             self.transientResetRequested.emit()
 
     def wheelEvent(self, event):
-        if self._plot_rect().contains(event.position()):
+        if not self._processor_controls and self._plot_rect().contains(event.position()):
             delta = event.angleDelta().y() / 120.0
             step = 1.0 if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else 4.0
             cur_s = self._state["transient"]["sensitivity"]
@@ -1114,17 +1121,19 @@ class ProTransientVisualizerWidget(QWidget):
         sc = st["sidechain"]
         a_val = tr["attack"] if (enabled and tr["enabled"]) else 0.0
         s_val = tr["sustain"] if (enabled and tr["enabled"]) else 0.0
-        sc_str = f"SC {format_freq(sc['hpf_freq'])}–{format_freq(sc['lpf_freq'])}" if (enabled and sc["enabled"]) else "SC Full"
-        hud_str = (
-            f"Attack {a_val:+.0f}%  •  Sustain {s_val:+.0f}%  •  "
-            f"Sens {int(tr['sensitivity'])}%  •  {sc_str}"
-        )
-        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, 345, 19)
+        hud_str = f"Attack {a_val:+.0f}%  •  Sustain {s_val:+.0f}%"
+        if not self._processor_controls:
+            sc_str = f"SC {format_freq(sc['hpf_freq'])}–{format_freq(sc['lpf_freq'])}" if (enabled and sc["enabled"]) else "SC Full"
+            hud_str += f"  •  Sens {int(tr['sensitivity'])}%  •  {sc_str}"
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        available = max(0.0, self._btn_in_rect.left() - plot.left() - 16)
+        hud_width = min(p.fontMetrics().horizontalAdvance(hud_str) + 12, available)
+        hud_str = p.fontMetrics().elidedText(hud_str, Qt.TextElideMode.ElideRight, int(hud_width) - 10)
+        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, hud_width, 19)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(QColor("#F0A848") if self._dragging_puck else QColor("#C6CCD8"))
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_str)
 
         p.restore()
@@ -1341,6 +1350,7 @@ class TransientShaperCard(QFrame):
 
         self.btn_punch.clicked.connect(lambda: self._on_mode("Punch"))
         self.btn_smooth.clicked.connect(lambda: self._on_mode("Smooth"))
+        self._mode_selector = seg_wrap
         h_lay.addWidget(seg_wrap)
         root.addWidget(header)
 
@@ -1380,8 +1390,8 @@ class TransientShaperCard(QFrame):
             format_pct, parse_numeric, mode="linear"
         )
         self.c_release = KnobParameterCell(
-            "Release", 15.0, 500.0, 85.0, COLORS["sustain"],
-            "15", "ms", "500",
+            "Release", 10.0, 500.0, 85.0, COLORS["sustain"],
+            "10", "ms", "500",
             format_ms, parse_numeric, mode="log"
         )
         self.c_mix = KnobParameterCell(
@@ -1398,9 +1408,32 @@ class TransientShaperCard(QFrame):
         self.c_sustain.valueChanged.connect(lambda v: self._set_field("sustain", round(v, 0)))
         self.c_sens.valueChanged.connect(lambda v: self._set_field("sensitivity", round(v, 0)))
         self.c_punch.valueChanged.connect(lambda v: self._set_field("punch", round(v, 0)))
+        self._control_row = row1
+        self._timing_row = row2
+        self._control_body = b_lay
         self.c_release.valueChanged.connect(lambda v: self._set_field("release", round(v, 0)))
         self.c_mix.valueChanged.connect(lambda v: self._set_field("mix", round(v, 0)))
 
+        self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        self.c_attack_time = KnobParameterCell(
+            I18N.tr("audio.fx.attack_ms", "Attack Time"), 0.5, 50.0, 8.0, self._accent,
+            "0.5", "ms", "50", format_ms, parse_numeric, mode="log",
+        )
+        for control in (self.c_punch, self.c_sens, self.c_mix, self.power_sw, self._mode_selector):
+            control.hide()
+        self._control_body.removeItem(self._timing_row)
+        row = self._control_row
+        for control in (self.c_attack, self.c_sustain):
+            row.removeWidget(control)
+        row.setSpacing(12)
+        row.addStretch()
+        for control in (self.c_attack, self.c_attack_time, self.c_sustain, self.c_release):
+            control.setMaximumWidth(112)
+            row.addWidget(control, 1)
+        row.addStretch()
+        self.c_attack_time.valueChanged.connect(lambda v: self._set_field("attack_ms", round(v, 2)))
         self.syncFromData(self._data)
 
     def syncFromData(self, data: dict):
@@ -1459,6 +1492,10 @@ class TransientShaperCard(QFrame):
         self.c_sens.setValue(self._data["sensitivity"])
         self.c_punch.setValue(self._data["punch"])
         self.c_release.setValue(self._data["release"])
+        attack_time = getattr(self, "c_attack_time", None)
+        if attack_time is not None:
+            attack_time.setValue(self._data.get("attack_ms", 8.0))
+            attack_time.setModuleActive(en)
         self.c_mix.setValue(self._data["mix"])
 
         for cell in (self.c_attack, self.c_sustain, self.c_sens, self.c_punch, self.c_release, self.c_mix):
@@ -2183,7 +2220,7 @@ class StudioTransientDesignerWidget(QWidget):
         del_preset_btn.clicked.connect(self._delete_current_preset)
         tb_lay.addWidget(del_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(235)
         self._builtin_preset_names = set(self._presets.keys())
         self.preset_combo.addItems(list(self._presets.keys()))
@@ -2387,6 +2424,8 @@ class StudioTransientDesignerWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
+        if hasattr(self.transient_card, "c_attack_time"):
+            st["transient"]["enabled"] = True
         self._update_ab_styles()
         self.power_switch.setChecked(st["enabled"])
         self.out_fader.setGain(st["output_gain"])
@@ -2583,8 +2622,18 @@ class StudioTransientDesignerWidget(QWidget):
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
 
+    def use_processor_controls(self) -> None:
+        self.transient_card.use_processor_controls()
+        self.visualizer.use_processor_controls()
+        self.sidechain_card.hide()
+        self.output_card.hide()
+        self.auto_gain_btn.hide()
+        self.out_fader.setEnabled(False)
+
     def get_state(self) -> dict:
-        return copy.deepcopy(self._current_state())
+        state = copy.deepcopy(self._current_state())
+        state["transient"].setdefault("attack_ms", 8.0)
+        return state
 
     def set_state(self, state: dict):
         self._banks[self._active_bank] = copy.deepcopy(state)

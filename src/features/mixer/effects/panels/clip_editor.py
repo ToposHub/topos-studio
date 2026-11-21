@@ -10,7 +10,7 @@ from functools import lru_cache
 import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QMenu,
+    QPushButton, QFrame, QLineEdit, QSizePolicy, QMenu,
     QScrollArea, QTabWidget,
 )
 from PyQt6.QtCore import Qt, QRectF, QPoint, QPointF, QSize, pyqtSignal, QTimer
@@ -20,7 +20,6 @@ from PyQt6.QtGui import (
     QShortcut, QRegion, QAction, QActionGroup, QContextMenuEvent,
 )
 
-
 from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint, fade_power
 from src.features.edit.ui.fade_overlay import (
     FADE_HANDLE_HIT_HEIGHT, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_SIZE,
@@ -29,6 +28,7 @@ from src.features.edit.ui.fade_overlay import (
 from src.features.mixer.spectrogram import DB_FLOOR, Spectrogram, fraction_frequency, frequency_fraction
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与声学常量（与 EQ-UI.py 保持一致的暗色工作室美学）
@@ -4447,7 +4447,7 @@ class StudioAudioClipEditor(QWidget):
         fft_row.addWidget(fft_lbl)
         fft_row.addStretch()
 
-        self.fft_combo = QComboBox()
+        self.fft_combo = ChevronComboBox()
         self.fft_combo.addItems(["512 瞬态", "1024 均衡", "2048 人声", "4096 低频"])
         self.fft_combo.setCurrentIndex(2)
         self.fft_combo.setToolTip("低窗口抓瞬态口水音，高窗口抓低频交流嗡声")
@@ -4620,7 +4620,7 @@ class StudioAudioClipEditor(QWidget):
         r_pitch.addWidget(self.pitch_knob)
         lay.addLayout(r_pitch)
 
-        self.stretch_algo_combo = QComboBox()
+        self.stretch_algo_combo = ChevronComboBox()
         self.stretch_algo_combo.addItems(["人声", "复音", "瞬态"])
         self.stretch_algo_combo.setToolTip("选择时间伸缩 DSP 算法内核")
         hdr_row.addWidget(self.stretch_algo_combo)

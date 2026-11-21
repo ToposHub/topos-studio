@@ -165,12 +165,12 @@ def test_real_processor_analysis_reaches_its_own_open_editor(qtbot: QtBot) -> No
     analysis = processor.tap_levels()["voice"]["analysis"]
     assert analysis["f0_in_hz"] is not None
     strip.update_track_telemetry({"taps": processor.tap_levels()})
-    graph = dialog._widget.voice_visualizer
+    graph = dialog.panel.voice_visualizer
     assert graph._f0_in_hz == analysis["f0_in_hz"]
-    assert dialog._widget.meter_fmt._value == 100.0
-    assert dialog._widget.meter_pch._value == 0.0
-    assert dialog._widget.meter_voc._value == 0.0
+    assert dialog.panel.meter_fmt._value == 100.0
+    assert dialog.panel.meter_pch._value == 0.0
+    assert dialog.panel.meter_voc._value == 0.0
     strip.update_track_telemetry({"silent": True})
     assert graph._f0_in_hz == 0.0
-    assert dialog._widget.meter_fmt._value == 0.0
+    assert dialog.panel.meter_fmt._value == 0.0
     strip.close_all_dialogs()

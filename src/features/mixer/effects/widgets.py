@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QPushButton, QVBoxLayout, QWidget,
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 from .catalog import EFFECT_CATALOG, EffectInstance, get_effect
 from .windows import EffectWindowManager
@@ -28,7 +30,7 @@ class EffectBrowserWidget(QWidget):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._refresh)
         layout.addWidget(self.search)
-        self.group_combo = QComboBox(self)
+        self.group_combo = ChevronComboBox(self)
         self.group_combo.addItem("全部分类")
         self.group_combo.addItems(list(dict.fromkeys(entry.group for entry in EFFECT_CATALOG)))
         self.group_combo.currentTextChanged.connect(self._refresh)

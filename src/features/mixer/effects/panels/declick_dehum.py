@@ -6,7 +6,7 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与默认状态配置（与 Delay-UI / DeEsser_UI 完全统一）
@@ -1464,7 +1465,7 @@ class StudioDeClickDeHumWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(215)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1566,7 +1567,7 @@ class StudioDeClickDeHumWidget(QWidget):
         algo_row = QHBoxLayout()
         algo_lbl = QLabel("Algorithm")
         algo_lbl.setStyleSheet("color: #A4A4AE; font-size: 10px; font-weight: 600;")
-        self.algo_combo = QComboBox()
+        self.algo_combo = ChevronComboBox()
         self.algo_combo.addItems([
             "Single-band",
             "Multi-band (Periodic)",

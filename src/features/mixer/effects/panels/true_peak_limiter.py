@@ -7,13 +7,16 @@ import random
 from collections import deque
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QSignalBlocker
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -1473,10 +1476,11 @@ class TruePeakEngineCard(QFrame):
         h_lay.addStretch()
 
         style_lbl = QLabel("Style:")
+        self._style_label = style_lbl
         style_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         h_lay.addWidget(style_lbl)
 
-        self.style_combo = QComboBox()
+        self.style_combo = ChevronComboBox()
         self.style_combo.setFixedWidth(104)
         self.style_combo.addItems(["Transparent", "Punchy", "Dynamic", "Allround", "Aggressive", "Modern"])
         self.style_combo.setToolTip("母带限制算法性格：Transparent 透明无染 / Punchy 保留瞬态 / Modern 现代高响度")
@@ -1496,8 +1500,8 @@ class TruePeakEngineCard(QFrame):
         row1 = QHBoxLayout()
         row1.setSpacing(4)
         self.c_lookahead = KnobParameterCell(
-            "Lookahead", 0.0, 10.0, 1.50, self._accent,
-            "0.0", "ms", "10.0",
+            "Lookahead", 0.0, 20.0, 1.50, self._accent,
+            "0.0", "ms", "20.0",
             format_ms, lambda s, fb: float(s), mode="power"
         )
         self.c_attack = KnobParameterCell(
@@ -1534,6 +1538,9 @@ class TruePeakEngineCard(QFrame):
         )
         row2.addWidget(self.c_link_tr, 1)
         row2.addWidget(self.c_link_rel, 1)
+        self._engine_body = b_lay
+        self._parameter_row = row1
+        self._link_row = row2
 
         # Col 3: True-Peak & Oversampling
         os_col = QVBoxLayout()
@@ -1552,7 +1559,7 @@ class TruePeakEngineCard(QFrame):
         self.btn_isp.clicked.connect(self._on_isp)
         os_col.addWidget(self.btn_isp)
 
-        self.os_combo = QComboBox()
+        self.os_combo = ChevronComboBox()
         self.os_combo.setFixedHeight(21)
         self.os_combo.addItems(["1x (Off)", "2x FIR", "4x FIR", "8x FIR"])
         self.os_combo.setToolTip("过采样倍率：4x/8x 可精确重建 D/A 转换器间采样峰值")
@@ -1626,6 +1633,49 @@ class TruePeakEngineCard(QFrame):
 
         self.syncFromData(self._data)
 
+    def use_processor_controls(self, ceiling: KnobParameterCell) -> None:
+        link = QPushButton(I18N.tr("audio.fx.linked", "Stereo Link"), self)
+        link.setCheckable(True)
+        link.setFixedSize(106, 22)
+        link.setToolTip("Apply the same gain reduction to both channels")
+        link.clicked.connect(self._on_stereo_link)
+        self.stereo_link_button = link
+        self._style_label.hide()
+        self.style_combo.hide()
+        self.power_sw.hide()
+        for control in (self.c_attack, self.c_knee, self.c_link_tr, self.c_link_rel,
+                        self.btn_isp, self.os_combo, self.btn_auto_rel, self.btn_anti_clip):
+            control.hide()
+        row = self._parameter_row
+        for control in (self.c_lookahead, self.c_release):
+            row.removeWidget(control)
+        row.setSpacing(10)
+        row.addStretch()
+        for control in (ceiling, self.c_lookahead, self.c_release):
+            control.setMaximumWidth(112)
+            row.addWidget(control, 1)
+        row.addWidget(link, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch()
+        self._engine_body.removeItem(self._link_row)
+        self._hide_layout_widgets(self._link_row)
+        self.syncFromData(self._data)
+
+    def _hide_layout_widgets(self, layout: QHBoxLayout | QVBoxLayout) -> None:
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+            elif item.layout() is not None:
+                self._hide_layout_widgets(item.layout())
+
+    def _on_stereo_link(self, linked: bool) -> None:
+        self._data["linked"] = linked
+        amount = 100.0 if linked else 0.0
+        self._data["link_trans"] = amount
+        self._data["link_rel"] = amount
+        self._emit()
+
     def updateRealtimeBadges(self, isp_overshoot_db: float, current_gr_db: float):
         self.isp_margin_pill.setText(f"ISP +{isp_overshoot_db:.2f} dB")
         self.gr_peak_pill.setText(f"GR -{current_gr_db:.1f} dB" if current_gr_db > 0.05 else "GR 0.0 dB")
@@ -1661,6 +1711,10 @@ class TruePeakEngineCard(QFrame):
         self.c_knee.setValue(self._data["knee"])
         self.c_link_tr.setValue(self._data["link_trans"])
         self.c_link_rel.setValue(self._data["link_rel"])
+        link = getattr(self, "stereo_link_button", None)
+        if link is not None:
+            with QSignalBlocker(link):
+                link.setChecked(self._data.get("linked", True))
 
         for cell in (self.c_lookahead, self.c_attack, self.c_release, self.c_knee, self.c_link_tr, self.c_link_rel):
             cell.setModuleActive(en)
@@ -1693,6 +1747,8 @@ class TruePeakEngineCard(QFrame):
         self.btn_isp.setStyleSheet(_pill_css(COLORS["blue"]))
         self.btn_auto_rel.setStyleSheet(_pill_css(COLORS["red"]))
         self.btn_anti_clip.setStyleSheet(_pill_css(COLORS["green"]))
+        if link is not None:
+            link.setStyleSheet(_pill_css(COLORS["red"]))
 
         self._updating = False
 
@@ -1797,14 +1853,14 @@ class DeliveryDitherCard(QFrame):
         d_lbl.setStyleSheet("color: #9AA0B0; font-size: 10px; font-weight: 600;")
         dither_col.addWidget(d_lbl)
 
-        self.bit_combo = QComboBox()
+        self.bit_combo = ChevronComboBox()
         self.bit_combo.setFixedHeight(21)
         self.bit_combo.addItems(["24-bit", "16-bit", "32-bit Float"])
         self.bit_combo.setToolTip("母带导出目标量化位深（CD 交付选 16-bit，流媒体/母带归档选 24-bit）")
         self.bit_combo.currentTextChanged.connect(self._on_bit_depth)
         dither_col.addWidget(self.bit_combo)
 
-        self.shape_combo = QComboBox()
+        self.shape_combo = ChevronComboBox()
         self.shape_combo.setFixedHeight(21)
         self.shape_combo.addItems(["None", "Triangular", "POW-r 1", "POW-r 2", "POW-r 3"])
         self.shape_combo.setToolTip("心理声学噪声整形曲线，降低低比特量化基底噪声")
@@ -2231,7 +2287,7 @@ class StudioTruePeakLimiterWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -2253,10 +2309,11 @@ class StudioTruePeakLimiterWidget(QWidget):
 
         # 出版交付标准快速切换
         std_lbl = QLabel("Delivery:")
+        self._delivery_label = std_lbl
         std_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         tb_lay.addWidget(std_lbl)
 
-        self.std_combo = QComboBox()
+        self.std_combo = ChevronComboBox()
         self.std_combo.setFixedWidth(190)
         self.std_combo.addItems(list(DELIVERY_STANDARDS.keys()))
         self.std_combo.setToolTip("选择出版与流媒体交付硬标准，自动配置 Target LUFS、Ceiling dBTP 与过采样")
@@ -2483,6 +2540,9 @@ class StudioTruePeakLimiterWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
+        if hasattr(self.engine_card, "stereo_link_button"):
+            st.update(gain=0.0, trim=0.0, ceil_link=False, audition_mode="Normal")
+            st["engine"].update(oversampling=4, true_peak=True, enabled=True)
         self.power_switch.setChecked(st["enabled"])
 
         self.std_combo.blockSignals(True)
@@ -2762,8 +2822,21 @@ class StudioTruePeakLimiterWidget(QWidget):
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
 
+    def use_processor_controls(self) -> None:
+        self.engine_card.use_processor_controls(self.gain_lufs_card.c_ceiling)
+        self.gain_lufs_card.hide()
+        self.delivery_card.hide()
+        self._delivery_label.hide()
+        self.std_combo.hide()
+        self.latency_badge.hide()
+        for factor, button in self._os_btns.items():
+            button.setVisible(factor == 4)
+            button.setEnabled(False)
+
     def get_state(self) -> dict:
-        return copy.deepcopy(self._current_state())
+        state = copy.deepcopy(self._current_state())
+        state["engine"].setdefault("linked", True)
+        return state
 
     def set_state(self, state: dict):
         self._banks[self._active_bank] = copy.deepcopy(state)

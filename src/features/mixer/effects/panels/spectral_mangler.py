@@ -6,13 +6,17 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+from src.features.mixer.effects.panel_glyphs import GlyphComboBox
 
 
 # =====================================================================
@@ -244,78 +248,20 @@ class PowerToggleSwitch(QWidget):
         p.drawEllipse(QPointF(cx, cy), r, r)
 
 
-class ShaperCurveSelector(QPushButton):
+class ShaperCurveSelector(GlyphComboBox):
     curveChanged = pyqtSignal(str)
 
-    def __init__(self, options: list[str], current: str, accent_color: str, parent=None):
-        super().__init__(parent)
-        self._options = options
-        self._current = current
-        self._accent = QColor(accent_color)
-        self._active = True
-        self.setFixedSize(88, 22)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clicked.connect(self._open_menu)
+    def __init__(self, options: list[str], current: str, accent_color: str, parent: QWidget | None = None) -> None:
+        super().__init__(options, current, accent_color, draw_shaper_glyph, parent)
+        self.setAccessibleName("Shaper curve")
+        self.setFixedWidth(self.sizeHint().width())
+        self.currentTextChanged.connect(self.curveChanged.emit)
 
-    def setCurrentCurve(self, curve: str):
-        if curve in self._options and self._current != curve:
-            self._current = curve
-            self.update()
+    def setCurrentCurve(self, curve: str) -> None:
+        self.set_choice(curve)
 
-    def setModuleActive(self, active: bool):
-        self._active = active
-        self.update()
-
-    def _open_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1D1D21;
-                border: 1px solid #141416;
-                border-radius: 4px;
-                padding: 4px;
-                color: #DCDCE2;
-                font-size: 11px;
-            }
-            QMenu::item { padding: 5px 16px; border-radius: 3px; }
-            QMenu::item:selected { background-color: #35353D; color: #FFFFFF; }
-        """)
-        for opt in self._options:
-            act = menu.addAction(opt)
-            act.triggered.connect(lambda checked=False, o=opt: self._select(o))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
-
-    def _select(self, curve: str):
-        if self._current != curve:
-            self._current = curve
-            self.update()
-            self.curveChanged.emit(curve)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        bg = QColor("#151518") if self._active else QColor("#1B1B1E")
-        p.setPen(QPen(QColor("#101012"), 1.0))
-        p.setBrush(bg)
-        p.drawRoundedRect(rect, 3.0, 3.0)
-
-        glyph_color = self._accent if self._active else QColor("#6E6E76")
-        glyph_rect = QRectF(4, 2, 24, self.height() - 4)
-        draw_shaper_glyph(p, glyph_rect, self._current, glyph_color)
-
-        p.setPen(QColor("#DCDCE2") if self._active else QColor("#6E6E76"))
-        font = QFont(MONO_FONT_FAM, 8)
-        font.setWeight(QFont.Weight.Bold)
-        p.setFont(font)
-        p.drawText(QRectF(28, 0, self.width() - 40, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._current)
-
-        ax = self.width() - 8.5
-        ay = self.height() / 2.0 - 1.2
-        p.setPen(QPen(QColor("#9A9AA2"), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(ax - 2.3, ay), QPointF(ax, ay + 2.5))
-        p.drawLine(QPointF(ax, ay + 2.5), QPointF(ax + 2.3, ay))
+    def setModuleActive(self, active: bool) -> None:
+        self.set_glyph_active(active)
 
 
 class EditableValuePill(QWidget):
@@ -781,6 +727,7 @@ class ManglerMasterStrip(QWidget):
 
         mix_tr = self._mix_track()
         gain_tr = self._gain_track()
+        p.fillRect(self.rect(), QColor("#27272B"))
 
         self._draw_fader(
             p, mix_tr, self._mix / 100.0,
@@ -1083,6 +1030,7 @@ class ProManglerVisualizerWidget(QWidget):
         plot = self._plot_rect()
 
         # 1. 深空渐变底色（与 EQ-UI / Dynamics-UI 完全一致）
+        p.fillRect(self.rect(), QColor("#27272B"))
         bg_grad = QLinearGradient(plot.topLeft(), plot.bottomLeft())
         bg_grad.setColorAt(0.0, QColor("#1D1D20"))
         bg_grad.setColorAt(1.0, QColor("#1D1D20"))
@@ -1366,26 +1314,23 @@ class ProManglerVisualizerWidget(QWidget):
         if target_hud == "ring":
             hud_str = f"RING MOD  •  Carrier {format_hz(r['carrier'])}Hz ({freq_to_note(r['carrier'])})  •  Mix {int(r['mix'])}%  •  Warp {int(r['warp'])}%"
             hud_col = QColor(COLORS["cyan"])
-            hud_w = 325
         elif target_hud == "grain":
             hud_str = f"GRANULAR  •  Size {format_ms(g['size'])}  •  Pitch {g['pitch']:+.1f}st  •  Density {g['density']:.1f}Hz"
             hud_col = QColor(COLORS["grain"])
-            hud_w = 315
         elif target_hud == "dist":
             hud_str = f"DISTORTION ({d['curve']})  •  Drive +{d['drive']:.1f}dB  •  Fold {int(d['fold'])}%  •  Tone {format_hz(d['tone'])}Hz"
             hud_col = QColor(COLORS["dist"])
-            hud_w = 335
         else:
-            hud_str = f"R: {format_hz(r['carrier'])}Hz   |   G: {format_ms(g['size'])} ({g['pitch']:+.0f}st)   |   D: {d['curve']} +{d['drive']:.1f}dB"
+            hud_str = f"R {format_hz(r['carrier'])}Hz  ·  G {format_ms(g['size'])} ({g['pitch']:+.0f}st)  ·  D {d['curve']} +{d['drive']:.1f}dB"
             hud_col = QColor("#B4B4BE")
-            hud_w = 290
 
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        hud_w = p.fontMetrics().horizontalAdvance(hud_str) + 12
         hud_rect = QRectF(plot.left() + 8, plot.top() + 8, hud_w, 19)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(hud_col)
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_str)
 
         p.restore()
@@ -1424,9 +1369,9 @@ class RingModulatorCard(QFrame):
         h_lay.addWidget(self.title_lbl)
         h_lay.addStretch()
 
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFixedWidth(84)
+        self.mode_combo = ChevronComboBox()
         self.mode_combo.addItems(["Sine", "Dual", "FM-Ring", "Rectify"])
+        self.mode_combo.setFixedWidth(self.mode_combo.sizeHint().width())
         self.mode_combo.currentTextChanged.connect(self._on_mode)
         h_lay.addWidget(self.mode_combo)
         root.addWidget(header)
@@ -1596,9 +1541,9 @@ class GranularCard(QFrame):
         self.freeze_btn.clicked.connect(self._on_freeze)
         h_lay.addWidget(self.freeze_btn)
 
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFixedWidth(82)
+        self.mode_combo = ChevronComboBox()
         self.mode_combo.addItems(["Cloud", "Reverse", "Scatter"])
+        self.mode_combo.setFixedWidth(self.mode_combo.sizeHint().width())
         self.mode_combo.currentTextChanged.connect(self._on_mode)
         h_lay.addWidget(self.mode_combo)
         root.addWidget(header)
@@ -2249,7 +2194,7 @@ class StudioSpectralManglerWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(206)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -2301,9 +2246,9 @@ class StudioSpectralManglerWidget(QWidget):
         r_lbl.setStyleSheet("color: #9A9AA2; font-size: 11px; font-weight: 600;")
         tb_lay.addWidget(r_lbl)
 
-        self.routing_combo = QComboBox()
-        self.routing_combo.setFixedWidth(142)
+        self.routing_combo = ChevronComboBox()
         self.routing_combo.addItems(ROUTING_MODES)
+        self.routing_combo.setFixedWidth(self.routing_combo.sizeHint().width())
         self.routing_combo.currentTextChanged.connect(self._on_routing_changed)
         tb_lay.addWidget(self.routing_combo)
 
@@ -2375,7 +2320,7 @@ class StudioSpectralManglerWidget(QWidget):
         cards_row.addWidget(self.grain_card, 4)
         cards_row.addWidget(self.dist_card, 3)
 
-        main_lay.addLayout(cards_row, 4)
+        main_lay.addLayout(cards_row)
 
     # -----------------------------------------------------------------
     # 状态管理与双向联动逻辑

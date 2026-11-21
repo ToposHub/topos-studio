@@ -6,13 +6,18 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
+    QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+from ..panel_glyphs import GlyphComboBox
 
 
 # =====================================================================
@@ -40,6 +45,7 @@ RANGE_PRESETS = {
     "ML": (100.0, 1500.0, "100", "1.5K"),
     "MH": (450.0, 8000.0, "450", "8.0K"),
     "H":  (1400.0, 20000.0, "1.4K", "20K"),
+    "All": (20.0, 20000.0, "20", "20K"),
 }
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -275,73 +281,20 @@ class PowerToggleSwitch(QWidget):
         p.drawEllipse(QPointF(cx, cy), r, r)
 
 
-class FilterShapeSelector(QPushButton):
+class FilterShapeSelector(GlyphComboBox):
     shapeChanged = pyqtSignal(str)
 
-    def __init__(self, options: list[str], current: str, accent_color: str, parent=None):
-        super().__init__(parent)
-        self._options = options
-        self._current = current
-        self._accent = QColor(accent_color)
-        self._active = True
-        self.setFixedSize(48, 21)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clicked.connect(self._open_menu)
+    def __init__(self, options: list[str], current: str, accent_color: str, parent: QWidget | None = None) -> None:
+        super().__init__(options, current, accent_color, draw_filter_glyph, parent)
+        self.setAccessibleName("Filter shape")
+        self.setMinimumWidth(124)
+        self.currentTextChanged.connect(self.shapeChanged)
 
-    def setCurrentShape(self, shape: str):
-        if shape in self._options and self._current != shape:
-            self._current = shape
-            self.update()
+    def setCurrentShape(self, shape: str) -> None:
+        self.set_choice(shape)
 
-    def setBandActive(self, active: bool):
-        if self._active != active:
-            self._active = active
-            self.update()
-
-    def _open_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1D1D21;
-                border: 1px solid #141416;
-                border-radius: 4px;
-                padding: 4px;
-                color: #DCDCE2;
-                font-size: 11px;
-            }
-            QMenu::item { padding: 5px 16px; border-radius: 3px; }
-            QMenu::item:selected { background-color: #35353D; color: #FFFFFF; }
-        """)
-        for opt in self._options:
-            act = menu.addAction(opt)
-            act.triggered.connect(lambda checked=False, o=opt: self._select(o))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
-
-    def _select(self, shape: str):
-        if self._current != shape:
-            self._current = shape
-            self.update()
-            self.shapeChanged.emit(shape)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        bg = QColor("#151518") if self._active else QColor("#1B1B1E")
-        p.setPen(QPen(QColor("#101012"), 1.0))
-        p.setBrush(bg)
-        p.drawRoundedRect(rect, 3.0, 3.0)
-
-        glyph_color = self._accent if self._active else QColor("#6E6E76")
-        glyph_rect = QRectF(3, 2, self.width() - 15, self.height() - 4)
-        draw_filter_glyph(p, glyph_rect, self._current, glyph_color)
-
-        ax = self.width() - 8.0
-        ay = self.height() / 2.0 - 1.2
-        p.setPen(QPen(QColor("#9A9AA2"), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(ax - 2.2, ay), QPointF(ax, ay + 2.4))
-        p.drawLine(QPointF(ax, ay + 2.4), QPointF(ax + 2.2, ay))
+    def setBandActive(self, active: bool) -> None:
+        self.setEnabled(active)
 
 
 class EditableValuePill(QWidget):
@@ -678,10 +631,11 @@ class ProDynamicEQGraphWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(270)
+        self.setMinimumHeight(210)
         self.setMouseTracking(True)
 
         self._bands = default_dynamic_eq_demo()["bands"]
+        self._processor_controls = False
         self._eq_enabled = True
         self._ext_sc_enabled = True
         self._master_gain = 0.0
@@ -983,6 +937,8 @@ class ProDynamicEQGraphWidget(QWidget):
             opts = ["LPF", "High Shelf", "Bell"]
         else:
             opts = ["Low Shelf", "Bell", "High Shelf", "Notch"]
+        if self._processor_controls:
+            opts = []
 
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -995,14 +951,16 @@ class ProDynamicEQGraphWidget(QWidget):
             act.triggered.connect(lambda checked=False, o=opt: self.nodeShapeRequested.emit(idx, o))
 
         if b["filter_type"] in ("Bell", "Low Shelf", "High Shelf"):
-            menu.addSeparator()
+            if opts:
+                menu.addSeparator()
             dyn_lbl = "Disable Dynamic Mode" if b["dyn_enabled"] else "Enable Dynamic Mode"
             act_dyn = menu.addAction(dyn_lbl)
             act_dyn.triggered.connect(lambda checked=False: self.nodeDynToggled.emit(idx))
 
-            trig_lbl = "Trigger: Switch to Internal (INT)" if b["trigger_mode"] == "EXT" else "Trigger: Switch to External SC (EXT)"
-            act_trig = menu.addAction(trig_lbl)
-            act_trig.triggered.connect(lambda checked=False: self.nodeTriggerToggled.emit(idx))
+            if not self._processor_controls:
+                trig_lbl = "Trigger: Switch to Internal (INT)" if b["trigger_mode"] == "EXT" else "Trigger: Switch to External SC (EXT)"
+                act_trig = menu.addAction(trig_lbl)
+                act_trig.triggered.connect(lambda checked=False: self.nodeTriggerToggled.emit(idx))
 
         menu.exec(global_pos)
 
@@ -1018,7 +976,8 @@ class ProDynamicEQGraphWidget(QWidget):
                 # 拖拽动态范围手柄或按住 Shift 垂直拖动节点 -> 调节 Dynamic Range
                 target_g = self._y_to_gain(event.position().y(), plot) - self._master_gain
                 raw_range = round(target_g - b["gain"], 1)
-                clamped_range = max(-24.0, min(18.0, raw_range))
+                minimum, maximum = (-30.0, 0.0) if self._processor_controls else (-24.0, 18.0)
+                clamped_range = max(minimum, min(maximum, raw_range))
                 self.nodeDynRangeDragged.emit(self._dragging_node, clamped_range)
                 return
 
@@ -1728,6 +1687,7 @@ class DynamicBandCard(QFrame):
         self.shape_selector.shapeChanged.connect(self._on_shape_changed)
         h_lay.addWidget(self.shape_selector)
         root.addWidget(header)
+        self._band_header = header
 
         # --- 2. 静态 EQ 参数区 (Frequency + Gain & Q 双列) ---
         self.static_sec = QFrame()
@@ -1883,6 +1843,7 @@ class DynamicBandCard(QFrame):
         dyn_r1.addWidget(self.c_range, 1)
         dyn_r1.addWidget(self.c_thresh, 1)
         d_lay.addLayout(dyn_r1)
+        self._limit_row = dyn_r1
 
         # 3.3 Dyn Row 2: Attack & Release
         dyn_r2 = QHBoxLayout()
@@ -1913,6 +1874,74 @@ class DynamicBandCard(QFrame):
 
         self._section_refs = [self.static_sec, self.dyn_sec, self.bottom_spacer]
         self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        cut = CompactKnobCell(
+            I18N.tr("audio.fx.max_cut_db", "Max Cut"), -30.0, 0.0, -9.0, self._accent,
+            "-30", "0", format_db_signed, lambda s, fb: float(s), mode="linear",
+        )
+        cut.valueChanged.connect(self._on_processor_cut)
+        old = self.c_range
+        self._limit_row.replaceWidget(old, cut)
+        old.hide()
+        old.deleteLater()
+        self.c_range = cut
+        self.c_boost = CompactKnobCell(
+            I18N.tr("audio.fx.max_boost_db", "Max Boost"), 0.0, 24.0, 0.0, self._accent,
+            "0", "24", format_db_signed, lambda s, fb: float(s), mode="linear",
+        )
+        self.c_boost.valueChanged.connect(
+            lambda value: self._set_processor_field("max_boost", round(value, 1)))
+        self.c_threshold_slope = CompactKnobCell(
+            I18N.tr("audio.fx.slope", "Slope"), 0.0, 1.0, 0.5, self._accent,
+            "0", "1", lambda v: f"{v:.2f}", lambda s, fb: float(s), mode="linear",
+        )
+        self.c_threshold_slope.valueChanged.connect(
+            lambda value: self._set_processor_field("threshold_slope", round(value, 2)))
+        self._build_processor_strip()
+
+    def _build_processor_strip(self) -> None:
+        self._band_header.hide()
+        section = QFrame(self)
+        section.setObjectName("SubSection")
+        wrapper = QVBoxLayout(section)
+        wrapper.setContentsMargins(8, 7, 8, 7)
+        wrapper.setSpacing(5)
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Bell", section))
+        header.addWidget(self.dyn_bar, 1)
+        header.addWidget(self.dyn_btn)
+        wrapper.addLayout(header)
+
+        frequency = QWidget(section)
+        freq_layout = QVBoxLayout(frequency)
+        freq_layout.setContentsMargins(1, 0, 1, 0)
+        freq_layout.setSpacing(1)
+        freq_layout.addWidget(self.f_lbl, 0, Qt.AlignmentFlag.AlignHCenter)
+        freq_layout.addWidget(self.freq_knob, 0, Qt.AlignmentFlag.AlignHCenter)
+        hints = QHBoxLayout()
+        hints.addWidget(self.freq_min_lbl)
+        hints.addStretch()
+        hints.addWidget(self.freq_max_lbl)
+        freq_layout.addLayout(hints)
+        freq_layout.addWidget(self.freq_pill, 0, Qt.AlignmentFlag.AlignHCenter)
+        controls = QHBoxLayout()
+        controls.setSpacing(6)
+        for control in (
+            frequency, self.c_gain, self.c_q, self.c_thresh, self.c_range, self.c_boost,
+            self.c_threshold_slope, self.c_attack, self.c_release,
+        ):
+            controls.addWidget(control, 1)
+        wrapper.addLayout(controls)
+        self.layout().addWidget(section)
+        self._section_refs = [section]
+
+    def _on_processor_cut(self, value: float) -> None:
+        self._set_processor_field("dyn_range", round(min(0.0, value), 1))
+
+    def _set_processor_field(self, key: str, value: float) -> None:
+        self._data[key] = value
+        self._emit_change()
 
     def mousePressEvent(self, event):
         self.selected.emit(self._idx)
@@ -2033,12 +2062,14 @@ class DynamicBandCard(QFrame):
             btn.setVisible(is_cut)
             btn.setChecked(sv == self._data["slope"])
         for rk, btn in self.range_btns.items():
-            btn.setVisible(not is_cut)
+            btn.setVisible(not is_cut and not hasattr(self, "c_boost"))
             btn.setChecked(rk == self._data["range_key"])
 
-        self.gq_wrap.setVisible(not is_cut)
-        self.dyn_sec.setVisible(is_dyn_capable)
-        self.bottom_spacer.setVisible(not is_dyn_capable)
+        processor_mode = hasattr(self, "c_boost")
+        self.gq_wrap.setVisible(not is_cut and not processor_mode)
+        self.static_sec.setVisible(not processor_mode)
+        self.dyn_sec.setVisible(is_dyn_capable and not processor_mode)
+        self.bottom_spacer.setVisible(not is_dyn_capable and not processor_mode)
         self.update()
 
         # Static Gain & Q
@@ -2119,8 +2150,13 @@ class DynamicBandCard(QFrame):
 
         self.c_range.setBandActive(dyn_on)
         self.c_thresh.setBandActive(dyn_on)
-        self.c_attack.setBandActive(dyn_on and not auto_t)
-        self.c_release.setBandActive(dyn_on and not auto_t)
+        self.c_attack.setBandActive(dyn_on and (processor_mode or not auto_t))
+        self.c_release.setBandActive(dyn_on and (processor_mode or not auto_t))
+        if processor_mode:
+            self.c_boost.setValue(self._data.get("max_boost", 0.0))
+            self.c_threshold_slope.setValue(self._data.get("threshold_slope", 0.5))
+            self.c_boost.setBandActive(dyn_on)
+            self.c_threshold_slope.setBandActive(dyn_on)
 
         self._apply_card_style()
         self._updating = False
@@ -2236,6 +2272,7 @@ class StudioDynamicEQWidget(QWidget):
 
         self._active_bank = "A"
         self._selected_band = 3
+        self._processor_mode = False
         self._banks = {
             "A": default_dynamic_eq_demo(),
             "B": default_dynamic_eq_flat(),
@@ -2384,7 +2421,7 @@ class StudioDynamicEQWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -2440,7 +2477,7 @@ class StudioDynamicEQWidget(QWidget):
         self.ext_sc_btn.clicked.connect(self._on_ext_sc_toggled)
         tb_lay.addWidget(self.ext_sc_btn)
 
-        self.sc_source_combo = QComboBox()
+        self.sc_source_combo = ChevronComboBox()
         self.sc_source_combo.setFixedWidth(122)
         self.sc_source_combo.addItems([
             "Bus 1-2 (Vocal)",
@@ -2463,7 +2500,7 @@ class StudioDynamicEQWidget(QWidget):
         tb_lay.addStretch()
 
         # 相位与延迟模式
-        self.phase_combo = QComboBox()
+        self.phase_combo = ChevronComboBox()
         self.phase_combo.setFixedWidth(104)
         self.phase_combo.addItems(["Zero Latency", "Natural Phase", "Linear Phase"])
         self.phase_combo.currentTextChanged.connect(self._on_phase_changed)
@@ -2624,8 +2661,30 @@ class StudioDynamicEQWidget(QWidget):
             }
         """)
 
+    def use_processor_controls(self) -> None:
+        self._processor_mode = True
+        self.eq_graph._processor_controls = True
+        self.band_cards[3].use_processor_controls()
+        self.ext_sc_btn.hide()
+        self.sc_listen_btn.hide()
+        self.sc_source_combo.hide()
+        self.phase_combo.hide()
+        self.master_strip.setEnabled(False)
+        for index, card in enumerate(self.band_cards):
+            if index != 3:
+                card.hide()
+        self._refresh_all_views()
+
     def _refresh_all_views(self):
         st = self._current_state()
+        if self._processor_mode:
+            for index, band in enumerate(st["bands"]):
+                band["enabled"] = index == 3
+            band = st["bands"][3]
+            band.update(filter_type="Bell", range_key="All", auto_timing=False, trigger_mode="INT")
+            band.setdefault("max_boost", 0.0)
+            band.setdefault("threshold_slope", 0.5)
+            self._selected_band = 3
         self._update_top_bar_styles()
         self.power_switch.setChecked(st["enabled"])
 
@@ -2720,6 +2779,8 @@ class StudioDynamicEQWidget(QWidget):
         self.bandSoloChanged.emit(band_index, is_solo)
 
     def _on_graph_node_toggled(self, idx: int):
+        if self._processor_mode:
+            return
         st = self._current_state()
         b = st["bands"][idx]
         b["enabled"] = not b["enabled"]
@@ -2730,6 +2791,8 @@ class StudioDynamicEQWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_band_spawn(self, freq: float, gain: float):
+        if self._processor_mode:
+            return
         st = self._current_state()
         disabled = [i for i, b in enumerate(st["bands"]) if not b["enabled"] and i in (1, 2, 3, 4)]
         if not disabled:
@@ -2759,7 +2822,7 @@ class StudioDynamicEQWidget(QWidget):
         b = st["bands"][idx]
         b["freq"] = round(freq, 1)
         b["gain"] = round(gain, 1)
-        b["range_key"] = auto_range_key(b["freq"])
+        b["range_key"] = "All" if self._processor_mode else auto_range_key(b["freq"])
         self.band_cards[idx].syncFromData(b)
         self._select_band_card(idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
@@ -2770,7 +2833,7 @@ class StudioDynamicEQWidget(QWidget):
         st = self._current_state()
         b = st["bands"][idx]
         b["dyn_enabled"] = True
-        b["dyn_range"] = round(dyn_range, 1)
+        b["dyn_range"] = round(min(0.0, dyn_range) if self._processor_mode else dyn_range, 1)
         self.band_cards[idx].syncFromData(b)
         self._select_band_card(idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
@@ -2787,6 +2850,8 @@ class StudioDynamicEQWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_node_shape(self, idx: int, new_shape: str):
+        if self._processor_mode:
+            return
         st = self._current_state()
         b = st["bands"][idx]
         b["filter_type"] = new_shape
@@ -2807,6 +2872,8 @@ class StudioDynamicEQWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_node_trigger_toggled(self, idx: int):
+        if self._processor_mode:
+            return
         st = self._current_state()
         b = st["bands"][idx]
         b["trigger_mode"] = "INT" if b["trigger_mode"] == "EXT" else "EXT"

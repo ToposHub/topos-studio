@@ -35,6 +35,7 @@ from src.features.edit.core.audio_edit import (
 )
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
 from src.features.edit.core.fade_curve_spec import is_fade_curve
+from src.features.mixer.effects.panel_style import style_reference_panel
 from src.features.mixer.effects.panels.clip_editor import (
     ClipEditorElidedLabel, ProcessStepRow, StudioAudioClipEditor,
 )
@@ -89,6 +90,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def __init__(self) -> None:
         super().__init__(show_commit_button=False)
+        style_reference_panel(self)
         self.btn_timeline = QPushButton(
             glyph_icon("arrow-left", "#CFCFD6"),
             I18N.tr("mixer.clip_editor.timeline", "Return to timeline"),

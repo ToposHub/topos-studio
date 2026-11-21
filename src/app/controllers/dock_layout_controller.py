@@ -1386,6 +1386,9 @@ class DockLayoutMixin:
         clip_id = view.selected_audio_clip_id()
         clip = timeline.get_clip_by_id(clip_id) if timeline is not None and clip_id else None
         track = timeline.get_track_by_id(clip.track_id) if clip is not None else None
+        if effect_type == "clip_editor" and clip_id and track is not None:
+            self._open_project_audio_clip_editor(clip_id)
+            return
         if not clip_id or track is None or track.is_locked:
             self.statusBar().showMessage(I18N.tr(
                 "mixer.effects_browser.select_clip",
@@ -1652,6 +1655,9 @@ class DockLayoutMixin:
         clip_effect_dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
         if clip_effect_dialogs is not None:
             clip_effect_dialogs.close_all()
+        effects_dock = getattr(self, "dock_audio_effects", None)
+        if effects_dock is not None:
+            effects_dock.widget().pause_panel_windows()
         self.dock_audio_clip_editor.widget().reset()
         self.timeline_panel.get_timeline_view().set_audio_only(False)
         self.timeline_panel.set_display_mode("edit")

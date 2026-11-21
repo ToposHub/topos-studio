@@ -5,7 +5,7 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy,
+    QPushButton, QFrame, QLineEdit, QSizePolicy,
     QInputDialog, QMenu, QScrollArea
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal
@@ -13,6 +13,8 @@ from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -494,7 +496,7 @@ class PannerControlCard(QFrame):
         self._apply_style()
 
         self.main_lay = QHBoxLayout(self)
-        self.main_lay.setContentsMargins(10, 7, 10, 7)
+        self.main_lay.setContentsMargins(9, 5, 9, 5)
         self.main_lay.setSpacing(8)
 
         # 左侧：标题 + 辅助按钮 + 数值胶囊
@@ -828,25 +830,26 @@ class SpatialSoundStageWidget(QWidget):
         rot_s = fmt_rotate(self._state["rotate"])
         if is_3d:
             z_s = fmt_elev(self._state["elevation"])
-            hud_text = f"L/R: {lr_s}  •  F/B: {fb_s}  •  Z: {z_s}  •  Rot: {rot_s}"
-            hud_w = 248
+            hud_text = f"L/R {lr_s}  ·  F/B {fb_s}  ·  Z {z_s}  ·  Rot {rot_s}"
         else:
-            hud_text = f"L/R: {lr_s}   •   F/B: {fb_s}   •   Rot: {rot_s}"
-            hud_w = 205
+            hud_text = f"L/R {lr_s}  ·  F/B {fb_s}  ·  Rot {rot_s}"
 
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        hud_w = p.fontMetrics().horizontalAdvance(hud_text) + 16
         hud_rect = QRectF(14, 12, hud_w, 20)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(QColor("#28D8F0") if en else QColor("#8A8A92"))
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_text)
 
         # 右上角交互提示标签
-        hint_str = "Shift+拖拽 / 滚轮: 调节高度" if is_3d else "双击复位  •  Ctrl/Alt 锁定单轴"
+        hint_str = "Shift+拖拽/滚轮调高度" if is_3d else "双击复位 · Ctrl/Alt 锁轴"
         p.setPen(QColor("#787882"))
-        p.setFont(QFont(MONO_FONT_FAM, 8))
-        p.drawText(QRectF(self.width() - 185, 12, 172, 20), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, hint_str)
+        hint_start = hud_rect.right() + 8
+        hint_width = self.width() - hint_start - 13
+        if p.fontMetrics().horizontalAdvance(hint_str) <= hint_width:
+            p.drawText(QRectF(hint_start, 12, hint_width, 20), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, hint_str)
 
     def _paint_2d_stage(self, p: QPainter, rect: QRectF, en: bool):
         # 6x6 主网格
@@ -1190,7 +1193,7 @@ class StudioSpatialPannerWidget(QWidget):
         add_btn.clicked.connect(self._save_new_preset)
         tb.addWidget(add_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(155)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1221,9 +1224,9 @@ class StudioSpatialPannerWidget(QWidget):
         tb.addStretch()
 
         # 扬声器制式选择
-        self.format_combo = QComboBox()
-        self.format_combo.setFixedWidth(64)
+        self.format_combo = ChevronComboBox()
         self.format_combo.addItems(["2.0", "5.1", "7.1", "7.1.4"])
+        self.format_combo.setFixedWidth(self.format_combo.sizeHint().width())
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         tb.addWidget(self.format_combo)
 

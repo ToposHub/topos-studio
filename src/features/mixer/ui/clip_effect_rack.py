@@ -14,11 +14,10 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES, get_effect_definition
+from src.features.mixer.effects.browser_catalog import audio_effect_groups, audio_effect_name
 from src.shared.assets.icon_manager import icon_delete, icon_down, icon_up
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
-
-from .effects_panel import audio_effect_groups, audio_effect_name
 
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import ClipInstance

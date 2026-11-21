@@ -280,44 +280,32 @@ class TestLimiterCommandPath:
         w._effect_chain = EffectChainParams(effects=(inst,))
         return w, inst
 
-    def test_open_editor_connects_both_signals(self, qapp):
-        """接线修复：limiter_preview 与 limiter_committed 均被连接。"""
-        from PyQt6.QtCore import pyqtSignal
-        from PyQt6.QtWidgets import QDialog
-        from src.features.edit.core.timeline_v2 import LimiterParams
-
-        # Retain the editor's QDialog lifecycle contract as well as its signals.
-        class FakeDlg(QDialog):
-            limiter_preview = pyqtSignal(str, object)
-            limiter_committed = pyqtSignal(str, object)
-
-            def __init__(self, *, track_id, track_name, instance_id,
-                         initial_params=None, parent=None):
-                super().__init__(parent)
-                self._track_id = track_id
-
-            def isVisible(self):
-                return False
-
-            def show(self):
-                pass
-
+    def test_open_editor_connects_both_signals(self, qapp, qtbot):
+        """Preview is transient and Apply commits through the mixer command signal."""
         w, inst = self._make_widget(qapp)
-        with patch("src.shared.ui.audio_mixer.limiter_dialog.LimiterDialog", FakeDlg):
-            w._open_limiter_editor(inst)
-
-        dlg = w._limiter_dialogs[inst.instance_id]
+        qtbot.addWidget(w)
+        w._open_limiter_editor(inst)
+        dialog = w._limiter_dialogs[inst.instance_id]
         previews, commits = [], []
-        w.track_effects_preview.connect(lambda tid, c: previews.append(c))
-        w.track_effects_committed.connect(lambda tid, c: commits.append(c))
+        w.track_effects_preview.connect(lambda tid, chain: previews.append(chain))
+        w.track_effects_committed.connect(lambda tid, chain: commits.append(chain))
 
-        new_params = LimiterParams(threshold_db=-6.0, release_ms=120.0)
-        dlg.limiter_preview.emit("t1", new_params)
-        assert len(previews) == 1 and commits == []
-        assert previews[0].effects[0].params["threshold_db"] == -6.0
+        knob = dialog.panel.lim_card.c_thresh.knob
+        knob.setValue(-8.0, emit=True)
+        qtbot.waitUntil(lambda: len(previews) == 1)
+        assert previews[0].effects[0].params["threshold_db"] == -8.0
+        assert commits == []
+        assert w._effect_chain.effects[0].params == inst.params
+        dialog.apply()
+        assert len(commits) == 1
+        assert commits[0].effects[0].params["threshold_db"] == -8.0
 
-        dlg.limiter_committed.emit("t1", new_params)
-        assert len(commits) == 1, "committed 必须走 track_effects_committed（命令栈）"
+        knob.setValue(-10.0, emit=True)
+        qtbot.waitUntil(lambda: previews[-1].effects[0].params["threshold_db"] == -10.0)
+        dialog.reject()
+        assert len(commits) == 1
+        assert previews[-1].effects[0].params["threshold_db"] == -8.0
+        assert w._effect_chain == commits[0]
 
     def test_on_limiter_edited_commit_true_emits_committed(self, qapp):
         """commit=True → track_effects_committed（修复前只发 preview）。"""

@@ -6,13 +6,15 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QSizePolicy, QInputDialog
+    QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -1059,7 +1061,10 @@ class KnobParameterCell(QWidget):
 
         hints_row = QHBoxLayout()
         hints_row.setContentsMargins(2, 0, 2, 0)
-        hints_row.setSpacing(2)
+        hints_row.setSpacing(4)
+        hints = QWidget()
+        hints.setLayout(hints_row)
+        hints.setMaximumWidth(90)
         for h_text, align in (
             (min_hint, Qt.AlignmentFlag.AlignLeft),
             (mid_hint, Qt.AlignmentFlag.AlignCenter),
@@ -1069,7 +1074,7 @@ class KnobParameterCell(QWidget):
             hl.setAlignment(align)
             hl.setStyleSheet("color: #787882; font-size: 9px;")
             hints_row.addWidget(hl, 1)
-        lay.addLayout(hints_row)
+        lay.addWidget(hints)
 
         self.pill = EditableValuePill(formatter(default_val), accent_color, width=pill_width)
         self.pill.valueEdited.connect(self._on_pill_edited)
@@ -1146,6 +1151,7 @@ class ExpanderGateCard(QFrame):
 
         self.btn_exp.clicked.connect(lambda: self._on_mode("Expander"))
         self.btn_gate.clicked.connect(lambda: self._on_mode("Gate"))
+        self._mode_segment = seg_wrap
         h_lay.addWidget(seg_wrap, 1)
         root.addWidget(header)
 
@@ -1197,6 +1203,8 @@ class ExpanderGateCard(QFrame):
         for c in (self.c_attack, self.c_hold, self.c_release):
             row2.addWidget(c, 1)
         b_lay.addLayout(row2)
+        self._settings_layout = b_lay
+        self._setting_rows = (row1, row2)
         root.addWidget(body, 1)
 
         self.c_thresh.valueChanged.connect(lambda v: self._set_field("threshold", round(v, 1)))
@@ -1207,6 +1215,14 @@ class ExpanderGateCard(QFrame):
         self.c_release.valueChanged.connect(lambda v: self._set_field("release", round(v, 1)))
 
         self.syncFromData(self._data)
+
+    def use_single_row(self) -> None:
+        first, second = self._setting_rows
+        for cell in (self.c_attack, self.c_hold, self.c_release):
+            second.removeWidget(cell)
+            first.addWidget(cell, 1)
+        self._settings_layout.removeItem(second)
+        self._mode_segment.setMaximumWidth(240)
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -1401,10 +1417,10 @@ class CompressorCard(QFrame):
         self.btn_sc_listen.clicked.connect(self._on_sc_listen)
         sc_col.addWidget(self.btn_sc_listen)
 
-        self.sc_source_combo = QComboBox()
+        self.sc_source_combo = ChevronComboBox()
         self.sc_source_combo.setFixedHeight(21)
         self.sc_source_combo.addItems(["Internal", "Dialogue Bus", "Music Bus", "Audio 2", "Audio 3"])
-        self.sc_source_combo.currentTextChanged.connect(self._on_sc_source)
+        self.sc_source_combo.currentIndexChanged.connect(self._on_sc_source)
         sc_col.addWidget(self.sc_source_combo)
 
         row2.addLayout(sc_col, 1)
@@ -1460,7 +1476,11 @@ class CompressorCard(QFrame):
         sc_listen = bool(self._data["sc_listen"])
         self.btn_sc_on.setChecked(sc_on)
         self.btn_sc_listen.setChecked(sc_listen)
-        self.sc_source_combo.setCurrentText(self._data["sc_source"])
+        source_index = self.sc_source_combo.findData(self._data["sc_source"])
+        if source_index >= 0:
+            self.sc_source_combo.setCurrentIndex(source_index)
+        else:
+            self.sc_source_combo.setCurrentText(self._data["sc_source"])
 
         pill_btn_css = f"""
             QPushButton {{
@@ -1500,8 +1520,8 @@ class CompressorCard(QFrame):
         self._data["sc_listen"] = checked
         self._emit()
 
-    def _on_sc_source(self, src: str):
-        self._data["sc_source"] = src
+    def _on_sc_source(self, _index: int) -> None:
+        self._data["sc_source"] = self.sc_source_combo.currentData() or self.sc_source_combo.currentText()
         self._emit()
 
     def _set_field(self, key: str, val: float):
@@ -1555,14 +1575,12 @@ class LimiterCard(QFrame):
         b_lay.setSpacing(10)
 
         row1 = QHBoxLayout()
-        row1.addStretch(1)
         self.c_thresh = KnobParameterCell(
             "Threshold", -30.0, 0.0, -6.0, self._accent,
             "-30.0", "dB", "0.0",
             lambda v: f"{v:.1f}", lambda s, fb: float(s), mode="linear"
         )
         row1.addWidget(self.c_thresh, 1)
-        row1.addStretch(1)
         b_lay.addLayout(row1)
 
         row2 = QHBoxLayout()
@@ -1582,9 +1600,12 @@ class LimiterCard(QFrame):
             "50", "ms", "4000",
             format_ms, lambda s, fb: float(s), mode="log"
         )
-        for c in (self.c_attack, self.c_hold, self.c_release):
-            row2.addWidget(c, 1)
+        row1.addWidget(self.c_attack, 1)
+        row2.addWidget(self.c_hold, 1)
+        row2.addWidget(self.c_release, 1)
         b_lay.addLayout(row2)
+        self._settings_layout = b_lay
+        self._setting_rows = (row1, row2)
         root.addWidget(body, 1)
 
         self.c_thresh.valueChanged.connect(lambda v: self._set_field("threshold", round(v, 1)))
@@ -1593,6 +1614,13 @@ class LimiterCard(QFrame):
         self.c_release.valueChanged.connect(lambda v: self._set_field("release", round(v, 1)))
 
         self.syncFromData(self._data)
+
+    def use_single_row(self) -> None:
+        first, second = self._setting_rows
+        for cell in (self.c_hold, self.c_release):
+            second.removeWidget(cell)
+            first.addWidget(cell, 1)
+        self._settings_layout.removeItem(second)
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -1790,7 +1818,7 @@ class StudioDynamicsWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(195)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1893,20 +1921,26 @@ class StudioDynamicsWidget(QWidget):
         self.makeup_fader = MakeUpFaderStrip()
         self.makeup_fader.gainChanged.connect(self._on_makeup_changed)
         mu_col.addWidget(self.makeup_fader, 1, Qt.AlignmentFlag.AlignHCenter)
-        up_lay.addLayout(mu_col)
-        up_lay.addWidget(_vsep())
+        self._makeup_column = QWidget()
+        self._makeup_column.setLayout(mu_col)
+        up_lay.addWidget(self._makeup_column)
+        self._makeup_separator = _vsep()
+        up_lay.addWidget(self._makeup_separator)
 
         # 2.5 Output 与 Sidechain 电平表
         out_col = self._build_meter_column("Output")
         self.meter_output = ProVerticalMeter(mode="level", show_ticks=True)
         out_col.addWidget(self.meter_output, 1, Qt.AlignmentFlag.AlignHCenter)
         up_lay.addLayout(out_col)
-        up_lay.addWidget(_vsep())
+        self._sidechain_separator = _vsep()
+        up_lay.addWidget(self._sidechain_separator)
 
         sc_col = self._build_meter_column("Sidechain")
         self.meter_sidechain = ProVerticalMeter(mode="level", show_ticks=True)
         sc_col.addWidget(self.meter_sidechain, 1, Qt.AlignmentFlag.AlignHCenter)
-        up_lay.addLayout(sc_col)
+        self._sidechain_column = QWidget()
+        self._sidechain_column.setLayout(sc_col)
+        up_lay.addWidget(self._sidechain_column)
 
         main_lay.addWidget(upper_panel, 5)
 
@@ -1932,10 +1966,27 @@ class StudioDynamicsWidget(QWidget):
         cards_row.addWidget(self.comp_card, 4)
         cards_row.addWidget(self.lim_card, 3)
 
-        main_lay.addLayout(cards_row, 4)
+        main_lay.addLayout(cards_row)
+
+    def show_stage(self, stage: str) -> None:
+        """Show one processor with its curve, controls and corresponding meters."""
+        cards = {"eg": self.eg_card, "comp": self.comp_card, "lim": self.lim_card}
+        meters = {"eg": self.meter_gr_eg, "comp": self.meter_gr_comp, "lim": self.meter_gr_lim}
+        for name, card in cards.items():
+            card.setVisible(name == stage)
+            card.power_sw.hide()
+            meters[name].setVisible(name == stage)
+
+        for widget in (self._makeup_column, self._makeup_separator, self._sidechain_column, self._sidechain_separator):
+            widget.setVisible(stage == "comp")
+        if stage == "eg":
+            self.eg_card.use_single_row()
+        elif stage == "lim":
+            self.lim_card.use_single_row()
 
     def _build_meter_column(self, header_text: str) -> QVBoxLayout:
         col = QVBoxLayout()
+        col.setContentsMargins(3, 0, 3, 0)
         col.setSpacing(4)
         lbl = QLabel(header_text)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -6,9 +6,12 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QHideEvent
-from PyQt6.QtWidgets import QDialog, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
+
+from src.shared.i18n.i18n import I18N
 
 from .catalog import EffectInstance, create_panel, get_effect
+from .panel_style import fit_effect_window
 
 
 def stop_panel_timers(panel: QWidget) -> None:
@@ -31,7 +34,10 @@ class EffectParameterWindow(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        status = QLabel("UI 参数面板 · 音频处理未连接 · 表计/频谱非实时测量", self)
+        status = QLabel(I18N.tr(
+            "mixer.effect_panel.ui_only",
+            "Panel controls are available. Audio processing and live meters are pending.",
+        ), self)
         status.setObjectName("MixerEffectStatus")
         layout.addWidget(status)
         self.panel = create_panel(instance.effect_id, owner_name or instance.owner_id)
@@ -44,14 +50,8 @@ class EffectParameterWindow(QDialog):
             if "enabled" in state:
                 state["enabled"] = instance.enabled
             restore(state)
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll_area.setWidget(self.panel)
-        layout.addWidget(self.scroll_area, 1)
-        self.resize(min(1180, max(900, self.panel.width())), min(850, max(620, self.panel.height() + 36)))
-        # Wrapping in a scroll area keeps large reference panels usable on laptops.
-        self.setMinimumSize(640, 420)
+        layout.addWidget(self.panel, 1)
+        fit_effect_window(self, self.panel)
 
     def capture_state(self) -> dict[str, Any]:
         getter = getattr(self.panel, "get_state", None)

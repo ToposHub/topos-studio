@@ -6,7 +6,7 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与默认参数配置（与 Dyamics-UI / multiband_comp_ui 统一）
@@ -1249,7 +1250,7 @@ class DoublerVoiceCard(QFrame):
         harm_lbl.setStyleSheet("color: #8A8A94; font-size: 9.5px; font-weight: 600;")
         harm_row.addWidget(harm_lbl)
 
-        self.interval_combo = QComboBox()
+        self.interval_combo = ChevronComboBox()
         self.interval_combo.setFixedHeight(21)
         self.interval_combo.addItems(HARMONY_INTERVALS)
         self.interval_combo.setToolTip("智能和声音程：跟随顶部 Key/Scale 自动计算三度/五度等自然音阶移调")
@@ -1890,7 +1891,7 @@ class StudioDoublerWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(190)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1937,7 +1938,7 @@ class StudioDoublerWidget(QWidget):
         scale_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         tb_lay.addWidget(scale_lbl)
 
-        self.scale_combo = QComboBox()
+        self.scale_combo = ChevronComboBox()
         self.scale_combo.setFixedWidth(96)
         self.scale_combo.addItems(MUSICAL_KEYS)
         self.scale_combo.setToolTip("与修音器共享音高分析基建：自动锁定三度/五度智能和声音阶")

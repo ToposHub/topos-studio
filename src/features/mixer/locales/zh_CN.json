@@ -25,8 +25,13 @@
         "space": "空间与延迟",
         "modulation": "调制",
         "tone": "音色与人声",
-        "other": "其他音频效果"
-      }
+        "other": "其他音频效果",
+        "tools": "片段工具",
+        "pending": "待接入音频处理的面板"
+      },
+      "open_clip_tool": "双击打开所选音频片段的编辑器。",
+      "open_pending_panel": "双击打开面板并体验交互。",
+      "library": "音频效果"
     },
     "monitor": {
       "picture_options": "画面选项"
@@ -166,6 +171,24 @@
       "lane": "自动化参数 Lane",
       "lane_track": "轨道:",
       "write_protected": "该轨道自动化已写保护"
+    },
+    "effect_panel": {
+      "mapped_parameters": "部分设计功能待接入音频处理。",
+      "ui_only": "可调整面板参数。音频处理和实时表计待接入。",
+      "dynamic_eq_scope": "现有动态均衡处理对应第 4 个频段的 Bell。",
+      "multiband_comp_scope": "现有处理器使用 3 个频段和 2 个分频点。",
+      "name": {
+        "declick_dehum": "去爆音 / 去嗡声",
+        "pitch_correction": "音高校正",
+        "exciter": "激励器",
+        "subharmonic": "次谐波发生器",
+        "doubler": "叠声 / 和声",
+        "clip_editor": "音频片段编辑器"
+      },
+      "ok": "确定",
+      "cancel": "取消",
+      "apply": "应用",
+      "current_settings": "当前参数"
     }
   }
 }

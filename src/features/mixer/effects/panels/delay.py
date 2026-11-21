@@ -6,13 +6,15 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFont
 )
+
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -1070,8 +1072,8 @@ class DelayModuleCard(QFrame):
         body = QFrame()
         body.setObjectName("CardBody")
         b_lay = QVBoxLayout(body)
-        b_lay.setContentsMargins(8, 10, 8, 12)
-        b_lay.setSpacing(12)
+        b_lay.setContentsMargins(8, 7, 8, 8)
+        b_lay.setSpacing(8)
         for cell in self._cells:
             b_lay.addWidget(cell, 1, Qt.AlignmentFlag.AlignCenter)
         root.addWidget(body, 1)
@@ -1267,7 +1269,7 @@ class StudioDelayWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(165)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1327,9 +1329,9 @@ class StudioDelayWidget(QWidget):
         fmt_lbl.setStyleSheet("color: #8E94A4; font-size: 11px; font-weight: 600;")
         tb_lay.addWidget(fmt_lbl)
 
-        self.format_combo = QComboBox()
-        self.format_combo.setFixedWidth(78)
+        self.format_combo = ChevronComboBox()
         self.format_combo.addItems(["Mono", "Stereo", "LCR", "Quad", "5.0", "5.1", "7.1"])
+        self.format_combo.setFixedWidth(self.format_combo.sizeHint().width())
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         tb_lay.addWidget(self.format_combo)
 
@@ -1459,7 +1461,7 @@ class StudioDelayWidget(QWidget):
         for card in (self.card_filter, self.card_left, self.card_right, self.card_fb, self.card_out):
             cards_row.addWidget(card, 1)
 
-        main_lay.addLayout(cards_row, 4)
+        main_lay.addLayout(cards_row)
 
         # 连接所有旋钮变更信号
         for pid, cell in self._cells.items():

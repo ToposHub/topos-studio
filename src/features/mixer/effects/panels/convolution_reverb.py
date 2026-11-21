@@ -7,15 +7,18 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QFileDialog,
+    QPushButton, QFrame, QLineEdit, QFileDialog,
     QInputDialog, QListWidget, QListWidgetItem, QStackedWidget,
     QAbstractItemView
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QSignalBlocker
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -957,6 +960,7 @@ class ConvolutionIRGraphWidget(QWidget):
         self._peaks_l, self._peaks_r = generate_synthetic_ir_peaks(101, 380.0)
         self._view_mode = "WAVE"      # "WAVE" (双声道脉冲波形) | "SPEC" (IR 频谱特征)
         self._capture_mode = False    # False = 卷积响应视图, True = 扫频录制视图
+        self._processor_controls = False
 
         # 扫频录制状态
         self._sweep_recording = False
@@ -1046,7 +1050,7 @@ class ConvolutionIRGraphWidget(QWidget):
     # 鼠标交互：拖动 ER/Tail 分割线、Start/End 修剪旗标、扫频录制触发
     # -----------------------------------------------------------------
     def _hit_test(self, pos: QPointF) -> str:
-        if self._capture_mode:
+        if self._capture_mode or self._processor_controls:
             return ""
         plot = self._plot_rect()
         if not plot.contains(pos):
@@ -1144,6 +1148,15 @@ class ConvolutionIRGraphWidget(QWidget):
         plot = self._plot_rect()
 
         p.fillRect(plot, QColor("#1D1D20"))
+
+        if self._processor_controls and not self._peaks_l:
+            name = os.path.basename(self._params.get("file_path", ""))
+            message = name or I18N.tr("audio.fx.no_ir", "No impulse response")
+            p.setPen(QColor("#AEB0B9"))
+            p.setFont(QFont(MONO_FONT_FAM, 10))
+            message = p.fontMetrics().elidedText(message, Qt.TextElideMode.ElideMiddle, int(plot.width()) - 20)
+            p.drawText(plot, Qt.AlignmentFlag.AlignCenter, message)
+            return
 
         if self._capture_mode:
             self._paint_sweep_capture_view(p, plot)
@@ -1701,6 +1714,7 @@ class StudioConvolutionReverbWidget(QWidget):
         self._demo_timer.timeout.connect(self._tick_demo_meters)
         self._demo_timer.start(45)
 
+        self._processor_mode = False
         self._setup_ui(track_name)
         self._refresh_all_views()
 
@@ -1819,7 +1833,7 @@ class StudioConvolutionReverbWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(190)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1872,6 +1886,7 @@ class StudioConvolutionReverbWidget(QWidget):
         self.sweep_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sweep_mode_btn.clicked.connect(self._on_toggle_sweep_mode)
         tb_lay.addWidget(self.sweep_mode_btn)
+        self._ir_toolbar = tb_lay
 
         tb_lay.addStretch()
 
@@ -2030,6 +2045,7 @@ class StudioConvolutionReverbWidget(QWidget):
         card_out.header_lay.addWidget(self.wet_lock_btn)
 
         out_top = card_out.add_section()
+        self._mix_controls = out_top
         out_top.addStretch()
         out_top.addWidget(self._add_ctrl(
             "dry_wet", "Dry / Wet", 0.0, 100.0, 18.0, "%",
@@ -2059,6 +2075,39 @@ class StudioConvolutionReverbWidget(QWidget):
         cards_row.addWidget(card_out, 28)
 
         main_lay.addLayout(cards_row, 46)
+
+    def use_processor_controls(self) -> None:
+        self._processor_mode = True
+        self.ir_browser.hide()
+        self.sweep_mode_btn.hide()
+        self._presets.clear()
+        with QSignalBlocker(self.preset_combo):
+            self.preset_combo.clear()
+        for state in self._banks.values():
+            state["file_path"] = ""
+            state["dry_level"] = 100.0
+        load_button = QPushButton(I18N.tr("audio.fx.choose_ir", "Load WAV"), self)
+        load_button.setObjectName("ToolBtn")
+        load_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        load_button.clicked.connect(self._open_ir_file_dialog)
+        self._ir_toolbar.insertWidget(self._ir_toolbar.count() - 2, load_button)
+        self._controls["dry_wet"].title_lbl.setText(I18N.tr("audio.fx.wet", "Wet"))
+        dry = self._add_ctrl(
+            "dry_level", I18N.tr("audio.fx.dry", "Dry"), 0.0, 100.0, 100.0, "%",
+            decimals=1, accent_color=SUITE_PALETTE["output"], suffix="%", knob_diameter=48,
+        )
+        self._mix_controls.insertWidget(1, dry)
+        for card in self._cards[:3]:
+            card.hide()
+        for key in ("direct_db", "er_db", "tail_db"):
+            self._controls[key].hide()
+        self.wet_lock_btn.hide()
+        self.ir_graph._processor_controls = True
+        self.ir_graph.setMinimumSize(440, 168)
+        self.ir_graph.setToolTip("Load or drop an impulse response WAV file")
+        self.in_meter.setLevels(-60.0, -60.0)
+        self.out_meter.setLevels(-60.0, -60.0)
+        self._refresh_all_views()
 
     def _add_ctrl(self, key: str, title: str, min_v: float, max_v: float, def_v: float, unit: str, **kwargs) -> KnobControlUnit:
         ctrl = KnobControlUnit(key, title, min_v, max_v, def_v, unit, **kwargs)
@@ -2157,6 +2206,8 @@ class StudioConvolutionReverbWidget(QWidget):
         st = self._current_state()
         en = bool(st.get("enabled", True))
         self._update_top_and_toggle_styles()
+        if self._processor_mode:
+            st.setdefault("dry_level", 100.0)
 
         self.power_switch.setChecked(en)
 
@@ -2173,12 +2224,17 @@ class StudioConvolutionReverbWidget(QWidget):
         for card in self._cards:
             card.setBandActive(en)
 
-        peaks_l, peaks_r = generate_synthetic_ir_peaks(st.get("seed", 101), st.get("native_ms", 400.0))
-        self.ir_graph.setWaveformPeaks(peaks_l, peaks_r)
+        if self._processor_mode:
+            self.ir_graph.setWaveformPeaks([], [])
+        else:
+            peaks_l, peaks_r = generate_synthetic_ir_peaks(st.get("seed", 101), st.get("native_ms", 400.0))
+            self.ir_graph.setWaveformPeaks(peaks_l, peaks_r)
         self.ir_graph.setState(st)
 
     def _switch_bank(self, bank: str):
         if bank != self._active_bank:
+            if self._processor_mode and not self._banks[bank]["file_path"]:
+                self._banks[bank]["file_path"] = self._current_state()["file_path"]
             self._active_bank = bank
             self._refresh_all_views()
             self.stateChanged.emit(self.get_state())
@@ -2252,6 +2308,8 @@ class StudioConvolutionReverbWidget(QWidget):
         saved_dw = cur.get("dry_wet", 25.0)
 
         new_st = copy.deepcopy(self._presets[name])
+        if self._processor_mode and not new_st["file_path"]:
+            new_st["file_path"] = cur["file_path"]
         if keep_wet:
             new_st["wet_lock"] = True
             new_st["dry_wet"] = saved_dw
@@ -2281,12 +2339,16 @@ class StudioConvolutionReverbWidget(QWidget):
             self,
             "加载脉冲响应文件 (Load Impulse Response)",
             "",
-            "Audio Files (*.wav *.aif *.aiff *.flac);;All Files (*)",
+            "WAV (*.wav)" if self._processor_mode else "Audio Files (*.wav *.aif *.aiff *.flac);;All Files (*)",
         )
         if path:
             self._on_ir_file_loaded(path)
 
     def _on_ir_file_loaded(self, file_path: str):
+        if self._processor_mode and (
+            not file_path.lower().endswith(".wav") or not os.path.isfile(file_path)
+        ):
+            return
         st = self._current_state()
         st["file_path"] = file_path
         st["seed"] = abs(hash(file_path)) % 10000
@@ -2339,10 +2401,14 @@ class StudioConvolutionReverbWidget(QWidget):
     # 公开 API：供后端 DSP 引擎调用（加载真实波形峰值、实时电平、状态序列化）
     # -----------------------------------------------------------------
     def reset_reverb(self):
-        self._banks[self._active_bank] = copy.deepcopy(BUILTIN_IR_LIBRARY["Film ADR / Tight Booth"])
-        self.preset_combo.blockSignals(True)
-        self.preset_combo.setCurrentText("Film ADR / Tight Booth")
-        self.preset_combo.blockSignals(False)
+        if self._processor_mode:
+            self._current_state().update(dry_wet=35.0, dry_level=100.0)
+            with QSignalBlocker(self.preset_combo):
+                self.preset_combo.setCurrentIndex(-1)
+        else:
+            self._banks[self._active_bank] = copy.deepcopy(BUILTIN_IR_LIBRARY["Film ADR / Tight Booth"])
+            with QSignalBlocker(self.preset_combo):
+                self.preset_combo.setCurrentText("Film ADR / Tight Booth")
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
 

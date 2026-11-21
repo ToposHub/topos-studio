@@ -25,8 +25,13 @@
         "space": "Space & Time",
         "modulation": "Modulation",
         "tone": "Tone & Voice",
-        "other": "Other Audio Effects"
-      }
+        "other": "Other Audio Effects",
+        "tools": "Clip Tools",
+        "pending": "Panels awaiting audio processing"
+      },
+      "open_clip_tool": "Double-click to open the selected audio clip in the editor.",
+      "open_pending_panel": "Double-click to open the panel and try its controls.",
+      "library": "Audio Effects"
     },
     "monitor": {
       "picture_options": "Picture Options"
@@ -166,6 +171,24 @@
       "lane": "Automation Lane",
       "lane_track": "Track:",
       "write_protected": "Track automation is write-protected"
+    },
+    "effect_panel": {
+      "mapped_parameters": "Some design controls are pending audio support.",
+      "ui_only": "Panel controls are available. Audio processing and live meters are pending.",
+      "dynamic_eq_scope": "The current processor uses band 4 as a bell filter.",
+      "multiband_comp_scope": "The current processor uses three bands and two crossovers.",
+      "name": {
+        "declick_dehum": "De-Click / De-Hum",
+        "pitch_correction": "Pitch Correction",
+        "exciter": "Exciter",
+        "subharmonic": "Subharmonic Generator",
+        "doubler": "Doubler / Harmonizer",
+        "clip_editor": "Audio Clip Editor"
+      },
+      "ok": "OK",
+      "cancel": "Cancel",
+      "apply": "Apply",
+      "current_settings": "Current settings"
     }
   }
 }

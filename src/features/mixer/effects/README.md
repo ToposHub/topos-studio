@@ -1,19 +1,11 @@
-# Mixer parameter-panel UI catalog
+# Mixer effect panels
 
-These 24 panels were supplied by the user in `Topos test` and copied into this feature with safe ASCII module names. `source_manifest.json` records original filenames, class names and source SHA-256 values. The files under `panels/` retain the supplied implementation and naming conventions; new adapters around them use typed APIs. Their `if __name__ == '__main__'` blocks are never executed by the catalog.
+The 24 designs from `Topos test` are tracked in [the source manifest](source_manifest.json). [The panel schemas](parameter_schemas.json) describe the designs' state snapshots. Production processing and serialization continue to use the Edit effect registry and the existing project parameter types.
 
-All entries have UI version `1.0.0-ui`, `backend_status=not_connected`, `supports_preview=False`, and `supports_export=False`. No production audio effect, DSP, project persistence or export capability is registered. `parameter_schemas.json` describes the parameter snapshots accepted by these panel UIs; it is not a promise that a DSP backend supports those values.
+`ProductionEffectDialog` hosts the designs for existing Clip, Track, Bus and Master effects, including grouped Dynamics and the track Spatial Panner. Controls in the design cards read and write the production model through the bindings. The window uses the panel layout's minimum size so the controls remain visible during resizing. Apply and OK submit through the existing timeline or mixer commands, and Cancel restores the last committed processing. Project metadata travels with the parameter snapshot. The handoff lists the processors and features that still need implementation. [Classic mappings](classic_bindings.py) · [Rack mappings](rack_bindings.py) · [Backend handoff](../../../../docs/plans/2026-11-21-audio-effect-panels-backend-handoff.md)
 
-The window wrapper explicitly labels its state as UI-only and stops the source panels' demonstration timers. It caches each hidden panel under `(owner_id, instance_id)`, preserving all A/B banks and clip-editor UI details across close/reopen without claiming that those UI-only details have been serialized into a Topos project. `pause_all()` hides windows when leaving the mixer page; `dispose_all()` releases them on shutdown. Removing a rack instance releases its cached window.
+The project Mixer library opens the Clip Editor through its timeline selection and lists five panels awaiting production processing. These panels use `EffectWindowManager` to cache session state across close and reopen. They use the design catalog, which describes UI availability. The production registry controls insertion, preview and export.
 
-```python
-manager = EffectWindowManager(page)
-rack = EffectRackWidget(manager)
-rack.set_owner('track-1', '对白 DX', [], scope='track')
-instance = rack.insert_effect('eq')
-manager.open(instance, '对白 DX')
-# On page leave: manager.pause_all()
-# On page disposal: manager.dispose_all()
-```
+Dropdowns reuse the application's `ChevronComboBox` and its shared popup, including the icon-bearing filter and shaper selectors. Numeric editors reuse the application input styles. The supplied design graphics, knobs and value pills fit into compact rows according to the controls available in each panel. Demonstration meter timers are stopped in hosted panels.
 
-Browser double-click and its insert button both emit `effectChosen(effect_id)`. The browser can be scoped with `set_scope('clip'|'track'|'bus'|'master')`. Audio Clip Editor is only listed for clip owners. Rack `changed(owner_id, instances)` is a local UI-state notification; the containing page must not use it to mutate production engine state during this UI-only milestone.
+The standalone Mixer UI session also uses the design catalog. Its `EffectBrowserWidget` is owner-scoped and emits `effectChosen(effect_id)`; its rack edits session state.

@@ -6,7 +6,7 @@ import copy
 import time
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与默认参数配置（与 Dynamics-UI / Panner-UI 完全统一）
@@ -1052,7 +1053,7 @@ class RateSyncCard(QFrame):
         div_lbl.setStyleSheet("color: #9AA0B0; font-size: 10px; font-weight: 600;")
         sync_col.addWidget(div_lbl)
 
-        self.div_combo = QComboBox()
+        self.div_combo = ChevronComboBox()
         self.div_combo.setFixedHeight(23)
         self.div_combo.addItems([d[0] for d in SYNC_DIVISIONS])
         self.div_combo.currentTextChanged.connect(self._on_div_changed)
@@ -1809,7 +1810,7 @@ class StudioTremoloAutoPanWidget(QWidget):
         add_btn.clicked.connect(self._save_new_preset)
         tb.addWidget(add_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)

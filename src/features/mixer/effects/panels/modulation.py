@@ -5,13 +5,16 @@ import math
 import copy
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
+
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
 # =====================================================================
@@ -687,6 +690,7 @@ class ProModulationVisualizerWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_mod_demo()
+        self._processor_controls = False
         self._focused_module = "chorus"  # "chorus" | "flanger" | "phaser"
         self._show_comb_curve = True
         self._show_stereo_lfo = True
@@ -954,13 +958,14 @@ class ProModulationVisualizerWidget(QWidget):
             p.setPen(QPen(QColor(242, 109, 109, 125), 1.3, Qt.PenStyle.DashLine))
             p.drawPath(path_r)
 
-            p.setFont(QFont(MONO_FONT_FAM, 7))
-            p.setPen(QColor(175, 182, 198, 120))
-            p.drawText(
-                QRectF(plot.left() + 8, plot.bottom() - 16, 240, 14),
-                Qt.AlignmentFlag.AlignLeft,
-                f"STEREO LFO PHASE Δ: {int(round(self._phase_spread_deg))}°  (L=CYAN / R=CORAL)",
-            )
+            if not self._processor_controls:
+                p.setFont(QFont(MONO_FONT_FAM, 7))
+                p.setPen(QColor(175, 182, 198, 120))
+                p.drawText(
+                    QRectF(plot.left() + 8, plot.bottom() - 16, 240, 14),
+                    Qt.AlignmentFlag.AlignLeft,
+                    f"STEREO LFO PHASE Δ: {int(round(self._phase_spread_deg))}°  (L=CYAN / R=CORAL)",
+                )
 
         # 5. 梳状滤波 / 全通移相动态频响扫频曲线
         if self._show_comb_curve and len(self._freqs) > 1:
@@ -1075,23 +1080,18 @@ class ProModulationVisualizerWidget(QWidget):
         # 8. 左上角实时调制遥测 HUD
         fmod = st[self._focused_module]
         mod_title = self._focused_module.upper()
-        if self._focused_module == "phaser":
-            extra = f"Stages {st['phaser']['stages']}  •  FB {format_signed_pct(st['phaser']['feedback'])}"
-        elif self._focused_module == "flanger":
-            extra = f"FB {format_signed_pct(st['flanger']['feedback'])}  •  Man {format_ms(st['flanger']['manual_ms'])}"
-        else:
-            extra = f"Delay {format_ms(st['chorus']['delay_ms'])}  •  {st['chorus']['voicing']}"
-
-        hud_str = (
-            f"[{mod_title}]  Rate {format_hz(fmod['rate'])}  •  Depth {int(fmod['depth'])}%  •  "
-            f"{extra}  •  Spread {int(fmod['spread'])}%"
-        )
-        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, 435, 19)
+        hud_str = f"Rate {format_hz(fmod['rate'])}  •  Depth {int(fmod['depth'])}%"
+        if not self._processor_controls:
+            hud_str = f"{mod_title}  •  {hud_str}  •  Spread {int(fmod['spread'])}%"
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        available = max(0.0, self._btn_comb_rect.left() - plot.left() - 16)
+        hud_width = min(p.fontMetrics().horizontalAdvance(hud_str) + 12, available)
+        hud_str = p.fontMetrics().elidedText(hud_str, Qt.TextElideMode.ElideRight, int(hud_width) - 10)
+        hud_rect = QRectF(plot.left() + 8, plot.top() + 8, hud_width, 19)
         p.setPen(QPen(QColor("#141416"), 1.0))
         p.setBrush(QColor(21, 21, 24, 215))
         p.drawRoundedRect(hud_rect, 3.5, 3.5)
         p.setPen(focus_col if enabled else QColor("#8A8A92"))
-        p.setFont(QFont(MONO_FONT_FAM, 8))
         p.drawText(hud_rect, Qt.AlignmentFlag.AlignCenter, hud_str)
 
         p.restore()
@@ -1143,6 +1143,7 @@ class KnobParameterCell(QWidget):
         hints_row = QHBoxLayout()
         hints_row.setContentsMargins(2, 0, 2, 0)
         hints_row.setSpacing(2)
+        self._hints: list[QLabel] = []
         for h_text, align in (
             (min_hint, Qt.AlignmentFlag.AlignLeft),
             (mid_hint, Qt.AlignmentFlag.AlignCenter),
@@ -1151,12 +1152,22 @@ class KnobParameterCell(QWidget):
             hl = QLabel(h_text)
             hl.setAlignment(align)
             hl.setStyleSheet("color: #787882; font-size: 9px;")
+            self._hints.append(hl)
             hints_row.addWidget(hl, 1)
         lay.addLayout(hints_row)
 
         self.pill = EditableValuePill(formatter(default_val), accent_color, width=pill_width)
         self.pill.valueEdited.connect(self._on_pill_edited)
         lay.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def set_control_range(self, minimum: float, maximum: float, left: str, right: str) -> None:
+        self._min = minimum
+        self._max = maximum
+        self.knob._min = minimum
+        self.knob._max = maximum
+        self._hints[0].setText(left)
+        self._hints[2].setText(right)
+        self.setValue(self._val)
 
     def setValue(self, val: float):
         self._updating = True
@@ -1187,7 +1198,24 @@ class KnobParameterCell(QWidget):
 # =====================================================================
 # 9. 模块卡片 1：Chorus Card（吉他/合成器加厚 & 人声 Doubles · Arturia / Dimension 灵感）
 # =====================================================================
-class ChorusModuleCard(QFrame):
+class _ModulationVoicesCard(QFrame):
+    def _add_voices(self, accent: str) -> None:
+        voices = KnobParameterCell(
+            I18N.tr("audio.fx.voices", "Voices"), 1.0, 4.0, 2.0, accent, "1", "", "4",
+            lambda v: str(round(v)), parse_numeric,
+        )
+        voices.valueChanged.connect(lambda v: self._set_field("voices", round(v)))
+        self._voices_row.addWidget(voices, 1)
+        self.c_voices = voices
+
+    def _sync_processor_voices(self, enabled: bool) -> None:
+        voices = getattr(self, "c_voices", None)
+        if voices is not None:
+            voices.setValue(self._data.get("voices", 2))
+            voices.setModuleActive(enabled)
+
+
+class ChorusModuleCard(_ModulationVoicesCard):
     changed = pyqtSignal(dict)
     selected = pyqtSignal(str)
 
@@ -1226,6 +1254,7 @@ class ChorusModuleCard(QFrame):
         seg_lay.setSpacing(2)
 
         self.voicing_btns: dict[str, QPushButton] = {}
+        self.voicing_selector = seg_wrap
         for v_name in ("Analog", "Dim-D", "Dual"):
             btn = QPushButton(v_name)
             btn.setCheckable(True)
@@ -1293,6 +1322,8 @@ class ChorusModuleCard(QFrame):
         self.c_spread.valueChanged.connect(lambda v: self._set_field("spread", round(v, 0)))
         self.c_delay.valueChanged.connect(lambda v: self._set_field("delay_ms", round(v, 1)))
         self.c_tone.valueChanged.connect(lambda v: self._set_field("tone", round(v, 0)))
+        self._voices_row = row1
+        self._chorus_mix_row = row2
         self.c_mix.valueChanged.connect(lambda v: self._set_field("mix", round(v, 0)))
 
         self.syncFromData(self._data)
@@ -1366,6 +1397,11 @@ class ChorusModuleCard(QFrame):
         self.c_spread.setValue(self._data["spread"])
         self.c_delay.setValue(self._data["delay_ms"])
         self.c_tone.setValue(self._data["tone"])
+        self._sync_processor_voices(en)
+        feedback = getattr(self, "c_processor_feedback", None)
+        if feedback is not None:
+            feedback.setValue(self._data.get("feedback", 0.0))
+            feedback.setModuleActive(en)
         self.c_mix.setValue(self._data["mix"])
 
         for cell in (self.c_rate, self.c_depth, self.c_spread, self.c_delay, self.c_tone, self.c_mix):
@@ -1398,7 +1434,7 @@ class ChorusModuleCard(QFrame):
 # =====================================================================
 # 10. 模块卡片 2：Flanger Card（质感运动 / MXR M117R & NI Flair 灵感）
 # =====================================================================
-class FlangerModuleCard(QFrame):
+class FlangerModuleCard(_ModulationVoicesCard):
     changed = pyqtSignal(dict)
     selected = pyqtSignal(str)
 
@@ -1438,6 +1474,7 @@ class FlangerModuleCard(QFrame):
 
         self.btn_classic = QPushButton("Classic")
         self.btn_thru0 = QPushButton("Thru-0")
+        self.mode_selector = seg_wrap
         for b in (self.btn_classic, self.btn_thru0):
             b.setCheckable(True)
             b.setFixedSize(48, 19)
@@ -1503,6 +1540,7 @@ class FlangerModuleCard(QFrame):
         self.c_depth.valueChanged.connect(lambda v: self._set_field("depth", round(v, 0)))
         self.c_feedback.valueChanged.connect(lambda v: self._set_field("feedback", round(v, 0)))
         self.c_manual.valueChanged.connect(lambda v: self._set_field("manual_ms", round(v, 1)))
+        self._voices_row = row2
         self.c_spread.valueChanged.connect(lambda v: self._set_field("spread", round(v, 0)))
         self.c_mix.valueChanged.connect(lambda v: self._set_field("mix", round(v, 0)))
 
@@ -1576,6 +1614,7 @@ class FlangerModuleCard(QFrame):
         self.c_depth.setValue(self._data["depth"])
         self.c_feedback.setValue(self._data["feedback"])
         self.c_manual.setValue(self._data["manual_ms"])
+        self._sync_processor_voices(en)
         self.c_spread.setValue(self._data["spread"])
         self.c_mix.setValue(self._data["mix"])
 
@@ -1662,6 +1701,7 @@ class PhaserModuleCard(QFrame):
             self.stage_btns[stg] = btn
 
         h_lay.addWidget(seg_wrap)
+        self._stage_selector = seg_lay
         root.addWidget(header)
 
         # Body (2x3 旋钮矩阵)
@@ -1842,6 +1882,7 @@ class StudioModulationTrioWidget(QWidget):
     """
     bypassChanged = pyqtSignal(bool)
     modeChanged = pyqtSignal(str)
+    processorModeChanged = pyqtSignal(str)
     routingChanged = pyqtSignal(str)
     chorusChanged = pyqtSignal(dict)
     flangerChanged = pyqtSignal(dict)
@@ -1856,6 +1897,8 @@ class StudioModulationTrioWidget(QWidget):
         self.resize(1040, 700)
         self.setMinimumSize(940, 620)
 
+        self._processor_effect = ""
+        self._processor_mode = "chorus"
         self._active_bank = "A"
         self._focused_module = "chorus"
         self._banks = {
@@ -2064,7 +2107,7 @@ class StudioModulationTrioWidget(QWidget):
         del_preset_btn.clicked.connect(self._delete_current_preset)
         tb_lay.addWidget(del_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(210)
         self._builtin_preset_names = set(self._presets.keys())
         self.preset_combo.addItems(list(self._presets.keys()))
@@ -2259,6 +2302,87 @@ class StudioModulationTrioWidget(QWidget):
 
         main_lay.addLayout(cards_row, 4)
 
+    def use_processor_controls(self, effect_type: str) -> None:
+        self._processor_effect = effect_type
+        self.mod_visualizer._processor_controls = True
+        self.out_fader.setEnabled(False)
+        self.routing_btn.hide()
+        self.audition_btn.hide()
+        self.mode_btns["Rack"].hide()
+        supported_modes = ("Phaser",) if effect_type == "phaser" else ("Chorus", "Flanger")
+        for mode in ("Chorus", "Flanger", "Phaser"):
+            card = getattr(self, f"{mode.lower()}_card")
+            self.mode_btns[mode].setVisible(mode in supported_modes)
+            card.power_sw.hide()
+            card.c_spread.hide()
+            card.c_rate.set_control_range(0.01, 20.0, "0.01", "20.0")
+            card.c_depth.setToolTip("Controls modulation sweep depth")
+        for card in (self.flanger_card, self.phaser_card):
+            card.c_feedback.set_control_range(0.0, 95.0, "0%", "95%")
+        self.chorus_card.c_delay.set_control_range(0.5, 40.0, "0.5", "40.0")
+        self.flanger_card.c_manual.set_control_range(0.5, 40.0, "0.5", "40.0")
+        if effect_type == "phaser":
+            self._processor_mode = "phaser"
+            self.phaser_card.c_depth.setToolTip("Sweep width from 0.5 to 5 octaves")
+            self._configure_phaser_stages()
+            card = self.phaser_card
+            self._compact_card(card, (card.c_rate, card.c_depth, card.c_center,
+                                      card.c_feedback, card.c_mix))
+        else:
+            self.chorus_card.voicing_selector.hide()
+            self.flanger_card.mode_selector.hide()
+            for card in (self.chorus_card, self.flanger_card):
+                card.c_depth.setToolTip("Delay modulation depth from 0 to 10 ms")
+            self.chorus_card.c_tone.hide()
+            self.chorus_card._add_voices(COLORS["chorus"])
+            self.flanger_card._add_voices(COLORS["flanger"])
+            feedback = KnobParameterCell(
+                I18N.tr("audio.fx.feedback", "Feedback"), 0.0, 95.0, 0.0, COLORS["chorus"],
+                "0", "%", "95", format_pct, parse_numeric,
+            )
+            feedback.valueChanged.connect(self._on_chorus_feedback)
+            self.chorus_card._chorus_mix_row.addWidget(feedback, 1)
+            self.chorus_card.c_processor_feedback = feedback
+            chorus = self.chorus_card
+            self._compact_card(chorus, (chorus.c_rate, chorus.c_depth, chorus.c_delay,
+                                        chorus.c_voices, feedback, chorus.c_mix))
+            flanger = self.flanger_card
+            self._compact_card(flanger, (flanger.c_rate, flanger.c_depth, flanger.c_manual,
+                                         flanger.c_voices, flanger.c_feedback, flanger.c_mix))
+        self._refresh_all_views()
+
+    def _compact_card(
+        self, card: ChorusModuleCard | FlangerModuleCard | PhaserModuleCard,
+        controls: tuple[KnobParameterCell, ...],
+    ) -> None:
+        body = card.c_rate.parentWidget().layout()
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addStretch()
+        for control in controls:
+            control.setMaximumWidth(98)
+            row.addWidget(control, 1)
+        row.addStretch()
+        previous_rows = [body.itemAt(i).layout() for i in range(body.count())]
+        for previous in previous_rows:
+            body.removeItem(previous)
+        body.addLayout(row)
+
+    def _configure_phaser_stages(self) -> None:
+        card = self.phaser_card
+        for stage in (6, 8):
+            card.stage_btns.pop(stage).hide()
+        for stage in (1, 3):
+            button = QPushButton(str(stage), card)
+            button.setCheckable(True)
+            button.setFixedSize(22, 19)
+            button.clicked.connect(lambda checked=False, value=stage: card._on_stage(value))
+            card.stage_btns[stage] = button
+            card._stage_selector.insertWidget(stage - 1, button)
+
+    def _on_chorus_feedback(self, feedback: float) -> None:
+        self.chorus_card._set_field("feedback", round(feedback, 1))
+
     def _build_meter_column(self, header_text: str) -> QVBoxLayout:
         col = QVBoxLayout()
         col.setSpacing(4)
@@ -2347,6 +2471,10 @@ class StudioModulationTrioWidget(QWidget):
 
     def _select_quick_mode(self, mode_name: str):
         """一键切换三模式（Chorus / Flanger / Phaser 单模式聚焦，或 Rack 多模块叠加）"""
+        if self._processor_effect:
+            if self._processor_effect == "chorus_flanger" and mode_name in ("Chorus", "Flanger"):
+                self.processorModeChanged.emit(mode_name.lower())
+            return
         st = self._current_state()
         if mode_name == "Chorus":
             st["chorus"]["enabled"] = True
@@ -2387,6 +2515,13 @@ class StudioModulationTrioWidget(QWidget):
                 if st[k]["enabled"]:
                     self._focused_module = k
                     break
+
+        if self._processor_effect:
+            active = self._processor_mode
+            for key in ("chorus", "flanger", "phaser"):
+                st[key]["enabled"] = key == active
+                getattr(self, f"{key}_card").setVisible(key == active)
+            self._focused_module = active
 
         self._update_top_bar_styles()
         self.power_switch.setChecked(st["enabled"])
@@ -2475,6 +2610,8 @@ class StudioModulationTrioWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_canvas_spread_scrolled(self, mod_key: str, spread_pct: float):
+        if self._processor_effect:
+            return
         st = self._current_state()
         mod = st[mod_key]
         mod["spread"] = spread_pct
@@ -2624,9 +2761,15 @@ class StudioModulationTrioWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def get_state(self) -> dict:
-        return copy.deepcopy(self._current_state())
+        state = copy.deepcopy(self._current_state())
+        state["chorus"].setdefault("voices", 2)
+        state["chorus"].setdefault("feedback", 0.0)
+        state["flanger"].setdefault("voices", 2)
+        return state
 
     def set_state(self, state: dict):
+        if self._processor_effect == "chorus_flanger":
+            self._processor_mode = "flanger" if state["flanger"]["enabled"] else "chorus"
         self._banks[self._active_bank] = copy.deepcopy(state)
         self._refresh_all_views()
 

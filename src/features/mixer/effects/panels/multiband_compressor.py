@@ -6,14 +6,15 @@ import copy
 import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QFrame, QLineEdit, QInputDialog
+    QPushButton, QFrame, QLineEdit, QInputDialog
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QSignalBlocker
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont
 )
 
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
 # 1. 全局色彩系统与默认参数配置（与 Dyamics-UI.py 保持同一视觉规范）
@@ -669,6 +670,7 @@ class ProMultibandGraphWidget(QWidget):
         self._state = default_multiband_demo()
         self._selected_band = 0
         self._band_grs = [0.0, 0.0, 0.0, 0.0]
+        self._show_audition_controls = True
 
         # 实时 FFT 频谱数据 (64 频点, -60 ~ 0 dBFS)
         self._spectrum_freqs = [20.0 * ((20000.0 / 20.0) ** (i / 63.0)) for i in range(64)]
@@ -693,6 +695,10 @@ class ProMultibandGraphWidget(QWidget):
     def setState(self, state: dict):
         self._state = state
         self.update()
+
+    def use_processor_controls(self) -> None:
+        self._show_audition_controls = False
+        self._spectrum_dbs = []
 
     def setSelectedBand(self, idx: int):
         if self._selected_band != idx:
@@ -978,6 +984,7 @@ class ProMultibandGraphWidget(QWidget):
                 p.setPen(col if is_audible else QColor("#666670"))
                 p.drawText(QRectF(x1 + 6, plot.top() + 5, 42, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"B{i + 1}")
 
+            if self._show_audition_controls and band_w >= 54.0:
                 # Mute 按钮
                 m_rect = QRectF(x2 - 21.0, plot.top() + 5.0, 16.0, 15.0)
                 s_rect = QRectF(x2 - 40.0, plot.top() + 5.0, 16.0, 15.0)
@@ -1099,6 +1106,7 @@ class KnobParameterCell(QWidget):
         hints_row = QHBoxLayout()
         hints_row.setContentsMargins(2, 0, 2, 0)
         hints_row.setSpacing(1)
+        self._range_labels: list[QLabel] = []
         for h_text, align in (
             (min_hint, Qt.AlignmentFlag.AlignLeft),
             (mid_hint, Qt.AlignmentFlag.AlignCenter),
@@ -1108,6 +1116,7 @@ class KnobParameterCell(QWidget):
             hl.setAlignment(align)
             hl.setStyleSheet("color: #787882; font-size: 8.5px;")
             hints_row.addWidget(hl, 1)
+            self._range_labels.append(hl)
         lay.addLayout(hints_row)
 
         self.pill = EditableValuePill(formatter(default_val), accent_color, width=pill_width)
@@ -1120,6 +1129,13 @@ class KnobParameterCell(QWidget):
         self.knob.setValue(self._val)
         self.pill.setText(self._formatter(self._val))
         self._updating = False
+
+    def setRange(self, minimum: float, maximum: float, min_hint: str, max_hint: str) -> None:
+        self._min = self.knob._min = minimum
+        self._max = self.knob._max = maximum
+        self._range_labels[0].setText(min_hint)
+        self._range_labels[-1].setText(max_hint)
+        self.setValue(self._val)
 
     def setModuleActive(self, active: bool):
         self.title_lbl.setStyleSheet(f"color: {'#9A9AA2' if active else '#6E6E76'}; font-size: 10px; font-weight: 600;")
@@ -1426,6 +1442,7 @@ class StudioMultibandCompWidget(QWidget):
 
         self._active_bank = "A"
         self._selected_band = 0
+        self._processor_controls = False
         self._banks = {
             "A": default_multiband_demo(),
             "B": default_multiband_flat(),
@@ -1583,7 +1600,7 @@ class StudioMultibandCompWidget(QWidget):
         add_preset_btn.clicked.connect(self._save_new_preset)
         tb_lay.addWidget(add_preset_btn)
 
-        self.preset_combo = QComboBox()
+        self.preset_combo = ChevronComboBox()
         self.preset_combo.setFixedWidth(185)
         self.preset_combo.addItems(list(self._presets.keys()))
         self.preset_combo.currentTextChanged.connect(self._load_preset)
@@ -1630,14 +1647,14 @@ class StudioMultibandCompWidget(QWidget):
         phase_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         tb_lay.addWidget(phase_lbl)
 
-        self.phase_combo = QComboBox()
+        self.phase_combo = ChevronComboBox()
         self.phase_combo.setFixedWidth(104)
         self.phase_combo.addItems(["Min Phase", "Linear Phase"])
         self.phase_combo.setToolTip("选择分频网络相位模式：最小相位（零延迟）或线性相位（消除段间相位失真）")
         self.phase_combo.currentTextChanged.connect(self._on_phase_changed)
         tb_lay.addWidget(self.phase_combo)
 
-        self.slope_combo = QComboBox()
+        self.slope_combo = ChevronComboBox()
         self.slope_combo.setFixedWidth(82)
         self.slope_combo.addItems(["12 dB/oct", "24 dB/oct", "48 dB/oct"])
         self.slope_combo.setToolTip("分频滤波器滚降斜率")
@@ -1647,6 +1664,8 @@ class StudioMultibandCompWidget(QWidget):
         self.latency_badge = QLabel("FIR · 23.2 ms")
         self.latency_badge.setStyleSheet(f"color: #28D8F0; font-family: {MONO_FONT_CSS}; font-size: 9.5px; font-weight: 600;")
         tb_lay.addWidget(self.latency_badge)
+        self._design_toolbar_controls = (bands_lbl, bc_wrap, phase_lbl, self.phase_combo, self.slope_combo,
+                                         self.latency_badge)
 
         tb_lay.addStretch()
 
@@ -1738,7 +1757,8 @@ class StudioMultibandCompWidget(QWidget):
         self.meter_output = ProVerticalMeter(mode="level", show_ticks=True)
         out_col.addWidget(self.meter_output, 1, Qt.AlignmentFlag.AlignHCenter)
         up_lay.addLayout(out_col)
-        up_lay.addWidget(_vsep())
+        gain_separator = _vsep()
+        up_lay.addWidget(gain_separator)
 
         # 2.5 Output 增益推子
         og_col = self._build_meter_column("Out Gain")
@@ -1746,6 +1766,7 @@ class StudioMultibandCompWidget(QWidget):
         self.out_fader.gainChanged.connect(self._on_output_gain_changed)
         og_col.addWidget(self.out_fader, 1, Qt.AlignmentFlag.AlignHCenter)
         up_lay.addLayout(og_col)
+        self._design_output_controls = (gain_separator, og_col.itemAt(0).widget(), self.out_fader)
 
         main_lay.addWidget(upper_panel, 5)
 
@@ -1784,6 +1805,24 @@ class StudioMultibandCompWidget(QWidget):
     # -----------------------------------------------------------------
     def _current_state(self) -> dict:
         return self._banks[self._active_bank]
+
+    def use_processor_controls(self) -> None:
+        self._processor_controls = True
+        self.mb_graph.use_processor_controls()
+        for control in (*self._design_toolbar_controls, *self._design_output_controls):
+            control.hide()
+        self._presets = {name: state for name, state in self._presets.items() if state["band_count"] == 3}
+        with QSignalBlocker(self.preset_combo):
+            self.preset_combo.clear()
+            self.preset_combo.addItems(list(self._presets))
+        for card in self.band_cards[:3]:
+            card.btn_solo.hide()
+            card.btn_mute.hide()
+            card.c_ratio.setRange(1.2, 20.0, "1.2:1", "20:1")
+            card.c_attack.setRange(0.7, 1000.0, "0.7", "1000")
+            card.c_release.setRange(50.0, 5000.0, "50", "5000")
+            card.c_makeup.setRange(0.0, 24.0, "0", "+24")
+        self._refresh_all_views()
 
     def _update_top_bar_styles(self):
         st = self._current_state()
@@ -1847,6 +1886,8 @@ class StudioMultibandCompWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
+        if self._processor_controls:
+            st["band_count"] = 3
         cnt = st["band_count"]
         xovers = st["crossovers"]
 
@@ -1961,6 +2002,8 @@ class StudioMultibandCompWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_solo_toggled(self, idx: int):
+        if self._processor_controls:
+            return
         st = self._current_state()
         st["bands"][idx]["solo"] = not st["bands"][idx]["solo"]
         self._refresh_all_views()
@@ -1969,6 +2012,8 @@ class StudioMultibandCompWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_mute_toggled(self, idx: int):
+        if self._processor_controls:
+            return
         st = self._current_state()
         st["bands"][idx]["mute"] = not st["bands"][idx]["mute"]
         self._refresh_all_views()
