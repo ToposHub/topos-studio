@@ -24,8 +24,14 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from dataclasses import replace
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
+
+if TYPE_CHECKING:
+    from .graph_edit import GraphEditCommand, GraphEditResult
+    from .layer_time import LayerTiming, LayerTimePlan
+    from .media_drop_payload import MediaDropPayload
+    from .psd_import import PsdDocumentManifest
 
 try:
     from PyQt6.QtCore import QObject, pyqtSignal
@@ -49,13 +55,15 @@ from .layer_model import (
     LAYER_BLEND_MODES,
     LAYER_MERGE_OWNER_PARAM,
     LAYER_TYPE_PRECOMP,
+    LAYER_TYPE_AUDIO,
     LAYER_TYPE_SHAPE,
     LAYER_TYPE_SOLID,
     LAYER_TYPE_TEXT,
     LAYER_TYPE_3D,
     TRACK_MATTE_MODES,
 )
-from .composite_markers import DEFAULT_MARKER_COLOR
+from .composite_markers import CompositeMarker, DEFAULT_MARKER_COLOR
+from .comp_audio import LayerAudio
 from .layer_stack_compiler import (
     LayerStackCompiler, CompileChange, CompileResult,
     MERGE_NODE_TYPE, MERGE_PORT_FOREGROUND, MERGE_PORT_BACKGROUND,
@@ -87,6 +95,14 @@ ACTION_ADD_PRECOMP = "layer_add_precomp"
 ACTION_SET_LAYER_TRACK_MATTE = "layer_set_track_matte"
 ACTION_ATTACH_NODE_TO_LAYER = "layer_attach_node"
 ACTION_PROMOTE_NODE_TO_LAYER = "layer_promote_node"
+
+
+@dataclass(frozen=True)
+class WiredLayerEffect:
+    stack_id: str
+    layer: Layer
+    changes: tuple[CompileChange, ...]
+    previous_parent_owner: Layer | None
 
 
 class LayerStackController(QObject if _HAVE_QT else object):
@@ -176,6 +192,13 @@ class LayerStackController(QObject if _HAVE_QT else object):
     def layers_map(self) -> Dict[str, Layer]:
         """Return ``layer_id -> Layer`` for the current stacks."""
         return {l.layer_id: l for l in self.graph.get_all_layers()}
+
+    def managed_layer_destination_ids(self) -> set[str]:
+        """Return destinations whose input wiring belongs to the layer compiler."""
+        return {
+            node_id for stack in self.stacks().values() if stack.managed and stack.layer_ids
+            for node_id in (*stack.generated_merge_node_ids, stack.output_node_id)
+        }
 
     def layer_merge_node(self, layer_id: str) -> Optional[Any]:
         stack = self._stack_for_layer(layer_id)
@@ -271,33 +294,27 @@ class LayerStackController(QObject if _HAVE_QT else object):
 
     def _resolve_layer_transform(
             self, layer: Layer,
-            chain: List[str]) -> tuple[Optional[str], bool, bool]:
+            chain: List[str], *, backfill: bool = True) -> tuple[Optional[str], bool, bool]:
         """Return ``(transform_id, missing, ambiguous)`` for one layer.
 
-        Registered references win; the legacy chain-head convention and the
-        unique-candidate backfill only run when no role is registered.  A
-        backfilled unique candidate is written back as the stable reference.
+        Registered references win. Legacy layers can backfill the role only
+        when their image chain contains a unique candidate.
         """
         registered = getattr(layer, "transform_node_id", None)
         if registered:
             node = self.graph.get_node(registered)
-            if node is not None and node.node_type == "transform":
+            if node is not None and node.node_type == "transform" and registered in chain:
                 return registered, False, False
             # Registered but detached: identifiable, repairable missing state.
             return None, True, False
 
-        root = self.graph.get_node(layer.root_node_id) \
-            if layer.root_node_id else None
-        if root is not None and root.node_type == "transform":
-            self._register_layer_transform(layer, root.id)
-            return root.id, False, False
-
         transform_ids = frozenset(
-            node_id for node_id, node in self.graph.nodes.items()
-            if getattr(node, "node_type", "") == "transform")
+            node_id for node_id in chain
+            if getattr(self.graph.get_node(node_id), "node_type", "") == "transform")
         candidate = choose_legacy_transform(tuple(chain), transform_ids)
         if candidate is not None:
-            self._register_layer_transform(layer, candidate)
+            if backfill:
+                self._register_layer_transform(layer, candidate)
             return candidate, False, False
         ambiguous = any(node_id in transform_ids for node_id in chain)
         return None, False, ambiguous
@@ -450,10 +467,13 @@ class LayerStackController(QObject if _HAVE_QT else object):
         result: List[str] = []
         has_solo = any(layer.enabled and layer.solo and layer.managed
                        for layer in self.layers_map().values()
-                       if layer.layer_id in stack.layer_ids)
+                       if layer.layer_id in stack.layer_ids and layer.layer_type != LAYER_TYPE_AUDIO)
         for layer_id in stack.layer_ids:
             layer = self.graph.get_layer(layer_id)
             if layer is None:
+                continue
+            if layer.layer_type == LAYER_TYPE_AUDIO:
+                result.append(layer_id)
                 continue
             root_id = layer.root_node_id
             hidden_by_switch = (stack.managed and layer.managed
@@ -634,7 +654,11 @@ class LayerStackController(QObject if _HAVE_QT else object):
                         _before_snapshot: Optional[Dict[str, Any]] = None,
                         _force_transform: bool = False,
                         _rollback_conflict: bool = False,
-                        stack_id: Optional[str] = None) -> str:
+                        stack_id: Optional[str] = None,
+                        enabled: bool = True,
+                        audio: LayerAudio | None = None,
+                        out_frame: int | None = None,
+                        _stage_only: bool = False) -> str:
         """High-level media-drop entry point.
 
         Creates a Layer whose root is ``root_node_id`` (or auto-wraps the
@@ -652,8 +676,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
             raise ValueError("Layer opacity must be a finite number.") from None
         if not math.isfinite(opacity) or not 0.0 <= opacity <= 1.0:
             raise ValueError("Layer opacity must be within [0, 1].")
-        before = _before_snapshot if _before_snapshot is not None \
-            else self._snapshot()
+        before = _before_snapshot if _before_snapshot is not None else (
+            {} if _stage_only else self._snapshot())
         created_node_ids: List[str] = []
 
         source_node = self.graph.get_node(source_node_id)
@@ -707,8 +731,11 @@ class LayerStackController(QObject if _HAVE_QT else object):
             source_node_id=source_node_id,
             transform_node_id=auto_transform.id if auto_transform is not None else None,
             layer_type=layer_type,
+            audio=audio,
+            out_frame=out_frame,
             blend_mode=blend_mode,
             opacity=opacity,
+            enabled=enabled,
         )
         stack.layer_ids.insert(insert_index, layer_id)
         if not self.graph.upsert_layer(stack.stack_id, layer):
@@ -718,6 +745,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
                     self.graph.remove_node(nid)
             raise ValueError(f"Unable to register layer {layer_id!r}.")
 
+        if _stage_only:
+            return layer_id
         result = self._recompile(stack)
         if result.conflict and (_rollback_conflict or stack.version >= BOTTOM_UP_LAYER_STACK_VERSION):
             if _before_snapshot is None:
@@ -1064,7 +1093,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if stack is not None and not stack.managed:
             raise ValueError("The composition output is owned by a free node graph.")
         before = self._snapshot()
-        node_type = str(getattr(payload, "node_type", "image_input"))
+        from .media_drop_payload import MEDIA_TYPE_AUDIO
+
+        audio_only = getattr(payload, "media_type", "") == MEDIA_TYPE_AUDIO
+        node_type = "audio_source" if audio_only else str(getattr(payload, "node_type", "image_input"))
         node = self._create_node(node_type, self._new_node_id(node_type))
         if node is None:
             raise ValueError(f"Unable to create media node {node_type!r}.")
@@ -1083,17 +1115,117 @@ class LayerStackController(QObject if _HAVE_QT else object):
             for key, value in values.items():
                 if value is not None and key in getattr(node, "parameters", {}):
                     node.set_parameter(key, value)
+            extras = getattr(payload, "extras", {}) or {}
+            asset_id = str(getattr(payload, "asset_id", ""))
+            stream_index = extras.get("audio_stream_index", -1)
+            audio = (LayerAudio(asset_id, int(stream_index))
+                     if asset_id and (audio_only or node_type == "video_frame") else None)
+            seconds = extras.get("duration_seconds")
+            audio_end = (max(0, math.ceil(seconds * self.graph.fps) - 1)
+                         if audio_only and isinstance(seconds, (int, float))
+                         and math.isfinite(seconds) and seconds > 0 else None)
             return self.add_media_layer(
                 getattr(payload, "display_name", "Media") or "Media",
                 node.id,
-                layer_type="media",
+                layer_type=LAYER_TYPE_AUDIO if audio_only else "media",
                 insert_index=insert_index,
                 description=description or "Add media layer",
                 _before_snapshot=before,
+                audio=audio,
+                out_frame=audio_end,
             )
         except Exception:
             self._restore(before)
             raise
+
+    def stage_psd_layers(self, payload: MediaDropPayload, manifest: PsdDocumentManifest,
+                         insert_index: int) -> int:
+        """Build a layered PSD on the isolated graph used for a media-drop batch."""
+        from .psd_import import (
+            PSD_LAYER_REFERENCE_VERSION, make_psd_layer_reference, plan_psd_import, plan_psd_import_units,
+        )
+        from .layer_styles import STYLE_KIND_COLOR_OVERLAY, STYLE_KIND_DROP_SHADOW, STYLE_KIND_OUTER_GLOW
+        from src.shared.color.color_conversion import srgb_to_linear
+
+        stack = self.ensure_main_stack()
+        if not stack.managed:
+            raise ValueError("The composition output is owned by a free node graph.")
+        planned = plan_psd_import(manifest)
+        legacy_stack = stack.version < BOTTOM_UP_LAYER_STACK_VERSION
+        units = None if legacy_stack else plan_psd_import_units(manifest, planned)
+        if units is None and not manifest.has_merged_image and any(
+                item.entry.has_effects and not item.importable for item in planned):
+            raise ValueError("The PSD has unsupported layer styles and no saved merged preview.")
+        for offset, unit in enumerate(units or (planned,)):
+            entry = unit[0].entry if units and len(unit) == 1 and unit[0].importable else None
+            reasons = [{
+                "layer": item.entry.name, "selector": list(item.entry.selector),
+                "reason": item.merge_reason, "styles": [style.to_dict() for style in item.entry.styles],
+            } for item in unit if not item.importable]
+            if legacy_stack:
+                reasons.append({"reason": "legacy_layer_stack"})
+            if not planned:
+                reasons.append({"reason": "no_editable_layers"})
+            selector = None
+            if entry is not None:
+                selector = make_psd_layer_reference(entry, manifest)
+            elif units:
+                selector = {
+                    "version": PSD_LAYER_REFERENCE_VERSION,
+                    "revision": manifest.revision,
+                    "merged_selectors": [list(item.entry.selector) for item in unit],
+                }
+            node_id = self._new_node_id("image_input")
+            source = self._create_node("image_input", node_id)
+            if source is None:
+                raise ValueError("Unable to create the PSD source node.")
+            for name, value in {
+                "file_path": payload.path, "asset_id": manifest.asset_id,
+                "width": manifest.width, "height": manifest.height,
+                "psd_layer": selector,
+                "psd_import": {
+                    "version": 1, "revision": manifest.revision,
+                    "fallback": reasons,
+                },
+            }.items():
+                source.set_parameter(name, value)
+            self.graph.add_node(source)
+            layer_id = self.add_media_layer(
+                entry.name if entry else (unit[-1].entry.name if units else payload.display_name), node_id,
+                insert_index=insert_index + offset,
+                blend_mode=entry.blend_mode if entry else DEFAULT_BLEND_MODE,
+                opacity=entry.opacity / 255 if entry else 1.0,
+                enabled=entry.visible if entry else True,
+                _stage_only=True,
+            )
+            if entry is None or not entry.styles:
+                continue
+            connection = self._layer_effect_input(layer_id)
+            style_node = self._create_node("layer_style", self._new_node_id("layer_style"))
+            if connection is None or style_node is None:
+                raise ValueError("Unable to attach an editable PSD style.")
+            prefixes = {STYLE_KIND_COLOR_OVERLAY: "overlay", STYLE_KIND_DROP_SHADOW: "shadow",
+                        STYLE_KIND_OUTER_GLOW: "glow"}
+            style_node.set_parameter("overlay_opacity", 0.0)
+            style_node.set_parameter("psd_srgb", True)
+            style_node.set_parameter("psd_styles", [style.to_dict() for style in entry.styles])
+            for style in entry.styles:
+                prefix = prefixes[style.kind]
+                for channel, value in zip("rgb", style.params["color"]):
+                    style_node.set_parameter(f"{prefix}_{channel}", float(srgb_to_linear(value)))
+                for key in ("opacity", "radius", "offset_x", "offset_y", "range"):
+                    if key in style.params:
+                        style_node.set_parameter(f"{prefix}_{key}", style.params[key])
+            self.graph.add_node(style_node)
+            self.graph.disconnect(connection.src_node_id, connection.src_port_name,
+                                  connection.dst_node_id, connection.dst_port_name)
+            if not self.graph.connect(source.id, connection.src_port_name, style_node.id, "image") or not (
+                    self.graph.connect(style_node.id, "result", connection.dst_node_id, "image")):
+                raise ValueError("Unable to connect the editable PSD style.")
+        result = self._recompile(stack)
+        if not result.ok or result.warnings:
+            raise ValueError(result.conflict_reason or "; ".join(result.warnings))
+        return len(units) if units else 1
 
     def add_model3d_payload(self, payload: Any,
                             insert_index: Optional[int] = None,
@@ -1241,25 +1373,36 @@ class LayerStackController(QObject if _HAVE_QT else object):
     def adopt_wired_layer_effect(self, layer_id: str, effect_id: str, output_port: str,
                                  target: tuple[str, str]) -> bool:
         """Promote a wired effect to the layer root after checking the layer projection."""
+        plan = self.prepare_wired_layer_effect(layer_id, effect_id, output_port, target)
+        if plan is None:
+            return False
+        self.commit_wired_layer_effect(plan)
+        return True
+
+    def prepare_wired_layer_effect(self, layer_id: str, effect_id: str, output_port: str,
+                                  target: tuple[str, str]) -> WiredLayerEffect | None:
+        """Validate adoption against the cable candidate without changing the layer."""
         layer = self.graph.get_layer(layer_id)
         stack = self._stack_for_layer(layer_id)
         effect = self.graph.get_node(effect_id)
         if layer is None or layer.locked or stack is None or effect is None:
-            return False
-        if not effect.supports_parent_transform and (
+            return None
+        transform_id, _, _ = self._resolve_layer_transform(
+            layer, self._layer_main_chain(layer), backfill=False)
+        if transform_id is None and not effect.supports_parent_transform and (
                 layer.parent_layer_id or any(other.parent_layer_id == layer_id
                                              for other in self.graph.get_all_layers())):
-            return False
+            return None
         if (stack.version < BOTTOM_UP_LAYER_STACK_VERSION and layer.opacity != 1.0
                 and "opacity" not in effect.parameters and not effect.supports_layer_opacity):
-            return False
+            return None
         dst_id, dst_port = target
         if any(other_id != layer_id for other_id in self.trace_layer_ids_for_node(effect_id)):
-            return False
+            return None
         updated = replace(layer, root_node_id=effect_id,
-                          source_node_id=layer.source_node_id or layer.root_node_id)
-        if effect.node_type == "transform":
-            # B01: adopting a wired Transform claims (or repairs) the role.
+                          source_node_id=layer.source_node_id or layer.root_node_id,
+                          transform_node_id=transform_id or layer.transform_node_id)
+        if transform_id is None and effect.node_type == "transform":
             updated = replace(updated, transform_node_id=effect_id)
         layers = self.layers_map()
         layers[layer_id] = updated
@@ -1269,47 +1412,106 @@ class LayerStackController(QObject if _HAVE_QT else object):
                 and (change.src_node_id, change.src_port_name,
                      change.dst_node_id, change.dst_port_name) == (effect_id, output_port, dst_id, dst_port)
                 for change in result.changes):
-            return False
-        self.graph.upsert_layer(stack.stack_id, updated)
+            return None
         # A cable edit may leave other parts of the graph deliberately
         # disconnected. Only project changes that follow from this new root.
         matte_inputs = {change.dst_node_id for change in result.changes
                         if change.kind == "connect" and change.src_node_id == effect_id
                         and change.dst_port_name == "mask"}
-        self._apply_changes([
+        changes = tuple(
             change for change in result.changes
             if change.src_node_id == effect_id or change.node_id == effect_id
-            or (change.src_port_name == "__parent__" and change.dst_port_name == effect_id)
+            or (change.src_port_name == "__parent__"
+                and change.src_node_id == (updated.transform_node_id or effect_id))
             or (change.kind == "disconnect" and change.src_node_id == layer.root_node_id
                 and change.dst_port_name == "mask" and change.dst_node_id in matte_inputs)
-        ])
-        self._clear_previous_layer_parent(layer)
-        self.emit_changed(stack.stack_id)
-        return True
+        )
+        return WiredLayerEffect(stack.stack_id, updated, changes,
+                                layer if transform_id is None else None)
+
+    def commit_wired_layer_effect(self, plan: WiredLayerEffect) -> None:
+        self._install_wired_layer_effect(plan)
+        self.emit_changed(plan.stack_id)
+
+    def _install_wired_layer_effect(self, plan: WiredLayerEffect) -> None:
+        if not self.graph.upsert_layer(plan.stack_id, plan.layer):
+            raise ValueError("The layer stack no longer exists.")
+        failures = self._apply_changes(plan.changes)
+        if failures:
+            raise ValueError("; ".join(failures))
+        if plan.previous_parent_owner is not None:
+            self._clear_previous_layer_parent(plan.previous_parent_owner)
+
+    def apply_wired_layer_edit(
+        self, command: GraphEditCommand,
+        binding: tuple[str, str, str, tuple[str, str]],
+    ) -> GraphEditResult:
+        """Apply a managed cable edit and its layer projection under one lock."""
+        from .graph_edit import EDIT_LAYER_CONFLICT, GraphEditIssue, GraphEditResult
+
+        graph = self.graph
+        adoption: WiredLayerEffect | None = None
+
+        def validate() -> GraphEditIssue | None:
+            nonlocal adoption
+            adoption = self.prepare_wired_layer_effect(*binding)
+            if adoption is None:
+                return GraphEditIssue(EDIT_LAYER_CONFLICT, "The effect cannot become the layer output.",
+                                      node_id=binding[1], port=binding[2])
+            return None
+
+        with graph._lock:
+            before = self._snapshot()
+            connections = graph.connections
+            generation, topology_revision = graph.generation, graph._topology_revision
+            command_ids = graph._edit_command_ids.copy()
+            callbacks = {node_id: node._on_state_changed for node_id, node in graph.nodes.items()}
+            result = graph.apply_edit(command, validate_candidate=validate)
+            if not result.ok:
+                return result
+            if adoption is None and (issue := validate()) is not None:
+                return GraphEditResult.rejected(issue, generation, command.command_id)
+            try:
+                self._install_wired_layer_effect(adoption)
+            except (ValueError, RuntimeError) as exc:
+                self._restore(before)
+                graph.connections = connections
+                graph._generation = generation
+                graph._topology_revision = topology_revision
+                graph._edit_command_ids = command_ids
+                for node_id, callback in callbacks.items():
+                    node = graph.get_node(node_id)
+                    if node is not None:
+                        node.set_state_callback(callback)
+                return GraphEditResult.rejected(
+                    GraphEditIssue(EDIT_LAYER_CONFLICT, str(exc)),
+                    generation, command.command_id)
+            result = GraphEditResult.applied(graph.generation, command.command_id)
+        self.emit_changed(adoption.stack_id)
+        return result
 
     def splice_layer_transform(self, layer_id: str, root_id: str, root_port: str,
                                transform_id: str, target: tuple[str, str]) -> bool:
         """Insert an existing node and roll back its cables if adoption fails."""
-        in_edge = (root_id, root_port, transform_id, "image")
-        already_connected = any(item.src_node_id == root_id and item.src_port_name == root_port
-                                and item.dst_port_name == "image"
-                                for item in self.graph.get_input_connections(transform_id))
-        if not already_connected and not self.graph.connect(*in_edge):
-            return False
-        out_edge = (transform_id, "result", *target)
-        if self.graph.connect(*out_edge):
-            if self.adopt_wired_layer_transform(layer_id, transform_id, target):
-                return True
-            self.graph.connect(root_id, root_port, *target)
-        if not already_connected:
-            self.graph.disconnect(*in_edge)
-        return False
+        from .graph_edit import GraphEditCommand
+        from .node_engine import Connection
+
+        return self.apply_wired_layer_edit(
+            GraphEditCommand(
+                added=(Connection(root_id, root_port, transform_id, "image"),
+                       Connection(transform_id, "result", *target)),
+                replace_single_inputs=True,
+            ),
+            (layer_id, transform_id, "result", target),
+        ).ok
 
     def _clear_previous_layer_parent(self, layer: Layer) -> None:
         previous = self.graph.get_node(layer.root_node_id)
         parent = self.graph.get_layer(layer.parent_layer_id) if layer.parent_layer_id else None
+        parent_target = (self.layer_transform_node(parent.layer_id)
+                         or self.graph.get_node(parent.root_node_id)) if parent else None
         if (previous is not None and parent is not None
-                and previous.parent_id == parent.root_node_id):
+                and parent_target is not None and previous.parent_id == parent_target.id):
             self.graph.set_node_parent(previous.id, None)
 
     def add_node_to_layer(self, layer_id: str, node_id: str,
@@ -1583,7 +1785,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
     # ── Duplicate ───────────────────────────────────────────────────────
 
     def duplicate_layer(self, layer_id: str,
-                        description: str = "") -> Optional[str]:
+                        description: str = "", *,
+                        split_timing: LayerTimePlan | None = None) -> Optional[str]:
         """Clone the primary image chain and keyframes above the original layer."""
         stack = self._stack_for_layer(layer_id) or self.main_stack()
         if stack is None:
@@ -1592,6 +1795,8 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if layer is None or layer.locked or layer_id not in stack.layer_ids:
             return None
         before = self._snapshot()
+        if split_timing is not None and self.isolate_layer_video_source(layer_id) is None:
+            return None
         node_ids = self._clone_layer_image_chain(layer)
         if node_ids is None:
             self._restore(before)
@@ -1644,6 +1849,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
             self._restore(before)
             return None
         self._duplicate_layer_merge(layer_id, new_layer, stack, created_node_ids)
+        if split_timing is not None and split_timing.peer is not None:
+            self._apply_video_layer_timing(layer, split_timing.layer)
+            self._apply_video_layer_timing(new_layer, split_timing.peer)
 
         result = self._recompile(stack)
         if result.conflict:
@@ -1878,9 +2086,11 @@ class LayerStackController(QObject if _HAVE_QT else object):
             "name", "enabled", "solo", "locked", "shy", "label_color",
             "opacity", "blend_mode", "parent_layer_id", "in_frame",
             "out_frame", "collapsed", "track_matte_layer_id",
-            "track_matte_mode", "track_matte_invert",
+            "track_matte_mode", "track_matte_invert", "audio",
         }
         if prop not in mutable_props or not hasattr(layer, prop):
+            return False
+        if prop == "audio" and (layer.locked or not isinstance(value, LayerAudio)):
             return False
         if prop == "name":
             if not isinstance(value, str) or not value.strip():
@@ -1904,7 +2114,9 @@ class LayerStackController(QObject if _HAVE_QT else object):
         elif prop == "track_matte_layer_id":
             if value is not None:
                 matte_stack = self._stack_for_layer(value)
-                if (value == layer_id or self.graph.get_layer(value) is None
+                matte = self.graph.get_layer(value)
+                if (value == layer_id or matte is None
+                        or LAYER_TYPE_AUDIO in (layer.layer_type, matte.layer_type)
                         or matte_stack is not stack):
                     return False
         elif prop == "track_matte_mode":
@@ -1974,6 +2186,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         return True
 
     def set_layer_visibility(self, layer_id: str, enabled: bool) -> bool:
+        layer = self.graph.get_layer(layer_id)
+        if layer is not None and layer.layer_type == LAYER_TYPE_AUDIO and layer.audio is not None:
+            return self.set_layer_property(layer_id, "audio", replace(layer.audio, mute=not enabled),
+                                           description="Toggle layer audio")
         return self.set_layer_property(layer_id, "enabled", enabled,
                                        description="Toggle layer visibility")
 
@@ -1992,6 +2208,122 @@ class LayerStackController(QObject if _HAVE_QT else object):
             return False
         layer.in_frame, layer.out_frame = start, end
         return True
+
+    def video_layer_timing(self, layer_id: str,
+                           bounds: tuple[int, int]) -> LayerTiming | None:
+        """Read the exact forward, constant-rate timing of an editable video layer."""
+        from src.shared.media.presentation_time import ready_presentation_index
+
+        from .layer_time import layer_timing_from_video
+
+        layer = self.graph.get_layer(layer_id)
+        if layer is None or layer.locked or not layer.managed:
+            return None
+        source = self.graph.get_node(layer.source_node_id)
+        if source is None or source.node_type != "video_frame":
+            return None
+        params = source.parameters
+        if (params.get("speed", 1.0) != 1 or params.get("time_offset", 0.0)
+                or params.get("loop", False) or params.get("hold", False)
+                or any(source.keyframe_tracks.get(name) for name in ("speed", "time_offset"))):
+            return None
+        time_range = source.time_range or {}
+        presentation_index = ready_presentation_index(str(params.get("file_path") or ""))
+        if presentation_index is None and "source_time_origin" in time_range:
+            return None
+        timing = layer_timing_from_video(
+            bounds, params, time_range, self.graph.fps, presentation_index)
+        return timing if timing.source_step > 0 else None
+
+    def isolate_layer_video_source(self, layer_id: str) -> Any:
+        """Give a legacy shared read an independent identity before editing it."""
+        layer = self.graph.get_layer(layer_id)
+        source = self.graph.get_node(layer.source_node_id) if layer is not None else None
+        if source is None or source.node_type != "video_frame":
+            return None
+        owners = [other for other in self.graph.get_all_layers()
+                  if other.source_node_id == source.id or other.root_node_id == source.id]
+        outputs = self.graph.get_output_connections(source.id)
+        if len(owners) == 1 and len(outputs) <= 1:
+            return source
+
+        from .node_engine import Connection
+
+        chain = self._layer_image_chain(layer)
+        if len(chain) < 2 or chain[-1] != source.id:
+            return None
+        target_id = chain[-2]
+        if any(other.layer_id != layer_id and target_id in self._layer_image_chain(other)
+               for other in owners):
+            return None
+        target = self.graph.get_node(target_id)
+        image_input = next((port.name for port in target.inputs if port.data_type == "image"), None)
+        original = next((edge for edge in outputs if edge.dst_node_id == target_id
+                         and edge.dst_port_name == image_input), None)
+        if original is None:
+            return None
+        clone_id = self._clone_node(source.id)
+        clone = self.graph.get_node(clone_id)
+        replacement = Connection(clone.id, original.src_port_name,
+                                 original.dst_node_id, original.dst_port_name)
+        if not self.graph.edit_connections((original,), (replacement,)):
+            self.graph.remove_node(clone.id)
+            return None
+        layer.source_node_id = clone.id
+        return clone
+
+    def edit_layer_source_time(self, layer_id: str, kind: str, amount: int,
+                               bounds: tuple[int, int]) -> bool | str:
+        """Apply slip, stretch or split as a single layer command."""
+        from .layer_time import plan_slip, plan_split, plan_stretch
+
+        timing = self.video_layer_timing(layer_id, bounds)
+        stack = self._stack_for_layer(layer_id)
+        if timing is None or stack is None:
+            return False
+        layer = self.graph.get_layer(layer_id)
+        source = self.graph.get_node(layer.source_node_id)
+        try:
+            if kind == "split":
+                plan = plan_split(timing, amount, source.parameters.get("asset_id", ""))
+                return self.duplicate_layer(layer_id, "Split layer", split_timing=plan) or False
+            if kind == "slip":
+                plan = plan_slip(timing, amount)
+                total_frames = int(source.parameters.get("total_frames", 0))
+                last = plan.layer.source_frame_at(plan.layer.out_frame)
+                if total_frames > 0 and last is not None and last >= total_frames:
+                    return False
+                index = plan.layer.presentation_index
+                if index is not None and plan.layer.source_time_at(plan.layer.out_frame) >= index.seconds_at(len(index.pts)):
+                    return False
+            elif kind == "stretch":
+                plan = plan_stretch(timing, amount)
+            else:
+                return False
+        except ValueError:
+            return False
+        if plan.layer == timing:
+            return False
+        before = self._snapshot()
+        if self.isolate_layer_video_source(layer_id) is None:
+            return False
+        self._apply_video_layer_timing(layer, plan.layer)
+        self._push_undo("layer_source_time", before, self._snapshot(),
+                        "Slip layer" if kind == "slip" else "Stretch layer", stack.stack_id)
+        self.emit_changed(stack.stack_id)
+        return True
+
+    def _apply_video_layer_timing(self, layer: Layer, timing: LayerTiming) -> None:
+        source = self.graph.get_node(layer.source_node_id)
+        layer.in_frame, layer.out_frame = timing.in_frame, timing.out_frame
+        source.set_parameter("source_in", timing.source_in)
+        source.set_parameter("source_out", timing.source_out)
+        source.time_range = {
+            **(source.time_range or {}), "enabled": True,
+            "comp_start": timing.in_frame, "comp_end": timing.out_frame,
+            **timing.sampling_metadata(),
+        }
+        self.graph.bump_generation()
 
     def layer_animation_node_ids(self, layer_id: str) -> set[str]:
         """Identify animation owned by one layer, excluding shared branches."""
@@ -2038,6 +2370,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         return chain - shared
 
     def set_layer_solo(self, layer_id: str, solo: bool) -> bool:
+        layer = self.graph.get_layer(layer_id)
+        if layer is not None and layer.layer_type == LAYER_TYPE_AUDIO and layer.audio is not None:
+            return self.set_layer_property(layer_id, "audio", replace(layer.audio, solo=solo),
+                                           description="Toggle layer audio solo")
         return self.set_layer_property(layer_id, "solo", solo,
                                        description="Toggle layer solo")
 
@@ -2111,19 +2447,17 @@ class LayerStackController(QObject if _HAVE_QT else object):
                    color: str = DEFAULT_MARKER_COLOR,
                    description: str = "") -> Optional[str]:
         """Create one composition marker with a stable UUID (one undo)."""
-        from .composite_markers import CompositeMarker
-        try:
-            frame = int(frame)
-        except (TypeError, ValueError):
+        marker = CompositeMarker.from_dict({
+            "marker_id": CompositeMarker.new_id(), "frame": frame,
+            "name": name, "duration": duration, "color": color,
+        })
+        if marker is None:
             return None
-        marker = CompositeMarker(
-            marker_id=CompositeMarker.new_id(), frame=frame, name=str(name),
-            duration=duration, color=color)
         before = self.graph.get_marker_map()
         if not self.graph.upsert_marker(marker):
             return None
         self._push_marker_undo(before, self.graph.get_marker_map(),
-                               description or f"Add marker at frame {frame}",
+                               description or f"Add marker at frame {marker.frame}",
                                "marker_add")
         self._emit_markers_changed()
         return marker.marker_id
@@ -2131,15 +2465,13 @@ class LayerStackController(QObject if _HAVE_QT else object):
     def _edit_marker(self, marker_id: str, changes: Dict[str, Any],
                      description: str, action_type: str) -> bool:
         """Apply one field update addressed by stable marker UUID."""
-        from dataclasses import replace as _dc_replace
-        current = self.graph.get_marker_map().get(str(marker_id))
+        before = self.graph.get_marker_map()
+        current = before.get(str(marker_id))
         if current is None:
             return False
-        try:
-            updated = _dc_replace(current, **changes)
-        except (TypeError, ValueError):
+        updated = CompositeMarker.from_dict({**current.to_dict(), **changes})
+        if updated is None:
             return False
-        before = self.graph.get_marker_map()
         if not self.graph.upsert_marker(updated):
             return False
         self._push_marker_undo(before, self.graph.get_marker_map(),
@@ -2159,7 +2491,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
         """Move one marker; a drag gesture commits this exactly once."""
         try:
             frame = int(frame)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         return self._edit_marker(
             marker_id, {"frame": frame},
@@ -2170,7 +2502,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
         if duration is not None:
             try:
                 duration = int(duration)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 return False
             if duration < 0:
                 return False
@@ -2194,7 +2526,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self._emit_markers_changed()
         return True
 
-    def markers(self) -> List[Any]:
+    def markers(self) -> List[CompositeMarker]:
         """Ordered read-only projection for rulers and export consumers."""
         return self.graph.get_markers()
 
@@ -2203,14 +2535,16 @@ class LayerStackController(QObject if _HAVE_QT else object):
         """One undo step per marker command; restores the exact marker map."""
         if self.undo_stack is None:
             return
-        try:
-            from .undo_stack import UndoAction
-        except Exception:
-            return
+        from .undo_stack import UndoAction
+
+        def restore(markers: Dict[str, CompositeMarker]) -> None:
+            self.graph.replace_markers(markers)
+            self._emit_markers_changed()
+
         action = UndoAction(
             action_type, {"before": before, "after": after},
-            undo_fn=lambda d: self.graph.replace_markers(d["before"]),
-            redo_fn=lambda d: self.graph.replace_markers(d["after"]),
+            undo_fn=lambda d: restore(d["before"]),
+            redo_fn=lambda d: restore(d["after"]),
             description=description,
         )
         action.is_compressed = False
@@ -2610,7 +2944,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             stack.generated_merge_node_ids = list(parent_result.merge_node_ids)
         return aggregate
 
-    def _apply_changes(self, changes: List[CompileChange]) -> List[str]:
+    def _apply_changes(self, changes: Iterable[CompileChange]) -> List[str]:
         """Apply compiler changes; return a list of failure descriptions.
 
         Failures (graph.connect refused, node missing, ...) used to be

@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from fractions import Fraction
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from math import ceil, floor
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Tuple
+
+if TYPE_CHECKING:
+    from src.shared.media.presentation_time import PresentationIndex
 
 
 def fps_fraction(value: Any) -> Fraction:
@@ -55,6 +59,21 @@ def half_open_range(in_frame: int, out_frame_inclusive: int) -> Tuple[int, int]:
 def inclusive_range(in_frame: int, end_exclusive: int) -> Tuple[int, int]:
     """Internal half-open interval → UI inclusive ``[in, out]``."""
     return int(in_frame), int(end_exclusive) - 1
+
+
+def source_frame_step(comp_fps: Any, source_fps: Any) -> Fraction:
+    """Source frames per composition frame at normal playback speed."""
+    comp = fps_fraction(comp_fps)
+    source = fps_fraction(source_fps)
+    return source / comp if comp > 0 and source > 0 else Fraction(1)
+
+
+def source_window_duration(source_in: int, source_out: int, *,
+                           step: Fraction, phase: Fraction = Fraction(0)) -> int:
+    """Number of composition frames covered by an inclusive source window."""
+    if source_out < source_in or step <= 0:
+        return 0
+    return max(0, ceil((source_out - source_in + 1 - phase) / step))
 
 
 def source_delta_for_comp_delta(comp_delta: int, comp_fps: Any, source_fps: Any,
@@ -114,25 +133,97 @@ class LayerTiming:
     source_out: int = -1
     comp_fps: Any = Fraction(24)
     source_fps: Any = Fraction(24)
+    source_phase: Fraction = Fraction(0)
+    rate: Fraction = Fraction(1)
+    presentation_index: PresentationIndex | None = None
+    source_time_origin: Fraction | None = None
 
     @property
     def fps_aware(self) -> bool:
-        return fps_fraction(self.comp_fps) > 0 and fps_fraction(self.source_fps) > 0
+        return (fps_fraction(self.comp_fps) > 0
+                and (self.presentation_index is not None or fps_fraction(self.source_fps) > 0))
+
+    @property
+    def source_step(self) -> Fraction:
+        """Source-frame distance between adjacent composition frames."""
+        return self.rate * source_frame_step(self.comp_fps, self.source_fps)
+
+    def source_position_at(self, comp_frame: int) -> Fraction:
+        """Exact source position, including the subframe phase of the anchor."""
+        if self.presentation_index is not None:
+            return Fraction(self.presentation_index.frame_at(self.source_time_at(comp_frame)))
+        return (self.source_in + self.source_phase
+                + (int(comp_frame) - self.in_frame) * self.source_step)
+
+    def source_time_at(self, comp_frame: int) -> Fraction:
+        """Elapsed source time at a composition frame on the VFR path."""
+        origin = self.source_time_origin
+        if origin is None:
+            if self.presentation_index is None:
+                raise ValueError("A presentation index is required for source timestamps.")
+            origin = self.presentation_index.seconds_at(self.source_in)
+        fps = fps_fraction(self.comp_fps)
+        return origin + Fraction(comp_frame - self.in_frame) * self.rate / fps
+
+    def reanchored_at(self, sample_frame: int, in_frame: int) -> LayerTiming:
+        """Preserve the exact presentation phase when moving a source anchor."""
+        if self.presentation_index is not None:
+            source_time = max(Fraction(0), self.source_time_at(sample_frame))
+            return replace(self, in_frame=in_frame,
+                           source_in=self.presentation_index.frame_at(source_time),
+                           source_time_origin=source_time)
+        source_origin = max(Fraction(0), self.source_position_at(sample_frame))
+        source_in = floor(source_origin)
+        return replace(self, in_frame=in_frame, source_in=source_in,
+                       source_phase=source_origin - source_in)
 
     def source_frame_at(self, comp_frame: int) -> Optional[int]:
-        """The source frame sampled at a composition frame."""
-        if not self.fps_aware:
-            position = self.source_in + (int(comp_frame) - self.in_frame)
-            return position if self.in_frame <= int(comp_frame) <= self.out_frame else None
-        in_f, end = half_open_range(self.in_frame, self.out_frame)
-        return source_frame_cfr(
-            int(comp_frame), in_frame=in_f, end_exclusive=end,
-            source_origin=Fraction(self.source_in),
-            comp_fps=self.comp_fps, source_fps=self.source_fps)
+        """The source frame sampled at a visible composition frame."""
+        if not self.in_frame <= int(comp_frame) <= self.out_frame:
+            return None
+        return floor(self.source_position_at(comp_frame))
 
     def with_fps(self, comp_fps: Any, source_fps: Any) -> "LayerTiming":
         return replace(self, comp_fps=fps_fraction(comp_fps),
                        source_fps=fps_fraction(source_fps))
+
+    def window_duration(self, source_out: int) -> int:
+        """Composition frames covered by the media window at this rate."""
+        if self.presentation_index is not None and self.rate > 0:
+            interval = (self.presentation_index.seconds_at(source_out + 1)
+                        - self.source_time_at(self.in_frame))
+            return max(0, ceil(interval * self.comp_fps / self.rate))
+        return source_window_duration(
+            self.source_in, source_out, step=self.source_step, phase=self.source_phase)
+
+    def sampling_metadata(self) -> dict[str, str]:
+        """Serialize timing without storing a file-specific index in the project."""
+        data = {"source_step": str(self.source_step), "source_phase": str(self.source_phase)}
+        if self.presentation_index is not None:
+            data.update(source_rate=str(self.rate),
+                        source_time_origin=str(self.source_time_at(self.in_frame)))
+        return data
+
+
+def layer_timing_from_video(
+    bounds: tuple[int, int], params: Mapping[str, Any], time_range: Mapping[str, Any],
+    comp_fps: Any, presentation_index: PresentationIndex | None = None,
+) -> LayerTiming:
+    """Resolve the saved sample clock for both layer commands and the timeline."""
+    comp = fps_fraction(comp_fps)
+    source = fps_fraction(params.get("fps"))
+    nominal = source_frame_step(comp, source)
+    step = fps_fraction(time_range.get("source_step")) or nominal
+    rate = fps_fraction(time_range.get("source_rate")) or step / nominal
+    origin = (fps_fraction(time_range["source_time_origin"])
+              if "source_time_origin" in time_range else None)
+    return LayerTiming(
+        *bounds, source_in=int(params.get("source_in", 0) or 0),
+        source_out=int(params.get("source_out", -1)),
+        comp_fps=comp, source_fps=source, source_phase=fps_fraction(time_range.get("source_phase")),
+        rate=rate, presentation_index=presentation_index if comp > 0 else None,
+        source_time_origin=origin,
+    )
 
 
 @dataclass(frozen=True)
@@ -178,17 +269,12 @@ def plan_trim_in(timing: LayerTiming, new_in: int) -> LayerTimePlan:
     frames → 24 source frames), never by the raw comp delta.
     """
     new_in = int(new_in)
-    delta = new_in - timing.in_frame
-    source_delta = (source_delta_for_comp_delta(delta, timing.comp_fps,
-                                                timing.source_fps)
-                    if timing.fps_aware else delta)
     notes: Tuple[str, ...] = ()
     if not timing.fps_aware:
         notes = ("source fps unknown; trim applied with a 1:1 frame delta",)
     return LayerTimePlan(
         kind="trim_in",
-        layer=replace(timing, in_frame=new_in,
-                      source_in=max(0, timing.source_in + source_delta)),
+        layer=timing.reanchored_at(new_in, new_in),
         fps_aware=timing.fps_aware,
         notes=notes,
     )
@@ -197,25 +283,14 @@ def plan_trim_in(timing: LayerTiming, new_in: int) -> LayerTimePlan:
 def plan_trim_out(timing: LayerTiming, new_out: int) -> LayerTimePlan:
     """Tail trim: duration shrinks, keeping the cut's source frame exact."""
     new_out = int(new_out)
-    old_duration = timing.out_frame - timing.in_frame + 1
-    new_duration = new_out - timing.in_frame + 1
-    if timing.fps_aware:
-        s_old = source_delta_for_comp_delta(old_duration, timing.comp_fps,
-                                            timing.source_fps)
-        s_new = source_delta_for_comp_delta(new_duration, timing.comp_fps,
-                                            timing.source_fps)
+    last_frame = max(timing.source_in, floor(timing.source_position_at(new_out)))
+    new_source_out = timing.source_out
+    if new_out < timing.out_frame:
+        new_source_out = last_frame
         if timing.source_out >= 0:
-            new_source_out = max(timing.source_in,
-                                 timing.source_out + (s_new - s_old))
-        else:
-            # Open end: only a shrinking tail needs an explicit bound.
-            new_source_out = (-1 if new_duration >= old_duration
-                              else timing.source_in + s_new - 1)
-    else:
-        s_new = new_duration
-        new_source_out = (timing.source_out if timing.source_out >= 0
-                          else (-1 if new_duration >= old_duration
-                                else timing.source_in + s_new - 1))
+            new_source_out = min(timing.source_out, new_source_out)
+    elif new_out > timing.out_frame and timing.source_out >= 0:
+        new_source_out = max(timing.source_out, last_frame)
     notes: Tuple[str, ...] = ()
     if not timing.fps_aware:
         notes = ("source fps unknown; trim applied with a 1:1 frame delta",)
@@ -230,18 +305,17 @@ def plan_trim_out(timing: LayerTiming, new_out: int) -> LayerTimePlan:
 def plan_slip(timing: LayerTiming, slip_delta: int) -> LayerTimePlan:
     """Slip: composition bounds stay; the sampled window moves in place."""
     slip_delta = int(slip_delta)
-    source_delta = (source_delta_for_comp_delta(slip_delta, timing.comp_fps,
-                                                timing.source_fps)
-                    if timing.fps_aware else slip_delta)
-    new_source_in = max(0, timing.source_in + source_delta)
+    slipped = timing.reanchored_at(timing.in_frame + slip_delta, timing.in_frame)
     if timing.source_out >= 0:
-        new_source_out = max(new_source_in, timing.source_out + source_delta)
+        if timing.presentation_index is not None:
+            new_source_out = floor(slipped.source_position_at(timing.out_frame))
+        else:
+            new_source_out = timing.source_out + slipped.source_in - timing.source_in
     else:
         new_source_out = -1
     return LayerTimePlan(
         kind="slip",
-        layer=replace(timing, source_in=new_source_in,
-                      source_out=new_source_out),
+        layer=replace(slipped, source_out=new_source_out),
         fps_aware=timing.fps_aware,
     )
 
@@ -260,14 +334,13 @@ def plan_split(timing: LayerTiming, cut_frame: int,
             f"Split cut {cut} must lie inside ({timing.in_frame}, "
             f"{timing.out_frame}].")
     left_source_out = timing.source_frame_at(cut - 1)
-    right_source_in = timing.source_frame_at(cut)
-    if left_source_out is None or right_source_in is None:
+    if left_source_out is None:
         raise ValueError("Split cut outside the layer's time range.")
     # Keep an open tail open on the left when the original had one; an
     # explicit bound is only kept when the original window already ended.
     left = replace(timing, out_frame=cut - 1,
                    source_out=left_source_out if timing.source_out >= 0 else -1)
-    right = replace(timing, in_frame=cut, source_in=right_source_in)
+    right = timing.reanchored_at(cut, cut)
     return LayerTimePlan(
         kind="split",
         layer=left,
@@ -287,10 +360,11 @@ def plan_stretch(timing: LayerTiming, new_duration: int) -> LayerTimePlan:
     new_duration = int(new_duration)
     if new_duration <= 0:
         raise ValueError("Stretch needs a positive target duration.")
-    rate = Fraction(new_duration, old_duration)
+    rate = timing.rate * Fraction(old_duration, new_duration)
     return LayerTimePlan(
         kind="stretch",
-        layer=replace(timing, out_frame=timing.in_frame + new_duration - 1),
+        layer=replace(timing, out_frame=timing.in_frame + new_duration - 1,
+                      rate=rate),
         keyframe_shift=0,
         fps_aware=timing.fps_aware,
         notes=(f"rate={rate.numerator}/{rate.denominator}",),

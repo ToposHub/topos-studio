@@ -12,7 +12,8 @@ diagnostic instead of silently degrading.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field, replace
+import math
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 STYLE_DATA_VERSION = 1
@@ -58,7 +59,7 @@ class LayerStyleEffect:
         if not isinstance(data, dict):
             return None
         kind = data.get("kind")
-        if not isinstance(kind, str) or kind not in KNOWN_STYLE_KINDS:
+        if not isinstance(kind, str) or not kind.strip():
             return None
         params = data.get("params")
         if not isinstance(params, dict):
@@ -85,7 +86,7 @@ class StyleStackDiagnostic:
     """Why a style (or stack) stays merged instead of editable."""
 
     kind: str
-    reason: str   # unknown_kind | unverified_kind | param_mismatch
+    reason: str
 
     def to_dict(self) -> Dict[str, str]:
         return {"kind": self.kind, "reason": self.reason}
@@ -103,7 +104,12 @@ def plan_style_stack(styles: Sequence[LayerStyleEffect]
     diagnostics: List[StyleStackDiagnostic] = []
     for style in sorted(styles, key=lambda s: s.order):
         if style.kind in EDITABLE_STYLE_KINDS:
-            editable.append(style)
+            if style.conversion_version != STYLE_DATA_VERSION:
+                diagnostics.append(StyleStackDiagnostic(style.kind, "unsupported_conversion_version"))
+            elif _style_has_valid_params(style):
+                editable.append(style)
+            else:
+                diagnostics.append(StyleStackDiagnostic(style.kind, "param_mismatch"))
         elif style.kind in KNOWN_STYLE_KINDS:
             diagnostics.append(StyleStackDiagnostic(
                 style.kind, "unverified_kind"))
@@ -112,18 +118,26 @@ def plan_style_stack(styles: Sequence[LayerStyleEffect]
     return tuple(editable), tuple(diagnostics)
 
 
+def _style_has_valid_params(style: LayerStyleEffect) -> bool:
+    color = style.params.get("color", (1.0, 1.0, 1.0))
+    try:
+        return (len(color) == 3 and all(math.isfinite(float(value)) for value in color)
+                and math.isfinite(float(style.params.get("opacity", 1.0))))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 # ── Compositing math (shared reference implementation) ─────────────────────
 
 
 def shadow_under(foreground: Tuple[float, float, float, float],
                  shadow_rgb: Tuple[float, float, float],
                  shadow_alpha: float) -> Tuple[float, float, float, float]:
-    """Composite a shadow pixel *under* straight-alpha foreground (B08 golden).
+    """Composite a shadow pixel *under* premultiplied foreground (B08 golden).
 
     Input color space is the composition working space; the shadow alpha
-    has already been blurred and offset upstream.  The foreground is NOT
-    premultiplied here and the source layer opacity must not be applied a
-    second time.
+    has already been blurred and offset upstream. The shadow RGB is straight
+    and the foreground already includes the source layer opacity.
     """
     r, g, b, a = foreground
     sr, sg, sb = shadow_rgb
@@ -135,14 +149,13 @@ def shadow_under(foreground: Tuple[float, float, float, float],
 def color_over(foreground: Tuple[float, float, float, float],
                color_rgb: Tuple[float, float, float],
                opacity: float) -> Tuple[float, float, float, float]:
-    """Color overlay *over* straight-alpha foreground (source layer opacity
-    applies exactly once via ``opacity``)."""
+    """Mix a straight overlay color within the foreground's coverage."""
     r, g, b, a = foreground
     cr, cg, cb = color_rgb
-    w = float(opacity)
-    return (r * (1.0 - w) + cr * w,
-            g * (1.0 - w) + cg * w,
-            b * (1.0 - w) + cb * w,
+    w = min(max(float(opacity), 0.0), 1.0)
+    return (r * (1.0 - w) + cr * a * w,
+            g * (1.0 - w) + cg * a * w,
+            b * (1.0 - w) + cb * a * w,
             a)
 
 
@@ -163,9 +176,9 @@ def style_halo_extent(params: Dict[str, Any], default_radius: float = 0.0
     return radius * 2.0 + offset
 
 
-def apply_style_stack_rgba(foreground_rgba, styles: Sequence[LayerStyleEffect],
-                           ) -> "Any":
-    """Apply an ordered editable stack to an ``(h, w, 4)`` float array.
+def apply_style_stack_rgba(foreground_rgba: Any, styles: Sequence[LayerStyleEffect]
+                           ) -> Any:
+    """Apply an ordered editable stack to premultiplied ``(h, w, 4)`` RGBA.
 
     Pure-CPU reference path used by tests and diagnostics: the shadow
     alpha is blurred upstream of this call (pass pre-blurred alpha via the
@@ -176,25 +189,33 @@ def apply_style_stack_rgba(foreground_rgba, styles: Sequence[LayerStyleEffect],
     import numpy as np
 
     image = np.asarray(foreground_rgba, dtype=np.float32).copy()
-    if image.ndim != 3 or image.shape[2] < 4:
+    if image.ndim != 3 or image.shape[2] != 4:
         raise ValueError("apply_style_stack_rgba expects (h, w, 4) RGBA")
-    for style in sorted(styles, key=lambda s: s.order):
+    editable, diagnostics = plan_style_stack(styles)
+    if diagnostics:
+        raise ValueError("style stack needs a merged fallback: " + ", ".join(
+            f"{item.kind} ({item.reason})" for item in diagnostics))
+    original_alpha = image[..., 3].copy()
+    for style in editable:
         if style.kind == STYLE_KIND_COLOR_OVERLAY:
-            color = style.params.get("color", (1.0, 1.0, 1.0))
-            opacity = float(style.params.get("opacity", 1.0) or 0.0)
+            color = np.asarray(style.params.get("color", (1.0, 1.0, 1.0)), dtype=np.float32)
+            opacity = float(style.params.get("opacity", 1.0))
             w = min(max(opacity, 0.0), 1.0)
-            image[..., 0] = image[..., 0] * (1.0 - w) + color[0] * w
-            image[..., 1] = image[..., 1] * (1.0 - w) + color[1] * w
-            image[..., 2] = image[..., 2] * (1.0 - w) + color[2] * w
+            image[..., :3] = image[..., :3] * (1.0 - w) + color * image[..., 3:4] * w
         elif style.kind in (STYLE_KIND_DROP_SHADOW, STYLE_KIND_OUTER_GLOW):
-            shadow_rgb = tuple(style.params.get("color", (0.0, 0.0, 0.0)))
-            shadow_opacity = float(style.params.get("opacity", 1.0) or 0.0)
+            shadow_rgb = np.asarray(style.params.get("color", (0.0, 0.0, 0.0)),
+                                    dtype=np.float32)
+            shadow_opacity = float(style.params.get("opacity", 1.0))
             plane = style.params.get("shadow_alpha_plane")
             alpha = (np.asarray(plane, dtype=np.float32)
-                     if plane is not None else image[..., 3])
+                     if plane is not None else original_alpha)
+            if alpha.shape != original_alpha.shape:
+                raise ValueError(f"{style.kind} alpha plane must match the layer size")
+            if style.kind == STYLE_KIND_OUTER_GLOW:
+                coverage_range = float(style.params.get("range", 1.0))
+                alpha = np.clip(alpha / max(0.01, coverage_range), 0.0, 1.0)
             shadow_alpha = np.clip(alpha * shadow_opacity, 0.0, 1.0)
             coverage = (1.0 - image[..., 3]) * shadow_alpha
-            for c in range(3):
-                image[..., c] = image[..., c] + shadow_rgb[c] * coverage
+            image[..., :3] += shadow_rgb * coverage[..., None]
             image[..., 3] = image[..., 3] + coverage
     return image

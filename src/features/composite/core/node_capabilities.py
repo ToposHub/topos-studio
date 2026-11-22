@@ -112,6 +112,7 @@ class NodeCapability:
     category: Optional[str] = None
     is_placeholder: bool = False
     bypass_mapping: Optional[Dict[str, str]] = None
+    supports_channel_selection: bool = False
 
 
 # ── Capability Table ──
@@ -177,6 +178,14 @@ _NODE_CAPABILITY_TABLE: Dict[str, NodeCapability] = {
         requires_gl=True,
         category="Input",
         owns_color_texture=False,  # External texture
+    ),
+    "audio_source": NodeCapability(
+        node_type="audio_source",
+        action_type="source",
+        roi_policy="full_frame",
+        requires_gl=False,
+        category="Input",
+        owns_color_texture=False,
     ),
     "text": NodeCapability(
         node_type="text",
@@ -657,6 +666,7 @@ _NODE_CAPABILITY_TABLE: Dict[str, NodeCapability] = {
         requires_gl=True,
         category="Filter",
         fusible=False,  # Spatial effect
+        supports_channel_selection=True,
     ),
     "defocus": NodeCapability(
         node_type="defocus",
@@ -679,6 +689,16 @@ _NODE_CAPABILITY_TABLE: Dict[str, NodeCapability] = {
         requires_gl=True,
         category="Filter",
         fusible=False,
+    ),
+    "layer_style": NodeCapability(
+        node_type="layer_style",
+        action_type="effect",
+        effect_type="layer_style",
+        roi_policy="expand",
+        tile_padding=1,
+        owns_color_texture=True,
+        requires_gl=True,
+        category="Filter",
     ),
     "sharpen": NodeCapability(
         node_type="sharpen",
@@ -1859,7 +1879,8 @@ def check_registry_consistency() -> Dict[str, List[str]]:
 
     # color_input: deprecated, deserialization-only (auto-migrated on load).
     # motion_graphic: deferred registration, filled by teaching_animation module.
-    _category_hidden = {"color_input", "motion_graphic"}
+    # audio_source is created with its owning audio layer by the media drop.
+    _category_hidden = {"color_input", "motion_graphic", "audio_source"}
     listed = {node_type for entries in NODE_CATEGORIES.values() for node_type, _ in entries}
     for node_type in NODE_REGISTRY:
         if node_type in _category_hidden:

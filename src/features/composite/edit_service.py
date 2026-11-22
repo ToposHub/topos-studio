@@ -16,6 +16,7 @@ JSON-safe 的编辑计划，不把 ``Node`` / ``NodeGraph`` 的内部对象暴�
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -309,6 +310,10 @@ class CompositeEditService:
 
     def apply(self, plan: CompositeEditPlan | Mapping[str, Any]) -> CompositeApplyResult:
         plan = _coerce_plan(plan)
+        with self.graph._lock:
+            return self._apply_locked(plan)
+
+    def _apply_locked(self, plan: CompositeEditPlan) -> CompositeApplyResult:
         before_generation = self.generation
         report = self.validate(plan)
         if not report.ok:
@@ -317,6 +322,9 @@ class CompositeEditService:
                 report=report, error="composite plan validation failed",
             )
         before = self.graph.to_dict()
+        before_topology_revision = self.graph._topology_revision
+        before_callbacks = {node_id: node._on_state_changed
+                            for node_id, node in self.graph.nodes.items()}
         notes: list[CompositeDiagnostic] = []
         try:
             for index, operation in enumerate(plan.operations):
@@ -325,7 +333,14 @@ class CompositeEditService:
                     notes.append(CompositeDiagnostic("info", note, index))
         except Exception as exc:
             # 所有操作在 validate 阶段已经通过；这里仅防止宿主/节点异常造成半套计划。
-            _restore_graph_in_place(self.graph, before)
+            if self.graph.to_dict() != before:
+                _restore_graph_in_place(self.graph, before, exact=True)
+                for node_id, callback in before_callbacks.items():
+                    node = self.graph.get_node(node_id)
+                    if node is not None:
+                        node.set_state_callback(callback)
+            self.graph._generation = before_generation
+            self.graph._topology_revision = before_topology_revision
             return CompositeApplyResult(
                 False, plan.plan_id, plan.content_hash(), before_generation, self.generation,
                 report=report, error=f"composite plan rolled back: {exc}",
@@ -758,17 +773,8 @@ class CompositeEditService:
             if removed is None:
                 raise CompositeEditError(f"node not found: {node_id!r}")
             return None
-        if kind == "connect":
-            from_node, from_port, to_node, to_port = _connection_endpoints(operation)
-            if not self.graph.connect(from_node, from_port, to_node, to_port):
-                raise CompositeEditError(
-                    f"connect failed: {from_node}.{from_port} -> {to_node}.{to_port}")
-            return None
-        if kind == "disconnect":
-            from_node, from_port, to_node, to_port = _connection_endpoints(operation)
-            if not self.graph.disconnect(from_node, from_port, to_node, to_port):
-                raise CompositeEditError(
-                    f"disconnect failed: {from_node}.{from_port} -> {to_node}.{to_port}")
+        if kind in {"connect", "disconnect"}:
+            self._apply_cable_operation(operation, connect=kind == "connect")
             return None
         if kind == "set_param":
             node_id = str(operation.get("node_id") or "")
@@ -906,6 +912,36 @@ class CompositeEditService:
         else:
             raise CompositeEditError(f"unsupported composite operation: {kind!r}")
         node.set_keyframe_track(pdef.name, track)
+
+    def _apply_cable_operation(self, operation: Mapping[str, Any], *,
+                               connect: bool) -> None:
+        from src.features.composite.core.graph_edit import (
+            EDIT_LAYER_CONFLICT, GraphEditCommand,
+        )
+        from src.features.composite.core.layer_stack_controller import LayerStackController
+        from src.features.composite.core.node_engine import Connection
+
+        endpoints = _connection_endpoints(operation)
+        edge = Connection(*endpoints)
+        controller = LayerStackController(self.graph)
+        if any(controller.is_node_locked_by_layer(node_id) for node_id in endpoints[::2]):
+            raise CompositeEditError(f"{EDIT_LAYER_CONFLICT}: A cable endpoint is locked.")
+        managed = edge.dst_node_id in controller.managed_layer_destination_ids()
+        binding = controller.layer_transform_binding(endpoints) if connect else None
+        if managed and binding is None:
+            raise CompositeEditError(
+                f"{EDIT_LAYER_CONFLICT}: This input is owned by the layer stack.")
+        command = GraphEditCommand(removed=() if connect else (edge,),
+                                   added=(edge,) if connect else (),
+                                   replace_single_inputs=connect)
+        if binding is None:
+            result = self.graph.apply_edit(command)
+        else:
+            layer_id, transform_id, target = binding
+            result = controller.apply_wired_layer_edit(
+                command, (layer_id, transform_id, "result", target))
+        if not result.ok:
+            raise CompositeEditError(f"{result.primary_code}: {result.issues[0].message}")
 
 
 def _coerce_plan(value: CompositeEditPlan | Mapping[str, Any]) -> CompositeEditPlan:
@@ -1111,14 +1147,22 @@ def _safe_copy(value: Any) -> Any:
         return {}
 
 
-def _restore_graph_in_place(graph: Any, data: dict[str, Any]) -> None:
+def _restore_graph_in_place(graph: Any, data: dict[str, Any], *, exact: bool = False) -> None:
     """在异常回滚时保留原 graph identity。仅由主线程宿主调用。"""
     from src.features.composite.core.node_engine import NodeGraph
 
     restored = NodeGraph.from_dict(data)
+    if exact:
+        # Project-load normalization (e.g. Output defaults) is deliberately
+        # bypassed when rolling back a command against an already live graph.
+        for saved in data.get("nodes", ()):
+            node = restored.get_node(saved["id"])
+            if node is not None:
+                node.parameters = copy.deepcopy(saved["parameters"])
     # 保留原 graph 上的锁、渲染缓存和 expression manager，只替换持久化状态。
     for key in ("nodes", "connections", "backdrops", "_sticky_notes", "_node_groups",
-                "_viewport_state", "_viewer_state", "_layer_stacks", "_layers", "fps", "duration_frames"):
+                "_viewport_state", "_viewer_state", "_layer_stacks", "_layers",
+                "_markers", "fps", "duration_frames"):
         setattr(graph, key, getattr(restored, key))
     # from_dict 把恢复节点绑定到了临时 restored graph 上：GroupNode 的
     # 子图求值引用必须指回存活对象，否则组求值永远走空缓存（直通）。

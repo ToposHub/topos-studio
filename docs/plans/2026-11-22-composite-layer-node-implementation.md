@@ -293,30 +293,46 @@ def find_cycle(
 QT_QPA_PLATFORM=offscreen TOPOS_HEADLESS_GL=1 .venv/bin/python -m pytest -q \
   tests/composite tests/ui/test_composite_node_wiring.py \
   tests/ui/test_composite_keyframes_dock.py tests/ui/test_keyframes_alt_drag_copy.py \
-  tests/ui/test_graph_expression_editor.py tests/app/test_composite_graph_open_context.py
+  tests/ui/test_graph_expression_editor.py tests/ui/test_graph_bugfix_data_safety.py \
+  tests/ui/test_keyframes_panel_animation_e2e.py tests/ui/test_graph_cross_platform.py \
+  tests/app/test_composite_graph_open_context.py tests/edit/test_composite_graph_data.py \
+  tests/edit/test_comp_clip_promotion_lifecycle.py tests/edit/test_audio_waveform.py \
+  tests/edit/test_clip_pcm.py tests/edit/test_audio_playback.py \
+  tests/edit/test_nested_audio_flatten.py tests/edit/test_timeline_export.py \
+  tests/ui/test_audio_arbiter_e6.py tests/ui/test_topos_audio.py \
+  tests/media/test_ffmpeg_source_seek_math.py tests/project/test_project_module_preservation.py \
+  tests/project/test_handoff_export.py tests/project/test_resource_resolver.py \
+  tests/project/test_package_contract.py tests/project/test_dependency_audit.py
 ```
 
 真实素材目录为 `/Volumes/Project_1/开发项目/topos-color-multitask /topos-color01/tests/test_videos/`，`multitask` 后有一个空格。用 `2K_h264.mp4` 查拖放与范围、`2K_Prores4444_Alpha.mov` 查透明边及图层主链、`4K_H264.mov` 查高分辨率。其余机器可用样本副本。音频先探测流，再用明确 PCM 脉冲和视频闪白做对照；PSD 使用可分发的独立 fixture。大型缓存和样本输出写临时目录。
 
 **结项条件。** 正常生产入口可用，旧工程可读，撤销重做覆盖，相关渲染、真机和故障测试通过。登记复跑材料和命令后更新对应状态。
 
-## 6. 实施状态登记（2026-11-22，B11 批次）
+## 6. 实施状态登记（2026-11-22）
 
-本节登记各任务的提交号、测试范围与剩余限制；复跑命令同 §5（从仓库根目录，`QT_QPA_PLATFORM=offscreen TOPOS_HEADLESS_GL=1 .venv/bin/python -m pytest -q …`）。
+已提交的后端基线为 `1f87bd23` 至 `8acdbe5a`。本轮生产接线与回归在工作区。
 
-| 任务 | 提交 | 覆盖 | 剩余限制 |
-| --- | --- | --- | --- |
-| B01 稳定图层角色 | 1f87bd23 | `Layer.transform_node_id` 稳定角色 + `layer_roles()` 契约；Blur 后置加效果/删除保护/快捷键/父级/复制/锁/撤销/序列化往返；旧链唯一候选回填、双 Transform 歧义诊断 | 查看器手柄（Viewer overlay）尚未接 `layer_transform_node`，仍按 root 渲染 |
-| B02 原子接线 | 1f87bd23 后续 | `NodeGraph.apply_edit` 原因码事务（环/容量/类型/端口/过时 revision/重复命令 ID），失败零修改；`_restore` 精确恢复连接顺序；手势乐观 revision | 预设导入与脚本的写入口仍走 `CompositeEditService`，未全部迁到 `apply_edit` |
-| B03 有理时间 | 同批 | `layer_time.py` 分数帧率（NTSC 恢复）、`source_frame_cfr`、slide/trim/slip/split/stretch 纯计划；裁边按帧率换算（25↔24、30↔29.97 精确）；共享读取节点 `shared_source_range` 诊断 | slip/split 的 UI 手势与 VFR 时间戳索引适配层未接；共享素材两层的独立读取节点自动拆分未做（当前靠诊断引导） |
-| B04 合成标记 | 同批 | UUID 标记 CRUD 各一步撤销；同帧独立删除；schema v12 迁移规整；缩短合成保留越界标记 | 标尺 UI 投影与右键菜单尚未接 `composition_markers_changed` |
-| B05 音频计划 | 同批 | `AudioPlan`/`LayerAudio`（mute>solo 优先）、`sample_boundary` 共享端点（含计划 NTSC 例）、波形分桶与缓存键、`Layer.audio` 往返 | AudioMixer/设备仲裁的真实播放接线与异步探测 UI 未接（纯契约层） |
-| B06 导出混音 | 同批 | `comp_audio_mix`：精确 PCM 长度、脉冲落位、两路线性叠加、五态导出诊断 | `composite_render_output` 的 mux 接线与 ffprobe 对拍未做（需真实编码样本） |
-| B07 PSD | 同批 | psd-tools 锁版本；清单/指纹/同名不猜名；直通 alpha 解码、`clip_psd_patch` 手算例、导入策略与支持矩阵；无依赖 PSD 字节夹具 | 16 位/PSB 用真实样本对拍未做；合成页一次提交建层的事务接线未接 |
-| B08 图层样式 | 同批 | 版本化 `LayerStyleEffect`+溯源；`shadow_under` golden；未验证样式合并+诊断；halo 窗 | GLSL 效果与 Effect Catalog 注册未做（CPU 参考实现就位） |
-| B09 外部引用 | 同批 | `CompRef`（pinned/follow）、DFS 环路径、done 复用、深度限、三因分离审计 | 工程读服务/资源解析/PrecompNode 的装载接线未接（纯契约层） |
-| B10 通道/窗口 | 同批 | RGB/A 选择按预乘契约恢复（alpha0/负/HDR）；半开窗口空/负坐标、模糊/裁剪/变换/合并传播、ROI≠全幅缓存键 | 节点能力表声明与 tile 调度消费窗口未接；4K 性能基准未跑 |
+| 任务 | 本轮结果 | 仍需验收或能力边界 |
+| --- | --- | --- |
+| B01 稳定图层角色 | 查看器手柄、快捷键、父级、效果和复制使用稳定主 Transform。旧链唯一候选可迁移，歧义有诊断。重新保存图层和层栈时透传扩展字段。 | 旧工程与媒体回归见 §5。 |
+| B02 原子接线 | 输出端先接时仅在画布暂存，两端齐全后一次提交；脚本、预设和节点画布共用图事务。覆盖失败无部分修改、边序和撤销记录。 | 保存故障及重新打开纳入回归。 |
+| B03 有理时间 | 默认媒体范围使用精确帧率。图层菜单支持滑移、伸缩和拆分。共享源的图层编辑可分离读取节点。VFR 后台建索引，预览与导出共用取帧和门控。 | 失效或重复 PTS 时走原取帧路径。 |
+| B04 合成标记 | 标尺支持同帧 UUID 独立编辑、时长、拖动一次提交与撤销；工程合并和 `.topos` 重开已覆盖。 | 档案仍保存超出当前合成长度的标记。 |
+| B05 音频计划 | 支持纯音频拖入、后台流探测、图层波形、独立增益/静音/独奏。预览接共享设备仲裁和检测默认设备变化。 | 合成音频支持正向恒速；反向、变速曲线、保音调和图层增益动画仍为能力限制。 |
+| B06 导出混音 | 视频导出单音轨 mux，音频输出完整后才发布。图片序列有格式提示。剪辑直接放置和嵌套 Comp Clip 使用同一 PCM 来源，并保留已有对应音频片段的归属。 | 已对拍 PCM MOV、AAC MP4 和 Opus WebM。跨设备长期同步仍需覆盖。 |
+| B07 PSD | PSD/PSB 后台探测，时间线分层一次提交，稳定选择器和相对路径支持迁移。用真实 16 位、透明及复杂图层样本比较预览和导出。 | 自由节点画布按合并图导入；未认证的模式按来源合并图和诊断处理。 |
+| B08 图层样式 | 颜色叠加、投影、外发光的受支持子集已接效果目录与共享 GPU 求值。保留原始样式和转换版本。 | 复杂样式保留合并语义；无可信来源时报告原因。文字抗锯齿边仍有误差。 |
+| B09 外部引用 | Precomp 可选择、重定位及固定或跟随版本。导出冻结依赖。自包含工程链可随交接包内嵌，迁移并删除原工程后仍可重开。 | 自动嵌入上限 256 MiB；松散素材或不可完整审计依赖显示在交接报告。外部包的宿主实时输入会给出诊断。 |
+| B10 通道/数据窗口 | Blur 的 RGB/A 选择、GPU 预乘恢复和 ROI 窗口、halo、缓存身份已接入。8 瓦片与全幅绝对误差容限 0.002。 | ROI 保留按需启用。多种 4K 负载与实际显存峰值尚待测量。 |
+| B11 平台验收 | 回归覆盖工程迁移、Qt、真实 VFR 像素、故障回滚、导出与交接。Cocoa 平台 76 项页面、图层面板和画布测试通过。Studio 主窗口完成 2K H.264 拖入、定位、真实像素读回和正常退出，合成线程正确退出。 | 当前设备只有单屏，双屏 Dock 和其他操作系统的真机验收继续开放。 |
 
-**回归状态。** 本批次全量：`tests/composite` + 5 个 UI/接线/打开上下文文件共 7800+ 用例通过（含本批新增 100+）。`tests/edit/test_audio_waveform.py` 26 例通过（B05 夹具结构参考）。真机（中文/英文、双屏、窄窗）与真实素材（`/Volumes/Project_1/…/tests/test_videos/`、PSD 独立 fixture）验收留待下一批 UI 接线时一并执行。
+**素材。** 之前的实拍回归覆盖 2K/4K H.264 和 ProRes 4444 Alpha。本轮追加带 2 秒首帧 PTS 的不等间隔 FFV1/MKV，裁剪、拆分和重开后，GPU 预览与导出六个像素取样一致。psd-tools 1.27.0 样本中的 16 位 PSD/PSB 和透明 PSB 通过相同解码链，复杂样式样本的预览与导出最大 RGBA 差为 0。与 Photoshop 保存的栅格比较，归一化 sRGB 平均误差为投影 0.00128、外发光 0.00292。外发光最高误差 0.0784 位于文字抗锯齿边缘。
 
-**环境。** macOS 15.3（darwin 24.3.0 x64），Python 3.12.13，psd-tools 1.27.0，PyQt6 offscreen + ModernGL（TOPOS_HEADLESS_GL=1）。
+**音频。** `ffprobe` 确认带样本脉冲的两帧 MOV 为 24fps H.264 和一条 48kHz PCM 音轨，均从 0 起始，时长均为 0.083333 秒，共 4,000 个音频样本。源裁切后的脉冲位于样本索引 200，剪辑嵌套混音逐样本一致。AAC MP4 的音画流同为 1 秒，Opus WebM 解码得到 48,000 个样本，两者的脉冲同样位于索引 200。素材音轨延后 125 ms 的样本落在预期位置 6,200。Steinberg UR22C DAW 的原生输出完成十次定位和重新起播，并释放设备。
+
+**性能。** 4K checker → Blur → Output 对比 768×432 ROI（13 次），全幅与 ROI 的首帧为 574.38/367.71 ms，稳态 p95 为 3.69/6.20 ms，缓存峰值为 506.25/508.85 MiB。
+
+**最终回归。** §5 命令通过 8,343 项，跳过 19 项，预期失败 1 项。Cocoa 复跑 `tests/app/test_composite_graph_open_context.py`、`tests/ui/test_composite_node_wiring.py` 和 `tests/ui/test_composite_keyframes_dock.py`，76 项通过。真实窗口冷启动的验收还修复了 GPU 示波器切换分析尺寸时的 OpenGL 1282，复跑出图及正常退出均通过。
+
+**环境。** macOS 15.3（darwin 24.3.0 x64），AMD Radeon RX 6900 XT，OpenGL 4.1 ATI-6.1.13，Python 3.12.13，psd-tools 1.27.0，PyQt6 6.11.0。

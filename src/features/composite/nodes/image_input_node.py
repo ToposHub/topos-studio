@@ -151,6 +151,8 @@ class ImageInputNode(Node):
             "exr_part": "",
             "exr_extra_channels": "",
             "asset_id": "",  # P7.2: Asset-backed node support
+            "psd_layer": None,  # versioned selector; absent on flattened inputs
+            "psd_import": None,  # source and fallback diagnostics for PSD imports
             "media_role": "plate",  # P7.2: Media role (plate/bg/fg/matte/depth/other)
             "color_space": "auto",
             "premultiplied": False,
@@ -190,6 +192,8 @@ class ImageInputNode(Node):
         self._last_uploaded_mtime: float = 0.0
         self._last_requested_exr_part: str = ""
         self._last_requested_exr_extra: list = []
+        self._last_requested_psd_layer: Optional[dict] = None
+        self._last_requested_file_path = ""
         # Sequence (####) support: last frame this node actually loaded.
         self._last_sequence_frame: Optional[int] = None
         # AUD-6902: set when this node releases a self-owned GL texture so
@@ -278,6 +282,8 @@ class ImageInputNode(Node):
         at decode time and must not cause an endless re-decode loop.
         """
         self._load_state = ImageLoadState.LOADING
+        self._last_requested_file_path = self.parameters.get("file_path", "")
+        self._last_requested_psd_layer = self.parameters.get("psd_layer")
         self._last_requested_exr_part = str(
             self.parameters.get("exr_part", "") or "")
         extra_raw = str(self.parameters.get("exr_extra_channels", "") or "")
@@ -379,8 +385,12 @@ class ImageInputNode(Node):
         exr_part / exr_extra_channels edit changes WHICH content the node
         should show without touching the file, so it must trigger a reload.
         """
+        if (self.parameters.get("psd_layer") != self._last_requested_psd_layer
+                or (self.parameters.get("psd_layer")
+                    and file_path != self._last_requested_file_path)):
+            return True
         if not file_path or not os.path.isfile(file_path):
-            return False
+            return bool(self.parameters.get("psd_import"))
         # EXR slice drift — independent of the file's mtime
         part_raw = str(self.parameters.get("exr_part", "") or "")
         extra_raw = str(self.parameters.get("exr_extra_channels", "") or "")
@@ -636,8 +646,15 @@ class ImageInputNode(Node):
                       if c.strip()] if extra_raw else None
         self._last_requested_exr_part = exr_part
         self._last_requested_exr_extra = list(extra_list or [])
-        decoded = decode_image_file(path, exr_part=exr_part,
-                                    extra_channels=extra_list)
+        psd_layer = self.parameters.get("psd_layer")
+        self._last_requested_psd_layer = psd_layer
+        self._last_requested_file_path = path
+        try:
+            decoded = decode_image_file(path, exr_part=exr_part, extra_channels=extra_list,
+                                        **({"psd_layer": psd_layer} if psd_layer else {}))
+        except (LookupError, OSError, TypeError, ValueError, RuntimeError) as error:
+            self.set_load_failed(str(error))
+            return
         if decoded is None:
             # Try fallback
             if not self._upload_fallback(ctx):
@@ -723,6 +740,9 @@ class ImageInputNode(Node):
                     self._dirty = False
                 else:
                     self.upload_to_gpu(ctx, frame=frame_number)
+
+        if self.parameters.get("psd_import") and self._load_state == ImageLoadState.FAILED:
+            return {}
 
         # If we still have no texture, try fallback (for missing files)
         if self._gpu_texture is None:

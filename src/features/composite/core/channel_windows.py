@@ -14,11 +14,12 @@ separate models.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 # ── Channel selection (B10 §1) ──────────────────────────────────────────────
 
@@ -40,46 +41,35 @@ class ChannelSelection:
         return (self.red, self.green, self.blue, self.alpha)
 
 
-def apply_channel_selection(effect_rgba, input_rgba,
-                            selection: ChannelSelection):
+def apply_channel_selection(effect_rgba: ArrayLike, input_rgba: ArrayLike,
+                            selection: ChannelSelection) -> NDArray[np.float32]:
     """Restore unselected channels from the effect's input (premultiplied).
 
-    Both arrays are premultiplied RGBA ``(h, w, 4)`` in the composition
-    working space.  When the effect changed alpha but color is not
-    selected, color is restored through the premultiply contract: unpre-
-    multiply the effect's color by its (new) alpha is wrong — the
-    authoritative color comes from the input, unpremultiplied by the
-    input alpha and re-premultiplied by the output alpha.  HDR values
-    pass through unclamped.
+    Both arrays contain premultiplied RGBA in the composition working
+    space. Each selected RGB component comes from the effect, and each
+    unselected component comes from the input. If its alpha differs from
+    the output alpha, restore its straight value with its original alpha
+    and premultiply by the output alpha. Zero alpha contributes zero color.
     """
     effect = np.asarray(effect_rgba, dtype=np.float32)
     source = np.asarray(input_rgba, dtype=np.float32)
-    if effect.shape != source.shape:
-        raise ValueError("apply_channel_selection shape mismatch")
-    r_on, g_on, b_on, a_on = selection.mask_rgba()
-    if (r_on and g_on and b_on and a_on):
+    if effect.shape != source.shape or effect.ndim == 0 or effect.shape[-1] != 4:
+        raise ValueError("Channel selection requires matching RGBA arrays")
+    if selection.selects_all:
         return effect
-    result = effect.copy()
-    color_changed_alpha = not a_on and not (r_on and g_on and b_on)
-    if not color_changed_alpha:
-        # Straight restore per channel (alpha, or all colors together).
-        if not a_on:
-            result[..., 3] = source[..., 3]
-        if not (r_on and g_on and b_on):
-            # Restore unselected color channels from the input's
-            # corresponding premultiplied channels.
-            for c, enabled in enumerate((r_on, g_on, b_on)):
-                if not enabled:
-                    result[..., c] = source[..., c]
-        return result
-    # Alpha restored AND some colors restored: rebuild the restored colors
-    # under the (restored) input alpha — input premultiplied values are
-    # already consistent with the input alpha, so a direct copy honors the
-    # premultiply contract exactly.
-    result[..., 3] = source[..., 3]
-    for c, enabled in enumerate((r_on, g_on, b_on)):
-        if not enabled:
-            result[..., c] = source[..., c]
+
+    selected_rgb = (selection.red, selection.green, selection.blue)
+    effect_alpha = effect[..., 3:4]
+    source_alpha = source[..., 3:4]
+    output_alpha = effect_alpha if selection.alpha else source_alpha
+    original_alpha = np.where(selected_rgb, effect_alpha, source_alpha)
+    original_rgb = np.where(selected_rgb, effect[..., :3], source[..., :3])
+    rescale = original_alpha != output_alpha
+    straight = np.divide(original_rgb, original_alpha,
+                         out=np.zeros_like(original_rgb), where=rescale & (original_alpha != 0.0))
+    result = np.empty_like(effect)
+    result[..., :3] = np.where(rescale, straight * output_alpha, original_rgb)
+    result[..., 3:4] = output_alpha
     return result
 
 
@@ -118,6 +108,8 @@ class DataWindow:
 
     def expanded(self, radius: float) -> "DataWindow":
         """Grow by a halo radius (Blur) with conservative ceil."""
+        if self.is_empty:
+            return self
         grow = int(np.ceil(float(radius)))
         if grow <= 0:
             return self
@@ -139,7 +131,7 @@ class DataWindow:
         try:
             return cls(int(data.get("x0", 0)), int(data.get("y0", 0)),
                        int(data.get("x1", 0)), int(data.get("y1", 0)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return cls(0, 0, 0, 0)
 
 
@@ -159,7 +151,7 @@ def transform_window(window: DataWindow, corners: Tuple[Tuple[float, float],
         return EMPTY_WINDOW
     xs = [float(x) for x, _ in corners]
     ys = [float(y) for _, y in corners]
-    pad = int(np.ceil(float(sampling_radius)))
+    pad = max(0, int(np.ceil(float(sampling_radius))))
     x0 = int(np.floor(min(xs))) - pad
     y0 = int(np.floor(min(ys))) - pad
     x1 = int(np.ceil(max(xs))) + pad
@@ -167,17 +159,9 @@ def transform_window(window: DataWindow, corners: Tuple[Tuple[float, float],
     return DataWindow(x0, y0, x1, y1)
 
 
-# Merge modes whose output can exceed the union of the input windows.
-_MERGE_UNION_MODES = frozenset({
-    "over", "add", "subtract", "difference", "multiply", "screen",
-    "overlay", "min", "max", "color-dodge", "color-burn",
-    "soft-light", "hard-light",
-})
-
-
 def merge_window(foreground: DataWindow, background: DataWindow,
                  mode: str = "over") -> DataWindow:
-    """Propagate windows through a Merge by blend mode (conservative union)."""
+    """Return a conservative bound for any Merge blend mode and Mix value."""
     return foreground.union(background)
 
 
@@ -185,13 +169,13 @@ def merge_window(foreground: DataWindow, background: DataWindow,
 
 
 def window_cache_key(window: DataWindow, frame: int,
-                     sampling_domain: Any = None,
-                     input_revision: Any = None) -> tuple:
+                     sampling_domain: Optional[Hashable] = None,
+                     input_revision: Optional[Hashable] = None,
+                     ) -> tuple[DataWindow, int, Optional[Hashable], Optional[Hashable]]:
     """Cache identity: window × frame × sampling domain × input revision.
 
     Two requests with different windows must never share a cache entry,
     and a full-frame re-render must not serve a ROI tile's entry (or vice
     versa) even for the same frame.
     """
-    return (window.to_dict(), int(frame),
-            str(sampling_domain), str(input_revision))
+    return (window, int(frame), sampling_domain, input_revision)

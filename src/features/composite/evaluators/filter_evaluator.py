@@ -22,7 +22,7 @@ import numpy as np
 import math
 import struct
 from collections import OrderedDict
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,48 @@ class FilterEvaluatorMixin:
                 color_space=input_tex.color_space,
             )
         }
+
+    def _apply_layer_style(self, input_tex: TextureResult, params: dict[str, Any],
+                           w: int, h: int) -> dict[str, TextureResult]:
+        """Blur the original coverage, then composite styles in the input format."""
+        mask_program = self.utility_shaders.get("layer_style_mask")
+        composite_program = self.utility_shaders.get("layer_style_composite")
+        if mask_program is None or composite_program is None:
+            raise RuntimeError("Layer Style shaders are unavailable")
+        from ..core.gl_bind import bind_texture_unit
+
+        uniforms = {**params, "u_resolution": (float(w), float(h)), "u_texture": 0}
+        masks = self._resource_pool.acquire_texture(w, h)
+        output = None
+        try:
+            self.fb_manager.get_fbo(masks).use()
+            self.ctx.viewport = (0, 0, w, h)
+            self._bind_external_texture(input_tex.texture_id)
+            for name, value in uniforms.items():
+                self._set_uniform_if_present(mask_program, name, value)
+            self._render_quad(mask_program)
+
+            output = self._resource_pool.acquire_texture(w, h)
+            self.fb_manager.get_fbo(output).use()
+            self.ctx.viewport = (0, 0, w, h)
+            self._bind_external_texture(input_tex.texture_id)
+            masks.use(1)
+            for name, value in uniforms.items():
+                self._set_uniform_if_present(composite_program, name, value)
+            composite_program["u_style_masks"].value = 1
+            self._render_quad(composite_program)
+        except Exception:
+            if output is not None:
+                self._resource_pool.release_texture(output)
+            raise
+        finally:
+            bind_texture_unit(0, 1)
+            self._resource_pool.release_texture(masks)
+        return {"result": TextureResult(
+            texture_id=output.glo, width=w, height=h, format=input_tex.format,
+            bbox=input_tex.effective_bbox(), color_space=input_tex.color_space,
+            alpha_premultiplied=input_tex.alpha_premultiplied,
+        )}
 
     def _apply_lens_distortion(self, input_tex: TextureResult, params: dict,
                                w: int, h: int) -> dict:

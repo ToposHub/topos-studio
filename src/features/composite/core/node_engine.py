@@ -15,12 +15,14 @@ import math
 import threading
 import logging
 from collections import OrderedDict, deque
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
 from src.features.composite.nodes.base_node import Node, Connection, TextureResult
 from src.features.composite.core.graph_snapshot import GraphSnapshot, NodeSnapshot, ConnectionSnapshot
+from src.features.composite.core.external_comp_refs import active_reference_host_archive
+from src.shared.project.resource_resolver import get_active_project_resolver
 from src.features.composite.core.graph_edit import (
     GraphEditCommand, GraphEditIssue, GraphEditResult,
     EDIT_CAPACITY, EDIT_CYCLE, EDIT_DUPLICATE_COMMAND, EDIT_EDGE_MISSING,
@@ -47,6 +49,7 @@ from src.features.composite.nodes.cs_transform_node import CSTransformNode
 from src.features.composite.nodes.reformat_node import ReformatNode
 from src.features.composite.nodes.crop_node import CropNode
 from src.features.composite.nodes.glow_node import GlowNode
+from src.features.composite.nodes.layer_style_node import LayerStyleNode
 from src.features.composite.nodes.denoise_node import DenoiseNode
 from src.features.composite.nodes.grain_node import GrainNode
 from src.features.composite.nodes.vectorblur_node import VectorBlurNode
@@ -57,6 +60,7 @@ from src.features.composite.nodes.mask_node import MaskNode
 from src.features.composite.nodes.matte_node import MatteNode
 from src.features.composite.nodes.keyer_node import KeyerNode
 from src.features.composite.nodes.video_frame_node import VideoFrameNode
+from src.features.composite.nodes.audio_source_node import AudioSourceNode
 from src.features.composite.nodes.file_output_node import FileOutputNode
 from src.features.composite.nodes.dissolve_node import DissolveNode
 from src.features.composite.nodes.compare_node import CompareNode
@@ -161,6 +165,7 @@ NODE_REGISTRY = {
     "image_input": ImageInputNode,
     "constant": ConstantNode,
     "video_frame": VideoFrameNode,
+    "audio_source": AudioSourceNode,
     "timeline_clip_input": TimelineClipInputNode,
     # Optional Teaching Animation node. The feature module replaces this
     # placeholder with the concrete class when enabled, keeping core imports
@@ -204,6 +209,7 @@ NODE_REGISTRY = {
     # Filter nodes
     "blur": BlurNode,
     "glow": GlowNode,
+    "layer_style": LayerStyleNode,
     "denoise": DenoiseNode,
     "grain": GrainNode,  # CP-019
     "vectorblur": VectorBlurNode,  # CP-020
@@ -361,6 +367,7 @@ NODE_CATEGORIES: Dict[str, List[Tuple[str, Optional[Type[Node]]]]] = {
         ("mesh_warp", WarpNode),
         ("blur", BlurNode),
         ("glow", GlowNode),
+        ("layer_style", LayerStyleNode),
         ("denoise", DenoiseNode),
         ("grain", GrainNode),  # CP-019
         ("vectorblur", VectorBlurNode),  # CP-020
@@ -578,6 +585,38 @@ class NodeGraph:
         with self._lock:
             return [n for n in self.nodes.values() if n.node_type == node_type]
 
+    def insert_subgraph(self, nodes: tuple[Node, ...],
+                        connections: tuple[Connection, ...]) -> GraphEditResult:
+        """Publish newly imported nodes and their internal cables together."""
+        with self._lock:
+            revision = self._generation
+            node_ids = {node.id for node in nodes}
+            if len(node_ids) != len(nodes) or node_ids.intersection(self.nodes):
+                return GraphEditResult.rejected(GraphEditIssue(
+                    EDIT_NODE_MISSING, "Imported node IDs must be unique."), revision)
+            if any(edge.src_node_id not in node_ids or edge.dst_node_id not in node_ids
+                   for edge in connections):
+                return GraphEditResult.rejected(GraphEditIssue(
+                    EDIT_NODE_MISSING, "An imported cable references an outside node."), revision)
+            previous_force_full_eval = self._force_full_eval
+            installed = False
+            try:
+                for node in nodes:
+                    self.add_node(node)
+                result = self.apply_edit(GraphEditCommand(added=connections))
+                installed = result.ok
+                return result if installed else GraphEditResult(
+                    ok=False, issues=result.issues, revision=revision)
+            finally:
+                if not installed:
+                    for node in nodes:
+                        if self.nodes.pop(node.id, None) is not None:
+                            self._expression_manager.remove_node(node.id)
+                            if isinstance(node, GroupNode):
+                                node.set_node_graph(None)
+                    self._generation = revision
+                    self._force_full_eval = previous_force_full_eval
+
     def _detach_node_references_unlocked(self, node_id: str,
                                           node: Node) -> None:
         """Shared cleanup when a node leaves the graph (AUD-5100).
@@ -724,6 +763,8 @@ class NodeGraph:
             self._node_groups.clear()
             self._layer_stacks.clear()
             self._layers.clear()
+            self._markers.clear()
+            self._edit_command_ids.clear()
             self._viewport_state.clear()
             self._viewer_state.clear()
             self._evaluation_cache.clear()
@@ -1312,17 +1353,25 @@ class NodeGraph:
         if not isinstance(marker_id, str) or not marker_id:
             return False
         with self._lock:
+            if self._markers.get(marker_id) == marker:
+                return False
             self._markers[marker_id] = marker
+            self._generation += 1
         return True
 
     def remove_marker(self, marker_id: str) -> Optional[Any]:
         with self._lock:
-            return self._markers.pop(str(marker_id), None)
+            marker = self._markers.pop(str(marker_id), None)
+            if marker is not None:
+                self._generation += 1
+            return marker
 
     def replace_markers(self, markers: Dict[str, Any]) -> None:
         """Swap the full marker map (undo/redo restore path)."""
         with self._lock:
-            self._markers = dict(markers)
+            if self._markers != markers:
+                self._markers = dict(markers)
+                self._generation += 1
 
     def get_marker_map(self) -> Dict[str, Any]:
         with self._lock:
@@ -1390,7 +1439,9 @@ class NodeGraph:
         with self._lock:
             return self._would_create_cycle(src_node_id, dst_node_id)
 
-    def apply_edit(self, command: GraphEditCommand) -> GraphEditResult:
+    def apply_edit(self, command: GraphEditCommand, *,
+                   validate_candidate: Callable[[], GraphEditIssue | None] | None = None,
+                   ) -> GraphEditResult:
         """Validate an entire cable edit on a staging list and publish once.
 
         B02 unified write entry: capacity, port type, directed-cycle,
@@ -1398,6 +1449,9 @@ class NodeGraph:
         staged candidate *before* anything is published; a rejected edit
         leaves the graph untouched and returns machine-readable reason
         codes instead of a bare ``False``.
+
+        An optional read-only domain validator observes the candidate edges
+        under the same lock, before revisions advance or nodes are dirtied.
         """
         with self._lock:
             revision = self._generation
@@ -1459,6 +1513,10 @@ class NodeGraph:
                         f"feed {input_port.data_type} input {edge.dst_port_name!r}.",
                         node_id=edge.src_node_id, port=edge.src_port_name),
                         revision, command_id)
+                if command.replace_single_inputs and input_port.max_connections == 1:
+                    proposed = [existing for existing in proposed
+                                if (existing.dst_node_id, existing.dst_port_name)
+                                != (edge.dst_node_id, edge.dst_port_name)]
                 occupied = sum(existing.dst_node_id == edge.dst_node_id
                                and existing.dst_port_name == edge.dst_port_name
                                for existing in proposed)
@@ -1481,20 +1539,26 @@ class NodeGraph:
                     proposed.append(edge)
                 else:
                     proposed.insert(positions[index], edge)
-            if proposed == self.connections:
-                return GraphEditResult.applied(revision, command_id)
-
-            original = self.connections
-            try:
-                self.connections = proposed
-                for node_id in {edge.dst_node_id for edge in (*removed, *added)}:
-                    self._mark_dirty_downstream(node_id)
-                self._generation += 1
-                self._topology_revision += 1
-            except Exception:
-                # Mid-publication failure must not leave a half-applied edit.
-                self.connections = original
-                raise
+            if proposed != self.connections:
+                original = self.connections
+                if validate_candidate is not None:
+                    self.connections = proposed
+                    try:
+                        issue = validate_candidate()
+                    finally:
+                        self.connections = original
+                    if issue is not None:
+                        return GraphEditResult.rejected(issue, revision, command_id)
+                try:
+                    self.connections = proposed
+                    for node_id in {edge.dst_node_id for edge in (*removed, *added)}:
+                        self._mark_dirty_downstream(node_id)
+                    self._generation += 1
+                    self._topology_revision += 1
+                except Exception:
+                    # Mid-publication failure must not leave a half-applied edit.
+                    self.connections = original
+                    raise
             if command_id:
                 self._edit_command_ids.append(command_id)
                 if len(self._edit_command_ids) > 128:
@@ -1521,69 +1585,15 @@ class NodeGraph:
         before removing any existing connection to the input port.
         Returns False without modifying the graph if validation fails.
         """
-        with self._lock:
-            src_node = self.nodes.get(src_node_id)
-            dst_node = self.nodes.get(dst_node_id)
-            if not src_node or not dst_node:
-                return False
-
-            src_port = src_node.get_output_port(src_port_name)
-            dst_port = dst_node.get_input_port(dst_port_name)
-            if not src_port or not dst_port:
-                return False
-
-            # Check data type compatibility
-            if src_port.data_type != dst_port.data_type:
-                return False
-
-            # Check for cycles BEFORE removing any existing connection
-            if self._would_create_cycle(src_node_id, dst_node_id):
-                return False
-
-            # Only now is it safe to replace existing connection on the input port.
-            # - max_connections == 1：单输入端口，满载时替换（旧连接已通过成环检测）。
-            # - max_connections > 1：多输入端口，满载时**拒绝**新连接以保护已有连接，
-            #   而不是清空全部（否则多输入聚合被破坏）。
-            if dst_port.max_connections > 0:
-                existing = sum(1 for c in self.connections
-                              if c.dst_node_id == dst_node_id and c.dst_port_name == dst_port_name)
-                if existing >= dst_port.max_connections:
-                    if dst_port.max_connections == 1:
-                        # Single-input: replace the existing connection
-                        self.connections = [
-                            c for c in self.connections
-                            if not (c.dst_node_id == dst_node_id and c.dst_port_name == dst_port_name)
-                        ]
-                    else:
-                        # Multi-input port at capacity: refuse without disturbing existing
-                        return False
-
-            conn = Connection(src_node_id, src_port_name, dst_node_id, dst_port_name)
-            self.connections.append(conn)
-
-            # Mark downstream nodes as dirty
-            self._mark_dirty_downstream(dst_node_id)
-            self._generation += 1
-            self._topology_revision += 1
-
-            return True
+        return self.apply_edit(GraphEditCommand(
+            added=(Connection(src_node_id, src_port_name, dst_node_id, dst_port_name),),
+            replace_single_inputs=True)).ok
 
     def disconnect(self, src_node_id: str, src_port_name: str,
                    dst_node_id: str, dst_port_name: str) -> bool:
         """Disconnect two ports."""
-        with self._lock:
-            original_len = len(self.connections)
-            self.connections = [
-                c for c in self.connections
-                if not (c.src_node_id == src_node_id and c.src_port_name == src_port_name
-                        and c.dst_node_id == dst_node_id and c.dst_port_name == dst_port_name)
-            ]
-            disconnected = len(self.connections) < original_len
-            if disconnected:
-                self._mark_dirty_downstream(dst_node_id)
-                self._generation += 1
-                self._topology_revision += 1
-            return disconnected
+        return self.apply_edit(GraphEditCommand(
+            removed=(Connection(src_node_id, src_port_name, dst_node_id, dst_port_name),))).ok
 
     def disconnect_by_dst(self, dst_node_id: str, dst_port_name: str) -> None:
         """Remove all connections to a specific input port."""
@@ -2220,6 +2230,14 @@ class NodeGraph:
                 if nid in errors_f:
                     expression_errors[nid] = errors_f[nid]
             # Capture node state
+            from .layer_time import fps_fraction
+            composition_fps = fps_fraction(self.fps)
+            layered_sources = {
+                layer.source_node_id for stack in self._layer_stacks.values()
+                if stack.managed
+                for layer_id in stack.layer_ids
+                if (layer := self._layers.get(layer_id)) is not None and layer.managed
+            }
             node_snaps: Dict[str, NodeSnapshot] = {}
             for nid, node in self.nodes.items():
                 # N-14：轨道/参数 meta 序列化按 param_revision 缓存。
@@ -2255,10 +2273,17 @@ class NodeGraph:
                     if isinstance(mapping, (tuple, list)) and len(mapping) == 2
                 }
 
+                parameters = copy.deepcopy(evaluated_params.get(nid, node.parameters))
+                time_range = copy.deepcopy(node.time_range) if node.time_range else None
+                if (nid in layered_sources and node.node_type == "video_frame"
+                        and composition_fps > 0
+                        and (time_range is None or time_range.get("enabled", True))):
+                    time_range = time_range or {}
+                    time_range["sample_comp_fps"] = str(composition_fps)
                 node_snaps[nid] = NodeSnapshot(
                     node_id=nid,
                     node_type=node.node_type,
-                    parameters=copy.deepcopy(evaluated_params.get(nid, node.parameters)),
+                    parameters=parameters,
                     disabled=node.disabled,
                     input_ports=[(p.name, p.data_type) for p in node.inputs],
                     output_ports=[(p.name, p.data_type) for p in node.outputs],
@@ -2275,7 +2300,7 @@ class NodeGraph:
                     expressions=copy.deepcopy(snapshot_expressions.get(nid, {})),
                     expression_errors=copy.deepcopy(expression_errors.get(nid, {})),
                     # ── Per-node time range + color (P1) ──
-                    time_range=copy.deepcopy(node.time_range) if node.time_range else None,
+                    time_range=time_range,
                     node_color=node.effective_header_color(),
                     group_member_node_ids=group_members,
                     group_input_mappings=group_inputs,
@@ -2303,14 +2328,88 @@ class NodeGraph:
             # time-node frame remaps were precomputed above (N-06) so both
             # parameter evaluation and frame-reading sources see the same
             # mapping.
-            from .layer_model import EMPTY_LAYER_OUTPUT_PARAM
+            from .layer_model import (
+                BOTTOM_UP_LAYER_STACK_VERSION, EMPTY_LAYER_OUTPUT_PARAM, LAYER_MERGE_OWNER_PARAM,
+            )
+            from .layer_time import layer_timing_from_video
             from .time_remap import (compute_layer_frame_gates,
-                                     empty_managed_layer_outputs)
+                                     empty_managed_layer_outputs, gate_active)
+            from src.shared.media.presentation_time import ready_presentation_index
+
+            def layer_is_active(layer: Any) -> bool:
+                if not gate_active((layer.in_frame, layer.out_frame), frame_number):
+                    return False
+                source = node_snaps.get(layer.source_node_id)
+                if layer.out_frame is not None or source is None or source.node_type != "video_frame":
+                    return True
+                params = source.parameters
+                if (params.get("hold") or params.get("loop") or params.get("time_offset")
+                        or params.get("speed", 1.0) != 1.0):
+                    return True
+                time_range = source.time_range or {}
+                if not time_range.get("enabled", True):
+                    return True
+                try:
+                    start = int(time_range.get("comp_start", layer.in_frame or 0))
+                except (TypeError, ValueError):
+                    start = 0
+                end = time_range.get("comp_end")
+                if not isinstance(end, int):
+                    index = ready_presentation_index(str(params.get("file_path") or ""))
+                    source_out = int(params.get("source_out", -1))
+                    if source_out < 0:
+                        source_out = (len(index.pts) if index is not None
+                                      else int(params.get("total_frames") or 0)) - 1
+                    timing = layer_timing_from_video(
+                        (start, start), params, time_range, composition_fps, index)
+                    duration = timing.window_duration(source_out) if timing.fps_aware else 0
+                    end = start + duration - 1 if duration > 0 else None
+                remap = frame_overrides.get(source.node_id)
+                sampled_frame = remap.apply(frame_number) if remap is not None else frame_number
+                return gate_active((start, end), sampled_frame)
+
             layer_frame_gates = compute_layer_frame_gates(
                 self._layer_stacks.values(), self._layers.get)
+            inactive_layer_inputs: dict[str, frozenset[str]] = {}
+            legacy_gate_nodes = {
+                node_id for stack in self._layer_stacks.values()
+                if not stack.managed or stack.version < BOTTOM_UP_LAYER_STACK_VERSION
+                for layer_id in stack.layer_ids
+                if (layer := self._layers.get(layer_id)) is not None
+                for node_id in (layer.root_node_id, layer.source_node_id)
+            }
+            for stack in self._layer_stacks.values():
+                if not stack.managed or stack.version < BOTTOM_UP_LAYER_STACK_VERSION:
+                    continue
+                # Leave shared image branches alive. Their ownership boundary
+                # is the destination Merge input rather than the source node.
+                merge_owners = {
+                    merge_id: self._layers.get(snapshot.parameters.get(LAYER_MERGE_OWNER_PARAM))
+                    for merge_id in stack.generated_merge_node_ids
+                    if (snapshot := node_snaps.get(merge_id)) is not None
+                }
+                for merge_id, owner in merge_owners.items():
+                    if owner is None or not owner.managed:
+                        continue
+                    inactive = set()
+                    if not layer_is_active(owner):
+                        inactive.add("A")
+                    matte = self._layers.get(owner.track_matte_layer_id)
+                    if matte is not None and not layer_is_active(matte):
+                        inactive.add("mask")
+                        if not owner.track_matte_invert:
+                            inactive.add("A")
+                    if inactive:
+                        inactive_layer_inputs[merge_id] = frozenset(inactive)
+                for layer_id in stack.layer_ids:
+                    layer = self._layers.get(layer_id)
+                    if layer is not None and layer.managed:
+                        for node_id in (layer.root_node_id, layer.source_node_id):
+                            if node_id not in legacy_gate_nodes:
+                                layer_frame_gates.pop(node_id, None)
             for output_id in empty_managed_layer_outputs(
                     self._layer_stacks.values(), self._layers.get,
-                    self.connections, layer_frame_gates, frame_number):
+                    self.connections, layer_frame_gates, frame_number, inactive_layer_inputs):
                 output = node_snaps.get(output_id)
                 if output is not None and output.node_type == "output":
                     output.parameters[EMPTY_LAYER_OUTPUT_PARAM] = True
@@ -2327,9 +2426,13 @@ class NodeGraph:
                 topology_revision=self._topology_revision,
                 frame_number=frame_number,
                 layer_frame_gates=layer_frame_gates,
+                inactive_layer_inputs=inactive_layer_inputs,
                 frame_overrides=frame_overrides,
                 # N-07：共享源时间分支冲突诊断（不再静默 first-wins）
                 time_conflicts=tuple(time_conflicts),
+                fps=fps,
+                project_archive_path=active_reference_host_archive(),
+                external_archive_resolver=get_active_project_resolver(),
                 # R-14：全局 3D 场景成品设置随快照进入所有渲染/导出路径
                 global_3d_scene_settings=copy.deepcopy(
                     self._viewer_state.get("default_3d_scene", {})
@@ -2637,9 +2740,7 @@ class NodeGraph:
                     lid: layer.to_dict() for lid, layer in self._layers.items()
                 }
             # Composition markers (B04): additive; older readers ignore.
-            if self._markers:
-                data["markers"] = [marker.to_dict()
-                                   for marker in self.get_markers()]
+            data["markers"] = [marker.to_dict() for marker in self.get_markers()]
 
             # Serialize UI state (viewport and viewer)
             if self._viewport_state:

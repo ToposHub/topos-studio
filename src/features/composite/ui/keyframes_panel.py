@@ -16,6 +16,7 @@ panel matches the global dark theme instead of hard-coded DaVinci colors.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from PyQt6.QtCore import QDateTime, QEvent, QObject, QPoint, Qt, QTimer, QSize, pyqtSignal
@@ -34,7 +35,8 @@ from PyQt6.QtWidgets import (
     QToolTip, QWidget,
 )
 
-from src.features.composite.core.layer_model import LAYER_BLEND_MODES, Layer
+from src.features.composite.core.composite_markers import CompositeMarker
+from src.features.composite.core.layer_model import LAYER_BLEND_MODES, LAYER_TYPE_AUDIO, Layer
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
@@ -668,6 +670,8 @@ class KeyframesPanel(QWidget):
         start, end = layer_bar_edit_bounds(
             bar.start_frame, bar.end_frame, target, edit,
             source_total=track.source_total, source_in=track.source_in,
+            source_step=track.source_step, source_phase=track.source_phase,
+            media_timing=track.media_timing,
         )
         if (start, end) != (bar.start_frame, bar.end_frame):
             self._on_timeline_range_changed(layer.root_node_id, {
@@ -775,6 +779,8 @@ class KeyframesPanel(QWidget):
                 old.layer_stack_changed.disconnect(self._on_layer_stack_changed)
             except (TypeError, RuntimeError):
                 pass
+        if old is not None and hasattr(old, "composition_markers_changed"):
+            old.composition_markers_changed.disconnect(self._refresh_composition_markers)
         self._layer_stack_controller = controller
         if controller is not None and hasattr(controller, "layer_stack_changed"):
             try:
@@ -782,7 +788,74 @@ class KeyframesPanel(QWidget):
             except (TypeError, RuntimeError):
                 logger.warning("Layer stack change signal connect failed",
                                exc_info=True)
+        if controller is not None and hasattr(controller, "composition_markers_changed"):
+            controller.composition_markers_changed.connect(self._refresh_composition_markers)
+        self._refresh_composition_markers()
         self._rebuild_filtered_model()
+
+    def _refresh_composition_markers(self, _scope: str = "") -> None:
+        controller = self._layer_stack_controller
+        start, end = self._effective_comp_range()
+        markers = tuple(marker for marker in controller.markers()
+                        if start <= marker.frame <= end) if controller is not None else ()
+        self._timeline_view.set_composition_markers(
+            markers, editable=controller is not None)
+        self._graph_view.set_markers(list(markers))
+
+    def _move_composition_marker(self, marker_id: str, frame: int) -> None:
+        if self._layer_stack_controller is not None:
+            self._layer_stack_controller.move_marker(marker_id, frame)
+
+    def _open_composition_marker_menu(self, frame: int,
+                                      markers: tuple[CompositeMarker, ...],
+                                      position: QPoint) -> None:
+        controller = self._layer_stack_controller
+        if controller is None:
+            return
+        menu = QMenu(self)
+        add_title = I18N.tr("keyframes.marker_add", "Add Composition Marker…")
+        rename_title = I18N.tr("keyframes.marker_rename", "Rename Marker…")
+        duration_title = I18N.tr("keyframes.marker_duration", "Marker Duration (frames)…")
+        remove_title = I18N.tr("keyframes.marker_delete", "Delete Marker")
+        name_label = I18N.tr("keyframes.marker_name", "Name")
+
+        def edit_name(marker: CompositeMarker | None = None) -> None:
+            name, ok = QInputDialog.getText(
+                self, rename_title if marker else add_title, name_label,
+                text=marker.name if marker else "")
+            if ok:
+                if marker is None:
+                    controller.add_marker(frame, name)
+                else:
+                    controller.rename_marker(marker.marker_id, name)
+
+        def edit_duration(marker: CompositeMarker) -> None:
+            max_duration = min(2_147_483_647, self._effective_comp_range()[1] - marker.frame + 1)
+            duration, ok = QInputDialog.getInt(
+                self, duration_title, duration_title, min(marker.duration or 0, max_duration),
+                min=0, max=max_duration)
+            if ok:
+                controller.set_marker_duration(marker.marker_id, duration or None)
+
+        menu.addAction(add_title, lambda: edit_name())
+        if markers:
+            menu.addSeparator()
+        labels = [f"{marker.name} ({marker.frame})" if marker.name else str(marker.frame)
+                  for marker in markers]
+        label_counts = Counter(labels)
+        for index, (marker, label) in enumerate(zip(markers, labels), 1):
+            marker_menu = menu.addMenu(f"{label} · {index}" if label_counts[label] > 1 else label)
+            marker_menu.addAction(rename_title, lambda checked=False, item=marker: edit_name(item))
+            marker_menu.addAction(duration_title, lambda checked=False, item=marker: edit_duration(item))
+            marker_menu.addAction(remove_title, lambda checked=False, item=marker:
+                                  controller.remove_marker(item.marker_id))
+        menu.addSeparator()
+        menu.addAction(I18N.tr("keyframes.ruler_frames", "Frame numbers"),
+                       lambda: self._timeline_view._set_display_mode("frame"))
+        menu.addAction(I18N.tr("keyframes.ruler_timecode", "Timecode"),
+                       lambda: self._timeline_view._set_display_mode("timecode"))
+        menu.exec(position)
+        menu.deleteLater()
 
     def set_media_drop_handler(self, handler) -> None:
         """Install the host-owned media drop callback on the whole panel."""
@@ -1125,6 +1198,8 @@ class KeyframesPanel(QWidget):
         self._tree_view.layer_name_edited.connect(self._rename_layer_from_timeline)
         self._tree_view.layer_menu_requested.connect(self._open_layer_menu)
         self._timeline_view.layer_menu_requested.connect(self._open_layer_menu)
+        self._timeline_view.marker_menu_requested.connect(self._open_composition_marker_menu)
+        self._timeline_view.marker_moved.connect(self._move_composition_marker)
         self._tree_view.layer_parent_menu_requested.connect(self._open_layer_parent_menu)
         self._tree_view.layer_delete_requested.connect(
             self.layer_delete_requested.emit)
@@ -1699,6 +1774,7 @@ class KeyframesPanel(QWidget):
         # media, but that must not enlarge ordinary node bars.
         self._model.set_comp_range(*self._effective_comp_range())
         self._node_graph = node_graph
+        self._refresh_composition_markers()
         if selected_layer_id is not None:
             self._selected_layer_id = str(selected_layer_id)
         if (self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
@@ -2021,6 +2097,11 @@ class KeyframesPanel(QWidget):
             return False
         node = self._node_graph.get_node(str(node_id))
         return bool(getattr(node, "supports_parent_transform", False))
+
+    def _layer_parent_binding_supported(self, layer: Layer) -> bool:
+        transform = self._layer_stack_controller.layer_transform_node(layer.layer_id)
+        return self._parent_binding_supported(
+            transform.id if transform is not None else layer.root_node_id)
 
     def _on_property_keyframe_toggle(self, node_id: str,
                                      param_name: str, *, allow_hidden: bool = False) -> None:
@@ -2686,6 +2767,7 @@ class KeyframesPanel(QWidget):
     def _set_timeline_composition_range(self, start: int, end: int) -> None:
         had_selected_points = self._uses_ae_layer_shortcuts() and bool(self._timeline_view.selected_keyframes())
         self._timeline_view.set_composition_range(start, end)
+        self._refresh_composition_markers()
         if had_selected_points and not self._timeline_view.selected_keyframes():
             self._layer_delete_blocked = True
 
@@ -3316,6 +3398,8 @@ class KeyframesPanel(QWidget):
                                    lambda: self._commit_layer_edit(
                                        controller.duplicate_layer(layer_id), layer_id))
         duplicate.setEnabled(editable)
+        if layer.audio is not None:
+            self._populate_layer_audio_menu(menu, layer, editable)
         if controller.graph.get_node(layer.root_node_id) is not None:
             menu.addAction(I18N.tr("composite.layer_timeline.reveal_node", "Show in Node Graph"),
                            lambda: self.reveal_layer_node_requested.emit(layer.root_node_id))
@@ -3347,7 +3431,7 @@ class KeyframesPanel(QWidget):
                                          controller.set_layer_blend_mode(layer_id, value), layer_id))
             action.setCheckable(True)
             action.setChecked(layer.blend_mode == mode)
-        blend.setEnabled(editable)
+        blend.setEnabled(editable and layer.layer_type != LAYER_TYPE_AUDIO)
 
         parents = menu.addMenu(I18N.tr("keyframes.layer_parent", "Parent"))
         self._populate_layer_parent_menu(parents, layer, layers, layer_ids)
@@ -3359,6 +3443,8 @@ class KeyframesPanel(QWidget):
             if other_id == layer_id or other_id not in layers:
                 continue
             other = layers[other_id]
+            if other.layer_type == LAYER_TYPE_AUDIO:
+                continue
             matte = mattes.addMenu(other.name)
             for mode, invert, label in (
                 ("alpha", False, I18N.tr("keyframes.layer_matte_alpha", "Alpha")),
@@ -3373,8 +3459,8 @@ class KeyframesPanel(QWidget):
                 action.setChecked((layer.track_matte_layer_id, layer.track_matte_mode,
                                    layer.track_matte_invert) == (other_id, mode, invert))
         parents.setEnabled(editable and (bool(layer.parent_layer_id)
-                           or self._parent_binding_supported(layer.root_node_id)))
-        mattes.setEnabled(editable)
+                           or self._layer_parent_binding_supported(layer)))
+        mattes.setEnabled(editable and layer.layer_type != LAYER_TYPE_AUDIO)
         track = self._model.track_for(f"layer:{layer_id}")
         if track is not None and track.range_bar is not None:
             bar = track.range_bar
@@ -3387,6 +3473,21 @@ class KeyframesPanel(QWidget):
                              lambda: self.seek_to_frame(bar.end_frame))
             timing.addAction(I18N.tr("composite.layer_timeline.set_work_area", "Set Work Area to Layer"),
                              lambda: self.set_play_range(bar.start_frame, bar.end_frame))
+            bounds = (bar.start_frame, bar.end_frame)
+            source_timing = controller.video_layer_timing(layer_id, bounds) if editable else None
+            if source_timing is not None:
+                timing.addSeparator()
+                split = timing.addAction(
+                    I18N.tr("keyframes.layer_split", "Split at Playhead"),
+                    lambda: self._commit_layer_edit(controller.edit_layer_source_time(
+                        layer_id, "split", self._state.current_frame, bounds), layer_id))
+                split.setEnabled(bounds[0] < self._state.current_frame <= bounds[1])
+                timing.addAction(
+                    I18N.tr("keyframes.layer_slip", "Slip Source…"),
+                    lambda: self._prompt_layer_source_time(layer_id, "slip", bounds))
+                timing.addAction(
+                    I18N.tr("keyframes.layer_stretch", "Stretch Duration…"),
+                    lambda: self._prompt_layer_source_time(layer_id, "stretch", bounds))
         menu.addSeparator()
         label = menu.addAction(I18N.tr("keyframes.layer_label_color", "Label Color…"),
                                lambda: self._choose_layer_color(layer))
@@ -3394,6 +3495,57 @@ class KeyframesPanel(QWidget):
         delete = menu.addAction(I18N.tr("keyframes.layer_delete", "Delete Layer"),
                                 lambda: self.layer_delete_requested.emit(layer_id))
         delete.setEnabled(editable)
+
+    def _prompt_layer_source_time(
+        self, layer_id: str, kind: str, bounds: tuple[int, int]
+    ) -> None:
+        if kind == "slip":
+            title = I18N.tr("keyframes.layer_slip", "Slip Source…")
+            label = I18N.tr("keyframes.layer_slip_frames", "Offset (composition frames)")
+            value, lower, upper = 0, -10_000_000, 10_000_000
+        else:
+            title = I18N.tr("keyframes.layer_stretch", "Stretch Duration…")
+            label = I18N.tr("keyframes.layer_stretch_frames", "Duration (frames)")
+            value, lower, upper = bounds[1] - bounds[0] + 1, 1, 10_000_000
+        result, accepted = QInputDialog.getInt(self, title, label, value, lower, upper)
+        if accepted:
+            self._commit_layer_edit(self._layer_stack_controller.edit_layer_source_time(
+                layer_id, kind, result, bounds), layer_id)
+
+    def set_audio_waveforms(self, envelopes: dict) -> None:
+        self._timeline_view.set_audio_waveforms(envelopes)
+
+    def _populate_layer_audio_menu(self, menu: QMenu, layer: Layer, editable: bool) -> None:
+        from dataclasses import replace
+
+        audio = layer.audio
+        controller = self._layer_stack_controller
+        submenu = menu.addMenu(I18N.tr("keyframes.layer_audio", "Audio"))
+        submenu.setEnabled(editable)
+
+        def apply_audio(prop: str, value: bool | float) -> None:
+            current = controller.graph.get_layer(layer.layer_id)
+            if current is not None and current.audio is not None:
+                self._commit_layer_edit(controller.set_layer_property(
+                    layer.layer_id, "audio", replace(current.audio, **{prop: value}),
+                    description="Edit layer audio"), layer.layer_id)
+
+        for prop, label, checked in (
+            ("mute", I18N.tr("keyframes.layer_audio_mute", "Mute"), audio.mute),
+            ("solo", I18N.tr("keyframes.layer_audio_solo", "Solo"), audio.solo),
+        ):
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(checked)
+            action.toggled.connect(lambda active, name=prop: apply_audio(name, active))
+
+        def edit_gain() -> None:
+            title = I18N.tr("keyframes.layer_audio_gain", "Gain (dB)")
+            gain, accepted = QInputDialog.getDouble(self, title, title, audio.gain_db, -120, 24, 1)
+            if accepted:
+                apply_audio("gain_db", gain)
+
+        submenu.addAction(I18N.tr("keyframes.layer_audio_gain", "Gain (dB)"), edit_gain)
 
     def _populate_layer_parent_menu(self, menu: QMenu, layer: Layer,
                                     layers: dict[str, Layer], layer_ids: list[str]) -> None:
@@ -3407,7 +3559,7 @@ class KeyframesPanel(QWidget):
         for other_id in layer_ids:
             other = layers.get(other_id)
             if (other is None or other_id == layer_id or
-                    not self._parent_binding_supported(other.root_node_id)):
+                    not self._layer_parent_binding_supported(other)):
                 continue
             action = menu.addAction(other.name, lambda _checked=False, target=other_id: self._commit_layer_edit(
                 controller.set_layer_parent(layer_id, target), layer_id))
@@ -3423,7 +3575,7 @@ class KeyframesPanel(QWidget):
         stack = controller.main_stack()
         if (layer is None or stack is None or layer.locked or not layer.managed or not stack.managed):
             return
-        if not layer.parent_layer_id and not self._parent_binding_supported(layer.root_node_id):
+        if not layer.parent_layer_id and not self._layer_parent_binding_supported(layer):
             return
         menu = QMenu(self)
         menu.setObjectName("KeyframesLayerParentMenu")

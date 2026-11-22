@@ -40,6 +40,7 @@ def _make_renderer_with_output(ctx) -> CompositeRenderer:
     frame[:, :, 3] = 1.0
     tex.write(frame.astype(np.float16))
     r.tex_ring = [None, tex, None]
+    r.fbo_ring = [None, ctx.framebuffer(color_attachments=[tex]), None]
     r.gpu_scope_ready = __import__('unittest.mock', fromlist=['Mock']).Mock()
     return r
 
@@ -84,6 +85,28 @@ class TestCompositeGpuScopeHandler:
         r.gpu_scope_ready.emit = lambda f, _e=emitted: _e.append(f)
         CompositeRenderer._handle_render_gpu_scope(r, {"not": "a demand"})
         assert emitted == []
+
+    def test_scope_resize_starts_with_live_output_framebuffer(self, gl_ctx, monkeypatch):
+        renderer = _make_renderer_with_output(gl_ctx)
+        engine = renderer._ensure_gpu_scope_engine()
+        render = engine.render_demand
+        used_targets = []
+
+        def render_demand(demand, source):
+            used_targets.append(gl_ctx.fbo)
+            return render(demand, source)
+
+        monkeypatch.setattr(engine, "render_demand", render_demand)
+        for revision, analysis_size in enumerate(((512, 288), (768, 432)), 1):
+            renderer._handle_render_gpu_scope(ScopeDemand(
+                revision, revision, "quad",
+                analysis_size=analysis_size, display_size=(400, 300),
+            ))
+            assert gl_ctx.error == "GL_NO_ERROR"
+        assert used_targets == [renderer.fbo_ring[1]] * 2
+        engine.release()
+        renderer.fbo_ring[1].release()
+        renderer.tex_ring[1].release()
 
     def test_command_is_registered(self):
         assert hasattr(CompositeCommand, "RENDER_GPU_SCOPE")

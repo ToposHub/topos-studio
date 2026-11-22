@@ -37,6 +37,106 @@ from src.features.composite.nodes.precomp_node import PrecompNode
 pytestmark = pytest.mark.composite_core
 
 
+def test_layer_source_timing_splits_on_the_same_source_samples_and_stretches() -> None:
+    from src.features.composite.core.undo_stack import UndoStack
+
+    graph = NodeGraph()
+    graph.fps = 25
+    graph.add_node(OutputNode(node_id="output"))
+    video = VideoFrameNode(node_id="video")
+    video.set_parameter("asset_id", "footage")
+    video.set_parameter("fps", 24)
+    video.set_parameter("total_frames", 120)
+    graph.add_node(video)
+    undo = UndoStack()
+    controller = LayerStackController(graph, undo, layer_stack_version=2)
+    layer_id = controller.add_media_layer("Footage", video.id)
+    from src.features.composite.edit_service import CompositeEditService
+    assert CompositeEditService(graph).apply({"operations": [{
+        "op": "add_keyframe", "node_id": graph.get_layer(layer_id).root_node_id,
+        "param_name": "translate_x", "frame": 54, "value": 4.0,
+    }]}).applied
+
+    source = graph.snapshot(frame_number=7).nodes[video.id]
+    assert source.time_range["sample_comp_fps"] == "25"
+    transient = VideoFrameNode()
+    transient.set_parameter("fps", 24)
+    transient.time_range = source.time_range
+    assert transient._resolve_frame_number(7) == 6
+    right_id = controller.edit_layer_source_time(layer_id, "split", 23, (0, 124))
+    assert isinstance(right_id, str)
+    left, right = graph.get_layer(layer_id), graph.get_layer(right_id)
+    right_source = graph.get_node(right.source_node_id)
+    assert right_source.id != video.id
+    assert right_source.parameters["asset_id"] == "footage"
+    assert set(graph.get_node(right.root_node_id).keyframe_tracks) == {"translate_x"}
+    assert (left.in_frame, left.out_frame, right.in_frame, right.out_frame) == (0, 22, 23, 124)
+    for frame in range(23, 125):
+        assert right_source.parameters["source_in"] + right_source._resolve_frame_number(frame) \
+            == frame * 24 // 25
+
+    undo.undo()
+    assert graph.get_layer(right_id) is None
+    undo.redo()
+    assert graph.get_node(right.source_node_id).time_range["source_phase"] == "2/25"
+    assert controller.edit_layer_source_time(right_id, "stretch", 204, (23, 124)) is True
+    right_source = graph.get_node(right.source_node_id)
+    assert right_source.time_range["source_step"] == "12/25"
+    assert controller.edit_layer_source_time(right_id, "slip", -2, (23, 226)) is True
+    saved = NodeGraph.from_dict(graph.to_dict())
+    assert saved.get_node(right.source_node_id).parameters["source_in"] == 21
+
+
+def test_v2_managed_inputs_gate_per_layer_without_hiding_other_branches() -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="output"))
+    graph.add_node(ConstantNode(node_id="source"))
+    graph.add_node(BlurNode(node_id="free"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    left = controller.add_media_layer("Early", "source")
+    right = controller.add_media_layer("Late", "source")
+    assert graph.connect("source", "result", "free", "image")
+    controller.apply_layer_time_bounds(left, (0, 10))
+    controller.apply_layer_time_bounds(right, (11, 20))
+
+    early = graph.snapshot(frame_number=10)
+    late = graph.snapshot(frame_number=11)
+    assert early.inactive_layer_inputs == {
+        controller.layer_merge_node(right).id: frozenset({"A"}),
+    }
+    assert late.inactive_layer_inputs == {
+        controller.layer_merge_node(left).id: frozenset({"A"}),
+    }
+    assert "source" not in early.layer_frame_gates
+    assert early.get_input_connections("free")[0].src_node_id == "source"
+
+
+def test_slipping_legacy_shared_video_isolates_only_the_edited_reader() -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="output"))
+    video = VideoFrameNode(node_id="source")
+    video.set_parameter("asset_id", "shared-footage")
+    video.set_parameter("fps", 24)
+    video.set_parameter("total_frames", 120)
+    graph.add_node(video)
+    graph.add_node(BlurNode(node_id="free"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    first = controller.add_media_layer("First", video.id)
+    second = controller.add_media_layer("Second", video.id)
+    assert graph.connect(video.id, "image", "free", "image")
+
+    assert controller.edit_layer_source_time(first, "slip", 8, (0, 49)) is True
+
+    first_layer, second_layer = graph.get_layer(first), graph.get_layer(second)
+    assert first_layer.source_node_id != video.id
+    first_source = graph.get_node(first_layer.source_node_id)
+    assert first_source.parameters["asset_id"] == video.parameters["asset_id"]
+    assert first_source.parameters["source_in"] == 8
+    assert second_layer.source_node_id == video.id
+    assert video.parameters["source_in"] == 0
+    assert graph.get_input_connections("free")[0].src_node_id == video.id
+
+
 # ── TimeRemap math ─────────────────────────────────────────────────────────
 
 class TestTimeRemapMath(unittest.TestCase):
@@ -643,6 +743,51 @@ class TestReverseLoopSnapshotPropagation(unittest.TestCase):
 
 # ── B03: rational layer-time contract ──────────────────────────────────────
 
+def test_first_layer_trim_preserves_sampling_phase_through_undo_and_reload(qapp):
+    from unittest.mock import MagicMock
+
+    from src.features.composite.ui.composite_page import CompositePage
+
+    page = CompositePage()
+    page._evaluate_graph = MagicMock()
+    graph = page.node_graph
+    graph.clear()
+    graph.fps = page._composite_fps = 25.0
+    graph.add_node(OutputNode(node_id="out"))
+    video = VideoFrameNode(node_id="video")
+    video.set_parameter("fps", 24.0)
+    video.set_parameter("total_frames", 60)
+    graph.add_node(video)
+    controller = page._layer_stack_controller
+    layer_id = controller.add_media_layer("Footage", video.id)
+    layer = graph.get_layer(layer_id)
+    root_id = layer.root_node_id
+
+    try:
+        assert (layer.in_frame, layer.out_frame) == (None, None)
+        page._on_keyframes_panel_time_range_changed(root_id, {
+            "layer_id": layer_id, "edit": "trim_in", "enabled": True,
+            "comp_start": 1, "comp_end": 59,
+        })
+        assert video.time_range["source_phase"] == "24/25"
+        assert video.time_range["source_step"] == "24/25"
+        assert [video._resolve_frame_number(frame) for frame in (1, 2, 3)] == [0, 1, 2]
+        assert (layer.in_frame, layer.out_frame) == (1, 59)
+
+        page.undo()
+        assert video.time_range is None
+        assert (layer.in_frame, layer.out_frame) == (None, None)
+        page.redo()
+        assert video._resolve_frame_number(2) == 1
+
+        page.load_composite_data(page.get_composite_data())
+        reloaded = graph.get_node("video")
+        assert reloaded.time_range["source_phase"] == "24/25"
+        assert reloaded._resolve_frame_number(2) == 1
+    finally:
+        page.close()
+
+
 class TestRationalLayerTime(unittest.TestCase):
     """Exact frame-rate math, fps-aware trims and layer-time edit plans."""
 
@@ -725,6 +870,30 @@ class TestRationalLayerTime(unittest.TestCase):
         grown = plan_trim_out(timing, 74)
         self.assertEqual(grown.layer.source_out, 47 + 24)
 
+    def test_head_trim_and_split_keep_subframe_sampling_phase(self):
+        from fractions import Fraction
+        from src.features.composite.core.layer_time import (
+            LayerTiming, plan_split, plan_trim_in, plan_trim_out,
+        )
+
+        for comp_fps, source_fps in ((25, 24), (30, Fraction(30000, 1001))):
+            original = LayerTiming(0, 60, source_out=100, comp_fps=comp_fps,
+                                   source_fps=source_fps)
+            trimmed = plan_trim_in(original, 1).layer
+            trimmed_twice = plan_trim_in(trimmed, 2).layer
+            right = plan_split(original, 1).peer
+            self.assertEqual(trimmed_twice, plan_trim_in(original, 2).layer)
+            self.assertEqual(trimmed.source_phase, original.source_step)
+            self.assertNotEqual(trimmed.source_phase, 0)
+            for frame in range(1, 61):
+                self.assertEqual(trimmed.source_frame_at(frame), original.source_frame_at(frame))
+                self.assertEqual(right.source_frame_at(frame), original.source_frame_at(frame))
+            tail = plan_trim_out(trimmed, 2).layer
+            self.assertEqual(tail.source_out, original.source_frame_at(2))
+
+        legacy = LayerTiming(0, 10, source_in=3, source_out=13, source_fps=0)
+        self.assertEqual(plan_trim_out(legacy, 5).layer.source_out, 8)
+
     def test_slide_and_slip_separate_concerns(self):
         from fractions import Fraction
         from src.features.composite.core.layer_time import (
@@ -771,7 +940,9 @@ class TestRationalLayerTime(unittest.TestCase):
         timing = LayerTiming(in_frame=0, out_frame=23)
         plan = plan_stretch(timing, 48)
         self.assertEqual(plan.layer.out_frame, 47)
-        self.assertIn("rate=2/1", plan.notes[0])
+        self.assertEqual(plan.layer.rate, Fraction(1, 2))
+        self.assertEqual(plan.layer.source_frame_at(2), 1)
+        self.assertEqual(plan.layer.source_frame_at(47), timing.source_frame_at(23))
 
     def test_apply_video_range_edit_is_fps_aware(self):
         from src.features.composite.ui.timeline_commands import apply_video_range_edit
@@ -825,6 +996,21 @@ class TestRationalLayerTime(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertFalse(result["fps_aware"])
         self.assertEqual(result["after"]["source_in"], 10)
+
+    def test_first_tail_trim_accepts_implicit_layer_bounds(self):
+        from src.features.composite.ui.timeline_commands import apply_video_range_edit
+
+        graph = NodeGraph()
+        graph.fps = 25
+        video = VideoFrameNode(node_id="video")
+        video.set_parameter("fps", 24.0)
+        video.set_parameter("total_frames", 60)
+        graph.add_node(video)
+        result = apply_video_range_edit(
+            video, graph, None, {"comp_start": 0, "comp_end": 2, "edit": "trim_out"},
+            previous_start=0, previous_bounds=(None, None),
+        )
+        self.assertEqual(result["after"]["source_out"], 1)
 
     def test_shared_source_conflict_is_diagnosable(self):
         from src.features.composite.core.layer_model import Layer, LayerStack

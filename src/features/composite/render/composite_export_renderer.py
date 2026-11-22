@@ -45,6 +45,7 @@ from src.features.composite.evaluators.graph_evaluator_mixin import GraphEvaluat
 from ..core.graph_snapshot import GraphSnapshot
 from ..core.node_capabilities import is_output_node_type
 from .gpu_resource_pool import GPUResourcePool
+from .external_comp_snapshot import ExternalCompSnapshots, has_external_references
 from ..nodes.base_node import TextureResult
 from .render_scheduler import RenderMode, RenderScheduler, RenderPlan
 
@@ -140,6 +141,8 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
         # frame-by-frame; the one-shot export path keeps the default
         # build-render-teardown behaviour.
         self._persistent = False
+        self._external_export = ExternalCompSnapshots(freeze=True)
+        self._external_preview = ExternalCompSnapshots()
         # ConfigManager for colour-engine selection (builtin vs OCIO), used by
         # nodes that do their own colour conversion (FileOutputNode). None →
         # OCIO default. Set via set_config_manager() before rendering.
@@ -165,6 +168,18 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
         is only performed on explicit teardown, not after every frame.
         """
         self._persistent = bool(enabled)
+
+    def set_external_export_snapshot(self, references: ExternalCompSnapshots) -> None:
+        """Share one reference revision across frame workers in a delivery."""
+        self._external_export = references
+
+    def _expand_external_snapshot(
+        self, snapshot: GraphSnapshot, *, preview: bool,
+    ) -> GraphSnapshot:
+        if not has_external_references(snapshot):
+            return snapshot
+        references = self._external_preview if preview else self._external_export
+        return references.expand(snapshot, output_name="display")
 
     def set_timeline_clip_context(
         self,
@@ -279,6 +294,12 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
         Returns:
             ExportResult with image data on success, or error message on failure.
         """
+        snapshot = self._expand_external_snapshot(snapshot, preview=readback_output == "srgb_u8")
+        if getattr(snapshot, "reference_diagnostics", ()):
+            return ExportResult(
+                error=snapshot.reference_diagnostics[0]["detail"],
+                diagnostics=list(snapshot.reference_diagnostics),
+            )
         # CP-021/R-13: 每次导出按当前图刷新合成级快门（Output 节点参数）。
         # 经 _apply_project_motion_blur_shutter 存 pending——渲染中途
         # _ensure_gpu_resources 重建 ctx 也会继承该值。
@@ -335,10 +356,11 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             self._readback_output = "linear_f32"
             return self._finish_trace(self._render_tiled_with_plan(
                 snapshot, output_w, output_h, plan), trace, t0)
-        else:
-            return self._finish_trace(
-                self._render_full_frame(snapshot, render_pass=render_pass),
-                trace, t0)
+        result = self._render_full_frame(snapshot, render_pass=render_pass)
+        if self._readback_output == "srgb_u8" and getattr(plan, "tile_blocker", ""):
+            result.preview_strategy = "full_frame"
+            result.preview_strategy_reason = f"{plan.tile_blocker} requires full-frame sampling"
+        return self._finish_trace(result, trace, t0)
 
     def _finish_trace(self, result: ExportResult,
                       trace, t0: float) -> ExportResult:
@@ -396,6 +418,12 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             also set when beauty was requested.
         """
         t_start = time.monotonic()
+        snapshot = self._expand_external_snapshot(snapshot, preview=False)
+        if getattr(snapshot, "reference_diagnostics", ()):
+            return ExportResult(
+                error=snapshot.reference_diagnostics[0]["detail"],
+                diagnostics=list(snapshot.reference_diagnostics),
+            )
         if render_passes is None:
             requested_names: Optional[tuple[str, ...]] = None
         elif isinstance(render_passes, str):
@@ -655,6 +683,12 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
         t0 = time.monotonic()
 
         try:
+            snapshot = self._expand_external_snapshot(snapshot, preview=True)
+            if getattr(snapshot, "reference_diagnostics", ()):
+                return make_unavailable_handle(
+                    snapshot.reference_diagnostics[0]["detail"], generation=generation,
+                    frame=frame_number, trace_id=trace.trace_id,
+                )
             self._ensure_gpu_resources()
             if render_mode is None:
                 render_mode = RenderMode.EXPORT
@@ -1029,10 +1063,7 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             rendered_tiles = 0
             try:
                 for tile in tiles:
-                    # AUD-80001: evict tile-scoped SOURCE entries BEFORE
-                    # evaluating so this tile cannot hit entries cropped
-                    # for a previous tile (or a previous pass) under
-                    # identical tile-agnostic keys.
+                    # Retire the previous tile's cropped source textures.
                     self._clear_tile_scoped_cache()
                     tile_ctx = TileContext(
                         padded_roi=tile.padded_roi,
@@ -1200,10 +1231,7 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
 
             # 5. Evaluate each tile
             for tile in tiles:
-                # AUD-80001: evict tile-scoped SOURCE entries BEFORE
-                # evaluating so this tile cannot hit entries cropped
-                # for a previous tile (or a previous pass) under
-                # identical tile-agnostic keys.
+                # Retire the previous tile's cropped source textures.
                 self._clear_tile_scoped_cache()
                 try:
                     tile_ctx = TileContext(
@@ -1317,10 +1345,7 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
 
             # 6. Evaluate each tile
             for tile in tiles:
-                # AUD-80001: evict tile-scoped SOURCE entries BEFORE
-                # evaluating so this tile cannot hit entries cropped
-                # for a previous tile (or a previous pass) under
-                # identical tile-agnostic keys.
+                # Retire the previous tile's cropped source textures.
                 self._clear_tile_scoped_cache()
                 try:
                     tile_ctx = TileContext(
@@ -1381,33 +1406,12 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
                 self.cleanup()
 
     def _clear_tile_scoped_cache(self) -> None:
-        """Reset tile-scoped evaluation state between tiles (AUD-80001).
+        """Release cropped sources between tiles and clear cached node pointers.
 
-        Two stale-state channels serve tile 1's (or a pre-loop full
-        frame's) content to later tiles because eval-cache keys carry no
-        tile geometry (the ROI suffix exists only for the PREVIEW
-        viewer-ROI path):
-
-        1. SOURCE/AI cache entries.  Source nodes have empty input
-           metadata, so their recomputed key is identical for every tile —
-           ``clear_export_cache()`` never evicts them (protected category)
-           and tiles 2+ hit tile 1's cropped texture verbatim.  Evict them
-           via invalidate_node().
-        2. The evaluator's per-node key memo (``_node_cache_keys``).  The
-           dirty-skip path serves entries by memoized key without
-           recomputing them, so a tile-agnostic EXPORT entry (e.g. the
-           output node's full-frame passthrough) leaks into every tile
-           even after its inputs changed.  Clearing the memo forces each
-           tile to recompute keys from its actual (cropped) inputs, which
-           miss.
-
-        EXPORT entries themselves stay cached during the pass — a full
-        ``CacheManager.clear()`` was tried and rejected: releasing the
-        EXPORT output textures back into the pool mid-pass (on top of the
-        SOURCE eviction) measurably corrupts subsequent tiles on the
-        GPU-stitch path (recycled textures re-acquired by the next tile's
-        evaluation render ~1/3 linear value).  EXPORT entries are cleared
-        post-pass in the finally blocks instead.
+        Tile geometry is part of cache identity. Cropped sources are still
+        explicitly retired between tiles to bound memory in the protected
+        SOURCE category. Keep effect outputs cached until pass cleanup to
+        avoid recycling textures still used by the GPU stitch path.
         """
         cm = self._cache_manager
         snapshot = self._snapshot
@@ -1480,10 +1484,10 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             if output_w and w >= output_w and h >= output_h:
                 # Full-frame positioned result (see docstring)
                 x0 = output.x
-                y0 = output.y
+                y0 = h - output.top
             else:
                 x0 = output.x - padded.x
-                y0 = output.y - padded.y
+                y0 = h - (output.top - padded.y)
             x1 = x0 + output.width
             y1 = y0 + output.height
 

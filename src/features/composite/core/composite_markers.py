@@ -47,7 +47,7 @@ class CompositeMarker:
             return None
         try:
             frame = int(data.get("frame"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         name = data.get("name", "")
         if not isinstance(name, str):
@@ -56,9 +56,9 @@ class CompositeMarker:
         if duration is not None:
             try:
                 duration = int(duration)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 duration = None
-            if duration < 0:
+            if duration is not None and duration < 0:
                 duration = None
         color = data.get("color", DEFAULT_MARKER_COLOR)
         if not isinstance(color, str) or not color:
@@ -103,7 +103,7 @@ def markers_report(markers: Dict[str, CompositeMarker],
     visible: List[CompositeMarker] = []
     outside: List[CompositeMarker] = []
     for marker in markers.values():
-        if marker.frame < limit:
+        if 0 <= marker.frame < limit:
             visible.append(marker)
         else:
             outside.append(marker)

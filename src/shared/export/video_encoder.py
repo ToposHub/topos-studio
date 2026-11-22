@@ -2441,7 +2441,7 @@ class FFmpegVideoEncoder:
 
         while offset < total_samples:
             end = min(offset + block_size, total_samples)
-            block = samples[:, offset:end]
+            block = np.ascontiguousarray(samples[:, offset:end])
 
             av_frame = av.AudioFrame.from_ndarray(block, format='fltp', layout=layout)
             av_frame.sample_rate = sample_rate

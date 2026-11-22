@@ -196,6 +196,8 @@ class BlurEvaluatorMixin:
             self._set_uniform_if_present(prog_v, 'u_radius', radius_y)
             self._set_uniform_if_present(prog_v, 'u_kernel_mode', kernel_mode)
             self._set_uniform_if_present(prog_v, 'u_channel_mask', channel_mask)
+            self._set_uniform_if_present(
+                prog_v, 'u_alpha_premultiplied', input_tex.alpha_premultiplied)
             self._set_uniform_if_present(prog_v, 'u_mix', mix)
             self._set_uniform_if_present(prog_v, 'u_edge_policy', edge_int)
             self._render_quad(prog_v)
@@ -244,6 +246,8 @@ class BlurEvaluatorMixin:
             self._set_uniform_if_present(prog, 'u_radius', radius)
             self._set_uniform_if_present(prog, 'u_sample_count', sample_count)
             self._set_uniform_if_present(prog, 'u_channel_mask', channel_mask)
+            self._set_uniform_if_present(
+                prog, 'u_alpha_premultiplied', input_tex.alpha_premultiplied)
             self._set_uniform_if_present(prog, 'u_mix', mix)
             self._set_uniform_if_present(prog, 'u_edge_policy', edge_int)
 

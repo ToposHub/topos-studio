@@ -51,6 +51,17 @@ class TestCompositeGraphDataCreation:
         assert comp.source_asset_id == "asset1"
         assert comp.source_asset_path == "/path/to/image.png"
 
+    def test_markers_survive_graph_conversion_and_record_edits(self):
+        marker = {"marker_id": "flash", "frame": 24, "name": "Flash", "duration": 4}
+        graph = CompositeGraphData.from_node_graph(
+            {"nodes": [], "markers": [marker]}, "comp1", "clip1", "asset1", "")
+        renamed = graph.with_name("New Name")
+        restored = CompositeGraphData.from_dict(renamed.to_dict())
+        assert restored.to_node_graph_dict()["markers"] == [marker]
+        updated = restored.with_full_graph_data(markers=[])
+        assert updated.to_node_graph_dict()["markers"] == []
+        assert restored.to_node_graph_dict()["markers"] == [marker]
+
     def test_create_with_name(self):
         """测试带名称的合成图创建。"""
         comp = CompositeGraphData(

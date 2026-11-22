@@ -116,31 +116,30 @@ class TestBulkAddKeyframes:
 
 
 class TestBulkAddPerformance:
-    def test_bulk_is_subquadratic_in_keyframe_count(self):
-        """P-1's core guarantee: bulk loading is O(n log n), not O(n²).
-        We verify the time ratio — if it were still per-add O(n²), loading
-        200 keyframes would take ~4× as long as 100, but bulk should scale
-        much better. This is a coarse guard against accidentally reverting
-        to the per-keyframe-add path (which sorted N times)."""
-        import time
+    def test_bulk_is_subquadratic_in_keyframe_count(self, monkeypatch: pytest.MonkeyPatch):
+        """Count frame reads to catch repeated scans or sorts during load."""
+        import random
 
-        def bulk_time(n):
-            data = {"param_name": "p",
-                    "keyframes": [{"frame": n - i, "value": float(i)}
-                                  for i in range(n)]}
-            start = time.perf_counter()
-            KeyframeTrack.from_dict(data)
-            return time.perf_counter() - start
+        read_count = 0
+        get_attribute = Keyframe.__getattribute__
 
-        t100 = bulk_time(100)
-        t200 = bulk_time(200)
-        # O(n log n) → ratio ~2.3×; O(n²) → ratio ~4×. Allow generous slack
-        # for timer noise; the point is to catch a 4×+ regression.
-        ratio = t200 / max(1e-6, t100)
-        assert ratio < 3.5, (
-            f"Bulk load 200 vs 100 keyframes took {ratio:.1f}× longer — "
-            "expected ~2× (O(n log n)). A ratio near 4× suggests the O(n²) "
-            "per-add path returned (P-1).")
+        def count_frame_reads(key: Keyframe, name: str) -> object:
+            nonlocal read_count
+            if name == "frame":
+                read_count += 1
+            return get_attribute(key, name)
+
+        monkeypatch.setattr(Keyframe, "__getattribute__", count_frame_reads)
+        frames = list(range(512))
+        random.Random(13).shuffle(frames)
+        track = KeyframeTrack.from_dict({
+            "param_name": "p",
+            "keyframes": [{"frame": frame, "value": float(frame)} for frame in frames],
+        })
+        # A single comparison sort plus a linear pass needs O(n log n) reads.
+        # The old per-insert scan alone would exceed this bound by an order of magnitude.
+        assert read_count < 4 * len(frames) * len(frames).bit_length()
+        assert [key.frame for key in track.keyframes] == list(range(512))
 
 
 # ── P-2: ExpressionParser AST cache ───────────────────────────────────

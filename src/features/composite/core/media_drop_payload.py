@@ -48,7 +48,7 @@ MIME_TYPE_MEDIA_POOL_ASSET = "application/x-topos-media-pool-asset"
 MEDIA_TYPE_IMAGE = "image"
 MEDIA_TYPE_VIDEO = "video"
 MEDIA_TYPE_SEQUENCE = "sequence"
-MEDIA_TYPE_AUDIO = "audio"  # not layer-renderable; drops are rejected, not misrouted
+MEDIA_TYPE_AUDIO = "audio"
 # Imported 3D assets are represented by a Model3D source node and are
 # rendered through a Scene3D layer root. Keep the short value stable because
 # it is also the value returned by the shared media format registry.
@@ -65,6 +65,13 @@ MEDIA_TYPE_TO_NODE_TYPE = {
     MEDIA_TYPE_SEQUENCE: "image_input",  # sequences use image_input for now
     MEDIA_TYPE_MODEL3D: "model3d",
 }
+
+
+def get_composite_media_type(path: str) -> str:
+    """Classify local files supported by Composite's media source nodes."""
+    if path.lower().endswith(".psb"):
+        return MEDIA_TYPE_IMAGE
+    return get_media_type(path)
 
 
 @dataclass
@@ -125,7 +132,7 @@ def accepts_layer_media_drop(mime_data: Any) -> bool:
             MIME_TYPE_MEDIA_POOL_ASSETS, MIME_TYPE_MEDIA_POOL_ASSET,
             MIME_TYPE_TOPOS_MEDIA_ASSET)):
         return True
-    return any(get_media_type(path) in MEDIA_TYPE_TO_NODE_TYPE
+    return any(get_composite_media_type(path) in MEDIA_TYPE_TO_NODE_TYPE
                for path in _local_paths_from_mime(mime_data))
 
 
@@ -187,7 +194,8 @@ def parse_media_pool_mime(mime_data: Any) -> List[str]:
 
 def resolve_drop_payloads(mime_data: Any,
                           project: Any = None,
-                          asset_lookup: Any = None) -> List[MediaDropPayload]:
+                          asset_lookup: Any = None, *,
+                          allow_audio: bool = False) -> List[MediaDropPayload]:
     """Bridge QMimeData → :class:`MediaDropPayload` list.
 
     Args:
@@ -218,19 +226,21 @@ def resolve_drop_payloads(mime_data: Any,
                 name="",
             )
             for path in fallback_paths
-            if (media_type := get_media_type(path)) in MEDIA_TYPE_TO_NODE_TYPE
+            if (media_type := get_composite_media_type(path)) in MEDIA_TYPE_TO_NODE_TYPE
+            or (allow_audio and media_type == MEDIA_TYPE_AUDIO)
         ]
-        return _reject_audio_payloads(payloads)
+        return payloads
 
     return resolve_asset_ids(asset_ids, project=project,
                              asset_lookup=asset_lookup,
-                             fallback_paths=fallback_paths)
+                             fallback_paths=fallback_paths, allow_audio=allow_audio)
 
 
 def resolve_asset_ids(asset_ids: List[str],
                       project: Any = None,
                       asset_lookup: Any = None,
-                      fallback_paths: Optional[List[str]] = None
+                      fallback_paths: Optional[List[str]] = None, *,
+                      allow_audio: bool = False,
                       ) -> List[MediaDropPayload]:
     """Resolve asset ids (no Qt dependency) → :class:`MediaDropPayload` list.
 
@@ -267,7 +277,8 @@ def resolve_asset_ids(asset_ids: List[str],
             # ids. Pairing them by order keeps drag/drop usable even when a
             # panel was opened before its EditProject reference was rebound.
             if (index < len(fallback)
-                    and (media_type := get_media_type(fallback[index])) in MEDIA_TYPE_TO_NODE_TYPE):
+                    and ((media_type := get_composite_media_type(fallback[index])) in MEDIA_TYPE_TO_NODE_TYPE
+                         or (allow_audio and media_type == MEDIA_TYPE_AUDIO))):
                 path = fallback[index]
                 payloads.append(MediaDropPayload(
                     asset_id=aid,
@@ -279,7 +290,7 @@ def resolve_asset_ids(asset_ids: List[str],
             logger.warning("Media drop: asset %r not found; skipped.", aid)
             continue
         payloads.append(_payload_from_asset(aid, asset))
-    return _reject_audio_payloads(payloads)
+    return payloads if allow_audio else _reject_audio_payloads(payloads)
 
 
 def _reject_audio_payloads(
@@ -373,7 +384,7 @@ def _payload_from_asset(asset_id: str, asset: Any) -> MediaDropPayload:
             or _get(asset, "label", ""))
     color_md = _get(asset, "color_metadata")
     extras = {}
-    for k in ("fps", "is_hdr", "proxy_path", "thumbnail_path"):
+    for k in ("fps", "is_hdr", "proxy_path", "thumbnail_path", "duration_seconds"):
         v = _get(asset, k)
         if v is not None:
             extras[k] = v
@@ -409,7 +420,7 @@ def _classify_media_type(value: Optional[str], path: str) -> str:
         # broken image_input node pointing at the sound file.
         if v in ("audio", "sound", "music", "snd"):
             return MEDIA_TYPE_AUDIO
-    media_type = get_media_type(path)
+    media_type = get_composite_media_type(path)
     if media_type in MEDIA_TYPE_TO_NODE_TYPE or media_type == MEDIA_TYPE_AUDIO:
         return media_type
     return MEDIA_TYPE_IMAGE  # Preserve asset metadata compatibility for legacy projects.

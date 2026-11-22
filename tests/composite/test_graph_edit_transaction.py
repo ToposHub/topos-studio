@@ -134,6 +134,20 @@ def test_duplicate_command_id_rejected():
                           ("b", "result", "t", "image")]
 
 
+def test_successful_noop_uses_command_id_without_advancing_revision() -> None:
+    graph = _graph()
+    edge = Connection("src", "result", "t", "image")
+    command = GraphEditCommand(added=(edge,), command_id="duplicate-after-removal")
+    revision = graph.generation
+    result = graph.apply_edit(command)
+    assert result.ok and result.revision == graph.generation == revision
+
+    assert graph.apply_edit(GraphEditCommand(removed=(edge,))).ok
+    result = graph.apply_edit(command)
+    assert result.primary_code == EDIT_DUPLICATE_COMMAND
+    assert edge not in graph.connections
+
+
 def test_successful_edit_publishes_once_and_bumps_revisions():
     g = _graph()
     generation_before = g.generation
@@ -214,3 +228,18 @@ def test_controller_undo_restores_exact_connection_order():
 
     controller._restore(snapshot)
     assert _cables(g) == before_order
+
+
+def test_failed_subgraph_import_does_not_publish_partial_nodes() -> None:
+    graph = NodeGraph()
+    source = ConstantNode(node_id="new-source")
+    blur = BlurNode(node_id="new-effect")
+    before = graph.to_dict()
+    revision = graph.generation
+    result = graph.insert_subgraph((source, blur), (
+        Connection(source.id, "result", blur.id, "image"),
+        Connection(blur.id, "result", source.id, "missing"),
+    ))
+    assert not result.ok
+    assert graph.generation == revision
+    assert graph.to_dict() == before

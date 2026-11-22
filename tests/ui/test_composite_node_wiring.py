@@ -8,6 +8,8 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDockWidget, QMainWindow
 
+from src.features.composite.core.graph_edit import EDIT_LAYER_CONFLICT, EDIT_STALE_REVISION
+from src.features.composite.core.layer_stack_compiler import CompileResult
 from src.features.composite.nodes.blur_node import BlurNode
 from src.features.composite.nodes.constant_node import ConstantNode
 from src.features.composite.nodes.output_node import OutputNode
@@ -361,10 +363,91 @@ def test_managed_foreground_rejects_foreign_cable_and_accepts_new_transform(page
 
     # Transform supports wiring either end first. A non-owned generator does not.
     previous_root = page.node_graph.get_layer(layer_id).root_node_id
+    start = editor.mapFromScene(_end(editor, transform.id))
+    end = editor.mapFromScene(merge_input)
+    viewport = editor.viewport()
+    button = Qt.MouseButton.LeftButton
+    QTest.mousePress(viewport, button, pos=start)
+    QTest.mouseMove(viewport, end)
+    page.node_graph.bump_generation()
+    latest = page.node_graph.generation
+    history = page._undo_stack.undo_description()
+    QTest.mouseRelease(viewport, button, pos=end)
+    assert page._graph_cable_keys() == old
+    assert page.node_graph.generation == latest
+    assert page._undo_stack.undo_description() == history
+    assert page._last_graph_edit_issues[0].code == EDIT_STALE_REVISION
+
     _drag(editor, _end(editor, transform.id), merge_input)
-    assert (transform.id, "result", merge.id, "A") in page._graph_cable_keys()
+    assert editor.pending_layer_transform() == (transform.id, "result", merge.id, "A")
+    assert page._graph_cable_keys() == old
+    assert page.node_graph.generation == latest
+    assert page._undo_stack.undo_description() == history
     _drag(editor, _end(editor, previous_root), _end(editor, transform.id, input_=True))
     assert page.node_graph.get_layer(layer_id).root_node_id == transform.id
+    assert editor.pending_layer_transform() is None
+    page.undo()
+    assert page._graph_cable_keys() == old
+    assert page.node_graph.get_layer(layer_id).root_node_id == previous_root
+
+
+def test_refused_wired_layer_effect_keeps_graph_and_revisions(page, monkeypatch) -> None:
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    _node(page, OutputNode, "out", 590, 0)
+    source = _node(page, ConstantNode, "source", 0, 0)
+    blur = _node(page, BlurNode, "effect", 240, 170)
+    layer_id = controller.add_media_layer("Footage", source.id)
+    root_id = graph.get_layer(layer_id).root_node_id
+    merge_id = controller.layer_merge_node(layer_id).id
+    original = (root_id, "result", merge_id, "A")
+    incoming = (root_id, "result", blur.id, "image")
+    outgoing = (blur.id, "result", merge_id, "A")
+    ordered_edges = graph.connections
+    edges = page._graph_cable_keys()
+    data = graph.to_dict()
+    revisions = (graph.generation, graph._topology_revision, controller.generation)
+    history = page._undo_stack.undo_description()
+
+    def refuse_candidate(*_args: object) -> CompileResult:
+        assert page._graph_cable_keys() == edges - {original} | {incoming, outgoing}
+        assert graph.generation == revisions[0]
+        return CompileResult(ok=False)
+
+    monkeypatch.setattr(controller.compiler, "compile", refuse_candidate)
+    assert not page._edit_graph_cables((original,), (incoming, outgoing))
+    assert page._last_graph_edit_issues[0].code == EDIT_LAYER_CONFLICT
+    assert graph.to_dict() == data
+    assert graph.connections is ordered_edges
+    assert page._graph_cable_keys() == edges
+    assert (graph.generation, graph._topology_revision, controller.generation) == revisions
+    assert page._undo_stack.undo_description() == history
+
+
+def test_failed_layer_projection_rolls_back_connections_and_history(page, monkeypatch) -> None:
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    _node(page, OutputNode, "out", 590, 0)
+    source = _node(page, ConstantNode, "source", 0, 0)
+    blur = _node(page, BlurNode, "effect", 240, 170)
+    layer_id = controller.add_media_layer("Footage", source.id)
+    root_id = graph.get_layer(layer_id).root_node_id
+    merge_id = controller.layer_merge_node(layer_id).id
+    ordered_edges = graph.connections
+    state = graph.to_dict()
+    revisions = (graph.generation, graph._topology_revision, controller.generation)
+    history = page._undo_stack.undo_description()
+
+    monkeypatch.setattr(controller, "_apply_changes", lambda _changes: ["projection failed"])
+    assert not page._edit_graph_cables(
+        ((root_id, "result", merge_id, "A"),),
+        ((root_id, "result", blur.id, "image"), (blur.id, "result", merge_id, "A")),
+    )
+    assert page._last_graph_edit_issues[0].code == EDIT_LAYER_CONFLICT
+    assert graph.to_dict() == state
+    assert graph.connections is ordered_edges
+    assert (graph.generation, graph._topology_revision, controller.generation) == revisions
+    assert page._undo_stack.undo_description() == history
 
 
 def test_drop_node_from_its_title_highlights_only_intended_wire(page, qapp):

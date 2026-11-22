@@ -105,12 +105,14 @@ def test_composite_page_stop_playback_does_not_create_timer():
         _drive_active=True,
         _renderer=renderer,
         _notify_kf_panel_play_state=Mock(),
+        _stop_composition_audio=Mock(),
     )
 
     CompositePage._stop_comp_playback(page)
 
     timer.stop.assert_called_once_with()
     renderer.stop_playback_drive.assert_called_once_with()
+    page._stop_composition_audio.assert_called_once_with()
     page._notify_kf_panel_play_state.assert_called_once_with()
     assert page._comp_playing is False
     assert page._drive_active is False

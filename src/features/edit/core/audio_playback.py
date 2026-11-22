@@ -947,6 +947,8 @@ class AudioDecoder:
         
         self._container: Optional[av.container.Container] = None
         self._audio_stream: Optional[av.AudioStream] = None
+        self._pcm_source: Any = None
+        self._pcm_position: int = 0
         self._path: Optional[Path] = None
         self._sample_rate: int = DEFAULT_SAMPLE_RATE
         self._channels: int = 2
@@ -1018,7 +1020,7 @@ class AudioDecoder:
     @property
     def is_open(self) -> bool:
         """是否已打开。"""
-        return self._container is not None
+        return self._container is not None or self._pcm_source is not None
 
     @property
     def sample_rate(self) -> int:
@@ -1256,8 +1258,25 @@ class AudioDecoder:
             self._audio_stream = None
             return False
 
+    def open_pcm(self, source: Any, timeline_fps: float, *, source_start: int = 0,
+                 source_fps: float = 0.0, output_sample_rate: int = DEFAULT_SAMPLE_RATE) -> None:
+        """Register a virtual stereo source without decoding on the caller's thread."""
+        self.close()
+        self._pcm_source = source
+        self._fps = timeline_fps
+        self._source_start = max(0, int(source_start))
+        self._source_fps = source_fps if source_fps > 0 else timeline_fps
+        self._sample_rate = source.sample_rate
+        self._output_sample_rate = output_sample_rate
+        self._channels = 2
+        self._source_layout_name = "stereo"
+        self._duration_samples = source.duration_samples
+        self._last_decoded_frame = -1
+
     def close(self) -> None:
         """关闭解码器。"""
+        self._pcm_source = None
+        self._pcm_position = 0
         if self._container:
             self._container.close()
             self._container = None
@@ -1290,6 +1309,10 @@ class AudioDecoder:
         Returns:
             是否成功
         """
+        if self._pcm_source is not None:
+            self._pcm_position = max(0, round(time_seconds * self._sample_rate))
+            self._last_decoded_frame = -1
+            return True
         if not self._container or not self._audio_stream:
             return False
 
@@ -1367,6 +1390,11 @@ class AudioDecoder:
         Returns:
             音频采样数组 (channels, samples) 或 None
         """
+        if self._pcm_source is not None:
+            samples = self._pcm_source.read(self._pcm_position, num_samples)
+            if samples is not None:
+                self._pcm_position += samples.shape[1]
+            return samples
         if not self._container or not self._audio_stream:
             return None
 
@@ -5608,6 +5636,7 @@ class AudioPlaybackManager(QObject):
         fade_curve_out: Optional[str] = None,
         audio_edit: Optional[dict] = None,
         pre_render_plan: Optional[Any] = None,
+        pcm_source: Any = None,
     ) -> bool:
         """
         添加音频轨道。
@@ -5639,7 +5668,10 @@ class AudioPlaybackManager(QObject):
         """
         # 创建解码器
         decoder = AudioDecoder()
-        if not decoder.open(
+        if pcm_source is not None:
+            decoder.open_pcm(pcm_source, self._timeline_fps, source_start=source_start,
+                             source_fps=source_fps, output_sample_rate=self._sample_rate)
+        elif not decoder.open(
             asset_path,
             self._timeline_fps,
             source_start=source_start,

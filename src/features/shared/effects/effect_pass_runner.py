@@ -509,6 +509,8 @@ class EffectPassRunner:
             # path. Everything else dispatches by shader_kind.
             if spec.dispatch_key == "glow":
                 return self._run_glow(spec, input_tex_glo, params, width, height, dtype=dtype)
+            if spec.dispatch_key == "layer_style":
+                return self._run_layer_style(spec, input_tex_glo, params, width, height, dtype=dtype)
             if spec.dispatch_key == "erode_dilate":
                 return self._run_erode_dilate(spec, input_tex_glo, params, width, height, dtype=dtype)
             if spec.dispatch_key == "blur":
@@ -1289,17 +1291,7 @@ class EffectPassRunner:
         #   pass 2: writes out, samples {input, bloom} → out ∉ {input, bloom}
         # FX-M02 guarded only pass 2 (input==scratch_a); AUD-26402 extends
         # the same rule to pass 1 for a chained input that IS scratch_b.
-        if input_glo == self._scratch_a.glo:
-            bloom_tex, bloom_fbo = self._scratch_b, self._scratch_b_fbo
-            out_tex, out_fbo = self._scratch_c, self._scratch_c_fbo
-        elif input_glo == self._scratch_b.glo:
-            bloom_tex, bloom_fbo = self._scratch_a, self._scratch_a_fbo
-            out_tex, out_fbo = self._scratch_c, self._scratch_c_fbo
-        else:
-            # External texture, or a previous effect's scratch_c output —
-            # the canonical bloom=b / out=a routing is feedback-safe.
-            bloom_tex, bloom_fbo = self._scratch_b, self._scratch_b_fbo
-            out_tex, out_fbo = self._scratch_a, self._scratch_a_fbo
+        (bloom_tex, bloom_fbo), (out_tex, out_fbo) = self._dual_source_targets(input_glo)
 
         # ── Pass 1: threshold + horizontal blur → bloom_tex ──
         bloom_fbo.use()
@@ -1340,6 +1332,47 @@ class EffectPassRunner:
 
         self._last_output_tex = out_tex
         return out_tex.glo
+
+    def _dual_source_targets(self, input_glo: int) -> tuple[tuple[Any, Any], tuple[Any, Any]]:
+        """Pick a scratch mask and an output that do not alias their inputs."""
+        a = self._scratch_a, self._scratch_a_fbo
+        b = self._scratch_b, self._scratch_b_fbo
+        c = self._scratch_c, self._scratch_c_fbo
+        if input_glo == self._scratch_a.glo:
+            return b, c
+        if input_glo == self._scratch_b.glo:
+            return a, c
+        return b, a
+
+    def _run_layer_style(self, spec: EffectSpec, input_glo: int, params: Dict[str, Any],
+                         width: int, height: int, *, dtype: str = "f1") -> int:
+        from src.features.composite.nodes.layer_style_node import LayerStyleNode
+
+        programs = self._get_program(spec, structural_key=())
+        if programs is None:
+            return input_glo
+        mask_program, style_program = programs
+        values = {definition.name: params.get(definition.name, definition.default)
+                  for definition in spec.param_defs}
+        uniforms = LayerStyleNode.style_uniforms(values, premultiplied=False)
+        uniforms.update(u_resolution=(float(width), float(height)), u_texture=0)
+        self._ensure_scratch(width, height, dtype)
+        (mask, mask_fbo), (output, output_fbo) = self._dual_source_targets(input_glo)
+        mask_fbo.use()
+        self._ctx.viewport = (0, 0, width, height)
+        self._bind_external_texture(input_glo)
+        for name, value in uniforms.items():
+            self._set_uniform(mask_program, name, value)
+        self._render_quad(mask_program)
+        output_fbo.use()
+        self._bind_external_texture(input_glo)
+        mask.use(1)
+        for name, value in uniforms.items():
+            self._set_uniform(style_program, name, value)
+        self._set_uniform(style_program, "u_style_masks", 1)
+        self._render_quad(style_program)
+        self._last_output_tex = output
+        return output.glo
 
     def _run_defocus(
         self, spec: EffectSpec, input_glo: int, params: Dict[str, Any],

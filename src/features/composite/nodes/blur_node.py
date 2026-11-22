@@ -20,6 +20,7 @@ Every type supports per-channel masking (R/G/B/A independent toggles) and a
 for backward compatibility with older projects.
 """
 
+from math import ceil, isfinite
 from typing import Dict, Optional, Any, Set
 from .base_node import Node, Port, TextureResult, ParamDef
 
@@ -230,7 +231,8 @@ class BlurNode(Node):
             return default
         return min(max_val, max(0.0, value))
 
-    def _get_effective_radius(self, params: Dict[str, Any]) -> tuple:
+    @classmethod
+    def _get_effective_radius(cls, params: Dict[str, Any]) -> tuple[float, float]:
         """Get effective radius values for ROI/tile-padding computation.
 
         Separable types use (radius_x, radius_y). Single-pass types use the
@@ -247,16 +249,16 @@ class BlurNode(Node):
 
         if blur_type in ("box", "gaussian"):
             if "radius" in params and "radius_x" not in params:
-                r = self._clamped_radius(params.get("radius", 5.0),
+                r = cls._clamped_radius(params.get("radius", 5.0),
                                          5.0, _RADIUS_MAX)
                 return (r, r)
-            rx = self._clamped_radius(params.get("radius_x", 5.0),
+            rx = cls._clamped_radius(params.get("radius_x", 5.0),
                                       5.0, _RADIUS_XY_MAX)
-            ry = self._clamped_radius(params.get("radius_y", 5.0),
+            ry = cls._clamped_radius(params.get("radius_y", 5.0),
                                       5.0, _RADIUS_XY_MAX)
             return (rx, ry)
         else:
-            r = self._clamped_radius(params.get("radius", params.get("radius_x", 8.0)),
+            r = cls._clamped_radius(params.get("radius", params.get("radius_x", 8.0)),
                                      8.0, _RADIUS_MAX)
             return (r, r)
 
@@ -274,17 +276,13 @@ class BlurNode(Node):
         if not input_bboxes:
             return None
         input_bbox = input_bboxes.get("image")
-        if input_bbox is None or input_bbox.is_empty:
-            return None
         return input_bbox
 
     def compute_input_roi(self, output_roi: "BBox",
                           params: Dict[str, Any],
                           input_bboxes: Optional[Dict[str, "BBox"]] = None) -> Dict[str, "BBox"]:
         """To blur output_roi, we need input expanded by the maximum radius."""
-        radius_x, radius_y = self._get_effective_radius(params)
-        max_radius = int(max(radius_x, radius_y))
-        expanded_roi = output_roi.expanded(max_radius)
+        expanded_roi = output_roi.expanded(self._tile_padding(params))
         result = {"image": expanded_roi}
         # Velocity is sampled at the output pixel, not along the blur kernel,
         # so it does not need the image-kernel padding. Only advertise this
@@ -307,7 +305,22 @@ class BlurNode(Node):
             Padding in pixels (maximum of radius_x and radius_y).
         """
         radius_x, radius_y = self._get_effective_radius(params)
-        return int(max(radius_x, radius_y))
+        factor = 1.0
+        blur_type = params.get("blur_type", "box")
+        if blur_type in {"motion", "directional"}:
+            factor = max(1.0, self._get_param_float_value(params, "shutter", 1.0))
+        elif blur_type == "bokeh":
+            stretch = 1.0 + self._get_param_float_value(params, "anamorphic", 0.0) * 1.5
+            factor = max(abs(stretch), 1.0 / abs(stretch)) if abs(stretch) > 0.001 else 1000.0
+        return ceil(max(radius_x, radius_y) * factor)
+
+    @staticmethod
+    def _get_param_float_value(params: Dict[str, Any], name: str, default: float) -> float:
+        try:
+            value = float(params.get(name, default))
+        except (ValueError, TypeError, OverflowError):
+            return default
+        return value if isfinite(value) else default
 
     def requires_roi_expansion(self, params: Dict[str, Any]) -> int:
         """Legacy API - delegates to _tile_padding()."""

@@ -12,9 +12,10 @@ device arbitration outside this module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .layer_time import fps_fraction
 
@@ -89,11 +90,16 @@ def db_to_linear(gain_db: float) -> float:
     """dB → linear amplitude (clamped at -120 dB ≈ silence)."""
     try:
         gain_db = float(gain_db)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return 1.0
+    if not math.isfinite(gain_db):
         return 1.0
     if gain_db <= -120.0:
         return 0.0
-    return 10.0 ** (gain_db / 20.0)
+    try:
+        return 10.0 ** (gain_db / 20.0)
+    except OverflowError:
+        return 1.0
 
 
 # ── Frame/sample boundary math (shared endpoints) ──────────────────────────
@@ -187,20 +193,21 @@ class LayerAudioTiming:
     audio: LayerAudio
     in_frame: int
     out_frame: int
-    source_origin_samples: int = 0   # media sample the layer's head samples
+    source_origin_samples: int = 0   # media sample at the layer's first frame, at the stream rate
 
 
 def build_audio_plan(timings: Iterable[LayerAudioTiming], *,
                      fps: Any,
                      sample_rate: int,
-                     streams: Dict[str, AudioStreamInfo],
-                     stream_key: Optional[Any] = None) -> AudioPlan:
+                     streams: Mapping[Any, AudioStreamInfo],
+                     stream_key: Optional[Callable[[Any], Tuple[str, int]]] = None
+                     ) -> AudioPlan:
     """Build the immutable plan from layer timings and probed streams.
 
     ``streams`` maps ``(asset_id, stream_index)`` → :class:`AudioStreamInfo`
     (or the host's own mapping via ``stream_key``).  Frame bounds come from
-    the layer rows; the source sample window uses the shared-endpoint
-    boundary math anchored at the layer's media origin.
+    the layer rows; the source window is anchored at the layer's media
+    origin and expressed in samples at the probed stream rate.
     """
     fps = fps_fraction(fps)
     rate = int(sample_rate)
@@ -210,10 +217,10 @@ def build_audio_plan(timings: Iterable[LayerAudioTiming], *,
     segments: List[AudioSegment] = []
     missing: List[str] = []
     total = 0
-    audible = audible_layers([(t.layer_id, t.audio) for t in timings])
-    audible_ids = {layer_id for layer_id, _ in audible}
+    timings = tuple(timings)
+    audible = set(audible_layers([(t.layer_id, t.audio) for t in timings]))
     for timing in timings:
-        if timing.layer_id not in audible_ids:
+        if (str(timing.layer_id), timing.audio) not in audible:
             continue
         info = stream_map.get(
             (timing.audio.asset_id, int(timing.audio.stream_index)))
@@ -222,17 +229,18 @@ def build_audio_plan(timings: Iterable[LayerAudioTiming], *,
             if key not in missing:
                 missing.append(key)
             continue
-        start = sample_boundary(timing.in_frame, fps, rate)
         end = sample_boundary(timing.out_frame + 1, fps, rate)
         origin = int(timing.source_origin_samples)
+        source_start = sample_boundary(timing.in_frame, fps, info.sample_rate)
+        source_end = sample_boundary(timing.out_frame + 1, fps, info.sample_rate)
         segments.append(AudioSegment(
             layer_id=timing.layer_id,
             asset_id=timing.audio.asset_id,
             stream_index=int(timing.audio.stream_index),
             in_frame=int(timing.in_frame),
             out_frame=int(timing.out_frame),
-            source_sample_start=origin + start,
-            source_sample_end=origin + end,
+            source_sample_start=origin,
+            source_sample_end=origin + source_end - source_start,
             sample_rate=info.sample_rate,
             channels=info.channels,
             gain_linear=db_to_linear(timing.audio.gain_db),
@@ -249,10 +257,10 @@ def build_audio_plan(timings: Iterable[LayerAudioTiming], *,
 # ── Waveform envelopes (worker-thread bucketing) ────────────────────────────
 
 
-def waveform_envelope(pcm, bucket_samples: int):
-    """Min/max envelope per bucket for interleaved float PCM.
+def waveform_envelope(pcm: Any, bucket_samples: int) -> Tuple[Any, Any]:
+    """Min/max envelope per temporal bucket for decoded float PCM.
 
-    ``pcm`` is a 1-D (interleaved) or 2-D ``(samples, channels)`` float
+    ``pcm`` is a 1-D (mono) or 2-D ``(samples, channels)`` float
     array.  Returns ``(mins, maxs)`` 1-D float arrays with one entry per
     full bucket; a trailing partial bucket is dropped so zoom levels map
     to stable bucket counts.
@@ -260,15 +268,15 @@ def waveform_envelope(pcm, bucket_samples: int):
     import numpy as np
 
     data = np.asarray(pcm, dtype=np.float32)
-    if data.ndim == 2:
-        data = data.reshape(-1)
+    if data.ndim not in (1, 2):
+        raise ValueError("waveform PCM must be mono or (samples, channels)")
     bucket = int(bucket_samples)
     if bucket <= 0 or data.size == 0:
         return np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.float32)
-    full = (data.size // bucket) * bucket
+    full = (data.shape[0] // bucket) * bucket
     if full == 0:
         return np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.float32)
-    trimmed = data[:full].reshape(-1, bucket)
+    trimmed = data[:full].reshape(full // bucket, -1)
     return trimmed.min(axis=1), trimmed.max(axis=1)
 
 
@@ -283,10 +291,6 @@ def waveform_cache_key(asset_revision: str, stream_index: int,
 def plan_epoch(plan: AudioPlan) -> str:
     """Stable signature for epoch invalidation on project/seek/loop changes."""
     import hashlib
-    payload = "|".join(
-        f"{s.layer_id}:{s.asset_id}#{s.stream_index}:{s.in_frame}-{s.out_frame}"
-        f":{s.source_sample_start}-{s.source_sample_end}:{s.gain_linear:.6g}"
-        f":{s.sample_rate}:{s.channels}"
-        for s in plan.segments)
+    payload = repr((plan.segments, plan.total_samples, plan.missing_streams))
     digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
     return f"{plan.fps}|{plan.sample_rate}|{digest}"

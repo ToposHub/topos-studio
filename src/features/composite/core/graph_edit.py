@@ -28,6 +28,7 @@ EDIT_PORT_MISSING = "edit.port_missing"
 EDIT_TYPE_MISMATCH = "edit.type_mismatch"
 EDIT_CAPACITY = "edit.capacity"
 EDIT_CYCLE = "edit.cycle"
+EDIT_LAYER_CONFLICT = "edit.layer_conflict"
 
 
 @dataclass(frozen=True)
@@ -85,3 +86,4 @@ class GraphEditCommand:
     positions: Tuple[int, ...] | None = None
     command_id: str = ""
     expected_revision: int = -1
+    replace_single_inputs: bool = False

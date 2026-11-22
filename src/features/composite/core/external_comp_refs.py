@@ -15,7 +15,10 @@ can act on each cause.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import PurePosixPath, PureWindowsPath
+from threading import Lock
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeAlias
 
 CompKey: TypeAlias = Tuple[str, str]
@@ -32,9 +35,27 @@ REF_PLUGIN_MISMATCH = "ref.plugin_mismatch"
 REF_CYCLE = "ref.cycle"
 REF_DEPTH_EXCEEDED = "ref.depth_exceeded"
 REF_SIZE_EXCEEDED = "ref.size_exceeded"
+REF_REVISION_MISMATCH = "ref.revision_mismatch"
+REF_PROJECT_MISMATCH = "ref.project_mismatch"
+REF_INVALID = "ref.invalid"
+REF_UNSUPPORTED_CONTEXT = "ref.unsupported_context"
 
 DEFAULT_MAX_DEPTH = 64
 DEFAULT_MAX_NODES = 100_000
+_HOST_LOCK = Lock()
+_HOST_ARCHIVE = ""
+
+
+def set_reference_host_archive(path: str | None) -> None:
+    """Set the app's archive for newly captured composition snapshots."""
+    global _HOST_ARCHIVE
+    with _HOST_LOCK:
+        _HOST_ARCHIVE = path or ""
+
+
+def active_reference_host_archive() -> str:
+    with _HOST_LOCK:
+        return _HOST_ARCHIVE
 
 
 @dataclass(frozen=True)
@@ -51,6 +72,14 @@ class CompRef:
         if self.update_policy not in UPDATE_POLICIES:
             raise ValueError(
                 f"Unknown update policy {self.update_policy!r}")
+        if any(not isinstance(value, str) or not value.strip()
+               for value in (self.project_id, self.comp_id)):
+            raise ValueError("External references require project and composition IDs")
+        path = self.relative_path
+        if (not isinstance(path, str) or "\0" in path
+                or PurePosixPath(path).is_absolute() or PureWindowsPath(path).anchor
+                or path.lower().startswith("file:")):
+            raise ValueError("External references require a project-relative path")
 
     @property
     def key(self) -> CompKey:
@@ -72,18 +101,41 @@ class CompRef:
         comp_id = data.get("comp_id")
         if not isinstance(project_id, str) or not isinstance(comp_id, str):
             return None
+        relative_path = data.get("relative_path", "")
+        if relative_path is not None and not isinstance(relative_path, str):
+            return None
         try:
             return cls(
                 project_id=project_id, comp_id=comp_id,
                 revision_fingerprint=str(data.get("revision_fingerprint", "")
                                          or ""),
-                relative_path=str(data.get("relative_path", "") or ""),
+                relative_path=relative_path or "",
                 update_policy=str(data.get("update_policy",
                                            UPDATE_POLICY_PINNED)
                                   or UPDATE_POLICY_PINNED),
             )
         except ValueError:
             return None
+
+
+def read_comp_ref(parameters: dict[str, Any]) -> CompRef | None:
+    """Read the structured contract or the editable Precomp parameter fields."""
+    data = parameters.get("external_comp_ref")
+    if data == {}:
+        return None
+    if data is None and any(parameters.get(f"ref_{key}") for key in (
+        "project_id", "comp_id", "relative_path", "revision_fingerprint",
+    )):
+        data = {key: parameters[f"ref_{key}"] for key in (
+            "project_id", "comp_id", "relative_path", "revision_fingerprint",
+            "update_policy",
+        ) if f"ref_{key}" in parameters}
+    if data is None:
+        return None
+    ref = CompRef.from_dict(data)
+    if ref is None:
+        raise ValueError("Invalid external composition reference")
+    return ref
 
 
 @dataclass(frozen=True)
@@ -104,27 +156,57 @@ def find_cycle(start: CompKey,
     The path includes the repeated key at both ends (``A → B → A``), or an
     empty list when the reference graph is acyclic from ``start``.
     """
-    path: List[CompKey] = []
-    active: set = set()
-    done: set = set()
+    _, problem = _dependency_order(start, dependencies, max_depth=None, max_nodes=None)
+    return list(problem.path) if problem is not None else []
 
-    def visit(key: CompKey) -> List[CompKey]:
-        if key in active:
-            return path[path.index(key):] + [key]
-        if key in done:
-            return []
-        path.append(key)
-        active.add(key)
-        for child in dependencies.get(key, ()):
-            cycle = visit(child)
-            if cycle:
-                return cycle
-        active.remove(key)
-        path.pop()
-        done.add(key)
-        return []
 
-    return visit(start)
+def _dependency_order(
+    start: CompKey,
+    dependencies: Dict[CompKey, Tuple[CompKey, ...]],
+    *,
+    max_depth: Optional[int],
+    max_nodes: Optional[int],
+) -> Tuple[List[CompKey], Optional[RefDiagnostic]]:
+    """Preflight a reference graph before loading or validating any payloads."""
+    if max_depth is not None and max_depth < 1:
+        return [], RefDiagnostic(REF_DEPTH_EXCEEDED, start,
+                                 f"Reference chain deeper than {max_depth}")
+    if max_nodes is not None and max_nodes < 1:
+        return [], RefDiagnostic(REF_SIZE_EXCEEDED, start,
+                                 f"Reference graph exceeds {max_nodes} compositions")
+
+    active = {start: 0}
+    stack: List[Tuple[CompKey, Iterator[CompKey]]] = [(start, iter(dependencies.get(start, ())))]
+    heights = {start: 1}
+    order: List[CompKey] = []
+    while stack:
+        key, children = stack[-1]
+        child = next(children, None)
+        if child is None:
+            order.append(key)
+            del active[key]
+            stack.pop()
+            if stack:
+                parent = stack[-1][0]
+                heights[parent] = max(heights[parent], 1 + heights[key])
+            continue
+        if child in active:
+            cycle = tuple(key for key, _ in stack[active[child]:]) + (child,)
+            return [], RefDiagnostic(REF_CYCLE, child,
+                                     " → ".join(f"{p}/{c}" for p, c in cycle), cycle)
+        if max_depth is not None and len(stack) + heights.get(child, 1) > max_depth:
+            return [], RefDiagnostic(REF_DEPTH_EXCEEDED, child,
+                                     f"Reference chain deeper than {max_depth}")
+        if child in heights:
+            heights[key] = max(heights[key], 1 + heights[child])
+            continue
+        if max_nodes is not None and len(heights) >= max_nodes:
+            return [], RefDiagnostic(REF_SIZE_EXCEEDED, child,
+                                     f"Reference graph exceeds {max_nodes} compositions")
+        active[child] = len(stack)
+        heights[child] = 1
+        stack.append((child, iter(dependencies.get(child, ()))))
+    return order, None
 
 
 @dataclass(frozen=True)
@@ -142,10 +224,11 @@ def resolve_reference_graph(
         dependencies: Dict[CompKey, Tuple[CompKey, ...]],
         *,
         max_depth: int = DEFAULT_MAX_DEPTH,
+        max_nodes: int = DEFAULT_MAX_NODES,
         validate: Optional[Callable[[CompKey], Optional[RefDiagnostic]]] = None,
-        done: Optional[set] = None,
+        done: Optional[set[CompKey]] = None,
 ) -> ReferenceResolution:
-    """Resolve a reference DAG dependencies-first with bounded depth.
+    """Resolve a reference DAG dependencies-first with bounded depth and size.
 
     ``validate`` reports per-key diagnostics (missing file / missing
     output / plugin mismatch); resolution stops at the first failure so
@@ -153,51 +236,38 @@ def resolve_reference_graph(
     validated set so shared subgraphs (two references to the same comp)
     are validated once and reported as reused.
     """
-    done_set: set = set(done or ())
-    diagnostics: List[RefDiagnostic] = []
-    order: List[CompKey] = []
-    reused: List[CompKey] = []
-    cycle = find_cycle(start, dependencies)
-    if cycle:
-        return ReferenceResolution(
-            ok=False,
-            diagnostics=(RefDiagnostic(
-                REF_CYCLE, cycle[0],
-                " → ".join(f"{p}/{c}" for p, c in cycle),
-                tuple(cycle)),))
+    order, problem = _dependency_order(
+        start, dependencies, max_depth=max_depth, max_nodes=max_nodes,
+    )
+    if problem is not None:
+        return ReferenceResolution(ok=False, diagnostics=(problem,))
 
-    status: Dict[CompKey, int] = {}
+    # Cached payloads still count toward the structural limits. Skip their
+    # payload validation and any descendants reached only through those keys.
+    done_set = set(done or ())
+    needed: set[CompKey] = set()
+    reused: dict[CompKey, None] = {}
+    pending = [iter((start,))]
+    while pending:
+        key = next(pending[-1], None)
+        if key is None:
+            pending.pop()
+            continue
+        if key in done_set or key in needed:
+            reused[key] = None
+            continue
+        needed.add(key)
+        pending.append(iter(dependencies.get(key, ())))
 
-    def visit(key: CompKey, depth: int) -> bool:
-        if key in done_set:
-            reused.append(key)
-            return True
-        if status.get(key) == 1:
-            return True
-        if depth > max_depth:
-            diagnostics.append(RefDiagnostic(
-                REF_DEPTH_EXCEEDED, key,
-                f"Reference chain deeper than {max_depth}"))
-            return False
-        status[key] = 1
-        for child in dependencies.get(key, ()):
-            if not visit(child, depth + 1):
-                return False
-        if validate is not None:
+    load_order = tuple(key for key in order if key in needed)
+    if validate is not None:
+        for key in load_order:
             problem = validate(key)
             if problem is not None:
-                diagnostics.append(problem)
-                return False
-        status[key] = 2
-        done_set.add(key)
-        order.append(key)
-        return True
-
-    if not visit(start, 1):
-        return ReferenceResolution(ok=False, diagnostics=tuple(diagnostics))
+                return ReferenceResolution(ok=False, diagnostics=(problem,))
     return ReferenceResolution(
-        ok=True, order=tuple(order), diagnostics=(),
-        reused=tuple(dict.fromkeys(reused)))
+        ok=True, order=load_order,
+        reused=tuple(reused))
 
 
 def audit_external_refs(

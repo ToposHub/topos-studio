@@ -15,6 +15,7 @@ from src.features.edit.core.primary_grade_shader import (  # noqa: F401
     PRIMARY_GRADE_BODY,
     PRIMARY_GRADE_UNIFORMS,
 )
+from .layer_style_shaders import PSD_RGB_TRANSFER_GLSL
 
 _PASSTHROUGH_VERTEX = """
 #version 330
@@ -80,8 +81,10 @@ uniform bool u_mask_invert;      // Invert mask value
 uniform bool u_layer_composite;  // Managed layer blend and Track Matte behavior
 uniform bool u_transparent_background;
 uniform bool u_mask_straight;
+uniform bool u_psd_srgb;
 in vec2 v_uv;
 out vec4 fragColor;
+""" + PSD_RGB_TRANSFER_GLSL + """
 
 // S2-A: Sample a layer with bbox mapping support.
 // Maps output pixel coordinates to input texture UV space.
@@ -173,6 +176,10 @@ void main() {
     // Convert each input to premultiplied independently (in-shader, no temp textures)
     if (u_a_straight) { a.rgb *= a.a; }
     if (u_b_straight) { b.rgb *= b.a; }
+    if (u_psd_srgb) {
+        a.rgb = psdEncodePremult(a.rgb, a.a);
+        b.rgb = psdEncodePremult(b.rgb, b.a);
+    }
 
     // Compute mask modulation with explicit channel selection (S3-A: replaces
     // the old ambiguous "m.a > 0 ? m.a : m.r" heuristic).
@@ -449,6 +456,9 @@ void main() {
     float mix_amount = clamp(u_mix * (u_layer_composite ? 1.0 : mask_val), 0.0, 1.0);
     blended_rgb = mix(b.rgb, blended_rgb, mix_amount);
     out_alpha = mix(b.a, out_alpha, mix_amount);
+    if (u_psd_srgb) {
+        blended_rgb = psdDecodePremult(blended_rgb, out_alpha);
+    }
 
     // S2-B: Output unpremultiply for alpha_policy="output_straight"
     // Convert premultiplied result to straight alpha
@@ -542,6 +552,29 @@ void main() {
 # single-pass shader (BILATERAL / MOTION / BOKEH) to keep them self-contained.
 # The separable V pass also defines its own sampleEdge().
 
+_BLUR_CHANNEL_SELECTION = """
+uniform bool u_alpha_premultiplied;
+
+float restoreBlurComponent(float value, float source_alpha, float alpha) {
+    if (source_alpha == alpha) {
+        return value;
+    }
+    return source_alpha == 0.0 ? 0.0 : value * (alpha / source_alpha);
+}
+
+vec4 selectBlurChannels(vec4 original, vec4 blurred) {
+    vec4 effected = mix(original, blurred, u_mix);
+    vec4 result = mix(original, effected, u_channel_mask);
+    if (u_alpha_premultiplied) {
+        vec3 alphas = mix(vec3(original.a), vec3(effected.a), u_channel_mask.rgb);
+        result.r = restoreBlurComponent(result.r, alphas.r, result.a);
+        result.g = restoreBlurComponent(result.g, alphas.g, result.a);
+        result.b = restoreBlurComponent(result.b, alphas.b, result.a);
+    }
+    return result;
+}
+"""
+
 _BLUR_SEPARABLE_H_FRAGMENT = """
 #version 330
 // Separable blur — horizontal pass.
@@ -560,14 +593,15 @@ out vec4 fragColor;
 const int MAX_KERNEL = 64;
 
 vec4 sampleEdge(sampler2D tex, vec2 uv) {
+    vec2 texel_center = vec2(0.5) / vec2(textureSize(tex, 0));
     if (u_edge_policy == 0) {
-        return texture(tex, clamp(uv, vec2(0.0), vec2(1.0)));
+        return texture(tex, clamp(uv, texel_center, vec2(1.0) - texel_center));
     } else if (u_edge_policy == 1) {
         return texture(tex, fract(uv));
     } else {
         vec2 m = fract(uv * 0.5) * 2.0;
         m = mix(m, 2.0 - m, step(1.0, m));
-        return texture(tex, m);
+        return texture(tex, clamp(m, texel_center, vec2(1.0) - texel_center));
     }
 }
 
@@ -629,19 +663,20 @@ uniform float u_mix;           // 1.0 = full blur, 0.0 = original
 uniform int u_edge_policy;     // 0=clamp, 1=wrap, 2=mirror
 in vec2 v_uv;
 out vec4 fragColor;
+""" + _BLUR_CHANNEL_SELECTION + """
 
 const int MAX_KERNEL = 64;
 
 vec4 sampleEdge(sampler2D tex, vec2 uv, vec2 tex_size) {
+    vec2 texel_center = vec2(0.5) / tex_size;
     if (u_edge_policy == 0) {
-        vec2 c = clamp(uv, vec2(0.0), vec2(1.0));
-        return texture(tex, c);
+        return texture(tex, clamp(uv, texel_center, vec2(1.0) - texel_center));
     } else if (u_edge_policy == 1) {
         return texture(tex, fract(uv));
     } else {
         vec2 m = fract(uv * 0.5) * 2.0;
         m = mix(m, 2.0 - m, step(1.0, m));
-        return texture(tex, m);
+        return texture(tex, clamp(m, texel_center, vec2(1.0) - texel_center));
     }
 }
 
@@ -649,7 +684,7 @@ void main() {
     vec4 original = texture(u_original, v_uv);
 
     if (u_radius < 0.5) {
-        fragColor = original;
+        fragColor = selectBlurChannels(original, texture(u_texture, v_uv));
         return;
     }
 
@@ -681,13 +716,7 @@ void main() {
     vec4 blurred = color / max(weight_sum, 0.0001);
 
     // Per-channel mix: channels with mask<0.5 keep original, others get blurred.
-    vec4 result;
-    result.r = mix(original.r, blurred.r, u_channel_mask.r * u_mix);
-    result.g = mix(original.g, blurred.g, u_channel_mask.g * u_mix);
-    result.b = mix(original.b, blurred.b, u_channel_mask.b * u_mix);
-    result.a = mix(original.a, blurred.a, u_channel_mask.a * u_mix);
-
-    fragColor = result;
+    fragColor = selectBlurChannels(original, blurred);
 }
 """
 
@@ -706,18 +735,20 @@ uniform float u_mix;
 uniform int u_edge_policy;
 in vec2 v_uv;
 out vec4 fragColor;
+""" + _BLUR_CHANNEL_SELECTION + """
 
 const int MAX_KERNEL = 10;
 
 vec4 sampleEdge(sampler2D tex, vec2 uv) {
+    vec2 texel_center = vec2(0.5) / vec2(textureSize(tex, 0));
     if (u_edge_policy == 0) {
-        return texture(tex, clamp(uv, vec2(0.0), vec2(1.0)));
+        return texture(tex, clamp(uv, texel_center, vec2(1.0) - texel_center));
     } else if (u_edge_policy == 1) {
         return texture(tex, fract(uv));
     } else {
         vec2 m = fract(uv * 0.5) * 2.0;
         m = mix(m, 2.0 - m, step(1.0, m));
-        return texture(tex, m);
+        return texture(tex, clamp(m, texel_center, vec2(1.0) - texel_center));
     }
 }
 
@@ -761,13 +792,7 @@ void main() {
 
     vec4 blurred = sum / max(weight_sum, 0.0001);
 
-    vec4 result;
-    result.r = mix(original.r, blurred.r, u_channel_mask.r * u_mix);
-    result.g = mix(original.g, blurred.g, u_channel_mask.g * u_mix);
-    result.b = mix(original.b, blurred.b, u_channel_mask.b * u_mix);
-    result.a = mix(original.a, blurred.a, u_channel_mask.a * u_mix);
-
-    fragColor = result;
+    fragColor = selectBlurChannels(original, blurred);
 }
 """
 
@@ -788,18 +813,20 @@ uniform float u_mix;
 uniform int u_edge_policy;
 in vec2 v_uv;
 out vec4 fragColor;
+""" + _BLUR_CHANNEL_SELECTION + """
 
 const int MAX_SAMPLES = 32;
 
 vec4 sampleEdge(sampler2D tex, vec2 uv) {
+    vec2 texel_center = vec2(0.5) / vec2(textureSize(tex, 0));
     if (u_edge_policy == 0) {
-        return texture(tex, clamp(uv, vec2(0.0), vec2(1.0)));
+        return texture(tex, clamp(uv, texel_center, vec2(1.0) - texel_center));
     } else if (u_edge_policy == 1) {
         return texture(tex, fract(uv));
     } else {
         vec2 m = fract(uv * 0.5) * 2.0;
         m = mix(m, 2.0 - m, step(1.0, m));
-        return texture(tex, m);
+        return texture(tex, clamp(m, texel_center, vec2(1.0) - texel_center));
     }
 }
 
@@ -842,13 +869,7 @@ void main() {
 
     vec4 blurred = sum / max(weight_sum, 0.0001);
 
-    vec4 result;
-    result.r = mix(original.r, blurred.r, u_channel_mask.r * u_mix);
-    result.g = mix(original.g, blurred.g, u_channel_mask.g * u_mix);
-    result.b = mix(original.b, blurred.b, u_channel_mask.b * u_mix);
-    result.a = mix(original.a, blurred.a, u_channel_mask.a * u_mix);
-
-    fragColor = result;
+    fragColor = selectBlurChannels(original, blurred);
 }
 """
 
@@ -870,18 +891,20 @@ uniform float u_mix;
 uniform int u_edge_policy;
 in vec2 v_uv;
 out vec4 fragColor;
+""" + _BLUR_CHANNEL_SELECTION + """
 
 const int MAX_SAMPLES = 48;
 
 vec4 sampleEdge(sampler2D tex, vec2 uv) {
+    vec2 texel_center = vec2(0.5) / vec2(textureSize(tex, 0));
     if (u_edge_policy == 0) {
-        return texture(tex, clamp(uv, vec2(0.0), vec2(1.0)));
+        return texture(tex, clamp(uv, texel_center, vec2(1.0) - texel_center));
     } else if (u_edge_policy == 1) {
         return texture(tex, fract(uv));
     } else {
         vec2 m = fract(uv * 0.5) * 2.0;
         m = mix(m, 2.0 - m, step(1.0, m));
-        return texture(tex, m);
+        return texture(tex, clamp(m, texel_center, vec2(1.0) - texel_center));
     }
 }
 
@@ -950,13 +973,7 @@ void main() {
 
     vec4 blurred = sum / max(weight_sum, 0.0001);
 
-    vec4 result;
-    result.r = mix(original.r, blurred.r, u_channel_mask.r * u_mix);
-    result.g = mix(original.g, blurred.g, u_channel_mask.g * u_mix);
-    result.b = mix(original.b, blurred.b, u_channel_mask.b * u_mix);
-    result.a = mix(original.a, blurred.a, u_channel_mask.a * u_mix);
-
-    fragColor = result;
+    fragColor = selectBlurChannels(original, blurred);
 }
 """
 

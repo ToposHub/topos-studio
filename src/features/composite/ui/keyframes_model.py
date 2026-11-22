@@ -20,13 +20,16 @@ Design (per docs/composite_davinci_keyframes_tool_plan_2026-06-28.md §5):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.features.composite.core.layer_model import (
+    LAYER_TYPE_AUDIO,
     BOTTOM_UP_LAYER_STACK_VERSION, LAYER_MERGE_OWNER_PARAM,
     LAYER_TYPE_3D, LAYER_TYPE_SOLID, LAYER_TYPE_TEXT, LEGACY_LAYER_STACK_VERSION,
 )
+from src.features.composite.core.layer_time import LayerTiming, layer_timing_from_video
 from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
@@ -142,6 +145,9 @@ class KeyframesTrackVisual:
     # Source frames are independent of the bar's composition frame numbers.
     source_total: int = 0
     source_in: int = 0
+    source_step: Fraction = Fraction(1)
+    source_phase: Fraction = Fraction(0)
+    media_timing: LayerTiming | None = None
     layer_managed: bool = True
 
 
@@ -381,6 +387,7 @@ class KeyframesModel:
                 continue
             display_idx += 1
             relation = relation_view(layer_id)
+            audio = layer.audio if layer.layer_type == LAYER_TYPE_AUDIO else None
             node = controller.graph.get_node(layer.root_node_id)
             if node is None:
                 # Stale layer — still show it (broken state) so the UI can
@@ -397,8 +404,8 @@ class KeyframesModel:
                     node_color=layer.label_color or "#555555",
                     layer_id=layer_id,
                     layer_index=display_idx,
-                    layer_enabled=layer.enabled,
-                    layer_solo=layer.solo,
+                    layer_enabled=not audio.mute if audio is not None else layer.enabled,
+                    layer_solo=audio.solo if audio is not None else layer.solo,
                     layer_shy=layer.shy,
                     layer_blended=layer_id in merge_owner_index,
                     layer_managed=layer.managed,
@@ -422,8 +429,8 @@ class KeyframesModel:
                 node_color=color,
                 layer_id=layer_id,
                 layer_index=display_idx,
-                layer_enabled=layer.enabled,
-                layer_solo=layer.solo,
+                layer_enabled=not audio.mute if audio is not None else layer.enabled,
+                layer_solo=audio.solo if audio is not None else layer.solo,
                 layer_shy=layer.shy,
                 layer_blended=layer_id in merge_owner_index,
                 layer_managed=layer.managed,
@@ -442,7 +449,8 @@ class KeyframesModel:
                                  layer.source_node_id, exc_info=True)
                     source_node = None
             self._tracks[layer_row.row_id] = self._build_node_track(
-                node, color, source_node=source_node, layer=layer)
+                node, color, source_node=source_node, layer=layer,
+                comp_fps=getattr(controller.graph, "fps", 0))
             merge_for_layer = getattr(controller, "layer_merge_node", None)
             merge = merge_for_layer(layer_id) if callable(merge_for_layer) else None
             self._append_layer_groups(layer_row, layer, node, merge,
@@ -1284,7 +1292,7 @@ class KeyframesModel:
 
     def _build_node_track(self, node: Any, color: str,
                           source_node: Any = None,
-                          layer: Any = None) -> KeyframesTrackVisual:
+                          layer: Any = None, comp_fps: Any = 0) -> KeyframesTrackVisual:
         tr = getattr(node, "time_range", None)
         range_bar: Optional[TimeRangeBar] = None
         label = layer.name if layer is not None else self._node_label(node)
@@ -1294,6 +1302,17 @@ class KeyframesModel:
         source_total = self._media_total_frames(media_node)
         source_in = 0
         source_out = source_total - 1
+        media_timing = None
+        if layer is not None and getattr(media_node, "node_type", "") == "video_frame":
+            from src.shared.media.presentation_time import ready_presentation_index
+
+            media_range = getattr(media_node, "time_range", None) or {}
+            params = media_node.parameters
+            index = ready_presentation_index(str(params.get("file_path") or ""))
+            if index is not None:
+                source_total = len(index.pts)
+                source_out = source_total - 1
+            media_timing = layer_timing_from_video((0, 0), params, media_range, comp_fps, index)
         if source_total:
             try:
                 source_in = max(0, min(source_out, int(
@@ -1318,7 +1337,9 @@ class KeyframesModel:
             # Video media shows its full source length instead, so material
             # longer than the composition stays visible and trimmable.
             if source_total > 0:
-                cs, ce = 0, source_out - source_in
+                duration = (media_timing.window_duration(source_out) if media_timing is not None
+                            else source_out - source_in + 1)
+                cs, ce = 0, duration - 1
             else:
                 cs, ce = self._comp_range
             if ce >= cs:
@@ -1335,10 +1356,15 @@ class KeyframesModel:
             range_bar = TimeRangeBar(
                 start_frame=start, end_frame=max(start, end),
                 label=layer.name, color=color)
+        if media_timing is not None and range_bar is not None:
+            media_timing = replace(media_timing, in_frame=range_bar.start_frame,
+                                   out_frame=range_bar.end_frame)
         return KeyframesTrackVisual(
             row_id=f"node:{node.id}",
             range_bar=range_bar, color=color, node_color=color,
-            source_total=source_total, source_in=source_in,
+            source_total=source_total, source_in=source_in, media_timing=media_timing,
+            source_step=media_timing.source_step if media_timing else Fraction(1),
+            source_phase=media_timing.source_phase if media_timing else Fraction(0),
             layer_managed=layer is None or layer.managed)
 
     def _build_param_track(self, node: Any, param_name: str,

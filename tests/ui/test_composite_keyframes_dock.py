@@ -9,7 +9,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -17,7 +17,7 @@ import pytest
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QMenu, QWidget
 
 from src.features.composite.core.node_engine import NodeGraph
 from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
@@ -134,7 +134,8 @@ def test_timeline_side_maps_media_drop_to_layer_insert(qapp):
 
 @pytest.mark.parametrize("surface", ["_tree_view", "_timeline_view"])
 @pytest.mark.parametrize("extension, accepted", [("png", True), ("mov", True),
-                                                 ("obj", True), ("wav", False)])
+                                                 ("obj", True), ("psb", True),
+                                                 ("wav", False)])
 def test_empty_layer_canvas_accepts_supported_local_drops(
     qtbot, surface: str, extension: str, accepted: bool,
 ) -> None:
@@ -352,6 +353,10 @@ def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
     transform_id = layer.transform_node_id
     merge = controller.layer_merge_node(layer_id)
     assert transform_id is not None and transform_id != layer.source_node_id
+    graph.add_node(ConstantNode(node_id="parent_source"))
+    parent_id = controller.add_media_layer("Parent", "parent_source")
+    parent_transform = controller.layer_transform_node(parent_id)
+    assert controller.set_layer_parent(layer_id, parent_id)
 
     graph.disconnect(transform_id, "result", merge.id, MERGE_PORT_FOREGROUND)
     assert graph.connect(transform_id, "result", blur.id, "image")
@@ -366,6 +371,15 @@ def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
         # The Layers view shows the registered Transform's params under the
         # transform group, not the Blur chain head's.
         assert controller.layer_transform_node(layer_id).id == transform_id
+        assert graph.get_node(transform_id).parent_id == parent_transform.id
+        with patch.object(page, "_viewer", MagicMock()) as viewer:
+            panel._on_layer_selected(layer_id)
+            viewer.set_selected_node.assert_called_once_with(transform_id)
+        assert page._last_selected_node_id == transform_id
+        menu = QMenu(panel)
+        panel._populate_layer_parent_menu(menu, graph.get_layer(parent_id),
+                                          controller.layers_map(), [parent_id, layer_id])
+        assert any(action.text() == "Footage" for action in menu.actions())
         assert any(row.layer_id == layer_id and row.node_id == transform_id
                    and row.param_name == "translate_x"
                    for row in panel._model.rows)
@@ -373,8 +387,8 @@ def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
         # instead of wrapping the Blur in a second Transform.
         effect_id = controller.add_layer_effect(layer_id, "blur")
         assert effect_id is not None
-        assert [n.id for n in graph.nodes.values()
-                if n.node_type == "transform"] == [transform_id]
+        assert {n.id for n in graph.nodes.values()
+                if n.node_type == "transform"} == {transform_id, parent_transform.id}
 
         page.load_composite_data(page.get_composite_data())
         restored = page.node_graph.get_layer(layer_id)
@@ -386,6 +400,60 @@ def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
         page.close()
         panel.close()
         properties.close()
+
+
+def test_composition_marker_ruler_drag_save_and_switch(qapp, tmp_path):
+    from src.shared.project.composition_merge import merge_composition_record
+    from src.shared.project.topos_project import ToposProject
+    from src.shared.project.topos_project_io import ToposProjectIO
+
+    page = CompositePage()
+    panel = KeyframesPanel()
+    page._evaluate_graph = MagicMock()
+    page.set_keyframes_panel(panel)
+    page.load_composite_data({"composite_id": "first", "nodes": [],
+                              "duration_frames": 60})
+    panel.set_view_mode("layers")
+    panel.resize(850, 300)
+    panel.show()
+    qapp.processEvents()
+    changes = []
+    page.composite_graph_changed.connect(lambda cid, data: changes.append((cid, data)))
+    controller = page._layer_stack_controller
+    view = panel._timeline_view
+    try:
+        marker_id = controller.add_marker(10, "Impact", duration=4)
+        assert panel._graph_view.markers()[0]["name"] == "Impact"
+        start_x = round(panel._frame_mapper.frame_to_x(10))
+        end_x = round(panel._frame_mapper.frame_to_x(20))
+        QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=QPoint(start_x, 30))
+        QTest.mouseMove(view, QPoint(end_x, 30))
+        assert controller.markers()[0].frame == 10
+        QTest.mouseRelease(view, Qt.MouseButton.LeftButton, pos=QPoint(end_x, 30))
+        assert controller.markers()[0].frame == 20
+        page.undo()
+        assert panel._graph_view.markers()[0]["frame"] == 10
+        page.redo()
+        assert panel._graph_view.markers()[0]["frame"] == 20
+        assert len(changes) == 4
+        saved = merge_composition_record({"name": "First"}, changes[-1][1], "first")
+        assert controller.remove_marker(marker_id)
+        removed = merge_composition_record(saved, changes[-1][1], "first")
+        assert removed["markers"] == []
+        archive = str(tmp_path / "markers.topos")
+        project = ToposProject(project_id="marker-review", name="Marker review",
+                               project_mode="composite_shot")
+        assert ToposProjectIO.save(project, archive, full_compositions_data={"first": saved})
+        _, reopened = ToposProjectIO.load(archive)
+        page.load_composite_data(reopened["compositions"]["first"])
+        assert [(item.marker_id, item.frame) for item in controller.markers()] == [(marker_id, 20)]
+        page.load_composite_data({"composite_id": "second", "nodes": [],
+                                  "duration_frames": 60})
+        assert controller.markers() == []
+        assert panel._graph_view.markers() == []
+    finally:
+        page.close()
+        panel.close()
 
 
 @pytest.mark.parametrize("reason", ["other_layer", "locked", "managed_conflict"])

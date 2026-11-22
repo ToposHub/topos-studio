@@ -1978,6 +1978,8 @@ def expand_sequence_audio_for_render(
     EditPage 音频同步走同一个 ``flatten_nested_audio_tracks``。
     """
     from src.features.edit.core.nested_sequence import flatten_nested_audio_tracks
+    from src.features.edit.core.comp_clip_pcm import with_comp_clip_audio
+    from dataclasses import replace as _dc_replace
 
     resolver = sequence_resolver if callable(sequence_resolver) else None
     asset_lookup = (
@@ -1985,14 +1987,21 @@ def expand_sequence_audio_for_render(
         if project is not None and getattr(project, "assets", None) is not None
         else None
     )
+    def resolve_child(timeline_id: str) -> Optional["TimelineSequence"]:
+        child = resolver(timeline_id)
+        if child is None:
+            return None
+        original = tuple(child.audio_tracks or ())
+        tracks = with_comp_clip_audio(child, original, project)
+        return child if tracks == original else _dc_replace(child, audio_tracks=tracks)
+
     expanded = flatten_nested_audio_tracks(
-        sequence, resolver, asset_lookup, strict=strict,
+        sequence, resolve_child if resolver is not None else None, asset_lookup, strict=strict,
         diagnostics=diagnostics, frame_range=frame_range,
     )
+    expanded = with_comp_clip_audio(sequence, tuple(expanded), project)
     if expanded == tuple(sequence.audio_tracks or ()):
         return sequence
-    from dataclasses import replace as _dc_replace
-
     return _dc_replace(sequence, audio_tracks=expanded)
 
 
@@ -4167,6 +4176,9 @@ class TimelineExporter:
 
         try:
             from src.features.edit.core.audio_playback import AudioDecoder
+            from src.features.edit.core.comp_clip_pcm import (
+                CompClipAudioError, CompClipPCMSource, comp_clip_audio_graph,
+            )
             from src.features.edit.core.timeline_render_plan import is_track_renderable
             import numpy as np
         except ImportError:
@@ -4668,8 +4680,9 @@ class TimelineExporter:
                             continue
 
                         # P1-14: 导出取源走项目代理策略（默认强制 master 原片）
+                        comp_audio_graph = comp_clip_audio_graph(self._project, clip.asset_id)
                         asset_path = export_source_path(self._project, asset)
-                        if not asset_path:
+                        if not asset_path and comp_audio_graph is None:
                             continue
                         # F2.10/M03（S05）：外录绑定——音频消费切到 WAV 源。
                         # 1x 直读按偏移折算源帧；retime/保调片段同样使用
@@ -4715,7 +4728,12 @@ class TimelineExporter:
                         if _decoder_key not in decoders:
                             decoder = AudioDecoder()
                             # 传入 timeline_fps 与 output_sample_rate，保证音视频同步
-                            decoder.open(asset_path, timeline_fps=fps, output_sample_rate=sample_rate)
+                            if comp_audio_graph is not None:
+                                decoder.open_pcm(CompClipPCMSource(comp_audio_graph, self._project, sample_rate,
+                                                                  strict=True),
+                                                 timeline_fps=fps, output_sample_rate=sample_rate)
+                            else:
+                                decoder.open(asset_path, timeline_fps=fps, output_sample_rate=sample_rate)
                             decoders[_decoder_key] = decoder
                         else:
                             decoder = decoders[_decoder_key]
@@ -5173,7 +5191,7 @@ class TimelineExporter:
 
 
                     except Exception as e:
-                        if isinstance(e, PreRenderUntrustedError):
+                        if isinstance(e, (PreRenderUntrustedError, CompClipAudioError)):
                             # P0 · 交付保真：预渲染前缀读不到可信 PCM——
                             # 中止导出（报告片段/步骤/原因），不得静默丢效果。
                             raise

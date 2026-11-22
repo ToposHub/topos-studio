@@ -93,12 +93,24 @@ def test_build_audio_plan_segments_share_boundaries():
     assert (l2.in_frame, l2.out_frame) == (50, 150)
     # Shared-endpoint windows: each segment covers the exact comp duration.
     assert l1.sample_count == sample_boundary(101, fps, 48000)
-    assert l2.source_sample_start == 48000 + sample_boundary(50, fps, 48000)
+    assert l2.source_sample_start == 48000
+    assert l2.sample_count == sample_boundary(151, fps, 48000) - sample_boundary(50, fps, 48000)
     assert plan.total_samples == sample_boundary(151, fps, 48000)
     # Frame lookup during playback.
     assert set(plan.segments_at_frame(75)) == {l1, l2}
     assert plan.segments_at_frame(0) == (l1,)
     assert plan.segments_at_frame(150) == (l2,)
+
+
+def test_audio_plan_accepts_iterables_and_uses_native_stream_origin_and_length():
+    timing = LayerAudioTiming("l1", LayerAudio("clip"), 10, 11, source_origin_samples=17)
+    stream = AudioStreamInfo("clip", 0, 44100, 2)
+    plan = build_audio_plan(iter([timing]), fps=24, sample_rate=48000, streams={("clip", 0): stream})
+    segment, = plan.segments
+    assert segment.source_sample_start == 17
+    assert segment.source_sample_end == 17 + 3675
+    assert segment.sample_rate == 44100
+    assert plan.total_samples == 24000
 
 
 def test_build_audio_plan_resolves_gain_and_missing_streams():
@@ -141,9 +153,10 @@ def test_waveform_envelope_buckets_min_max():
     # Trailing partial bucket dropped: 105 samples / 10 → 10 buckets.
     mins, maxs = waveform_envelope(np.ones(105, dtype=np.float32), 10)
     assert len(mins) == 10
-    # Stereo interleaved input flattens before bucketing.
+    # Each stereo bucket spans the same time interval as its mono counterpart.
     stereo = np.stack([pcm, -pcm], axis=1)
     mins, maxs = waveform_envelope(stereo, 10)
+    assert len(mins) == len(maxs) == 10
     assert mins[0] == pytest.approx(-1.0)
     assert maxs[0] == pytest.approx(1.0)
     assert waveform_cache_key("rev1", 0, 0, 48000, 10) != \
@@ -161,3 +174,14 @@ def test_plan_epoch_changes_with_content():
     assert plan_epoch(plan_a) != plan_epoch(plan_b)
     assert plan_epoch(plan_a) == plan_epoch(build_audio_plan(
         base, fps=Fraction(24), sample_rate=48000, streams=streams))
+
+
+def test_plan_epoch_tracks_stream_timestamps():
+    timing = [LayerAudioTiming("layer", LayerAudio("asset"), 0, 10)]
+    streams = {
+        ("asset", 0): AudioStreamInfo("asset", 0, 48000, 2, Fraction(1, 48000), start_pts=0)
+    }
+    start = build_audio_plan(timing, fps=24, sample_rate=48000, streams=streams)
+    streams[("asset", 0)] = AudioStreamInfo("asset", 0, 48000, 2, Fraction(1, 48000), start_pts=1024)
+    delayed = build_audio_plan(timing, fps=24, sample_rate=48000, streams=streams)
+    assert plan_epoch(start) != plan_epoch(delayed)

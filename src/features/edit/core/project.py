@@ -3920,6 +3920,7 @@ class EditProject:
             backdrops=comp_data.backdrops,
             sticky_notes=comp_data.sticky_notes,
             groups=comp_data.groups,
+            markers=comp_data.markers,
             created_at=comp_data.created_at,
             modified_at=now,
             width=res_w,

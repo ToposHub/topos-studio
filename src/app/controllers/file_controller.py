@@ -486,6 +486,9 @@ class FileOpsMixin:
         the library scan roots (highest priority, receives new saves), so a
         preset collection travels with its project.  ``None`` detaches it.
         """
+        from src.features.composite.core.external_comp_refs import set_reference_host_archive
+
+        set_reference_host_archive(project_filepath)
         try:
             from src.features.teaching_animation.presets.paths import set_active_project_file
             set_active_project_file(project_filepath)

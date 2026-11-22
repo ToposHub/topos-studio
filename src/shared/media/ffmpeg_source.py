@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Any, Generator, Tuple, Literal
@@ -32,6 +33,7 @@ import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     import queue
+    from .presentation_time import PresentationIndex
 
 from .metadata import Rational, VideoMetadata
 from .source import MediaSourceError, MediaOpenError, MediaDecodeError
@@ -363,6 +365,43 @@ def extract_pts_index_seconds(path: str) -> "list[float] | None":
         return None
 
 
+def read_presentation_index(path: str) -> PresentationIndex | None:
+    """Demux a version of a source without opening its playback decoder."""
+    import av
+    from .av_concurrency import av_operation
+    from .presentation_time import PresentationIndex
+
+    with av_operation():
+        container = av.open(path)
+        try:
+            stream = container.streams.video[0]
+            if stream.time_base is None:
+                return None
+            packets = {}
+            for packet in container.demux(stream):
+                if not packet.size:
+                    continue
+                if packet.pts is None or packet.pts in packets:
+                    return None
+                packets[packet.pts] = max(0, packet.duration or 0)
+            if not packets or (stream.frames and stream.frames != len(packets)):
+                return None
+            pts = tuple(sorted(packets))
+            delta = (pts[-1] - pts[-2]) if len(pts) > 1 else 1
+            last_duration = packets[pts[-1]] or delta
+            end = pts[-1] + max(1, last_duration)
+            count = len(pts) - 1
+            span = pts[-1] - pts[0]
+            # A constant cadence may still alternate between adjacent
+            # tick lengths when ticks cannot represent the nominal period.
+            variable = (abs(last_duration * count - span) > count
+                        or any(abs((tick - pts[0]) * count - index * span) > count
+                               for index, tick in enumerate(pts)))
+            return PresentationIndex(pts, Fraction(stream.time_base), end, variable)
+        finally:
+            _close_container_bounded(container, 2.0)
+
+
 def looks_vfr(pts_seconds: "list[float] | None") -> bool:
     """PTS 秒表是否为变帧率（相邻差不齐 > 半帧容差）。"""
     if not pts_seconds or len(pts_seconds) < 3:
@@ -635,6 +674,7 @@ class FFmpegMediaSource:
                            转换时；默认 ``None`` 保持原有高位深输出策略。
         """
         self._path: str = path
+        self._presentation_index: PresentationIndex | None = None
         self._target_size: Optional[Tuple[int, int]] = target_size
         self._preserve_planes: bool = preserve_planes
         self._output_mode: OutputMode = output_mode
@@ -1422,6 +1462,14 @@ class FFmpegMediaSource:
         # 读取下一帧
         return self.read_next_frame()
 
+    def set_presentation_index(self, index: PresentationIndex) -> None:
+        """Select exact frame-to-PTS addressing for this opened media source."""
+        if self._video_stream is None or self._video_stream.time_base != index.time_base:
+            raise ValueError("Presentation index uses a different video time base.")
+        self._presentation_index = index
+        if self._metadata is not None:
+            self._metadata = replace(self._metadata, total_frames=len(index.pts))
+
     def read_next_frame(self) -> DecodedFrame:
         """
         读取下一帧（顺序解码）。
@@ -1671,7 +1719,7 @@ class FFmpegMediaSource:
         if self._container is None or self._video_stream is None:
             return
 
-        index = self._ensure_gop_index()
+        index = None if self._presentation_index is not None else self._ensure_gop_index()
         codec_name = self._metadata.codec_name if self._metadata is not None else ""
         if str(codec_name).lower() in GOP_SLICE_SEEK_CODECS:
             try:
@@ -2024,13 +2072,17 @@ class FFmpegMediaSource:
         """
         if self._video_stream is None or self._metadata is None:
             return frame_index
+        index = getattr(self, "_presentation_index", None)
+        if index is not None and 0 <= frame_index < len(index.pts):
+            return index.pts[frame_index]
 
         time_base = self._video_stream.time_base
         fps = self._metadata.fps
+        start_pts = int(getattr(self._video_stream, "start_time", None) or 0)
 
         if time_base is None:
             # 使用帧率倒数作为时间基
-            return frame_index * fps.den
+            return start_pts + frame_index * fps.den
 
         # PTS = frame_index / fps / time_base
         # = frame_index * fps.den / fps.num * time_base.den / time_base.num
@@ -2048,7 +2100,7 @@ class FFmpegMediaSource:
             fps.num * tb_num,
         )
 
-        return int(pts_value + Fraction(1, 2))
+        return start_pts + int(pts_value + Fraction(1, 2))
 
     def _pts_to_frame(self, pts: int) -> int:
         """
@@ -2062,12 +2114,16 @@ class FFmpegMediaSource:
         """
         if self._video_stream is None or self._metadata is None:
             return 0
+        index = getattr(self, "_presentation_index", None)
+        if index is not None:
+            return index.frame_for_pts(pts)
 
         time_base = self._video_stream.time_base
         fps = self._metadata.fps
+        relative_pts = int(pts) - int(getattr(self._video_stream, "start_time", None) or 0)
 
         if time_base is None:
-            return pts // fps.den
+            return max(0, relative_pts // fps.den)
 
         # Frame = PTS * time_base * fps
         # = PTS * time_base.num / time_base.den * fps.num / fps.den
@@ -2076,7 +2132,7 @@ class FFmpegMediaSource:
         tb_num = time_base.numerator if hasattr(time_base, 'numerator') else time_base.num
         tb_den = time_base.denominator if hasattr(time_base, 'denominator') else time_base.den
         frame_value = Fraction(
-            int(pts) * tb_num * fps.num,
+            relative_pts * tb_num * fps.num,
             tb_den * fps.den,
         )
         frame = int(frame_value + Fraction(1, 2))

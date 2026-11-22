@@ -29,21 +29,21 @@ AE 导航开启时，图层属性快捷键作用于选中图层，未选图层�
 
 每层还登记稳定的主 Transform 角色（`Layer.transform_node_id`，B01）。效果可以位于该 Transform 之上或之下（如 Constant → Transform → Blur → 本层 Merge A），效果插入、删除、变换快捷键、查看器手柄、父级投影与复制都通过角色解析而不是链首类型推断：`LayerStackController.layer_roles()` 返回 source/transform/effects/foreground/managed_merge 契约。主 Transform 被删除时保留悬空引用作为可识别的缺失状态，重新接线后由事务认领恢复；旧工程沿本层图像主链回溯，唯一候选才回填稳定引用，多候选标记为歧义并诊断。
 
-所有连线编辑统一经 `NodeGraph.apply_edit`（`core/graph_edit.py`，B02）：候选边表在图锁内一次性完成端口存在、类型、容量、成环、过时 revision 与重复命令 ID 校验，通过后单次发布并递增 generation/topology_revision；拒绝路径零修改并返回点分原因码（`edit.cycle`、`edit.capacity` 等），供吸附提示与诊断消费。画布手势在拖线开始时捕获 graph generation，松手时以乐观 revision 提交，图被并发修改则整笔手势拒绝。图层控制器的撤销恢复直接按快照重建连接列表（含多输入端口的边顺序），不再逐条 replay `connect()`。
+画布、脚本和预设的连线复用 `NodeGraph.apply_edit`（`core/graph_edit.py`，B02）。候选边表在图锁内检查端口、类型、容量、成环、版本、重复命令及受管图层约束，通过后发布。拒绝保留原边表、版本和撤销历史，并返回 `edit.cycle`、`edit.capacity`、`edit.layer_conflict` 等原因码。先接 Transform 输出端时，画布暂存连线意图和起始版本。补齐输入后，两段连接一起通过校验并生成一次撤销。
 
-图层时间使用有理数契约（`core/layer_time.py`，B03）：帧率以精确分数表示（`fps_fraction` 可从浮点恢复 NTSC 的 30000/1001），UI 使用含尾合成帧、纯函数内部使用半开区间，`source_frame_cfr` 提供跨帧率的 CFR 取帧映射，滑移/裁边/拆分/伸缩共用同一契约；图层裁边（trim_in/trim_out）按合成帧差换算精确的素材帧差（合成 25fps 裁素材 24fps 时 25 合成帧 = 24 素材帧），素材帧率未知时降级为 1:1 并在结果中标记 `fps_aware=False`。同一读取节点被多个不同时间范围的图层共享时，门控交集保守隐藏且校验器发出 `shared_source_range` 警告，修复方式是同资产 ID 的独立读取节点。
+图层时间使用有理数契约（`core/layer_time.py`，B03）。UI 与工程使用含尾帧，计算使用半开区间。滑移、裁边、拆分和伸缩保留 CFR 的采样相位与步长，VFR 在后台建立按文件修订缓存的 PTS 索引，工程只保存相对时间锚点和速率。无有效时间戳时走原取帧路径。旧图层共享读取节点时，编辑可为该层建立保留同一素材 ID 的独立读取节点。预览和导出读取同一快照，按各层的含尾范围门控 Merge 前景和遮罩。
 
-合成标记（`core/composite_markers.py`，B04）由合成拥有：稳定 UUID、整型帧、名称、可选时长和颜色，同帧多标记按 UUID 独立编辑；创建/改名/移动/时长/颜色/删除各为一步撤销（拖动释只提交一次）。标记随图序列化（schema v12），缩短合成时越界标记保留位置、经 `markers_report` 标出以便恢复；标尺和导出直接消费纯数据投影，不依赖 Qt。
+合成标记（`core/composite_markers.py`，B04）保存 UUID、帧、名称、时长和颜色。同帧标记在标尺右键菜单按 UUID 独立编辑，拖动在松手时提交一次。标尺和曲线视图投影当前范围内的标记，缩短合成时仍保存越界标记。工程同步使用 schema v12 的 `markers` 字段，删除最后一个标记时同步空数组。
 
-合成音频（`core/comp_audio.py` / `core/comp_audio_mix.py`，B05/B06）由不可变 `AudioPlan` 驱动：每层可选 `Layer.audio`（asset/stream/gain dB/mute/solo），静音优先于独奏、任一独奏静音其余层；片段窗口用共享样本端点的边界算术（`sample_boundary`，与计划中 NTSC 160160/161761 例子一致），素材窗口锚定在层的媒体起点。混音（`comp_audio_mix`）给出精确的导出 PCM 长度、按解析预测的样本偏移落位（单样本脉冲测试）、线性增益叠加，并以 ok/silent/missing_media/no_stream/error 五态区分导出音频状态；波形包络按素材修订/流/窗口/缩放分键缓存，播放以 plan epoch 失效。旧工程无音频字段维持原表现。
+合成音频（B05/B06）以 `Layer.audio` 和 `AudioPlan` 表达每层的流、增益、静音和独奏。纯音频素材由 `AudioSource` 持有路径和素材 ID，在图层时间线显示波形且跳过图像 Merge。后台探测并按绝对采样端点解码，`core/composition_pcm.py` 提供给音频播放、视频 mux 和剪辑页 Comp Clip。独立合成播放使用共享设备仲裁，设备变化时从当前帧重新打开输出。视频导出把混音写到同一容器的单条音轨，完整输出才替换目标。图像序列在导出界面提示其仅包含画面。剪辑展开时为没有对应音频片段的 Comp Clip 加入虚拟音频轨，已有片段保留原有归属。
 
-PSD/PSB 分层导入（`core/psd_import.py`，B07）使用锁定版本的 psd-tools（≥1.27,<1.28）做独立解码：探测产出不可变清单（逐层 PSD 源 ID 或结构路径指纹、BBox、层序、可见性、不透明度、混合、编组/剪贴/样式标记），同名层绝不按显示名猜身份；像素读取返回 BBox 尺寸的直通 alpha RGBA，`clip_psd_patch` 复现计划中的画布裁剪（负偏移与完全在画布外）。首批仅导入可保真的普通像素层，编组透传/调整/智能对象/剪贴/样式按影响范围合并并记录原因；缓存按素材修订×层选择器×工作空间×精度分键。
+合成 ImageInput 通过 `core/psd_import.py`（B07）读取 PSD/PSB。合并模式优先使用文档预览，没有预览时由 psd-tools 按层生成。8 位和 16 位 RGB 使用直通 Alpha，嵌入 ICC 通过 LittleCMS 2 的浮点 RGB 转换输出 sRGB。图层时间线拖放先在 CPU 后台探测，使用 PSD 层 ID 或结构指纹定位来源，在独立图中建立本层 Transform 和 Merge，再一次提交。剪贴堆栈与依赖下方画面的组和调整层可按影响范围合并。无法可靠拆分的文档使用合并图，节点保留原因和样式来源。工程包把 PSD 来源路径保存为相对引用，重开时通过项目目录和资源恢复路径。
 
-可编辑图层样式（`core/layer_styles.py`，B08）映射为带版本与顺序的 `LayerStyleEffect` 数据（保留原始 PSD 样式描述与转换版本）；已验证批次为颜色叠加、投影和外发光，描边/内阴影/渐变未验证前保持 B07 合并语义并诊断。`shadow_under` 复现计划中的像素 golden，`color_over` 的不透明度只应用一次，HDR 值不钳制，`style_halo_extent` 从模糊半径加偏移量给出 tile halo。
+可编辑的 `LayerStyle` 节点（B08）由效果目录注册，合成预览和导出共享 GLSL。颜色叠加保留前景 Alpha，投影和外发光从同一原始覆盖率作高斯滤波并置于前景下方。PSD 图层内部及受管 Merge 按 sRGB 混合，输出仍回到合成的线性工作空间。节点记录原始 PSD 描述与转换版本，只有满足混合、轮廓、填充和不透明度条件的样式自动转成可编辑节点。其他样式保留 B07 合并语义及原因。范围估算把模糊半径和投影偏移计入 tile halo。
 
-外部合成引用（`core/external_comp_refs.py`，B09）以 `(project_id, comp_id)` 为键：引用带版本指纹、相对路径与 pinned/follow 更新策略；解析按依赖优先的显式 DFS——active 集报告完整回边路径，done 集复用已验证子图，深度限制约束长链；审计把缺文件、缺输出与插件不匹配分开报，分别接入重定位与归档流程。
+外部合成（B09）在 Precomp 属性中选择、固定修订、跟随或重定位。渲染工作线程按 `(project_id, comp_id)` 探测包和依赖，解析相对路径，报告循环、缺失输出和插件不匹配。并行导出共享冻结的内容指纹。交接包可通过资源索引内嵌可完整审计的自包含工程链，按 SHA-256 去重，保留原包字节。总上限 256 MiB。松散媒体或不可完整审计的依赖继续显示在交接报告中。
 
-效果通道选择与数据窗口（`core/channel_windows.py`，B10）：已验证单输入图像效果可声明 RGB/A 通道选择，未选通道按预乘契约从效果输入恢复（alpha=0、负值与 HDR 直通）；`DataWindow` 为支持空与负坐标的半开矩形，按节点类别传播——模糊按 halo 扩窗、裁剪求交、变换取四角保守外包加采样半径、合并按模式取并——窗口、帧、采样域与输入修订共同进缓存键，ROI 与全幅永不共用条目。
+通道选择和数据窗口（B10）由节点能力表声明。Blur 的 GPU 通道恢复按最终 Alpha 重新预乘选定 RGB，保留 HDR 和负值。`DataWindow` 用可为空、可带负坐标的半开区域描述像素范围。Tile 调度按效果扩展采样范围，缓存键区分窗口、帧、采样域和输入修订。4K 实测的小窗口降低首帧时间，稳态 p95 增加，因此 ROI 保留按需启用。
 
 节点图的 Merge 以 A、B、Mask 标识前景、背景和遮罩，由图层栈生成的 Merge 带图层标记。节点端口与连线两端都可拖拽，目标只有一个兼容端口时可将线放到节点主体上。按住 Shift 拖线端可以复制分支。拖动时显示吸附目标和将替换的线，松手后由 CompositePage 提交，NodeGraph.edit_connections 先验证整次改线的端口类型、容量和成环条件。
 
@@ -62,7 +62,7 @@ PSD/PSB 分层导入（`core/psd_import.py`，B07）使用锁定版本的 psd-to
                      ┌─────────────────────────── UI 线程 ────────────────────────────────┐
                      │  CompositePage / GraphView            NodeGraph (RLock 保护)       │
                      │    │ 编辑(加/删/连/参数/关键帧/表达式)     │ to_dict/from_dict        │
-                     │    │                                   │   ↕ graph_migration v1→v11│
+                     │    │                                   │   ↕ graph_migration v1→v12│
                      │    └── NodeGraph.snapshot() ──(持锁、解析关键帧+表达式、扁平化 Group)──┘
                      │                │ GraphSnapshot（不可变：nodes/connections/eval_order/
                      │                │   generation/topology_revision/frame_number/门控）
@@ -378,7 +378,7 @@ CompositeRenderDialog → CompositeRenderExporter.export(settings, context)
 **节点模型与图引擎**
 - `src/features/composite/nodes/base_node.py`（TextureResult/ParamDef/Port/Connection/Node，修订跟踪与 Effect Marker 协议、ROI 接口、scene 旁路、序列化）
 - `src/features/composite/core/node_engine.py`（NODE_REGISTRY/NODE_CATEGORIES、NodeGraph 图操作、snapshot()、to_dict/from_dict、运行时迁移、动态注册）
-- `src/features/composite/core/graph_migration.py`（COMPOSITE_SCHEMA_VERSION=11 与 v1→v11 迁移链、spawn_3d_scene_children）
+- `src/features/composite/core/graph_migration.py`（COMPOSITE_SCHEMA_VERSION=12 与 v1→v12 迁移链、spawn_3d_scene_children）
 - `src/features/composite/core/graph_snapshot.py`（NodeSnapshot/ConnectionSnapshot/GraphSnapshot 不可变快照契约）
 - `src/features/composite/core/node_capabilities.py`（节点能力表与分类单一事实源）
 - `src/features/composite/core/node_plugin.py`（NodePluginManager 发现目录）

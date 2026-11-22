@@ -55,7 +55,8 @@ class BBox:
         return self.x <= px < self.right and self.y <= py < self.top
 
     def intersects(self, other: "BBox") -> bool:
-        return (self.x < other.right and self.right > other.x and
+        return (not self.is_empty and not other.is_empty and
+                self.x < other.right and self.right > other.x and
                 self.y < other.top and self.top > other.y)
 
     def union(self, other: "BBox") -> "BBox":
@@ -82,6 +83,8 @@ class BBox:
 
     def expanded(self, margin: int) -> "BBox":
         """Return a bbox grown by `margin` pixels on all sides."""
+        if self.is_empty:
+            return self
         return BBox(
             x=self.x - margin,
             y=self.y - margin,

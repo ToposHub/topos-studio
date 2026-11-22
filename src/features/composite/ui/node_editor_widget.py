@@ -365,6 +365,9 @@ class NodeEditorWidget(QGraphicsView):
         # B02: graph generation captured when a cable gesture starts; the
         # committed edit is rejected if the graph changed underneath.
         self._cable_gesture_revision: int = -1
+        self._pending_transform_cable: (
+            tuple[tuple[str, str, str, str], int, ConnectionItem] | None
+        ) = None
         self.can_connect_cable: Optional[Callable[[tuple[str, str, str, str], bool], bool]] = None
         self.insert_cable_dot: Optional[Callable[[tuple[str, str, str, str], QPointF], bool]] = None
         self.group_node_creation: Optional[Callable[[], AbstractContextManager[None]]] = None
@@ -566,6 +569,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def remove_node_visual(self, node_id: str) -> None:
         """Remove a visual node item."""
+        pending = self._pending_transform_cable
+        if pending is not None and node_id in pending[0][::2]:
+            self.clear_pending_layer_transform()
         self._locked_node_ids.discard(node_id)
         item = self._node_items.pop(node_id, None)
         if item:
@@ -830,6 +836,7 @@ class NodeEditorWidget(QGraphicsView):
     def clear_all(self) -> None:
         """Remove all nodes and connections."""
         self._clear_cable_drag()
+        self.clear_pending_layer_transform()
         # Stop flow animations before clearing scene to prevent
         # timer callbacks on deleted C++ objects
         for conn_data in self._connection_items:
@@ -1084,7 +1091,7 @@ class NodeEditorWidget(QGraphicsView):
             ext = os.path.splitext(path)[1].lower()
 
             # 按扩展名路由到对应节点类型
-            if ext in _IMAGE_EXTENSIONS:
+            if ext in _IMAGE_EXTENSIONS or ext == ".psb":
                 node_type = "image_input"
                 params = {"file_path": path}
             elif ext in _VIDEO_EXTENSIONS:
@@ -2741,6 +2748,10 @@ class NodeEditorWidget(QGraphicsView):
             self._clear_cable_drag()
             event.accept()
             return
+        if event.key() == Qt.Key.Key_Escape and self.pending_layer_transform() is not None:
+            self.clear_pending_layer_transform()
+            event.accept()
+            return
         if self._dragging_connection:
             return
         # Check if shortcuts are enabled
@@ -3028,6 +3039,50 @@ class NodeEditorWidget(QGraphicsView):
         """
         graph = getattr(self, "_node_graph", None)
         self._cable_gesture_revision = int(getattr(graph, "generation", -1))
+        self.pending_layer_transform()
+
+    def pending_layer_transform(self) -> tuple[str, str, str, str] | None:
+        """Return the output-first intent while its original graph is current."""
+        if self._pending_transform_cable is None:
+            return None
+        edge, revision, _ = self._pending_transform_cable
+        if self._node_graph is None or self._node_graph.generation != revision:
+            self.clear_pending_layer_transform()
+            return None
+        return edge
+
+    def stage_layer_transform(self, edge: tuple[str, str, str, str], revision: int) -> bool:
+        """Draw an uncommitted cable without claiming either port."""
+        src, output, dst, input_port = edge
+        source = self._node_items.get(src)
+        destination = self._node_items.get(dst)
+        if source is None or destination is None:
+            return False
+        self.clear_pending_layer_transform()
+        cable = ConnectionItem(source.output_ports[output], destination.input_ports[input_port],
+                               routing=self._current_cable_routing())
+        cable.setOpacity(0.45)
+        cable.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        cable.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        self._scene.addItem(cable)
+        source.connections.append(cable)
+        destination.connections.append(cable)
+        self._pending_transform_cable = (edge, revision, cable)
+        cable.update_path()
+        return True
+
+    def clear_pending_layer_transform(self) -> None:
+        """Discard the canvas-only intent."""
+        pending = self._pending_transform_cable
+        if pending is None:
+            return
+        self._pending_transform_cable = None
+        edge, _, cable = pending
+        for node_id in edge[::2]:
+            item = self._node_items.get(node_id)
+            if item is not None and cable in item.connections:
+                item.connections.remove(cable)
+        self._scene.removeItem(cable)
 
     def _start_connection_drag(self, port: PortItem, scene_pos: QPointF) -> None:
         """Start dragging a connection from an output port (forward drag)."""
@@ -3882,6 +3937,7 @@ class NodeEditorWidget(QGraphicsView):
 
     def _apply_group_filter(self) -> None:
         """Show only the filtered subset (or everything when None)."""
+        self.clear_pending_layer_transform()
         visible = self._group_filter_ids
         for node_id, item in self._node_items.items():
             item.setVisible(visible is None or node_id in visible)

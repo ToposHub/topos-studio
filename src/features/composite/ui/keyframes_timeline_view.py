@@ -14,6 +14,7 @@ from PyQt6.QtCore import QMimeData, Qt, QPoint, QPointF, QRectF, pyqtSignal
 from PyQt6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen, QPolygonF, QResizeEvent
 from PyQt6.QtWidgets import QMenu, QWidget
 
+from src.features.composite.core.composite_markers import CompositeMarker, DEFAULT_MARKER_COLOR
 from src.features.composite.core.media_drop_payload import accepts_layer_media_drop
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
@@ -93,6 +94,8 @@ class KeyframesTimelineView(QWidget):
     range_changed = pyqtSignal(str, dict)       # node_id, time_range dict
     layer_selected = pyqtSignal(str)
     layer_menu_requested = pyqtSignal(str, QPoint)
+    marker_menu_requested = pyqtSignal(int, object, QPoint)
+    marker_moved = pyqtSignal(str, int)
     property_group_revealed = pyqtSignal(str)
     play_range_changed = pyqtSignal(int, int)   # work-area in/out frames
     display_mode_changed = pyqtSignal(str)      # ruler label mode changed
@@ -111,6 +114,9 @@ class KeyframesTimelineView(QWidget):
         # Actual composition extent. This clamps the work area; the
         # ruler itself may extend farther to expose a longer media source.
         self._composition_range: Optional[Tuple[int, int]] = None
+        self._composition_markers: tuple[CompositeMarker, ...] = ()
+        self._composition_marker_editing = False
+        self._marker_drag: tuple[CompositeMarker, float, int] | None = None
         # MediaPool drops are accepted on the whole visible timeline side as
         # well as the left Layer tree. The panel maps the y coordinate back
         # to the shared row model and owns the actual graph mutation.
@@ -128,6 +134,30 @@ class KeyframesTimelineView(QWidget):
     # ── model / state binding ──
 
     def refresh(self) -> None:
+        self.update()
+
+    def set_composition_markers(self, markers: tuple[CompositeMarker, ...], *,
+                                editable: bool) -> None:
+        self._composition_markers = markers
+        self._composition_marker_editing = editable
+        self.update()
+
+    def _markers_at_x(self, x: float, y: float) -> tuple[CompositeMarker, ...]:
+        if (self._model.view_mode != KeyframesModel.VIEW_MODE_LAYERS
+                or not _LAYER_WORKAREA_TOP - 10 <= y < _LAYER_WORKAREA_TOP):
+            return ()
+        return tuple(marker for marker in self._composition_markers
+                     if abs(self._fm.frame_to_x(marker.frame) - x) <= 6)
+
+    def _marker_frame_at(self, x: float) -> int:
+        return max(0, self._frame_at_x(x))
+
+    def _drag_marker_to(self, x: float) -> None:
+        if self._marker_drag is None:
+            return
+        marker, press_x, _ = self._marker_drag
+        frame = self._marker_frame_at(self._fm.frame_to_x(marker.frame) + x - press_x)
+        self._marker_drag = (marker, press_x, frame)
         self.update()
 
     def ruler_height(self) -> int:
@@ -465,8 +495,36 @@ class KeyframesTimelineView(QWidget):
                                Qt.AlignmentFlag.AlignLeft, label)
             f += major_step
 
+        if layers_mode:
+            self._draw_composition_markers(p, w)
         p.setPen(QPen(QColor(C.BORDER_DARK)))
         p.drawLine(0, self.ruler_height() - 1, w, self.ruler_height() - 1)
+
+    def _draw_composition_markers(self, painter: QPainter, width: int) -> None:
+        for marker in self._composition_markers:
+            frame = marker.frame
+            if self._marker_drag is not None and self._marker_drag[0] == marker:
+                frame = self._marker_drag[2]
+            x = self._fm.frame_to_x(frame)
+            color = QColor(marker.color)
+            if not color.isValid():
+                color = QColor(DEFAULT_MARKER_COLOR)
+            y = _LAYER_WORKAREA_TOP - 1
+            if marker.duration:
+                end = frame + marker.duration
+                if self._composition_range is not None:
+                    end = min(end, self._composition_range[1] + 1)
+                end_x = self._fm.frame_to_x(end)
+                start_x = max(0.0, x)
+                if end_x > start_x and x < width:
+                    painter.setPen(QPen(color, 2))
+                    painter.drawLine(QPointF(start_x, y), QPointF(min(width, end_x), y))
+            if -6 <= x <= width + 6:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawPolygon(QPolygonF([
+                    QPointF(x - 4, y - 8), QPointF(x + 4, y - 8), QPointF(x, y),
+                ]))
 
     def _tick_steps(self) -> Tuple[int, int]:
         """Adaptive (minor, major) tick steps in frames (1-2-5 series).
@@ -748,6 +806,10 @@ class KeyframesTimelineView(QWidget):
                 frames.update(keyframe.frame for keyframe in track.keyframes)
         return frames
 
+    def set_audio_waveforms(self, envelopes: dict) -> None:
+        self._audio_waveforms = envelopes
+        self.update()
+
     def _draw_layer_bar(self, p: QPainter, row: KeyframesRow, bar: TimeRangeBar,
                         y: int, w: int, *, editable: bool) -> None:
         start, end = self._range_bar_x_bounds(bar)
@@ -775,6 +837,18 @@ class KeyframesTimelineView(QWidget):
         p.setPen(stroke)
         p.setBrush(fill)
         p.drawRoundedRect(rect, 3.0, 3.0)
+
+        envelope = getattr(self, "_audio_waveforms", {}).get(row.layer_id)
+        if envelope is not None:
+            lower, upper = envelope
+            center = rect.center().y()
+            height = rect.height() * 0.45
+            p.setPen(QPen(outline))
+            for index, (lo, hi) in enumerate(zip(lower, upper)):
+                x = start + (end - start) * (index + 0.5) / len(lower)
+                if left <= x <= right:
+                    p.drawLine(QPointF(x, center - height * min(1.0, hi)),
+                               QPointF(x, center - height * max(-1.0, lo)))
 
         if editable and end - start >= 6.0:
             p.setPen(QPen(outline, 1.5))
@@ -955,6 +1029,12 @@ class KeyframesTimelineView(QWidget):
                 return
             if not self._time_at_x(x):
                 return
+            markers = self._markers_at_x(x, y)
+            if markers:
+                marker = min(markers, key=lambda item: abs(self._fm.frame_to_x(item.frame) - x))
+                self._marker_drag = (marker, x, marker.frame)
+                self._drag_mode = "marker"
+                return
             # 0. Work-area band (top of the ruler) — in/out handles first.
             wa_hit = self._hit_workarea(x, y)
             if wa_hit is not None:
@@ -1026,6 +1106,8 @@ class KeyframesTimelineView(QWidget):
         x = float(event.position().x())
         if self._drag_mode == "playhead":
             self._do_playhead_drag(x)
+        elif self._drag_mode == "marker":
+            self._drag_marker_to(x)
         elif self._drag_mode == "keyframe":
             self._do_multi_keyframe_drag(x)
         elif self._drag_mode == "marquee":
@@ -1064,6 +1146,16 @@ class KeyframesTimelineView(QWidget):
             self._do_navigator_drag(float(event.position().x()))
             self._navigator_drag = None
             self.unsetCursor()
+        elif self._drag_mode == "marker":
+            if event.button() != Qt.MouseButton.LeftButton:
+                return
+            self._drag_marker_to(float(event.position().x()))
+            if self._marker_drag is not None:
+                marker, _, frame = self._marker_drag
+                self._marker_drag = None
+                if frame != marker.frame:
+                    self.marker_moved.emit(marker.marker_id, frame)
+            self.update()
         elif self._drag_mode.startswith("workarea") and self._layer_time_extent() is not None:
             self._do_workarea_drag(self._drag_mode, float(event.position().x()))
             self.unsetCursor()
@@ -1150,8 +1242,14 @@ class KeyframesTimelineView(QWidget):
             tooltip = I18N.tr("keyframes.time_navigator_hint", "Drag the center to pan or the handles to zoom. Double-click to fit.")
         elif workarea is not None and self._layer_time_extent() is not None:
             tooltip = I18N.tr("keyframes.work_area_drag_hint", "Drag the work area or adjust either end.")
+        markers = self._markers_at_x(x, y)
+        if markers:
+            tooltip = "\n".join(marker.name or str(marker.frame) for marker in markers)
         if tooltip != self.toolTip():
             self.setToolTip(tooltip)
+        if markers:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            return
         if navigator in ("in", "out") or workarea in ("in", "out"):
             self.setCursor(Qt.CursorShape.SplitHCursor)
             return
@@ -1183,6 +1281,11 @@ class KeyframesTimelineView(QWidget):
                 self._select_keyframe(*hit, additive=False)
             has_sel = hit is not None
             if self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+                if (self._composition_marker_editing
+                        and _NAVIGATOR_H <= y < _LAYER_WORKAREA_TOP and self._time_at_x(x)):
+                    self.marker_menu_requested.emit(
+                        self._marker_frame_at(x), self._markers_at_x(x, y), event.globalPos())
+                    return
                 index = self._row_index_at_y(y)
                 if index >= 0:
                     row = self._model.visible_rows()[index]
@@ -1545,6 +1648,8 @@ class KeyframesTimelineView(QWidget):
             track.range_bar.start_frame, track.range_bar.end_frame = layer_bar_edit_bounds(
                 start, end, candidate, "trim_in" if left else "trim_out",
                 source_total=track.source_total, source_in=track.source_in,
+                source_step=track.source_step, source_phase=track.source_phase,
+                media_timing=track.media_timing,
             )
             self.update()
             return

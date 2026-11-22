@@ -1409,20 +1409,18 @@ class EditPage(QWidget):
         # 音频轨平移进父坐标作为虚拟轨，与导出共用同一纯函数。展开先于
         # has_audio 判定：父轨无音频但嵌套贡献音频时仍需激活。
         project = self._get_project() if callable(getattr(self, "_get_project", None)) else None
-        if self._audio_sequence_resolver is not None and project is not None:
+        if project is not None:
             try:
-                from src.features.edit.core.nested_sequence import (
-                    flatten_nested_audio_tracks,
-                )
+                from src.features.edit.core.timeline_export import expand_sequence_audio_for_render
                 # F3.1：预览侧此前不收 diagnostics（父 retime 嵌套音频
                 # 静默丢失只有日志）——现在结构化诊断落属性并发射信号。
                 nested_issues: list = []
-                audio_tracks = flatten_nested_audio_tracks(
+                audio_tracks = expand_sequence_audio_for_render(
                     self._current_timeline,
                     self._audio_sequence_resolver,
-                    lambda aid: project.assets.get(aid) if project else None,
+                    project,
                     diagnostics=nested_issues,
-                )
+                ).audio_tracks
                 self._last_nested_audio_diagnostics = tuple(nested_issues)
                 if nested_issues:
                     self.signal_hub.nested_audio_diagnostics_changed.emit(
@@ -1632,8 +1630,16 @@ class EditPage(QWidget):
                 audio_path_str, audio_offset = resolve_audio_source(
                     project, asset)
                 asset_path = Path(audio_path_str or asset.path)
-                if not asset_path.exists():
+                from src.features.edit.core.comp_clip_pcm import CompClipPCMSource, comp_clip_audio_graph
+
+                comp_audio_graph = comp_clip_audio_graph(project, clip.asset_id)
+                if comp_audio_graph is None and not asset_path.exists():
                     continue
+                pcm_options = {}
+                if comp_audio_graph is not None:
+                    pcm_options["pcm_source"] = CompClipPCMSource(
+                        comp_audio_graph, project, int(self._current_timeline.sample_rate),
+                    )
 
                 # 从 clip 和 asset 获取源参数，确保音频正确解码和重采样
                 clip_source_start = getattr(clip, 'source_start', 0) or 0
@@ -1698,6 +1704,7 @@ class EditPage(QWidget):
                     # §3.3：预渲染处理栈（STFT 类步骤）绑定缓存基底
                     pre_render_plan=self._resolve_pre_render_plan(
                         project, track, clip, asset),
+                    **pcm_options,
                 ):
                     registered_any = True
                     # P-clip-FX: 把该 clip 的 audio 效果同步到引擎
@@ -1973,11 +1980,14 @@ class EditPage(QWidget):
             return tuple(entries)
 
         track_entries: list[tuple[Any, ...]] = []
+        from src.features.edit.core.comp_clip_pcm import comp_clip_audio_graph
+
         for track in audio_tracks:
             clip_entries: list[tuple[Any, ...]] = []
             for clip in getattr(track, "clips", ()):
                 asset = getattr(project, "assets", {}).get(getattr(clip, "asset_id", ""))
                 asset_path, audio_offset = resolve_audio_source(project, asset)
+                comp_graph = comp_clip_audio_graph(project, clip.asset_id)
                 channel_map = resolve_source_channel_map(project, asset)
                 asset_fps = float(getattr(asset, "fps", 0.0) or 0.0) if asset is not None else 0.0
                 # P-clip-FX: 纳入该 clip 的 audio 效果（effect_type + 有序参数），
@@ -2009,6 +2019,8 @@ class EditPage(QWidget):
                     getattr(clip, "clip_id", ""),
                     getattr(clip, "asset_id", ""),
                     str(asset_path),
+                    (comp_graph.get("graph_revision"), _sig_value(comp_graph.get("layers")))
+                    if comp_graph is not None else None,
                     audio_offset,
                     channel_map,
                     asset_fps,

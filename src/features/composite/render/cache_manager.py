@@ -269,7 +269,10 @@ class CacheManager:
         # Output format suffix: include requested output dimensions
         format_suffix = ""
         if output_format is not None:
-            format_suffix = f":fmt{output_format.width}x{output_format.height}:{output_format.pixel_aspect}"
+            format_suffix = (
+                f":fmt{output_format.width}x{output_format.height}:"
+                f"{output_format.pixel_aspect}:{output_format.origin_x},{output_format.origin_y}"
+            )
 
         # Alpha mode suffix: include requested alpha processing
         alpha_suffix = ""

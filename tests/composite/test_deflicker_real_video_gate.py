@@ -28,11 +28,6 @@ W, H = 160, 120
 
 _VIDEO = os.path.join(os.path.dirname(__file__), '..',
                       'test_videos', '2K_h264.mp4')
-_GATE_ARTIFACT = os.path.join(os.path.dirname(__file__), '..',
-                              'media', 'results',
-                              'p29_deflicker_real_video_gate.json')
-
-
 class _StubConfig:
     def __init__(self, overrides=None):
         self._overrides = dict(overrides or {})
@@ -101,7 +96,7 @@ def _gl_available():
 class TestDeflickerRealVideoGate:
     def test_gpu_path_matches_cpu_over_real_video(self, qapp,
                                                   _gl_available,
-                                                  monkeypatch):
+                                                  monkeypatch, tmp_path):
         if not os.path.exists(_VIDEO):
             pytest.skip(f"real test video missing: {_VIDEO}")
         frames = 5
@@ -184,6 +179,6 @@ class TestDeflickerRealVideoGate:
             "path_agreement": {"worst_abs_code_diff": worst_abs,
                                "frac_pixels_diff_gt1": worst_frac},
         }
-        os.makedirs(os.path.dirname(_GATE_ARTIFACT), exist_ok=True)
-        with open(_GATE_ARTIFACT, "w", encoding="utf-8") as fh:
+        report = tmp_path / "p29_deflicker_real_video_gate.json"
+        with report.open("w", encoding="utf-8") as fh:
             json.dump(artifact, fh, indent=1)

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 import pytest
+from tests.composite.standalone_gpu import run_standalone_gpu
 
 from src.features.composite.core.channel_windows import (
     EMPTY_WINDOW, ChannelSelection, DataWindow, apply_channel_selection,
@@ -31,11 +32,11 @@ def _rgba(*pixels):
 
 def test_alpha_only_selection_restores_colors_from_input():
     source = _rgba((0.2, 0.4, 0.6, 0.5))
-    effect = _rgba((9.0, 9.0, 9.0, 0.8))  # effect broke colors; kept alpha
+    effect = _rgba((9.0, 9.0, 9.0, 0.8))
     result = apply_channel_selection(
         effect, source, ChannelSelection(red=False, green=False, blue=False))
-    # Colors restored from input, alpha kept from the effect.
-    assert result[0, 0].tolist() == pytest.approx([0.2, 0.4, 0.6, 0.8])
+    # Preserve input straight color (0.4, 0.8, 1.2) at the updated alpha.
+    assert result[0, 0].tolist() == pytest.approx([0.32, 0.64, 0.96, 0.8])
 
 
 def test_color_only_selection_restores_alpha_from_input():
@@ -44,7 +45,16 @@ def test_color_only_selection_restores_alpha_from_input():
     result = apply_channel_selection(
         effect, source,
         ChannelSelection(red=True, green=True, blue=True, alpha=False))
-    assert result[0, 0].tolist() == pytest.approx([1.0, 0.0, 0.0, 0.5])
+    assert result[0, 0].tolist() == pytest.approx([0.5 / 0.9, 0.0, 0.0, 0.5])
+
+
+def test_mixed_channels_use_their_own_alpha_and_preserve_hdr():
+    source = _rgba((0.4, -1.0, 2.0, 0.25), (0.0, 0.0, 0.0, 0.0))
+    effect = _rgba((1.0, 2.0, 3.0, 0.50), (4.0, 3.0, 2.0, 0.50))
+    result = apply_channel_selection(effect, source, ChannelSelection(True, False, False, True))
+    np.testing.assert_allclose(result[:, 0], [[1, -2, 4, 0.5], [4, 0, 0, 0.5]])
+    result = apply_channel_selection(effect, source, ChannelSelection(True, False, False, False))
+    np.testing.assert_allclose(result[:, 0], [[0.5, -1, 2, 0.25], [0, 0, 0, 0]])
 
 
 def test_partial_color_selection_restores_only_unselected():
@@ -79,6 +89,10 @@ def test_shape_mismatch_raises():
         apply_channel_selection(np.zeros((2, 1, 4), np.float32),
                                 np.zeros((1, 1, 4), np.float32),
                                 ChannelSelection())
+    with pytest.raises(ValueError):
+        apply_channel_selection(np.zeros((2, 1, 3), np.float32),
+                                np.zeros((2, 1, 3), np.float32),
+                                ChannelSelection())
 
 
 # ── Data windows ────────────────────────────────────────────────────────────
@@ -109,6 +123,8 @@ def test_blur_window_expands_by_halo():
     window = DataWindow(10, 10, 50, 40)
     assert window.expanded(0) == window
     assert window.expanded(2.5) == DataWindow(7, 7, 53, 43)  # ceil(2.5)=3
+    assert EMPTY_WINDOW.expanded(3) == EMPTY_WINDOW
+    assert DataWindow(-5, 2, -5, 10).expanded(3).is_empty
 
 
 def test_crop_window_intersects():
@@ -148,9 +164,121 @@ def test_window_cache_key_separates_roi_from_full_frame():
     assert key_full != window_cache_key(full, 7, "export", "rev1")
     assert key_full != window_cache_key(full, 7, "preview", "rev2")
     assert key_full == window_cache_key(full, 7, "preview", "rev1")
+    assert {key_full: "full", key_roi: "tile"}[key_roi] == "tile"
+    assert window_cache_key(full, 7, None, 1) != window_cache_key(full, 7, "None", "1")
 
 
 def test_window_round_trips_through_dict():
     window = DataWindow(-10, 4, 128, 256)
     assert DataWindow.from_dict(window.to_dict()) == window
     assert DataWindow.from_dict("junk") == EMPTY_WINDOW
+    assert DataWindow.from_dict({"x1": float("inf")}) == EMPTY_WINDOW
+
+
+def test_gpu_blur_channel_restore_matches_the_premultiplied_reference() -> None:
+    run_standalone_gpu(_check_gpu_blur_channel_restore_matches_the_premultiplied_reference)
+
+
+def _check_gpu_blur_channel_restore_matches_the_premultiplied_reference() -> None:
+    from src.features.composite.core.node_capabilities import get_node_capability
+    from src.features.composite.nodes.base_node import TextureResult
+    from src.features.composite.render.composite_export_renderer import CompositeExportRenderer
+
+    moderngl = pytest.importorskip("moderngl")
+    try:
+        probe = moderngl.create_standalone_context()
+    except (RuntimeError, OSError) as exc:
+        pytest.skip(f"No standalone GL context: {exc}")
+    probe.release()
+    renderer = CompositeExportRenderer()
+    assert get_node_capability("blur").supports_channel_selection
+    try:
+        renderer._ensure_gpu_resources()
+        source = _rgba((0, 0, 0, 0), (0.5, -1, 2, 0.5), (1, 0, 3, 1)).reshape(1, 3, 4)
+        texture = renderer._resource_pool.acquire_texture(3, 1, dtype="f4")
+        texture.write(source.tobytes())
+        inp = TextureResult(
+            texture_id=texture.glo, width=3, height=1,
+            alpha_premultiplied=True, color_space="linear",
+        )
+        params = {"radius_x": 1.0, "radius_y": 0.0, "channel_a": True, "mix": 0.5}
+
+        def render(values):
+            output = renderer._apply_blur(inp, values, 3, 1)["result"]
+            out_tex = renderer._get_texture_by_id(output.texture_id)
+            framebuffer = renderer.fb_manager.get_fbo(out_tex)
+            return np.frombuffer(framebuffer.read(components=4, dtype="f4"), np.float32).reshape(1, 3, 4)
+
+        full_effect = render(params)
+        selected = render({**params, "channel_r": False, "channel_g": False, "channel_b": False})
+        expected = apply_channel_selection(full_effect, source, ChannelSelection(False, False, False, True))
+        np.testing.assert_allclose(selected, expected, atol=0.002)
+        assert selected[0, 1, 1] < 0 and selected[0, 1, 2] > 1
+    finally:
+        renderer.cleanup()
+
+
+def test_preview_roi_requires_full_frame_for_nonlocal_blur():
+    from src.features.composite.core.format import BBox
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.nodes.blur_node import BlurNode
+    from src.features.composite.render.render_scheduler import RenderScheduler
+
+    graph = NodeGraph()
+    blur = BlurNode("blur")
+    graph.add_node(blur)
+    scheduler = RenderScheduler()
+    roi = BBox(-8, 4, 16, 32)
+    assert scheduler.plan(graph.snapshot(), "preview", viewer_roi=roi).roi_enabled
+    blur.set_parameter("edge_policy", "wrap")
+    assert not scheduler.plan(graph.snapshot(), "preview", viewer_roi=roi).roi_enabled
+
+
+def test_gpu_tiled_blur_matches_full_frame_across_padding() -> None:
+    run_standalone_gpu(_check_gpu_tiled_blur_matches_full_frame_across_padding)
+
+
+def _check_gpu_tiled_blur_matches_full_frame_across_padding() -> None:
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.nodes.blur_node import BlurNode
+    from src.features.composite.nodes.constant_node import ConstantNode
+    from src.features.composite.nodes.output_node import OutputNode
+    from src.features.composite.render.composite_export_renderer import CompositeExportRenderer
+    from src.features.composite.render.render_scheduler import RenderScheduler
+
+    moderngl = pytest.importorskip("moderngl")
+    try:
+        probe = moderngl.create_standalone_context()
+    except (RuntimeError, OSError) as exc:
+        pytest.skip(f"No standalone GL context: {exc}")
+    probe.release()
+    graph = NodeGraph()
+    source = ConstantNode("source")
+    blur = BlurNode("blur")
+    output = OutputNode("output")
+    for key, value in {
+        "width": 80, "height": 48, "mode": "checker", "checker_size": 11,
+        "color_r": 3.0, "color_a": 0.4, "color2_a": 0.75,
+    }.items():
+        source.set_parameter(key, value)
+    blur.set_parameter("radius_x", 3.5)
+    blur.set_parameter("radius_y", 3.5)
+    for node in (source, blur, output):
+        graph.add_node(node)
+    assert graph.connect(source.id, "result", blur.id, "image")
+    assert graph.connect(blur.id, "result", output.id, "image")
+    snapshot = graph.snapshot(color_width=80, color_height=48)
+    plan = RenderScheduler().plan(snapshot, "export")
+    plan.tile_size = 24
+    assert plan.estimated_padding >= 4
+    renderer = CompositeExportRenderer()
+    try:
+        renderer.set_persistent_mode(True)
+        full = renderer.render_and_readback(snapshot)
+        tiled = renderer._render_tiled_with_plan(snapshot, 80, 48, plan)
+        assert full.error is None, full.error
+        assert tiled.error is None, tiled.error
+        assert tiled.tile_count == 8
+        np.testing.assert_allclose(tiled.image, full.image, atol=0.002)
+    finally:
+        renderer.cleanup()

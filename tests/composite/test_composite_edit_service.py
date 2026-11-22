@@ -74,6 +74,31 @@ def test_generation_conflict_does_not_mutate_graph():
     assert "scale_x" not in transform.keyframe_tracks
 
 
+def test_refused_managed_cable_rolls_back_earlier_script_operations() -> None:
+    from src.features.composite.core.layer_stack_controller import LayerStackController
+
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="output"))
+    graph.add_node(ConstantNode(node_id="source"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    layer_id = controller.add_media_layer("Footage", "source")
+    merge = controller.layer_merge_node(layer_id)
+    before = graph.to_dict(), graph.generation, graph._topology_revision
+
+    result = CompositeEditService(graph).apply({
+        "base_generation": graph.generation,
+        "operations": [
+            {"op": "add_node", "node_type": "constant", "node_id": "foreign"},
+            {"op": "connect", "from_node": "foreign", "from_port": "result",
+             "to_node": merge.id, "to_port": "A"},
+        ],
+    })
+
+    assert not result.applied
+    assert "edit.layer_conflict" in result.error
+    assert (graph.to_dict(), graph.generation, graph._topology_revision) == before
+
+
 def test_script_and_ai_operation_shapes_are_identical():
     graph, transform = make_graph()
     service = CompositeEditService(graph)

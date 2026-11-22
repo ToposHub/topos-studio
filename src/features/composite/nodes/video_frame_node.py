@@ -39,11 +39,17 @@ Cache key strategy:
 - Prevents cross-contamination when switching frames or quality
 """
 
+from __future__ import annotations
+
 import os
 import logging
 import threading
 import time
+import weakref
+from concurrent.futures import Future
 from dataclasses import dataclass
+from fractions import Fraction
+from math import floor
 from typing import Dict, Optional, Any, List, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -51,12 +57,14 @@ import moderngl
 
 if TYPE_CHECKING:
     from src.shared.media import MediaSource, VideoMetadata, DecodedFrame
+    from src.shared.media.presentation_time import PresentationIndex
 
 logger = logging.getLogger(__name__)
 
 from .base_node import Node, Port, TextureResult, ParamDef
 from src.features.composite.core.format import ImageFormat, BBox
 from src.features.composite.core.color_space import ColorSpace
+from src.features.composite.core.layer_time import fps_fraction, source_frame_step
 
 
 @dataclass(frozen=True)
@@ -320,6 +328,10 @@ class VideoFrameNode(Node):
         self._preload_target: Optional[Tuple[int, str]] = None
         # 媒体代际：换源/清缓存时 +1，后台预取按代际拒绝过期帧写入缓存
         self._media_generation: int = 0
+        self._presentation_future: Future[PresentationIndex | None] | None = None
+        self._presentation_resolved = False
+        self._presentation_index: PresentationIndex | None = None
+        self._last_media_path = ""
         # 渲染线程最近一次内联解码时间：连续拖拽/播放期间（解码节拍密集）
         # 抑制后台预取，避免两者在共享服务的 decode_lock 上互相阻塞
         self._last_render_decode_at: float = 0.0
@@ -379,7 +391,7 @@ class VideoFrameNode(Node):
         """Video frame rate (read-only)."""
         if self._video_metadata:
             return self._video_metadata.fps.to_fps()
-        return 0.0
+        return self._get_param_clamped("fps", min_val=0.0)
 
     @property
     def total_frames(self) -> int:
@@ -443,7 +455,11 @@ class VideoFrameNode(Node):
             # 注：历史上这里传 self.node_id（不存在的属性，必抛 AttributeError），
             # 导致服务路径永远失败、每个节点都回退到独立 MediaSource。基类
             # 的节点标识是 self.id。
-            clip_id = video_ctx.open_clip(file_path, self.id)
+            if self._presentation_index is None:
+                clip_id = video_ctx.open_clip(file_path, self.id)
+            else:
+                clip_id = video_ctx.open_clip(
+                    file_path, self.id, presentation_index=self._presentation_index)
 
             # Get clip info
             clip_info = video_ctx.get_clip_info(clip_id)
@@ -576,6 +592,17 @@ class VideoFrameNode(Node):
             # Primary: Use MediaSourceFactory
             source = MediaSourceFactory.create(file_path, backend='auto')
             source.open()
+            if self._presentation_index is not None:
+                setter = getattr(source, "set_presentation_index", None)
+                if not callable(setter):
+                    source.close()
+                    raise MediaOpenError("Decoder does not support timestamp indexing.",
+                                         source_path=file_path)
+                try:
+                    setter(self._presentation_index)
+                except (OSError, ValueError):
+                    source.close()
+                    raise
 
             # Probe metadata
             self._video_metadata = source.probe()
@@ -599,6 +626,10 @@ class VideoFrameNode(Node):
             return source
 
         except MediaOpenError as e:
+            if self._presentation_index is not None:
+                self._load_state = VideoLoadState.FAILED
+                self.error_message = str(e)
+                return None
             logger.warning(f"MediaSource failed, trying VideoDecoderAdapter fallback: {e}")
 
             # Fallback: Use VideoDecoderAdapter (wraps old VideoDecoder)
@@ -677,6 +708,9 @@ class VideoFrameNode(Node):
         self._load_state = VideoLoadState.MISSING
         self._video_metadata = None
         self._clip_id = None
+        self._presentation_future = None
+        self._presentation_resolved = False
+        self._presentation_index = None
         self.parameters["clip_id"] = ""
         self._use_service = True  # Reset to default
 
@@ -711,6 +745,9 @@ class VideoFrameNode(Node):
             speed = self.parameters.get("speed", 1.0)
             loop = self.parameters.get("loop", False)
             hold = self.parameters.get("hold", False)
+            if self._presentation_index is not None:
+                # Timestamp addressing already applied the speed and offset.
+                time_offset, speed = 0.0, 1.0
 
             # Request frame via VideoContext
             decoded_frame = self._video_context.request_frame_for_node(
@@ -878,6 +915,7 @@ class VideoFrameNode(Node):
             # IOSurface 直通 GL，CVPixelBuffer 以延迟导入形式递交渲染线程。
             # 未命中/禁用时 request_gpu_frame 内部退化为普通 CPU 请求。
             if ((not is_export or sync_vt)
+                    and self._presentation_index is None
                     and not self._vt_gpu_disabled
                     and self._video_context is not None):
                 # 拖拽/快梭：目标注册时已采样（scrub 参数；None 时兜底自采
@@ -1246,6 +1284,8 @@ class VideoFrameNode(Node):
         source_out = self.parameters.get("source_out", -1)
         time_offset = self.parameters.get("time_offset", 0.0)
         speed = self.parameters.get("speed", 1.0)
+        if self._presentation_index is not None:
+            time_offset, speed = 0.0, 1.0
 
         self._video_context.prefetch_for_node(
             clip_id=self._clip_id,
@@ -1848,7 +1888,19 @@ class VideoFrameNode(Node):
                     comp_start = int(tr.get("comp_start", 0) or 0)
                 except (TypeError, ValueError):
                     comp_start = 0
-            return max(0, int(timeline_frame) - comp_start)
+            local_frame = max(0, int(timeline_frame) - comp_start)
+            if isinstance(tr, dict) and tr.get("enabled", True):
+                step = fps_fraction(tr.get("source_step"))
+                if not step and tr.get("sample_comp_fps"):
+                    step = source_frame_step(tr["sample_comp_fps"], self.video_fps)
+                if self._presentation_index is not None:
+                    comp_fps = fps_fraction(tr.get("sample_comp_fps"))
+                    if comp_fps > 0:
+                        return self._resolve_timestamp_frame(local_frame, tr, comp_fps)
+                if step > 0:
+                    phase = fps_fraction(tr.get("source_phase"))
+                    return max(0, floor(phase + local_frame * step))
+            return local_frame
 
         # Priority: explicit frame_number
         frame_number = self._get_param_int("frame_number", 0)
@@ -1864,6 +1916,75 @@ class VideoFrameNode(Node):
                 frame_number = frame_from_time
 
         return frame_number
+
+    def _resolve_timestamp_frame(
+        self, local_frame: int, time_range: dict[str, Any], comp_fps: Fraction
+    ) -> int:
+        index = self._presentation_index
+        source_in = self._get_param_int("source_in", 0)
+        source_out = self._get_param_int("source_out", -1)
+        if source_out < 0:
+            source_out = len(index.pts) - 1
+        nominal = source_frame_step(comp_fps, self.video_fps)
+        step = fps_fraction(time_range.get("source_step")) or nominal
+        rate = fps_fraction(time_range.get("source_rate")) or step / nominal
+        origin = (fps_fraction(time_range["source_time_origin"])
+                  if "source_time_origin" in time_range else index.seconds_at(source_in))
+        offset = fps_fraction(self.parameters.get("time_offset"))
+        speed = fps_fraction(self.parameters.get("speed", 1))
+        requested = origin + (local_frame / comp_fps * rate + offset) * speed
+        start, end = index.seconds_at(source_in), index.seconds_at(source_out + 1)
+        if requested >= end:
+            if self.parameters.get("loop") and end > start:
+                requested = start + (requested - start) % (end - start)
+            else:
+                # Pass an out-of-range ordinal to VideoContext, which owns
+                # the existing hold/missing-frame behavior.
+                return source_out - source_in + 1
+        return max(0, index.frame_at(requested) - source_in)
+
+    def _prepare_presentation_index(self, file_path: str, render_mode: str) -> bool:
+        """Start the shared demux off-thread and report when sampling is ready."""
+        tr = self.time_range or {}
+        if not tr.get("sample_comp_fps") or self._presentation_resolved:
+            return True
+        if self._presentation_future is None:
+            from src.shared.media.presentation_time import request_presentation_index
+
+            try:
+                self._presentation_future = request_presentation_index(file_path)
+            except OSError:
+                self._presentation_resolved = True
+                return True
+            self._get_video_context()
+            node_ref = weakref.ref(self)
+
+            def notify(future: Future[PresentationIndex | None]) -> None:
+                node = node_ref()
+                if node is None or node._presentation_future is not future:
+                    return
+                index = None if future.exception() is not None else future.result()
+                if index is not None and index.is_variable:
+                    node._get_video_context().notify_presentation_index_ready()
+                else:
+                    node._notify_frame_ready()
+
+            self._presentation_future.add_done_callback(notify)
+        future = self._presentation_future
+        if not future.done() and "export" not in str(render_mode).lower():
+            return False
+        try:
+            index = future.result()
+        except (ImportError, IndexError, OSError, ValueError):
+            logger.debug("Unable to index presentation timestamps for %s", file_path,
+                         exc_info=True)
+            index = None
+        if index is not None and index.is_variable:
+            if self._load_state != VideoLoadState.MISSING:
+                self._close_video()
+            self._presentation_index = index
+        self._presentation_resolved = True
+        return True
 
     # ── GPU Upload ──
 
@@ -2271,7 +2392,8 @@ class VideoFrameNode(Node):
         返回 False 表示预取放弃（无 VT 源/非顺序目标），调用方据此停止
         加深预取窗口。
         """
-        if self._vt_gpu_disabled or self._clip_id is None or self._video_context is None:
+        if (self._presentation_index is not None or self._vt_gpu_disabled
+                or self._clip_id is None or self._video_context is None):
             return False
         try:
             return bool(self._video_context.prefetch_vt_sequential_for_node(
@@ -2690,6 +2812,12 @@ class VideoFrameNode(Node):
             ctx = ctx.gl
 
         file_path = self.parameters.get("file_path", "")
+        if file_path != self._last_media_path:
+            if self._last_media_path:
+                self.cleanup()
+            self._last_media_path = file_path
+        if file_path and not self._prepare_presentation_index(file_path, render_mode):
+            return {}
 
         # Open video if needed
         if file_path and self._load_state == VideoLoadState.MISSING:

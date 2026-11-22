@@ -38,6 +38,10 @@ import math
 import os
 import time
 from dataclasses import replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.features.composite.core.media_drop_payload import MediaDropPayload
 
 logger = logging.getLogger(__name__)
 
@@ -99,17 +103,25 @@ class CompositeControllerMixin:
     def _create_comp_clip_from_media_drop(self, mime_data: object) -> bool:
         """Publish the clip and its first media batch together."""
         from src.features.composite.core.media_drop_payload import (
-            MEDIA_TYPE_VIDEO, resolve_drop_payloads,
+            get_composite_media_type, resolve_drop_payloads,
         )
-        from src.shared.media.format_registry import get_media_type
-        from src.shared.project.composition_merge import merge_composition_record
 
         page = getattr(self, "composite_page", None)
         if page is None or not self._composite_available or page.has_active_composition():
             return False
-        payloads = [payload for payload in resolve_drop_payloads(mime_data, project=self._current_edit_project)
-                    if get_media_type(payload.path) in ("image", "video", "model")]
+        payloads = [payload for payload in resolve_drop_payloads(
+            mime_data, project=self._current_edit_project, allow_audio=True)
+            if get_composite_media_type(payload.path) in ("image", "video", "model", "audio")]
         if not payloads:
+            return False
+        return page.prepare_media_drop(payloads, self._publish_comp_clip_from_media_drop)
+
+    def _publish_comp_clip_from_media_drop(self, payloads: list[MediaDropPayload]) -> bool:
+        from src.features.composite.core.media_drop_payload import MEDIA_TYPE_AUDIO, MEDIA_TYPE_VIDEO
+        from src.shared.project.composition_merge import merge_composition_record
+
+        page = getattr(self, "composite_page", None)
+        if page is None or not self._composite_available or page.has_active_composition():
             return False
         if self._current_edit_project is None and not self._ensure_edit_project():
             return False
@@ -130,16 +142,46 @@ class CompositeControllerMixin:
                 fps = rate
                 break
         # Video nodes currently advance one source frame per composition frame.
-        duration = max((media.duration for media in videos if media.duration > 0), default=round(10 * fps))
+        lengths = [media.duration for media in videos if media.duration > 0]
+        lengths.extend(math.ceil(media.extras["duration_seconds"] * fps)
+                       for media in payloads if media.media_type == MEDIA_TYPE_AUDIO
+                       and "duration_seconds" in media.extras)
+        duration = max(lengths, default=round(10 * fps))
 
         try:
-            staged, _, _, graph_id = project.create_empty_comp_clip(
+            staged = project
+            registered_payloads = []
+            for payload in payloads:
+                manifest = payload.extras.get("psd_manifest")
+                if manifest is not None:
+                    staged = staged.import_asset(
+                        path=payload.path, media_type="image",
+                        metadata={"width": manifest.width, "height": manifest.height,
+                                  "bit_depth": manifest.bit_depth},
+                    )
+                    asset = staged.get_asset_by_path(payload.path)
+                    if asset is None:
+                        raise ValueError("Could not register the Photoshop source in the media pool")
+                    payload = replace(payload, asset_id=asset.asset_id, extras={
+                        **payload.extras, "psd_manifest": replace(manifest, asset_id=asset.asset_id),
+                    })
+                elif payload.media_type == MEDIA_TYPE_AUDIO and payload.asset_id.startswith("path:"):
+                    metadata = {key: payload.extras[key] for key in ("duration_seconds", "audio_info")
+                                if key in payload.extras}
+                    staged = staged.import_asset(path=payload.path, media_type=MEDIA_TYPE_AUDIO,
+                                                 metadata=metadata)
+                    asset = staged.get_asset_by_path(payload.path)
+                    if asset is None:
+                        raise ValueError("Could not register the audio source in the media pool")
+                    payload = replace(payload, asset_id=asset.asset_id)
+                registered_payloads.append(payload)
+            staged, _, _, graph_id = staged.create_empty_comp_clip(
                 name=project.next_comp_clip_name(),
                 width=width, height=height,
                 fps=fps, duration_frames=max(1, duration), background_color=(0.0, 0.0, 0.0, 0.0),
             )
             empty_graph = staged.compositions[graph_id]
-            before, graph_data = page.build_initial_media_graph(empty_graph, payloads)
+            before, graph_data = page.build_initial_media_graph(empty_graph, registered_payloads)
             populated = merge_composition_record(empty_graph, graph_data, graph_id)
         except (KeyError, TypeError, ValueError, RuntimeError):
             logger.warning("Could not create a composition from the media drop", exc_info=True)
@@ -1083,6 +1125,8 @@ class CompositeControllerMixin:
         if composite_id:
             default_name = composite_name_for_file(composite_id)
 
+        from src.features.composite.core.composition_pcm import composition_audio_layers
+
         dialog = CompositeRenderDialog(
             parent=self,
             mode=mode,
@@ -1093,6 +1137,7 @@ class CompositeControllerMixin:
             fps=fps,
             available_render_passes=tuple(available_render_passes),
             parallel_frames_default=self._resolve_export_parallel_default(),
+            has_composition_audio=bool(composition_audio_layers(graph_data)),
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return

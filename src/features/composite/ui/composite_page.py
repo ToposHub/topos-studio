@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QToolButton, QMenu, QToolTip, QDockWidget,
 )
-from PyQt6.QtCore import QEvent, QObject, QPointF, Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import QEvent, QObject, QPointF, Qt, pyqtSignal, pyqtSlot, QThreadPool, QTimer
 from PyQt6.QtGui import QActionGroup, QCursor, QKeySequence, QShortcut
 
 from src.features.composite.render.composite_renderer import CompositeRenderer, CompositeCommand
@@ -38,13 +38,14 @@ from src.features.composite.render.render_scheduler import RenderRequest, Reques
 from src.features.composite.render.prefetch_scheduler import PrefetchScheduler, PrefetchPrediction
 from src.features.composite.nodes.node_state import NodeState
 from src.features.composite.core.node_engine import Connection, NodeGraph, NODE_REGISTRY
-from src.features.composite.core.graph_edit import GraphEditCommand
+from src.features.composite.core.graph_edit import EDIT_LAYER_CONFLICT, GraphEditCommand, GraphEditIssue
 from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 from src.features.composite.core.layer_stack_controller import (
     ACTION_ATTACH_NODE_TO_LAYER, LayerStackController,
 )
 from src.features.composite.core.media_drop_payload import (
     MediaDropPayload, resolve_drop_payloads, resolve_asset_ids, MEDIA_TYPE_MODEL3D,
+    MEDIA_TYPE_AUDIO,
     MEDIA_TYPE_VIDEO,
 )
 from src.features.composite.nodes.color_node import COLORNode  # Deprecated - kept for isinstance checks
@@ -80,7 +81,6 @@ from src.features.composite.core.undo_stack import (
     create_add_node_action,
     create_remove_node_action,
     create_connect_action,
-    create_disconnect_action,
 )
 from .node_editor_widget import NodeEditorWidget
 from .node_search_popup import NodeSearchPopup
@@ -150,6 +150,10 @@ class _FrameReadyTrampoline:
             page._emit_video_node_frame_ready()
 
 
+class _PsdDropResult(QObject):
+    ready = pyqtSignal(object, object, str)
+
+
 class CompositePage(QWidget):
     """
     The Composite page panel. Contains the node graph editor.
@@ -199,6 +203,8 @@ class CompositePage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._video_node_frame_ready.connect(self._on_video_node_frame_ready)
+        self._video_context = None
+        self._video_presentation_revision = 0
         try:
             from src.features.composite.core.video_context import VideoContext
             # T-P1-71（composite 套件第二处段错误根因）：此前直接注册
@@ -211,9 +217,8 @@ class CompositePage(QWidget):
             # 的预期路径）。注意 destroyed 信号在 PyQt 中不能连 Python
             # 槽（析构时连接已被丢弃），不能用作注销时机。
             self._frame_ready_handler_ref = _FrameReadyTrampoline(self)
-            VideoContext.get_instance().set_frame_ready_handler(
-                self._frame_ready_handler_ref
-            )
+            self._video_context = VideoContext.get_instance()
+            self._video_context.set_frame_ready_handler(self._frame_ready_handler_ref)
         except Exception:
             logger.debug("CompositePage: video frame-ready handler not registered")
 
@@ -339,6 +344,8 @@ class CompositePage(QWidget):
         self._layer_stack_controller = LayerStackController(
             self._node_graph, self._undo_stack, parent=self,
             layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
+        self._layer_stack_controller.composition_markers_changed.connect(
+            self._on_composition_markers_changed)
 
         # Parameter change debounce timer
         self._param_debounce_timer = QTimer(self)
@@ -899,6 +906,8 @@ class CompositePage(QWidget):
 
     def set_edit_project(self, project: Any = None) -> None:
         """Set the project used by ToposColor nodes to resolve ColorStacks."""
+        if getattr(project, "project_id", None) != getattr(self._project, "project_id", None):
+            self._stop_composition_audio()
         self._project = project
 
     def set_initial_media_drop_handler(self, handler: Callable[[object], bool]) -> None:
@@ -911,7 +920,10 @@ class CompositePage(QWidget):
     @staticmethod
     def _add_dropped_media_layer(controller: LayerStackController,
                                  payload: MediaDropPayload, insert_index: int) -> None:
-        if payload.media_type == MEDIA_TYPE_MODEL3D:
+        manifest = payload.extras.get("psd_manifest")
+        if manifest is not None:
+            controller.stage_psd_layers(payload, manifest, insert_index)
+        elif payload.media_type == MEDIA_TYPE_MODEL3D:
             controller.add_model3d_payload(payload, insert_index=insert_index,
                                            description="Add 3D model layer")
         else:
@@ -921,13 +933,76 @@ class CompositePage(QWidget):
     def build_initial_media_graph(self, empty_graph: dict,
                                   payloads: list[MediaDropPayload]) -> tuple[dict, dict]:
         """Build the first drop in an isolated graph before opening the clip."""
-        graph = NodeGraph.from_dict(empty_graph)
+        return self._build_media_drop_graph(empty_graph, payloads, 0)
+
+    def _build_media_drop_graph(self, data: dict, payloads: list[MediaDropPayload],
+                                insert_index: int) -> tuple[dict, dict]:
+        graph = NodeGraph.from_dict(data)
         controller = LayerStackController(graph, layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
-        controller.project_from_node_graph()
+        if controller.main_stack() is None:
+            controller.project_from_node_graph()
         before = graph.to_dict()
-        for index, payload in enumerate(payloads):
-            self._add_dropped_media_layer(controller, payload, index)
+        for payload in payloads:
+            previous_count = len(graph.get_all_layers())
+            self._add_dropped_media_layer(controller, payload, insert_index)
+            insert_index += len(graph.get_all_layers()) - previous_count
         return before, graph.to_dict()
+
+    def prepare_media_drop(self, payloads: list[MediaDropPayload],
+                           on_ready: Callable[[list[MediaDropPayload]], bool]) -> bool:
+        """Keep media probe I/O off the UI thread before the graph transaction."""
+        if not any(payload.media_type == MEDIA_TYPE_AUDIO
+                   or payload.path.lower().endswith((".psd", ".psb")) for payload in payloads):
+            return on_ready(payloads)
+        if getattr(self, "_pending_psd_drop", None) is not None:
+            return False
+        result = _PsdDropResult()
+        result.ready.connect(self._on_psd_drop_prepared, Qt.ConnectionType.QueuedConnection)
+        self._pending_psd_drop = (
+            result, self._node_graph, self._node_graph.generation,
+            self._current_composite_id, on_ready,
+        )
+
+        def probe() -> None:
+            from src.features.composite.core.composition_pcm import prepare_audio_drop
+            from src.features.composite.core.psd_import import prepare_psd_drop
+
+            try:
+                prepared = [prepare_audio_drop(payload) for payload in prepare_psd_drop(payloads)]
+            except Exception as error:
+                logger.warning("Composite media probe failed", exc_info=True)
+                result.ready.emit(result, [], str(error))
+            else:
+                result.ready.emit(result, prepared, "")
+
+        QThreadPool.globalInstance().start(probe)
+        return True
+
+    @pyqtSlot(object, object, str)
+    def _on_psd_drop_prepared(self, result: _PsdDropResult,
+                              payloads: list[MediaDropPayload], error: str) -> None:
+        pending = getattr(self, "_pending_psd_drop", None)
+        if pending is None or pending[0] is not result:
+            return
+        self._pending_psd_drop = None
+        _, graph, revision, composite_id, on_ready = pending
+        if (graph is not self._node_graph or revision != self._node_graph.generation
+                or composite_id != self._current_composite_id):
+            return
+        if error:
+            self.status_message.emit(error)
+            return
+        existing_nodes = set(graph.nodes)
+        if on_ready(payloads):
+            fallback = []
+            for node in self._node_graph.nodes.values():
+                if node.id in existing_nodes or node.node_type != "image_input":
+                    continue
+                provenance = node.parameters.get("psd_import") or {}
+                fallback.extend(item["reason"] for item in provenance.get("fallback", ()))
+            if fallback:
+                title = I18N.tr("nodes.image_input.psd_flattened", "Imported merged Photoshop layers")
+                self.status_message.emit(f"{title} ({', '.join(dict.fromkeys(fallback))})")
 
     def _handle_keyframes_media_drop(self, mime_data: object,
                                      _target_layer_id: Optional[str],
@@ -942,9 +1017,30 @@ class CompositePage(QWidget):
             return False
         if not self.has_active_composition() and getattr(self, "_initial_media_drop_handler", None) is not None:
             return self._handle_initial_media_drop(mime_data)
-        payloads = resolve_drop_payloads(mime_data, project=self._project)
+        payloads = resolve_drop_payloads(mime_data, project=self._project, allow_audio=True)
         if not payloads:
             return False
+        return self.prepare_media_drop(
+            payloads, lambda prepared: self._commit_keyframes_media_drop(prepared, insert_index))
+
+    def _commit_keyframes_media_drop(self, payloads: list[MediaDropPayload],
+                                     insert_index: int) -> bool:
+        if any("psd_manifest" in payload.extras or payload.media_type == MEDIA_TYPE_AUDIO
+               for payload in payloads):
+            from src.features.composite.edit_service import _restore_graph_in_place
+
+            self._commit_pending_edit_transactions()
+            before = self._node_graph.to_dict()
+            try:
+                _, after = self._build_media_drop_graph(before, payloads, insert_index)
+            except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                self.status_message.emit(str(error))
+                return False
+            _restore_graph_in_place(self._node_graph, after)
+            self._node_editor.build_from_graph(self._node_graph)
+            self._refresh_keyframes_panel()
+            self.record_external_composite_edit(before, after)
+            return True
         grouped = self._undo_stack is not None
         if grouped:
             self._undo_stack.begin_group()
@@ -1965,6 +2061,11 @@ class CompositePage(QWidget):
 
     def cleanup(self) -> None:
         """Stop playback, panel timers, renderer and release resources."""
+        self._stop_composition_audio()
+        audio = getattr(self, "_composition_audio_preview", None)
+        if audio is not None:
+            audio.clear_waveforms()
+        self._pending_psd_drop = None
         # AUD-9505: stop every single-shot/debounce timer BEFORE anything
         # else. An armed ``_renderer_retry_timer`` firing ~300 ms after this
         # method would pass the ``_renderer is None`` guard and rebuild +
@@ -2252,6 +2353,7 @@ class CompositePage(QWidget):
             composite_data: CompositeGraphData serialized dict
         """
         from src.features.composite.core.node_engine import NODE_REGISTRY
+        from src.features.composite.core.composite_markers import parse_markers
         from src.features.composite.nodes.unknown_placeholder_node import UnknownPlaceholderNode
 
         logger.info(f"[CompositePage] Loading composite data: {composite_data.get('composite_id', 'unknown')}")
@@ -2267,6 +2369,7 @@ class CompositePage(QWidget):
                 composite_data.get("composite_id"))
             return
 
+        self._stop_composition_audio()
         # Track the current composite_id for edit-started signal
         loaded_id = composite_data.get("composite_id", "")
         if loaded_id and loaded_id != self._current_composite_id:
@@ -2371,6 +2474,7 @@ class CompositePage(QWidget):
             composite_data.get("layer_stacks"),
             composite_data.get("layers"),
         )
+        self._node_graph.replace_markers(parse_markers(composite_data.get("markers")))
 
         # P1: Load viewer_state and viewport_state
         # 载入的 state/装饰字典必须深拷贝：NodeGraph.clear() 会原地清空
@@ -2501,6 +2605,15 @@ class CompositePage(QWidget):
         )
         return data
 
+    def _on_composition_markers_changed(self, _scope: str = "") -> None:
+        """Publish the edited timeline metadata through the project save bridge."""
+        if self._current_composite_id:
+            self._emit_user_edit_once()
+            graph_data = self.get_composite_data()
+            self.composite_graph_changed.emit(self._current_composite_id, graph_data)
+            self._last_published_graph_data = graph_data
+            self._last_published_graph_generation = self._node_graph.generation
+
     def _on_node_double_clicked(self, node_id: str) -> None:
         node = self._node_graph.get_node(node_id)
         if isinstance(node, (COLORNode, ToposColorNode)):
@@ -2627,11 +2740,7 @@ class CompositePage(QWidget):
             self._node_editor.add_connection_visual(*edge, self._port_data_type(*edge[:2]))
 
     def _managed_layer_destinations(self) -> set[str]:
-        return {
-            node_id for stack in self._layer_stack_controller.stacks().values()
-            if stack.managed and stack.layer_ids
-            for node_id in (*stack.generated_merge_node_ids, stack.output_node_id)
-        }
+        return self._layer_stack_controller.managed_layer_destination_ids()
 
     def _is_pending_layer_transform(self, edge: tuple[str, str, str, str]) -> bool:
         """Allow the existing output-first route for a newly added Transform."""
@@ -2697,6 +2806,7 @@ class CompositePage(QWidget):
         """
         graph = self._node_graph
         controller = self._layer_stack_controller
+        self._last_graph_edit_issues = ()
         old_edges = self._graph_cable_keys()
         if replace_input and len(added) == 1:
             dst_id, port_name = added[0][2:]
@@ -2709,11 +2819,21 @@ class CompositePage(QWidget):
                 ))))
         if any(_page_node_is_locked(self, node_id) for edge in (*removed, *added)
                for node_id in (edge[0], edge[2])):
+            self._last_graph_edit_issues = (GraphEditIssue(
+                EDIT_LAYER_CONFLICT, "A cable endpoint is locked."),)
             return False
         if set(removed) == set(added) or (not removed and all(edge in old_edges for edge in added)):
             return False
 
         managed = self._managed_layer_destinations()
+        pending = self._node_editor.pending_layer_transform()
+        if pending is not None and len(added) == 1 and not removed:
+            incoming = added[0]
+            if incoming[2:] == (pending[0], "image"):
+                target = controller.layer_transform_insertion_target(incoming[0])
+                original = (*incoming[:2], *pending[2:])
+                if target is not None and target[1:] == pending[2:] and original in old_edges:
+                    removed, added = (original,), (incoming, pending)
         binding = None
         if len(added) == 2 and len(removed) == 1:
             incoming, outgoing = added
@@ -2723,6 +2843,9 @@ class CompositePage(QWidget):
                     and incoming[2] == outgoing[0] and outgoing[2:] == original[2:] == target[1:]):
                 effect_id = outgoing[0]
                 if controller.trace_layer_ids_for_node(effect_id):
+                    self._last_graph_edit_issues = (GraphEditIssue(
+                        EDIT_LAYER_CONFLICT, "The effect already belongs to a layer.",
+                        node_id=effect_id),)
                     return False
                 binding = (target[0], effect_id, outgoing[1], target[1:])
         elif len(added) == 1:
@@ -2731,11 +2854,15 @@ class CompositePage(QWidget):
                 binding = (transform[0], transform[1], "result", transform[2])
         protected = {edge[2:] for edge in (*removed, *added) if edge[2] in managed}
         if protected and (binding is None or protected != {binding[3]}):
-            if (allow_pending_transform and len(added) == 1
-                    and self._is_pending_layer_transform(added[0])):
-                self._on_nodes_connected(*added[0])
-                return added[0] in self._graph_cable_keys()
-            return False
+            if (not allow_pending_transform or len(added) != 1
+                    or any(edge[2:] != added[0][2:] for edge in removed)
+                    or not self._is_pending_layer_transform(added[0])):
+                self._last_graph_edit_issues = (GraphEditIssue(
+                    EDIT_LAYER_CONFLICT, "This input is owned by the layer stack."),)
+                return False
+            result = graph.apply_edit(GraphEditCommand(expected_revision=expected_revision))
+            self._last_graph_edit_issues = result.issues
+            return result.ok and self._node_editor.stage_layer_transform(added[0], result.revision)
         if binding is not None:
             layer = graph.get_layer(binding[0])
             if layer is None or layer.locked:
@@ -2751,19 +2878,17 @@ class CompositePage(QWidget):
         added_edges = tuple(Connection(*edge) for edge in added if edge not in old_edges)
         if not remove_keys <= old_edges:
             return False
-        self._last_graph_edit_issues = ()
-        result = graph.apply_edit(GraphEditCommand(
+        command = GraphEditCommand(
             removed=removed_edges, added=added_edges,
-            expected_revision=expected_revision))
+            expected_revision=expected_revision)
+        result = (controller.apply_wired_layer_edit(command, binding) if binding is not None
+                  else graph.apply_edit(command))
         if not result.ok:
             self._last_graph_edit_issues = result.issues
             logger.warning("Cable edit rejected (%s): %s", result.primary_code,
                            "; ".join(issue.message for issue in result.issues))
             return False
-        if binding is not None and not controller.adopt_wired_layer_effect(*binding):
-            graph.apply_edit(GraphEditCommand(
-                removed=added_edges, added=removed_edges, positions=positions))
-            return False
+        self._node_editor.clear_pending_layer_transform()
 
         node = graph.get_node(moved_node) if moved_node is not None else None
         move = (node.position, (position.x(), position.y())) if node and position is not None else None
@@ -2778,6 +2903,9 @@ class CompositePage(QWidget):
 
         if move is not None:
             set_position(move[1])
+        if self._compound_paste_active:
+            self._update_cable_visuals(old_edges)
+            return True
         self._emit_user_edit_once()
         self._commit_pending_edit_transactions()
         if created_dot is not None:
@@ -2814,90 +2942,12 @@ class CompositePage(QWidget):
 
     def _on_nodes_connected(self, src_node_id: str, src_port: str,
                             dst_node_id: str, dst_port: str) -> None:
-        self._emit_user_edit_once()
-        # Get data_type for visual before connecting
-        src_node = self._node_graph.get_node(src_node_id)
-        data_type = "image"
-        if src_node:
-            port = src_node.get_output_port(src_port)
-            if port:
-                data_type = port.data_type
+        self._edit_graph_cables((), ((src_node_id, src_port, dst_node_id, dst_port),),
+                                replace_input=True, allow_pending_transform=True)
 
-        # U-14：connect 提交前捕获该输入端口的旧边。NodeGraph.connect
-        # 对单输入端口会静默替换旧边——不捕获的话 undo 只断新线，
-        # 旧线永久丢失。
-        dst_node = self._node_graph.get_node(dst_node_id)
-        controller = getattr(self, "_layer_stack_controller", None)
-        edge = (src_node_id, src_port, dst_node_id, dst_port)
-        binding = None
-        if controller is not None and not self.__dict__.get("_compound_paste_active"):
-            if (src_node is not None and src_node.node_type == "transform"
-                    and controller.is_locked_layer_transform_target(dst_node_id, dst_port)):
-                return
-            binding = controller.layer_transform_binding(edge)
-        if binding is not None:
-            layer = self._node_graph.get_layer(binding[0])
-            if layer.locked:
-                return
-            self._commit_pending_edit_transactions()
-            before = controller.snapshot()
-            edges_before = self._graph_cable_keys()
-        dst_port_obj = dst_node.get_input_port(dst_port) if dst_node else None
-        is_multi_input = (dst_port_obj is not None
-                          and dst_port_obj.max_connections > 1)
-        old_edges: list = []
-        if not is_multi_input:
-            old_edges = [
-                (c.src_node_id, c.src_port_name)
-                for c in self._node_graph.get_input_connections(dst_node_id)
-                if c.dst_port_name == dst_port
-            ]
-
-        # Connect in data model FIRST — if it fails, visual stays unchanged
-        success = self._node_graph.connect(src_node_id, src_port, dst_node_id, dst_port)
-        if not success:
-            return
-        if binding is not None and controller.adopt_wired_layer_transform(*binding):
-            self._commit_layer_transform_wiring(before, edges_before)
-            return
-
-        # Sync visual: 单输入端口按精确 quad 移除旧线（U-15：by-dst 会
-        # 误删多输入端口的其他视觉线）；多输入端口直接追加。
-        if not is_multi_input:
-            for old_src, old_port in old_edges:
-                self._node_editor.remove_connection_visual_exact(
-                    old_src, old_port, dst_node_id, dst_port)
-        self._node_editor.add_connection_visual(
-            src_node_id, src_port, dst_node_id, dst_port, data_type
-        )
-        if self.__dict__.get("_compound_paste_active"):
-            # U-16：粘贴/预设装配期——模型+视觉照常，undo 由
-            # nodes_pasted 统一成组压栈，不产生游离的 Connect 记录。
-            pass
-        elif old_edges == [(src_node_id, src_port)]:
-            # 重复连接同一条边：图与视觉均恢复原状，不生成历史。
-            pass
-        elif old_edges:
-            # U-14：替换是一个原子命令（removed + added），一步undo
-            # 恢复旧线。
-            self._push_replace_connection_undo(
-                old_edges, (src_node_id, src_port, dst_node_id, dst_port))
-        else:
-            self._push_connect_undo(src_node_id, src_port, dst_node_id, dst_port)
-        self._sync_layer_stack_after_node_edit()
-        self._evaluate_graph()
-
-    def _on_nodes_disconnected(self, src_node_id, src_port, dst_node_id, dst_port) -> None:
-        self._emit_user_edit_once()
-        # Disconnect in data model FIRST
-        self._node_graph.disconnect(src_node_id, src_port, dst_node_id, dst_port)
-        # U-15：按精确 quad 删除视觉线。by-dst 只删目标端口第一条，
-        # 多输入端口上会误删其他来源的线。
-        self._node_editor.remove_connection_visual_exact(
-            src_node_id, src_port, dst_node_id, dst_port)
-        self._push_disconnect_undo(src_node_id, src_port, dst_node_id, dst_port)
-        self._sync_layer_stack_after_node_edit()
-        self._evaluate_graph()
+    def _on_nodes_disconnected(self, src_node_id: str, src_port: str,
+                               dst_node_id: str, dst_port: str) -> None:
+        self._edit_graph_cables(((src_node_id, src_port, dst_node_id, dst_port),), ())
 
     def _on_node_about_to_be_removed(self, node_id: str) -> None:
         """Detach transient UI/viewer state before the QGraphicsItem is removed."""
@@ -5020,6 +5070,11 @@ class CompositePage(QWidget):
         """
         if self._renderer is None:
             return
+        if self._video_context is not None:
+            revision = self._video_context.presentation_revision
+            if revision != self._video_presentation_revision:
+                self._video_presentation_revision = revision
+                self._refresh_keyframes_panel()
         if getattr(self, "_drive_active", False):
             # 渲染线程自驱中：解码结果由驱动循环直接消费，无需回 UI
             # 触发补拍（这正是自驱消灭的那个双往返回路）。
@@ -5108,6 +5163,9 @@ class CompositePage(QWidget):
             import time as _t
             self._comp_play_start_time = _t.perf_counter()
             self._comp_play_start_frame = frame
+            audio = getattr(self, "_composition_audio_preview", None)
+            if audio is not None:
+                audio.update_position(frame, seek=True)
             if self._renderer is not None:
                 try:
                     self._renderer.stop_playback_drive()
@@ -5237,6 +5295,7 @@ class CompositePage(QWidget):
         self._is_image_color_mode = enabled
 
         if enabled:
+            self._stop_composition_audio()
             # 1. Stop the independent comp-clip playback engine if any.
             timer = getattr(self, "_comp_playback_timer", None)
             if timer is not None:
@@ -5340,6 +5399,7 @@ class CompositePage(QWidget):
         self._drive_active = True
         fps = max(1.0, self.comp_clip_fps())
         self._comp_playback_timer.start(int(1000.0 / fps))
+        self._start_composition_audio()
         # 自驱启动：立即提交首帧求值（携带 playback_drive，渲染线程由此
         # 进入驱动循环）。tick 定时器在驱动模式下只做播放头显示记账，
         # 不会提交求值——没有这次提交驱动就永远不会开始。
@@ -5364,6 +5424,7 @@ class CompositePage(QWidget):
 
     def _stop_comp_playback(self) -> None:
         """Stop the page-owned comp timer and render-thread drive state."""
+        self._stop_composition_audio()
         timer = getattr(self, "_comp_playback_timer", None)
         if timer is not None:
             timer.stop()
@@ -5379,6 +5440,36 @@ class CompositePage(QWidget):
                              exc_info=True)
         if was_active:
             self._notify_kf_panel_play_state()
+
+    def _start_composition_audio(self) -> None:
+        if not any(layer.audio for layer in self._node_graph.get_all_layers()):
+            self._stop_composition_audio()
+            return
+        audio = self._get_composition_audio_preview()
+        start = getattr(self, "_comp_in_frame", None) or 0
+        audio.start(self._node_graph.to_dict(), self._project, start,
+                    self._comp_effective_out(), self._composite_current_frame, self.comp_clip_fps())
+
+    def _get_composition_audio_preview(self) -> "CompositionAudioPreview":
+        from .composition_audio_preview import CompositionAudioPreview
+
+        audio = getattr(self, "_composition_audio_preview", None)
+        if audio is None:
+            audio = self._composition_audio_preview = CompositionAudioPreview(self)
+            audio.failed.connect(self.status_message)
+            audio.waveforms_ready.connect(self._set_composition_waveforms)
+        return audio
+
+    @pyqtSlot(object)
+    def _set_composition_waveforms(self, envelopes: dict) -> None:
+        panel = getattr(self, "_keyframes_panel", None)
+        if panel is not None and hasattr(panel, "set_audio_waveforms"):
+            panel.set_audio_waveforms(envelopes)
+
+    def _stop_composition_audio(self) -> None:
+        audio = getattr(self, "_composition_audio_preview", None)
+        if audio is not None:
+            audio.stop()
 
     def comp_toggle_play(self) -> None:
         self._ensure_comp_playback_timer()
@@ -5418,6 +5509,10 @@ class CompositePage(QWidget):
             # B2: honour the loop toggle. Loop restarts from the In/start;
             # one-shot parks at the Out point and stops.
             if self._comp_loop:
+                if start == self._composite_current_frame:
+                    audio = getattr(self, "_composition_audio_preview", None)
+                    if audio is not None:
+                        audio.update_position(start, seek=True)
                 self.set_composite_current_frame(start)
                 self._comp_play_start_time = time.perf_counter()
                 self._comp_play_start_frame = start
@@ -5426,6 +5521,9 @@ class CompositePage(QWidget):
                 self.comp_pause()
             return
         if target != self._composite_current_frame:
+            audio = getattr(self, "_composition_audio_preview", None)
+            if audio is not None:
+                audio.update_position(target)
             if getattr(self, "_drive_active", False):
                 # 渲染线程自驱中：本 tick 只做最轻量的播放头记账（面板同步
                 # 每帧全做会拖住 UI 线程——Keyframes/Properties/Spline 的
@@ -5444,6 +5542,8 @@ class CompositePage(QWidget):
         self._ensure_comp_playback_timer()
         self._comp_in_frame = in_frame
         self._comp_out_frame = out_frame
+        if self._comp_playing:
+            self._start_composition_audio()
 
     def set_comp_loop(self, enabled: bool) -> None:
         """B2: toggle comp-clip playback looping (bound to the bar's ⟳ button).
@@ -5456,9 +5556,7 @@ class CompositePage(QWidget):
         self._comp_loop = bool(enabled)
 
     def clear_comp_clip_in_out(self) -> None:
-        self._ensure_comp_playback_timer()
-        self._comp_in_frame = None
-        self._comp_out_frame = None
+        self.set_comp_clip_in_out(None, None)
 
     def _apply_view_mode_overrides(self, snapshot) -> dict:
         """Apply preview-context-dependent bg/grid overrides to a snapshot.
@@ -6625,6 +6723,11 @@ class CompositePage(QWidget):
         if not self.is_comp_clip_playback_active():
             return None
         if snapshot is not None:
+            from ..render.external_comp_snapshot import has_external_references
+
+            if has_external_references(snapshot):
+                self._drive_active = False
+                return None
             for ns in snapshot.nodes.values():
                 if getattr(ns, "keyframe_tracks", None):
                     self._drive_active = False
@@ -7453,25 +7556,13 @@ class CompositePage(QWidget):
         end = max(start, min(int(end), maximum))
         node.set_parameter("source_in", start)
         node.set_parameter("source_out", end)
-
-        current = (copy.deepcopy(node.time_range)
-                   if isinstance(node.time_range, dict) else {})
-        try:
-            comp_start = int(current.get("comp_start", 0) or 0)
-        except (TypeError, ValueError):
-            comp_start = 0
-        current.update({
-            "enabled": True,
-            "comp_start": comp_start,
-            "comp_end": comp_start + end - start,
-            "source_in": start,
-            "source_out": end,
-        })
-        node.time_range = current
+        cls._sync_video_trim_layer(node)
 
     @classmethod
     def _sync_video_trim_layer(cls, node: Any) -> None:
         """Recompute the layer end after a direct source_in/source_out edit."""
+        from src.features.composite.core.layer_time import fps_fraction, source_window_duration
+
         start, end, _ = cls._video_trim_bounds(node)
         current = (copy.deepcopy(node.time_range)
                    if isinstance(node.time_range, dict) else {})
@@ -7479,10 +7570,13 @@ class CompositePage(QWidget):
             comp_start = int(current.get("comp_start", 0) or 0)
         except (TypeError, ValueError):
             comp_start = 0
+        step = fps_fraction(current.get("source_step")) or fps_fraction(1)
+        phase = fps_fraction(current.get("source_phase"))
+        duration = source_window_duration(start, end, step=step, phase=phase)
         current.update({
             "enabled": True,
             "comp_start": comp_start,
-            "comp_end": comp_start + end - start,
+            "comp_end": comp_start + max(0, duration - 1),
             "source_in": start,
             "source_out": end,
         })
@@ -8092,54 +8186,6 @@ class CompositePage(QWidget):
                 return port.data_type
         return "image"
 
-    def _restore_connection_edge(self, edge: dict) -> None:
-        """Reconnect one edge in model + visual (undo/redo helper, U-14)."""
-        quad = (edge["src_node"], edge["src_port"],
-                edge["dst_node"], edge["dst_port"])
-        if self._node_graph.connect(*quad):
-            self._node_editor.remove_connection_visual_exact(*quad)
-            self._node_editor.add_connection_visual(
-                *quad, self._port_data_type(quad[0], quad[1]))
-
-    def _remove_connection_edge(self, edge: dict) -> None:
-        """Disconnect one edge in model + visual (undo/redo helper, U-14)."""
-        quad = (edge["src_node"], edge["src_port"],
-                edge["dst_node"], edge["dst_port"])
-        self._node_graph.disconnect(*quad)
-        self._node_editor.remove_connection_visual_exact(*quad)
-
-    def _push_replace_connection_undo(self, removed_edges, added_edge) -> None:
-        """单输入连线替换 = 一个原子撤销命令（U-14）。
-
-        ``removed_edges`` 是被替换掉的旧输入 [(src, src_port), ...]，
-        ``added_edge`` 是新边 (src, src_port, dst, dst_port)。undo 恢复
-        全部旧线，redo 重新替换；重复替换三次也能逐步还原。
-        """
-        dst_node, dst_port = added_edge[2], added_edge[3]
-        removed = [
-            {"src_node": s, "src_port": sp,
-             "dst_node": dst_node, "dst_port": dst_port}
-            for (s, sp) in removed_edges
-        ]
-        added = {"src_node": added_edge[0], "src_port": added_edge[1],
-                 "dst_node": dst_node, "dst_port": dst_port}
-
-        def restore(present: list, absent: list) -> None:
-            for edge in absent:
-                self._remove_connection_edge(edge)
-            for edge in present:
-                self._restore_connection_edge(edge)
-            self._evaluate_graph()
-
-        self._undo_stack.push(UndoAction(
-            "connect_replace",
-            {"removed": removed, "added": added},
-            undo_fn=lambda d: restore(d["removed"], [d["added"]]),
-            redo_fn=lambda d: restore([d["added"]], d["removed"]),
-            description=(f"Connect {added_edge[1]} → {dst_port} "
-                         f"(replace)"),
-        ))
-
     def _undo_connect(self, data) -> None:
         self._node_graph.disconnect(
             data["src_node"], data["src_port"],
@@ -8168,51 +8214,6 @@ class CompositePage(QWidget):
                 data["dst_node"], data["dst_port"],
                 self._port_data_type(data["src_node"], data["src_port"]),
             )
-        self._evaluate_graph()
-
-    def _push_disconnect_undo(self, src_node, src_port, dst_node, dst_port) -> None:
-        """Push undo for disconnection.
-
-        Uses factory function to ensure this action is kept during compression.
-        """
-        action = create_disconnect_action(
-            src_node=src_node,
-            src_port=src_port,
-            dst_node=dst_node,
-            dst_port=dst_port,
-            undo_fn=lambda d: self._undo_disconnect(d),
-            redo_fn=lambda d: self._redo_disconnect(d),
-        )
-        self._undo_stack.push(action)
-
-    def _undo_disconnect(self, data) -> None:
-        success = self._node_graph.connect(
-            data["src_node"], data["src_port"],
-            data["dst_node"], data["dst_port"]
-        )
-        if success:
-            # U-15：只清本 quad 的陈旧视觉（by-dst 会误删多输入端口上
-            # 其他来源的线），再重建本线。
-            self._node_editor.remove_connection_visual_exact(
-                data["src_node"], data["src_port"],
-                data["dst_node"], data["dst_port"]
-            )
-            self._node_editor.add_connection_visual(
-                data["src_node"], data["src_port"],
-                data["dst_node"], data["dst_port"],
-                self._port_data_type(data["src_node"], data["src_port"]),
-            )
-        self._evaluate_graph()
-
-    def _redo_disconnect(self, data) -> None:
-        self._node_graph.disconnect(
-            data["src_node"], data["src_port"],
-            data["dst_node"], data["dst_port"]
-        )
-        self._node_editor.remove_connection_visual_exact(
-            data["src_node"], data["src_port"],
-            data["dst_node"], data["dst_port"]
-        )
         self._evaluate_graph()
 
     def set_parameter(self, node_id: str, param_name: str,
@@ -8701,6 +8702,17 @@ class CompositePage(QWidget):
         panel = getattr(self, '_keyframes_panel', None)
         if panel is None or self._node_graph is None:
             return
+        current = (self._node_graph, self._node_graph.generation, getattr(self._project, "assets", None))
+        previous = getattr(self, "_waveform_graph_revision", None)
+        if (previous is None or current[:2] != previous[:2] or current[2] is not previous[2]):
+            self._waveform_graph_revision = current
+            if any(layer.audio for layer in self._node_graph.get_all_layers()):
+                self._get_composition_audio_preview().request_waveforms(
+                    self._node_graph.to_dict(), self._project)
+            elif (audio := getattr(self, "_composition_audio_preview", None)) is not None:
+                audio.clear_waveforms()
+            if getattr(self, "_comp_playing", False):
+                self._start_composition_audio()
         # Keep the ruler aligned with the comp clip's frame range.
         self._sync_keyframes_panel_frame_range()
         selected = getattr(self, '_last_selected_node_id', None)
@@ -9082,6 +9094,7 @@ class CompositePage(QWidget):
         layer_id = time_range.get("layer_id")
         layer = layers_map.get(layer_id) if layer_id and layers_map else None
         layer_before = layer_after = None
+        isolated_source_snapshot = None
         if layer_id:
             if (layer is None or layer.locked or not layer.managed
                     or layer.root_node_id != node_id):
@@ -9091,7 +9104,20 @@ class CompositePage(QWidget):
                                int(time_range["comp_end"]))
             except (KeyError, TypeError, ValueError):
                 return
+            if layer_after[1] < layer_after[0]:
+                return
             layer_before = (layer.in_frame, layer.out_frame)
+            source = self._node_graph.get_node(layer.source_node_id)
+            if source is not None and source.node_type == "video_frame":
+                before_isolation = controller.snapshot()
+                isolated_source = controller.isolate_layer_video_source(layer_id)
+                if isolated_source is None:
+                    self.status_message.emit(I18N.tr(
+                        "keyframes.layer_edit_failed", "Unable to apply this layer edit."))
+                    return
+                if isolated_source.id != source.id:
+                    isolated_source.set_state_callback(self._on_node_state_changed)
+                    isolated_source_snapshot = before_isolation
             if not controller.apply_layer_time_bounds(layer_id, layer_after):
                 return
             layers_map = {layer_id: layer}
@@ -9113,11 +9139,14 @@ class CompositePage(QWidget):
             previous_bounds=layer_before)
         range_payload = {key: value for key, value in time_range.items()
                          if key not in {"edit", "layer_id"}}
+        video_range_payload = {**range_payload, **(
+            video_param_edit.get("source_timing", {}) if video_param_edit else {})}
         # Old node rows and saved node ranges still use the node-level
         # contract. New layer rows are gated at the Layer so an effect-node
         # bypass cannot show the layer outside its range.
         if layer is None or before or video_source is node:
-            node.time_range = {**(before or {}), **range_payload}
+            node.time_range = {**(before or {}), **(
+                video_range_payload if video_source is node else range_payload)}
         undo_data = {"node_id": node_id, "before": before,
                      "after": copy.deepcopy(node.time_range)}
         if layer is not None:
@@ -9134,7 +9163,7 @@ class CompositePage(QWidget):
             # Video playback uses comp_start as its composition time
             # origin. Moving a bar changes the origin, but keeps source in
             # and out unchanged so the same material moves with the bar.
-            video_source.time_range = {**(source_before or {}), **range_payload}
+            video_source.time_range = {**(source_before or {}), **video_range_payload}
             undo_data.update(
                 video_node_id=video_source.id,
                 video_time_range_before=source_before,
@@ -9148,13 +9177,23 @@ class CompositePage(QWidget):
             undo_data["video_params_before"] = dict(video_param_edit["before"])
             undo_data["video_params_after"] = dict(video_param_edit["after"])
         try:
-            self._undo_stack.push(UndoAction(
-                action_type="node_time_range_change",
-                data=undo_data,
-                undo_fn=lambda d: self._restore_node_time_range(d, "before"),
-                redo_fn=lambda d: self._restore_node_time_range(d, "after"),
-                description="time range",
-            ))
+            if isolated_source_snapshot is not None:
+                self._undo_stack.push(UndoAction(
+                    action_type="node_time_range_change",
+                    data={"before": isolated_source_snapshot, "after": controller.snapshot()},
+                    undo_fn=lambda d: self._restore_layer_node_snapshot_for_ui(d["before"]),
+                    redo_fn=lambda d: self._restore_layer_node_snapshot_for_ui(d["after"]),
+                    description="time range",
+                ))
+                self._node_editor.build_from_graph(self._node_graph)
+            else:
+                self._undo_stack.push(UndoAction(
+                    action_type="node_time_range_change",
+                    data=undo_data,
+                    undo_fn=lambda d: self._restore_node_time_range(d, "before"),
+                    redo_fn=lambda d: self._restore_node_time_range(d, "after"),
+                    description="time range",
+                ))
         except Exception as e:
             logger.warning("Undo push failed for time range change: %s", e)
         self._node_graph.bump_generation()
@@ -9314,7 +9353,7 @@ class CompositePage(QWidget):
             panel._tree_view.refresh()
 
     def _on_keyframes_panel_layer_selected(self, layer_id: str) -> None:
-        """Select a Layer row and its live root node as one shared target."""
+        """Select the layer's Transform for Viewer handles and property editing."""
         self._last_selected_layer_id = str(layer_id)
         controller = getattr(self, '_layer_stack_controller', None)
         if controller is None:
@@ -9322,7 +9361,9 @@ class CompositePage(QWidget):
         try:
             layer = controller.layers_map().get(str(layer_id))
             if layer is not None:
-                self._on_keyframes_panel_node_selected(layer.root_node_id)
+                transform = controller.layer_transform_node(layer.layer_id)
+                self._on_keyframes_panel_node_selected(
+                    transform.id if transform is not None else layer.root_node_id)
         except Exception:
             logger.exception("Unable to select Keyframes layer %s", layer_id)
 

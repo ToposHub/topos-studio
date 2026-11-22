@@ -398,6 +398,12 @@
     "export_complete_title": "Export Complete"
   },
   "nodes": {
+    "layer_style": {
+      "title": "Layer Style"
+    },
+    "image_input": {
+      "psd_flattened": "Imported merged Photoshop layers"
+    },
     "text": {
       "title": "Text"
     }
@@ -1488,6 +1494,19 @@
     "ai_model_dir_placeholder": "Select AI Model Directory"
   },
   "composite": {
+    "external": {
+      "choose": "Link Composition…",
+      "unlink": "Unlink",
+      "invalid": "Invalid external link",
+      "unlinked": "External Composition",
+      "title": "External Composition",
+      "save_first": "Save the host project before adding a link.",
+      "no_outputs": "This project has no composition outputs.",
+      "output": "Composition output",
+      "pin": "Pin this revision",
+      "follow": "Follow latest revision",
+      "version": "Version policy"
+    },
     "empty_state": {
       "title": "No Comp Clip Open",
       "hint": "Create or open a Comp Clip to begin editing.",
@@ -1515,6 +1534,7 @@
       "s_label": "s"
     },
     "render_output": {
+      "sequence_audio_note": "Image sequences contain frames only. Choose Video File to include audio.",
       "title": "Render Output",
       "render_btn": "Render Output",
       "mode_image": "Image Mode",
@@ -2913,6 +2933,18 @@
     }
   },
   "keyframes": {
+    "marker_add": "Add Composition Marker…",
+    "marker_rename": "Rename Marker…",
+    "marker_duration": "Marker Duration (frames)…",
+    "marker_delete": "Delete Marker",
+    "layer_split": "Split at Playhead",
+    "layer_slip": "Slip Source…",
+    "layer_slip_frames": "Offset (composition frames)",
+    "layer_stretch": "Stretch Duration…",
+    "layer_stretch_frames": "Duration (frames)",
+    "marker_name": "Name",
+    "ruler_frames": "Frame numbers",
+    "ruler_timecode": "Timecode",
     "add_kf": "Add keyframe at current frame (Ctrl/Cmd+K)",
     "center_playhead": "Center playhead",
     "col_name": "Name",

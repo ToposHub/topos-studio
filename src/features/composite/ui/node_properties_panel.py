@@ -1078,9 +1078,22 @@ class NodeSectionWidget(QFrame):
         self._triple_sliders = []
         self._skip_params.clear()
         self._hidden_params.clear()
+        self._external_comp_picker = None
 
         if not self.parameters:
             return
+
+        if self.node_type == "precomp":
+            from .external_comp_picker import ExternalCompPicker
+
+            self._external_comp_picker = ExternalCompPicker(
+                self.parameters,
+                lambda ref: self._parent_panel._on_param_changed(
+                    "external_comp_ref", ref, self.node_id),
+                parent=self,
+            )
+            self._content_layout.addWidget(self._external_comp_picker)
+            self._skip_params.add("external_comp_ref")
 
         # Dispatch to node-type-specific custom UI builders.
         if self.node_type == "constant":
@@ -1302,6 +1315,9 @@ class NodeSectionWidget(QFrame):
             self._build_parameters()
         else:
             # Incremental update
+            picker = getattr(self, "_external_comp_picker", None)
+            if picker is not None:
+                picker.refresh(self.parameters)
             for key, value in self.parameters.items():
                 if key in self._param_widgets:
                     self._parent_panel._update_section_param_value(key, value, self._param_widgets)

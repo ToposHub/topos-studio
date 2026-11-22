@@ -12,7 +12,6 @@ synthetic float arrays.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -73,7 +72,9 @@ def _as_stereo(pcm: np.ndarray) -> np.ndarray:
         return np.stack([data, data], axis=1)
     if data.ndim == 2 and data.shape[1] == 1:
         return np.repeat(data, 2, axis=1)
-    return data[:, :2]
+    if data.ndim == 2 and data.shape[1] >= 2:
+        return data[:, :2]
+    raise ValueError("decoded PCM must be mono or (samples, channels)")
 
 
 def mix_segment(buffer: np.ndarray, segment: AudioSegment, pcm: np.ndarray,
@@ -89,19 +90,23 @@ def mix_segment(buffer: np.ndarray, segment: AudioSegment, pcm: np.ndarray,
     Returns the buffer (also mutated in place) so callers can chain.
     """
     fps = fps_fraction(fps)
-    if buffer.ndim != 2 or buffer.shape[1] < 2:
-        raise ValueError("mix buffer must be (samples, 2)")
-    data = _as_stereo(pcm)
-    # The segment window's first source sample sits on the boundary sample
-    # of its first composition frame.
-    seg_base = sample_boundary(
-        segment.in_frame - int(comp_start_frame), fps, int(sample_rate))
-    offset = seg_base - segment.source_sample_start
-    start = max(0, offset + segment.source_sample_start)
-    end = min(buffer.shape[0], offset + segment.source_sample_end)
+    if buffer.ndim != 2 or buffer.shape[1] not in (1, 2):
+        raise ValueError("mix buffer must have one or two channels")
+    # Subtract absolute sample boundaries to retain their fractional phase.
+    # Source windows remain at the native rate while decoded PCM is already
+    # resampled, so placement and clipping use output-rate boundaries.
+    origin = sample_boundary(comp_start_frame, fps, sample_rate)
+    segment_start = sample_boundary(segment.in_frame, fps, sample_rate) - origin
+    segment_end = sample_boundary(segment.out_frame + 1, fps, sample_rate) - origin
+    start = max(0, segment_start)
+    end = min(buffer.shape[0], segment_end)
     if end <= start:
         return buffer
-    take = data[:end - start]
+    data = _as_stereo(pcm)
+    source_offset = start - segment_start
+    take = data[source_offset:source_offset + end - start]
+    if buffer.shape[1] == 1:
+        take = take.mean(axis=1, keepdims=True)
     if take.shape[0] < end - start:  # decode delivered less than planned
         end = start + take.shape[0]
     buffer[start:end] += take * float(segment.gain_linear)
@@ -119,10 +124,15 @@ def mixdown(plan: AudioPlan, decoded: Dict[str, np.ndarray],
     the state degrades to ``missing_media`` (B06 §2 classification).
     """
     fps = fps_fraction(fps)
+    if channels not in (1, 2):
+        raise ValueError("mixdown supports mono and stereo output")
     length = export_range.pcm_length(fps, plan.sample_rate)
     buffer = np.zeros((length, channels), dtype=np.float32)
     missing: list[str] = []
-    for segment in plan.segments:
+    overlapping = [segment for segment in plan.segments
+                   if segment.out_frame >= export_range.start_frame
+                   and segment.in_frame <= export_range.end_frame]
+    for segment in overlapping:
         key = f"{segment.layer_id}:{segment.asset_id}#{segment.stream_index}"
         pcm = decoded.get(key)
         if pcm is None:
@@ -132,4 +142,6 @@ def mixdown(plan: AudioPlan, decoded: Dict[str, np.ndarray],
                     plan.sample_rate)
     if missing:
         return buffer, AUDIO_STATE_MISSING_MEDIA
+    if not overlapping and not plan.missing_streams:
+        return buffer, AUDIO_STATE_SILENT
     return buffer, classify_audio_state(plan)

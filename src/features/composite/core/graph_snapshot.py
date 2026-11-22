@@ -11,7 +11,10 @@ Port-level revision tracking enables fine-grained dirty propagation:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from src.shared.project.resource_resolver import ProjectResourceResolver
 
 
 @dataclass
@@ -160,6 +163,14 @@ class GraphSnapshot:
     # 使所有导出入口（图片/序列/视频/multi-pass/headless）与预览同合同，
     # 不再回落 Scene3D 旧默认。临时导航/选择/isolate 不在此字段内。
     global_3d_scene_settings: Dict[str, Any] = field(default_factory=dict)
+    project_archive_path: str = ""
+    external_archive_resolver: Optional["ProjectResourceResolver"] = None
+    fps: float = 24.0
+    reference_diagnostics: Tuple[Dict[str, Any], ...] = ()
+    external_node_frames: Dict[str, int] = field(default_factory=dict)
+    # Evaluated per frame at managed Merge inputs, where each layer owns its
+    # own gate even when a source is also consumed by another graph branch.
+    inactive_layer_inputs: Dict[str, frozenset[str]] = field(default_factory=dict)
 
     # ── Lookup helpers (no lock needed) ──
 

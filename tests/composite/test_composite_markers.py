@@ -157,7 +157,10 @@ def test_parse_markers_tolerates_corruption():
         {"marker_id": "", "frame": 4},
         {"marker_id": "bad", "frame": "x"},
         {"marker_id": "neg", "frame": 2, "duration": -4},
+        {"marker_id": "malformed_duration", "frame": 8, "duration": {}},
+        {"marker_id": "invalid_frame", "frame": float("inf")},
     ])
-    assert set(markers) == {"ok", "neg"}
+    assert set(markers) == {"ok", "neg", "malformed_duration"}
     assert markers["neg"].duration is None
+    assert markers["malformed_duration"].duration is None
     assert parse_markers("not-a-list") == {}

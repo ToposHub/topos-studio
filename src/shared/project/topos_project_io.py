@@ -102,6 +102,15 @@ MAX_ARCHIVE_ENTRIES: int = 50_000
 #: 解压允许写入的最大总字节数（未压缩）。上限取得宽松（4K EXR 烘焙资产
 #: 可达数 GB），但足以拦截 PB 级 zip bomb 耗尽磁盘。
 MAX_ARCHIVE_TOTAL_BYTES: int = 32 * 1024 * 1024 * 1024
+MAX_COMPOSITE_ARCHIVE_BYTES: int = 2 * 1024 * 1024 * 1024
+_COMPOSITE_ARCHIVE_MODULES = frozenset(
+    f"{name}{suffix}"
+    for name in (
+        "manifest.json", "project.json", "composite/graphs.json",
+        "edit/media_pool.json",
+    )
+    for suffix in ("", ".mp", ".gz", ".mp.gz")
+)
 
 #: 解压流式拷贝的单块大小。
 _EXTRACT_CHUNK_BYTES: int = 1024 * 1024
@@ -472,7 +481,9 @@ class ToposProjectIO:
         return declared_total
 
     @staticmethod
-    def _extract_archive_to_cache(zf: zipfile.ZipFile, destination: str) -> None:
+    def _extract_archive_to_cache(
+        zf: zipfile.ZipFile, destination: str, *, composite_only: bool = False,
+    ) -> None:
         """Safely materialize an archive into an otherwise empty cache dir.
 
         AUD-37104: entry count and total uncompressed size are capped —
@@ -482,6 +493,7 @@ class ToposProjectIO:
         ToposProjectIO.validate_archive_limits(zf)
         root = os.path.abspath(destination)
         written_total = 0
+        limit = MAX_COMPOSITE_ARCHIVE_BYTES if composite_only else MAX_ARCHIVE_TOTAL_BYTES
         for info in zf.infolist():
             # Project packages do not need symlinks. Reject them because they
             # may resolve outside the cache after extraction.
@@ -493,6 +505,11 @@ class ToposProjectIO:
             if os.path.commonpath((root, target)) != root:
                 raise ValueError(f"Project archive path escapes cache: {info.filename}")
 
+            if (composite_only and info.filename not in _COMPOSITE_ARCHIVE_MODULES
+                    and not info.filename.startswith(("resources/", "assets/baked/"))):
+                continue
+            if written_total + info.file_size > limit:
+                raise ValueError(f"Project archive exceeds the extraction size limit of {limit} bytes")
             if info.is_dir():
                 os.makedirs(target, exist_ok=True)
                 continue
@@ -504,10 +521,10 @@ class ToposProjectIO:
                     if not chunk:
                         break
                     written_total += len(chunk)
-                    if written_total > MAX_ARCHIVE_TOTAL_BYTES:
+                    if written_total > limit:
                         raise ValueError(
                             "Project archive exceeds the extraction size limit "
-                            f"of {MAX_ARCHIVE_TOTAL_BYTES} bytes (zip bomb?)"
+                            f"of {limit} bytes (zip bomb?)"
                         )
                     output.write(chunk)
 
@@ -723,7 +740,9 @@ class ToposProjectIO:
                 payload.set_module("color/color_stacks.json", full_color_stacks_data)
 
             if full_compositions_data is not None:
-                payload.set_module("composite/graphs.json", full_compositions_data)
+                graphs = ToposProjectIO._composite_media_paths(
+                    full_compositions_data, project_dir) if config.relative_paths else full_compositions_data
+                payload.set_module("composite/graphs.json", graphs)
                 if ui_state_data and "composite_viewer_state" in ui_state_data:
                     payload.set_module(
                         "composite/viewer_state.json",
@@ -879,6 +898,10 @@ class ToposProjectIO:
         filepath: str,
         config: ToposProjectIOConfig = ToposProjectIOConfig(),
         load_full_data: bool = True,
+        *,
+        composite_only: bool = False,
+        cache_revision: str = "",
+        activate_resources: bool = True,
     ) -> tuple[ToposProject | None, dict[str, Any] | None]:
         """
         从 .topos ZIP 包加载工程。
@@ -887,6 +910,9 @@ class ToposProjectIO:
             filepath: .topos 文件路径
             config: 配置选项
             load_full_data: 是否加载完整数据（子目录 JSON）
+            composite_only: 仅读取合成图及其资源，保留当前工程的资源解析器。
+            cache_revision: 外部引用的包指纹，供不同修订使用独立缓存。
+            activate_resources: 是否将此包设置为当前会话的资源解析器。
 
         Returns:
             (ToposProject 实例, 完整数据字典) 或 (None, None) 如果加载失败
@@ -918,6 +944,14 @@ class ToposProjectIO:
             # 使用持久 cache 目录而非临时目录
             # cache 目录位于项目文件同级的 .topos_cache/<project_filename>/ 中
             project_filename = os.path.splitext(os.path.basename(filepath))[0]
+            if composite_only:
+                project_filename = f"{project_filename}.ref"
+            if cache_revision:
+                if len(cache_revision) != 64 or any(
+                    char not in "0123456789abcdef" for char in cache_revision
+                ):
+                    raise ValueError("Invalid archive revision")
+                project_filename = f"{project_filename}-{cache_revision}"
             cache_dir = os.path.join(project_dir, ".topos_cache", project_filename)
 
             # Always load through a fresh staging directory. Reusing the cache
@@ -928,7 +962,12 @@ class ToposProjectIO:
             try:
                 os.makedirs(staging_cache_dir, exist_ok=False)
                 with zipfile.ZipFile(filepath, 'r') as zf:
-                    ToposProjectIO._extract_archive_to_cache(zf, staging_cache_dir)
+                    if composite_only:
+                        ToposProjectIO._extract_archive_to_cache(
+                            zf, staging_cache_dir, composite_only=True,
+                        )
+                    else:
+                        ToposProjectIO._extract_archive_to_cache(zf, staging_cache_dir)
                 # AUD-37102: swap via rename-aside instead of rmtree+rebuild.
                 # Readers of cache_dir never see a half-copied directory, the
                 # old content stays recoverable until the new one is in
@@ -1062,14 +1101,16 @@ class ToposProjectIO:
                         ToposProjectIO._read_json(resource_index_path, config))
                 # 换工程/旧包无资源：清掉上一工程的资源上下文，防跨工程
                 # 串解析（DESK-02B）。
-                set_active_project_resolver(None)
+                if activate_resources and not composite_only:
+                    set_active_project_resolver(None)
                 if len(resource_index) > 0:
                     resolver = ProjectResourceResolver(cache_dir, resource_index)
                     full_data["resource_index"] = resource_index.to_dict()
                     full_data["resource_resolver"] = resolver
                     # DESK-02B：设为当前工程资源上下文（LUT/贴图/生成
                     # 资源加载器经 resolve_project_reference 消费）。
-                    set_active_project_resolver(resolver)
+                    if activate_resources and not composite_only:
+                        set_active_project_resolver(resolver)
                     # DESK-01D：资源索引维度分级补判（无索引=legacy-0）
                     version_status = classify_package_versions(
                         manifest_data,
@@ -1094,6 +1135,18 @@ class ToposProjectIO:
                         ToposProjectIO._materialize_embedded_assets(
                             project_data["assets"], resolver)
                         project = ToposProject.from_dict(project_data)
+
+                if composite_only:
+                    graphs_path = os.path.join(cache_dir, "composite/graphs.json")
+                    try:
+                        full_data["compositions"] = ToposProjectIO._read_json(graphs_path, config)
+                    except FileNotFoundError:
+                        full_data["compositions"] = {}
+                    if "assets" not in full_data:
+                        full_data["assets"] = project_data.get("assets") or {}
+                    full_data["compositions"] = ToposProjectIO._composite_media_paths(
+                        full_data["compositions"], project_dir, assets=full_data["assets"])
+                    return project, full_data
 
                 # edit/bins.json
                 bins_path = os.path.join(cache_dir, "edit/bins.json")
@@ -1128,7 +1181,10 @@ class ToposProjectIO:
                 # composite/graphs.json
                 graphs_path = os.path.join(cache_dir, "composite/graphs.json")
                 if os.path.exists(graphs_path):
-                    full_data["compositions"] = ToposProjectIO._read_json(graphs_path, config)
+                    full_data["compositions"] = ToposProjectIO._composite_media_paths(
+                        ToposProjectIO._read_json(graphs_path, config), project_dir,
+                        assets=full_data.get("assets", project_data.get("assets") or {}),
+                    )
 
                 # composite/viewer_state.json
                 viewer_state_path = os.path.join(cache_dir, "composite/viewer_state.json")
@@ -1545,6 +1601,41 @@ class ToposProjectIO:
                     if os.path.exists(asset_data["path_original"]):
                         asset_data["path"] = asset_data["path_original"]
         return assets_data
+
+    @staticmethod
+    def _composite_media_paths(graphs: dict[str, Any], base_dir: str,
+                               assets: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Save layered Photoshop and audio source paths relative to the project."""
+        updated: dict[str, Any] = {}
+        for graph_id, graph in graphs.items():
+            if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+                updated[graph_id] = graph
+                continue
+            nodes = []
+            for node in graph["nodes"]:
+                params = node.get("parameters") if isinstance(node, dict) else None
+                if not isinstance(params, dict) or not (
+                        params.get("psd_import") or node.get("type") == "audio_source"):
+                    nodes.append(node)
+                    continue
+                path = params.get("file_path")
+                if not isinstance(path, str) or not path:
+                    nodes.append(node)
+                    continue
+                if assets is None:
+                    try:
+                        path = os.path.relpath(path, base_dir) if os.path.isabs(path) else path
+                    except ValueError:
+                        path = os.path.basename(path)
+                else:
+                    path = ToposProjectIO._to_absolute_path(path, base_dir)
+                    asset = assets.get(params.get("asset_id"))
+                    asset_path = asset.get("path") if isinstance(asset, dict) else None
+                    if not os.path.isfile(path) and isinstance(asset_path, str) and os.path.isfile(asset_path):
+                        path = asset_path
+                nodes.append({**node, "parameters": {**params, "file_path": path}})
+            updated[graph_id] = {**graph, "nodes": nodes}
+        return updated
 
     @staticmethod
     def _to_relative_path(absolute_path: str, base_dir: str) -> str:

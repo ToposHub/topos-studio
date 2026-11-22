@@ -158,6 +158,7 @@ class MergeNode(Node):
         ParamDef("mask_invert", "bool", False),
         ParamDef(LAYER_MERGE_OWNER_PARAM, "str", "", hidden=True),
         ParamDef(LAYER_MERGE_MATTE_PARAM, "bool", False, hidden=True),
+        ParamDef("psd_srgb", "bool", False, hidden=True),
     ]
 
     def __init__(self, node_id: Optional[str] = None) -> None:
@@ -180,6 +181,7 @@ class MergeNode(Node):
             "alpha_clamp": True,         # S2-B
             "mask_channel": "luma",      # S3-A
             "mask_invert": False,        # S3-A
+            "psd_srgb": False,
         }
 
     def compute_output_bbox(self, input_bboxes: Dict[str, "BBox"],
@@ -335,6 +337,7 @@ class MergeNode(Node):
                 "mask_channel": mask_channel_idx,
                 "mask_invert": self.parameters.get("mask_invert", False),
                 "layer_composite": layer_composite,
+                "psd_srgb": bool(self.parameters.get("psd_srgb")),
                 "transparent_background": transparent_background,
             },
         }

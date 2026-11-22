@@ -396,6 +396,12 @@
     "export_complete_title": "导出完成"
   },
   "nodes": {
+    "layer_style": {
+      "title": "图层样式"
+    },
+    "image_input": {
+      "psd_flattened": "Photoshop 图层包含合并导入项"
+    },
     "text": {
       "title": "文字"
     }
@@ -1506,6 +1512,19 @@
     "ai_model_dir_placeholder": "选择 AI 模型目录"
   },
   "composite": {
+    "external": {
+      "choose": "链接合成…",
+      "unlink": "解除链接",
+      "invalid": "外部合成链接无效",
+      "unlinked": "外部合成",
+      "title": "外部合成",
+      "save_first": "请先保存当前工程，再添加外部合成链接。",
+      "no_outputs": "该工程没有合成输出。",
+      "output": "合成输出",
+      "pin": "固定到当前修订",
+      "follow": "跟随最新修订",
+      "version": "版本策略"
+    },
     "empty_state": {
       "title": "暂无合成片段",
       "hint": "请创建或打开一个合成片段",
@@ -1533,6 +1552,7 @@
       "s_label": "s"
     },
     "render_output": {
+      "sequence_audio_note": "图片序列只输出图像帧。如需同时输出音频，请选择视频文件。",
       "title": "渲染输出",
       "render_btn": "渲染输出",
       "mode_image": "图片模式",
@@ -2911,6 +2931,18 @@
     }
   },
   "keyframes": {
+    "marker_add": "添加合成标记…",
+    "marker_rename": "重命名标记…",
+    "marker_duration": "标记持续时间（帧）…",
+    "marker_delete": "删除标记",
+    "layer_split": "在播放头处拆分",
+    "layer_slip": "滑移素材…",
+    "layer_slip_frames": "偏移量（合成帧）",
+    "layer_stretch": "伸缩时长…",
+    "layer_stretch_frames": "时长（帧）",
+    "marker_name": "名称",
+    "ruler_frames": "帧数",
+    "ruler_timecode": "时间码",
     "add_kf": "在当前帧添加关键帧 (Ctrl/Cmd+K)",
     "center_playhead": "播放头居中",
     "col_name": "名称",
@@ -2978,6 +3010,10 @@
     "layer_duplicate": "复制图层",
     "layer_prepare_transform": "启用图层变换",
     "layer_add_effect": "添加效果",
+    "layer_audio": "音频",
+    "layer_audio_mute": "静音",
+    "layer_audio_solo": "独奏",
+    "layer_audio_gain": "增益（dB）",
     "layer_remove_effect": "移除效果",
     "layer_label_color": "标签颜色…",
     "layer_blend": "混合模式",

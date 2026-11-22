@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from src.features.composite.core.comp_audio import (
-    AudioStreamInfo, LayerAudio, LayerAudioTiming, build_audio_plan,
+    AudioStreamInfo, LayerAudio, LayerAudioTiming, build_audio_plan, sample_boundary,
 )
 from src.features.composite.core.comp_audio_mix import (
     AUDIO_STATE_MISSING_MEDIA, AUDIO_STATE_NO_STREAM, AUDIO_STATE_OK,
@@ -108,6 +108,45 @@ def test_export_range_offsets_segment_placement():
     pcm[0] = 1.0
     mix_segment(buffer, segment, pcm, 12, FPS, RATE)
     assert buffer[0, 0] == pytest.approx(1.0)
+
+
+def test_export_start_inside_the_layer_offsets_the_decoded_pcm():
+    segment = _segment(in_frame=0, out_frame=2)
+    pcm = np.zeros(segment.sample_count, dtype=np.float32)
+    pcm[100] = 0.5
+    pcm[2100] = 1.0
+    buffer = np.zeros((2000, 2), dtype=np.float32)
+    mix_segment(buffer, segment, pcm, 1, FPS, RATE)
+    assert np.flatnonzero(buffer[:, 0]).tolist() == [100]
+    assert buffer[100, 0] == 1.0
+
+
+def test_mix_uses_output_rate_and_subtracts_absolute_ntsc_boundaries():
+    ntsc = Fraction(30_000, 1001)
+    timing = LayerAudioTiming("l1", LayerAudio("a"), 2, 3)
+    stream = AudioStreamInfo("a", 0, 44_100, 2)
+    plan = build_audio_plan([timing], fps=ntsc, sample_rate=RATE, streams={("a", 0): stream})
+    expected_start = sample_boundary(2, ntsc, RATE) - sample_boundary(1, ntsc, RATE)
+    expected_end = sample_boundary(4, ntsc, RATE) - sample_boundary(1, ntsc, RATE)
+    pcm = np.zeros(expected_end - expected_start, dtype=np.float32)
+    pcm[0] = pcm[-1] = 1.0
+    mix, state = mixdown(plan, {"l1:a#0": pcm}, AudioExportRange(1, 5), fps=ntsc)
+    assert state == AUDIO_STATE_OK
+    assert expected_start == 1602
+    assert np.flatnonzero(mix[:, 0]).tolist() == [expected_start, expected_end - 1]
+
+
+def test_out_of_range_segment_needs_no_decode_and_mono_mix_is_supported():
+    timing = LayerAudioTiming("l1", LayerAudio("a"), 0, 0)
+    plan = build_audio_plan([timing], fps=FPS, sample_rate=RATE, streams=_streams(("a", 0)))
+    mix, state = mixdown(plan, {}, AudioExportRange(1, 2), fps=FPS)
+    assert state == AUDIO_STATE_SILENT
+    assert not mix.any()
+    pcm = np.full((2000, 2), (0.25, 0.75), dtype=np.float32)
+    mix, state = mixdown(plan, {"l1:a#0": pcm}, AudioExportRange(0, 0), fps=FPS, channels=1)
+    assert state == AUDIO_STATE_OK
+    assert mix.shape == (2000, 1)
+    np.testing.assert_array_equal(mix[:, 0], 0.5)
 
 
 def test_mixdown_states():
