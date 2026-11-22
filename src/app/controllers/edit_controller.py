@@ -2713,9 +2713,20 @@ class EditControllerMixin:
         panel = getattr(self, 'audio_mixer_panel', None)
         if panel is None or timeline is None:
             return
+        routing_dialog = getattr(self, "_routing_dialog", None)
+        baseline = getattr(self, "_routing_dialog_baseline", None) or {}
+        if routing_dialog is not None and baseline.get("timeline_id") == timeline.timeline_id:
+            route_track = timeline.get_track_by_id(routing_dialog._track_id)
+            if route_track is not None:
+                routing_dialog.refresh_channel_layout(
+                    route_track.track_id, route_track.bus_layout if route_track.is_bus else route_track.audio_layout)
+                routing_dialog.refresh_channel_layout(None, getattr(timeline, "master_audio_layout", ""))
         vca_dialog = getattr(self, "_mixer_vca_dialog", None)
         if vca_dialog is not None and vca_dialog.isVisible():
             vca_dialog.set_sequence(timeline)
+        sync_monitor = getattr(self, "_sync_mixer_control_room", None)
+        if callable(sync_monitor):
+            sync_monitor(timeline)
         audio_tracks = getattr(timeline, 'audio_tracks', ())
         tracks = []
         for idx, track in enumerate(audio_tracks, start=1):
@@ -2737,6 +2748,8 @@ class EditControllerMixin:
                 "strip_eq": getattr(track, 'strip_eq', None),
                 # W26: FX 机架效果器链（None=未使用）。EQ/Dynamics/FX 列表效果器都存这里。
                 "effect_chain": getattr(track, 'effect_chain', None),
+                "fx_layout": (getattr(track, "bus_layout", "") if getattr(track, "is_bus", False)
+                              else getattr(track, "audio_layout", "")),
                 # CW-A1: 空间声像器（空 dict=未使用）
                 "panner": getattr(track, 'panner', None),
                 # W16: 轨道颜色
@@ -2759,6 +2772,8 @@ class EditControllerMixin:
                 panel.set_master_strip_state(
                     getattr(timeline, 'master_strip_eq', None),
                     getattr(timeline, 'master_effect_chain', None))
+            if hasattr(panel, "set_master_effect_processing_layout"):
+                panel.set_master_effect_processing_layout(getattr(timeline, "master_audio_layout", ""))
             mgr = self._get_mixer_audio_manager()
             # AM-05: 引擎同步的真相源现在是 edit_page._sync_audio_tracks_from_timeline
             # （它已同步 master/automation/routing/EQ/FX 到引擎）。此处的引擎同步是
@@ -2831,6 +2846,9 @@ class EditControllerMixin:
 
     def _on_audio_mixer_timeline_display_changed(self, _timeline: Any) -> None:
         """Initial project loads and timeline switches also refresh the mixer."""
+        reference_dialog = getattr(self, "_mixer_reference_dialog", None)
+        if reference_dialog is not None:
+            reference_dialog.sync_context()
         sync_adr = getattr(self, "_sync_adr_session_timeline", None)
         if callable(sync_adr) and getattr(self, "_adr_panel_wired", False):
             sync_adr(_timeline)
@@ -2853,6 +2871,9 @@ class EditControllerMixin:
             vca_dialog = getattr(self, "_mixer_vca_dialog", None)
             if vca_dialog is not None:
                 vca_dialog.set_sequence(None)
+            sync_monitor = getattr(self, "_sync_mixer_control_room", None)
+            if callable(sync_monitor):
+                sync_monitor(None)
         # 混音器录音工作流：轨集/时间线变化后重算 patch、arm 与录制状态。
         refresh = getattr(self, "_refresh_mixer_recording_controls", None)
         if callable(refresh):
@@ -3704,9 +3725,29 @@ class EditControllerMixin:
         if panel is not None and not (shared_input is not None and from_mixer_timeline):
             mgr.on_level = panel.set_input_level
             mgr.on_state_changed = panel.set_recording_state
-            if settings.get('monitor') and panel.begin_monitor(
-                    config.sample_rate, config.channels):
-                mgr.on_monitor_block = panel.monitor_write_block()
+            if settings.get('monitor'):
+                if getattr(self, "_adr_pass", None) is not None:
+                    audio_manager = self._get_mixer_audio_manager()
+                    if (audio_manager is not None and getattr(edit_page, "_audio_active", False)
+                            and audio_manager.control_room_sample_rate() == config.sample_rate):
+                        from src.features.edit.core.monitor_service import ControlRoomInput
+
+                        capture = ControlRoomInput(config.sample_rate, config.channels)
+                        audio_manager.control_room_return = capture
+                        mgr.on_monitor_block = capture.push
+                        self._control_room_adr_return = (mgr, capture)
+
+                        def monitor_recording_state(state: str) -> None:
+                            panel.set_recording_state(state)
+                            if state in ("failed", "idle"):
+                                self._release_control_room_adr_return(mgr)
+
+                        mgr.on_state_changed = monitor_recording_state
+                    else:
+                        self._show_adr_message(I18N.tr(
+                            "mixer.monitor.adr_unavailable", "The ADR monitor return needs an active programme output at the capture sample rate."))
+                elif panel.begin_monitor(config.sample_rate, config.channels):
+                    mgr.on_monitor_block = panel.monitor_write_block()
         if from_mixer_timeline:
             if not hasattr(self, "_mixer_timeline_recorders"):
                 self._mixer_timeline_recorders = {}
@@ -3744,6 +3785,9 @@ class EditControllerMixin:
                 mgr.on_recording_progress = lambda seconds, peak: view.update_recording_preview(
                     track_id, generation, seconds, peak)
         if not mgr.start_recording(in_point_frame=in_point_frame):
+            release_monitor = getattr(self, "_release_control_room_adr_return", None)
+            if callable(release_monitor):
+                release_monitor(mgr)
             if from_mixer_timeline:
                 self._set_mixer_timeline_recording_state(
                     track_id, mgr, "failed", mirror_adr=shared_input is None)
@@ -3800,6 +3844,9 @@ class EditControllerMixin:
         if mgr is None:
             return
         mgr.on_monitor_block = None
+        release_monitor = getattr(self, "_release_control_room_adr_return", None)
+        if callable(release_monitor):
+            release_monitor(mgr)
         panel = self._adr_panel()
         if panel is not None and track_id not in getattr(self, "_mixer_armed_inputs", {}):
             panel.end_monitor()
@@ -4701,6 +4748,8 @@ class EditControllerMixin:
         不进命令栈，参数变化时 DSP 系数立即重算。
         MX-03: track_id == "-1"（MASTER_TRACK_ID）走 Master 条带入口。
         """
+        if not EditControllerMixin._mixer_rack_change_allowed(self, track_id, chain):
+            return
         mgr = self._get_mixer_audio_manager()
         if track_id == "-1":
             if mgr is not None and hasattr(mgr, 'set_master_strip_eq'):
@@ -4721,6 +4770,9 @@ class EditControllerMixin:
         同时更新 AudioPlaybackManager 做实时听感（与命令栈解耦）。
         MX-03: track_id == "-1"（MASTER_TRACK_ID）提交 Master 版命令。
         """
+        if not EditControllerMixin._mixer_rack_change_allowed(self, track_id, chain):
+            self._sync_audio_mixer_from_current_timeline()
+            return
         # 实时听感
         mgr = self._get_mixer_audio_manager()
         if track_id == "-1":
@@ -4838,7 +4890,16 @@ class EditControllerMixin:
             bus_tracks=bus_tracks,
             parent=tview.window() if isinstance(tview, QWidget) else None,
             routing_snapshot=routing_snapshot,
+            channel_layouts=(
+                str(getattr(track, "bus_layout", "stereo") if track.is_bus
+                    else getattr(track, "audio_layout", "")),
+                str(getattr(sequence, "master_audio_layout", "")),
+                bool(track.is_bus),
+            ),
         )
+        dialog.layout_changed.connect(
+            lambda target, name: self._on_mixer_layout_changed(
+                dialog, sequence.timeline_id, target, name))
         dialog.routing_committed.connect(self._on_mixer_routing_committed)
         # E18: 拖动期实时听感预览（此前 routing_preview 全仓无接收者）。
         # 关闭对话框时把引擎恢复到最后一次提交（无提交则恢复打开前原路由）。
@@ -4859,6 +4920,31 @@ class EditControllerMixin:
         dialog.finished.connect(self._on_mixer_routing_dialog_finished)
         self._routing_dialog = dialog
         dialog.show()
+
+    def _on_mixer_layout_changed(self, dialog: QWidget, timeline_id: str,
+                                 target: str | None, name: str) -> None:
+        from src.features.edit.core.commands import SetMixLayoutCommand
+
+        view = self._edit_timeline_view()
+        sequence = self._mixer_routing_sequence(view)
+        if sequence is None or sequence.timeline_id != timeline_id:
+            return
+        try:
+            view.execute_command(SetMixLayoutCommand.create(target, name))
+            self._sync_audio_mixer_from_current_timeline()
+        except ValueError as exc:
+            status = getattr(self, "status_bar", None)
+            if status is not None:
+                status.showMessage(str(exc), 8000)
+        updated = self._mixer_routing_sequence(view)
+        if updated is None or updated.timeline_id != timeline_id:
+            return
+        if target is None:
+            dialog.refresh_channel_layout(target, updated.master_audio_layout)
+        else:
+            track = updated.get_track_by_id(target)
+            if track is not None:
+                dialog.refresh_channel_layout(target, track.bus_layout if track.is_bus else track.audio_layout)
 
     def _build_routing_validation_graph(self, sequence, track_id: str,
                                         output_bus_id, sends) -> "tuple[list, dict]":
@@ -5181,6 +5267,231 @@ class EditControllerMixin:
         dialog.raise_()
         dialog.activateWindow()
 
+    def _mixer_reference_context(self) -> tuple[Any, Any, Any]:
+        project = getattr(self, "_current_edit_project", None)
+        sequence = getattr(getattr(self, "edit_page", None), "_current_timeline", None)
+        manager = self._get_mixer_audio_manager()
+        return project, sequence, getattr(manager, "reference_mix", None)
+
+    def _commit_mixer_reference(self, sequence_id: str, reference_id: str,
+                                reference: Any) -> bool:
+        from src.features.edit.core.commands import SetReferenceMixCommand
+
+        view = self._edit_timeline_view()
+        sequence = view.get_timeline() if view is not None else None
+        if sequence is None or sequence.timeline_id != sequence_id or view.has_provisional_timeline():
+            return False
+        project = getattr(self, "_current_edit_project", None)
+        if reference is not None and (project is None or reference.asset_id not in project.assets):
+            return False
+        view.execute_command(SetReferenceMixCommand.create(sequence_id, reference_id, reference))
+        updated = view.get_timeline()
+        stored = next((item for item in updated.reference_mixes
+                       if getattr(item, "version_id", None) == reference_id), None)
+        return stored == reference
+
+    def _on_mixer_show_reference_mix(self) -> None:
+        from src.features.mixer.ui.reference_mix_dialog import ReferenceMixDialog
+
+        project, sequence, _monitor = self._mixer_reference_context()
+        if project is None or sequence is None:
+            return
+        page = self.edit_page
+        if page._ensure_audio_manager() is None:
+            return
+        dialog = getattr(self, "_mixer_reference_dialog", None)
+        if dialog is None:
+            dialog = ReferenceMixDialog(self._mixer_reference_context, self._commit_mixer_reference,
+                                        page.window())
+            self._mixer_reference_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_mixer_show_control_room(self) -> None:
+        from src.features.mixer.ui.control_room import ControlRoomDialog
+
+        page = getattr(self, "edit_page", None)
+        timeline = getattr(page, "_current_timeline", None)
+        if timeline is None:
+            return
+        manager = page._ensure_audio_manager()
+        if manager is None:
+            return
+        dialog = getattr(self, "_mixer_control_room_dialog", None)
+        if dialog is None:
+            dialog = ControlRoomDialog(page.window())
+            dialog.state_requested.connect(self._on_mixer_control_room_state)
+            dialog.patch_requested.connect(self._on_mixer_control_room_patch)
+            self._mixer_control_room_dialog = dialog
+            manager.sample_rate_changed.connect(self._on_mixer_control_room_rate_changed)
+        self._sync_mixer_control_room(timeline, refresh_devices=True)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _sync_mixer_control_room(self, timeline: Any, *, refresh_devices: bool = False) -> None:
+        from dataclasses import replace
+        from src.app.controllers.mixer_recording_controller import _input_patches
+
+        dialog = getattr(self, "_mixer_control_room_dialog", None)
+        manager = self._get_mixer_audio_manager()
+        if dialog is None or manager is None:
+            return
+        project = getattr(self, "_current_edit_project", None)
+        scope = (getattr(project, "project_id", None), getattr(timeline, "timeline_id", None))
+        state = manager.control_room_state
+        patches = _input_patches(timeline)
+        active = getattr(self, "_control_room_capture", None)
+        if scope != getattr(self, "_control_room_scope", None):
+            self._control_room_scope = scope
+            self._release_control_room_capture()
+            dialog.status.clear()
+            state = replace(state, source_tap="program", selected_listen_ids=())
+        elif active is not None and patches.get(active[1]) != active[2]:
+            self._release_control_room_capture()
+            state = replace(state, selected_listen_ids=())
+            dialog.status.setText(I18N.tr("mixer.monitor.input_changed", "Input patch changed. Select it again to listen."))
+        elif state.source_tap in ("pfl", "afl") and timeline is not None:
+            track_ids = {track.track_id for track in timeline.audio_tracks}
+            state = replace(state, selected_listen_ids=tuple(
+                track_id for track_id in state.selected_listen_ids if track_id in track_ids))
+        manager.set_control_room(state, manager.control_room_patch)
+        dialog.set_session(timeline, state, manager.control_room_patch,
+                           {track_id: patch.label() for track_id, patch in patches.items()},
+                           refresh_devices=refresh_devices)
+        if timeline is None:
+            dialog.hide()
+
+    def _release_control_room_capture(self) -> None:
+        active = getattr(self, "_control_room_capture", None)
+        self._control_room_capture = None
+        manager = self._get_mixer_audio_manager()
+        if manager is not None:
+            manager.set_control_room_input(None)
+        if active is None:
+            return
+        source, _track_id, patch = active
+        source.unsubscribe("control_room")
+        armed = getattr(self, "_mixer_armed_inputs", {})
+        sources = getattr(self, "_mixer_capture_inputs", {})
+        if not any(item.device_id == patch.device_id for item in armed.values()):
+            if sources.get(patch.device_id) is source:
+                sources.pop(patch.device_id)
+
+    def _release_control_room_adr_return(self, owner: Any) -> None:
+        active = getattr(self, "_control_room_adr_return", None)
+        if active is None or active[0] is not owner:
+            return
+        self._control_room_adr_return = None
+        manager = self._get_mixer_audio_manager()
+        if manager is not None and manager.control_room_return is active[1]:
+            manager.control_room_return = None
+
+    def _on_mixer_control_room_state(self, state: Any) -> None:
+        from src.app.controllers.mixer_recording_controller import _input_patches
+        from src.features.edit.core.monitor_service import ControlRoomInput
+        from src.features.edit.core.shared_recording_input import SharedRecordingInput
+
+        manager = self._get_mixer_audio_manager()
+        if manager is None:
+            return
+        manager.set_control_room(state, manager.control_room_patch)
+        timeline = getattr(getattr(self, "edit_page", None), "_current_timeline", None)
+        track_id = state.selected_listen_ids[0] if state.source_tap == "input" and state.selected_listen_ids else ""
+        patch = _input_patches(timeline).get(track_id)
+        active = getattr(self, "_control_room_capture", None)
+        if active is not None and (track_id, patch) == active[1:]:
+            return
+        self._release_control_room_capture()
+        if patch is None:
+            return
+        counts = {identity: count for identity, _name, count in SharedRecordingInput.available_devices()}
+        if counts.get(patch.device_id, 0) <= max(patch.channels):
+            self._on_mixer_control_room_input_failed(I18N.tr("mixer.record.input_unavailable", "The selected input or channel is unavailable."))
+            return
+        sources = getattr(self, "_mixer_capture_inputs", None)
+        if sources is None:
+            self._mixer_capture_inputs = sources = {}
+        source = sources.get(patch.device_id)
+        rate = manager.control_room_sample_rate()
+        if source is None:
+            source = SharedRecordingInput(patch.device_id, counts[patch.device_id])
+        if source.sample_rate != rate:
+            self._on_mixer_control_room_input_failed(I18N.tr("mixer.monitor.input_rate", "The input and output sample rates must match."))
+            return
+        capture = ControlRoomInput(rate, len(patch.channels))
+        def receive_monitor_pcm(pcm: Any) -> None:
+            manager.submit_control_room_input(capture, pcm)
+
+        try:
+            source.subscribe("control_room", patch.channels, receive_monitor_pcm,
+                             self._on_mixer_control_room_input_failed)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._on_mixer_control_room_input_failed(str(exc))
+            return
+        sources[patch.device_id] = source
+        self._control_room_capture = (source, track_id, patch)
+        manager.set_control_room_input(capture)
+        self._mixer_control_room_dialog.status.clear()
+
+    def _on_mixer_control_room_input_failed(self, message: str) -> None:
+        from dataclasses import replace
+
+        self._release_control_room_capture()
+        manager = self._get_mixer_audio_manager()
+        if manager is not None and manager.control_room_state.source_tap == "input":
+            manager.set_control_room(replace(manager.control_room_state, selected_listen_ids=()),
+                                     manager.control_room_patch)
+            self._sync_mixer_control_room(getattr(getattr(self, "edit_page", None), "_current_timeline", None))
+        self._mixer_control_room_dialog.status.setText(message)
+
+    def _on_mixer_control_room_rate_changed(self, rate: float) -> None:
+        active = getattr(self, "_control_room_capture", None)
+        if active is not None and active[0].sample_rate != int(rate):
+            self._on_mixer_control_room_input_failed(I18N.tr(
+                "mixer.monitor.input_rate", "The input and output sample rates must match."))
+
+    def _on_mixer_control_room_patch(self, patch: Any) -> None:
+        from dataclasses import replace
+        from PyQt6.QtMultimedia import QMediaDevices
+
+        manager = self._get_mixer_audio_manager()
+        if manager is None:
+            return
+        dialog = self._mixer_control_room_dialog
+        if patch.channels:
+            device = next((item for item in QMediaDevices.audioOutputs()
+                           if bytes(item.id()) == patch.device_id), None) if patch.device_id else (
+                               QMediaDevices.defaultAudioOutput())
+            if device is None or device.isNull() or device.maximumChannelCount() < patch.device_channels:
+                dialog.status.setText(I18N.tr("mixer.monitor.output_failed", "Control room output is unavailable. Check the output device and channel patch."))
+                return
+            # Numbered patches and calibrated trims belong to this device.
+            # Pin a selected system-default device before remembering the map.
+            patch = replace(patch, device_id=bytes(device.id()))
+        try:
+            manager.set_control_room(manager.control_room_state, patch)
+        except ValueError:
+            dialog.status.setText(I18N.tr("mixer.monitor.stop_for_patch", "Stop playback before applying a new output patch."))
+            return
+        patch.save_local()
+        self._sync_mixer_control_room(getattr(getattr(self, "edit_page", None), "_current_timeline", None),
+                                      refresh_devices=True)
+        dialog.status.setText(I18N.tr("mixer.monitor.applied", "Output patch applied."))
+
+    def _on_mixer_control_room_output_failed(self, reason: str) -> None:
+        if reason == "control_room_input_rate":
+            message = reason.removeprefix("speaker_layout:") if reason.startswith("speaker_layout:") else I18N.tr("mixer.monitor.input_rate", "The input and output sample rates must match.")
+        else:
+            message = reason.removeprefix("speaker_layout:") if reason.startswith("speaker_layout:") else I18N.tr("mixer.monitor.output_failed", "Control room output is unavailable. Check the output device and channel patch.")
+        dialog = getattr(self, "_mixer_control_room_dialog", None)
+        if dialog is not None:
+            dialog.status.setText(message)
+        status = getattr(self, "status_bar", None)
+        if status is not None:
+            status.showMessage(message, 8000)
+
     def _mixer_health_snapshot(self) -> Any:
         """Use the existing engine only; opening diagnostics never creates one."""
         manager = self._get_mixer_audio_manager()
@@ -5299,6 +5610,22 @@ class EditControllerMixin:
         except (ValueError, RuntimeError) as exc:
             self.status_bar.showMessage(str(exc), 4000)
         panel.sync_clip(view.get_timeline())
+
+    def _mixer_rack_change_allowed(self, track_id: str, chain: Any) -> bool:
+        from src.features.edit.core.native_mix_layout import validate_rack_edit
+
+        view = getattr(getattr(self, "timeline_panel", None), "timeline_view", None)
+        timeline = EditControllerMixin._mixer_routing_sequence(view)
+        if timeline is None:
+            return True
+        try:
+            validate_rack_edit(timeline, None if track_id == "-1" else track_id, chain)
+        except ValueError as exc:
+            status = getattr(self, "status_bar", None)
+            if status is not None:
+                status.showMessage(str(exc), 8000)
+            return False
+        return True
 
     def _on_mixer_effects_preview(self, track_id: str, chain) -> None:
         """W26: FX 机架拖动期：实时更新 AudioPlaybackManager 的效果器链（听感）。

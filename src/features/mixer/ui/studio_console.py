@@ -350,6 +350,8 @@ class StudioAudioMixerPanel(AudioMixerPanel):
     output_meter_reset = pyqtSignal()
     vca_groups_requested = pyqtSignal()
     health_requested = pyqtSignal()
+    control_room_requested = pyqtSignal()
+    reference_mix_requested = pyqtSignal()
     track_solo_safe_requested = pyqtSignal(str, bool)
     recover_recording_requested = pyqtSignal()
 
@@ -454,6 +456,8 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         menu.addSeparator()
         menu.addAction(I18N.tr("mixer.vca.title", "VCA groups"), self.vca_groups_requested.emit)
         menu.addAction(I18N.tr("mixer.health.title", "Audio engine health"), self.health_requested.emit)
+        menu.addAction(I18N.tr("mixer.monitor.title", "Control room"), self.control_room_requested.emit)
+        menu.addAction(I18N.tr("mixer.reference.title", "Reference Mix A/B"), self.reference_mix_requested.emit)
         menu.addAction(I18N.tr("mixer.recovery.title", "Recover interrupted recording…"), self.recover_recording_requested.emit)
         reset = menu.addAction(I18N.tr("mixer.console.reset_view", "Reset channel view"))
         reset.triggered.connect(self.reset_channel_view)

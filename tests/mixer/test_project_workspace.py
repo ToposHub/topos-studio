@@ -323,7 +323,7 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     assert editor._panel is not None
     qtbot.waitUntil(lambda: editor._panel.peak_val_lbl.text() != "—", timeout=10000)
     # P1-6：噪声采集/降噪随真实 PCM 启用（预览态）；频谱修复笔仍待后端。
-    assert editor._panel.btn_denoise.isEnabled()
+    qtbot.waitUntil(editor._panel.btn_denoise.isEnabled, timeout=10000)
     qtbot.waitUntil(lambda: editor._panel.btn_tool_brush.isEnabled(), timeout=10000)
     menu_action = I18N.tr("dock.float", "Float")
     chosen_actions = []
@@ -2241,7 +2241,9 @@ def test_insert_menu_categorizes_effects_and_commits_to_the_channel(
         if use_master_context_menu:
             add_label = "+ " + I18N.tr("audio.fx.add", "Add Effect")
             menu = next(action.menu() for action in menu.actions() if action.text() == add_label)
-        categories = {action.text(): action.menu() for action in menu.actions()}
+        categories = {action.text(): action.menu() for action in menu.actions() if action.menu()}
+        (hosted,) = (action for action in menu.actions() if action.data() == "vst3_hosted")
+        assert hosted.isEnabled()
         titles = [I18N.tr(f"mixer.effects_browser.group.{key}", label) for key, label, _ in groups]
         assert list(categories) == titles
 
@@ -2377,3 +2379,23 @@ def test_edit_video_scroll_survives_mixer_round_trip(
         if pin_to_splitter:
             layout = view._layout_engine
             assert layout.track_rect("video-track").bottom() == pytest.approx(layout.splitter_rect().top())
+
+
+def test_layout_selectors_commit_track_and_master_through_timeline_history(
+    project_host: ProjectHost,
+) -> None:
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    host._on_mixer_show_routing("audio-track")
+    dialog = host._routing_dialog
+    picker = dialog._layout_selectors["audio-track"]
+    picker.activated.emit(picker.findData("5.1"))
+    master = dialog._layout_selectors[None]
+    master.activated.emit(master.findData("5.1"))
+    assert view.get_timeline().get_track_by_id("audio-track").audio_layout == "5.1"
+    assert view.get_timeline().master_audio_layout == "5.1"
+    view.undo()
+    assert view.get_timeline().master_audio_layout == ""
+    view.undo()
+    assert view.get_timeline().get_track_by_id("audio-track").audio_layout == ""
+    dialog.close()

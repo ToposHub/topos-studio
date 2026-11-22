@@ -22,6 +22,8 @@ from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
+from src.features.edit.core.realtime_playback.audio_ring_buffer import AudioRingBuffer
+
 logger = logging.getLogger(__name__)
 
 MONITOR_SESSION_STATE_VERSION = 1
@@ -31,6 +33,94 @@ MONITOR_SOURCES = ("program", "pfl", "afl", "sip", "input")
 
 DEFAULT_DIM_DB = -20.0
 DEFAULT_RAMP_MS = 5.0
+
+
+@dataclass(frozen=True)
+class ControlRoomPatch:
+    """Map logical speaker slots to zero based channels of a local device."""
+
+    device_id: bytes = b""
+    channels: Tuple[int, ...] = ()
+    device_channels: int = 2
+    trim_db: Tuple[float, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.device_channels) is not int or not 1 <= self.device_channels <= 32:
+            raise ValueError("output requires between 1 and 32 device channels")
+        if self.channels and len(self.channels) not in (1, 2, 4, 6, 8):
+            raise ValueError("speaker patch requires 1, 2, 4, 6 or 8 channels")
+        if len(set(self.channels)) != len(self.channels) or any(
+            type(channel) is not int or channel < 0 or channel >= self.device_channels
+            for channel in self.channels
+        ):
+            raise ValueError("output channel numbers must be unique and in range")
+        if self.trim_db and (len(self.trim_db) != len(self.channels) or any(
+            not math.isfinite(value) or not -24.0 <= value <= 0.0
+            for value in self.trim_db
+        )):
+            raise ValueError("speaker trims require one value per speaker from -24 to 0 dB")
+
+    def apply(self, samples: np.ndarray) -> np.ndarray:
+        if not self.channels:
+            return samples
+        if samples.shape[0] != len(self.channels):
+            raise ValueError("monitor patch and rendered speaker count differ")
+        output = np.zeros((self.device_channels, samples.shape[1]), dtype=np.float32)
+        output[list(self.channels)] = samples
+        for channel, trim in zip(self.channels, self.trim_db):
+            if trim != 0.0:
+                output[channel] *= np.float32(10.0 ** (trim / 20.0))
+        return output
+
+    @classmethod
+    def load_local(cls) -> ControlRoomPatch:
+        from PyQt6.QtCore import QSettings
+
+        settings = QSettings("ToposColor", "ControlRoom")
+        data = settings.value("speaker_patch_v1")
+        if isinstance(data, dict):
+            try:
+                return cls(bytes.fromhex(data["device_id"]), tuple(data["channels"]),
+                           data["device_channels"], tuple(data["trim_db"]))
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Ignoring invalid local control room speaker patch")
+        return cls()
+
+    def save_local(self) -> None:
+        from PyQt6.QtCore import QSettings
+
+        QSettings("ToposColor", "ControlRoom").setValue("speaker_patch_v1", {
+            "device_id": self.device_id.hex(), "channels": list(self.channels),
+            "device_channels": self.device_channels, "trim_db": list(self.trim_db),
+        })
+
+
+class ControlRoomInput:
+    """Bounded listen-only sample queue from a shared Qt capture source."""
+
+    def __init__(self, sample_rate: int, channels: int) -> None:
+        self.sample_rate = sample_rate
+        self._ring = AudioRingBuffer(channels, max(256, sample_rate // 5))
+
+    def push(self, pcm: np.ndarray) -> None:
+        self._ring.write(pcm[:, -self._ring.capacity:])
+
+    @property
+    def available_samples(self) -> int:
+        return self._ring.filled
+
+    def read(self, samples: int, sample_rate: int) -> Optional[np.ndarray]:
+        if sample_rate != self.sample_rate:
+            return None
+        pcm = self._ring.read(samples)
+        if pcm.shape[-1] == samples:
+            return pcm
+        result = np.zeros((pcm.shape[0], samples), dtype=np.float32)
+        result[:, :pcm.shape[-1]] = pcm
+        return result
+
+    def clear(self) -> None:
+        self._ring.clear()
 
 
 @dataclass(frozen=True)
@@ -268,6 +358,28 @@ class MonitorService:
             elif target != 1.0:
                 out = out * np.float32(target)
         return np.ascontiguousarray(out, dtype=np.float32)
+
+
+def render_speaker_block(
+    service: MonitorService, state: MonitorSessionState, patch: ControlRoomPatch,
+    device_channels: int, taps: Mapping[str, np.ndarray],
+) -> np.ndarray:
+    """Adapt canonical tap layouts to the local speaker patch and apply controls."""
+    from src.features.edit.core.channel_layout import ChannelLayout, route_pcm
+
+    layout = ChannelLayout.from_channel_count(len(patch.channels) or device_channels)
+    if state.mono and layout.channel_count > 2:
+        # Mono goes through the layout's explicit fold, including its LFE policy.
+        target = ChannelLayout.STEREO if layout == ChannelLayout.QUAD else layout
+        routed = {key: route_pcm(route_pcm(route_pcm(block, ChannelLayout.MONO), target), layout)
+                  for key, block in taps.items()}
+        state = replace(state, mono=False)
+    else:
+        routed = {key: route_pcm(block, layout) for key, block in taps.items()}
+        if layout.channel_count == 1:
+            state = replace(state, mono=False)
+    service.set_state(state)
+    return patch.apply(service.render_block(routed))
 
 
 __all__ = [

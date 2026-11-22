@@ -291,6 +291,7 @@ class MixerRecordingControllerMixin:
             return
         if not hasattr(self, "_mixer_armed_inputs"):
             self._mixer_armed_inputs: dict[str, _InputPatch] = {}
+        if not hasattr(self, "_mixer_capture_inputs"):
             self._mixer_capture_inputs: dict[str, SharedRecordingInput] = {}
         if track_id in self._mixer_armed_inputs:
             return
@@ -326,7 +327,10 @@ class MixerRecordingControllerMixin:
         source = self._mixer_capture_inputs.get(patch.device_id)
         if source is not None:
             source.unmonitor(track_id)
-            if all(item.device_id != patch.device_id for item in armed.values()):
+            listening = getattr(self, "_control_room_capture", None)
+            if (not listening or listening[0] is not source) and all(
+                item.device_id != patch.device_id for item in armed.values()
+            ):
                 self._mixer_capture_inputs.pop(patch.device_id, None)
 
     def _clear_mixer_armed_inputs(self) -> None:

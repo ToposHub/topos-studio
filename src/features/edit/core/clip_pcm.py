@@ -31,6 +31,8 @@ from itertools import chain
 from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 import numpy as np
+
+from src.shared.media.audio_frame_pcm import audio_frame_array
 from PyQt6.QtCore import QCoreApplication, QObject, QThread, pyqtSignal
 
 from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame, resolve_audio_source
@@ -352,7 +354,7 @@ def _decode_window_frames(
 
 def _pcm_frame_to_float(frame: av.AudioFrame) -> np.ndarray:
     """Unpack a decoded frame, including left-aligned 24-bit samples in s32."""
-    data = frame.to_ndarray()
+    data = audio_frame_array(frame)
     channels = len(frame.layout.channels)
     if not frame.format.is_planar:
         data = data.reshape(-1, channels).T

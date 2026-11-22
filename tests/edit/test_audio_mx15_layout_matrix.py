@@ -38,12 +38,10 @@ class TestMx15CapabilityMatrix:
             "source_decode", "clip_stage", "track_dsp", "bus_master",
             "export"}
 
-    def test_track_dsp_is_stereo_domain(self):
-        """轨链 DSP 域=立体声；5.1/7.1/高度不支持且有原因。"""
+    def test_track_dsp_supports_native_beds(self):
         assert layout_supported("track_dsp", ChannelLayout.STEREO)
-        assert not layout_supported("track_dsp", ChannelLayout.SURROUND_5_1)
-        reason = unsupported_reason("track_dsp", ChannelLayout.SURROUND_5_1)
-        assert reason and "立体声" in reason
+        assert layout_supported("track_dsp", ChannelLayout.SURROUND_5_1)
+        assert unsupported_reason("track_dsp", ChannelLayout.QUAD)
 
     def test_export_supports_surround_delivery(self):
         for layout in (ChannelLayout.STEREO, ChannelLayout.SURROUND_5_1,

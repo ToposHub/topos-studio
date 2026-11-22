@@ -194,6 +194,12 @@ def collect_chain_diagnostics(chain: Any) -> list[dict[str, Any]]:
     for e in effects or ():
         etype = getattr(e, "effect_type", "")
         status, reason = effect_type_support(etype)
+        if etype == "vst3_hosted" and getattr(e, "enabled", True):
+            from src.features.edit.core.hosted_vst3 import params_issue
+
+            params = getattr(e, "params", {})
+            if params.get("enabled", True) and (issue := params_issue(params)):
+                status, reason = "unsupported", issue
         v = int(getattr(e, "algorithm_version", 0) or 0)
         bucket = algorithm_compat_bucket(v, effect_type=etype)
         if bucket == "future":

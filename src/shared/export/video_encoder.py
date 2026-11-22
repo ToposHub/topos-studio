@@ -2443,7 +2443,13 @@ class FFmpegVideoEncoder:
             end = min(offset + block_size, total_samples)
             block = np.ascontiguousarray(samples[:, offset:end])
 
-            av_frame = av.AudioFrame.from_ndarray(block, format='fltp', layout=layout)
+            # Packed float keeps the 7.1 speaker order without depending on
+            # PyAV's eight-channel planar frame allocation.
+            if channels == 8:
+                block = np.ascontiguousarray(block.T).reshape(1, -1)
+                av_frame = av.AudioFrame.from_ndarray(block, format="flt", layout=layout)
+            else:
+                av_frame = av.AudioFrame.from_ndarray(block, format="fltp", layout=layout)
             av_frame.sample_rate = sample_rate
             av_frame.time_base = time_base
             av_frame.pts = round(self._audio_written_duration / time_base)

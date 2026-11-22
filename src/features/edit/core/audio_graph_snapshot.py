@@ -31,7 +31,7 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.audio_edit import steps_signature
 
-SOUND_SNAPSHOT_SCHEMA_VERSION = 2
+SOUND_SNAPSHOT_SCHEMA_VERSION = 3
 
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
@@ -108,6 +108,7 @@ class TrackNodeSnapshot:
     audio_transitions_signature: Tuple = ()
     bus_layout: str = "stereo"
     solo_safe: bool = False
+    audio_layout: str = ""
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ class MasterNodeSnapshot:
     # MX-03: Master 条带（EQ/FX 链）——edit_page 签名已含，快照超集补齐。
     strip_eq_signature: Optional[str] = None
     effect_chain_signature: Optional[str] = None
+    audio_layout: str = ""
 
 
 @dataclass(frozen=True)
@@ -181,10 +183,11 @@ class AudioGraphSnapshot:
                    t.effect_chain_signature, t.automation_signature, t.automation_mode,
                    t.automation_trim, t.stem_group, t.is_bus,
                    t.panner_signature, t.audio_transitions_signature,
-                   t.bus_layout, t.solo_safe) for t in self.tracks],
+                   t.bus_layout, t.solo_safe, t.audio_layout) for t in self.tracks],
             "m": (self.master.volume, self.master.muted,
                   self.master.automation_signature, self.master.automation_mode,
-                  self.master.strip_eq_signature, self.master.effect_chain_signature),
+                  self.master.strip_eq_signature, self.master.effect_chain_signature,
+                  self.master.audio_layout),
             # B01: VCA 组（gain/mute/成员）
             "v": self.vcas,
         }
@@ -389,12 +392,14 @@ def build_audio_graph_snapshot(
             bus_layout=str(getattr(track, "bus_layout", "stereo")
                            or "stereo"),
             solo_safe=bool(getattr(track, "solo_safe", False)),
+            audio_layout=str(getattr(track, "audio_layout", "")),
         ))
 
     # master 节点
     master = MasterNodeSnapshot(
         volume=float(getattr(sequence, "master_volume", 1.0)),
         muted=bool(getattr(sequence, "master_muted", False)),
+        audio_layout=str(getattr(sequence, "master_audio_layout", "")),
         automation_signature=_automation_signature(getattr(sequence, "master_automation", {})),
         automation_mode=str(getattr(sequence, "master_automation_mode", "off") or "off"),
         strip_eq_signature=_strip_eq_signature(getattr(sequence, "master_strip_eq", None)),

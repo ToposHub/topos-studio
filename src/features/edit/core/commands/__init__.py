@@ -33,8 +33,10 @@ import logging
 from src.features.edit.core.timeline_v2 import TimelineSequence, ClipInstance
 
 from src.features.edit.core.adr_cues import SetAdrCuesCommand
+from src.features.edit.core.commands.mix_layout_command import SetMixLayoutCommand
 from src.features.edit.core.commands.routing_transaction import SetTrackRoutingCommand
 from src.features.edit.core.commands.vca_commands import SetVcaGroupCommand
+from src.features.edit.core.commands.reference_mix_commands import SetReferenceMixCommand
 from src.features.edit.core.audio_comp import FlattenAudioCompCommand
 from src.features.edit.core.dialogue_proposal import ApplyDialogueProposalCommand
 from src.features.edit.core.commands.clip_props_commands import SetDialogueGroupCommand
@@ -1203,7 +1205,9 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "RemoveBusCommand": RemoveBusCommand.from_dict,
     "SetTrackOutputBusCommand": SetTrackOutputBusCommand.from_dict,
     "SetTrackRoutingCommand": SetTrackRoutingCommand.from_dict,
+    "SetMixLayoutCommand": SetMixLayoutCommand.from_dict,
     "SetVcaGroupCommand": SetVcaGroupCommand.from_dict,
+    "SetReferenceMixCommand": SetReferenceMixCommand.from_dict,
     "FlattenAudioCompCommand": FlattenAudioCompCommand.from_dict,
     "ApplyDialogueProposalCommand": ApplyDialogueProposalCommand.from_dict,
     "AddSendCommand": AddSendCommand.from_dict,

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Collection, Optional, Dict, ClassVar, Literal
 from enum import Enum
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+from src.features.edit.core.reference_mix import ReferenceMixRecord, ReferenceMixRef, decode_reference_mix_record
 # R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
 from src.features.edit.core.fade_curve_spec import is_fade_curve
 from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
@@ -3676,6 +3678,8 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanParams
         _EFFECT_PARAM_REGISTRY["chorus_flanger"] = ChorusFlangerParams
         _EFFECT_PARAM_REGISTRY["phaser"] = PhaserParams
+        from src.features.edit.core.hosted_vst3 import EFFECT_TYPE, HostedVst3Params
+        _EFFECT_PARAM_REGISTRY[EFFECT_TYPE] = HostedVst3Params
     return _EFFECT_PARAM_REGISTRY
 
 
@@ -4908,6 +4912,7 @@ class EditTrack:
     # the end of the dataclass to preserve legacy positional construction of
     # EditTrack(track_id, name, track_type, index, ...).
     track_role: str = "standard"
+    audio_layout: str = ""  # Empty preserves the legacy track domain.
 
     def __post_init__(self) -> None:
         if not self.track_id:
@@ -5099,6 +5104,7 @@ class EditTrack:
             ),
             solo_safe=self.solo_safe if solo_safe is None else solo_safe,
             bus_layout=self.bus_layout if bus_layout is None else bus_layout,
+            audio_layout=self.audio_layout,
             is_bus=self.is_bus if is_bus is None else is_bus,
             output_bus_id=self.output_bus_id if output_bus_id is None else output_bus_id,
             sends=self.sends if sends is None else sends,
@@ -5416,7 +5422,7 @@ class EditTrack:
         return self._rebuild(caption_metadata=metadata)
 
     #: Bus 布局允许集（MX-15 能力矩阵：bus_routing 仅 stereo/5.1/7.1）。
-    _BUS_LAYOUT_ALLOWED = ("stereo", "5.1", "7.1")
+    _BUS_LAYOUT_ALLOWED = ("mono", "stereo", "5.1", "7.1")
 
     def bus_channel_layout(self) -> "ChannelLayout":
         """Bus 的声道布局（非法/未声明回退 stereo；仅 is_bus 有意义）。"""
@@ -5564,6 +5570,7 @@ class EditTrack:
             "solo_safe": self.solo_safe,
             "is_bus": self.is_bus,
             "bus_layout": self.bus_layout,
+            **({"audio_layout": self.audio_layout} if self.audio_layout else {}),
             "output_bus_id": self.output_bus_id,
             "sends": [s.to_dict() for s in self.sends],
             "stem_group": self.stem_group,
@@ -5640,6 +5647,7 @@ class EditTrack:
             solo_safe=bool(data.get("solo_safe", False)),
             is_bus=bool(data.get("is_bus", False)),
             bus_layout=str(data.get("bus_layout", "stereo") or "stereo"),
+            audio_layout=str(data.get("audio_layout") or ""),
             output_bus_id=data.get("output_bus_id"),
             sends=sends,
             stem_group=str(data.get("stem_group", "") or ""),
@@ -5654,7 +5662,7 @@ class EditTrack:
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
             "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
             "automation_mode", "automation_trim",
-            "automation_write_protected", "solo_safe", "is_bus", "bus_layout",
+            "automation_write_protected", "solo_safe", "is_bus", "bus_layout", "audio_layout",
             "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })
@@ -5743,6 +5751,8 @@ def validate_effect_params(effect_type: str, params: dict) -> tuple:
     except Exception:
         return dict(params or {}), [("__all__", "unparsable", "raw kept")]
     cleaned = cleaned_obj.to_dict()
+    if effect_type == "vst3_hosted":
+        cleaned = {**params, **cleaned}
     diags = []
     for key, raw in (params or {}).items():
         if key not in cleaned:
@@ -5995,7 +6005,9 @@ class TimelineSequence:
     # （TAEP §6.2）。直接调用 _rebuild / with_* 不会自动 bump，bump 只发生在
     # 提交边界，避免 preview/模拟产生虚假 revision 噪音。
     revision: int = 0
-    # R28/F-R09：未知字段保留（未来版本写入的序列级字段 roundtrip 不丢）
+    reference_mixes: tuple[ReferenceMixRecord, ...] = ()
+    master_audio_layout: str = ""  # Empty is the legacy mix domain.
+    # R28/F-R09:未知字段保留（未来版本写入的序列级字段 roundtrip 不丢）
     _extra_fields: Dict[str, Any] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -6003,8 +6015,8 @@ class TimelineSequence:
     _KNOWN_SEQUENCE_KEYS = frozenset({
         "timeline_id", "name", "fps", "width", "height", "sample_rate",
         "format_settings", "video_tracks", "audio_tracks", "subtitle_tracks",
-        "caption_graphics", "markers", "vcas", "range_start", "range_end",
-        "master_volume", "master_muted", "master_automation",
+        "caption_graphics", "markers", "vcas", "reference_mixes", "range_start", "range_end",
+        "master_volume", "master_muted", "master_automation", "master_audio_layout",
         "master_automation_mode", "master_strip_eq", "master_effect_chain",
         "revision", "audio_fx_schema_version",
     })
@@ -6330,10 +6342,12 @@ class TimelineSequence:
             caption_graphics_extra=dict(self.caption_graphics_extra if caption_graphics_extra is None else caption_graphics_extra),
             markers=self.markers if markers is None else markers,
             vcas=self.vcas,
+            reference_mixes=self.reference_mixes,
             range_start=self.range_start if range_start is ... else range_start,
             range_end=self.range_end if range_end is ... else range_end,
             master_volume=self.master_volume if master_volume is None else master_volume,
             master_muted=self.master_muted if master_muted is None else master_muted,
+            master_audio_layout=self.master_audio_layout,
             # AUD-19104：未显式更新时深拷贝——派生序列快照不再共享同一批
             # master KeyframeTrack 实例（可变），undo 前后快照互不影响。
             master_automation=(
@@ -6539,8 +6553,13 @@ class TimelineSequence:
             },
             "markers": [m.to_dict() for m in self.markers],
             "vcas": [g.to_dict() for g in self.vcas],
+            **({"reference_mixes": [
+                record.to_dict() if isinstance(record, ReferenceMixRef) else deepcopy(record)
+                for record in self.reference_mixes
+            ]} if self.reference_mixes else {}),
             "range_start": self.range_start, "range_end": self.range_end,
             "master_volume": self.master_volume, "master_muted": self.master_muted,
+            **({"master_audio_layout": self.master_audio_layout} if self.master_audio_layout else {}),
             "master_automation": {k: v.to_dict() for k, v in self.master_automation.items()} if self.master_automation else {},
             "master_automation_mode": self.master_automation_mode,
             "master_strip_eq": self.master_strip_eq.to_dict() if self.master_strip_eq else None,
@@ -6642,9 +6661,13 @@ class TimelineSequence:
             },
             markers=tuple(TimelineMarker.from_dict(m) for m in data.get("markers", [])),
             vcas=tuple(VcaGroup.from_dict(g) for g in data.get("vcas", [])),
+            reference_mixes=tuple(decode_reference_mix_record(item)
+                                  for item in (data.get("reference_mixes") or ())
+                                  if isinstance(item, dict)),
             range_start=data.get("range_start"), range_end=data.get("range_end"),
             master_volume=float(data.get("master_volume", 1.0)),
             master_muted=bool(data.get("master_muted", False)),
+            master_audio_layout=str(data.get("master_audio_layout") or ""),
             master_automation=master_auto,
             master_automation_mode=str(data.get("master_automation_mode", "off") or "off"),
             master_strip_eq=master_eq,

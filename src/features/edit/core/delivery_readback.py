@@ -1,8 +1,6 @@
 """Read and measure the encoded delivery, without changing its sound.
 
-The current stem writer produces mono/stereo integer PCM WAV. Only that
-verified subset is accepted here; unsupported codecs/layouts never inherit
-metadata from a requested profile and masquerade as measured output.
+Read signed PCM WAV and verify any surround speaker order from the file header.
 """
 from __future__ import annotations
 
@@ -15,6 +13,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from src.features.edit.core.audio_capabilities import is_scipy_available_for_dsp
+from src.features.edit.core.channel_layout import ChannelLayout
 from src.features.edit.core.delivery_profile import (
     DeliveryProfile, MeasurementResult, measurement_rejection,
 )
@@ -66,12 +65,15 @@ def measure_delivery_wav(
                 source.getnchannels(), source.getframerate(),
                 source.getsampwidth(), source.getnframes(),
             )
-            if channels not in (1, 2):
-                raise ValueError("WAV readback supports verified mono/stereo channel order only")
+            if channels not in (1, 2, 6, 8):
+                raise ValueError("WAV readback supports mono, stereo, 5.1 and 7.1")
+            layout = ChannelLayout.from_channel_count(channels)
+            if channels > 2:
+                _verify_surround_header(path, layout)
             if width not in (2, 3) or source.getcomptype() != "NONE":
                 raise ValueError("WAV readback requires 16/24-bit integer PCM")
             identity.update(sample_rate=rate,
-                            channel_order=("M",) if channels == 1 else ("L", "R"),
+                            channel_order=layout.channel_labels,
                             bit_depth=width * 8)
             meter = LoudnessMeter(rate, channels)
             true_peak = _TruePeakEstimator(channels)
@@ -112,8 +114,21 @@ def measure_delivery_wav(
             warnings.append("programme LUFS unavailable (backend/rate/window/gating)")
         return MeasurementResult(status="complete", measurements=measurements,
                                  warnings=tuple(warnings), **identity)
-    except (OSError, ValueError, EOFError, wave.Error) as error:
+    except (OSError, ImportError, ValueError, EOFError, wave.Error) as error:
         return MeasurementResult(status="failed", error=str(error), **identity)
+
+
+def _verify_surround_header(path: Path, layout: ChannelLayout) -> None:
+    """Read speaker names from the container, independently of the delivery plan."""
+    import av
+
+    with av.open(str(path)) as container:
+        stream = next(iter(container.streams.audio), None)
+        names = tuple(channel.name for channel in stream.layout.channels) if stream else ()
+    base = ("FL", "FR", "FC", "LFE", "BL", "BR")
+    expected = base if layout is ChannelLayout.SURROUND_5_1 else base + ("SL", "SR")
+    if names != expected:
+        raise ValueError(f"WAV header speaker order {names} != {expected}")
 
 
 def delivery_profile_rejection(

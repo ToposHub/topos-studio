@@ -94,6 +94,35 @@ def test_production_export_reports_encoded_file_qc(tmp_path: Path) -> None:
     assert evidence["measurement"]["sample_count"] == 48000
 
 
+def test_reference_registration_requires_full_mix_and_matching_published_bytes(tmp_path: Path) -> None:
+    from src.features.edit.core.reference_mix import ReferenceMixRef
+    from src.features.edit.core.reference_mix_session import prepare_reference, reference_from_delivery_manifest
+
+    sequence = replace(_sequence(), revision=23)
+    result = export_all_stems(
+        sequence, str(tmp_path),
+        specs=[StemSpec(StemType.MASTER, "Master"), StemSpec(StemType.TRACK, "Track", ("t",))],
+        decode_clip_fn=lambda _t, _c, _f, _fps, n: np.full((2, n), 0.125, np.float32),
+        qc_profile=_technical(), frame_range=(4, 12),
+    )
+    assert result.all_succeeded, result.qc_errors
+    reference = ReferenceMixRef("version", "asset", label="First print")
+    full_mix = tmp_path / "Master.wav"
+    registered = reference_from_delivery_manifest(str(full_mix), reference)
+    assert registered.mix_version is not None
+    assert registered.mix_version.source_revision == 23
+    assert registered.mix_version.source_sequence_id == sequence.timeline_id
+    assert registered.timeline_anchor_sample == 8000
+    assert ReferenceMixRef.from_dict(registered.to_dict()) == registered
+    assert prepare_reference(str(full_mix), registered, 48000, 2) is not None
+    with pytest.raises(ValueError, match="full Master print"):
+        reference_from_delivery_manifest(str(tmp_path / "Track.wav"), reference)
+    with full_mix.open("ab") as handle:
+        handle.write(b"later modification")
+    with pytest.raises(ValueError, match="differs"):
+        prepare_reference(str(full_mix), registered, 48000, 2)
+
+
 def test_worker_prefix_uses_actual_sanitized_deduplicated_names(qtbot, tmp_path: Path) -> None:
     from src.features.edit.ui.stem_export_dialog import StemExportWorker
 

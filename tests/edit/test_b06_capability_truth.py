@@ -1,13 +1,4 @@
-"""B06 核心锁：capability 矩阵与渲染实际一致 + VBAP 手册 oracle。
-
-主计划 §12 完成条件之一是"capability矩阵与实际一致"。本文件把
-``layout_capability`` 声明的立体声域现实与离线渲染路径逐项对锁（5.1
-素材进立体声轨按 clip 阶段降混的声明语义），并跑 §12 的 VBAP 双扬声器
-手册 oracle（±30° 扬声器、0° 目标 → [√.5, √.5]，非负、能量归一）。
-
-注：B06 全链（原生 track_dsp/bus_master 多声道）保持待实施——capability
-如实声明 stereo，测试锁死"声明==实际"，防止声像错误被包装成原生环绕。
-"""
+"""Native stage capability and explicit speaker matrix oracles."""
 from __future__ import annotations
 
 import math
@@ -30,26 +21,17 @@ from src.features.edit.core.vbap import SPEAKER_LAYOUTS, vbap_gains
 
 
 class TestCapabilityTruth:
-    def test_stages_declared_stereo(self) -> None:
-        """track_dsp/bus_master 如实声明 stereo（不虚报原生环绕）。"""
+    def test_stages_declare_native_bed_layouts(self) -> None:
         for stage in ("track_dsp", "bus_master"):
             cap = stage_capability(stage)
             assert cap is not None
-            assert cap.layouts == (ChannelLayout.STEREO,)
-            assert not cap.supports(ChannelLayout.SURROUND_5_1)
-            assert not layout_supported(stage, ChannelLayout.SURROUND_5_1)
-            reason = unsupported_reason(stage, ChannelLayout.SURROUND_5_1)
-            assert reason  # 明确拒绝原因，不是静默
+            for layout in (ChannelLayout.MONO, ChannelLayout.STEREO,
+                           ChannelLayout.SURROUND_5_1, ChannelLayout.SURROUND_7_1):
+                assert layout_supported(stage, layout)
+            assert unsupported_reason(stage, ChannelLayout.QUAD)
 
     def test_capability_matches_renderer_reality(self) -> None:
-        """渲染实际与声明一致：轨域不吞多声道（clip 阶段负责降混）。
-
-        track_dsp 声明立体声域——轨链对 >2ch 输入按文档化的 trim 语义
-        直通（pan_gains_for_channels >2ch = balance），降混责任在
-        clip/decode 阶段（capability 的 adaptation 字段）。本测试锁死
-        这一分工，防止"轨链悄悄吞声道"或"capability 虚报原生"。
-        """
-        track = EditTrack("t", "T", "audio", 0)
+        track = EditTrack("t", "T", "audio", 0, audio_layout="5.1")
         renderer = AudioGraphRenderer(48000.0)
         renderer.configure_from_sequence(TimelineSequence(audio_tracks=(track,)))
         pcm_51 = np.zeros((6, 8), dtype=np.float32)

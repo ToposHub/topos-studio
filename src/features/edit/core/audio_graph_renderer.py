@@ -46,9 +46,9 @@ from src.features.edit.core.audio_dsp import (
 )
 from src.features.edit.core.channel_layout import (
     ChannelLayout,
-    downmix_matrix,
-    routing_matrix,
+    route_pcm,
 )
+from src.features.edit.core.native_mix_layout import mix_layout, pan_clip_pcm, validate_native_layouts
 from src.features.edit.core.audio_playback import topological_sort_buses, unpack_send
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,7 @@ class _TrackNode:
 
     __slots__ = (
         "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled", "solo_safe",
-        "output_bus_id", "bus_layout", "sends", "automation", "automation_mode",
+        "output_bus_id", "bus_layout", "audio_layout", "sends", "automation", "automation_mode",
         "automation_trim", "eq_filter", "effect_chain", "panner", "fx_sampler",
     )
 
@@ -165,6 +165,7 @@ class _TrackNode:
                                else ChannelLayout.STEREO)
         else:
             self.bus_layout = ChannelLayout.STEREO
+        self.audio_layout = str(getattr(track, "audio_layout", ""))
         # sends: [(target_bus_id, level, tap, muted), ...] 仅 enabled 的（MX-14 4 元组）
         raw_sends = getattr(track, "sends", ()) or ()
         self.sends = [
@@ -301,10 +302,12 @@ class AudioGraphRenderer:
 
     def configure_from_sequence(self, sequence: Any) -> None:
         """从 TimelineSequence 构建节点图（普通轨 + Bus 轨 + master）。"""
+        validate_native_layouts(sequence)
         audio_tracks = getattr(sequence, "audio_tracks", ()) or ()
         for track in audio_tracks:
             node = _TrackNode(track, self._sample_rate)
             self._nodes[node.track_id] = node
+        self._master_layout = str(getattr(sequence, "master_audio_layout", ""))
         self._master_volume = float(getattr(sequence, "master_volume", 1.0))
         self._master_muted = bool(getattr(sequence, "master_muted", False))
         # §3.1: master automation（AUD-15400: 同样深拷贝，切断活引用）
@@ -655,6 +658,7 @@ class AudioGraphRenderer:
         sidechain_taps: Optional[dict] = None,
         clip_pdc_delay: int = 0,
         clip_pdc_key: str = "",
+        pan_already_applied: bool = False,
     ) -> Optional[np.ndarray]:
         """处理单个普通轨的一个样本块。
 
@@ -804,28 +808,8 @@ class AudioGraphRenderer:
         else:
             samples = samples * (volume * trim_factor * vca_factor)
 
-        # pan（RMA-08: 按源声道数选算法——mono=equal-power，stereo=balance unity-center；
-        # §3.2: ramp 时逐样本）
-        from src.features.edit.core.audio_dsp import pan_gains_for_channels
-        samples = samples.copy()
-        if pan_ramp is not None:
-            # 逐样本：mono 用 equal-power（cos/sin），stereo/surround 用 balance（线性衰减远侧）
-            if source_channels <= 1:
-                theta = (pan_ramp + 1.0) * 0.5 * (np.pi / 2.0)
-                left_gains = np.cos(theta).astype(samples.dtype)
-                right_gains = np.sin(theta).astype(samples.dtype)
-            else:
-                pr = np.clip(pan_ramp, -1.0, 1.0)
-                left_gains = (1.0 - np.maximum(0.0, pr)).astype(samples.dtype)
-                right_gains = (1.0 + np.minimum(0.0, pr)).astype(samples.dtype)
-            samples[0] *= left_gains
-            if samples.shape[0] > 1:
-                samples[1] *= right_gains
-        else:
-            left_gain, right_gain = pan_gains_for_channels(pan, source_channels)
-            samples[0] *= left_gain
-            if samples.shape[0] > 1:
-                samples[1] *= right_gain
+        if not pan_already_applied:
+            samples = pan_clip_pcm(samples, source_channels, pan, pan_ramp)
 
         # CW-A1: 空间声像器（spread/rotate/divergence/boom 立体声域矩阵，
         # 与 mix_samples 同级：pan/balance 增益之后、strip EQ 之前）
@@ -894,34 +878,35 @@ class AudioGraphRenderer:
         return np.zeros((layout.channel_count, reference.shape[-1]),
                         dtype=reference.dtype)
 
-    def _downmix_to_master(self, samples: np.ndarray,
-                           src_layout: ChannelLayout,
-                           dst_channels: int = 2) -> np.ndarray:
-        """Bus → Master 降混：BS.775，LFE 默认排除。
+    def master_layout(self, legacy_channels: int) -> ChannelLayout:
+        name = getattr(self, "_master_layout", "")
+        return mix_layout(name) if name else ChannelLayout.from_channel_count(legacy_channels)
 
-        ``dst_channels`` 来自实际 master 缓冲宽度（单声道 stem=1、
-        立体声=2）；不可推断的宽度原样返回（不虚构映射）。
-        """
-        if src_layout.channel_count == dst_channels:
-            return samples
-        try:
-            dst = ChannelLayout.from_channel_count(dst_channels)
-        except ValueError:
-            return samples
-        matrix = downmix_matrix(src_layout, dst, include_lfe=False)
-        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+    def track_domain(self, track_id: str, master_channels: int) -> tuple[ChannelLayout, bool]:
+        node = self._nodes[track_id]
+        if node.audio_layout:
+            return mix_layout(node.audio_layout), True
+        if getattr(self, "_master_layout", ""):
+            return ChannelLayout.STEREO, True
+        return ChannelLayout.from_channel_count(master_channels), False
+
+    def pan_native_clip(self, track_id: str, samples: np.ndarray,
+                        source_channels: int, frame: int, fps: float) -> np.ndarray:
+        node = self._nodes[track_id]
+        pan_curve = node.automation.get("pan") if node.automation_mode != "off" else None
+        ramp = None
+        if pan_curve is not None and pan_curve.keyframes:
+            ramp = np.asarray(pan_curve.get_value_ramp(
+                float(frame), fps, samples.shape[1], self._sample_rate, node.pan))
+        return pan_clip_pcm(samples, source_channels, node.pan, ramp, native=True)
+
+    def _downmix_to_master(self, samples: np.ndarray, src_layout: ChannelLayout,
+                           dst_channels: int = 2) -> np.ndarray:
+        return route_pcm(samples, ChannelLayout.from_channel_count(dst_channels), src_layout)
 
     def _upmix_to_bus(self, samples: np.ndarray, src_layout: ChannelLayout,
                       bus_id: str) -> np.ndarray:
-        """轨/上游 Bus 立体声样本 → 目标 Bus 布局（routing_matrix 上混）。
-
-        同布局直通返回原数组（零拷贝）；上混为静态矩阵乘。
-        """
-        dst = self._bus_layout_of(bus_id)
-        if dst.channel_count == samples.shape[0]:
-            return samples
-        matrix = routing_matrix(src_layout, dst)
-        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+        return route_pcm(samples, self._bus_layout_of(bus_id), src_layout)
 
     def route_track_output(
         self,
@@ -951,7 +936,7 @@ class AudioGraphRenderer:
                 if target not in bus_inputs:
                     bus_inputs[target] = self._new_bus_buffer(target, output)
                 bus_inputs[target][:, :n] += self._upmix_to_bus(
-                    routed, node.bus_layout if node else ChannelLayout.STEREO,
+                    routed, ChannelLayout.from_channel_count(routed.shape[0]),
                     target)
             else:
                 # AUD-15402: 未知 bus 目标（如 bus 已删除但轨的路由未清理）。
@@ -962,9 +947,9 @@ class AudioGraphRenderer:
                     "AudioGraphRenderer: track %r routes to unknown bus %r; "
                     "falling back to master", track_id, target,
                 )
-                output[:, :n] += routed
+                output[:, :n] += route_pcm(routed, ChannelLayout.from_channel_count(output.shape[0]))
         else:
-            output[:, :n] += routed
+            output[:, :n] += route_pcm(routed, ChannelLayout.from_channel_count(output.shape[0]))
         # sends（并行；MX-14 4 元组 + 独立 mute + pre/post tap）
         if node is not None:
             for send_index, send_entry in enumerate(node.sends):
@@ -983,7 +968,7 @@ class AudioGraphRenderer:
                 if send_bus_id not in bus_inputs:
                     bus_inputs[send_bus_id] = self._new_bus_buffer(
                         send_bus_id, output)
-                src_layout = node.bus_layout if node else ChannelLayout.STEREO
+                src_layout = ChannelLayout.from_channel_count(samples.shape[0])
                 if send_tap == "pre_fader":
                     if pre_fader_samples is None:
                         logger.warning(
@@ -1073,7 +1058,6 @@ class AudioGraphRenderer:
         # 在 Bus/Master 成片 f20 仍输出 ~0.2（复审 §5 H02 已复现）。
         n_total = output.shape[-1]
         chunk = max(1, int(round(self._sample_rate / max(1e-6, float(fps)))))
-        from src.features.edit.core.audio_dsp import balance_gains
 
         for bus_id in sorted_buses:
             bus_input_full = bus_inputs.get(bus_id)
@@ -1120,25 +1104,13 @@ class AudioGraphRenderer:
                     bus_samples = bus_input * vol_ramp[np.newaxis, :]
                 else:
                     bus_samples = bus_input * node.volume
-                # pan（RMA-08: balance unity-center；逐样本 ramp 或块起点标量）
+                pan_ramp = None
                 if has_pan and bus_samples.shape[0] >= 2:
-                    pan_ramp = np.array(
-                        pan_track.get_value_ramp(
-                            frame_c, fps, n, self._sample_rate, node.pan),
-                        dtype=output.dtype)
-                    bus_samples = bus_samples.copy()
-                    for i in range(min(len(pan_ramp), bus_samples.shape[-1])):
-                        lg, rg = balance_gains(float(pan_ramp[i]))
-                        bus_samples[0, i] *= lg
-                        bus_samples[1, i] *= rg
-                    pan_scalar = float(pan_ramp[0]) if len(pan_ramp) else node.pan
-                else:
-                    lg, rg = balance_gains(node.pan)
-                    bus_samples = bus_samples.copy()
-                    bus_samples[0] *= lg
-                    if bus_samples.shape[0] > 1:
-                        bus_samples[1] *= rg
-                    pan_scalar = node.pan
+                    pan_ramp = np.asarray(pan_track.get_value_ramp(
+                        frame_c, fps, n, self._sample_rate, node.pan), dtype=output.dtype)
+                bus_samples = pan_clip_pcm(bus_samples, 2, node.pan, pan_ramp,
+                                           native=node.bus_layout is ChannelLayout.MONO)
+                pan_scalar = float(pan_ramp[0]) if pan_ramp is not None and pan_ramp.size else node.pan
                 # CW-A1: Bus 空间声像器（与 mix_samples Bus 阶段同级）
                 if node.panner is not None and node.panner.is_active:
                     bus_samples = node.panner.process(bus_samples, pan_scalar)

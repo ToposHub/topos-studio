@@ -617,6 +617,9 @@ class SetTrackEffectChainCommand:
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
 
+        from src.features.edit.core.native_mix_layout import validate_rack_edit
+
+        validate_rack_edit(timeline, self.track_id, self.effect_chain)
         old_chain = track.effect_chain
         new_track = track.with_effect_chain(self.effect_chain)
         new_timeline = timeline.with_track_updated(new_track)
@@ -838,6 +841,9 @@ class SetMasterEffectChainCommand:
     _old_effect_chain: Optional[Any] = None  # EffectChainParams | None
 
     def apply(self, timeline: TimelineSequence) -> Tuple[TimelineSequence, "SetMasterEffectChainCommand"]:
+        from src.features.edit.core.native_mix_layout import validate_rack_edit
+
+        validate_rack_edit(timeline, None, self.effect_chain)
         old_chain = timeline.master_effect_chain
         new_timeline = timeline.with_master_effect_chain(self.effect_chain)
         logger.debug("SetMasterEffectChainCommand applied")

@@ -3515,7 +3515,12 @@ class UpdateClipAudioEditCommand:
             track_id=self.track_id, clip_id=self.clip_id,
             _before=clip, _after=self._after)
         new_track = track.with_clip_updated(self._after)
-        return timeline.with_track_updated(new_track), updated_cmd
+        new_timeline = timeline.with_track_updated(new_track)
+        if track.audio_layout and track.audio_layout != "stereo":
+            from src.features.edit.core.native_mix_layout import validate_native_layouts
+
+            validate_native_layouts(new_timeline, (new_track,))
+        return new_timeline, updated_cmd
 
     def undo(self, timeline: TimelineSequence) -> TimelineSequence:
         if self._before is None:

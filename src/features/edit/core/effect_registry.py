@@ -977,6 +977,14 @@ class EffectRegistry:
         # P2（2026-11-21 计划 FX-15）：激励器
         self.register(EXCITER_EFFECT)
         self.register(SUBHARMONIC_EFFECT)
+        self.register(EffectDefinition(
+            effect_type="vst3_hosted",
+            name="VST3 plug-in",
+            category="audio_hosted",
+            description="Locally registered third-party stereo, zero-latency track insert",
+            params_schema={},
+            icon="audio_track",
+        ))
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an

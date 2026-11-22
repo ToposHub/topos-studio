@@ -24,6 +24,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -39,6 +40,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.features.edit.core.channel_layout import ChannelLayout
+from src.features.edit.core.native_mix_layout import MIX_LAYOUTS, mix_layout
 from src.features.edit.core.stem_export import (
     StemSpec,
     StemType,
@@ -89,6 +92,7 @@ class StemExportWorker(QThread):
         *,
         sequence_resolver: Optional[Callable] = None,
         delivery_profile: Optional[DeliveryProfile] = None,
+        channel_layout: ChannelLayout = ChannelLayout.STEREO,
     ) -> None:
         super().__init__(parent)
         self._sequence = sequence
@@ -98,6 +102,7 @@ class StemExportWorker(QThread):
         self.failure_diagnostics: tuple = ()
         self._output_dir = output_dir
         self._specs = specs
+        self._channel_layout = channel_layout
         # Normalize before assigning final spec filenames, avoiding duplicate separators.
         self._prefix = (prefix or "").strip().rstrip("_- ")
         # Default is an evidence profile, not a customer loudness target. It
@@ -106,6 +111,7 @@ class StemExportWorker(QThread):
         self._delivery_profile = delivery_profile or DeliveryProfile(
             profile_id="topos-stem-technical-v1", name="Stem WAV technical readback",
             file_format="wav", target_lufs=None, max_true_peak_dbtp=None,
+            channel_order=channel_layout.channel_labels,
             max_sample_peak_dbfs=None,
             stems=tuple(StemRule(stem, allow_silence=True) for stem in FULL_STEM_SET),
         )
@@ -125,6 +131,7 @@ class StemExportWorker(QThread):
                 self._project,
                 float(getattr(self._sequence, "fps", 24.0) or 24.0),
                 STEM_SAMPLE_RATE,
+                bool(getattr(self._sequence, "master_audio_layout", "")),
             )
             # §3.3：预渲染处理栈（STFT 类步骤）的缓存基底。
             pre_render_base_fn = create_pre_render_base_fn(
@@ -146,7 +153,7 @@ class StemExportWorker(QThread):
                         decode_clip_fn=decode_fn,
                         pre_render_base_fn=pre_render_base_fn,
                         sample_rate=STEM_SAMPLE_RATE,
-                        channels=STEM_CHANNELS,
+                        channels=self._channel_layout.channel_count,
                         bit_depth=STEM_BIT_DEPTH,
                         specs=specs,
                         cancel_check=lambda: self._cancel_requested,
@@ -307,9 +314,15 @@ class StemExportDialog(QDialog):
             self._prefix_input,
         )
 
-        format_label = QLabel(
-            I18N.tr("edit.stem_export.format_wav_stereo", "WAV · 48 kHz · 24 bit · 立体声"))
-        out_form.addRow(I18N.tr("edit.stem_export.format_label", "格式:"), format_label)
+        format_label = QLabel("WAV · 48 kHz · 24 bit")
+        out_form.addRow(I18N.tr("edit.stem_export.format_label", "Format"), format_label)
+        self._layout_combo = QComboBox()
+        for name in MIX_LAYOUTS:
+            self._layout_combo.addItem(name, name)
+        master = getattr(sequence, "master_audio_layout", "")
+        index = self._layout_combo.findData(master or "stereo")
+        self._layout_combo.setCurrentIndex(max(0, index))
+        out_form.addRow(I18N.tr("mixer.layout.title", "Channel layouts"), self._layout_combo)
         layout.addWidget(out_group)
 
         # 3. 进度
@@ -396,6 +409,7 @@ class StemExportDialog(QDialog):
             output_dir,
             tuple(specs),
             prefix=self._prefix_input.text(),
+            channel_layout=mix_layout(str(self._layout_combo.currentData())),
             parent=self,
             sequence_resolver=self._sequence_resolver,
         )
@@ -425,6 +439,7 @@ class StemExportDialog(QDialog):
             box.setEnabled(not running)
         self._dir_input.setEnabled(not running)
         self._prefix_input.setEnabled(not running)
+        self._layout_combo.setEnabled(not running)
 
     # ------------------------------------------------------------------
     # Worker 回调（UI 线程）

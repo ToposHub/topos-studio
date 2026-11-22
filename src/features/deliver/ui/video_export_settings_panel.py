@@ -1313,7 +1313,7 @@ class VideoExportSettingsPanel(QWidget):
         # v1.1 音频轨（container_spec_v1.1）：声道布局选择——
         # topos 容器 2.0/5.1/7.1 三档；其它 codec 沿用声道数语义
         self._audio_channels_combo = ChevronComboBox()
-        for ch, label in ((2, "2.0 Stereo"), (6, "5.1"),
+        for ch, label in ((2, "2.0 Stereo"), (1, "1.0 Mono"), (6, "5.1"),
                           (8, "7.1")):
             self._audio_channels_combo.addItem(label, ch)
         apply_combo_dropdown_style(self._audio_channels_combo)

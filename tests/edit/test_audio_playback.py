@@ -1274,7 +1274,7 @@ class TestAudioPlaybackManager:
         manager = AudioPlaybackManager()
         manager.set_timeline_duration(2400)
         manager._scrub_preview_generation = 4
-        output = Mock()
+        output = Mock(_sample_rate=48000, _channels=2)
         output.bytes_per_frame.return_value = 8
         output.bytes_free.return_value = 20000
         output.write_samples.return_value = 512
@@ -1290,7 +1290,7 @@ class TestAudioPlaybackManager:
         manager = AudioPlaybackManager()
         manager.set_timeline_duration(2400)
         manager._scrub_preview_generation = 4
-        output = Mock()
+        output = Mock(_sample_rate=48000, _channels=2)
         output.bytes_per_frame.return_value = 8
         output.bytes_free.return_value = 64
         manager._ensure_scrub_preview_output = Mock(return_value=output)

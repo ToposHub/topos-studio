@@ -49,6 +49,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vst3-host = [
+    "pedalboard==0.9.26; platform_system == 'Darwin' or platform_system == 'Linux'",
+]
 # W06（Windows 计划项）：Windows cuda 驻留解码（NVDEC→GL interop 零拷贝，
 # opt-in 开关 TOPOS_WIN_HW_RESIDENT_DECODE）的可选运行时绑定。核心依赖
 # 刻意不含 CUDA——无 extra 的安装按 fail-closed 走下载 planar/CPU 路径

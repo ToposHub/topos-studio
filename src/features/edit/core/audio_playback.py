@@ -91,9 +91,10 @@ if TYPE_CHECKING:  # pragma: no cover - annotation-only import
 import numpy as np
 
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QMutexLocker
-from PyQt6.QtMultimedia import QAudioSink, QAudioFormat, QMediaDevices
+from PyQt6.QtMultimedia import QAudio, QAudioSink, QAudioFormat, QMediaDevices
 
 from src.features.edit.core.playback_debug import playback_trace
+from src.shared.media.audio_frame_pcm import audio_frame_array
 from src.features.edit.core.audio_transition_catalog import overlap_fade_regions
 from src.features.edit.core.audio_dsp import (
     StripEQFilter,
@@ -102,8 +103,6 @@ from src.features.edit.core.audio_dsp import (
     # AUD-15506: mix 热路径依赖提升为模块级导入，消除逐块函数内 import 的
     # 查找/调用开销（channel_layout 无反向依赖；audio_dsp 本就是本模块依赖）。
     apply_clip_fade,
-    pan_gains_for_channels,
-    balance_gains,
     apply_pdc_delay_line,
     plan_edge_pdc,
     MASTER_SINK_ID,
@@ -111,13 +110,19 @@ from src.features.edit.core.audio_dsp import (
 from src.features.edit.core.audio_edit import apply_clip_audio_edit, apply_clip_audio_edit_block
 from src.features.edit.core.channel_layout import (
     ChannelLayout,
+    SpeakerLayoutError,
     adapt_channels,
-    downmix_matrix,
-    routing_matrix,
+    codec_bed_layout,
+    route_pcm,
 )
+from src.features.edit.core.native_mix_layout import adapt_clip_pcm, mix_layout, pan_clip_pcm
 from src.features.edit.core.source_patch import SourcePatchSpec
 from src.features.edit.core.timeline_v2 import StripEQParams, EffectChainParams
 from src.features.edit.core.loudness_meter import LoudnessMeter
+from src.features.edit.core.monitor_service import (
+    ControlRoomInput, ControlRoomPatch, MonitorService, MonitorSessionState,
+    render_speaker_block,
+)
 
 # PyAV for audio decoding
 try:
@@ -192,7 +197,7 @@ def _get_av_resampler(source_rate: int, target_rate: int, channels: int, instanc
         if PYAV_AVAILABLE:
             layout = "stereo" if channels == 2 else "mono" if channels == 1 else f"{channels}c"
             _av_resampler_cache[key] = av.audio.resampler.AudioResampler(
-                format="fltp",
+                format="flt" if channels >= 8 else "fltp",
                 layout=layout,
                 rate=target_rate,
             )
@@ -249,10 +254,11 @@ def _resample_audio(
                 # 必须 ascontiguousarray：astype(order='K') 会保留源数组的
                 # 非连续布局（如声道映射切片 .T 的产物），from_ndarray 拒收
                 # 非 C-contiguous 输入并抛异常，导致整轨长期落到 scipy 兜底。
+                packed = channels >= 8
+                data = (np.ascontiguousarray(samples.T, dtype=np.float32).reshape(1, -1)
+                        if packed else np.ascontiguousarray(samples, dtype=np.float32))
                 frame = av.AudioFrame.from_ndarray(
-                    np.ascontiguousarray(samples, dtype=np.float32),
-                    format="fltp", layout=layout,
-                )
+                    data, format="flt" if packed else "fltp", layout=layout)
                 frame.sample_rate = source_rate
                 out_frames = resampler.resample(frame)
                 # 仅在 seek 或结束时 flush，避免每次调用都重置内部状态
@@ -266,7 +272,9 @@ def _resample_audio(
                     _av_resampler_cache.pop(
                         (source_rate, target_rate, channels, instance_id), None)
                 if out_frames:
-                    arrays = [f.to_ndarray() for f in out_frames]
+                    arrays = [audio_frame_array(f) for f in out_frames]
+                    if packed:
+                        arrays = [data.reshape(-1, channels).T for data in arrays]
                     result = np.concatenate(arrays, axis=-1)
                     return result.astype(np.float32)
         except Exception as e:
@@ -669,7 +677,7 @@ class TrackLevel:
     """
 
     __slots__ = ("peak_l", "peak_r", "rms_l", "rms_r", "lufs", "pre_peak", "gr", "sc",
-                 "taps")
+                 "taps", "speaker_peaks")
 
     def __init__(
         self,
@@ -682,6 +690,7 @@ class TrackLevel:
         gr: Optional[dict] = None,
         sc: Optional[dict] = None,
         taps: Optional[dict] = None,
+        speaker_peaks: tuple[float, ...] = (),
     ) -> None:
         self.peak_l = float(peak_l)
         self.peak_r = float(peak_r)
@@ -694,6 +703,7 @@ class TrackLevel:
         # MX-02: {instance_id: {"in_db","out_db","gr_db","sc_db","effect_type"}}——
         # 链处理时按实例真实采样（不再把轨末端 peak 冒充插件输出）
         self.taps = dict(taps) if taps else {}
+        self.speaker_peaks = speaker_peaks
 
     def __getitem__(self, index: int) -> float:
         """索引访问：[0]=peak_l, [1]=peak_r（向后兼容 (l, r) tuple）。"""
@@ -1451,7 +1461,7 @@ class AudioDecoder:
                             # pts 不可用时保守放弃 skip（不能拿后续更晚的 pts 乱丢）。
                             self._seek_target_seconds = None
                         # 转换为 numpy 数组并归一化到 [-1.0, 1.0]
-                        audio_array = frame.to_ndarray()  # type: ignore
+                        audio_array = audio_frame_array(frame)
 
                         # ---- 处理 packed (交错) 格式 → 平面格式 ----
                         # packed 格式 to_ndarray() 可能返回 (1, channels*samples) 或 1D 数组
@@ -1830,6 +1840,8 @@ class AudioMixer:
         # P2 环绕 Bus 路由核心：{bus_id: ChannelLayout}（轨→Bus 上混、
         # Bus→Master 降混走 channel_layout.routing_matrix）。
         self._bus_layouts: Dict[str, Any] = {}
+        self._track_layouts: Dict[str, ChannelLayout] = {}
+        self._master_layout: ChannelLayout | None = None
         # W24/W25: 每轨路由信息 {track_id: {"output_bus_id": str|None, "sends": [(bus_id, level), ...]}}
         self._track_routing: Dict[str, Dict[str, Any]] = {}
         self._sample_rate: float = 48000.0
@@ -1866,6 +1878,9 @@ class AudioMixer:
         # 跨 buffer 平滑增益包络，避免 audible pumping（block-boundary gain jump）。
         from src.features.edit.core.audio_dsp import MasterLimiter
         self._master_limiter = MasterLimiter(self._sample_rate, threshold=1.0)
+        self._listen_pdc_lines: Dict[str, Any] = {}
+        self._listen_pdc_signature: tuple = ()
+        self._listen_pdc_rejected = False
         # AT (Audio Transition): 每轨的音频转场实例（仅 audio:* 类型）。
         # 存 TransitionInstance 列表；mix_samples 在解码每个 clip 时查询该 clip
         # 是否作为某转场的 left/right，并叠加 crossfade 包络。None/空=该轨无转场。
@@ -2819,6 +2834,7 @@ class AudioMixer:
             self._pdc_lines.clear()
             # P0 · Clip FX PDC：clip 相对延迟线一并清空
             self._clip_pdc_lines.clear()
+            self._listen_pdc_lines.clear()
             for win in self._spectrum_windows.values():
                 win.fill(0.0)
             for tid in list(self._spectrum_write.keys()):
@@ -2887,6 +2903,12 @@ class AudioMixer:
                 self._track_effect_samplers.pop(track_id, None)
             # P0 · PDC: 链延迟声明可能变化 → 重算补偿量
             self._recompute_pdc_locked()
+
+    def release_hosted_effects(self) -> None:
+        """Release process resources for all chains, including bus and Master."""
+        with QMutexLocker(self._mutex):
+            for chain in (*self._effect_chains.values(), *self._clip_effect_chains.values()):
+                chain.release_hosted_effects()
 
     def set_master_strip_eq(self, params: Optional[StripEQParams]) -> None:
         """MX-03: 设置 Master Strip EQ。线程安全。
@@ -3063,6 +3085,17 @@ class AudioMixer:
         with QMutexLocker(self._mutex):
             self._bus_layouts = parsed
 
+    def set_programme_layouts(self, tracks: Dict[str, str], master: str) -> None:
+        parsed = {track_id: mix_layout(name) for track_id, name in tracks.items() if name}
+        master_layout = mix_layout(master) if master else None
+        with QMutexLocker(self._mutex):
+            self._track_layouts = parsed
+            self._master_layout = master_layout
+
+    def programme_channels(self, legacy: int = 2) -> int:
+        layout = self._master_layout
+        return layout.channel_count if layout is not None else legacy
+
     def _bus_layout_of(self, bus_id: str) -> ChannelLayout:
         """Bus 声道布局（未知回退 stereo）。"""
         return self._bus_layouts.get(bus_id, ChannelLayout.STEREO)
@@ -3077,11 +3110,7 @@ class AudioMixer:
     def _to_bus_layout(self, samples: np.ndarray, src_layout: ChannelLayout,
                        bus_id: str) -> np.ndarray:
         """轨/上游 Bus 样本 → 目标 Bus 布局（routing_matrix 上混）。"""
-        dst = self._bus_layout_of(bus_id)
-        if dst.channel_count == samples.shape[0]:
-            return samples
-        matrix = routing_matrix(src_layout, dst)
-        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+        return route_pcm(samples, self._bus_layout_of(bus_id), src_layout)
 
     def _downmix_to_master(self, samples: np.ndarray,
                            src_layout: ChannelLayout,
@@ -3097,8 +3126,7 @@ class AudioMixer:
             dst = ChannelLayout.from_channel_count(dst_channels)
         except ValueError:
             return samples
-        matrix = downmix_matrix(src_layout, dst, include_lfe=False)
-        return (matrix @ samples.astype(np.float64)).astype(samples.dtype)
+        return route_pcm(samples, dst, src_layout)
 
     def set_track_automation_trim(self, track_id: str,
                                   trims: Dict[str, float]) -> None:
@@ -3213,6 +3241,10 @@ class AudioMixer:
         fps: float,
         num_samples: int,
         output_channels: int = 2,
+        *,
+        listen_taps: Optional[Dict[str, np.ndarray]] = None,
+        listen_ids: Tuple[str, ...] = (),
+        listen_stage: str = "pre",
     ) -> tuple:
         """
         混合指定帧的音频采样。
@@ -3280,14 +3312,20 @@ class AudioMixer:
 
             # 遍历所有普通音频轨（非 Bus，按侧链依赖排序）
             for track_id in track_order:
+                declared_layout = self._track_layouts.get(track_id)
+                native_track = declared_layout is not None or self._master_layout is not None
+                domain = declared_layout or (ChannelLayout.STEREO if native_track else
+                                             ChannelLayout.from_channel_count(output_channels))
+                track_channels = domain.channel_count
+                edit_in_source = native_track and track_channels != 2
                 decoders = self._decoders.get(track_id)
                 if decoders is None:
-                    self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_pdc_line(track_id, track_channels, num_samples)
                     self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
                 state = self._tracks.get(track_id)
                 if not state or not state.enabled:
-                    self._advance_pdc_line(track_id, output_channels, num_samples)
+                    self._advance_pdc_line(track_id, track_channels, num_samples)
                     self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
                 # W25: 跳过 Bus 轨（它们在阶段 2 处理，不在阶段 1 解码 clips）
@@ -3296,15 +3334,11 @@ class AudioMixer:
                     continue
 
                 # 计算有效音量
-                if state.muted:
-                    self._advance_pdc_line(track_id, output_channels, num_samples)
-                    self._advance_clip_pdc_lines(track_id, num_samples)
-                    continue
-
-                # RMA-04: solo 用可听闭包判断。旧逻辑 `not state.solo` 会把 solo 普通
-                # 轨的上游输入（喂给 solo Bus 的普通轨）错误剔除。闭包保留这些上游。
-                if has_solo and track_id not in audible_solo:
-                    self._advance_pdc_line(track_id, output_channels, num_samples)
+                programme_audible = not state.muted and (
+                    not has_solo or track_id in audible_solo)
+                listening = listen_taps is not None and track_id in listen_ids
+                if not programme_audible and not listening:
+                    self._advance_pdc_line(track_id, track_channels, num_samples)
                     self._advance_clip_pdc_lines(track_id, num_samples)
                     continue
 
@@ -3377,8 +3411,10 @@ class AudioMixer:
                             mute_gate, float(self._sample_rate),
                         )
                         if not np.any(mute_gate):
+                            programme_audible = False
+                        if not programme_audible and not listening:
                             # P0 · PDC: 整块被自动化静音门控剔除 → 推进延迟线
-                            self._advance_pdc_line(track_id, output_channels, num_samples)
+                            self._advance_pdc_line(track_id, track_channels, num_samples)
                             self._advance_clip_pdc_lines(track_id, num_samples)
                             continue
                 # 累计该轨电平（跨多个 decoder/clip：peak 取 max，RMS 用平方和均值）
@@ -3396,7 +3432,7 @@ class AudioMixer:
                 # 轨 DSP 只对求和结果运行一次）。复用 scratch，每次清零。
                 # MX-07: 无 clip 但尾音未结束时保持全零（feed-zero drain）。
                 track_input = self._mix_scratch(
-                    self._mix_acc_scratch, track_id, output_channels, num_samples
+                    self._mix_acc_scratch, track_id, track_channels, num_samples
                 )
                 any_clip_samples = False
 
@@ -3429,7 +3465,7 @@ class AudioMixer:
                                     int(round(_local * self._sample_rate / fps)),
                                     num_samples,
                                     sample_rate=int(self._sample_rate),
-                                    channels=output_channels,
+                                    channels=track_channels,
                                 )
                                 synthesized_from_base = samples is not None
                     if samples is None:
@@ -3442,6 +3478,7 @@ class AudioMixer:
                     # P0：成品合成块已是输出声道宽度的最终内容，跳过源域
                     # 步骤（源 patch / downmix），与成片导出同策略。
                     _src_layout = None
+                    codec_name = ""
                     if not synthesized_from_base:
                         _src_layout = getattr(decoder, "source_layout", None)
                         _patch_map = getattr(decoder, "_source_channel_map", None)
@@ -3454,27 +3491,20 @@ class AudioMixer:
                                 # 选道后的布局是自定义的，不能再声明容器布局
                                 _src_layout = None
 
-                        # AM-08 阶段 4.1 / RMA-09: 声道映射用标准 downmix（替代 naive 截断）。
-                        # RMA-09: 用 decoder 的真实容器布局（如 5.1(side)），而非按声道数猜测。
-                        if samples.shape[0] != output_channels:
-                            try:
-                                # AUD-15506: adapt_channels 已提升为模块级导入
-                                samples = adapt_channels(
-                                    samples, output_channels,
-                                    src_layout=_src_layout,
-                                )
-                            except ValueError:
-                                # 非标准声道数（如 4 声道）：回退安全截断避免阻断播放
-                                if samples.shape[0] == 1:
-                                    samples = np.repeat(samples, output_channels, axis=0)
-                                elif samples.shape[0] > output_channels:
-                                    samples = samples[:output_channels]
-                                elif samples.shape[0] < output_channels:
-                                    # 审计修复：1<src<out（如 4ch 源→6ch 输出）
-                                    # 旧代码两分支都不命中，样本宽度保持错误。
-                                    # 与导出侧回退一致：首声道广播到目标声道。
-                                    samples = np.repeat(
-                                        samples[:1], output_channels, axis=0)
+                            elif native_track and _patch_map:
+                                raise SpeakerLayoutError(f"{track_id}: source channel patch does not match decoded PCM")
+                        if native_track and not _patch_map:
+                            name = getattr(decoder, "source_layout_name", "")
+                            if isinstance(name, str) and name:
+                                _src_layout = codec_bed_layout(name, samples.shape[0])
+                                codec_name = name if name == "5.1(side)" else ""
+                        source_channels = samples.shape[0] if native_track else int(
+                            getattr(decoder, "_channels", 2) or 2)
+                        if not edit_in_source:
+                            samples = adapt_clip_pcm(samples, domain, _src_layout,
+                                                     native=native_track, context=track_id, codec_name=codec_name)
+                    else:
+                        source_channels = samples.shape[0]
 
                     # P0-3: Clip Editor 处理栈（非破坏性 audio_edit 步骤）。
                     # 固定顺序：源解码/裁剪/retime → 处理栈 → clip 增益/淡化
@@ -3495,6 +3525,10 @@ class AudioMixer:
                             sample_rate=int(self._sample_rate),
                             pre_render_base=getattr(
                                 decoder, "_pre_render_base", None))
+
+                    if edit_in_source and not synthesized_from_base:
+                        samples = adapt_clip_pcm(samples, domain, _src_layout,
+                                                 native=True, context=track_id, codec_name=codec_name)
 
                     # RMA-03: clip 淡入/淡出（实时路径此前完全不处理，与离线导出漂移）。
                     # 在声道扩展后、clip-FX/track 处理前应用，作用于该 clip 原始信号。
@@ -3591,36 +3625,8 @@ class AudioMixer:
                     # CW-A1: pre-fader 峰值改在轨阶段对求和输入测量（MX-04：
                     # 多 clip 重叠时求和电平才反映 Dynamics 检测到的真实输入）
 
-                    # 应用声像（RMA-08: 按源声道数选算法）。
-                    # MX-04: pan 是逐声道线性增益且依赖 clip 源布局（mono
-                    # equal-power / stereo balance），保留在 clip 阶段逐 clip
-                    # 施加；音量 / 空间声像器 / EQ / FX 在轨阶段对求和输入
-                    # 一次处理（有状态 DSP 只推进一次）。
-                    # mono 源用 equal-power pan（center 恒功率 -3dB/侧），stereo 源用
-                    # balance（unity-center，保持原响度与声像），surround 用 trim。
-                    # §3.2: pan ramp 时逐样本计算 left/right gain。
-                    # AUD-15506: pan_gains_for_channels 已提升为模块级导入。
-                    src_ch = int(getattr(decoder, "_channels", 2) or 2)
-                    if pan_ramp is not None:
-                        n = samples.shape[-1]
-                        pr = np.clip(pan_ramp[:n], -1.0, 1.0)
-                        if src_ch <= 1:
-                            # mono: equal-power（cos/sin）
-                            theta = (pr + 1.0) * 0.5 * (np.pi / 2.0)
-                            left_gains = np.cos(theta).astype(np.float32)
-                            right_gains = np.sin(theta).astype(np.float32)
-                        else:
-                            # stereo/surround: balance（unity-center）
-                            left_gains = (1.0 - np.maximum(0.0, pr)).astype(np.float32)
-                            right_gains = (1.0 + np.minimum(0.0, pr)).astype(np.float32)
-                        samples[0] *= left_gains
-                        if samples.shape[0] > 1:
-                            samples[1] *= right_gains
-                    else:
-                        left_gain, right_gain = pan_gains_for_channels(pan, src_ch)
-                        samples[0] *= left_gain
-                        if samples.shape[0] > 1:
-                            samples[1] *= right_gain
+                    samples = pan_clip_pcm(samples, source_channels, pan, pan_ramp,
+                                           native=native_track)
 
                     # MX-04: clip 块汇入轨输入（时间对齐求和；短块由 scratch
                     # 零填充语义覆盖）。超长块先截取。轨级处理在 clip 循环后
@@ -3658,7 +3664,7 @@ class AudioMixer:
                     _cleft = self._clip_tail_left.get(_cid, 0)
                     if _cleft <= 0:
                         continue
-                    _ctail = np.zeros((min(2, output_channels), num_samples),
+                    _ctail = np.zeros((track_channels, num_samples),
                                       dtype=np.float32)
                     if _c_active:
                         _ctail = _cchain.process(_ctail)
@@ -3693,6 +3699,12 @@ class AudioMixer:
                 # CW-A1: pre-fader 峰值（clip-FX 后、音量前；drain 块为 0）
                 if any_clip_samples and track_input.shape[-1] > 0:
                     track_pre_peak = float(np.max(np.abs(track_input)))
+
+                if listening and listen_stage == "pre":
+                    listen_taps[f"track:{track_id}:pre"] = track_input.copy()
+                    if not programme_audible:
+                        self._advance_pdc_line(track_id, track_channels, num_samples)
+                        continue
 
                 # 音量（§3.2: 逐样本 ramp；求和后应用一次，线性等价）
                 samples = track_input
@@ -3747,6 +3759,12 @@ class AudioMixer:
                     track_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     samples = track_chain.process(samples, sidechain_by_id=sc_map)
 
+                if listening and listen_stage == "post":
+                    listen_taps[f"track:{track_id}:post"] = samples.copy()
+                if not programme_audible:
+                    self._advance_pdc_line(track_id, track_channels, num_samples)
+                    continue
+
                 # mute 门控在链输出端（自动化切点同时门控 EQ/FX 尾音泄漏）
                 if mute_gate is not None:
                     samples = samples * mute_gate[np.newaxis, :samples.shape[-1]]
@@ -3754,7 +3772,7 @@ class AudioMixer:
                 # 补零到块宽（复用 scratch）→ 该轨输出缓冲
                 if samples.shape[-1] < num_samples:
                     padded = self._mix_scratch(
-                        self._mix_pad_scratch, track_id, output_channels, num_samples
+                        self._mix_pad_scratch, track_id, track_channels, num_samples
                     )
                     padded[:, :samples.shape[-1]] = samples
                     samples = padded
@@ -3791,7 +3809,7 @@ class AudioMixer:
                         bus_inputs[target_bus] = self._new_bus_buffer(
                             target_bus, num_samples)
                     bus_inputs[target_bus][:, :routed.shape[-1]] += \
-                        self._to_bus_layout(routed, ChannelLayout.STEREO,
+                        self._to_bus_layout(routed, domain,
                                             target_bus)
                 elif target_bus is not None:
                     # AUD-15402: output_bus_id 指向未注册 bus（如 bus 已删除但
@@ -3800,10 +3818,10 @@ class AudioMixer:
                         "audio track %s routes to unknown bus %s; falling back to master",
                         track_id, target_bus,
                     )
-                    output += routed
+                    output += self._downmix_to_master(routed, domain, output_channels)
                 else:
                     # 直接到 Master
-                    output += routed
+                    output += self._downmix_to_master(routed, domain, output_channels)
                 # 处理 sends（MX-14: post-fader 默认 / pre-fader 可选 + 独立
                 # mute；并行发送到多个 Bus）。B02: 每条 send 经独立延迟线。
                 for send_index, send_entry in enumerate(routing.get("sends", [])):
@@ -3832,17 +3850,19 @@ class AudioMixer:
                         pre_delayed = self.apply_send_edge_delay(
                             track_id, send_index, send_bus_id, pre_src)
                         bus_inputs[send_bus_id][:, :pre_n] += (
-                            self._to_bus_layout(pre_delayed, ChannelLayout.STEREO,
+                            self._to_bus_layout(pre_delayed, domain,
                                                 send_bus_id)[:, :pre_n]
                             * send_level)
                     else:
                         send_delayed = self.apply_send_edge_delay(
                             track_id, send_index, send_bus_id, samples)
                         bus_inputs[send_bus_id][:, :samples.shape[-1]] += (
-                            self._to_bus_layout(send_delayed, ChannelLayout.STEREO,
+                            self._to_bus_layout(send_delayed, domain,
                                                 send_bus_id) * send_level)
 
-                if track_peak_l > 0.0 or track_peak_r > 0.0 or track_pre_peak > 0.0:
+                track_speakers = tuple(map(float, np.max(np.abs(routed), axis=1))) if (
+                    track_channels > 2 and routed.shape[1]) else ()
+                if max(track_peak_l, track_peak_r, track_pre_peak, *track_speakers) > 0.0:
                     # CW-A1: 侧链 tap（该轨完整输出，推子后；仅在本块内消费）
                     # 供后续被控轨的压缩器探测
                     if track_id in track_sc_needed and track_output_acc is not None:
@@ -3868,13 +3888,14 @@ class AudioMixer:
                     ):
                         try:
                             if track_id not in self._lufs_meters:
-                                self._lufs_meters[track_id] = LoudnessMeter(self._sample_rate, output_channels)
+                                self._lufs_meters[track_id] = LoudnessMeter(self._sample_rate, track_channels)
                             lm = self._lufs_meters[track_id]
                             lm.process(track_output_acc)
                             lufs_m = lm.momentary_lufs
                         except Exception:
                             pass
                     per_track_peaks[track_id] = TrackLevel(
+                        speaker_peaks=track_speakers,
                         peak_l=track_peak_l, peak_r=track_peak_r,
                         rms_l=rms_l, rms_r=rms_r, lufs=lufs_m,
                         pre_peak=track_pre_peak, gr=gr_map, sc=sc_levels,
@@ -3897,6 +3918,7 @@ class AudioMixer:
                     "audio bus routing cycle detected, skipping: %s", cycle_buses,
                 )
             for bus_id in sorted_buses:
+                bus_channels = self._bus_layout_of(bus_id).channel_count
                 bus_input = bus_inputs.get(bus_id)
                 bus_had_input = bus_input is not None
                 if bus_input is None:
@@ -3906,22 +3928,25 @@ class AudioMixer:
                     if tail_rem <= 0:
                         # P0 · PDC：无输入 Bus 的延迟线也要推进（被推迟的
                         # 内容需按绝对时间继续流出），否则重新激活时错位。
-                        self._advance_pdc_line(bus_id, output_channels, num_samples)
+                        self._advance_pdc_line(bus_id, bus_channels, num_samples)
                         continue
                     self._track_tail_remaining[bus_id] = max(
                         0, tail_rem - num_samples)
                     bus_input = self._mix_scratch(
-                        self._mix_bus_scratch, bus_id, output_channels, num_samples
+                        self._mix_bus_scratch, bus_id, bus_channels, num_samples
                     )
                     bus_inputs[bus_id] = bus_input
                 bus_state = self._tracks.get(bus_id)
-                if bus_state is None or not bus_state.enabled or bus_state.muted:
-                    self._advance_pdc_line(bus_id, output_channels, num_samples)
+                if bus_state is None or not bus_state.enabled:
+                    self._advance_pdc_line(bus_id, bus_channels, num_samples)
                     continue
-                # RMA-04: solo 用可听闭包判断。旧逻辑 `not bus_state.solo` 会把 solo
-                # 普通轨必经的 Bus（该 Bus 未 solo）错误剔除，导致 solo 普通轨无声。
-                if has_solo and bus_id not in audible_solo:
-                    self._advance_pdc_line(bus_id, output_channels, num_samples)
+                programme_bus = not bus_state.muted and (
+                    not has_solo or bus_id in audible_solo)
+                listen_bus = listen_taps is not None and bus_id in listen_ids
+                if listen_bus and listen_stage == "pre":
+                    listen_taps[f"track:{bus_id}:pre"] = bus_input.copy()
+                if not programme_bus and not (listen_bus and listen_stage == "post"):
+                    self._advance_pdc_line(bus_id, bus_channels, num_samples)
                     continue
                 # RMA-06: Bus automation（volume/pan/mute）逐样本求值。
                 # 此前 Bus 阶段只读静态 bus_state.volume/pan，automation 被无声忽略。
@@ -3972,20 +3997,8 @@ class AudioMixer:
                 # MX-03: Bus pre-fader 峰值（音量/EQ/FX 前；Dynamics Input 表）
                 bus_pre_peak = (float(np.max(np.abs(bus_input)))
                                 if bus_input.shape[-1] > 0 else 0.0)
-                # pan（RMA-08: Bus 输入是已混的立体声，用 balance unity-center，
-                # 保持 center 响度与声像；不再用 equal-power 把整体降 -3dB）
-                # AUD-15506: balance_gains 已提升为模块级导入。
-                if bus_pan_ramp is not None and bus_samples.shape[0] >= 2:
-                    bus_samples = bus_samples.copy()
-                    for bi in range(min(len(bus_pan_ramp), bus_samples.shape[-1])):
-                        lg, rg = balance_gains(float(bus_pan_ramp[bi]))
-                        bus_samples[0, bi] *= lg
-                        bus_samples[1, bi] *= rg
-                else:
-                    lg, rg = balance_gains(bus_pan)
-                    bus_samples[0] *= lg
-                    if bus_samples.shape[0] > 1:
-                        bus_samples[1] *= rg
+                bus_samples = pan_clip_pcm(bus_samples, 2, bus_pan, bus_pan_ramp,
+                                           native=bus_channels == 1)
                 # CW-A1: Bus 空间声像器（与普通轨同级，balance 之后叠加矩阵）
                 bus_panner = self._track_panners.get(bus_id)
                 if bus_panner is not None and bus_panner.is_active:
@@ -4023,6 +4036,11 @@ class AudioMixer:
                     bus_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     bus_samples = bus_chain.process(
                         bus_samples, sidechain_by_id=bus_sc_map)
+                if listen_bus and listen_stage == "post":
+                    listen_taps[f"track:{bus_id}:post"] = bus_samples.copy()
+                if not programme_bus:
+                    self._advance_pdc_line(bus_id, bus_samples.shape[0], num_samples)
+                    continue
                 # P0 · PDC（实时监听）：Bus 输出端延迟线，对齐同级最迟链
                 # （下游路由/sends/Bus 检源 tap 随之同步延迟，与离线一致）。
                 # B02 · PDC：bus_samples 保持未延迟；主路边延迟在路由点应用，
@@ -4098,7 +4116,9 @@ class AudioMixer:
                     br = float(np.max(np.abs(bus_routed[1])))
                 else:
                     bl = br = float(np.max(np.abs(bus_routed[0])))
-                if bl > 0.0 or br > 0.0 or bus_pre_peak > 0.0:
+                bus_speakers = tuple(map(float, np.max(np.abs(bus_routed), axis=1))) if (
+                    bus_channels > 2 and bus_routed.shape[1]) else ()
+                if max(bl, br, bus_pre_peak, *bus_speakers) > 0.0:
                     if bus_routed.shape[-1] > 0:
                         rms_bl = float(np.sqrt(np.mean(bus_routed[0] ** 2)))
                         rms_br = float(np.sqrt(np.mean(bus_routed[1] ** 2))) \
@@ -4112,7 +4132,7 @@ class AudioMixer:
                         try:
                             if bus_id not in self._lufs_meters:
                                 self._lufs_meters[bus_id] = LoudnessMeter(
-                                    self._sample_rate, output_channels)
+                                    self._sample_rate, bus_channels)
                             bmeter = self._lufs_meters[bus_id]
                             bmeter.process(bus_routed)
                             bus_lufs = bmeter.momentary_lufs
@@ -4120,6 +4140,7 @@ class AudioMixer:
                             pass
                     per_track_peaks[bus_id] = TrackLevel(
                         peak_l=bl, peak_r=br, rms_l=rms_bl, rms_r=rms_br,
+                        speaker_peaks=bus_speakers,
                         lufs=bus_lufs, pre_peak=bus_pre_peak,
                         gr=(bus_chain.collect_gain_reduction()
                             if bus_chain is not None else {}),
@@ -4225,7 +4246,9 @@ class AudioMixer:
                     m_peak_r = float(np.max(np.abs(output[1])))
                 else:
                     m_peak_l = m_peak_r = float(np.max(np.abs(output[0])))
-                if m_peak_l > 0.0 or m_peak_r > 0.0:
+                master_speakers = tuple(map(float, np.max(np.abs(output), axis=1))) if (
+                    output.shape[0] > 2) else ()
+                if max(m_peak_l, m_peak_r, *master_speakers) > 0.0:
                     m_cnt = output.shape[-1]
                     m_rms_l = float(np.sqrt(np.dot(output[0], output[0]) / m_cnt))
                     m_rms_r = (float(np.sqrt(np.dot(output[1], output[1]) / m_cnt))
@@ -4245,6 +4268,7 @@ class AudioMixer:
                             pass
                     per_track_peaks[MASTER_BUS_KEY] = TrackLevel(
                         peak_l=m_peak_l, peak_r=m_peak_r,
+                        speaker_peaks=master_speakers,
                         rms_l=m_rms_l, rms_r=m_rms_r, lufs=m_lufs,
                         pre_peak=master_pre_peak,
                         gr=(master_chain.collect_gain_reduction()
@@ -4255,12 +4279,59 @@ class AudioMixer:
                               if master_chain is not None else {}),
                     )
 
+            if listen_taps is not None:
+                self._align_listen_taps(listen_taps, listen_ids, listen_stage, num_samples,
+                                        output_channels, registered_bus_set)
+            elif self._listen_pdc_signature:
+                self._listen_pdc_signature = ()
+                self._listen_pdc_lines.clear()
             # B09：渲染耗时遥测（窗口 512 块；health_snapshot() 消费百分位）。
             self._render_times_ms.append(
                 (time.perf_counter() - _render_t0) * 1000.0)
             self._render_deadlines_ms.append(
                 1000.0 * num_samples / self._sample_rate)
             return output, per_track_peaks
+
+    def _align_listen_taps(
+        self, taps: Dict[str, np.ndarray], ids: Tuple[str, ...], stage: str,
+        samples: int, output_channels: int, buses: set[str],
+    ) -> None:
+        """Align listen taps using their pre/post latency on a separate delay bank."""
+        arrival = {}
+        widths = {}
+        for track_id in dict.fromkeys(ids):
+            if track_id not in self._tracks:
+                continue
+            key = f"track:{track_id}:{stage}"
+            default = (ChannelLayout.STEREO if self._master_layout is not None else
+                       ChannelLayout.from_channel_count(output_channels))
+            layout = self._bus_layout_of(track_id) if track_id in buses else (
+                self._track_layouts.get(track_id) or default)
+            widths[key] = layout.channel_count
+            chain = self._effect_chains.get(track_id)
+            intrinsic = chain.latency_samples() if stage == "post" and chain is not None else 0
+            arrival[key] = (self._pdc_arrival.get(track_id, 0)
+                            + self._clip_lat_max.get(track_id, 0) + intrinsic)
+        latest = max(arrival.values(), default=0)
+        delays = {key: latest - value for key, value in arrival.items()}
+        signature = tuple((key, delay, widths[key]) for key, delay in delays.items())
+        if self._listen_pdc_signature != signature:
+            self._listen_pdc_signature = signature
+            self._listen_pdc_lines.clear()
+            bytes_needed = sum(delay * widths[key] * 4 for key, delay in delays.items())
+            self._listen_pdc_rejected = bytes_needed > 16 * 1024 * 1024
+            if self._listen_pdc_rejected:
+                logger.warning("Control room listen delay compensation exceeds 16 MiB")
+        if self._listen_pdc_rejected:
+            taps.clear()
+            return
+        for key, delay in delays.items():
+            if not delay:
+                continue
+            block = taps.get(key)
+            if block is None:
+                block = np.zeros((widths[key], samples), dtype=np.float32)
+            taps[key] = apply_pdc_delay_line(self._listen_pdc_lines, key, delay, block)
 
 
 # =============================================================================
@@ -4287,6 +4358,9 @@ class AudioOutput(QObject):
         channels: int = 2,
         buffer_frames: int = AUDIO_OUTPUT_FRAMES,
         parent: Optional[QObject] = None,
+        *,
+        device_id: bytes = b"",
+        strict_channels: bool = False,
     ) -> None:
         """
         初始化音频输出。
@@ -4301,6 +4375,8 @@ class AudioOutput(QObject):
         self._sample_rate: int = sample_rate
         self._channels: int = channels
         self._buffer_frames: int = max(256, int(buffer_frames))
+        self._device_id = device_id
+        self._strict_channels = strict_channels
 
         # 创建音频格式
         self._format: QAudioFormat = QAudioFormat()
@@ -4330,8 +4406,14 @@ class AudioOutput(QObject):
             是否成功启动
         """
         try:
-            # 获取默认音频设备
-            device = QMediaDevices.defaultAudioOutput()
+            if self._device_id:
+                device = next((candidate for candidate in QMediaDevices.audioOutputs()
+                               if bytes(candidate.id()) == self._device_id), None)
+                if device is None:
+                    logger.warning("Selected control room output device is unavailable")
+                    return False
+            else:
+                device = QMediaDevices.defaultAudioOutput()
             playback_trace(
                 "audio_output.start",
                 sample_rate=self._format.sampleRate(),
@@ -4342,7 +4424,8 @@ class AudioOutput(QObject):
             if not device.isFormatSupported(self._format):
                 # 尝试最接近的格式
                 nearest = device.preferredFormat()
-                if nearest.sampleRate() <= 0 or nearest.channelCount() <= 0:
+                if (nearest.sampleRate() <= 0 or nearest.channelCount() <= 0
+                        or (self._strict_channels and nearest.channelCount() != self._channels)):
                     logger.warning("Audio format not supported")
                     return False
                 self._format = nearest
@@ -4355,7 +4438,7 @@ class AudioOutput(QObject):
 
             # 启动
             self._io_device = self._audio_sink.start()
-            if self._io_device is None:
+            if self._io_device is None or self._audio_sink.error() != QAudio.Error.NoError:
                 playback_trace("audio_output.start_failed", reason="no_io_device")
                 logger.warning("Failed to start audio sink")
                 return False
@@ -4401,7 +4484,7 @@ class AudioOutput(QObject):
         if self._audio_sink:
             try:
                 self._audio_sink.resume()
-                self._is_playing = True
+                self._is_playing = self._io_device is not None
                 logger.debug("AudioOutput resumed")
             except RuntimeError:
                 self._audio_sink = None
@@ -4494,6 +4577,9 @@ class AudioOutput(QObject):
         if self._audio_sink is None or not self._is_playing:
             return 0
         try:
+            if self._audio_sink.state() == QAudio.State.StoppedState:
+                self._is_playing = False
+                return 0
             return int(self._audio_sink.bytesFree())
         except RuntimeError:
             self._audio_sink = None
@@ -4690,6 +4776,18 @@ class AudioPlaybackThread(QThread):
         self._prefill_chunk_fraction: float = 0.0
         self._prerolled_frame: Optional[int] = None
         self._prerolled_fps: float = 0.0
+        self.control_room_state: Optional[Callable[[], MonitorSessionState]] = None
+        self.control_room_patch = ControlRoomPatch()
+        self.control_room_input: Optional[Callable[[], Optional[ControlRoomInput]]] = None
+        self.control_room_return: Optional[Callable[[], Optional[ControlRoomInput]]] = None
+        self.reference_mix: Any = None
+        self._monitor_service: Optional[MonitorService] = None
+        self._monitor_next_sample = 0
+        self._monitor_next_frame: Optional[int] = None
+        self._monitor_render_rate = 0
+        self._programme_peaks: Optional[Tuple[float, float]] = None
+        self._paused_input_monitor: Optional[MonitorService] = None
+        self._paused_input_displaced_transport = False
 
     def _enqueue_command(self, command: Tuple[str, Any]) -> None:
         """Queue a control command, coalescing stale positioning requests."""
@@ -4800,7 +4898,14 @@ class AudioPlaybackThread(QThread):
 
         try:
             if self._output is None:
-                self._output = AudioOutput(sample_rate=self._sample_rate, channels=self._channels)
+                patch = self.control_room_patch
+                if patch.device_id or patch.channels:
+                    self._output = AudioOutput(
+                        sample_rate=self._sample_rate, channels=self._channels,
+                        device_id=patch.device_id, strict_channels=bool(patch.channels),
+                    )
+                else:
+                    self._output = AudioOutput(sample_rate=self._sample_rate, channels=self._channels)
 
             if not self._output.start():
                 playback_trace("audio_thread.error", reason="output_start_failed")
@@ -4809,14 +4914,21 @@ class AudioPlaybackThread(QThread):
                 # UI 仍显示"播放中"且无任何信号。上报 manager 统一 stop() +
                 # state_changed("stopped")，UI 恢复一致。
                 self._output_failure_reported = True
-                self.output_failed.emit("output_start_failed")
+                self.output_failed.emit("control_room_output_unavailable" if
+                                        self.control_room_patch.device_id or self.control_room_patch.channels
+                                        else "output_start_failed")
                 self._running = False
 
             # 检测设备格式回退后的采样率变化，确保整条链路采样率一致
             if self._running and self._output is not None:
                 device_rate = self._output._sample_rate
                 device_channels = self._output._channels
-                if device_rate != self._sample_rate or device_channels != self._channels:
+                if (self.control_room_state is not None and not self.control_room_patch.channels
+                        and device_channels not in (1, 2)):
+                    self._output_failure_reported = True
+                    self._running = False
+                    self.output_failed.emit("control_room_output_unavailable")
+                if self._running and (device_rate != self._sample_rate or device_channels != self._channels):
                     logger.warning(
                         f"Audio device format fallback: rate {self._sample_rate}→{device_rate}, "
                         f"channels {self._channels}→{device_channels}. Syncing pipeline."
@@ -4836,14 +4948,6 @@ class AudioPlaybackThread(QThread):
                     if self._mixer is not None:
                         self._mixer.set_sample_rate(device_rate)
                         self._mixer.set_decoders_output_rate(device_rate)
-                    if self._ring is not None and self._ring.channels != max(1, int(device_channels)):
-                        from src.features.edit.core.realtime_playback.audio_ring_buffer import (
-                            AudioRingBuffer,
-                        )
-                        self._ring = AudioRingBuffer(
-                            channels=max(1, int(device_channels)),
-                            capacity=self._ring.capacity,
-                        )
                     playback_trace(
                         "audio_thread.format_fallback_sync",
                         new_rate=device_rate,
@@ -4853,6 +4957,9 @@ class AudioPlaybackThread(QThread):
                     # R10：回报 manager（UI 曲线/频谱轴与解码/DSP 同源）
                     self.device_format_changed.emit(float(device_rate),
                                                     int(device_channels))
+                if self._running and self._ring is not None and self._ring.channels != device_channels:
+                    from src.features.edit.core.realtime_playback.audio_ring_buffer import AudioRingBuffer
+                    self._ring = AudioRingBuffer(channels=device_channels, capacity=self._ring.capacity)
 
             if self._running and self._paused and self._output is not None:
                 self._output.suspend()
@@ -4864,10 +4971,12 @@ class AudioPlaybackThread(QThread):
                     self._process_command(cmd)
                 except queue.Empty:
                     pass
+                if not self._running:
+                    break
 
-                # 如果暂停，等待
                 if self._paused:
-                    self.msleep(10)
+                    if not self._play_paused_input():
+                        self.msleep(10)
                     continue
 
                 # 播放音频
@@ -4879,6 +4988,8 @@ class AudioPlaybackThread(QThread):
                         # 线程继续服务后续周期（与 _prefill_ring 的保护同级）。
                         try:
                             self._play_cycle()
+                        except SpeakerLayoutError:
+                            raise
                         except Exception as e:
                             logger.error(
                                 f"_play_cycle failed, skipping chunk: {e}",
@@ -4896,9 +5007,13 @@ class AudioPlaybackThread(QThread):
                             self.output_failed.emit("output_device_lost")
                         self._running = False
 
+        except SpeakerLayoutError as error:
+            self._running = False
+            self._output_failure_reported = True
+            self.output_failed.emit(f"speaker_layout:{error}")
+        finally:
             if self._output:
                 self._output.stop()
-        finally:
             self._restore_realtime_isolation()
             logger.debug("AudioPlaybackThread stopped")
 
@@ -4919,7 +5034,12 @@ class AudioPlaybackThread(QThread):
                 self._output.suspend()
         elif cmd_type == "resume":
             self._paused = False
-            if self._output:
+            if self._paused_input_displaced_transport:
+                self._seek_audio_thread_position(self._next_audio_frame, self._fps,
+                                                 keep_suspended=False)
+                if self._output:
+                    self._output.resume()
+            elif self._output:
                 self._output.resume()
         elif cmd_type == "seek":
             # Seek 命令：data = (frame, fps)
@@ -4949,6 +5069,38 @@ class AudioPlaybackThread(QThread):
                 target_samples=target_samples,
             )
 
+    def _play_paused_input(self) -> bool:
+        """Keep input audible through the suspended transport's own sink."""
+        if self.control_room_state is None or self.control_room_input is None or self._output is None:
+            return False
+        state = self.control_room_state()
+        source = self.control_room_input()
+        if state.source_tap != "input" or source is None or source.sample_rate != self._sample_rate:
+            if self._paused_input_monitor is not None:
+                self._paused_input_monitor = None
+                self._output.reset_buffer(keep_suspended=True)
+            return False
+        if self._paused_input_monitor is None:
+            self._paused_input_monitor = MonitorService(self._sample_rate)
+            self._paused_input_displaced_transport = True
+            self._output.reset_buffer(keep_suspended=False)
+            self._output.resume()
+        if not self._output.is_playing:
+            self._running = False
+            self.output_failed.emit("output_device_lost")
+            return False
+        capacity = self._output.bytes_free() // self._output.bytes_per_frame()
+        count = min(source.available_samples, capacity, max(1, self._sample_rate // 100))
+        if count <= 0:
+            return False
+        pcm = source.read(count, self._sample_rate)
+        if pcm is None:
+            return False
+        output = render_speaker_block(self._paused_input_monitor, state, self.control_room_patch,
+                                      self._channels, {"input": pcm})
+        self._output.write_samples(output)
+        return True
+
     def _seek_audio_thread_position(
         self,
         frame: int,
@@ -4971,6 +5123,19 @@ class AudioPlaybackThread(QThread):
         self._fractional_frame = 0.0
         self._sample_chunk_fraction = 0.0
         self._prefill_chunk_fraction = 0.0
+        self._monitor_next_frame = None
+        self._paused_input_monitor = None
+        self._paused_input_displaced_transport = False
+        if self._monitor_service is not None:
+            self._monitor_service.reset()
+        if self.reference_mix is not None:
+            self.reference_mix.reset_transport()
+        source = self.control_room_input() if self.control_room_input is not None else None
+        if source is not None:
+            source.clear()
+        source = self.control_room_return() if self.control_room_return is not None else None
+        if source is not None:
+            source.clear()
         self._latest_per_track_peaks = {}
         self._track_levels_pending = False
         self._last_emitted_track_ids.clear()
@@ -5001,6 +5166,65 @@ class AudioPlaybackThread(QThread):
         self._sample_chunk_fraction -= chunk_samples
         return max(1, chunk_samples)
 
+    def _render_output_block(self, frame: int, samples: int, channels: int) -> tuple:
+        """Render once, then apply the listening branch before the device ring."""
+        state_reader = self.control_room_state
+        if state_reader is None:
+            if isinstance(self._mixer, AudioMixer):
+                programme, levels = self._mixer.mix_samples(
+                    frame, self._fps, samples, self._mixer.programme_channels())
+                if programme is not None:
+                    programme = route_pcm(programme, ChannelLayout.from_channel_count(channels))
+                return programme, levels
+            return self._mixer.mix_samples(frame, self._fps, samples, channels)
+
+        state = state_reader()
+        patch = self.control_room_patch
+        taps: Dict[str, np.ndarray] = {}
+        programme_channels = self._mixer.programme_channels()
+        if state.source_tap in ("pfl", "afl"):
+            programme, levels = self._mixer.mix_samples(
+                frame, self._fps, samples, programme_channels, listen_taps=taps,
+                listen_ids=state.selected_listen_ids,
+                listen_stage="pre" if state.source_tap == "pfl" else "post",
+            )
+        else:
+            programme, levels = self._mixer.mix_samples(frame, self._fps, samples, programme_channels)
+        if programme is None or programme.size == 0:
+            return programme, levels
+        # The cursor follows samples rendered for the ring. Re-anchor after an
+        # explicit seek or discontinuity rather than rounding every video frame.
+        if self._monitor_next_frame != frame or self._monitor_render_rate != self._sample_rate:
+            self._monitor_next_sample = round(frame * self._sample_rate / self._fps)
+        first_sample = self._monitor_next_sample
+        self._monitor_next_sample += programme.shape[-1]
+        self._monitor_next_frame = frame + 1
+
+        master = levels.get(MASTER_BUS_KEY)
+        self._programme_peaks = (float(master[0]), float(master[1])) if master is not None else (0.0, 0.0)
+        if state.source_tap in ("program", "sip") and self.reference_mix is not None:
+            programme = self.reference_mix.render_block(
+                programme, first_sample, sample_rate=self._sample_rate)
+        if self.control_room_return is not None:
+            source = self.control_room_return()
+            return_pcm = source.read(programme.shape[-1], self._sample_rate) if source is not None else None
+            if return_pcm is not None and state.source_tap in ("program", "sip"):
+                # ADR guide and the selected input return share the final
+                # room output. Never add the return to the programme graph.
+                programme = programme + route_pcm(
+                    return_pcm, ChannelLayout.from_channel_count(programme.shape[0]))
+
+        taps["master"] = programme
+        if state.source_tap == "input" and self.control_room_input is not None:
+            source = self.control_room_input()
+            pcm = source.read(programme.shape[-1], self._sample_rate) if source is not None else None
+            if pcm is not None:
+                taps["input"] = pcm
+        if self._monitor_service is None or self._monitor_render_rate != self._sample_rate:
+            self._monitor_service = MonitorService(self._sample_rate)
+        self._monitor_render_rate = self._sample_rate
+        return render_speaker_block(self._monitor_service, state, patch, channels, taps), levels
+
     def _play_cycle(self) -> None:
         """
         一个播放周期（Final-5: 经 AudioRingBuffer 解耦）。
@@ -5028,6 +5252,8 @@ class AudioPlaybackThread(QThread):
         # 用 mixer 当前帧推进，避免重复解码同一帧。
         try:
             self._prefill_ring()
+        except SpeakerLayoutError:
+            raise
         except Exception as e:
             logger.debug(f"_prefill_ring failed: {e}")
 
@@ -5070,12 +5296,10 @@ class AudioPlaybackThread(QThread):
             # 异常（畸形 sends 的 float() TypeError、DSP 插件抛错）冲出 run()
             # 会杀死整个播放线程且状态残留为 playing。捕获、记录并跳过本 chunk。
             try:
-                samples, _direct_per_track = self._mixer.mix_samples(
-                    current_frame,
-                    self._fps,
-                    chunk_samples,
-                    self._output._channels,
-                )
+                samples, _direct_per_track = self._render_output_block(
+                    current_frame, chunk_samples, self._output._channels)
+            except SpeakerLayoutError:
+                raise
             except Exception as e:
                 logger.error(f"direct-mix fallback failed, skipping chunk: {e}", exc_info=True)
                 self._sample_chunk_fraction = chunk_fraction_before
@@ -5163,7 +5387,9 @@ class AudioPlaybackThread(QThread):
                 import numpy as _np
                 now_ms = time.perf_counter() * 1000.0
                 if now_ms - self._last_track_level_emit_ms >= 30.0:
-                    if samples.ndim == 2 and samples.shape[0] >= 2:
+                    if self._programme_peaks is not None:
+                        left_peak, right_peak = self._programme_peaks
+                    elif samples.ndim == 2 and samples.shape[0] >= 2:
                         left_peak = float(_np.max(_np.abs(samples[0])))
                         right_peak = float(_np.max(_np.abs(samples[1])))
                     elif samples.ndim == 2:
@@ -5214,6 +5440,13 @@ class AudioPlaybackThread(QThread):
                             # CW-A1: pre-fader 峰值（Dynamics Input 表）
                             "pre": float(db_arr[i, 4]),
                         }
+                        speaker_peaks = getattr(lvl, "speaker_peaks", ())
+                        if speaker_peaks:
+                            speaker_order = ChannelLayout.from_channel_count(len(speaker_peaks)).channel_labels
+                            payload["speakers"] = {
+                                label: max(-100.0, 20.0 * math.log10(max(1e-10, peak)))
+                                for label, peak in zip(speaker_order, speaker_peaks)
+                            }
                         # CW-A1: GR / 侧链检源电平（按 instance_id；仅动态对话框消费）
                         gr = getattr(lvl, "gr", None)
                         sc = getattr(lvl, "sc", None)
@@ -5334,12 +5567,7 @@ class AudioPlaybackThread(QThread):
             self._prefill_chunk_fraction -= n
             n = max(1, n)
             current_frame = int(self._ring_write_frame_int)
-            samples, per_track = self._mixer.mix_samples(
-                current_frame,
-                self._fps,
-                n,
-                self._channels,
-            )
+            samples, per_track = self._render_output_block(current_frame, n, self._channels)
             self._latest_per_track_peaks = per_track
             self._track_levels_pending = True
             if samples is None or samples.size == 0:
@@ -5650,6 +5878,7 @@ class AudioPlaybackManager(QObject):
     audio_telemetry_reset = pyqtSignal(int)
     # MX-09: 引擎采样率下发（设备/工程切换时 EQ 曲线与频谱轴同步重算）
     sample_rate_changed = pyqtSignal(float)
+    control_room_output_failed = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -5686,10 +5915,90 @@ class AudioPlaybackManager(QObject):
         self._audio_preroll_ms: int = 120
         self._audio_scrub_preview_ms: int = 72
         self._scrub_preview_generation: int = 0
+        self.control_room_state = MonitorSessionState()
+        self.control_room_patch = ControlRoomPatch.load_local()
+        self.control_room_input: Optional[ControlRoomInput] = None
+        self.control_room_return: Optional[ControlRoomInput] = None
+        self._control_room_active = True
+        self._stopped_input_monitor: Optional[MonitorService] = None
+        self._stopped_input_failed = False
+        from src.features.edit.core.reference_mix_session import ReferenceMixMonitor
+        self.reference_mix = ReferenceMixMonitor()
 
         logger.debug("AudioPlaybackManager initialized")
 
     # ==================== Configuration ====================
+
+    def set_control_room(self, state: MonitorSessionState, patch: ControlRoomPatch) -> None:
+        """Publish an immutable listening state without editing the programme."""
+        if patch != self.control_room_patch:
+            if self._clock.is_playing:
+                raise ValueError("Stop playback before changing the output patch")
+            if self._playback_thread is not None:
+                frame = self.get_current_frame()
+                self.stop()
+                self.seek(frame)
+            self._stop_scrub_preview_output()
+            self._scrub_preview_output = None
+            self.control_room_patch = patch
+            self._stopped_input_failed = False
+        if state != self.control_room_state and (
+            state.source_tap != "input" or self.control_room_state.source_tap != "input"
+            or state.selected_listen_ids != self.control_room_state.selected_listen_ids
+            or self._stopped_input_monitor is None
+        ):
+            self._stop_scrub_preview_output()
+            self._invalidate_scrub_previews()
+        self.control_room_state = state
+
+    def control_room_sample_rate(self) -> int:
+        return self._sample_rate
+
+    def set_control_room_active(self, active: bool) -> None:
+        self._control_room_active = active
+        if not active and self._stopped_input_monitor is not None:
+            self._stop_scrub_preview_output()
+
+    def set_control_room_input(self, capture: Optional[ControlRoomInput]) -> None:
+        if self._stopped_input_monitor is not None:
+            self._stop_scrub_preview_output()
+        self.control_room_input = capture
+        self._stopped_input_failed = False
+
+    def submit_control_room_input(self, capture: ControlRoomInput, pcm: np.ndarray) -> None:
+        """Deliver a captured block to the current output owner on the Qt thread."""
+        state = self.control_room_state
+        if (not self._control_room_active or self.control_room_input is not capture
+                or state.source_tap != "input" or capture.sample_rate != self._sample_rate or not pcm.size):
+            return
+        if self._playback_thread is not None:
+            # The playback worker owns the device whether running or paused.
+            capture.push(pcm)
+            return
+        if self._clock.is_playing or self._stopped_input_failed:
+            return
+        output = self._ensure_scrub_preview_output()
+        if output is None or output._sample_rate != capture.sample_rate:
+            self._stop_scrub_preview_output()
+            self._stopped_input_failed = True
+            self.control_room_output_failed.emit(
+                "control_room_input_rate" if output is not None else "control_room_output_unavailable")
+            return
+        if self._stopped_input_monitor is None:
+            self._stopped_input_monitor = MonitorService(capture.sample_rate)
+        capacity = output.bytes_free() // output.bytes_per_frame()
+        if not output.is_playing:
+            self._stop_scrub_preview_output()
+            self._stopped_input_failed = True
+            self.control_room_output_failed.emit("output_device_lost")
+            return
+        count = min(capacity, pcm.shape[-1])
+        if count > 0:
+            # Live monitor uses the freshest block, rather than a growing
+            # queue, when the capture clock temporarily outruns the sink.
+            speaker = render_speaker_block(self._stopped_input_monitor, state, self.control_room_patch,
+                                            output._channels, {"input": pcm[:, -count:]})
+            output.write_samples(speaker)
 
     def prewarm_output(self) -> None:
         """
@@ -6221,6 +6530,9 @@ class AudioPlaybackManager(QObject):
         """P2：设置 Bus 声道布局声明。转发到 AudioMixer。"""
         self._mixer.set_bus_layouts(layouts)
 
+    def set_programme_layouts(self, tracks: Dict[str, str], master: str) -> None:
+        self._mixer.set_programme_layouts(tracks, master)
+
     def set_track_automation_preview(self, track_id: str,
                                      automation: Dict[str, Any]) -> None:
         """P1-5：设置/清除某轨的预览自动化层。转发到 AudioMixer。"""
@@ -6250,14 +6562,22 @@ class AudioPlaybackManager(QObject):
 
     def _create_playback_thread(self, start_frame: int, *, start_paused: bool) -> None:
         """Create the thread-owned audio output path."""
+        self._stop_scrub_preview_output()
+        if self.control_room_input is not None:
+            self.control_room_input.clear()
         self._playback_thread = AudioPlaybackThread(self)
+        self._playback_thread.control_room_patch = self.control_room_patch
+        self._playback_thread.control_room_state = lambda: self.control_room_state
+        self._playback_thread.control_room_input = lambda: self.control_room_input
+        self._playback_thread.control_room_return = lambda: self.control_room_return
+        self._playback_thread.reference_mix = self.reference_mix
         self._playback_thread.setup(
             self._clock,
             self._mixer,
             None,
             self._timeline_fps,
             sample_rate=self._sample_rate,
-            channels=2,
+            channels=self.control_room_patch.device_channels,
             start_frame=start_frame,
             start_paused=start_paused,
         )
@@ -6287,6 +6607,7 @@ class AudioPlaybackManager(QObject):
         playback_trace("audio_manager.output_failed", reason=reason)
         logger.warning(f"Audio output failed during playback ({reason}); stopping playback")
         self.stop()
+        self.control_room_output_failed.emit(reason)
 
     def _ensure_scrub_preview_worker(self) -> AudioScrubPreviewWorker:
         worker = self._scrub_preview_worker
@@ -6323,20 +6644,27 @@ class AudioPlaybackManager(QObject):
     def _ensure_scrub_preview_output(self) -> Optional[AudioOutput]:
         output = self._scrub_preview_output
         if output is None:
-            output = AudioOutput(
-                sample_rate=self._sample_rate,
-                channels=2,
-                buffer_frames=SCRUB_AUDIO_OUTPUT_FRAMES,
-                parent=self,
-            )
+            patch = self.control_room_patch
+            options = {"device_id": patch.device_id, "strict_channels": bool(patch.channels)} \
+                if patch.device_id or patch.channels else {}
+            output = AudioOutput(sample_rate=self._sample_rate, channels=patch.device_channels,
+                                 buffer_frames=SCRUB_AUDIO_OUTPUT_FRAMES, parent=self, **options)
             self._scrub_preview_output = output
         if not output.is_playing and not output.start():
+            return None
+        if not self.control_room_patch.channels and output._channels not in (1, 2):
+            output.stop()
             return None
         return output
 
     def _stop_scrub_preview_output(self) -> None:
+        self._stopped_input_monitor = None
         if self._scrub_preview_output is not None:
             self._scrub_preview_output.stop()
+
+    def _can_scrub_monitor(self) -> bool:
+        return (self.control_room_state.source_tap in ("program", "sip")
+                and not self.control_room_state.muted and not self.reference_mix.reference_selected)
 
     def preview_scrub_audio(self, frame: int, duration_ms: Optional[int] = None) -> bool:
         """
@@ -6346,7 +6674,7 @@ class AudioPlaybackManager(QObject):
         if the tiny preview buffer is full, the block is dropped instead of
         queueing old audio behind the playhead.
         """
-        if self._timeline_duration == 0 or self._clock.is_playing:
+        if self._timeline_duration == 0 or self._clock.is_playing or not self._can_scrub_monitor():
             return False
 
         frame = self._clamp_frame(frame)
@@ -6363,7 +6691,7 @@ class AudioPlaybackManager(QObject):
             frame,
             self._timeline_fps,
             preview_samples,
-            2,
+            self._mixer.programme_channels(2),
             generation,
         )
         self._prepared_frame = None
@@ -6399,12 +6727,22 @@ class AudioPlaybackManager(QObject):
             )
             return
 
+        if not self._can_scrub_monitor():
+            return
         output = self._ensure_scrub_preview_output()
         if output is None:
             playback_trace("audio_manager.scrub_preview_output_unavailable", frame=frame)
             return
 
         sample_array = np.asarray(samples, dtype=np.float32)
+        if output._sample_rate != self._sample_rate:
+            output.stop()
+            return
+        service = MonitorService(self._sample_rate)
+        service.set_state(self.control_room_state)
+        service.reset()
+        sample_array = render_speaker_block(service, self.control_room_state, self.control_room_patch,
+                                            output._channels, {"master": sample_array})
         bytes_needed = sample_array.shape[-1] * output.bytes_per_frame()
         bytes_free = output.bytes_free()
         if bytes_free < bytes_needed:
@@ -6436,6 +6774,10 @@ class AudioPlaybackManager(QObject):
         if self._timeline_duration == 0:
             return False
         if self._clock.is_playing:
+            self.seek(frame)
+            return False
+        if self.control_room_state.source_tap == "input" and self.control_room_input is not None:
+            # Pre-rendered input would be stale by the time playback starts.
             self.seek(frame)
             return False
 
@@ -6592,6 +6934,7 @@ class AudioPlaybackManager(QObject):
         self._prepared_frame = None
         self._prepared_fps = 0.0
         self._stop_scrub_preview_output()
+        self.reference_mix.reset_transport()
 
         # 停止输出
         self._output = None
@@ -6882,6 +7225,7 @@ class AudioPlaybackManager(QObject):
 
         停止播放，释放所有解码器。
         """
+        self.set_control_room_active(False)
         try:
             self.stop()
         finally:
@@ -6889,10 +7233,13 @@ class AudioPlaybackManager(QObject):
             # raises during stop().  The manager is a Qt parent of this
             # QThread; allowing parent destruction to race this cleanup makes
             # QThread::~QThread() abort the process on macOS.
-            self._stop_scrub_preview_worker()
-            if self._scrub_preview_output is not None:
-                self._scrub_preview_output.stop()
-                self._scrub_preview_output = None
+            try:
+                self._stop_scrub_preview_worker()
+                if self._scrub_preview_output is not None:
+                    self._scrub_preview_output.stop()
+                    self._scrub_preview_output = None
+            finally:
+                self._mixer.release_hosted_effects()
 
         # 清理所有解码器
         for track_id in list(self._mixer._decoders.keys()):

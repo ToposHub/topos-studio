@@ -205,6 +205,7 @@ class RoutingDialog(QDialog):
     """
 
     routing_preview = pyqtSignal(str, object)   # track_id, payload dict
+    layout_changed = pyqtSignal(object, str)
     routing_committed = pyqtSignal(str, object)  # track_id, payload dict
 
     def __init__(
@@ -216,6 +217,7 @@ class RoutingDialog(QDialog):
         bus_tracks: List[tuple],  # [(track_id, name), ...] 候选 Bus
         parent: Optional[QWidget] = None,
         routing_snapshot: Optional[dict] = None,
+        channel_layouts: tuple[str, str, bool] | None = None,
     ) -> None:
         """初始化 Routing 对话框。
 
@@ -233,6 +235,8 @@ class RoutingDialog(QDialog):
         self._track_id = track_id
         self._bus_tracks = bus_tracks
         self._routing_snapshot = routing_snapshot
+        self._channel_layouts = channel_layouts
+        self._layout_selectors: dict[str | None, QComboBox] = {}
 
         self.setWindowTitle(
             I18N.tr("audio.mixer.routing.title", "Routing — {name}").format(name=track_name)
@@ -262,6 +266,29 @@ class RoutingDialog(QDialog):
         # 而非等到用户第一次交互。
         self._validate_and_warn(self._collect())
 
+    def _add_layout_selector(self, rows: QVBoxLayout, target: str | None,
+                             current: str, allow_default: bool, title: str) -> None:
+        from src.features.edit.core.native_mix_layout import MIX_LAYOUTS
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel(title))
+        combo = QComboBox()
+        if allow_default:
+            combo.addItem(I18N.tr("mixer.layout.default", "Project default"), "")
+        for name in MIX_LAYOUTS:
+            combo.addItem(name, name)
+        self._layout_selectors[target] = combo
+        self.refresh_channel_layout(target, current)
+        combo.activated.connect(
+            lambda index: self.layout_changed.emit(target, str(combo.itemData(index))))
+        row.addWidget(combo, 1)
+        rows.addLayout(row)
+
+    def refresh_channel_layout(self, target: str | None, current: str) -> None:
+        combo = self._layout_selectors.get(target)
+        if combo is not None:
+            combo.setCurrentIndex(combo.findData(current))
+
     # ────────────────────────── UI 构建 ──────────────────────────
 
     def _init_ui(self) -> None:
@@ -288,6 +315,15 @@ class RoutingDialog(QDialog):
         self._output_combo.currentIndexChanged.connect(self._on_committed)
         og_layout.addWidget(self._output_combo)
         layout.addWidget(output_group)
+
+        if self._channel_layouts is not None:
+            current, master, is_bus = self._channel_layouts
+            layout_group = QGroupBox(I18N.tr("mixer.layout.title", "Channel layouts"))
+            rows = QVBoxLayout(layout_group)
+            self._add_layout_selector(rows, self._track_id, current, not is_bus,
+                                      I18N.tr("mixer.layout.channel", "Track / Bus"))
+            self._add_layout_selector(rows, None, master, True, "Master")
+            layout.addWidget(layout_group)
 
         # ── Send slots ──
         sends_group = QGroupBox(

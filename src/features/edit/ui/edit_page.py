@@ -878,6 +878,10 @@ class EditPage(QWidget):
             self._audio_manager.sample_rate_changed.connect(
                 mixer_panel.on_engine_sample_rate
             )
+            output_failed = getattr(self._audio_manager, "control_room_output_failed", None)
+            handle_output_failure = getattr(self._main_window, "_on_mixer_control_room_output_failed", None)
+            if output_failed is not None and callable(handle_output_failure):
+                output_failed.connect(handle_output_failure)
             self._mixer_signals_connected = True
             # W11: LUFS 按需计算——表模式驱动（无 LUFS 表时省掉 K-weighting，
             # 占混音热路径近一半耗时）。先同步当前状态再监听变化。
@@ -1485,6 +1489,25 @@ class EditPage(QWidget):
             logger.debug("Audio graph validation skipped: %s", e)
             snap = None
 
+        from src.features.edit.core.native_mix_layout import validate_native_layouts
+
+        try:
+            validate_native_layouts(self._current_timeline, audio_tracks)
+        except ValueError as exc:
+            reason = str(exc)
+            if self._audio_routing_errors != (reason,):
+                logger.warning("Audio layout rejected: %s", reason)
+                host = getattr(self, "_main_window", None)
+                bar = getattr(host, "status_bar", None)
+                if bar is not None:
+                    bar.showMessage(reason, 8000)
+            self._audio_routing_errors = (reason,)
+            self._audio_active = False
+            self._audio_timeline_signature = None
+            if self._audio_manager is not None:
+                self._audio_manager.stop()
+            return
+
         if snap is not None and not snap.is_valid:
             self._audio_routing_errors = tuple(snap.validation_errors)
             logger.warning(
@@ -1769,6 +1792,13 @@ class EditPage(QWidget):
                         for track in audio_tracks
                         if getattr(track, "is_bus", False)
                     })
+                set_programme_layouts = getattr(audio_mgr, "set_programme_layouts", None)
+                if callable(set_programme_layouts):
+                    set_programme_layouts(
+                        {track.track_id: str(getattr(track, "audio_layout", ""))
+                         for track in audio_tracks if not getattr(track, "is_bus", False)},
+                        str(getattr(self._current_timeline, "master_audio_layout", "")),
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_bus_layouts failed: %s", e)
         if self._current_timeline is not None:
@@ -2145,6 +2175,7 @@ class EditPage(QWidget):
                 getattr(track, "output_bus_id", None),
                 # P2: Bus 声道布局（引擎上/下混矩阵；改布局必须重建）
                 str(getattr(track, "bus_layout", "stereo") or "stereo"),
+                str(getattr(track, "audio_layout", "")),
                 _sends_sig(track),
                 # AT: 音频转场（audio:* 实例）变化需重新下发 crossfade 到引擎
                 _audio_transitions_sig(track),
@@ -2190,6 +2221,7 @@ class EditPage(QWidget):
             master_auto_sig,
             master_strip_sig,
             vca_sig,
+            str(getattr(timeline, "master_audio_layout", "")),
         )
 
     # ------------------------------------------------------------------
@@ -2590,6 +2622,10 @@ class EditPage(QWidget):
         """
         self._is_active = True
         logger.info("[EditPage] Entering Edit page")
+
+        activate_monitor = getattr(getattr(self, "_audio_manager", None), "set_control_room_active", None)
+        if callable(activate_monitor):
+            activate_monitor(getattr(getattr(self, "_main_window", None), "current_page", "Edit") in {"Edit", "Mixer"})
 
         # Seeks driven from other pages (Color clip sync) moved only the
         # playback controller while this view was hidden; realign the

@@ -3909,6 +3909,8 @@ def _ensure_effect_registry() -> dict:
             SubharmonicEffect,
         )
         _EFFECT_CLASS_REGISTRY["subharmonic"] = SubharmonicEffect
+        from src.features.edit.core.hosted_vst3 import EFFECT_TYPE, HostedVst3Effect
+        _EFFECT_CLASS_REGISTRY[EFFECT_TYPE] = HostedVst3Effect
     return _EFFECT_CLASS_REGISTRY
 
 
@@ -4188,6 +4190,12 @@ class EffectChain:
                     inst_params["makeup_gain"] = 0.0
             _apply_params_with_version(instance, inst_params, self._sample_rate,
                                        algorithm_version)
+            if effect_type == "vst3_hosted":
+                enabled = bool(enabled and (params or {}).get("enabled", True))
+                if enabled:
+                    instance.prepare()
+                else:
+                    instance.bypass()
             new_effects.append(instance)
             new_flags.append(bool(enabled))
             new_ids.append(instance_id)
@@ -4229,6 +4237,12 @@ class EffectChain:
                 return bool(installer(capture))
             return False
         return False
+
+    def release_hosted_effects(self) -> None:
+        """Retire hosted processes without changing the channel's effect model."""
+        for instance in self._effects:
+            if instance.effect_type == "vst3_hosted":
+                instance.release_resources()
 
     def process(self, samples: np.ndarray,
                 sidechain_by_id: Optional[dict] = None) -> np.ndarray:

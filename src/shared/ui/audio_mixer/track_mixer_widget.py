@@ -297,6 +297,7 @@ class TrackMixerWidget(QWidget):
         self.setAcceptDrops(True)
         # MX-09: 引擎采样率缓存（set_engine_sample_rate 更新；对话框构造注入）
         self._engine_sample_rate: float = 48000.0
+        self._effect_processing_layout = "stereo"
         self._track_id = track_id
         self._track_name = track_name
         self._track_tag = track_tag
@@ -1250,6 +1251,8 @@ class TrackMixerWidget(QWidget):
             if panel != "fx" and not (panel == "eq" and self._show_eq_insert_in_rack()):
                 continue
             short = EFFECT_SHORT_NAMES.get(inst.effect_type) or _effect_display_name(inst.effect_type)
+            if inst.effect_type == "vst3_hosted":
+                short = str(inst.params.get("plugin_name") or short)
             p_enabled = inst.enabled and bool(inst.params.get("enabled", True))
             label = short  # 旁路不加方括号，仅用灰色区分
             item = QListWidgetItem(label)
@@ -1273,7 +1276,8 @@ class TrackMixerWidget(QWidget):
                 item.setIcon(self._effect_status_icon(active))
                 effect_type = item.data(Qt.ItemDataRole.UserRole + 1)
                 state = I18N.tr("audio.mixer.active", "Active") if active else I18N.tr("audio.mixer.bypassed", "Bypassed")
-                item.setToolTip(f"{_effect_display_name(effect_type)} · {state}\n" + I18N.tr(
+                name = item.text() if effect_type == "vst3_hosted" else _effect_display_name(effect_type)
+                item.setToolTip(f"{name} · {state}\n" + I18N.tr(
                     "audio.mixer.insert_tip", "Click / Enter: edit · Space: bypass · Delete: remove · Right-click: more"))
             if iid == selected_id:
                 self._effect_list.setCurrentItem(item)
@@ -1368,6 +1372,8 @@ class TrackMixerWidget(QWidget):
             self._open_dynamics_panel()
         elif instance.panel == "eq":
             self._open_eq_from_badge()
+        elif instance.effect_type == "vst3_hosted":
+            self._edit_vst3_insert(instance)
         elif instance.effect_type in self._INSERT_EFFECT_TYPES or instance.effect_type == "noise_gate":
             self._open_insert_effect(instance)
 
@@ -1454,6 +1460,14 @@ class TrackMixerWidget(QWidget):
                     action.triggered.connect(self._add_spatial_panner)
                 else:
                     action.triggered.connect(lambda checked=False, et=effect_type: self._effect_add(et))
+        hosted = menu.addAction(I18N.tr("audio.fx.vst3.add", "Add VST3 plug-in…"))
+        hosted.setData("vst3_hosted")
+        if self._effect_processing_layout != "stereo":
+            reason = I18N.tr("audio.fx.vst3.stereo_only", "Requires a stereo channel")
+            hosted.setEnabled(False)
+            hosted.setToolTip(reason)
+            hosted.setText(f"{hosted.text()} · {reason}")
+        hosted.triggered.connect(lambda _checked=False: self._edit_vst3_insert())
 
     def _show_add_effect_menu(self) -> None:
         """Open Add Effect from the permanent button below the rack."""
@@ -1585,7 +1599,35 @@ class TrackMixerWidget(QWidget):
         self._update_badges_style()
         self._open_dynamics_panel()
 
-    def _effect_add(self, effect_type: str) -> None:
+    def _edit_vst3_insert(self, instance: TrackEffectInstance | None = None) -> None:
+        from src.features.edit.core.hosted_vst3 import EFFECT_TYPE, HostedVst3Params
+        from src.features.mixer.ui.vst3_insert_dialog import Vst3InsertDialog
+
+        if instance is None and self._effect_processing_layout != "stereo":
+            return
+        try:
+            initial = HostedVst3Params.from_dict(instance.params) if instance else None
+        except ValueError as exc:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, I18N.tr("audio.fx.vst3.title", "VST3 plug-in"), str(exc))
+            return
+        original_chain = self._effect_chain
+        dialog = Vst3InsertDialog(self._engine_sample_rate, self, initial)
+        dialog.exec()
+        result = dialog.result_params
+        dialog.deleteLater()
+        if result is None or original_chain != self._effect_chain:
+            return
+        if instance is None and self._effect_processing_layout == "stereo":
+            self._effect_add(EFFECT_TYPE, result.to_dict())
+        elif instance is not None and result != initial:
+            self._on_fx_param_edited(instance, {**instance.params, **result.to_dict()})
+
+    def set_effect_processing_layout(self, layout: str) -> None:
+        """Keep rack choices aligned with the channel's actual processing domain."""
+        self._effect_processing_layout = str(layout or "stereo")
+
+    def _effect_add(self, effect_type: str, params: dict | None = None) -> None:
         """添加一个效果器到链尾（支持多实例，同类型可重复添加）。
 
         effect_type == "dynamics" 时一次性加入完整 Dynamics 单元
@@ -1599,7 +1641,7 @@ class TrackMixerWidget(QWidget):
         new_order = max((e.order for e in existing), default=-1) + 1
         inst = TrackEffectInstance(
             effect_type=effect_type,
-            params=_effect_default_params(effect_type),
+            params=_effect_default_params(effect_type) if params is None else params,
             enabled=True,
             order=new_order,
             panel="fx",  # FX 列表管理的实例（与 DY 胶囊的 panel="dynamics" 区分）
@@ -2179,6 +2221,7 @@ class TrackMixerWidget(QWidget):
     def reset_meter(self) -> None:
         """重置电平表"""
         self._meter.reset()
+        self._set_speaker_peaks(None)
 
     # ─── CW-A1: 空间声像器 ───────────────────────────────────
 
@@ -2262,12 +2305,43 @@ class TrackMixerWidget(QWidget):
 
     # ─── CW-A1: 遥测分发（引擎 33Hz payload → 已打开对话框）────
 
+    def _set_speaker_peaks(self, speakers: dict | None) -> None:
+        meter = getattr(self, "studio_meter", self._meter)
+        if speakers:
+            if getattr(self, "_speaker_meter_tip", None) is None:
+                self._speaker_meter_tip = meter.toolTip()
+            meter.setToolTip(" · ".join(f"{name} {db:.1f} dBFS" for name, db in speakers.items()))
+        elif getattr(self, "_speaker_meter_tip", None) is not None:
+            meter.setToolTip(self._speaker_meter_tip)
+            self._speaker_meter_tip = None
+
     def update_track_telemetry(self, payload: dict) -> None:
         """Send measured values to the open panels, keyed by effect instance."""
         silent = bool(payload.get("silent"))
+        self._set_speaker_peaks(payload.get("speakers"))
         reduction = payload.get("gr") or {}
         detectors = payload.get("sc") or {}
         taps = payload.get("taps") or {}
+        for row in range(self._effect_list.count()):
+            item = self._effect_list.item(row)
+            if item.data(Qt.ItemDataRole.UserRole + 1) != "vst3_hosted":
+                continue
+            tap = taps.get(item.data(Qt.ItemDataRole.UserRole))
+            if tap is None and not silent:
+                continue
+            detail = (tap or {}).get("analysis") or {}
+            error = detail.get("error")
+            if error:
+                state = I18N.tr("audio.fx.vst3.host_muted", "Host muted this insert")
+                item.setForeground(QColor("#F09666"))
+                item.setToolTip(f"{item.text()} · {state}\n{error}")
+                continue
+            active = bool(item.data(Qt.ItemDataRole.UserRole + 2))
+            item.setForeground(QColor(C.TEXT_PRIMARY if active else "#666670"))
+            state = I18N.tr("audio.mixer.active", "Active") if active else I18N.tr("audio.mixer.bypassed", "Bypassed")
+            if detail.get("pending"):
+                state = I18N.tr("audio.fx.vst3.checking", "Checking plug-in in a separate process…")
+            item.setToolTip(f"{item.text()} · {state}")
         spectrum = payload.get("spectrum") or {}
         freqs = [] if silent else spectrum.get("freqs", [])
         db = [] if silent else spectrum.get("db", [])

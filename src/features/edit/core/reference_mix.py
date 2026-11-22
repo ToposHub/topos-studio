@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -24,6 +25,7 @@ import numpy as np
 
 REFERENCE_MIX_REF_VERSION = 1
 MIX_VERSION_VERSION = 1
+_MAX_SAMPLE_INDEX = 2**53 - 1  # exact integer representation in decimal Qt controls
 
 
 @dataclass(frozen=True)
@@ -38,12 +40,74 @@ class ReferenceMixRef:
     original_rate: int = 48000
     label: str = ""
     provenance: str = ""                # 客户参考/旧版打印等（审计需要）
+    timeline_rate: int = 48000
+    mix_version: MixVersion | None = None
+    _extra: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not self.version_id:
+        if not isinstance(self.version_id, str) or not self.version_id:
             raise ValueError("version_id cannot be empty")
-        if not self.asset_id:
+        if not isinstance(self.asset_id, str) or not self.asset_id:
             raise ValueError("asset_id cannot be empty")
+        if (type(self.source_start_sample) is not int
+                or not 0 <= self.source_start_sample <= _MAX_SAMPLE_INDEX):
+            raise ValueError("Reference source in-point must be a nonnegative sample index")
+        if (type(self.timeline_anchor_sample) is not int
+                or abs(self.timeline_anchor_sample) > _MAX_SAMPLE_INDEX):
+            raise ValueError("Reference timeline anchor must be a sample index")
+        if any(type(rate) is not int or not 1 <= rate <= 768000
+               for rate in (self.original_rate, self.timeline_rate)):
+            raise ValueError("Invalid reference sample rate")
+        if any(type(channel) is not int or channel < 0 for channel in self.channel_map):
+            raise ValueError("Invalid reference channel map")
+        if not isinstance(self.label, str) or not isinstance(self.provenance, str):
+            raise ValueError("Reference metadata must be text")
+        if self.mix_version is not None and (
+                self.mix_version.version_id != self.version_id or self.mix_version.asset_id != self.asset_id):
+            raise ValueError("Mix version identity does not match its reference")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **deepcopy(self._extra),
+            "version": REFERENCE_MIX_REF_VERSION,
+            "version_id": self.version_id,
+            "asset_id": self.asset_id,
+            "source_start_sample": self.source_start_sample,
+            "timeline_anchor_sample": self.timeline_anchor_sample,
+            "channel_map": list(self.channel_map),
+            "original_rate": self.original_rate,
+            "label": self.label,
+            "provenance": self.provenance,
+            "timeline_rate": self.timeline_rate,
+            **({"mix_version": self.mix_version.to_dict()} if self.mix_version is not None else {}),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ReferenceMixRef:
+        if type(data.get("version")) is not int or data["version"] != REFERENCE_MIX_REF_VERSION:
+            raise ValueError("Unsupported reference mix schema")
+        fields = {key: data[key] for key in (
+            "version_id", "asset_id", "source_start_sample", "timeline_anchor_sample",
+            "channel_map", "original_rate", "label", "provenance", "timeline_rate", "mix_version",
+        ) if key in data}
+        if "channel_map" in fields:
+            fields["channel_map"] = tuple(fields["channel_map"])
+        if "mix_version" in fields:
+            fields["mix_version"] = MixVersion.from_dict(fields["mix_version"])
+        return cls(**fields, _extra=deepcopy({
+            key: value for key, value in data.items() if key != "version" and key not in fields
+        }))
+
+
+ReferenceMixRecord = ReferenceMixRef | dict[str, Any]
+
+
+def decode_reference_mix_record(raw: dict[str, Any]) -> ReferenceMixRecord:
+    """Preserve newer or malformed records without making them playable."""
+    try:
+        return ReferenceMixRef.from_dict(raw)
+    except (ValueError, TypeError, KeyError):
+        return deepcopy(raw)
 
 
 @dataclass(frozen=True)
@@ -57,6 +121,8 @@ class MixVersion:
     label: str = ""
     notes: str = ""
     measured_report_ref: str = ""       # QC/测量报告引用（B04/B05 闭环）
+    source_sequence_id: str = ""
+    file_sha256: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -68,10 +134,15 @@ class MixVersion:
             "label": self.label,
             "notes": self.notes,
             "measured_report_ref": self.measured_report_ref,
+            **({"source_sequence_id": self.source_sequence_id} if self.source_sequence_id else {}),
+            **({"file_sha256": self.file_sha256} if self.file_sha256 else {}),
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "MixVersion":
+        if (not isinstance(data, Mapping) or type(data.get("version")) is not int
+                or data["version"] != MIX_VERSION_VERSION):
+            raise ValueError("Unsupported mix version schema")
         return cls(
             version_id=str(data.get("version_id", "")),
             source_revision=int(data.get("source_revision", 0) or 0),
@@ -80,6 +151,8 @@ class MixVersion:
             label=str(data.get("label", "")),
             notes=str(data.get("notes", "")),
             measured_report_ref=str(data.get("measured_report_ref", "")),
+            source_sequence_id=str(data.get("source_sequence_id", "")),
+            file_sha256=str(data.get("file_sha256", "")),
         )
 
 

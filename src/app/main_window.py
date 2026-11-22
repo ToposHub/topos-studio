@@ -2266,6 +2266,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             if hasattr(mp, "vca_groups_requested"):
                 mp.vca_groups_requested.connect(self._on_mixer_show_vca_groups)
                 mp.health_requested.connect(self._on_mixer_show_health)
+                mp.control_room_requested.connect(self._on_mixer_show_control_room)
+                mp.reference_mix_requested.connect(self._on_mixer_show_reference_mix)
                 mp.track_solo_safe_requested.connect(self._on_mixer_solo_safe_requested)
                 mp.recover_recording_requested.connect(self._on_mixer_recover_recording)
             if hasattr(mp, "track_output_requested"):
@@ -2795,6 +2797,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         # 2. 音频（EditPage.shutdown_audio_playback 专为关闭路径设计，幂等）
         try:
+            release_monitor = getattr(self, "_release_control_room_capture", None)
+            if callable(release_monitor):
+                release_monitor()
+            reference_dialog = getattr(self, "_mixer_reference_dialog", None)
+            if reference_dialog is not None:
+                reference_dialog.close()
+                reference_dialog.reset_session()
             edit_page = getattr(self, "edit_page", None)
             if edit_page is not None and hasattr(edit_page, "shutdown_audio_playback"):
                 edit_page.shutdown_audio_playback(resume_background=False)
