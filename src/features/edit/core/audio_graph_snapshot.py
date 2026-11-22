@@ -58,6 +58,16 @@ class ClipNodeSnapshot:
     # B01: clip 增益（dB，听感字段；审计反例 clip_gain_control——此前
     # 快照完全缺该字段，改增益不触发重建）
     audio_gain_db: float = 0.0
+    # 快照超集补齐（对照 edit_page 签名复审）：is_enabled（离线导出跳过
+    # 禁用 clip）、采样域淡化（覆盖帧域值）、子帧放置偏移（F3.3）——
+    # 任何一项变化都必须改变 stable_hash。
+    is_enabled: bool = True
+    fade_in_samples: Optional[int] = None
+    fade_out_samples: Optional[int] = None
+    audio_sample_offset: int = 0
+    source_sample_offset: int = 0
+    # A2：冻结 clip 注册时被跳过（无声化）——冻结状态是听感字段。
+    freeze_source_frame: Optional[int] = None
     effects_signature: Tuple = ()  # clip FX 摘要
     # P0-3：Clip Editor 处理栈摘要（enabled 步骤的有序指纹；变化必须重建）。
     audio_edit_signature: Tuple = ()
@@ -85,6 +95,11 @@ class TrackNodeSnapshot:
     # B01/P1-5: volume trim 倍率（离线渲染消费；审计反例 automation_trim）
     automation_trim: Tuple[Tuple[str, float], ...] = ()
     stem_group: str = ""
+    # 快照超集补齐（对照 edit_page 签名复审）：空间声像器、audio:* 转场、
+    # Bus 声道布局（引擎 set_bus_layouts 消费）都是听感字段。
+    panner_signature: Optional[str] = None
+    audio_transitions_signature: Tuple = ()
+    bus_layout: str = "stereo"
 
 
 @dataclass(frozen=True)
@@ -94,6 +109,9 @@ class MasterNodeSnapshot:
     muted: bool
     automation_signature: Optional[str]
     automation_mode: str
+    # MX-03: Master 条带（EQ/FX 链）——edit_page 签名已含，快照超集补齐。
+    strip_eq_signature: Optional[str] = None
+    effect_chain_signature: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -138,15 +156,21 @@ class AudioGraphSnapshot:
             "c": [(c.clip_id, c.asset_id, c.source_start, c.timeline_start,
                    c.timeline_duration, c.speed, c.fade_in_frames, c.fade_out_frames,
                    c.fade_curve, c.fade_curve_in, c.fade_curve_out, c.audio_gain_db,
+                   c.is_enabled, c.fade_in_samples, c.fade_out_samples,
+                   c.audio_sample_offset, c.source_sample_offset,
+                   c.freeze_source_frame,
                    c.effects_signature, c.audio_edit_signature) for c in self.clips],
             # track: is_enabled（禁用轨不发声）；B01: sends 含 tap/muted、
             # automation_trim 参与声音身份
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
                    t.output_bus_id, t.sends, t.strip_eq_signature,
                    t.effect_chain_signature, t.automation_signature, t.automation_mode,
-                   t.automation_trim, t.stem_group, t.is_bus) for t in self.tracks],
+                   t.automation_trim, t.stem_group, t.is_bus,
+                   t.panner_signature, t.audio_transitions_signature,
+                   t.bus_layout) for t in self.tracks],
             "m": (self.master.volume, self.master.muted,
-                  self.master.automation_signature, self.master.automation_mode),
+                  self.master.automation_signature, self.master.automation_mode,
+                  self.master.strip_eq_signature, self.master.effect_chain_signature),
             # B01: VCA 组（gain/mute/成员）
             "v": self.vcas,
         }
@@ -208,6 +232,35 @@ def _effect_chain_signature(chain: Any) -> Optional[str]:
     return repr(chain)
 
 
+def _repr_signature(obj: Any) -> Optional[str]:
+    """通用对象签名（None=None；to_dict 稳定排序；否则 repr）。"""
+    if obj is None:
+        return None
+    if hasattr(obj, "to_dict"):
+        return repr(sorted(obj.to_dict().items()))
+    return repr(obj)
+
+
+def _audio_transitions_signature(track: Any) -> Tuple:
+    """轨内 audio:* 转场签名（crossfade 参数；视频转场不影响声音）。"""
+    entries = []
+    for tr in (getattr(track, "transitions", ()) or ()):
+        ttype = str(getattr(tr, "transition_type", ""))
+        if not ttype.startswith("audio:"):
+            continue
+        entries.append((
+            ttype,
+            getattr(tr, "transition_id", ""),
+            getattr(tr, "left_clip_id", ""),
+            getattr(tr, "right_clip_id", ""),
+            int(getattr(tr, "center_frame", 0) or 0),
+            int(getattr(tr, "duration", 0) or 0),
+            str(getattr(tr, "alignment", "centered") or "centered"),
+            repr(sorted((getattr(tr, "params", None) or {}).items())),
+        ))
+    return tuple(entries)
+
+
 def _automation_signature(auto: Any) -> Optional[str]:
     if not auto:
         return None
@@ -256,6 +309,12 @@ def build_audio_graph_snapshot(
                 fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
                 fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
                 audio_gain_db=float(getattr(clip, "audio_gain_db", 0.0) or 0.0),
+                is_enabled=bool(getattr(clip, "is_enabled", True)),
+                fade_in_samples=getattr(clip, "fade_in_samples", None),
+                fade_out_samples=getattr(clip, "fade_out_samples", None),
+                audio_sample_offset=int(getattr(clip, "audio_sample_offset", 0) or 0),
+                source_sample_offset=int(getattr(clip, "source_sample_offset", 0) or 0),
+                freeze_source_frame=getattr(clip, "freeze_source_frame", None),
                 effects_signature=_clip_effects_signature(clip),
                 audio_edit_signature=steps_signature(
                     getattr(clip, "audio_edit", None)),
@@ -291,6 +350,10 @@ def build_audio_graph_snapshot(
             automation_trim=tuple(sorted(
                 (str(k), float(v)) for k, v in trim.items())),
             stem_group=str(getattr(track, "stem_group", "") or ""),
+            panner_signature=_repr_signature(getattr(track, "panner", None)),
+            audio_transitions_signature=_audio_transitions_signature(track),
+            bus_layout=str(getattr(track, "bus_layout", "stereo")
+                           or "stereo"),
         ))
 
     # master 节点
@@ -299,6 +362,9 @@ def build_audio_graph_snapshot(
         muted=bool(getattr(sequence, "master_muted", False)),
         automation_signature=_automation_signature(getattr(sequence, "master_automation", {})),
         automation_mode=str(getattr(sequence, "master_automation_mode", "off") or "off"),
+        strip_eq_signature=_strip_eq_signature(getattr(sequence, "master_strip_eq", None)),
+        effect_chain_signature=_effect_chain_signature(
+            getattr(sequence, "master_effect_chain", None)),
     )
 
     # 编译期校验（环/未知目标）

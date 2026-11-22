@@ -94,13 +94,13 @@ def validate_reconform_transaction(
     for lo, hi in protected_ranges:
         if hi <= lo:
             continue
-        for span in spans:
-            # 保护区间与保留 span 部分相交（非完整包含）= 会被切碎
-            if span.old_start < hi and span.old_end > lo:
-                if not (lo <= span.old_start and span.old_end <= hi):
-                    errors.append(
-                        f"protected range [{lo}, {hi}) would be split by "
-                        f"span [{span.old_start}, {span.old_end})")
+        # 保护区间安全 ⇔ 某个 span 完整包含它（span.old_start ≤ lo 且
+        # span.old_end ≥ hi）。否则：span 边界落入 (lo, hi) → 被切碎；
+        # 两端不被任何 span 覆盖 → 保护内容落入删除区。两种都拒绝。
+        if not any(s.old_start <= lo and s.old_end >= hi for s in spans):
+            errors.append(
+                f"protected range [{lo}, {hi}) not kept whole by any span "
+                f"(split by span boundaries or partially deleted)")
     for lo, hi in deleted_ranges:
         if hi <= lo:
             continue

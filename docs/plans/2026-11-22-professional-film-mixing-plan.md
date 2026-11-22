@@ -760,6 +760,75 @@ assert np.allclose(g, [1.0, 10 ** (-12.0 / 20)])
 `test_timeline_envelope_editing.py::test_hit_performance_with_1200_nodes`
 为机器敏感的边界性能测试（带/不带本工作均间歇超 250ms）。
 
+### 批次8（2026-11-22 第二轮回扫）：整体隐藏缺陷审查与修复
+
+全量交付后做的第二轮系统回扫（4 个并行审查代理覆盖全部新模块 +
+本人复核 PDC 渲染/播放/导出三条缝），发现并修复（回归锁定在
+`tests/edit/test_hidden_bug_sweep.py`，25 项）：
+
+- **B15**：`validate_reconform_transaction` 保护区间判定重写为
+  "安全 ⇔ 某个 span 完整包含"——旧判定对"span 含保护区间"误报
+  split（拒绝合法事务），对"保护区间只被部分覆盖"漏报（保护内容
+  落删除区仍放行）。
+- **B02/PDC**：导出循环（timeline_export/stem_export）间隙零喂预算
+  现为 **链尾音 + 最大出边延迟**（`renderer.pdc_out_edges_max_delay`
+  公开访问器）——延迟线持留内容按绝对时间流出，不再在下一 clip
+  起点错位涌出/导出尾截断；timeline_export 内联路由补齐 AUD-15402
+  兜底（未知 bus → master 告警，不再静默丢整轨/send 建孤儿缓冲）。
+- **B10**：`MonitorService` 5ms 增益斜坡按全局样本位置推进（块长
+  < 斜坡长时旧实现把整段斜坡压缩进首块——64 样本设备缓冲实测 1.3ms
+  到位）；混合长度 tap 输出取最大宽度（长 tap 尾部不再截断）。
+- **B08**：`plan_decode_window` 视窗完全越过 extent 时吸附到末样本
+  （不再越界 1 样本读解）；`range_extremes` 无整瓦片路径去除同段
+  双重聚合（幂等性不再依赖 min/max 语义）。
+- **B21**：`ArtifactRegistry._save` 写前重读磁盘按 id 合并——跨进程/
+  多窗口写者不再互相覆盖删除。
+- **B20**：`align_reference_offset` 拒绝 max_offset_samples<1 退化窗
+  （corr[-0:] 整数组重复会让带外峰解码成大数值"高置信"错位）。
+- **B11**：`ClockAnchor.timeline_sample_for_device` 无拟合缓存时按
+  **最新锚点 + 理想斜率** 换算（单锚/拟合被拒后不再退回过原点恒等，
+  4000 样本级错位）；`CaptureJournal` 按 sequence 从最新会话匹配 +
+  恢复前缀在 sequence 重置处切换到最新会话（日志复用不再吞新 take）。
+- **B17**：`MtcAssembler` QF6/QF7 解析按 SMPTE 规范修正（fps 位在
+  QF7 bit2-3、时高位在 QF7 bit0-1；旧实现 fps 码永远读 0、25fps 时
+  hours 被污染成 65）。测试编码器同步修正并补 25fps 流断言。
+- **B18**：chna 记录布局按 EBU Tech 3285-s7 修正（UID ASCII 在记录
+  偏移 2..13，非 4..15；旧布局与真实 ADM/BWF 工具不互操作）。
+- **B12**：AAF **帧/样本域错误**（关键）——导出侧帧域 (帧, 子帧偏移)
+  经 `frames_to_samples` 精确换算后写样本编辑率槽（旧实现把帧数值
+  直接当样本，24fps×48k 下 2000 倍位移）；导入侧样本域 → (帧,
+  子帧偏移) 二元组重述（F3.3），时长向上取整到帧并记诊断；裸
+  SourceClip/Filler 槽（无 Sequence 包装）不再静默导入成空轨；
+  尾部 Filler 长度按样本域比较；重叠 clip 顺序化诊断如实记录；
+  失败路径清理 .tmp；未实现的 AafOptions 值显式 ValueError（不静默
+  忽略）；Bus 轨进 DROPPED 报告。往返测试改按样本域比对（旧测试
+  域混淆自洽、永不失败）。
+- **B07**：`CoalesceAutomationTrimCommand` 烘入用 `dataclasses.replace`
+  只改 value——贝塞尔手柄/tangent_mode/插值类型/pre-post 外推策略
+  保留（旧实现在 BEZIER+linear 外推下 parity |Δ|≈0.36，违反 1e-12
+  声音不变合同）。
+- **B01**：快照 stable_hash 超集补齐——panner、audio:* 转场、master
+  条带（EQ/FX）、clip 采样域淡化/子帧偏移/is_enabled 此前缺席
+  （edit_page 签名有而快照无，原子图交换路径会 stale）；Bus
+  `bus_layout` 补进**双签名**且图重建路径补 `set_bus_layouts` 下发
+  （改布局/重开工程后引擎不再沿用旧布局混音）。
+- **B05/B04**：`MeasurementResult.from_dict` 忠实保留测量值类型
+  （float() 洗涤会让 True→1.0 绕过 bool 防线）；荒谬有限值
+  （|v|>1e6）拒绝；`publish_delivery_atomic` 失败回滚本次新发布文件
+  （零新增污染）+ 同名 basename 冲突显式 ValueError（不再静默覆盖
+  前一 stem 内容）；`from_preset` 容忍 target_lufs=None（无 LU 目标
+  语义）；`evaluate_delivery` None 限值不参与比较（不再 KeyError）。
+- **B13**：`validate_proposal` 拒绝同一 clip 的多条 align（apply 端
+  dict 折叠静默丢前一条）；`simplify_volume_db` 接入
+  `AutomationRecorder.stop/stop_for_preview`（§13 步骤 8 的 dB 界
+  此前只存在于测试，生产录制收尾仍走线性阈值）。
+- 杂项：dialogue_proposal `List` 导入；capability_registry AAF 条目
+  许可注更正为 pyaaf2 1.7.1 MIT（旧 BSD-3 残留）。
+
+复核确认无需改动：`plan_edge_pdc` 算法本体（Kahn/环剔除/钳位）、
+实时 mix_samples 各跳过点的延迟线推进、punch/comp/replace_region
+数学、VBAP/chna 验证语义、sound_fixtures 往返。
+
 ## 20. B10–B20完整实施手册
 
 以下为主计划的组成部分。工时与依赖以§4表及各项现状说明为准。

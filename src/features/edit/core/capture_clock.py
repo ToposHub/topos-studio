@@ -219,12 +219,25 @@ class ClockAnchor:
     def timeline_sample_for_device(self, device_sample: int) -> int:
         """设备样本 → 参考时钟样本（有理取整；锚误差目标 ≤1 样本）。
 
-        斜率拟合在追加锚后失效，直到再次 estimate_drift（断点重新建锚）。
+        无可用拟合（首锚后未 estimate / 拟合被合理性护栏拒绝）时按
+        **最新锚点 + 理想斜率**换算——锚点处精确，不虚构漂移，也不把
+        已有锚点整体丢弃退回过原点恒等（单锚 5000→9000 时查 5000 不得
+        回 5000）。无任何锚点时才按理想比率过原点（调用方负责锚定）。
         """
-        slope = self._slope if self._slope is not None \
-            else self._reference_rate / self._device_rate
-        intercept = self._intercept if self._intercept is not None else 0.0
-        value = Fraction(slope) * int(device_sample) + Fraction(intercept)
+        if self._slope is not None:
+            slope = Fraction(self._slope)
+            intercept = (Fraction(self._intercept)
+                         if self._intercept is not None else Fraction(0))
+        elif self._pairs:
+            ideal = Fraction(self._reference_rate, self._device_rate)
+            latest = self._pairs[-1]
+            slope = ideal
+            intercept = (Fraction(int(latest.timeline_sample))
+                         - ideal * int(latest.device_sample))
+        else:
+            slope = Fraction(self._reference_rate, self._device_rate)
+            intercept = Fraction(0)
+        value = slope * int(device_sample) + intercept
         # 四舍五入到整数（对称取整）
         if value < 0:
             return -int((-2 * value.numerator + value.denominator)
@@ -304,10 +317,15 @@ class CaptureJournal:
         return seg
 
     def commit_segment(self, sequence_no: int) -> bool:
-        """把段标记为已落盘（追加日志；每 fsync_every 段 fsync 一次）。"""
+        """把段标记为已落盘（追加日志；每 fsync_every 段 fsync 一次）。
+
+        按 sequence_no **从最新向旧**匹配——日志复用（崩溃恢复后同一
+        路径开新会话，sequence 从 0 重启）时，旧会话的同号段不得吞掉
+        新会话的提交（否则新 take 永远写不进日志）。
+        """
         import json
 
-        seg = next((s for s in self._segments
+        seg = next((s for s in reversed(self._segments)
                     if s.sequence_no == sequence_no), None)
         if seg is None or seg.fsynced:
             return False
@@ -366,6 +384,11 @@ class CaptureJournal:
         total = 0
         expected_seq = 0
         for seg in confirmed:
+            if seg.sequence_no == 0 and expected_seq > 0:
+                # sequence 重置 = 新会话开始（日志文件跨会话追加）——恢复
+                # 依据切换到最新会话，不把旧会话的段计入新 take 的前缀。
+                total = 0
+                expected_seq = 0
             if seg.sequence_no != expected_seq:
                 break
             total += seg.sample_count

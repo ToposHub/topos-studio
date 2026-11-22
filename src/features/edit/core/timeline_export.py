@@ -4531,12 +4531,19 @@ class TimelineExporter:
                     _track_node.effect_chain.tail_estimate_samples()
                     if (_track_node is not None
                         and _track_node.effect_chain is not None) else 0)
+                # B02 · PDC：链输出尾音之后还要经过边延迟线（串行）——间隙
+                # 零喂预算必须覆盖 链尾音 + 最大出边延迟，否则延迟线持留内容
+                # 在间隙冻结、在下一 clip 起点错位涌出（实时路径由
+                # _advance_pdc_line 对应；导出终点截断同理被覆盖）。
+                _track_tail_samples += renderer.pdc_out_edges_max_delay(
+                    track.track_id)
                 _track_state = {"tail_left": 0}
                 # R02: 单调游标——本轨已通过 _render_and_route 推进到的下一帧。
                 # early flush 与 final drain 共用；drain 从 cursor 起步，禁止
                 # 把已处理旧帧再次喂入有状态节点（时序与写入位置分离缺陷）。
                 _track_state["next_frame"] = feed_start
-                _track_state["last_rendered"] = None                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
+                _track_state["last_rendered"] = None
+                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
                 # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
                 _clip_starts = [c.timeline_start for c in track.clips]
                 _suffix_min_start = [0] * (len(_clip_starts) + 1)
@@ -4613,12 +4620,21 @@ class TimelineExporter:
                     # 应用（检源缓冲/主路累积消费同一延迟后内容）。
                     processed = renderer._apply_pdc(track.track_id, processed)
                     actual = min(processed.shape[-1], out_end - out_start)
-                    if target is not None:
+                    if target is not None and renderer.is_known_bus(target):
                         if target not in bus_inputs:
                             bus_inputs[target] = np.zeros(
                                 (channels, feed_total_samples), dtype=np.float32)
                         bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
                     else:
+                        if target is not None:
+                            # AUD-15402：未知 bus 目标（bus 已删除而轨路由
+                            # 未清理）——兜底进 master 并告警；不落入永不被
+                            # 消费的孤儿缓冲（整轨静默丢失），与实时/
+                            # route_track_output 语义一致。
+                            logger.warning(
+                                "audio export: track %r routes to unknown "
+                                "bus %r; falling back to master",
+                                track.track_id, target)
                         output[:, out_start:out_end] += processed[:channels, :actual]
                     # sends（并行；MX-14: pre_fader tap 取 clip 求和块 summed，
                     # post_fader 取处理后输出；独立 mute 只断开 send）。
@@ -4628,6 +4644,14 @@ class TimelineExporter:
                             send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted:
+                                continue
+                            if not renderer.is_known_bus(send_bus_id):
+                                # AUD-15402：send 指向未注册 bus——跳过并
+                                # 告警（不建孤儿缓冲静默吞内容）。
+                                logger.warning(
+                                    "audio export: track %r send targets "
+                                    "unknown bus %r; send skipped",
+                                    track.track_id, send_bus_id)
                                 continue
                             if send_bus_id not in bus_inputs:
                                 bus_inputs[send_bus_id] = np.zeros(

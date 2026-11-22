@@ -467,6 +467,23 @@ class AudioGraphRenderer:
         # （调用时序：导出循环在块循环前申报；渲染中途不重入）。
         self._clip_pdc_lines = {}
 
+    def pdc_out_edges_max_delay(self, node_id: str) -> int:
+        """该节点出边（主路 + 全部 send 边）的最大 PDC 延迟（样本）。
+
+        导出循环的间隙零喂预算用：FX 尾音预算之外，边延迟线里的持留
+        内容也必须按绝对时间继续流出（预算 = 链尾音 + 本值）。
+        """
+        delay = int(self._pdc_delay.get(node_id, 0))
+        prefix = f"{node_id}|s"
+        for key, edge_delay in self._pdc_send_edges.items():
+            if key.startswith(prefix):
+                delay = max(delay, int(edge_delay))
+        return delay
+
+    def is_known_bus(self, bus_id: Optional[str]) -> bool:
+        """bus_id 是否为节点图中已注册的 Bus（AUD-15402 判定的公开接口）。"""
+        return self._is_known_bus(bus_id)
+
     def note_clip_chain_latency(self, track_id: str, latency_samples: int) -> None:
         """申报某轨 clip FX 链的最大算法延迟（P0 · Clip FX PDC）。
 

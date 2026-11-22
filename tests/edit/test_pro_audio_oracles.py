@@ -89,6 +89,23 @@ class TestReconformRemap:
         assert validate_reconform_transaction(
             spans, protected_ranges=[(0, 1000)]) == []
 
+    def test_protected_inside_single_span_is_kept_whole(self) -> None:
+        """保护区间被单个 span 完整包含 → 连续保留、未切碎 → 通过。
+
+        （回归：旧实现按"span 未完整落在保护区间内"误报 split。）"""
+        spans = (KeptSpan(0, 2000, 0),)
+        assert validate_reconform_transaction(
+            spans, protected_ranges=[(500, 1000)]) == []
+
+    def test_protected_partially_covered_rejected(self) -> None:
+        """保护区间只被 span 部分覆盖（两端落入删除区）→ 拒绝。
+
+        （回归：旧实现因"span 完整落在保护区间内"而漏放行。）"""
+        spans = (KeptSpan(300, 700, 300),)
+        errors = validate_reconform_transaction(
+            spans, protected_ranges=[(0, 1000)])
+        assert any("protected" in e for e in errors)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # B16
@@ -126,11 +143,12 @@ class TestMtcAssembler:
                        minutes: int, seconds: int, frames: int,
                        fps_code: int = 0):
         out = None
+        # SMPTE/MTC：QF6 = 时低 5 位；QF7 = bit0-1 时高位、bit2-3 fps 码
         quarters = [
             frames & 0x0F, (frames >> 4) & 0x0F,
             seconds & 0x0F, (seconds >> 4) & 0x0F,
             minutes & 0x0F, (minutes >> 4) & 0x0F,
-            (hours & 0x1F) | (fps_code << 5), (hours >> 5) & 0x0F,
+            hours & 0x1F, ((hours >> 4) & 0x03) | (fps_code << 2),
         ]
         for i, nibble in enumerate(quarters):
             out = assembler.feed_quarter_frame((i << 4) | nibble)
@@ -143,6 +161,17 @@ class TestMtcAssembler:
         assert result is not None
         assert result["position_frames"] == (3600 + 120 + 3) * 24 + 20
         assert result["fps_code"] == 0
+        assert result["hours"] == 1
+
+    def test_25fps_stream_parsed_per_smpte(self) -> None:
+        """fps 位在 QF7（不在 QF6 半字节内）——25fps 码流不得解析成 24fps。"""
+        asm = MtcAssembler()
+        result = self._feed_position(asm, hours=1, minutes=2, seconds=3,
+                                     frames=12, fps_code=1)
+        assert result is not None
+        assert result["fps_code"] == 1
+        assert result["hours"] == 1
+        assert result["position_frames"] == (3600 + 120 + 3) * 25 + 12
 
     def test_out_of_order_does_not_publish(self) -> None:
         asm = MtcAssembler()

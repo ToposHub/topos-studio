@@ -100,7 +100,14 @@ class TestAafExportImport:
 
     def test_roundtrip_source_windows_within_one_sample(
             self, tmp_path: Path) -> None:
-        """手册：样本编辑率槽 → 导入后源窗/位置误差 ≤1 样本。"""
+        """手册：样本编辑率槽 → 导入后源窗/位置误差 ≤1 样本。
+
+        位置按**样本域**比对：导出侧 23.976 帧域 → 样本；导入侧以导入
+        序列自身 fps（默认 24）+ 子帧偏移重述同一绝对样本位置。帧数值
+        绝不在两个域之间直接相等比较（那是原实现的域混淆 bug）。
+        """
+        from src.features.edit.core.interchange import frames_to_samples
+
         seq = _sequence()
         path = tmp_path / "out.aaf"
         export_aaf(seq, path)
@@ -110,27 +117,69 @@ class TestAafExportImport:
         tracks = {t.name: t for t in imported.audio_tracks}
         # 3 条非 Bus 音频轨（Bus 不导出）
         assert set(tracks) == {"DX", "MX", "AMB"}
+        imp_fps = imported.fps
+
+        def _start_s(clip: ClipInstance) -> int:
+            return frames_to_samples(clip.timeline_start, imp_fps, 48000) \
+                + int(clip.audio_sample_offset or 0)
+
+        def _source_s(clip: ClipInstance) -> int:
+            return frames_to_samples(clip.source_start, imp_fps, 48000) \
+                + int(clip.source_sample_offset or 0)
+
+        def _end_s(clip: ClipInstance) -> int:
+            return frames_to_samples(
+                clip.timeline_start + clip.timeline_duration,
+                imp_fps, 48000)
+
         dx = tracks["DX"].clips
         assert len(dx) == 2
-        assert dx[0].timeline_start == 0
-        assert dx[0].timeline_duration == 48000
-        assert abs(dx[0].source_start - 1200) <= 1
-        assert dx[1].timeline_start == 72000
-        assert abs(dx[1].source_start - 96000) <= 1
+        # 23.976@48k 每帧 2002 样本：导出前位置全部精确换算
+        assert _start_s(dx[0]) == 0
+        assert _end_s(dx[0]) - _start_s(dx[0]) == 48000 * 2002
+        assert abs(_source_s(dx[0]) - 1200 * 2002) <= 1
+        assert _start_s(dx[1]) == 72000 * 2002
+        assert abs(_source_s(dx[1]) - 96000 * 2002) <= 1
         mx = tracks["MX"].clips
-        assert mx[0].timeline_start == 48000
-        assert mx[0].timeline_duration == 96000
+        assert _start_s(mx[0]) == 48000 * 2002
+        assert _end_s(mx[0]) - _start_s(mx[0]) == 96000 * 2002
         amb = tracks["AMB"].clips
-        assert amb[0].timeline_start == 24000
-        assert abs(amb[0].source_start - 480) <= 1
-        # 间隙不伪造内容（DX 轨 48000–72000 无 clip）
-        starts = [c.timeline_start for c in dx]
-        assert 48000 not in starts or all(
-            c.timeline_start != 48000 for c in dx)
+        assert _start_s(amb[0]) == 24000 * 2002
+        assert abs(_source_s(amb[0]) - 480 * 2002) <= 1
+        # 间隙不伪造内容（DX 轨 [48000, 72000) 帧区间内无 clip 起点）
+        starts_s = [_start_s(c) for c in dx]
+        assert 48000 * 2002 not in starts_s
         # relink 请求覆盖全部 3 个资产
         relink_keys = {r.external_ref for r in result.relink_requests}
         assert relink_keys == {"topos:asset-dx", "topos:asset-mx",
                                "topos:asset-amb"}
+
+    def test_export_frame_domain_not_relabelled_as_samples(
+            self, tmp_path: Path) -> None:
+        """回归（域混淆）：帧数值不得被直接当样本写进 AAF——24fps×48k 下
+        帧 240（10s）必须落在样本 480000，而不是 240（2000 倍位移）。"""
+        from src.features.edit.adapters import aaf_adapter as aa
+        import aaf2
+
+        clip = ClipInstance(clip_id="c1", asset_id="a1", track_id="t1",
+                            timeline_start=240, timeline_duration=480,
+                            source_start=0, source_duration=480,
+                            audio_sample_offset=17)
+        track = EditTrack("t1", "T1", "audio", 0, clips=(clip,))
+        seq = TimelineSequence(audio_tracks=(track,),
+                               fps=Fraction(24, 1), sample_rate=48000)
+        path = tmp_path / "domain.aaf"
+        export_aaf(seq, path)
+        with aaf2.open(str(path)) as f:
+            mob = next(iter(f.content.compositionmobs()))
+            slot = mob.slots[0]
+            seq_seg = slot.segment
+            items = list(seq_seg.components)
+        # 240 帧 + 17 样本偏移 → 起点样本 480017；末帧边界 720 帧 →
+        # 1440000 样本；clip 本体 = 1440000 − 480017
+        assert int(items[0].length) == 480017          # Filler 前导
+        assert int(items[1].length) == 1440000 - 480017  # clip 本体
+        assert int(slot.edit_rate.numerator) == 48000
 
     def test_protocol_adapter_methods(self, tmp_path: Path) -> None:
         adapter = AafAudioAdapter()
@@ -142,6 +191,61 @@ class TestAafExportImport:
         assert info.supported
         imported = adapter.import_to_canonical(path)
         assert imported.sequences
+
+    def test_bare_sourceclip_slot_imported(self, tmp_path: Path) -> None:
+        """回归：裸 SourceClip 槽（无 Sequence 包装）是真实 AAF 常见合法
+        形态——不得因无 components 属性静默导入成空轨。"""
+        import aaf2
+
+        path = tmp_path / "bare.aaf"
+        with aaf2.open(str(path), "w") as f:
+            comp = f.create.from_name("CompositionMob")
+            comp.name = "Bare"
+            f.content.mobs.append(comp)
+            srcmob = f.create.from_name("SourceMob")
+            srcmob.name = "topos:asset-x"
+            desc = f.create.from_name("PCMDescriptor")
+            desc["SampleRate"].value = aaf2.rational.AAFRational(48000)
+            desc["AudioSamplingRate"].value = aaf2.rational.AAFRational(48000)
+            desc["Channels"].value = 2
+            desc["QuantizationBits"].value = 24
+            desc["BlockAlign"].value = 6
+            desc["AverageBPS"].value = 288000
+            desc["Length"].value = 0
+            srcmob.descriptor = desc
+            sslot = f.create.from_name("TimelineMobSlot", slot_id=1)
+            sslot.edit_rate = aaf2.rational.AAFRational(48000)
+            fill = f.create.from_name("Filler")
+            fill.media_kind = "Sound"
+            fill.length = 48000
+            sslot.segment = fill
+            srcmob.slots.append(sslot)
+            f.content.mobs.append(srcmob)
+            sc = f.create.from_name("SourceClip")
+            sc.media_kind = "Sound"
+            sc.length = 48000
+            sc.start = 0
+            sc.mob = srcmob
+            sc.slot = sslot
+            slot = f.create.from_name("TimelineMobSlot", slot_id=1)
+            slot.name = "DX"
+            slot.segment = sc  # 裸 segment（不包 Sequence）
+            slot.edit_rate = aaf2.rational.AAFRational(48000)
+            slot.origin = 0
+            comp.slots.append(slot)
+            f.save()
+
+        result = import_aaf(path)
+        assert result.sequences
+        track = result.sequences[0].audio_tracks[0]
+        assert len(track.clips) == 1
+        clip = track.clips[0]
+        # 样本域位置重述为帧域 (帧, 偏移)：0 样本 → 帧 0；48000 样本
+        # @24fps → 24 帧；源起点 0 样本 → 帧 0。
+        assert clip.timeline_start == 0
+        assert clip.timeline_duration == 24
+        assert clip.source_start == 0
+        assert clip.audio_sample_offset == 0
 
     def test_import_rejects_non_aaf(self, tmp_path: Path) -> None:
         bogus = tmp_path / "bogus.aaf"

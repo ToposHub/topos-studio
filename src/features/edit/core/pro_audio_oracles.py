@@ -136,9 +136,11 @@ class MtcAssembler:
             frames = self._nibbles[0] | (self._nibbles[1] << 4)
             seconds = self._nibbles[2] | (self._nibbles[3] << 4)
             minutes = self._nibbles[4] | (self._nibbles[5] << 4)
-            hours_low = self._nibbles[6]
-            hours = (hours_low & 0x1F) | (self._nibbles[7] << 4)
-            fps_code = (hours_low >> 5) & 0x03
+            # QF6 = 时低 5 位；QF7 = bit0-1 时高位、bit2-3 fps 码
+            # （SMPTE/MTC：0=24、1=25、2=29.97DF、3=30——fps 位在 QF7，
+            # 不在 QF6 的 4 位半字节内）
+            hours = (self._nibbles[6] & 0x1F) | ((self._nibbles[7] & 0x03) << 4)
+            fps_code = (self._nibbles[7] >> 2) & 0x03
             fps = {0: 24, 1: 25, 2: 30, 3: 30}[fps_code]  # 2=29.97DF 按 30 计
             position_frames = ((hours * 3600 + minutes * 60 + seconds)
                                * fps + frames)
@@ -250,10 +252,11 @@ def validate_track_uids(uids: List[Tuple[str, int]],
 
 
 def pack_chna_chunk(num_tracks: int, uids: List[Tuple[str, int]]) -> bytes:
-    """打包最小 chna chunk 载荷（EBU Tech 3285-s7 布局：NumTracks u32、
-    NumUIDs u32、每条 16B = u16 trackIndex（磁盘从 1 起）+ u16 ref + 12B
-    UID ASCII）。本函数是最小编码器，完整 chunk 还需 chunk 头与 profile
-    校验（B18 手册：XML/profile validator 另立）。"""
+    """打包最小 chna chunk 载荷（EBU Tech 3285-s7 §3 布局：NumTracks
+    u32、NumUIDs u32、每条 16B = u16 trackIndex（磁盘从 1 起）+ **12B
+    UID ASCII（记录内偏移 2..13）** + u16 保留 0）。本函数是最小编码器，
+    完整 chunk 还需 chunk 头与 profile 校验（B18 手册：XML/profile
+    validator 另立）。"""
     import struct
 
     payload = struct.pack("<II", int(num_tracks), len(uids))
@@ -261,7 +264,8 @@ def pack_chna_chunk(num_tracks: int, uids: List[Tuple[str, int]]) -> bytes:
         ascii_uid = uid.encode("ascii")
         if len(ascii_uid) != 12:
             raise ValueError("UID must be 12 ASCII chars")
-        payload += struct.pack("<HH", int(index) + 1, 0) + ascii_uid
+        payload += struct.pack("<H", int(index) + 1) + ascii_uid \
+            + struct.pack("<H", 0)
     return payload
 
 
@@ -277,8 +281,9 @@ def parse_chna_chunk(payload: bytes) -> Tuple[int, List[Tuple[str, int]]]:
     for _ in range(num_uids):
         if offset + 16 > len(payload):
             raise ValueError("chna payload truncated")
-        index, _ref = struct.unpack_from("<HH", payload, offset)
-        uid = payload[offset + 4: offset + 16].decode("ascii", errors="strict")
+        (index,) = struct.unpack_from("<H", payload, offset)
+        uid = payload[offset + 2: offset + 14].decode(
+            "ascii", errors="strict")
         uids.append((uid, int(index) - 1))
         offset += 16
     return int(num_tracks), uids

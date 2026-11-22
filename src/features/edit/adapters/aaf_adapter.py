@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -137,17 +138,36 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
         raise ValueError(
             f"unsupported_policy={options.unsupported_policy!r} not "
             "supported in v1 (only 'report'; bake requires B21 contract)")
+    # v1 未实现的选项值一律显式拒绝（不静默忽略调用方意图）
+    if int(options.version) != 1:
+        raise ValueError(f"version={options.version!r} not supported (only 1)")
+    if int(options.handle_samples) != 0:
+        raise ValueError(
+            f"handle_samples={options.handle_samples!r} not supported in v1 "
+            "(0 = exact source windows)")
+    if str(options.media_mode) != "external":
+        raise ValueError(
+            f"media_mode={options.media_mode!r} not supported in v1 "
+            "(external refs only; embedded essence is not implemented)")
+    if not options.preserve_source_metadata:
+        raise ValueError("preserve_source_metadata=False not supported in v1")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
 
+    from src.features.edit.core.interchange import frames_to_samples as _f2s
+
     entries: list[InterchangeEntry] = []
     diagnostics: list[dict[str, Any]] = []
     sample_rate = int(getattr(sequence, "sample_rate", 48000) or 48000)
-    fps_num, fps_den = _fractional_fps(getattr(sequence, "fps", 24))
+    fps = getattr(sequence, "fps", 24)
     audio_tracks = [
         t for t in (getattr(sequence, "audio_tracks", ()) or ())
         if not bool(getattr(t, "is_bus", False))
+    ]
+    bus_tracks = [
+        t for t in (getattr(sequence, "audio_tracks", ()) or ())
+        if bool(getattr(t, "is_bus", False))
     ]
     video_tracks = list(getattr(sequence, "video_tracks", ()) or ())
     if video_tracks:
@@ -157,6 +177,14 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
             description=(f"{len(video_tracks)} video track(s) not written "
                          "(AAF audio-only subset v1)"),
             path="sequence.video_tracks",
+        ))
+    if bus_tracks:
+        entries.append(InterchangeEntry(
+            category=InterchangeEntryCategory.DROPPED,
+            element="bus_tracks",
+            description=(f"{len(bus_tracks)} bus track(s) not written "
+                         "(AAF audio subset v1 carries no bus graph/routing)"),
+            path="sequence.audio_tracks[buses]",
         ))
 
     f = aaf2.open(str(tmp_path), "w")
@@ -174,22 +202,42 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
             components: list[Any] = []
             cursor = 0  # 轨内样本游标（timeline 域）
             for clip in sorted(clips, key=lambda c: int(c.timeline_start)):
-                start = int(clip.timeline_start or 0)
-                length = int(clip.timeline_duration or 0)
-                if length <= 0:
+                frame_start = int(clip.timeline_start or 0)
+                frame_dur = int(clip.timeline_duration or 0)
+                if frame_dur <= 0:
                     continue
-                if start > cursor:
+                # 帧域 (帧, 子帧偏移) → 样本域（F3.3 绝对边界）：起点 =
+                # 帧起点样本 + 子帧偏移，端点 = 末帧边界样本。帧数值
+                # 绝不直接当样本用（24fps 下 2000 倍位移）。
+                start = _f2s(frame_start, fps, sample_rate) + max(
+                    0, int(getattr(clip, "audio_sample_offset", 0) or 0))
+                end = _f2s(frame_start + frame_dur, fps, sample_rate)
+                length = end - start
+                if length <= 0:
+                    diagnostics.append({
+                        "severity": "warning", "code": "aaf.zero_length",
+                        "message": (f"clip {clip.clip_id} resolves to "
+                                    f"{length} samples; skipped"),
+                    })
+                    continue
+                placed = start
+                if placed > cursor:
                     filler = create.from_name("Filler")
                     filler.media_kind = SUPPORTED_MEDIA_KIND
-                    filler.length = start - cursor
+                    filler.length = placed - cursor
                     components.append(filler)
-                elif start < cursor:
+                elif placed < cursor:
+                    # 线性 Sequence 无法表达重叠（尾首相接是合法模型态）：
+                    # 顺序化到前一段之后（入点后移），诊断如实记录位移量。
+                    placed = cursor
                     diagnostics.append({
                         "severity": "warning", "code": "aaf.overlap",
-                        "message": (f"clip {clip.clip_id} overlaps previous "
-                                    f"by {cursor - start} samples; clamped"),
+                        "message": (
+                            f"clip {clip.clip_id} overlaps previous by "
+                            f"{cursor - start} samples; linear Sequence "
+                            "cannot represent overlap — serialized after "
+                            "previous clip (in-point delayed)"),
                     })
-                    cursor = start
                 # SourceMob（每 asset 一个）
                 asset_id = str(clip.asset_id or "")
                 if asset_id not in src_cache:
@@ -201,14 +249,19 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
                 src_clip = create.from_name("SourceClip")
                 src_clip.media_kind = SUPPORTED_MEDIA_KIND
                 src_clip.length = length
-                src_clip.start = int(clip.source_start or 0)
+                src_clip.start = _f2s(int(clip.source_start or 0), fps,
+                                      sample_rate) + max(
+                    0, int(getattr(clip, "source_sample_offset", 0) or 0))
                 src_clip.mob = srcmob
                 src_clip.slot = src_slot
                 components.append(src_clip)
-                cursor = start + length
-            track_total = int(getattr(sequence, "duration_frames", 0) or 0)
-            # 音频轨总长按样本计（48k 参考域模型）
-            track_len_samples = max(cursor, track_total)
+                cursor = placed + length
+            # 轨总长：duration_frames（帧域）→ 样本域再比较（不可帧/样本
+            # 混比——24fps×48k 下 2400 帧 ≠ 2400 样本）。
+            track_total_samples = _f2s(
+                int(getattr(sequence, "duration_frames", 0) or 0),
+                fps, sample_rate)
+            track_len_samples = max(cursor, track_total_samples)
             if track_len_samples > cursor:
                 filler = create.from_name("Filler")
                 filler.media_kind = SUPPORTED_MEDIA_KIND
@@ -229,9 +282,18 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
             comp.slots.append(slot)
             slot_ids.add(slot.slot_id)
         f.save()
-    finally:
         f.close()
-    os.replace(tmp_path, output_path)
+        os.replace(tmp_path, output_path)
+    except Exception:
+        try:
+            f.close()
+        except Exception:  # noqa: BLE001 — 关闭失败不掩盖原始异常
+            pass
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     entries.append(InterchangeEntry(
         category=InterchangeEntryCategory.PRESERVED,
@@ -360,6 +422,9 @@ def import_aaf(source: str | Path, *,
     )
 
     REF_RATE = 48000
+    from src.shared.media.metadata import Rational as _Rational
+    # 导入序列使用 TimelineSequence 默认帧率（F3.3 帧域 + 子帧样本偏移）
+    import_fps = _Rational(24, 1)
     f = aaf2.open(str(source))
     try:
         relink_requests: list[AssetRelinkRequest] = []
@@ -391,6 +456,11 @@ def import_aaf(source: str | Path, *,
                     continue
                 seg = slot.segment
                 comps = list(getattr(seg, "components", []) or [])
+                if not comps and type(seg).__name__ in ("SourceClip", "Filler"):
+                    # 单 clip 槽（裸 SourceClip/Filler，无 Sequence 包装）是
+                    # 真实 AAF 的常见合法形态——直接作为唯一组件，不得因
+                    # 无 components 属性静默导入成空轨。
+                    comps = [seg]
                 if len(comps) > INSPECT_MAX_COMPONENTS_PER_SLOT:
                     diagnostics.append({
                         "severity": "error", "code": "aaf.slot_budget",
@@ -425,16 +495,37 @@ def import_aaf(source: str | Path, *,
                     tl_start = _convert_rate(cursor, slot_rate, (REF_RATE, 1))
                     tl_end = _convert_rate(cursor + length, slot_rate, (REF_RATE, 1))
                     src_start_ref = _convert_rate(src_start, slot_rate, (REF_RATE, 1))
+                    length_samples = max(1, tl_end - tl_start)
+                    # 48k 样本域 → 模型帧域 (帧, 子帧偏移)（F3.3 二元组）——
+                    # 样本数值绝不直接写进帧字段（24fps 下 2000 倍位移）。
+                    tl_frame, tl_off = _samples_to_frame_offset(
+                        tl_start, import_fps, REF_RATE)
+                    src_frame, src_off = _samples_to_frame_offset(
+                        src_start_ref, import_fps, REF_RATE)
+                    dur_frames = _samples_to_frames_ceil(
+                        length_samples, import_fps, REF_RATE)
+                    if _frames_to_samples_exact(
+                            dur_frames, import_fps, REF_RATE) != length_samples:
+                        diagnostics.append({
+                            "severity": "info", "code": "aaf.subframe_length",
+                            "message": (
+                                f"clip length {length_samples} samples "
+                                f"quantized up to {dur_frames} frames "
+                                "(model duration is frame-domain; sub-frame "
+                                "tail handled by source window)"),
+                        })
                     asset_key = (str(src_mob.name) if src_mob is not None
                                  else f"mob:{comp_item.mobid}")
                     clip = ClipInstance(
                         clip_id=f"aaf-{asset_key}-{src_start_ref}-{tl_start}",
                         asset_id=asset_key,
                         track_id=f"aaf-slot-{slot.slot_id}",
-                        timeline_start=tl_start,
-                        timeline_duration=max(1, tl_end - tl_start),
-                        source_start=src_start_ref,
-                        source_duration=max(1, tl_end - tl_start),
+                        timeline_start=tl_frame,
+                        timeline_duration=dur_frames,
+                        source_start=src_frame,
+                        source_duration=dur_frames,
+                        audio_sample_offset=tl_off,
+                        source_sample_offset=src_off,
                     )
                     clips.append(clip)
                     if asset_key not in {a["asset_id"] for a in assets}:
@@ -495,6 +586,41 @@ def _convert_rate(position: int, from_rate: Tuple[int, int],
     if value < 0:
         return -((-2 * value + denom) // (2 * denom))
     return (2 * value + denom) // (2 * denom)
+
+
+def _fps_fraction(fps: Any) -> "Fraction":
+    """fps（Rational/Fraction/float）→ 精确有理数。"""
+    from fractions import Fraction
+    if hasattr(fps, "numerator") and hasattr(fps, "denominator"):
+        return Fraction(int(fps.numerator), int(fps.denominator))
+    if hasattr(fps, "num") and hasattr(fps, "den"):
+        return Fraction(int(fps.num), int(fps.den))
+    return Fraction(str(fps))
+
+
+def _frames_to_samples_exact(frames: int, fps: Any, sample_rate: int) -> int:
+    """帧 → 样本（floor；与 interchange.frames_to_samples 同语义）。"""
+    value = Fraction(int(frames) * int(sample_rate)) / _fps_fraction(fps)
+    return int(value)
+
+
+def _samples_to_frame_offset(total_samples: int, fps: Any,
+                             sample_rate: int) -> Tuple[int, int]:
+    """样本 → (帧, 子帧样本偏移)（interchange.samples_to_frames 的逆，
+    F3.3 二元组：位置 = 帧起点样本 + 偏移，偏移 ∈ [0, 每帧样本数)）。"""
+    frames_value = Fraction(int(total_samples)) * _fps_fraction(fps) \
+        / int(sample_rate)
+    frame = int(frames_value)
+    offset = int(total_samples) - _frames_to_samples_exact(frame, fps,
+                                                           sample_rate)
+    return frame, offset
+
+
+def _samples_to_frames_ceil(total_samples: int, fps: Any,
+                            sample_rate: int) -> int:
+    """样本数 → 覆盖全部样本的最小帧数（向上取整）。"""
+    value = Fraction(int(total_samples)) * _fps_fraction(fps) / int(sample_rate)
+    return -((-value.numerator) // value.denominator)
 
 
 class AafAudioAdapter:

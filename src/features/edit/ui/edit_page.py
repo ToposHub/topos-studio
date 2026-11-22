@@ -1725,6 +1725,20 @@ class EditPage(QWidget):
                     set_vca(vca_factors)
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_vca_overrides failed: %s", e)
+            # P2: Bus 声道布局同步——引擎 set_bus_layouts 消费（上/下混
+            # 矩阵）。此前图重建路径从不下发（仅被动路径），改布局/重开
+            # 工程后引擎沿用旧布局混音。
+            try:
+                set_layouts = getattr(audio_mgr, "set_bus_layouts", None)
+                if callable(set_layouts):
+                    set_layouts({
+                        track.track_id: str(
+                            getattr(track, "bus_layout", "stereo") or "stereo")
+                        for track in audio_tracks
+                        if getattr(track, "is_bus", False)
+                    })
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_bus_layouts failed: %s", e)
         if self._current_timeline is not None:
             try:
                 audio_mgr.set_master_volume(float(getattr(self._current_timeline, "master_volume", 1.0)))
@@ -2056,6 +2070,9 @@ class EditPage(QWidget):
                     int(getattr(clip, "source_sample_offset", 0) or 0),
                     getattr(clip, "effective_fade_curve_in", None),
                     getattr(clip, "effective_fade_curve_out", None),
+                    # A2：冻结 clip 在注册时被跳过（无声化）——冻结状态
+                    # 变化必须触发重建，否则混音沿用旧图。
+                    getattr(clip, "freeze_source_frame", None),
                     tuple(fx_sig),
                     # P0-3：处理栈变更必须重建引擎（旁路/删除/新增步骤）。
                     steps_signature(getattr(clip, "audio_edit", None)),
@@ -2088,6 +2105,8 @@ class EditPage(QWidget):
                 # AM-02/AM-05: 路由字段（is_bus / output_bus_id / sends）
                 is_bus,
                 getattr(track, "output_bus_id", None),
+                # P2: Bus 声道布局（引擎上/下混矩阵；改布局必须重建）
+                str(getattr(track, "bus_layout", "stereo") or "stereo"),
                 _sends_sig(track),
                 # AT: 音频转场（audio:* 实例）变化需重新下发 crossfade 到引擎
                 _audio_transitions_sig(track),

@@ -58,7 +58,8 @@ class StemRule:
     required_measurements: Tuple[str, ...] = ()
     # 允许整段静音（FX/ME 国际版）：status=silence 且样本数>0 才放行。
     allow_silence: bool = False
-    # 覆盖 profile 级限值（None=继承 profile；stem 无 LUFS 目标时显式置 False）
+    # 覆盖 profile 级限值（None=继承 profile 声明；False 不是特殊值——
+    # "本 stem 无 LUFS 目标"目前不可表达，需显式扩展 schema）
     target_lufs: Optional[float] = None
     max_true_peak_dbtp: Optional[float] = None
     # pre/post Master 取点语义（§11 步骤 8）：None=跟随导出配置。
@@ -272,7 +273,8 @@ class DeliveryProfile:
             source_doc_hash="",
             acquired_date="",
             measurement_mode="programme",
-            target_lufs=float(preset.loudness.target_lufs),
+            target_lufs=(None if preset.loudness.target_lufs is None
+                         else float(preset.loudness.target_lufs)),
             tolerance_lu=float(preset.loudness.tolerance_lu),
             max_true_peak_dbtp=float(preset.loudness.max_true_peak_dbtp),
             max_sample_peak_dbfs=float(preset.loudness.max_sample_peak_dbfs),
@@ -340,8 +342,12 @@ class MeasurementResult:
             sample_count=int(data.get("sample_count", 0) or 0),
             algorithm_version=str(data.get("algorithm_version", "")),
             gate_mode=str(data.get("gate_mode", "programme")),
+            # 忠实保留原始值类型（不做 float() 洗涤）：bool/str/None 载入后
+            # 由 measurement_rejection 的 type 检查拒绝——float() 会把
+            # True→1.0、"-2.0"→-2.0 洗成合法值，让持久化往返绕过
+            # 非法值防线（encode≠decode 不对称）。
             measurements={
-                str(k): float(v)
+                str(k): v
                 for k, v in (data.get("measurements") or {}).items()
             },
             warnings=tuple(str(w) for w in (data.get("warnings") or ())),
@@ -391,8 +397,16 @@ def measurement_rejection(
         value = result.measurements.get(key)
         if value is None:
             return f"missing required measurement: {key}"
-        if type(value) not in (int, float) or not math.isfinite(float(value)):
+        if type(value) not in (int, float):
             return f"required measurement {key} is not a finite number: {value!r}"
+        fv = float(value)
+        if not math.isfinite(fv):
+            return f"required measurement {key} is not a finite number: {value!r}"
+        if abs(fv) > 1.0e6:
+            # 物理合理界（LUFS/dBTP/dBFS 均为有界分贝值）：1e30 这类
+            # 有限但荒谬的值不是可用测量。
+            return (f"required measurement {key} outside plausible "
+                    f"range: {value!r}")
     return None
 
 
@@ -450,6 +464,9 @@ def publish_delivery_atomic(
     out_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".delivery-tmp-", dir=out_dir))
     published: list[Path] = []
+    # 发布前已存在的目标路径（回滚时不得误删调用方的旧文件——os.replace
+    # 已覆盖的内容无法恢复，只能保留现状并在异常里说明）。
+    preexisting: set[Path] = set()
     try:
         staged: list[tuple[Path, Path]] = []
         for stem_id, src in files.items():
@@ -457,16 +474,35 @@ def publish_delivery_atomic(
             if not src.is_file():
                 raise FileNotFoundError(
                     f"delivery file missing for {stem_id}: {src}")
-            target = staging / Path(src).name
+            final_path = out_dir / Path(src).name
+            if any(final == final_path for _, final in staged):
+                # 同名 basename 冲突：后一个 stem 会覆盖前一个的暂存/
+                # 发布内容——发布名必须唯一，拒绝而非静默取其一。
+                raise ValueError(
+                    f"multiple delivery stems share basename "
+                    f"{final_path.name!r}; published names must be unique")
+            if final_path.exists():
+                preexisting.add(final_path)
+            # 暂存名按 stem_id（防同名互覆）；发布名保持源文件名。
+            target = staging / f"{stem_id}{src.suffix or '.bin'}"
             shutil.copyfile(src, target)
             if validator is not None:
                 validator(target)
-            staged.append((target, out_dir / Path(src).name))
+            staged.append((target, final_path))
         # 全部校验通过 → 原子改名发布
         for tmp_path, final_path in staged:
             os.replace(tmp_path, final_path)
             published.append(final_path)
     except Exception:
+        # 回滚：删除本次新发布的文件（不动发布前已存在的路径），
+        # 保证"失败后正式目录零新增污染"的合同。
+        for final_path in published:
+            if final_path in preexisting:
+                continue
+            try:
+                final_path.unlink()
+            except OSError:
+                pass
         shutil.rmtree(staging, ignore_errors=True)
         raise
     finally:

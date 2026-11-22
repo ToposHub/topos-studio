@@ -595,6 +595,11 @@ def _iter_stem_pcm_chunks(
         _tail_budget[_t.track_id] = (
             _n.effect_chain.tail_estimate_samples()
             if (_n is not None and _n.effect_chain is not None) else 0)
+        # B02 · PDC：链尾音之后串行经过边延迟线——零喂预算须覆盖
+        # 链尾音 + 最大出边延迟（否则间隙冻结延迟线，下一 clip 起点
+        # 错位涌出持留内容）。
+        _tail_budget[_t.track_id] += renderer.pdc_out_edges_max_delay(
+            _t.track_id)
         _tail_left[_t.track_id] = 0
 
     # work 按 (SC 序轨序, clip 序) 稳定重排——Phase 1 的求和顺序确定
@@ -874,7 +879,9 @@ def _iter_stem_pcm_chunks(
                             0, _tail_left[track.track_id] - block_len)
                         summed = np.zeros((channels, block_len), dtype=np.float32)
                     else:
-                        continue  # 间隙且无尾音 → 冻结（与实时/成片一致）
+                        # 间隙且无尾音（尾音预算已含 PDC 出边延迟——延迟线
+                        # 持留内容随零喂按绝对时间流出）→ 冻结。
+                        continue
                 else:
                     _tail_left[track.track_id] = _tail_budget.get(
                         track.track_id, 0)

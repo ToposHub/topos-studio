@@ -160,13 +160,13 @@ class WaveformPyramid:
             energy += float(np.sum(seg * seg))
             count += int(seg.size)
 
-        # 整 tile（best 级）主体
+        # 整 tile（best 级）主体（无整 tile 时 body 为空区间，不重复聚合
+        # 同一段边界——min/max 幂等但 RMS/计数语义不得依赖这一点）
         first_full = max(0, (start + best.tile_samples - 1) // best.tile_samples)
         last_full = min(best.tiles, end // best.tile_samples) - 1
-        body_lo = first_full * best.tile_samples if first_full <= last_full \
-            else end
-        body_hi = (last_full + 1) * best.tile_samples if first_full <= last_full \
-            else start
+        has_body = first_full <= last_full
+        body_lo = first_full * best.tile_samples if has_body else start
+        body_hi = (last_full + 1) * best.tile_samples if has_body else start
         for idx in range(first_full, last_full + 1):
             _tile_agg(best, idx)
 
@@ -256,7 +256,9 @@ def plan_decode_window(
         raise ValueError("invalid channels/dtype")
     extent_start = int(extent_start)
     extent_end = int(extent_end)
-    view_start = max(extent_start, min(int(view_start), extent_end))
+    # 视窗完全越过 extent 末尾时吸附到最后 1 个有效样本（extent_end 为
+    # 半开边界，window 不得越界读取 1 样本）。
+    view_start = max(extent_start, min(int(view_start), extent_end - 1))
     view_end = max(view_start + 1, min(int(view_end), extent_end))
     per_sample = channels * dtype_bytes
 

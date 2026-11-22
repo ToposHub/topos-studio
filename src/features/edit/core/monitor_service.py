@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -171,26 +171,31 @@ class MonitorService:
             taps[f"input:{key}"] = buf
         selected = self._select_tap_ids(taps, audible_solo, solo_safe)
 
-        out: Optional[np.ndarray] = None
+        # 先收集选中的 tap（通道数取首个有效 tap；输出长度 = 最大宽度，
+        # 不再随 tap 迭代顺序截长——长 tap 的尾部不得丢弃）。
+        selected_bufs: List[Tuple[str, np.ndarray]] = []
+        out_ch: Optional[int] = None
         n = 0
         for key in selected:
             buf = taps.get(key)
             if buf is None or buf.size == 0:
                 continue
+            selected_bufs.append((key, buf))
             n = max(n, buf.shape[-1])
-            if out is None:
-                out = np.array(buf, dtype=np.float32, copy=True)
-            else:
-                if buf.shape[0] != out.shape[0]:
-                    # 布局不一致的 tap 不静默相加（B06 合同：显式矩阵处理）
-                    logger.warning(
-                        "MonitorService: tap %r layout %d != %d; skipped",
-                        key, buf.shape[0], out.shape[0])
-                    continue
-                width = min(out.shape[-1], buf.shape[-1])
-                out[:, :width] += buf[:, :width]
-        if out is None or n == 0:
+            if out_ch is None:
+                out_ch = buf.shape[0]
+        if not selected_bufs or n == 0:
             return np.zeros((2, 1), dtype=np.float32)
+        out = np.zeros((out_ch, n), dtype=np.float32)
+        for key, buf in selected_bufs:
+            if buf.shape[0] != out.shape[0]:
+                # 布局不一致的 tap 不静默相加（B06 合同：显式矩阵处理）
+                logger.warning(
+                    "MonitorService: tap %r layout %d != %d; skipped",
+                    key, buf.shape[0], out.shape[0])
+                continue
+            width = min(out.shape[-1], buf.shape[-1])
+            out[:, :width] += buf[:, :width]
 
         # mono（布局矩阵；缺矩阵显式拒绝，不猜）
         if self._state.mono:
@@ -213,20 +218,25 @@ class MonitorService:
                 out = (stereo_mono_matrix(2) @ out.astype(np.float64)).astype(
                     np.float32)
 
-        # 增益（短斜坡：从上一块目标增益滑向本块目标增益）
+        # 增益（短斜坡：从上一块目标增益滑向本块目标增益）。
+        # 斜坡位置按剩余总样本数定义（全局进度），不按块重锚——块长
+        # 小于斜坡长度时（如 64 样本设备缓冲 vs 5ms 斜坡）不得把整段
+        # 斜坡压缩进首块。
         target = float(self._state.target_gain())
         ramp = self._ramp
         if ramp.ramp_samples_left > 0 and ramp.ramp_from != target:
-            count = min(ramp.ramp_samples_left, out.shape[-1])
+            total = int(ramp.ramp_samples_left)
+            count = min(total, out.shape[-1])
             if count > 0:
-                gains = np.linspace(ramp.ramp_from, target, count + 1,
-                                    dtype=np.float64)[1:]
+                full = np.linspace(ramp.ramp_from, target, total + 1,
+                                   dtype=np.float64)
+                gains = full[1:count + 1]
                 envelope = np.full(out.shape[-1], target, dtype=np.float64)
                 envelope[:count] = gains
                 out = out * envelope[np.newaxis, :].astype(np.float32)
-                ramp.ramp_samples_left -= count
-                ramp.last_gain = float(envelope[-1])
-                ramp.ramp_from = float(envelope[-1])
+                ramp.ramp_samples_left = total - count
+                ramp.last_gain = float(full[count])
+                ramp.ramp_from = float(full[count])
             else:
                 ramp.last_gain = target
         else:

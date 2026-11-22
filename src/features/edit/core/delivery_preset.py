@@ -261,38 +261,46 @@ def evaluate_delivery(
         if invalid is not None:
             findings.append(invalid)
             continue
-        lufs = float(values["integrated_lufs"])  # 必测防线已确认存在
-        dbtp = float(values["true_peak_dbtp"])
-        peak = float(values["peak_dbfs"])
+        # 必测防线只强制"声明了限值"的键；限值为 None 的指标不参与比较
+        # （此前无条件取键会在 target_lufs=None 时 KeyError——B04 防线
+        # 本就为 None 限值场景预留）。
+        lufs = values.get("integrated_lufs")
+        dbtp = values.get("true_peak_dbtp")
+        peak = values.get("peak_dbfs")
         silence = float(values.get("max_silence_seconds", 0.0))
-        if not preset.loudness.within_loudness(lufs):
+        if (lufs is not None and preset.loudness.target_lufs is not None
+                and not preset.loudness.within_loudness(float(lufs))):
             findings.append({
                 "check_id": f"delivery.{stem}.loudness",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} 响度 {lufs:+.1f} LUFS 超出目标 "
+                    f"stem {stem} 响度 {float(lufs):+.1f} LUFS 超出目标 "
                     f"{preset.loudness.target_lufs:+.1f} "
                     f"±{preset.loudness.tolerance_lu:.1f} LU"),
-                "details": {"stem": stem, "measured_lufs": lufs,
+                "details": {"stem": stem, "measured_lufs": float(lufs),
                             "target_lufs": preset.loudness.target_lufs},
             })
-        if dbtp > preset.loudness.max_true_peak_dbtp:
+        if (dbtp is not None
+                and preset.loudness.max_true_peak_dbtp is not None
+                and float(dbtp) > preset.loudness.max_true_peak_dbtp):
             findings.append({
                 "check_id": f"delivery.{stem}.true_peak",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} True Peak {dbtp:+.1f} dBTP 超上限 "
+                    f"stem {stem} True Peak {float(dbtp):+.1f} dBTP 超上限 "
                     f"{preset.loudness.max_true_peak_dbtp:+.1f}"),
-                "details": {"stem": stem, "measured_dbtp": dbtp},
+                "details": {"stem": stem, "measured_dbtp": float(dbtp)},
             })
-        if peak > preset.loudness.max_sample_peak_dbfs:
+        if (peak is not None
+                and preset.loudness.max_sample_peak_dbfs is not None
+                and float(peak) > preset.loudness.max_sample_peak_dbfs):
             findings.append({
                 "check_id": f"delivery.{stem}.sample_peak",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} 样本峰值 {peak:+.1f} dBFS 超上限 "
+                    f"stem {stem} 样本峰值 {float(peak):+.1f} dBFS 超上限 "
                     f"{preset.loudness.max_sample_peak_dbfs:+.1f}"),
-                "details": {"stem": stem, "measured_peak_dbfs": peak},
+                "details": {"stem": stem, "measured_peak_dbfs": float(peak)},
             })
         if silence > preset.max_silence_seconds:
             findings.append({

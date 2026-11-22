@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,7 @@ def validate_proposal(
             f"{current_revision}; recompute required")
     if set(current_fingerprints) != set(proposal.source_fingerprints):
         errors.append("source fingerprints changed since proposal")
+    seen_align: set = set()
     for op in proposal.operations:
         if op.op_type == OPERATION_ALIGN:
             if op.confidence < ALIGNMENT_AUTO_APPLY_CONFIDENCE:
@@ -184,6 +185,14 @@ def validate_proposal(
                     f"alignment for clip {op.clip_id} confidence "
                     f"{op.confidence:.2f} below auto-apply threshold "
                     f"{ALIGNMENT_AUTO_APPLY_CONFIDENCE:.2f}")
+            # 同一 clip 的多条 align：apply 端按 dict 折叠只会保留最后
+            # 一条——静默丢弃前一条不是合法候选，校验期拒绝重算。
+            if op.clip_id:
+                if op.clip_id in seen_align:
+                    errors.append(
+                        f"multiple alignment operations for clip "
+                        f"{op.clip_id}; recompute required")
+                seen_align.add(op.clip_id)
     return errors
 
 

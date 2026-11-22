@@ -1,7 +1,7 @@
 {
   "audit_date": "2026-11-22",
   "scope": "read-only synthetic probes; no media/device/project mutations",
-  "source_revision": "f8d0245fb3254cde8c7bc1d3bdfae387f29fa1ac",
+  "source_revision": "3fd9631001e32137eda9b6ba0e564d06a1836a84",
   "source_state": "working tree including approved mixer UI changes",
   "python": "3.12.14",
   "numpy": "2.5.2",

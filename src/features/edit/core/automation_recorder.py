@@ -569,8 +569,14 @@ class AutomationRecorder:
         if not samples:
             return None
 
-        # 简化为关键帧
-        keyframes = simplify_samples(samples, threshold=simplify_threshold)
+        # 简化为关键帧。volume 的验收界在 dB 域（§13 步骤 8：≤0.1dB），
+        # 线性阈值简化对指数形推子衰减不满足该界——volume 走 dB 界简化，
+        # 其余参数保持线性阈值语义。
+        if self._param == "volume":
+            keyframes = simplify_volume_db(samples, max_error_db=0.1)
+        else:
+            keyframes = simplify_samples(samples,
+                                         threshold=simplify_threshold)
         if not keyframes:
             return None
 
@@ -625,7 +631,11 @@ class AutomationRecorder:
             self._samples = []
             self._segments = []
             self._segment_start = None
-        keyframes = simplify_samples(samples, threshold=simplify_threshold)
+        if self._param == "volume":
+            keyframes = simplify_volume_db(samples, max_error_db=0.1)
+        else:
+            keyframes = simplify_samples(samples,
+                                         threshold=simplify_threshold)
         return [(int(kf.frame), float(kf.value)) for kf in keyframes]
 
     def cancel(self) -> None:
@@ -713,8 +723,6 @@ class CoalesceAutomationTrimCommand:
     def apply(
         self, timeline: Any,
     ) -> Tuple[Any, "CoalesceAutomationTrimCommand"]:
-        from src.shared.keyframe import Keyframe, KeyframeTrack
-
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
@@ -728,6 +736,8 @@ class CoalesceAutomationTrimCommand:
 
         curve = track.automation.get(self.param)
         if curve is not None and getattr(curve, "keyframes", None):
+            import dataclasses as _dc
+
             baked: list = []
             for kf in curve.keyframes:
                 value = float(kf.value) * factor
@@ -737,14 +747,21 @@ class CoalesceAutomationTrimCommand:
                         f"frame {kf.frame} ({value} outside "
                         f"[{curve.min_val}, {curve.max_val}]); sound would "
                         "change — trim kept, adjust curve first")
-                baked.append(Keyframe(
-                    frame=int(kf.frame), value=value,
-                    interpolation=kf.interpolation))
-            new_curve = KeyframeTrack(
-                param_name=curve.param_name,
-                min_val=float(curve.min_val), max_val=float(curve.max_val))
+                # dataclasses.replace 只改 value：贝塞尔手柄（handle_left/
+                # right、bezier_in/out）、tangent_mode 与插值类型原样保留
+                # —— 重建裸 Keyframe 会把它们丢掉，烘焙前后曲线形状
+                # （声音）不再相等（审计反例：BEZIER + handle 偏移最大
+                # |Δ|≈0.36，远超 1e-12 合同）。
+                baked.append(_dc.replace(kf, value=value))
+            # 曲线元数据（pre/post 外推策略、未知 schema 键）同样保留
+            new_curve = _dc.replace(curve, keyframes=[])
             for kf in baked:
                 new_curve.add_keyframe(kf)
+            new_curve = _dc.replace(
+                new_curve,
+                pre_extrap=getattr(curve, "pre_extrap", "constant"),
+                post_extrap=getattr(curve, "post_extrap", "constant"),
+            )
             new_auto = track._clone_automation()
             new_auto[self.param] = new_curve
             new_track = track._rebuild(

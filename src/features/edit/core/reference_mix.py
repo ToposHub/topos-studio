@@ -141,7 +141,13 @@ def align_reference_offset(
     ref = ref - ref.mean()
     n = 1 << int(np.ceil(np.log2(prog.size + ref.size)))
     corr = np.fft.irfft(np.fft.rfft(prog, n) * np.conj(np.fft.rfft(ref, n)), n)
-    max_lag = int(min(max_offset_samples, n // 2))
+    # 窗口必须非退化：max_lag=0 时 corr[-0:] 是整个数组（正/负窗重复），
+    # 峰会被解码成大数值"高置信"错位——同源实现 estimate_alignment_offset
+    # 对同一形态显式拒绝。
+    if int(max_offset_samples) < 1:
+        raise ValueError(
+            f"max_offset_samples must be >= 1 (got {max_offset_samples!r})")
+    max_lag = max(1, int(min(max_offset_samples, n // 2)))
     lags = np.concatenate([corr[:max_lag + 1], corr[-max_lag:]])
     peak = int(np.argmax(lags))
     lag = peak if peak <= max_lag else peak - len(lags)
