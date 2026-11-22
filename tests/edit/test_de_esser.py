@@ -147,3 +147,58 @@ class TestDeEsserOracle:
         assert reduction_db > 3.0
         assert chain.latency_samples() == 0
         assert chain.tail_estimate_samples() == 0
+
+
+@pytest.mark.parametrize("extra", [{}, {"detector_shape": "bandpass", "lookahead_ms": 3.0}])
+@pytest.mark.parametrize("mode", ["split", "wide"])
+def test_transients_are_consistent_across_render_block_sizes(extra: dict, mode: str) -> None:
+    # Bursts alternate in duration and level so both detector slopes change
+    # inside blocks. A stationary tone rarely exposes an incorrect block-start
+    # comparison for the attack/release branch.
+    rng = np.random.default_rng(502)
+    levels = np.repeat([0.035, 0.24, 0.7, 0.01, 0.55, 0.1, 0.03],
+                       [701, 1901, 3431, 1771, 1999, 1121, 4777])
+    t = np.arange(levels.size) / RATE
+    signal = levels * np.sin(2 * np.pi * 6500 * t)
+    pcm = np.stack((signal, 0.4 * signal + 0.05 * rng.standard_normal(t.size))).astype(np.float32)
+    params = dict(extra, threshold_dbfs=-36.0, mode=mode)
+    fx = _make(params)
+    expected = fx.process(pcm)
+    telemetry = fx.collect_telemetry()
+    delay = fx.latency_samples()
+    assert np.max(np.abs(pcm[:, :pcm.shape[1] - delay] - expected[:, delay:])) > 0.01
+
+    for block_size in (512, 2000, 8192):
+        fx.reset_state()
+        blocks = [fx.process(pcm[:, start:start + block_size])
+                  for start in range(0, pcm.shape[1], block_size)]
+        np.testing.assert_allclose(np.concatenate(blocks, axis=1), expected,
+                                   rtol=0.0, atol=6e-8)
+        assert fx.collect_telemetry() == telemetry
+
+    fx.reset_state()
+    blocks = []
+    start = 0
+    while start < pcm.shape[1]:
+        stop = min(start + int(rng.integers(1, 3001)), pcm.shape[1])
+        blocks.append(fx.process(pcm[:, start:stop]))
+        start = stop
+    np.testing.assert_allclose(np.concatenate(blocks, axis=1), expected,
+                               rtol=0.0, atol=6e-8)
+
+
+@pytest.mark.parametrize("extra", [{}, {"detector_shape": "bandpass"}])
+def test_attack_and_release_shape_gain_on_each_detector_path(extra: dict) -> None:
+    # Keep a quiet probe under threshold after a loud burst. Wide mode lets
+    # the output RMS ratio reveal the actual envelope gain on that probe.
+    pcm = _dual_tone(seconds=0.5, amp_1k=0.0, amp_6k=0.4)
+    pcm[:, :RATE // 10] *= 0.04
+    pcm[:, RATE // 4:] *= 0.04
+    params = dict(extra, threshold_dbfs=-27.0, mode="wide")
+    fast = _make(dict(params, attack_ms=2.0, release_ms=20.0)).process(pcm)
+    slow = _make(dict(params, attack_ms=60.0, release_ms=300.0)).process(pcm)
+
+    early_burst = slice(5500, 6000)
+    after_burst = slice(17000, 17500)
+    assert np.linalg.norm(fast[:, early_burst]) < 0.9 * np.linalg.norm(slow[:, early_burst])
+    assert np.linalg.norm(slow[:, after_burst]) < 0.9 * np.linalg.norm(fast[:, after_burst])

@@ -291,6 +291,9 @@ class TestSpeedStrategyFixture:
         requested = []
 
         class _SpyDecoder(AudioDecoder):
+            def seek_to_time(self, time_seconds: float) -> bool:
+                return True
+
             def decode_next_samples(self, num_samples):
                 requested.append(num_samples)
                 sig = np.full(num_samples, 0.5, dtype=np.float32)

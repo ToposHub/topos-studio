@@ -929,6 +929,16 @@ class SpeedParams:
         # 等效位置不得先 int(round) 再乘段速度（量化误差会被 8x 级速度
         # 放大成 max4 源帧差）；沿段积分保持连续，最后统一量化。
         remaining = max(0.0, float(timeline_frame))
+        if (self.speed == 1.0 and not self.speed_points and self.curve_length is None
+                and not self.curve_offset and self.curve_time_offset is None
+                and source_duration > 0):
+            # Default clips have one unit-speed segment with the whole window
+            # as its domain. Keep the same floor and end clamp without
+            # rebuilding the segment per video/audio frame.
+            source_frame = int(min(remaining, source_duration - 1))
+            if self.reverse:
+                source_frame = source_duration - 1 - source_frame
+            return source_frame, source_frame
         source_frame = source_duration - 1
         if self.curve_length is not None:
             # Slices and extensions share the authored curve's clock. Handles

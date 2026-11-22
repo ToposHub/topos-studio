@@ -66,13 +66,7 @@ class ChannelLayout(Enum):
     @property
     def channel_count(self) -> int:
         """该布局的声道数。"""
-        return {
-            ChannelLayout.MONO: 1,
-            ChannelLayout.STEREO: 2,
-            ChannelLayout.SURROUND_5_1: 6,
-            ChannelLayout.SURROUND_7_1: 8,
-            ChannelLayout.QUAD: 4,
-        }[self]
+        return _CHANNELS_BY_LAYOUT[self]
 
     @property
     def channel_labels(self) -> tuple:
@@ -99,15 +93,12 @@ class ChannelLayout(Enum):
     @staticmethod
     def from_channel_count(count: int) -> "ChannelLayout":
         """根据声道数推断布局（1=mono, 2=stereo, 4=quad, 6=5.1, 8=7.1）。未知抛 ValueError。"""
-        mapping = {1: ChannelLayout.MONO, 2: ChannelLayout.STEREO,
-                   4: ChannelLayout.QUAD,
-                   6: ChannelLayout.SURROUND_5_1, 8: ChannelLayout.SURROUND_7_1}
-        if count not in mapping:
+        if count not in _LAYOUT_BY_CHANNELS:
             raise ValueError(
                 f"Unknown channel count {count}: 无法推断 ChannelLayout。"
                 f"支持: 1(mono)/2(stereo)/4(quad)/6(5.1)/8(7.1)，其他需显式指定。"
             )
-        return mapping[count]
+        return _LAYOUT_BY_CHANNELS[count]
 
     @staticmethod
     def from_av_layout_name(name: str) -> "ChannelLayout":
@@ -138,6 +129,16 @@ class ChannelLayout(Enum):
                     f"（7.1.x）不支持，需先显式降混（MX-15 能力矩阵）")
             return ChannelLayout.SURROUND_7_1
         raise ValueError(f"Unsupported PyAV layout: {name!r}")
+
+
+_LAYOUT_BY_CHANNELS = {
+    1: ChannelLayout.MONO,
+    2: ChannelLayout.STEREO,
+    4: ChannelLayout.QUAD,
+    6: ChannelLayout.SURROUND_5_1,
+    8: ChannelLayout.SURROUND_7_1,
+}
+_CHANNELS_BY_LAYOUT = {layout: count for count, layout in _LAYOUT_BY_CHANNELS.items()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -4701,6 +4701,39 @@ class MasterLimiter:
     def threshold(self, value: float) -> None:
         self._threshold = max(0.01, float(value))
 
+    def _smooth_gain(self, target: np.ndarray) -> tuple[np.ndarray, float]:
+        if target.size < 128:
+            return _smooth_attack_release(
+                target, self._gain, self._release_coeff, self._attack_coeff)
+        limited = np.flatnonzero(target < 1.0)
+        if limited.size * 4 >= target.size:
+            return _smooth_attack_release(
+                target, self._gain, self._release_coeff, self._attack_coeff)
+
+        # Between peaks the target is exactly unity and the envelope can
+        # only release. Advance those stretches in closed form, retaining
+        # the sample-by-sample attack/release decision at each actual peak.
+        samples = np.arange(target.size)
+        release = np.power(self._release_coeff, np.arange(target.size + 1))
+        if not limited.size:
+            gains = 1.0 + (self._gain - 1.0) * release[1:]
+            return gains, float(gains[-1])
+        positions = np.insert(limited, 0, -1)
+        levels = np.empty(positions.size, dtype=np.float64)
+        levels[0] = level = self._gain
+        gaps = release[np.diff(positions) - 1]
+        for i, (value, gap) in enumerate(zip(target[limited].tolist(), gaps.tolist()), 1):
+            before = 1.0 + (level - 1.0) * gap
+            coeff = self._release_coeff if value > before else self._attack_coeff
+            level = value + (before - value) * coeff
+            levels[i] = level
+
+        preceding = np.zeros(target.size, dtype=np.intp)
+        preceding[limited] = np.arange(1, positions.size)
+        np.maximum.accumulate(preceding, out=preceding)
+        gains = 1.0 + (levels[preceding] - 1.0) * release[samples - positions[preceding]]
+        return gains, float(gains[-1])
+
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用连续状态限幅。
 
@@ -4736,9 +4769,7 @@ class MasterLimiter:
 
         # 增益平滑（attack 下降快、release 上升慢）：分支方向与
         # _smooth_attack_release 的 rise/fall 相反（目标低于增益时衰减）。
-        out_gain, self._gain = _smooth_attack_release(
-            target_gain.astype(np.float64, copy=False), self._gain,
-            self._release_coeff, self._attack_coeff)
+        out_gain, self._gain = self._smooth_gain(target_gain.astype(np.float64, copy=False))
 
         # 应用增益到所有声道
         out = (samples * out_gain).astype(samples.dtype, copy=False)

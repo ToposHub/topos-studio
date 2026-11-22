@@ -82,6 +82,34 @@ class TestContinuousState:
         lim.process(quiet.copy())
         assert lim._gain > 0.9, f"release 后增益应恢复，实际 {lim._gain}"
 
+    def test_sparse_and_dense_peak_blocks_match_sample_recurrence(self) -> None:
+        rng = np.random.default_rng(88)
+        signal = rng.uniform(-0.8, 0.8, (2, 18000)).astype(np.float32)
+        signal[0, 17:5600:11] *= 2.6
+        signal[:, 6300:10000] *= 3.1
+        signal[1, [10000, 15999, 17999]] = -1.65
+
+        threshold = 1.0
+        target = threshold / np.maximum(np.max(np.abs(signal), axis=0), threshold)
+        attack = float(np.exp(-1 / (0.001 * SR)))
+        release = float(np.exp(-1 / (0.1 * SR)))
+        level = 1.0
+        expected_gain = np.empty(target.size, dtype=np.float64)
+        for i, value in enumerate(target.tolist()):
+            coeff = release if value > level else attack
+            level = value + (level - value) * coeff
+            expected_gain[i] = level
+        expected = (signal * expected_gain).astype(np.float32)
+        expected *= threshold / np.maximum(np.max(np.abs(expected), axis=0), threshold)
+
+        for boundaries in ((0, 18000), (0, 127, 5600, 10000, 13500, 15999, 18000)):
+            limiter = MasterLimiter(SR)
+            actual = np.concatenate([
+                limiter.process(signal[:, start:end])
+                for start, end in zip(boundaries, boundaries[1:])
+            ], axis=1)
+            np.testing.assert_allclose(actual, expected, atol=1e-7, rtol=0)
+
     def test_no_block_boundary_gain_jump(self):
         """AM-09 验收：连续正弦无 block-boundary gain jump（pumping）。
 

@@ -10,6 +10,7 @@ import pytest
 from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
 from src.features.edit.core.audio_playback import AudioDecoder, AudioMixer, AudioTrackState
 from src.features.edit.core.channel_layout import ChannelLayout
+from src.features.edit.core.clip_pcm import decode_audio_range
 from src.features.edit.core.commands import SetMixLayoutCommand
 from src.features.edit.core.delivery_readback import measure_delivery_wav
 from src.features.edit.core.project import EditProject, MediaAsset
@@ -95,6 +96,43 @@ def test_layout_apply_preserves_identity_and_rejects_stereo_fx() -> None:
     stereo = replace(sequence, audio_tracks=(replace(track, effect_chain=stereo_fx),))
     with pytest.raises(ValueError, match="imager cannot process 7.1"):
         SetMixLayoutCommand.create("a", "7.1").apply(stereo)
+
+
+def test_resampled_source_stays_aligned_in_playback_movie_and_stem(tmp_path: Path) -> None:
+    source = tmp_path / "resampled.wav"
+    pcm = np.random.default_rng(42).uniform(-0.2, 0.2, (2, 44100)).astype(np.float32)
+    assert write_stem_wav(str(source), pcm, sample_rate=44100)
+    expected = decode_audio_range(str(source), 0, 48000, 48000)
+    assert expected is not None
+    clip = ClipInstance("c", "audio", "track", 0, 24, 0, 24)
+    seq = TimelineSequence(audio_tracks=(EditTrack("track", "Track", "audio", 0, clips=(clip,)),))
+    project = EditProject("p", "P", assets={
+        "audio": MediaAsset("audio", str(source), "audio", "Audio", {}),
+    })
+
+    decoder = AudioDecoder()
+    assert decoder.open(source, 24.0, output_sample_rate=48000)
+    mixer = AudioMixer()
+    mixer.add_track("track", decoder, AudioTrackState("track"))
+    try:
+        blocks = [mixer.mix_samples(i, 24.0, 2000)[0] for i in range(24)]
+        np.testing.assert_allclose(np.concatenate(blocks, axis=1), expected, atol=1e-7, rtol=0)
+    finally:
+        decoder.close()
+
+    movie = TimelineExporter(project, seq, Mock())._render_audio_master(
+        0, 24, TimelineExportConfig(output_path=str(tmp_path / "test.mov")), encoder=Mock())
+    np.testing.assert_allclose(movie, expected, atol=1e-7, rtol=0)
+
+    decode, close = create_clip_decode_fn(project, 24.0, 48000)
+    spec = StemSpec(StemType.MASTER, "Master")
+    try:
+        stem = render_stem_pcm(seq, spec, decode_clip_fn=decode)
+        np.testing.assert_allclose(stem, expected, atol=1e-7, rtol=0)
+        isolated = render_stem_pcm(seq, spec, decode_clip_fn=decode, frame_range=(8, 12))
+        np.testing.assert_allclose(isolated, expected[:, 16000:24000], atol=1e-7, rtol=0)
+    finally:
+        close()
 
 
 def test_planar_aac_71_decodes_and_resamples_without_ghost_plane(tmp_path: Path) -> None:

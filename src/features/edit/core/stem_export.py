@@ -628,8 +628,11 @@ def _iter_stem_pcm_chunks(
 
     for f0 in range(feed_start, end_frame, chunk_frames):
         f1 = min(f0 + chunk_frames, end_frame)
-        s0 = frames_to_samples(f0 - feed_start, fps_exact, sample_rate)
-        s1 = frames_to_samples(f1 - feed_start, fps_exact, sample_rate)
+        sample_bounds = [
+            frames_to_samples(frame - feed_start, fps_exact, sample_rate)
+            for frame in range(f0, f1 + 1)
+        ]
+        s0, s1 = sample_bounds[0], sample_bounds[-1]
         if s1 <= s0:
             continue
         chunk_len = s1 - s0
@@ -659,9 +662,8 @@ def _iter_stem_pcm_chunks(
             frame_hi = min(ovl_end, f1)
             for frame_idx in range(frame_lo, frame_hi):
                 # D06：块长用精确相邻样本边界差（与成片导出同源）。
-                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
-                out_next = frames_to_samples(
-                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
+                index = frame_idx - f0
+                out_start, out_next = sample_bounds[index], sample_bounds[index + 1]
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -852,10 +854,8 @@ def _iter_stem_pcm_chunks(
                     _ctail_frames = int(math.ceil(_ctail / _spf))
                     for _tf in range(_clip_end,
                                      min(f1, _clip_end + _ctail_frames)):
-                        _ts = frames_to_samples(
-                            _tf - feed_start, fps_exact, sample_rate)
-                        _tn = frames_to_samples(
-                            _tf + 1 - feed_start, fps_exact, sample_rate)
+                        index = _tf - f0
+                        _ts, _tn = sample_bounds[index], sample_bounds[index + 1]
                         _tbl = _tn - _ts
                         if _tbl <= 0:
                             continue
@@ -888,12 +888,9 @@ def _iter_stem_pcm_chunks(
             node = renderer.get_node(track.track_id)
             domain, native_track = renderer.track_domain(track.track_id, master_channels)
             track_channels = domain.channel_count
-            _track_frames = sorted(
-                f for (tid, f) in frame_sum if tid == track.track_id)
             for frame_idx in range(f0, f1):
-                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
-                out_next = frames_to_samples(
-                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
+                index = frame_idx - f0
+                out_start, out_next = sample_bounds[index], sample_bounds[index + 1]
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -1605,17 +1602,115 @@ def create_clip_decode_fn(
         needs_retime,
         preserve_pitch_request,
     )
+    from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame
+    from src.features.edit.core.channel_layout import SpeakerLayoutError, codec_bed_layout
+    from src.features.edit.core.clip_pcm import resolve_source_channel_map
     from src.features.edit.core.proxy_policy import export_source_path
-
-    decoders: Dict[str, AudioDecoder] = {}
-    side_surround_sources: set[str] = set()
-    retime_readers: Dict[str, Optional[ClipRetimeReader]] = {}
-    pp_readers: Dict[str, Optional[PreservedPitchReader]] = {}
-    _pp_unsupported_warned: set = set()
-    # F3.3：子帧偏移门（时间线侧+源侧合计；与成片导出/实时预览同语义）
     from src.features.edit.core.sample_time import SampleSkipGate
-    _sample_skip_gates: Dict[str, SampleSkipGate] = {}
+    from src.features.edit.core.source_patch import SourcePatchSpec
+
+    decoders: dict[tuple[str, str, float], AudioDecoder] = {}
+    side_surround_sources: set[str] = set()
+    ReadClip = Callable[[Any, int, int], Optional[np.ndarray]]
+    prepared: dict[str, tuple[Any, float, Optional[ReadClip]]] = {}
     spf = int(sample_rate / fps) if fps > 0 else 0
+
+    def prepare_clip(clip: Any, fps_value: float) -> Optional[ReadClip]:
+        # The worker consumes a project snapshot. Resolve static source
+        # metadata, patch and the proper reader just once for each clip.
+        if getattr(clip, "freeze_source_frame", None) is not None:
+            return None
+        assets = getattr(project, "assets", {})
+        asset = assets.get(clip.asset_id)
+        if asset is None or getattr(asset, "is_nested_sequence", False):
+            return None
+        asset_path = export_source_path(project, asset)
+        if not asset_path:
+            return None
+
+        audio_offset = 0.0
+        binding = binding_for_asset(
+            getattr(project, "audio_sync_bindings", None) or {}, clip.asset_id)
+        if binding is not None:
+            wav_path = getattr(assets.get(binding.wav_asset_id), "path", "")
+            if wav_path:
+                asset_path = wav_path
+                audio_offset = binding.offset_seconds
+            else:
+                logger.warning(
+                    "stem clip %s: bound WAV asset unreadable (%s) "
+                    "— falling back to camera audio", clip.clip_id, binding.wav_asset_id)
+
+        decoder_key = (clip.asset_id, asset_path, fps_value)
+        decoder = decoders.get(decoder_key)
+        if decoder is None:
+            decoder = AudioDecoder()
+            if not decoder.open(asset_path, timeline_fps=fps_value, output_sample_rate=sample_rate):
+                return None
+            decoders[decoder_key] = decoder
+
+        patch = SourcePatchSpec(audio_channel_map=resolve_source_channel_map(project, asset))
+        source_fps = clip_source_fps(clip, fps_value)
+        codec_layout = getattr(decoder, "source_layout_name", "")
+        skip_samples = (int(getattr(clip, "audio_sample_offset", 0) or 0)
+                        + int(getattr(clip, "source_sample_offset", 0) or 0))
+        skip_gate = SampleSkipGate(skip_samples)
+        last_frame: Optional[int] = None
+        validated_channels = 0
+
+        reader: ClipRetimeReader | PreservedPitchReader | None = None
+        requested, pp_speed = preserve_pitch_request(clip)
+        if requested:
+            if pp_speed is None:
+                logger.warning("stem clip %s preserve-pitch 不支持倒放/速度曲线，回退变调",
+                               clip.clip_id)
+            else:
+                candidate = PreservedPitchReader(
+                    decoder, clip, fps, spf, sample_rate, source_offset_seconds=audio_offset)
+                if candidate.available:
+                    reader = candidate
+        if reader is None and needs_retime(clip):
+            candidate_retime = ClipRetimeReader(
+                decoder, clip, fps, spf, sample_rate=sample_rate,
+                source_offset_seconds=audio_offset)
+            if candidate_retime.available:
+                reader = candidate_retime
+            else:
+                logger.warning("stem clip %s retime 窗口不可用", clip.clip_id)
+
+        def read_clip(track: Any, frame_idx: int, n_samples: int) -> Optional[np.ndarray]:
+            nonlocal last_frame, validated_channels
+            if reader is not None:
+                samples = reader.read_frame(frame_idx, n_samples)
+            else:
+                try:
+                    source_frame = clip.timeline_to_source_frame(frame_idx)
+                except (ValueError, AttributeError):
+                    return None
+                if audio_offset:
+                    source_frame = bound_audio_frame(source_frame, audio_offset, source_fps)
+                samples = decoder.decode_samples_for_frame(source_frame, source_fps, n_samples)
+            if samples is None:
+                return None
+            if samples.ndim == 1:
+                samples = samples[np.newaxis, :]
+            selected = patch.select_channels(samples) if patch.audio_channel_map else samples
+            if selected is samples and (native_master or getattr(track, "audio_layout", "")):
+                if patch.audio_channel_map:
+                    raise SpeakerLayoutError(
+                        f"{clip.clip_id}: source channel patch does not match decoded PCM")
+                if codec_layout and validated_channels != samples.shape[0]:
+                    codec_bed_layout(codec_layout, samples.shape[0])
+                    validated_channels = samples.shape[0]
+                    if codec_layout == "5.1(side)":
+                        side_surround_sources.add(clip.clip_id)
+            if last_frame is not None and frame_idx <= last_frame:
+                # export_all_stems replays the same clip for each selected stem.
+                skip_gate.reset(skip_samples)
+            last_frame = frame_idx
+            return skip_gate.feed(selected)
+
+        return read_clip
 
     def decode_clip(
         track: Any,
@@ -1624,174 +1719,13 @@ def create_clip_decode_fn(
         fps_value: float,
         n_samples: int,
     ) -> Optional[np.ndarray]:
-        # D05：冻结段无音频进度——成片混音跳过，Stem 同语义返回 None。
-        if getattr(clip, "freeze_source_frame", None) is not None:
-            return None
-        asset = getattr(project, "assets", {}).get(getattr(clip, "asset_id", "")) \
-            if project is not None else None
-        if asset is None:
-            return None
-        if getattr(asset, "is_nested_sequence", False):
-            return None
-
-        # F2.1 · Source Patching：素材级源声道映射（保调/retime/直读三条
-        # 返回路径统一经此选道，与成片导出/预览同语义）。无映射时恒等。
-        from src.features.edit.core.clip_pcm import resolve_source_channel_map
-        from src.features.edit.core.source_patch import SourcePatchSpec
-        patch = SourcePatchSpec(audio_channel_map=resolve_source_channel_map(project, asset))
-
-        def _select_source_channels(
-                samples: Optional[np.ndarray]) -> Optional[np.ndarray]:
-            if samples is None:
-                return None
-            selected = patch.select_channels(samples)
-            if selected is samples and (native_master or getattr(track, "audio_layout", "")):
-                from src.features.edit.core.channel_layout import SpeakerLayoutError, codec_bed_layout
-                if patch.audio_channel_map:
-                    raise SpeakerLayoutError(f"{clip.clip_id}: source channel patch does not match decoded PCM")
-                name = getattr(decoder, "source_layout_name", "")
-                if isinstance(name, str) and name:
-                    codec_bed_layout(name, samples.shape[0])
-                    if name == "5.1(side)":
-                        side_surround_sources.add(clip.clip_id)
-            return selected
-
-        def _apply_sample_gate(
-                samples: Optional[np.ndarray]) -> Optional[np.ndarray]:
-            """F3.3：子帧偏移门（成片/预览同刻；pp/retime/1x 三路统一）。"""
-            if samples is None or samples.shape[-1] == 0:
-                return samples
-            gate = _sample_skip_gates.get(clip.clip_id)
-            if gate is None:
-                from src.features.edit.core.sample_time import (
-                    SampleSkipGate as _Gate,
-                )
-                gate = _Gate(int(getattr(clip, "audio_sample_offset", 0) or 0)
-                             + int(getattr(clip, "source_sample_offset", 0) or 0))
-                _sample_skip_gates[clip.clip_id] = gate
-            return gate.feed(samples)
-
-        asset_path = export_source_path(project, asset)
-        if not asset_path:
-            return None
-
-        # F2.10/M03（S05）：外录绑定——音频消费切到 WAV 源（偏移折算）；
-        # retime/保调片段同样使用 WAV（reader 的 source_offset_seconds
-        # 平移源窗，与成片/实时预览同口径——此前与成片同政策对变速
-        # 绑定片段静默回退机内声）。仅 WAV 缺失/不可读才回退。
-        from src.features.edit.core.audio_sync import (
-            binding_for_asset,
-            bound_audio_frame,
-        )
-        binding = binding_for_asset(
-            getattr(project, "audio_sync_bindings", None) or {},
-            clip.asset_id)
-        audio_offset = 0.0
-        if binding is not None:
-            wav = project.assets.get(binding.wav_asset_id)
-            wav_path = getattr(wav, "path", "") if wav is not None else ""
-            if wav_path:
-                asset_path = wav_path
-                audio_offset = binding.offset_seconds
-            else:
-                logger.warning(
-                    "stem clip %s: bound WAV asset unreadable (%s) "
-                    "— falling back to camera audio",
-                    clip.clip_id, binding.wav_asset_id)
-                binding = None
-        if binding is not None:
-            decoder_key = (clip.asset_id, asset_path)
-        else:
-            decoder_key = clip.asset_id
-
-        decoder = decoders.get(decoder_key)
-        if decoder is None:
-            decoder = AudioDecoder()
-            if not decoder.open(
-                asset_path,
-                timeline_fps=float(fps_value),
-                output_sample_rate=int(sample_rate),
-            ):
-                return None
-            decoders[decoder_key] = decoder
-        elif float(fps_value) != float(fps):
-            # fps 漂移守卫：render_stem_pcm 全程使用同一 fps，正常不触发
-            decoder.close()
-            if not decoder.open(
-                asset_path,
-                timeline_fps=float(fps_value),
-                output_sample_rate=int(sample_rate),
-            ):
-                return None
-
-        # R05：保调变速走共享 WSOLA 读取器（与成片同一实现）。
-        requested, pp_speed = preserve_pitch_request(clip)
-        if requested:
-            if pp_speed is None:
-                if clip.clip_id not in _pp_unsupported_warned:
-                    _pp_unsupported_warned.add(clip.clip_id)
-                    logger.warning(
-                        "stem clip %s preserve-pitch 不支持倒放/速度曲线，回退变调",
-                        clip.clip_id,
-                    )
-            else:
-                pp_reader = pp_readers.get(clip.clip_id, False)
-                if pp_reader is False:
-                    candidate = PreservedPitchReader(
-                        decoder, clip, float(fps), spf, int(sample_rate),
-                        source_offset_seconds=audio_offset)
-                    pp_reader = candidate if candidate.available else None
-                    pp_readers[clip.clip_id] = pp_reader
-                    if pp_reader is None:
-                        logger.warning(
-                            "stem clip %s preserve-pitch 预解码失败，回退变调",
-                            clip.clip_id,
-                        )
-                if pp_reader is not None:
-                    return _apply_sample_gate(_select_source_channels(
-                        pp_reader.read_frame(frame_idx, int(n_samples))))
-
-        # D01：retime 片段走共享样本域重采样（与成片导出同源）。
-        if needs_retime(clip):
-            reader = retime_readers.get(clip.clip_id, False)
-            if reader is False:
-                reader = ClipRetimeReader(
-                    decoder, clip, float(fps), spf,
-                    sample_rate=int(sample_rate),
-                    source_offset_seconds=audio_offset)
-                retime_readers[clip.clip_id] = (
-                    reader if reader.available else None
-                )
-                if not reader.available:
-                    logger.warning(
-                        "stem clip %s retime 窗口不可用，本帧静音跳过",
-                        clip.clip_id,
-                    )
-                    reader = None
-            if reader is not None:
-                return _apply_sample_gate(_select_source_channels(
-                    reader.read_frame(frame_idx, int(n_samples))))
-
-        # 1x 直读：canonical 映射（混合 fps/帧相位由模型处理）。
-        # R06：解码定位用素材源帧率时钟。
-        try:
-            source_frame = clip.timeline_to_source_frame(frame_idx)
-        except (ValueError, AttributeError):
-            return None
-        if audio_offset:
-            source_frame = bound_audio_frame(
-                source_frame, audio_offset,
-                clip_source_fps(clip, float(fps_value)))
-        samples = decoder.decode_samples_for_frame(
-            source_frame, clip_source_fps(clip, float(fps_value)),
-            int(n_samples),
-        )
-        if samples is None:
-            return None
-        if samples.ndim == 1:
-            samples = samples.reshape(1, -1)
-        return _apply_sample_gate(_select_source_channels(
-            np.ascontiguousarray(samples, dtype=np.float32)))
+        entry = prepared.get(clip.clip_id)
+        if entry is None or entry[0] is not clip or entry[1] != fps_value:
+            side_surround_sources.discard(clip.clip_id)
+            entry = (clip, fps_value, prepare_clip(clip, fps_value))
+            prepared[clip.clip_id] = entry
+        read_clip = entry[2]
+        return read_clip(track, frame_idx, n_samples) if read_clip is not None else None
 
     def close_all() -> None:
         for decoder in decoders.values():
@@ -1800,9 +1734,8 @@ def create_clip_decode_fn(
             except Exception:  # noqa: BLE001 — 释放失败不阻塞导出收尾
                 pass
         decoders.clear()
-        retime_readers.clear()
-        pp_readers.clear()
-        _pp_unsupported_warned.clear()
+        prepared.clear()
+        side_surround_sources.clear()
 
     def codec_layout_for(clip_id: str) -> str:
         return "5.1(side)" if clip_id in side_surround_sources else ""

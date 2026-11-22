@@ -31,7 +31,9 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.audio_edit import steps_signature
 
-SOUND_SNAPSHOT_SCHEMA_VERSION = 3
+# The render identity changes with the corrected resampler alignment and
+# de-esser envelope, even when an older project's serialized fields match.
+SOUND_SNAPSHOT_SCHEMA_VERSION = 4
 
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence

@@ -79,6 +79,7 @@ import time
 import threading
 import queue
 from dataclasses import dataclass
+from fractions import Fraction
 from itertools import count as _it_count
 from typing import TYPE_CHECKING, Iterator, Optional, Callable, Dict, List, Tuple, Any
 from enum import Enum
@@ -94,6 +95,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QMutexLocker
 from PyQt6.QtMultimedia import QAudio, QAudioSink, QAudioFormat, QMediaDevices
 
 from src.features.edit.core.playback_debug import playback_trace
+from src.features.edit.core.sample_time import resample_preroll_start
 from src.shared.media.audio_frame_pcm import audio_frame_array
 from src.features.edit.core.audio_transition_catalog import overlap_fade_regions
 from src.features.edit.core.audio_dsp import (
@@ -186,6 +188,12 @@ _AV_RESAMPLER_CACHE_MAX: int = 64
 _decoder_instance_seq: Iterator[int] = _it_count(1)
 
 
+def _new_av_resampler(target_rate: int, channels: int) -> av.AudioResampler:
+    layout = "stereo" if channels == 2 else "mono" if channels == 1 else f"{channels}c"
+    return av.audio.resampler.AudioResampler(
+        format="flt" if channels >= 8 else "fltp", layout=layout, rate=target_rate)
+
+
 def _get_av_resampler(source_rate: int, target_rate: int, channels: int, instance_id: int = 0) -> Any:
     """获取或创建 PyAV AudioResampler 实例（带缓存）。
 
@@ -195,12 +203,7 @@ def _get_av_resampler(source_rate: int, target_rate: int, channels: int, instanc
     key = (source_rate, target_rate, channels, instance_id)
     if key not in _av_resampler_cache:
         if PYAV_AVAILABLE:
-            layout = "stereo" if channels == 2 else "mono" if channels == 1 else f"{channels}c"
-            _av_resampler_cache[key] = av.audio.resampler.AudioResampler(
-                format="flt" if channels >= 8 else "fltp",
-                layout=layout,
-                rate=target_rate,
-            )
+            _av_resampler_cache[key] = _new_av_resampler(target_rate, channels)
             # AUD-15501: 容量上限——超限时按插入序驱逐最旧条目（dict 保序）。
             while len(_av_resampler_cache) > _AV_RESAMPLER_CACHE_MAX:
                 _av_resampler_cache.pop(next(iter(_av_resampler_cache)), None)
@@ -215,6 +218,8 @@ def _resample_audio(
     target_rate: int,
     instance_id: int = 0,
     flush: bool = False,
+    *,
+    resampler: Optional[av.AudioResampler] = None,
 ) -> np.ndarray:
     """
     使用 PyAV AudioResampler（多相 FIR 滤波器）对音频进行高质量重采样。
@@ -239,7 +244,7 @@ def _resample_audio(
         samples = samples.reshape(1, -1)
 
     source_count = samples.shape[-1]
-    if source_count == 0:
+    if source_count == 0 and not flush:
         return np.zeros((samples.shape[0], 0), dtype=np.float32)
 
     channels = samples.shape[0]
@@ -247,7 +252,12 @@ def _resample_audio(
     # --- 路径 1: PyAV AudioResampler（最佳质量，多相 FIR） ---
     if PYAV_AVAILABLE:
         try:
-            resampler = _get_av_resampler(source_rate, target_rate, channels, instance_id)
+            key = (source_rate, target_rate, channels, instance_id)
+            cached = resampler is None
+            if cached:
+                if source_count == 0 and key not in _av_resampler_cache:
+                    return samples
+                resampler = _get_av_resampler(source_rate, target_rate, channels, instance_id)
             if resampler is not None:
                 layout = "stereo" if channels == 2 else "mono" if channels == 1 else f"{channels}c"
                 # 构造一个 AudioFrame 来喂给 resampler。
@@ -255,12 +265,14 @@ def _resample_audio(
                 # 非连续布局（如声道映射切片 .T 的产物），from_ndarray 拒收
                 # 非 C-contiguous 输入并抛异常，导致整轨长期落到 scipy 兜底。
                 packed = channels >= 8
-                data = (np.ascontiguousarray(samples.T, dtype=np.float32).reshape(1, -1)
-                        if packed else np.ascontiguousarray(samples, dtype=np.float32))
-                frame = av.AudioFrame.from_ndarray(
-                    data, format="flt" if packed else "fltp", layout=layout)
-                frame.sample_rate = source_rate
-                out_frames = resampler.resample(frame)
+                out_frames = []
+                if source_count:
+                    data = (np.ascontiguousarray(samples.T, dtype=np.float32).reshape(1, -1)
+                            if packed else np.ascontiguousarray(samples, dtype=np.float32))
+                    frame = av.AudioFrame.from_ndarray(
+                        data, format="flt" if packed else "fltp", layout=layout)
+                    frame.sample_rate = source_rate
+                    out_frames = resampler.resample(frame)
                 # 仅在 seek 或结束时 flush，避免每次调用都重置内部状态
                 if flush:
                     out_frames += resampler.resample(None)
@@ -269,17 +281,26 @@ def _resample_audio(
                     # 之后每次调用都落到 scipy resample_poly 兜底（每次
                     # 重算 FIR 滤波器，实测单轨 ~1ms vs PyAV ~0.1ms，多轨
                     # 混音因此掉到实时以下）。seek 后丢弃实例，下次重建。
-                    _av_resampler_cache.pop(
-                        (source_rate, target_rate, channels, instance_id), None)
+                    if cached:
+                        _av_resampler_cache.pop(key, None)
                 if out_frames:
                     arrays = [audio_frame_array(f) for f in out_frames]
                     if packed:
                         arrays = [data.reshape(-1, channels).T for data in arrays]
-                    result = np.concatenate(arrays, axis=-1)
-                    return result.astype(np.float32)
+                    return arrays[0] if len(arrays) == 1 else np.concatenate(arrays, axis=-1)
+                if not (flush and source_count):
+                    # FIR startup may buffer a small packet before emitting PCM.
+                    return np.empty((channels, 0), dtype=np.float32)
         except Exception as e:
             logger.debug(f"PyAV resampler failed ({e}), falling back to scipy")
 
+    if source_count == 0:
+        return samples
+    return _resample_audio_fallback(samples, source_rate, target_rate)
+
+
+def _resample_audio_fallback(samples: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    channels, source_count = samples.shape
     # --- 路径 2: scipy.signal.resample_poly（polyphase FIR，高质量） ---
     try:
         from scipy.signal import resample_poly
@@ -988,6 +1009,7 @@ class AudioDecoder:
         self._timeline_duration: int = 0     # clip 在时间线上的持续帧数（0 = 未知/不限）
         # RMA-09: 容器实际声道布局名（open 时从 stream.layout.name 读取）。
         self._source_layout_name: str = ""
+        self._stream_origin_seconds = 0.0
         # P-clip-FX: 该 decoder 对应的 clip_id，由 add_track 注入。
         # mix_samples 据此反查 clip.effects 并应用 per-clip 效果链。
         # None（旧调用方）表示该 decoder 不应用 clip 级效果。
@@ -1017,6 +1039,7 @@ class AudioDecoder:
         self._pp_fraction: float = 0.0
         self._pp_margin_pending: int = 0
         self._pp_flushed: bool = False
+        self._pp_tail: Optional[np.ndarray] = None
         # F3.3：子帧偏移块消费门（时间线侧/源侧；seek/重开重置 pending）
         from src.features.edit.core.sample_time import SampleSkipGate
         self._timeline_skip = SampleSkipGate()
@@ -1031,6 +1054,13 @@ class AudioDecoder:
         # 流程：先消费 remainder -> 不足再 demux 新 audio frames ->
         #       合并后超过 num_samples 时返回前 N 个，剩余保存到 remainder。
         self._sample_remainder: Optional[np.ndarray] = None
+        self._decoded_frames: Optional[Iterator[av.AudioFrame]] = None
+        self._resampled_remainder: Optional[np.ndarray] = None
+        self._resample_eof = False
+        self._working_resampler: Optional[av.AudioResampler] = None
+        self._resample_startup: Optional[np.ndarray] = None
+        self._resample_seek_sample: Optional[int] = None
+        self._resample_skip = 0
 
         # Sample-accurate seek: container.seek 只落到 packet 边界（可能早于
         # 目标时间），seek 后记录目标秒数，decode_next_samples 对首个解码帧
@@ -1107,8 +1137,10 @@ class AudioDecoder:
             return
         self._preserve_pitch = enabled
         self._stretcher = None  # 重开：全新时域状态
+        self._last_decoded_frame = -1
         self._pp_flushed = False
         self._pp_fraction = 0.0
+        self._pp_tail = None
 
     def set_gain_db(self, gain_db: float) -> None:
         """C3: 设置片段级增益（dB，[-48, +12]；0 = 无增益）。
@@ -1217,6 +1249,7 @@ class AudioDecoder:
             logger.warning("PyAV not available, cannot decode audio")
             return False
 
+        self.close()
         try:
             self._container = av.open(str(path))
             self._path = path
@@ -1243,6 +1276,16 @@ class AudioDecoder:
             self._audio_stream = audio_streams[0]  # type: ignore
             self._sample_rate = self._audio_stream.sample_rate or DEFAULT_SAMPLE_RATE  # type: ignore
             self._channels = self._audio_stream.channels or 2  # type: ignore
+            # AV_DISPOSITION_ATTACHED_PIC identifies cover art, not timed video.
+            attached_pic = 0x0400
+            if self._audio_stream.start_time and not any(
+                stream.type == "video" and not (getattr(stream, "disposition", 0) & attached_pic)
+                for stream in self._container.streams
+            ):
+                # Audio-only sources use their first audible sample as zero,
+                # including priming offsets written by gapless MP3 encoders.
+                self._stream_origin_seconds = float(
+                    self._audio_stream.start_time * self._audio_stream.time_base)
             # RMA-09: 记录容器实际声道布局名（如 "5.1(side)"），供 adapt_channels 用
             # 真实布局而非按声道数猜测。5.1(side) vs 5.1(back)、multiple mono 等会被
             # 正确解释，避免丢声道。属性 source_layout 返回 ChannelLayout 或 None。
@@ -1298,20 +1341,33 @@ class AudioDecoder:
         """关闭解码器。"""
         self._pcm_source = None
         self._pcm_position = 0
+        self._stream_origin_seconds = 0.0
+        self._reset_decode_position()
+        self._stretcher = None
         if self._container:
             self._container.close()
             self._container = None
             self._audio_stream = None
             self._path = None
-            self._decode_buffer.clear()
-            # Stage B: close 时清空 leftover，避免下次复用解码器时残留旧 samples。
-            self._sample_remainder = None
-            self._seek_target_seconds = None
             logger.debug("AudioDecoder closed")
         # AUD-15501: 关闭时清理本实例在全局 resampler 缓存中的条目。
         # 长剪辑会话反复 add/remove clip 时，条目只增不减（每个残留
         # AudioResampler 持有 FIR 历史）；seek/结束 flush 的 pop 只覆盖单键。
         self._purge_resampler_cache_entries()
+
+    def _reset_decode_position(self) -> None:
+        self._decode_buffer.clear()
+        self._last_decoded_frame = -1
+        self._decoded_frames = None
+        self._sample_remainder = None
+        self._seek_target_seconds = None
+        self._resampled_remainder = None
+        self._resample_eof = False
+        self._working_resampler = None
+        self._resample_startup = None
+        self._resample_seek_sample = None
+        self._resample_skip = 0
+        self._pp_tail = None
 
     def _purge_resampler_cache_entries(self) -> None:
         """AUD-15501: 按 instance_id 清理全局 resampler 缓存中本实例的条目。"""
@@ -1331,45 +1387,41 @@ class AudioDecoder:
             是否成功
         """
         if self._pcm_source is not None:
+            self._reset_decode_position()
+            self._purge_resampler_cache_entries()
             self._pcm_position = max(0, round(time_seconds * self._sample_rate))
-            self._last_decoded_frame = -1
             return True
         if not self._container or not self._audio_stream:
             return False
 
         try:
+            self._reset_decode_position()
+            self._purge_resampler_cache_entries()
+            time_seconds += self._stream_origin_seconds
             # PyAV seek 使用 time_base
             target_pts = int(time_seconds / float(self._audio_stream.time_base))  # type: ignore
             self._container.seek(target_pts, stream=self._audio_stream)  # type: ignore
-            self._decode_buffer.clear()
-            self._last_decoded_frame = -1
-            # Stage B: seek 后清空 leftover，避免播放定位后混入旧 samples 造成杂音/漂移。
-            self._sample_remainder = None
             # Sample-accurate: container.seek 落到 packet 边界（backward=True 时
             # pts <= target），记录目标时间，由 decode_next_samples 丢弃 pre-roll。
             self._seek_target_seconds = float(time_seconds)
-            
-            # seek 后 flush resampler，清空旧状态避免杂音
-            if PYAV_AVAILABLE and self._sample_rate != self._output_sample_rate:
-                try:
-                    resampler = _get_av_resampler(
-                        self._sample_rate, self._output_sample_rate, self._channels, self._instance_id
-                    )
-                    if resampler is not None:
-                        resampler.resample(None)  # flush
-                    # flush 后实例即终结（继续喂帧抛 AVERROR_EOF），必须从
-                    # 缓存移除，否则 seek 后该解码器永久落入 scipy 慢路径
-                    # （每次重算 FIR 滤波器，多轨混音掉到实时以下）。
-                    _av_resampler_cache.pop(
-                        (self._sample_rate, self._output_sample_rate,
-                         self._channels, self._instance_id), None)
-                except Exception:
-                    pass
-            
             return True
         except Exception as e:
             logger.error(f"Seek failed: {e}")
             return False
+
+    def _seek_resampled_time(self, target_sample: int) -> bool:
+        """Prime the filter at the source phase used by a whole-file conversion."""
+        source_rate, target_rate = self._sample_rate, self._output_sample_rate
+        start = resample_preroll_start(target_sample, source_rate, target_rate)
+        if not self.seek_to_time(start / source_rate):
+            return False
+        self._resample_skip = target_sample - start * target_rate // source_rate
+        self._resample_seek_sample = target_sample
+        return True
+
+    def _iter_audio_frames(self) -> Iterator[av.AudioFrame]:
+        for packet in self._container.demux(self._audio_stream):
+            yield from packet.decode()
 
     def seek_to_frame(self, frame: int) -> bool:
         """
@@ -1432,103 +1484,121 @@ class AudioDecoder:
 
             # Step 2: remainder 不足时继续 demux 新 audio frames。
             if collected_count < num_samples:
-                for packet in self._container.demux(self._audio_stream):  # type: ignore
-                    for frame in packet.decode():  # type: ignore
-                        # Sample-accurate seek：丢弃目标时间之前的 pre-roll 样本。
-                        # container.seek 落点在 packet 边界，可能早于目标时间；
-                        # 用帧 pts 精确计算应跳过的源样本数。
-                        preroll_skip = 0
-                        if self._seek_target_seconds is not None:
-                            frame_start_seconds: Optional[float] = None
+                if self._decoded_frames is None:
+                    self._decoded_frames = self._iter_audio_frames()
+                for frame in self._decoded_frames:
+                    # Sample-accurate seek：丢弃目标时间之前的 pre-roll 样本。
+                    # container.seek 落点在 packet 边界，可能早于目标时间；
+                    # 用帧 pts 精确计算应跳过的源样本数。
+                    preroll_skip = 0
+                    if self._seek_target_seconds is not None:
+                        frame_start_seconds: Optional[float] = None
+                        try:
+                            if frame.pts is not None:  # type: ignore
+                                frame_start_seconds = (
+                                    float(frame.pts) * float(frame.time_base or self._audio_stream.time_base)
+                                )
+                        except Exception:
+                            frame_start_seconds = None
+                        if frame_start_seconds is not None:
+                            skip = int(round(
+                                (self._seek_target_seconds - frame_start_seconds)
+                                * self._sample_rate
+                            ))
+                            if skip >= frame.samples:  # type: ignore
+                                # 整帧都在目标时间之前：丢弃整帧，继续对下一帧判断。
+                                continue
+                            preroll_skip = max(0, skip)
+                            if self._resample_seek_sample is not None:
+                                source_rate = self._sample_rate
+                                target_rate = self._output_sample_rate
+                                first = round(
+                                    (frame_start_seconds - self._stream_origin_seconds) * source_rate
+                                ) + preroll_skip
+                                period = source_rate // math.gcd(source_rate, target_rate)
+                                aligned = (first + period - 1) // period * period
+                                # Some streams start later than the requested
+                                # preroll. Align the available PCM if it still
+                                # starts before the output sample we need.
+                                target = self._resample_seek_sample
+                                if aligned * target_rate <= target * source_rate:
+                                    preroll_skip += aligned - first
+                                    if preroll_skip >= frame.samples:
+                                        continue
+                                    first = aligned
+                                self._resample_skip = max(
+                                    0, target - round(first * target_rate / source_rate))
+                        # pts 不可用时保守放弃 skip（不能拿后续更晚的 pts 乱丢）。
+                        self._seek_target_seconds = None
+                        self._resample_seek_sample = None
+                    # 转换为 numpy 数组并归一化到 [-1.0, 1.0]
+                    audio_array = audio_frame_array(frame)
+
+                    # ---- 处理 packed (交错) 格式 → 平面格式 ----
+                    # packed 格式 to_ndarray() 可能返回 (1, channels*samples) 或 1D 数组
+                    # 需要解交错为 (channels, samples)
+                    if hasattr(frame, 'format') and hasattr(frame.format, 'is_planar'):
+                        if frame.format.is_planar is False:
                             try:
-                                if frame.pts is not None:  # type: ignore
-                                    frame_start_seconds = (
-                                        float(frame.pts) * float(self._audio_stream.time_base)  # type: ignore
-                                    )
-                            except Exception:
-                                frame_start_seconds = None
-                            if frame_start_seconds is not None:
-                                skip = int(round(
-                                    (self._seek_target_seconds - frame_start_seconds)
-                                    * self._sample_rate
-                                ))
-                                if skip >= frame.samples:  # type: ignore
-                                    # 整帧都在目标时间之前：丢弃整帧，继续对下一帧判断。
-                                    continue
-                                if skip > 0:
-                                    preroll_skip = skip
-                                # skip <= 0：落点已不早于目标，无需再丢。
-                            # pts 不可用时保守放弃 skip（不能拿后续更晚的 pts 乱丢）。
-                            self._seek_target_seconds = None
-                        # 转换为 numpy 数组并归一化到 [-1.0, 1.0]
-                        audio_array = audio_frame_array(frame)
+                                n_channels = frame.layout.nb_channels if frame.layout else 0
+                                n_samples_per_ch = frame.samples
+                                if n_channels <= 0:
+                                    n_channels = self._channels  # 退回到解码器记录的声道数
+                                total_expected = n_channels * n_samples_per_ch
 
-                        # ---- 处理 packed (交错) 格式 → 平面格式 ----
-                        # packed 格式 to_ndarray() 可能返回 (1, channels*samples) 或 1D 数组
-                        # 需要解交错为 (channels, samples)
-                        if hasattr(frame, 'format') and hasattr(frame.format, 'is_planar'):
-                            if frame.format.is_planar is False:
-                                try:
-                                    n_channels = frame.layout.nb_channels if frame.layout else 0
-                                    n_samples_per_ch = frame.samples
-                                    if n_channels <= 0:
-                                        n_channels = self._channels  # 退回到解码器记录的声道数
-                                    total_expected = n_channels * n_samples_per_ch
+                                if audio_array.ndim == 2 and audio_array.shape[0] == 1:
+                                    interleaved = audio_array[0]
+                                    if interleaved.size >= total_expected and n_channels > 1:
+                                        audio_array = interleaved[:total_expected].reshape(-1, n_channels).T
+                                    # 如果 size 不匹配或单声道，保持原样
+                                elif audio_array.ndim == 1 and n_channels > 1:
+                                    # PyAV 某些版本返回 1D 数组
+                                    if audio_array.size >= total_expected:
+                                        audio_array = audio_array[:total_expected].reshape(-1, n_channels).T
+                                # 如果已经是 (channels, samples) 形状则无需处理
+                            except (AttributeError, ValueError) as e:
+                                logger.debug(f"Deinterleave skipped: {e}")
+                                # 解交错失败时保持 audio_array 原样，不会崩溃
 
-                                    if audio_array.ndim == 2 and audio_array.shape[0] == 1:
-                                        interleaved = audio_array[0]
-                                        if interleaved.size >= total_expected and n_channels > 1:
-                                            audio_array = interleaved[:total_expected].reshape(-1, n_channels).T
-                                        # 如果 size 不匹配或单声道，保持原样
-                                    elif audio_array.ndim == 1 and n_channels > 1:
-                                        # PyAV 某些版本返回 1D 数组
-                                        if audio_array.size >= total_expected:
-                                            audio_array = audio_array[:total_expected].reshape(-1, n_channels).T
-                                    # 如果已经是 (channels, samples) 形状则无需处理
-                                except (AttributeError, ValueError) as e:
-                                    logger.debug(f"Deinterleave skipped: {e}")
-                                    # 解交错失败时保持 audio_array 原样，不会崩溃
+                    if audio_array.dtype == np.float32:
+                        pass  # 已经是 [-1.0, 1.0] 范围
+                    elif audio_array.dtype == np.float64:
+                        audio_array = audio_array.astype(np.float32)
+                    elif audio_array.dtype == np.int16:
+                        audio_array = audio_array.astype(np.float32) / 32768.0
+                    elif audio_array.dtype == np.int32:
+                        audio_array = audio_array.astype(np.float32) / 2147483648.0
+                    elif audio_array.dtype == np.int8:
+                        audio_array = audio_array.astype(np.float32) / 128.0
+                    elif audio_array.dtype == np.uint8:
+                        audio_array = (audio_array.astype(np.float32) - 128.0) / 128.0
+                    else:
+                        # 未知格式：尝试安全转换
+                        audio_array = audio_array.astype(np.float32)
+                        peak = np.max(np.abs(audio_array))
+                        if peak > 1.0:
+                            audio_array /= peak
 
-                        if audio_array.dtype == np.float32:
-                            pass  # 已经是 [-1.0, 1.0] 范围
-                        elif audio_array.dtype == np.float64:
-                            audio_array = audio_array.astype(np.float32)
-                        elif audio_array.dtype == np.int16:
-                            audio_array = audio_array.astype(np.float32) / 32768.0
-                        elif audio_array.dtype == np.int32:
-                            audio_array = audio_array.astype(np.float32) / 2147483648.0
-                        elif audio_array.dtype == np.int8:
-                            audio_array = audio_array.astype(np.float32) / 128.0
-                        elif audio_array.dtype == np.uint8:
-                            audio_array = (audio_array.astype(np.float32) - 128.0) / 128.0
-                        else:
-                            # 未知格式：尝试安全转换
-                            audio_array = audio_array.astype(np.float32)
-                            peak = np.max(np.abs(audio_array))
-                            if peak > 1.0:
-                                audio_array /= peak
+                    # Sample-accurate seek：切掉帧头部 pre-roll（解交错/归一化之后，
+                    # 保证切片在样本维度而非交错维度上）。
+                    if preroll_skip > 0 and audio_array.shape[-1] > preroll_skip:
+                        audio_array = audio_array[..., preroll_skip:]
+                    elif preroll_skip > 0:
+                        continue
 
-                        # Sample-accurate seek：切掉帧头部 pre-roll（解交错/归一化之后，
-                        # 保证切片在样本维度而非交错维度上）。
-                        if preroll_skip > 0 and audio_array.shape[-1] > preroll_skip:
-                            audio_array = audio_array[..., preroll_skip:]
-                        elif preroll_skip > 0:
-                            continue
-
-                        collected_samples.append(audio_array)
-                        collected_count += audio_array.shape[-1]
-
-                        if collected_count >= num_samples:
-                            break
+                    collected_samples.append(audio_array)
+                    collected_count += audio_array.shape[-1]
 
                     if collected_count >= num_samples:
                         break
+
 
             if not collected_samples:
                 return None
 
             # Step 3: 合并所有采样。
-            result = np.concatenate(collected_samples, axis=-1)
+            result = (collected_samples[0] if len(collected_samples) == 1
+                      else np.concatenate(collected_samples, axis=-1))
 
             # Step 4: 超过 num_samples 时，保留尾部到 remainder 再截断。
             # 这是 Stage B 的核心修复：不再直接丢弃多余 samples。
@@ -1551,6 +1621,71 @@ class AudioDecoder:
         except Exception as e:
             logger.error(f"Decode failed: {e}")
             return None
+
+    def _read_working_pcm(self, num_samples: int) -> Optional[np.ndarray]:
+        """Return up to num_samples in the working rate, short only at EOF."""
+        if num_samples <= 0:
+            return None
+        if self._sample_rate == self._output_sample_rate:
+            return self.decode_next_samples(num_samples)
+
+        pieces: list[np.ndarray] = []
+        pending = self._resampled_remainder
+        self._resampled_remainder = None
+        remaining = num_samples
+        while remaining:
+            if pending is not None and pending.shape[1]:
+                take = min(remaining, pending.shape[1])
+                pieces.append(pending[:, :take])
+                remaining -= take
+                if take < pending.shape[1]:
+                    self._resampled_remainder = pending[:, take:]
+                pending = None
+                continue
+            if self._resample_eof:
+                break
+            # Keep the FIR stream continuous and amortize Python/AVFrame
+            # conversions across video frames. Lookahead is bounded per source.
+            native = self.decode_next_samples(8192)
+            if native is None or native.shape[1] == 0:
+                self._resample_eof = True
+                native = np.empty((self._channels, 0), dtype=np.float32)
+            elif self._working_resampler is None and PYAV_AVAILABLE:
+                # Keep each active stream's filter history for its lifetime,
+                # including sessions with more tracks than the utility cache.
+                try:
+                    self._working_resampler = _new_av_resampler(
+                        self._output_sample_rate, native.shape[0])
+                except (ValueError, av.error.FFmpegError):
+                    # The conversion helper still supports uncommon layouts
+                    # via its per-channel fallback.
+                    pass
+            pending = _resample_audio(
+                native, self._sample_rate, self._output_sample_rate,
+                self._instance_id, flush=self._resample_eof,
+                resampler=self._working_resampler)
+            if self._resample_eof and self._resample_startup is not None:
+                startup = self._resample_startup
+                complete_size = (
+                    startup.shape[1] * self._output_sample_rate + self._sample_rate - 1
+                ) // self._sample_rate
+                if pending.shape[1] < complete_size:
+                    # swresample can emit no PCM, or only part of it, at EOF
+                    # when the whole source is shorter than its FIR history.
+                    pending = _resample_audio_fallback(
+                        startup, self._sample_rate, self._output_sample_rate)
+                self._resample_startup = None
+            elif pending.shape[1]:
+                self._resample_startup = None
+            elif 0 < native.shape[1] < 8192:
+                self._resample_startup = native
+            if self._resample_skip:
+                discard = min(self._resample_skip, pending.shape[1])
+                self._resample_skip -= discard
+                pending = pending[:, discard:]
+        if not pieces:
+            return None
+        return pieces[0] if len(pieces) == 1 else np.concatenate(pieces, axis=-1)
 
     def decode_samples_for_frame(
         self,
@@ -1580,6 +1715,8 @@ class AudioDecoder:
             return None
         if self._timeline_duration > 0 and local_frame >= self._timeline_duration:
             return None
+        if samples_per_frame <= 0:
+            return None
 
         # 检查是否需要 seek（seek 时重置小数累积器）
         expected_frame = self._last_decoded_frame + 1
@@ -1593,7 +1730,16 @@ class AudioDecoder:
                 self._source_start / max(self._source_fps, 0.001)
                 + local_frame / max(float(fps), 0.001)
             )
-            self.seek_to_time(time_seconds)
+            if self._sample_rate == self._output_sample_rate:
+                located = self.seek_to_time(time_seconds)
+            else:
+                source_fps = Fraction(max(self._source_fps, 0.001)).limit_denominator(1_000_000)
+                frame_fps = Fraction(max(float(fps), 0.001)).limit_denominator(1_000_000)
+                exact_seconds = self._source_start / source_fps + local_frame / frame_fps
+                located = self._seek_resampled_time(
+                    max(0, int(exact_seconds * self._output_sample_rate)))
+            if not located:
+                return None
             self._fractional_offset = 0.0
             self._pp_fraction = 0.0
             # F3.2：seek/loop/暂停恢复 → 清流式伸缩器时域状态并重置读前余量
@@ -1606,14 +1752,6 @@ class AudioDecoder:
                 self._timeline_skip.reset(self._fade_offsets[0])
                 self._source_skip.reset(self._fade_offsets[1])
 
-        # 按输出端实际 chunk 时长读取源采样。非整数帧率下输出端会在
-        # N/N+1 samples 间交替，这里跟随实际 num_samples，避免长时间漂移。
-        exact_samples_per_frame = (
-            samples_per_frame * self._sample_rate / max(1, self._output_sample_rate)
-        )
-        if exact_samples_per_frame <= 0:
-            exact_samples_per_frame = self._sample_rate / max(fps, 1.0)
-
         speed = self._speed if self._speed > 0 else 1.0
 
         # F3.2: 保调变速（流式 WSOLA）。与离线导出同 25ms/7.5ms 参数
@@ -1622,41 +1760,17 @@ class AudioDecoder:
         # （新伸缩器读前余量跳过 ~32ms 内容，实测可闻脉冲）；全速经同一
         # 状态机，倍率突变只动步进（平滑，见 test_speed_switch_keeps_streaming）。
         if self._preserve_pitch:
-            result = self._decode_preserve_pitch(
-                local_frame, samples_per_frame, speed,
-                exact_samples_per_frame)
-            if result is not None:
-                self._last_decoded_frame = local_frame
+            result = self._decode_preserve_pitch(samples_per_frame, speed)
+            self._last_decoded_frame = local_frame
             return result
 
-        # RMA-03: clip 速度。resample（变调）策略——按 speed 倍率调整每帧读取的
-        # 源采样数：speed>1 读更多源样本→播放更快/音调更高；speed<1 读更少→更慢/更低。
-        # 这与离线导出 timeline_export 的 source_frame*=speed 语义一致（变调 resample）。
-        exact_samples_per_frame *= speed
-
-        # 累积小数部分，取整数部分作为本次实际读取的采样数
-        self._fractional_offset += exact_samples_per_frame
-        source_samples_per_frame = int(self._fractional_offset)
-        self._fractional_offset -= source_samples_per_frame
-
-        if source_samples_per_frame <= 0:
-            source_samples_per_frame = max(1, samples_per_frame)  # safety fallback
-
-        # 从源文件读取原始采样
-        samples = self.decode_next_samples(source_samples_per_frame)
-        if samples is not None:
-            self._last_decoded_frame = local_frame
-
-            # 若源采样率与输出采样率不同，执行重采样
-            if self._sample_rate != self._output_sample_rate:
-                samples = _resample_audio(
-                    samples,
-                    source_rate=self._sample_rate,
-                    target_rate=self._output_sample_rate,
-                    instance_id=self._instance_id,
-                    flush=False,  # 正常播放不 flush，seek 时已单独处理
-                )
-
+        # Follow the caller's exact output block size, including N/N+1 at
+        # fractional frame rates. Apply clip speed in the working-rate domain.
+        self._fractional_offset += samples_per_frame * speed
+        size = int(self._fractional_offset)
+        self._fractional_offset -= size
+        samples = self._read_working_pcm(size)
+        self._last_decoded_frame = local_frame
         return self._apply_skip_gates(samples)
 
     def _apply_skip_gates(self, samples: Optional[np.ndarray]):
@@ -1668,10 +1782,8 @@ class AudioDecoder:
 
     def _decode_preserve_pitch(
         self,
-        local_frame: int,
         samples_per_frame: int,
         speed: float,
-        exact_source_per_output: float,
     ) -> Optional[np.ndarray]:
         """F3.2: 保调解码块——读 n*speed(+margin) 源 → 流式 WSOLA → 恰好 n 输出。
 
@@ -1679,6 +1791,13 @@ class AudioDecoder:
         解码器分配（伸缩器按 clip 惰性建一次）。EOF 时 flush 伸缩器出尾
         块，其后本 clip 音频结束（返回 None）。
         """
+        n_out = max(1, int(samples_per_frame))
+        if self._pp_flushed:
+            if self._pp_tail is None:
+                return None
+            tail = self._pp_tail
+            self._pp_tail = tail[:, n_out:] if tail.shape[-1] > n_out else None
+            return tail[:, :n_out]
         if self._stretcher is None:
             from src.features.edit.core.audio_timestretch import (
                 StreamingWsola,
@@ -1690,50 +1809,24 @@ class AudioDecoder:
             self._pp_margin_pending = \
                 self._stretcher.algorithmic_latency_samples
 
-        n_out = max(1, int(samples_per_frame))
-        # 源域读取量：输出 n × speed，经 src/out 采样率换算，外加读前余量
-        target_src = n_out * speed * (
-            self._sample_rate / max(1, self._output_sample_rate))
-        self._pp_fraction += target_src
-        read_src = int(self._pp_fraction)
-        self._pp_fraction -= read_src
-        margin = self._pp_margin_pending
+        self._pp_fraction += n_out * speed
+        size = int(self._pp_fraction)
+        self._pp_fraction -= size
+        need = size + self._pp_margin_pending
         self._pp_margin_pending = 0
-        need_src = read_src + margin
-
-        pieces: list = []
-        got = 0
-        while got < need_src:
-            chunk = self.decode_next_samples(need_src - got)
-            if chunk is None or chunk.shape[-1] == 0:
-                break  # clip 音频 EOF
-            pieces.append(chunk)
-            got += chunk.shape[-1]
-        if not pieces:
-            # 本块无新输入：可 emit 的只剩伸缩器内已结算样本
-            out = self._stretcher.pull(n_out)
-            if out.shape[-1] == 0 and self._pp_flushed:
-                return None
-            return out if out.shape[-1] else None
-        samples = pieces[0] if len(pieces) == 1 else np.concatenate(pieces, axis=-1)
-        if self._sample_rate != self._output_sample_rate:
-            samples = _resample_audio(
-                samples,
-                source_rate=self._sample_rate,
-                target_rate=self._output_sample_rate,
-                instance_id=self._instance_id,
-                flush=False,
-            )
-        samples = self._apply_skip_gates(samples)
-        self._stretcher.push(samples)
+        samples = self._read_working_pcm(need)
+        got = 0 if samples is None else samples.shape[-1]
+        if got:
+            self._stretcher.push(self._apply_skip_gates(samples))
         out = self._stretcher.pull(n_out)
-        if out.shape[-1] < n_out and got < need_src:
-            # EOF：flush 尾块补齐（一次性）
-            if not self._pp_flushed:
-                self._pp_flushed = True
-                tail = self._stretcher.flush()
-                if tail.shape[-1]:
-                    out = np.concatenate([out, tail], axis=-1)
+        if out.shape[-1] < n_out and got < need:
+            self._pp_flushed = True
+            tail = self._stretcher.flush()
+            take = n_out - out.shape[-1]
+            if tail.shape[-1]:
+                out = np.concatenate([out, tail[:, :take]], axis=-1)
+                if tail.shape[-1] > take:
+                    self._pp_tail = tail[:, take:]
         return out if out.shape[-1] else None
 
 
@@ -2546,7 +2639,11 @@ class AudioMixer:
         with QMutexLocker(self._mutex):
             for decoders in self._decoders.values():
                 for decoder in self._iter_decoders(decoders):
+                    if decoder._output_sample_rate == sample_rate:
+                        continue
                     decoder._output_sample_rate = int(sample_rate)
+                    decoder._last_decoded_frame = -1
+                    decoder._stretcher = None
                     decoder._purge_resampler_cache_entries()
 
     # ── P0/B02 · PDC（实时监听）：DAG 边级延迟规划与输出端延迟线 ──────

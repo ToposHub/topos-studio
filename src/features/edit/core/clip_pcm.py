@@ -36,7 +36,9 @@ from src.shared.media.audio_frame_pcm import audio_frame_array
 from PyQt6.QtCore import QCoreApplication, QObject, QThread, pyqtSignal
 
 from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame, resolve_audio_source
-from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock
+from src.features.edit.core.sample_time import (
+    AUDIO_REFERENCE_SAMPLE_RATE, TimelineSampleClock, resample_preroll_start,
+)
 
 if TYPE_CHECKING:
     import av
@@ -334,11 +336,7 @@ def _decode_window_frames(
     if (container.format.name == "wav" and (stream.codec_context.name or "").startswith("pcm_")
             and source_rate > 0 and stream.time_base == Fraction(1, source_rate)
             and not stream.start_time):
-        phase_period = source_rate // math.gcd(source_rate, sample_rate)
-        target_in = start_sample * source_rate // sample_rate
-        # swresample's interpolation history is in input samples.
-        preroll = 4096 * max(1, (source_rate + sample_rate - 1) // sample_rate)
-        seek_in = max(0, target_in - preroll) // phase_period * phase_period
+        seek_in = resample_preroll_start(start_sample, source_rate, sample_rate)
         if seek_in > 0:
             try:
                 container.seek(seek_in, stream=stream)
