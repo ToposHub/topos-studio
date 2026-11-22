@@ -244,9 +244,15 @@ class TestMetalVideoFrameRing:
         assert ring.submit_pending(scheduler, (0,)) is not None
         assert ring.submit_pending(scheduler, (1,)) is not None
         context.callbacks[0][0](context.callbacks[0][1])
+        # Metal 迁移 1.2：驱动回调只入队；消费线程先 poll() 让调度器把
+        # on_complete（标记条目完成）跑到自己线程上，再释放已完成条目。
+        assert ring.release_completed() == 0
+        assert released == {0: 0, 1: 0}
+        assert scheduler.poll() == (0,)
         assert ring.release_completed() == 1
         assert released == {0: 1, 1: 0}
         context.callbacks[1][0](context.callbacks[1][1])
+        assert scheduler.poll() == (1,)
         assert ring.release_completed() == 1
         assert released == {0: 1, 1: 1}
 
@@ -375,7 +381,50 @@ class TestRealDeviceImport:
         finally:
             bridge.destroy()
 
-    def test_format_mismatch_fails_explicitly(self):
+    def test_imported_planes_carry_the_importing_device(self):
+        """Metal 迁移 1.2：导入的平面带设备身份，消费方据此拒绝跨设备读取。"""
+        from src.shared.media.gpu_frame import GpuDecodedFrame, GpuFrameRelease
+        from src.shared.media.macos_vt.cv_metal_bridge import CVMetalVideoBridge
+
+        bridge = CVMetalVideoBridge(ring_size=2)
+        assert bridge.initialize()
+        identity = bridge.device_identity
+        assert identity.startswith("metal:"), identity
+        pb = _make_biplanar_buffer(Quartz.kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+        try:
+            result = bridge.import_pixel_buffer(pb, 7, "nv12", 8)
+            assert result is not None, bridge.last_fallback_reason()
+            planes, gpu_release = result
+            assert all(plane.resource.device_identity == identity for plane in planes)
+            frame = GpuDecodedFrame(
+                frame_index=7, pts=7, time_seconds=0.28, width=W, height=H,
+                visible_rect=(0, 0, W, H), pixel_format="nv12", bit_depth=8,
+                planes=planes, release=GpuFrameRelease(release_callback=gpu_release.release),
+                device_identity=identity,
+            )
+            assert frame.validate_for_device(api="metal", device_identity=identity) == ""
+            assert frame.validate_for_device(
+                api="metal", device_identity="metal:Other GPU:deadbeef"
+            ).startswith("device_mismatch:frame=")
+            assert frame.validate_for_device(api="opengl").startswith("graphics_api_mismatch")
+            gpu_release.release()
+        finally:
+            bridge.destroy()
+
+    def test_device_identity_falls_back_to_the_device_object(self):
+        from src.shared.media.macos_vt.cv_metal_bridge import CVMetalVideoBridge
+        from src.shared.media.macos_vt.gpu_encode_surface import metal_device_identity
+
+        class _Device:
+            def name(self) -> str:
+                return "Probe GPU"
+
+        class _Context:  # no ``device_identity`` attribute
+            device = _Device()
+
+        bridge = CVMetalVideoBridge(_Context())
+        assert bridge.device_identity == metal_device_identity(_Context.device)
+        assert CVMetalVideoBridge(None).device_identity == ""
         from src.shared.media.macos_vt.cv_metal_bridge import CVMetalVideoBridge
 
         bridge = CVMetalVideoBridge()

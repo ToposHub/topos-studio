@@ -33,6 +33,7 @@ from src.features.edit.core.playback_debug import playback_trace
 from src.shared.gpu.present_frame import (
     GpuPresentFrame,
     OutputSlotPool,
+    PresentLeaseKey,
 )
 
 from src.features.edit.core.blend_shader import (
@@ -5569,21 +5570,41 @@ void main() {
         self._current_present_lease = None
         return present
 
-    def ack_present_slot(self, slot_id: int) -> None:
+    def ack_present_slot(
+        self, slot_id: int, lease_key: Optional[PresentLeaseKey] = None,
+    ) -> None:
         """
         Viewer 完成 blit 后调用，释放 slot（缺陷计划 RP-P0-02 ack 协议）。
 
         可在任意线程调用（OutputSlotPool 内部加锁）。Viewer 的 paintGL 完成
         glBlitFramebuffer 后应调用此方法，让 slot 回到 RELEASABLE -> FREE。
+
+        ``lease_key``（Metal 迁移 1.1）把确认限定到描述符对应的那一次提交：
+        按键里的池代次只投递给那一代池。没有键时保持旧语义——按 slot_id
+        投给当前池和全部退役池（AUD-16602：在途旧池帧的 ack 同步送达退役
+        池，让其 slot 转为 RELEASABLE，退役纹理因此具备延迟释放条件）。
+        旧语义的代价是：池因尺寸重建后，一个迟到的旧 ack 会同时落到新池里
+        另一帧正在占用的同号槽上。
         """
         if slot_id < 0:
             return  # 无 slot 跟踪的 fallback frame
-        self._present_pool.ack(slot_id)
-        # AUD-16602：在途旧池帧的 ack 同步送达退役池，让其 slot 转为
-        # RELEASABLE——退役纹理因此具备延迟释放条件。（重复 ack 到无
-        # 关池由 OutputSlotPool.ack 内部吞掉并 debug 记录，不会崩溃。）
-        for pool, *_rest in self._retired_output_pools:
-            pool.ack(slot_id)
+        if lease_key is None:
+            self._present_pool.ack(slot_id)
+            # 重复 ack 到无关池由 OutputSlotPool.ack 内部吞掉并 debug 记录，
+            # 不会崩溃。
+            for pool, *_rest in self._retired_output_pools:
+                pool.ack(slot_id)
+        elif not self._present_pool.ack(slot_id, lease_key):
+            # 不属于当前池的这一代：只投递给键指明的那一代退役池。
+            for pool, *_rest in self._retired_output_pools:
+                if pool.generation == lease_key.pool_generation:
+                    pool.ack(slot_id, lease_key)
+                    break
+            else:
+                logger.debug(
+                    "ack_present_slot: lease key %s names no live pool generation",
+                    lease_key,
+                )
         self.slot_acked.emit(slot_id)
 
     def present_pool_stats(self) -> dict:

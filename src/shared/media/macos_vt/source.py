@@ -866,6 +866,13 @@ class MacOSVtZeroCopySource:
             return None
 
         gpu_planes, gpu_release = result
+        # 导入设备随帧发布：消费方（Metal 渲染器 / 原生视口）据此拒绝在
+        # 另一台设备上读取这些纹理，而不是静默跨设备采样。
+        device_identity = next(
+            (plane.resource.device_identity for plane in gpu_planes
+             if plane.resource is not None and plane.resource.device_identity),
+            "",
+        )
 
         def _release() -> None:
             try:
@@ -890,6 +897,7 @@ class MacOSVtZeroCopySource:
             decode_path=decode_path,
             zero_copy=True,
             release=GpuFrameRelease(release_callback=_release),
+            device_identity=device_identity,
         )
 
     def read_next_frame_metal(self) -> GpuDecodedFrame | None:

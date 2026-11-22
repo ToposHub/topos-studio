@@ -12,7 +12,7 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | 0 环境和基线 | ✅ 0.1–0.4 完成；0.5 样本 A 完成，B–G 已登记规格与归属阶段 | Resolve 对照沿用同机 11-22 记录，本次未驱动正在运行的 Resolve |
-| 1 共享 GPU 帧 | ✅ 1.1–1.3 代码与定向测试完成 | 调度器与帧事务尚未接入生产预览路径（阶段 2 接线） |
+| 1 共享 GPU 帧 | ✅ 1.1–1.3 代码与定向测试完成 | 原生发布分支、租约键与带键 ack 已在生产协议上生效；异步调度器与帧事务已就绪但尚未接入预览路径（阶段 2 接线） |
 | 2 原生视口和剪辑 | ⏳ 未开始 | 开工前须先解决播放基线里的旧帧覆盖（见 0.4） |
 | 3–8 | ⏳ 未开始 | — |
 
@@ -24,7 +24,7 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 
 ## 阶段 0 环境、基线和覆盖清单
 
-### 0.1 配环境（提交：本记录首次入库的提交）
+### 0.1 配环境（提交 `d0de0351`，0.1–0.5 同一提交）
 
 - 命令：`sw_vers` / `uname -m` / `python -V` / `ffmpeg -version` / `system_profiler SPDisplaysDataType`，
   `PYTHONPATH=. .venv/bin/python tools/probe_metal_capability.py --output-json … --output-md …`。
@@ -125,3 +125,81 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 样本 B–G 已登记内容、媒体、核验点与归属阶段，各自在首次改动其覆盖的渲染路径之前建成并采集
 强制 OpenGL 基线。实测发现冻结媒体集里没有 HDR 素材（`4K_H265.mov` 是 10-bit BT.709 SDR），
 样本 E 的 HDR 源需要合成。见 [samples.md](../macos_metal_migration/samples.md)。
+
+## 阶段 1 共享 GPU 帧和生命周期
+
+阶段 1 的三个编号在同一提交里完成。相关回归 550 项通过（`tests/shared/gpu/metal/`、present 协议、
+架构门禁、Metal 预览、CVMetal 桥、VT 源、trace）；引用被改接口的 95 个测试文件 2180 通过，
+3 个既有失败见文首。
+
+### 1.1 原生发布分支与租约键
+
+- `src/shared/gpu/present_frame.py`
+  - `NativePresentDescriptor`：api、设备身份、原生句柄、像素格式、尺寸、可见区域、方向
+    （`top_left` / `bottom_left`）、色彩四元组（range / matrix / primaries / transfer）。
+    `validate_for_consumer()` 返回机器可读的消费方契约失败原因。
+  - `PresentLeaseKey` =（资源池代次，槽号，递增提交号）。池代次默认取进程级单调计数，退役池与
+    现行池永不重号；每次 `begin_writing` 提交号 +1。
+  - `TextureLease.make_present_frame(native=...)`：原生分支要求槽位以非 GL 资源注册且 api 一致，
+    描述符 `texture_id=0`、`fence_ns=0`、`extra["render_backend"]` 取原生 api。不传 `native` 时
+    GL 分支的字段与构造参数完全不变，`native=None`。
+  - `OutputSlotPool.register_slot(..., resource=...)` 注册原生槽位；`ack` / `discard` /
+    `mark_in_viewer` 可带键，键不匹配即过期确认——计入 `stats()["stale_acks"]`、不改变状态。
+    不带键的调用保持旧语义。
+- **修掉的既有隐患**：`EditGpuPreviewRenderer.ack_present_slot` 原先按 `slot_id` 同时投给现行池和
+  全部退役池。池因尺寸重建后，一个迟到的旧 ack 会确认新池里另一帧正在占用的同号槽，该槽随即
+  可被复用而 Viewer 仍在采样——正是协议要防的「未确认先复用」。
+- 设备或格式不匹配：`GpuPresentFrame.validate_for_consumer()` 给出
+  `device_mismatch:frame=…|consumer=…`、`graphics_api_mismatch:…`、`resource_format_unsupported:…`。
+  「按既有路径重取本帧并记录原因」的接线属于 2.2：原生帧目前还没有生产消费者，现有 GL 消费者
+  不会收到原生描述符。
+- 测试：`tests/edit/test_gpu_present_frame_native.py` 31 项——重复确认、过期确认（旧提交号 /
+  退役池代次）、设备变化、GL 描述符形状不变、旧式鸭子类型识别、原生发布的前置校验。
+
+### 1.2 有界提交、完成队列与帧事务
+
+- `src/shared/gpu/metal/submission_scheduler.py`（线程契约重写）
+  - 驱动完成回调**只把结果入队**；`release_callbacks` 与 `on_complete` 改由资源线程在 `poll()`
+    执行。此前两者都跑在 Metal 的完成线程上。
+  - `try_reserve()` / `submit_reserved()`：先预留再编码，编码前即知环是否已满。
+  - `pending_timeouts()` / `pause()` / `resume_if_idle()`：完成超时可见，可暂停该设备的新提交，
+    在途工作排空后才解除。
+  - `wait_idle()` / `drain()` 返回 GPU 是否确已空闲；`False` 表示调用方不得销毁资源。
+- `src/shared/gpu/metal/context.py`：`discard_pending()` / `has_pending_work()`——已录制未提交的
+  命令整组丢弃，不再被下一帧的 `dispatch` 续写；`submit(raise_after_commit=)`。
+- **修掉的既有缺陷**：`MetalComputeContext.submit()` 在 `commit()` **之后**仍可能抛异常（驱动同步
+  报告错误）。旧调度器在异常路径丢弃预留，而完成回调终将到来并发现预留不在——释放回调永远不会
+  执行。现在调度器以 `raise_after_commit=False` 提交，已提交的 buffer 一律经完成回调回收。
+- `src/shared/gpu/metal/frame_transaction.py`（新增）：把「预留 → 编码 → 提交 → 完成回收」绑成一帧
+  的事务。输入在该事务的命令缓冲完成时释放一次；输出还要等显示消费者 `note_display_done()`，
+  两个条件都满足才释放一次；失败帧的输出立即释放。环满沿用 hold/drop（`begin()` 返回 `None`，
+  此时什么都没编码）。提交失败或编码后取消时整组丢弃已录制命令。
+- 设备身份：`CVMetalVideoBridge.device_identity` 与导入平面上的 `GpuPlaneResource.device_identity`、
+  VT 源 `GpuDecodedFrame.device_identity` 此前都是空串，`validate_for_device()` 的设备比对实际被
+  跳过。现在桥接层与 `import_pixel_buffer_frame_metal` 填充进程内稳定身份，格式与
+  `MetalComputeContext.device_identity` 一致。
+- **边界**：调度器与帧事务在生产代码里尚无调用方——预览仍走每帧同步 `finish()`，导出走自己的
+  路径。它们在阶段 2 接入原生视口时才真正承载帧；异步完成、超时暂停与退役目前只有注入故障的
+  单元测试证据，没有真机证据。
+- 测试：`test_submission_scheduler_owner_thread.py` 22 项、`test_context_discard_pending.py` 5 项、
+  `test_frame_transaction.py` 19 项（含 300 帧乱序完成的压测，每个输入与输出恰好释放一次）、
+  `test_cv_metal_bridge.py` +2 项（含真实设备导入）。既有 3 个断言旧契约的调度器测试按新契约更新。
+
+### 1.3 代际、退役与确认路由
+
+- `EditGpuPreviewRenderer.ack_present_slot(slot_id, lease_key=None)`：带键时按键里的池代次只投递
+  给那一代池（现行或退役）；不带键保持旧的广播语义。
+- `TimelinePreviewRenderer`：所有持有描述符的 ack 调用点（共 9 处）与 Viewer 面向的 `ack_cb`
+  都带上租约键；渲染器早于租约键（只收 `slot_id`）时回退按槽号确认。
+- 代际与退役沿用现有语义：`set_generation_id()` 单调校验与旧任务丢弃、`_drain_retired_output_pools`
+  等全部槽位回收后再销毁（超时以 `ctx.finish()` 兜底）不变。完成超时暂停、保留上一帧、GPU 确认
+  空闲后才允许销毁资源，落在帧事务池里（见 1.2）。
+- **边界**：Metal 原生池的退役与「停止接收旧帧后收齐已发出工作的完成事件」要等阶段 2 把原生
+  槽位接入渲染线程后才能做真机验证（连续拖动、反复开关窗口、换屏）。
+- 测试：`tests/edit/test_present_lease_key_routing.py` 14 项——退役池的迟到 ack 不触碰新池同号槽、
+  过期提交号被拒、未知池代次不改变任何状态、无键广播语义保留、Viewer 回调绑定键、旧式渲染器回退。
+
+### 计划片段的实测
+
+计划 1.2 给出的 `GpuFrameRelease` 片段（两个消费者都结束后只回收一次）在现有实现上原样通过，
+未作改动。

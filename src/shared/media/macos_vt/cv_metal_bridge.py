@@ -450,6 +450,27 @@ class CVMetalVideoBridge:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    @property
+    def device_identity(self) -> str:
+        """导入纹理所在 Metal 设备的进程内稳定身份（空串 = 尚未确定）。
+
+        与 ``MetalComputeContext.device_identity`` 同一格式；上下文没有
+        该属性时按设备对象现场计算。消费方用 ``GpuDecodedFrame.validate_for_device``
+        比对它，拒绝跨设备读取。
+        """
+        context = self._metal_ctx
+        if context is None:
+            return ""
+        declared = str(getattr(context, "device_identity", "") or "")
+        if declared:
+            return declared
+        device = getattr(context, "device", None)
+        if device is None:
+            return ""
+        from .gpu_encode_surface import metal_device_identity
+
+        return metal_device_identity(device)
+
     # -- 导入 -----------------------------------------------------------
 
     def import_pixel_buffer(
@@ -523,6 +544,7 @@ class CVMetalVideoBridge:
                 _cf.CFRelease(pb_ptr)
                 self._record_failure("destroyed_during_import")
                 return None
+            device_identity = self.device_identity
 
             try:
                 import objc
@@ -563,6 +585,9 @@ class CVMetalVideoBridge:
                             width=plane_w,
                             height=plane_h,
                             ownership="borrowed",
+                            # 导入它们的设备：消费方的 validate_for_device()
+                            # 据此拒绝在另一台设备上读取这些纹理。
+                            device_identity=device_identity,
                         ),
                     ))
             except Exception as exc:

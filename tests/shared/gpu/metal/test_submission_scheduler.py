@@ -39,9 +39,14 @@ def test_scheduler_is_bounded_and_completion_releases() -> None:
     assert scheduler.in_flight == 2
 
     context.callbacks[0](context.command_buffers[0])
-    assert released == [1]
+    # Metal migration 1.2: the driver thread only queues the completion.  The
+    # ring slot is free at once, but the lease is released by the owner in
+    # poll().
     assert scheduler.in_flight == 1
+    assert released == []
     assert scheduler.poll() == (0,)
+    assert released == [1]
+    assert scheduler.in_flight == 1  # the second frame is still running
 
     third = scheduler.submit()
     assert third is not None
@@ -52,7 +57,10 @@ def test_scheduler_drains_without_hiding_queue_growth() -> None:
     context = _Context()
     scheduler = MetalSubmissionScheduler(context, max_in_flight=1)
     scheduler.submit()
-    scheduler.drain()
+    # A real waitUntilCompleted returns after the completion handler ran.
+    context.command_buffers[0].waitUntilCompleted.side_effect = (
+        lambda: context.callbacks[0](context.command_buffers[0]))
+    assert scheduler.drain() is True
     context.command_buffers[0].waitUntilCompleted.assert_called_once()
 
 
@@ -66,6 +74,8 @@ def test_scheduler_handles_completion_before_submit_returns() -> None:
     )
 
     assert submission is not None
-    assert released == ["released"]
+    # Even a completion that ran inside commit() waits for the owner thread.
     assert scheduler.in_flight == 0
+    assert released == []
     assert scheduler.poll() == (0,)
+    assert released == ["released"]

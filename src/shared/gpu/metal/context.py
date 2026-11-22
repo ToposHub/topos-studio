@@ -499,6 +499,7 @@ class MetalComputeContext:
         *,
         completion: Any = None,
         wait: bool = False,
+        raise_after_commit: bool = True,
     ) -> Any:
         """提交当前 command buffer，可选 completion handler。
 
@@ -509,6 +510,13 @@ class MetalComputeContext:
         例外是之前 dispatch 异常丢弃过已编码 kernel 链（AUD-1401），
         此时显式抛 `MetalComputeError` 而不是返回 None，调用方必须
         重新编码整条链（"无工作"与"工作被丢弃"不再混同）。
+
+        ``raise_after_commit=False``（异步提交的调度器使用）：commit
+        之后驱动同步报告的错误不再抛出，而是照常返回 command buffer，
+        由 completion handler 把错误送到资源线程。调用方拿到异常时无法
+        分辨 buffer 是否已被 commit——若已提交，完成回调仍会到来，此时
+        丢弃预留会让释放回调永远不执行。提交之前的失败（无 completion
+        支持、丢弃过工作）照常抛出。
         """
         with self._lock:
             cb = self._current_cb
@@ -548,10 +556,12 @@ class MetalComputeContext:
                     self._last_gpu_time_ms = self._measure_gpu_time_ms(cb)
             error = cb.error()
             # 非阻塞提交时 command buffer 尚未完成，PyObjC 通常返回 None；若
-            # 驱动在 commit 时已同步报告错误，仍立即失败闭环。
+            # 驱动在 commit 时已同步报告错误，仍立即失败闭环——除非调用方
+            # 明确要求经 completion handler 接收（buffer 已提交，回调必到）。
             if error is not None and (wait or getattr(cb, "status", lambda: 0)() >= 4):
-                detail = getattr(error, "localizedDescription", lambda: str(error))()
-                raise MetalComputeError(f"Metal command buffer 执行失败: {detail}")
+                if wait or raise_after_commit:
+                    detail = getattr(error, "localizedDescription", lambda: str(error))()
+                    raise MetalComputeError(f"Metal command buffer 执行失败: {detail}")
             return cb
 
     @staticmethod
@@ -574,6 +584,31 @@ class MetalComputeContext:
         if start <= 0.0 or end < start:
             return None
         return (end - start) * 1000.0
+
+    def discard_pending(self) -> bool:
+        """Drop the encoded-but-unsubmitted command buffer as one group.
+
+        A ring that is found full *after* encoding leaves this frame's
+        commands in ``_current_cb``; the next ``dispatch`` would append to
+        them and the next ``submit`` would commit another frame's work
+        together with them.  The pending commands belong to the frame that
+        encoded them: retry within that frame or drop everything here.
+        Returns ``True`` when something was dropped.  Nothing was committed,
+        so no completion handler and no GPU work is involved.
+        """
+        with self._lock:
+            command_buffer = self._current_cb
+            self._current_cb = None
+            dropped = self._dropped_work
+            # The dropped group included any earlier dropped chain; both are
+            # gone together and the next submit must not report stale work.
+            self._dropped_work = False
+        return command_buffer is not None or dropped
+
+    def has_pending_work(self) -> bool:
+        """Whether a command buffer is encoded and waiting to be submitted."""
+        with self._lock:
+            return self._current_cb is not None
 
     def finish(self) -> None:
         """提交当前 command buffer 并等待完成（诊断/显式同步点）。"""

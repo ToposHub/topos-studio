@@ -7445,7 +7445,8 @@ class TimelinePreviewRenderer(QObject):
             # A0.1：显式丢弃事件（present_status='dropped'）。
             self._annotate_present_drop(frame, slot_id, "generation_mismatch")
             # 仍然要 ack 这个 slot，避免泄漏（stale frame 的 slot 不再展示）
-            self._ack_present_slot_safe(slot_id)
+            self._ack_present_slot_safe(
+                slot_id, getattr(present_frame, "lease_key", None))
             return
 
         if self._is_playback_result_stale(frame):
@@ -7454,7 +7455,8 @@ class TimelinePreviewRenderer(QObject):
                 frame=frame, slot_id=slot_id,
             )
             self._annotate_present_drop(frame, slot_id, "playback_stale")
-            self._ack_present_slot_safe(slot_id)
+            self._ack_present_slot_safe(
+                slot_id, getattr(present_frame, "lease_key", None))
             return
 
         self._stash_pending_present_frame(frame, generation_id, present_frame)
@@ -7478,12 +7480,7 @@ class TimelinePreviewRenderer(QObject):
             self._late_realtime_present_key = None
             accepted = self._pop_pending_present_frame(frame, generation_id)
             if accepted is not None:
-                gpu_renderer = getattr(self, "_gpu_renderer", None)
-                ack_cb = (
-                    gpu_renderer.ack_present_slot
-                    if gpu_renderer is not None and hasattr(gpu_renderer, "ack_present_slot")
-                    else None
-                )
+                ack_cb = self._make_present_ack_callback(accepted)
                 if self._should_emit_frame(frame):
                     self._mark_frame_emitted(frame)
                     playback_trace(
@@ -7502,7 +7499,9 @@ class TimelinePreviewRenderer(QObject):
                     self._annotate_present_drop(
                         frame, getattr(accepted, "slot_id", -1),
                         "late_emit_monotonic_rejected")
-                    self._ack_present_slot_safe(getattr(accepted, "slot_id", -1))
+                    self._ack_present_slot_safe(
+                        getattr(accepted, "slot_id", -1),
+                        getattr(accepted, "lease_key", None))
             return
         playback_trace(
             "renderer.present_frame_stashed",
@@ -7644,7 +7643,9 @@ class TimelinePreviewRenderer(QObject):
                 slot_id=int(getattr(previous, "slot_id", -1)),
                 reason="stash_overwritten")
             self._note_telemetry_present(frame, "superseded")
-            self._ack_present_slot_safe(getattr(previous, "slot_id", -1))
+            self._ack_present_slot_safe(
+                getattr(previous, "slot_id", -1),
+                getattr(previous, "lease_key", None))
         pending[key] = present_frame
 
     def _pop_pending_present_frame(self, frame: int, generation_id: int) -> object | None:
@@ -7654,16 +7655,46 @@ class TimelinePreviewRenderer(QObject):
             return None
         return pending.pop((int(frame), int(generation_id)), None)
 
-    def _ack_present_slot_safe(self, slot_id: int) -> None:
-        """安全 ack slot（避免 stale frame 泄漏 slot）。"""
+    def _ack_present_slot_safe(
+        self, slot_id: int, lease_key: object | None = None,
+    ) -> None:
+        """安全 ack slot（避免 stale frame 泲漏 slot）。
+
+        ``lease_key`` 是描述符的租约键（池代次 + 槽号 + 提交号）：给出时
+        确认只作用于那一次提交，迟到的旧 ack 不会碰到新池里同号的另一帧。
+        """
         if slot_id < 0:
             return
         gpu_renderer = getattr(self, '_gpu_renderer', None)
-        if gpu_renderer is not None and hasattr(gpu_renderer, 'ack_present_slot'):
+        if gpu_renderer is None or not hasattr(gpu_renderer, 'ack_present_slot'):
+            return
+        try:
+            if lease_key is None:
+                gpu_renderer.ack_present_slot(slot_id)
+            else:
+                gpu_renderer.ack_present_slot(slot_id, lease_key)
+        except TypeError:
+            # 渲染器早于租约键（只收 slot_id）：退回按槽号确认。
             try:
                 gpu_renderer.ack_present_slot(slot_id)
             except Exception:
                 pass
+        except Exception:
+            pass
+
+    def _make_present_ack_callback(self, present_frame: object) -> object | None:
+        """Viewer 面向的 ack 回调，绑定该描述符自己的租约键。"""
+        gpu_renderer = getattr(self, '_gpu_renderer', None)
+        if gpu_renderer is None or not hasattr(gpu_renderer, 'ack_present_slot'):
+            return None
+        lease_key = getattr(present_frame, 'lease_key', None)
+        if lease_key is None:
+            return gpu_renderer.ack_present_slot
+
+        def ack(slot_id: int, _key: object = lease_key) -> None:
+            self._ack_present_slot_safe(slot_id, _key)
+
+        return ack
 
     def _clear_stale_pending_present_frames(self) -> None:
         """清空所有暂存的 present frame，并 ack 它们的 slot。
@@ -7681,7 +7712,8 @@ class TimelinePreviewRenderer(QObject):
             self._annotate_present_drop(
                 int(getattr(present, "frame", -1)), slot_id, "generation_switch")
             if slot_id >= 0:
-                self._ack_present_slot_safe(slot_id)
+                self._ack_present_slot_safe(
+                    slot_id, getattr(present, "lease_key", None))
         pending.clear()
 
     def shutdown(self) -> None:
@@ -12165,7 +12197,9 @@ class TimelinePreviewRenderer(QObject):
         if generation != self._generation_id or generation != self._dispatched_generation_id:
             stale_present = self._pop_pending_present_frame(frame, generation)
             if stale_present is not None:
-                self._ack_present_slot_safe(getattr(stale_present, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(stale_present, "slot_id", -1),
+                    getattr(stale_present, "lease_key", None))
             playback_trace(
                 "renderer.gpu_result_drop_generation",
                 frame=frame,
@@ -12208,7 +12242,9 @@ class TimelinePreviewRenderer(QObject):
         if scrub_exact_frame is not None and int(frame) != int(scrub_exact_frame):
             stale_present = self._pop_pending_present_frame(frame, generation)
             if stale_present is not None:
-                self._ack_present_slot_safe(getattr(stale_present, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(stale_present, "slot_id", -1),
+                    getattr(stale_present, "lease_key", None))
             playback_trace(
                 "renderer.gpu_result_drop_scrub_non_final",
                 frame=frame,
@@ -12222,7 +12258,9 @@ class TimelinePreviewRenderer(QObject):
         if self._scrub_active and not self._can_emit_scrub_render_result(frame):
             stale_present = self._pop_pending_present_frame(frame, generation)
             if stale_present is not None:
-                self._ack_present_slot_safe(getattr(stale_present, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(stale_present, "slot_id", -1),
+                    getattr(stale_present, "lease_key", None))
             playback_trace(
                 "renderer.gpu_result_drop_active_scrub_too_far_behind",
                 frame=frame,
@@ -12240,12 +12278,7 @@ class TimelinePreviewRenderer(QObject):
         # only for old renderers/tests that do not emit present_frame_ready.
         present_frame = self._pop_pending_present_frame(frame, generation)
         if present_frame is not None:
-            gpu_renderer = getattr(self, '_gpu_renderer', None)
-            ack_cb = (
-                gpu_renderer.ack_present_slot
-                if gpu_renderer is not None and hasattr(gpu_renderer, 'ack_present_slot')
-                else None
-            )
+            ack_cb = self._make_present_ack_callback(present_frame)
             result = {
                 "present_frame": present_frame,
                 "ack_cb": ack_cb,
@@ -12384,7 +12417,9 @@ class TimelinePreviewRenderer(QObject):
             )
             get_trace_collector().record(trace)
             if present_frame is not None:
-                self._ack_present_slot_safe(getattr(present_frame, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(present_frame, "slot_id", -1),
+                    getattr(present_frame, "lease_key", None))
             self._pending_layer_count = 0
             if self._dispatch_pending_scrub_exact_if_needed():
                 return
@@ -12420,7 +12455,9 @@ class TimelinePreviewRenderer(QObject):
             )
             get_trace_collector().record(trace)
             if present_frame is not None:
-                self._ack_present_slot_safe(getattr(present_frame, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(present_frame, "slot_id", -1),
+                    getattr(present_frame, "lease_key", None))
             self._pending_layer_count = 0
             if self._dispatch_pending_scrub_exact_if_needed():
                 return
@@ -12460,7 +12497,9 @@ class TimelinePreviewRenderer(QObject):
             # 推进后 next_frame == _last_emitted_frame → skip → 循环终止。
             self._advance_last_emitted_to_dropped_frame(frame)
             if present_frame is not None:
-                self._ack_present_slot_safe(getattr(present_frame, "slot_id", -1))
+                self._ack_present_slot_safe(
+                    getattr(present_frame, "slot_id", -1),
+                    getattr(present_frame, "lease_key", None))
             self._pending_layer_count = 0
             if self._dispatch_pending_scrub_exact_if_needed():
                 return
