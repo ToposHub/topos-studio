@@ -2,7 +2,9 @@
 
 import pytest
 from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QInputDialog, QMenu
 
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.core.node_engine import NodeGraph
@@ -229,6 +231,114 @@ def test_layer_fit_includes_the_entire_composition_at_extreme_durations(qapp, fr
     assert mapper.frame_to_x(frames) == pytest.approx(view.width())
     view.zoom_time_at(400, 0.25)
     assert mapper.frame_to_x(frames) == pytest.approx(view.width())
+
+
+def test_wide_layer_panel_caps_default_tree_width_and_preserves_user_split(qtbot) -> None:
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_view_mode("layers")
+    panel.resize(1760, 360)
+    panel.show()
+    qtbot.waitUntil(lambda: panel._splitter.sizes()[0] > 0)
+    assert panel._splitter.sizes()[0] == 360
+    assert panel._tree_view._header_height == panel._timeline_view.ruler_height()
+
+    panel._splitter.moveSplitter(500, 1)
+    panel.resize(1820, 360)
+    assert panel._splitter.sizes()[0] > 360
+
+
+def test_layer_header_replaces_top_bar_and_exposes_useful_layer_switches(qtbot) -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    marked = controller.create_generated_layer("solid", "Marked", {})
+    card = controller.create_generated_layer("solid", "Card", {})
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=card)
+    panel.resize(1760, 360)
+    panel.show()
+    assert panel._toolbar.isHidden()
+    assert panel._layer_header_tools.isVisible()
+    assert panel._layer_header_tools.geometry().left() > panel._time_display.geometry().right()
+    assert panel._layer_header_tools.geometry().bottom() < panel._tree_view._header_height
+
+    panel._layer_search_edit.setText("Card")
+    assert panel._search_edit.text() == "Card"
+    assert [row.layer_id for row in panel._model.visible_rows() if row.row_type == "layer"] == [card]
+    panel._layer_search_edit.clear()
+
+    tree = panel._tree_view
+
+    def click_switch(layer_id: str, column: str) -> None:
+        index = next(index for index, row in enumerate(panel._model.visible_rows())
+                     if row.row_type == "layer" and row.layer_id == layer_id)
+        left, right = tree._column_geometry()[column]
+        assert right > left
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint((left + right) // 2,
+                                    tree._header_height + KEYFRAMES_ROW_H * index + KEYFRAMES_ROW_H // 2))
+
+    click_switch(marked, "shy")
+    assert graph.get_layer(marked).shy
+    panel._hide_shy_action.trigger()
+    assert graph.get_layer(marked).enabled
+    assert marked not in {row.layer_id for row in panel._model.visible_rows()}
+    panel._hide_shy_action.trigger()
+    assert marked in {row.layer_id for row in panel._model.visible_rows()}
+    click_switch(marked, "shy")
+    assert not graph.get_layer(marked).shy
+
+    transform = controller.layer_transform_node(card)
+    panel.parameter_changed.connect(graph.set_node_parameter)
+    assert panel._motion_blur_action.isChecked()
+    with qtbot.waitSignal(panel.parameter_changed) as edit:
+        panel._motion_blur_action.trigger()
+    assert edit.args == ["out", "motion_blur_enabled", False]
+    assert not graph.get_node("out").parameters["motion_blur_enabled"]
+    with qtbot.waitSignal(panel.parameter_changed) as edit:
+        click_switch(card, "motion_blur")
+    assert edit.args == [transform.id, "motion_blur", True]
+    assert transform.parameters["motion_blur"]
+    assert not controller.layer_transform_node(marked).parameters["motion_blur"]
+    panel._motion_blur_action.trigger()
+    assert graph.get_node("out").parameters["motion_blur_enabled"]
+    assert transform.parameters["motion_blur"]
+    panel._act_graph_editor.trigger()
+    assert panel._view_mode == "graph"
+    panel._act_nodes_mode.trigger()
+    assert panel._layer_header_tools.isHidden()
+    assert panel._toolbar.isVisible()
+
+
+def test_blank_layer_tree_context_menu_can_create_a_layer(qtbot, monkeypatch) -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    controller.ensure_main_stack()
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph)
+    panel.show()
+
+    def choose_text(menu, _position):
+        new_layer = menu.actions()[0].menu()
+        assert new_layer.isEnabled()
+        new_layer.actions()[0].trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_text)
+    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *_args: ("New title", True))
+    tree = panel._tree_view
+    pos = QPoint(20, tree._header_height + 25)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, tree.mapToGlobal(pos))
+    with qtbot.waitSignal(panel.generated_layer_requested) as created:
+        tree.contextMenuEvent(event)
+    assert created.args == ["text", "New title", {"text": "New title"}, 0]
 
 
 def test_layer_navigator_and_work_area_have_independent_drag_targets(qapp) -> None:

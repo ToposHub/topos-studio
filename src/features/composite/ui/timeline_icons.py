@@ -22,6 +22,7 @@ specialised shapes (keyframe diamond, playhead) the views call directly.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
@@ -29,8 +30,45 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 
 from . import timeline_layout
 
+PROPERTY_KEYFRAME_GLYPH = "◆"
+_PROPERTY_KEYFRAME_COLOR = "#999"
+_PROPERTY_KEYFRAME_BORDER = "#555"
+_PROPERTY_KEYFRAME_CURRENT = "#ff5555"
+PROPERTY_KEYFRAME_STYLE = f"""
+QToolButton {{
+    background-color: transparent; border: 1px solid {_PROPERTY_KEYFRAME_BORDER};
+    font-size: 10px; padding: 1px; color: {_PROPERTY_KEYFRAME_COLOR}; border-radius: 2px;
+}}
+QToolButton:hover {{
+    background-color: {_PROPERTY_KEYFRAME_BORDER}; color: #cc6600; border-color: #cc6600;
+}}
+QToolButton:checked {{
+    background-color: {_PROPERTY_KEYFRAME_CURRENT}; color: #fff;
+    border-color: {_PROPERTY_KEYFRAME_CURRENT};
+}}
+"""
+
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from PyQt6.QtGui import QIcon
+
+
+def draw_property_keyframe(painter: QPainter, rect: QRectF, *,
+                           at_current: bool, enabled: bool) -> None:
+    """Paint the Properties button's diamond in a timeline row."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if not enabled:
+        painter.setOpacity(0.5)
+    painter.setPen(QColor(_PROPERTY_KEYFRAME_CURRENT if at_current else _PROPERTY_KEYFRAME_BORDER))
+    painter.setBrush(QColor(_PROPERTY_KEYFRAME_CURRENT) if at_current else Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 2, 2)
+    painter.setPen(QColor("#fff" if at_current else _PROPERTY_KEYFRAME_COLOR))
+    font = painter.font()
+    font.setBold(False)
+    font.setPixelSize(10)
+    painter.setFont(font)
+    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, PROPERTY_KEYFRAME_GLYPH)
+    painter.restore()
 
 
 # ── colour resolution ──────────────────────────────────────────────────
@@ -109,7 +147,19 @@ def draw_icon(painter: QPainter, name: str, rect: QRectF,
         elif name == "solo":
             _draw_solo(painter, cx, cy, half)
         elif name == "shy":
-            _draw_eye(painter, cx, cy, half, off=True)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(cx - half * .72, cy - half * .68,
+                                           half * 1.44, half * 1.15), 2, 2)
+            for side in (-1, 1):
+                painter.drawLine(QPointF(cx + side * half * .25, cy - half * .24),
+                                 QPointF(cx + side * half * .25, cy - half * .10))
+            painter.drawLine(QPointF(cx - half * .28, cy + half * .7),
+                             QPointF(cx + half * .28, cy + half * .7))
+        elif name == "motion_blur":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for offset in (-.47, 0, .47):
+                painter.drawEllipse(QPointF(cx + half * offset, cy - half * offset * .35),
+                                    half * .46, half * .55)
         elif name in ("expand", "collapse"):
             _draw_chevron(painter, cx, cy, half,
                           down=(name == "expand"))
@@ -143,8 +193,10 @@ def draw_icon(painter: QPainter, name: str, rect: QRectF,
             _draw_nodes_mode(painter, cx, cy, half)
         elif name == "layers_mode":
             _draw_layers_mode(painter, cx, cy, half)
-        elif name in ("link", "pick_whip"):
+        elif name == "link":
             _draw_link(painter, cx, cy, half)
+        elif name == "pick_whip":
+            _draw_pick_whip(painter, cx, cy, half)
         # Unknown name → draw nothing (caller's fallback handles it).
     finally:
         painter.restore()
@@ -199,6 +251,17 @@ def _draw_link(p: QPainter, cx: float, cy: float, half: float) -> None:
                    link_w, link_h)
     p.drawRoundedRect(left, link_h / 2.0, link_h / 2.0)
     p.drawRoundedRect(right, link_h / 2.0, link_h / 2.0)
+
+
+def _draw_pick_whip(p: QPainter, cx: float, cy: float, half: float) -> None:
+    """Draw a small coiled pick whip with an open tip."""
+    path = QPainterPath(QPointF(cx, cy))
+    for step in range(1, 33):
+        angle = step / 32 * math.tau * 1.45
+        radius = step / 32 * half * .92
+        path.lineTo(cx + math.sin(angle) * radius, cy + math.cos(angle) * radius)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawPath(path)
 
 
 def _draw_plus(p: QPainter, cx: float, cy: float, half: float,

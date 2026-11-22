@@ -50,7 +50,7 @@ from src.features.composite.core.media_drop_payload import (
 )
 from src.features.composite.nodes.color_node import COLORNode  # Deprecated - kept for isinstance checks
 from src.features.composite.nodes.topos_color_node import ToposColorNode
-from src.features.composite.nodes.output_node import OutputNode
+from src.features.composite.nodes.output_node import MOTION_BLUR_ENABLED_PARAM, OutputNode
 from src.features.composite.nodes.image_input_node import ImageInputNode
 from src.features.composite.nodes.blend_node import MergeNode
 from src.features.composite.nodes.constant_node import ConstantNode
@@ -83,6 +83,7 @@ from src.features.composite.core.undo_stack import (
     create_connect_action,
 )
 from .node_editor_widget import NodeEditorWidget
+from .scale_link import ScaleLinkState
 from .node_search_popup import NodeSearchPopup
 from .minimap_widget import MinimapWidget
 from .node_thumbnail import NodeThumbnailManager, linear_rgb_to_display
@@ -125,6 +126,45 @@ def _page_node_is_locked(owner: object, node_id: object) -> bool:
     controller = vars(owner).get("_layer_stack_controller")
     layer_lock = getattr(controller, "is_node_locked_by_layer", None)
     return callable(layer_lock) and layer_lock(str(node_id)) is True
+
+
+def _sync_composite_parameter_values(owner: object, node_id: str,
+                                     *param_names: str,
+                                     refresh_animated: bool = False) -> None:
+    """Refresh existing Properties and Layer controls after a graph write."""
+    state = vars(owner)
+    props = state.get("_properties_panel")
+    sync_props = getattr(props, "sync_base_parameter_values", None)
+    if callable(sync_props):
+        node = state["_node_graph"].get_node(node_id)
+        if node is not None:
+            sync_props(node_id, {name: node.parameters.get(name) for name in param_names})
+    sync_animated = getattr(props, "sync_animated_values", None)
+    frame = getattr(owner, "_current_keyframe_frame", None)
+    if refresh_animated and callable(sync_animated) and callable(frame):
+        sync_animated(node_id, frame(), list(param_names))
+    timeline = state.get("_keyframes_panel")
+    sync_timeline = getattr(timeline, "sync_parameter_values", None)
+    if callable(sync_timeline):
+        sync_timeline(node_id, param_names)
+
+
+def _parameter_image_size(owner: object, node: Any) -> tuple[int, int] | None:
+    """Use the same image reference for the pivot in both panels."""
+    if "pivot_mode" not in node.parameters:
+        return None
+    if node.node_type == "text":
+        width = int(node.parameters.get("width") or 0)
+        height = int(node.parameters.get("height") or 0)
+        if width > 0 and height > 0:
+            return width, height
+    resolver = getattr(owner, "_resolve_node_input_size", None)
+    if callable(resolver) and (size := resolver(node)) is not None:
+        return size
+    state = vars(owner)
+    width = state.get("_last_texture_width", 0)
+    height = state.get("_last_texture_height", 0)
+    return (width, height) if width > 0 and height > 0 else None
 
 
 class _FrameReadyTrampoline:
@@ -188,6 +228,7 @@ class CompositePage(QWidget):
     # Argument: new frame number. The transport bar listens to refresh its
     # time/frame display as the comp-clip timer advances the playhead.
     composite_frame_changed = pyqtSignal(int)
+    composite_playing_changed = pyqtSignal(bool)
 
     # Signal: Output node "Render Output" button clicked.
     # Argument: node_id of the Output node.
@@ -339,13 +380,20 @@ class CompositePage(QWidget):
 
         # Undo stack
         self._undo_stack = UndoStack(self)
+        self._scale_link_state = ScaleLinkState(self)
+        self._linked_scale_edit: tuple[str, int, dict[str, Any], dict[str, Any]] | None = None
+        self._scale_link_state.edit_started.connect(self._start_linked_scale_edit)
+        self._scale_link_state.value_changed.connect(self._change_linked_scale)
+        self._scale_link_state.edit_finished.connect(self._finish_linked_scale_edit)
         # AE/Nuke hybrid controller. It shares the page's NodeGraph and undo
         # stack so layer edits are atomic with the rest of the composition.
         self._layer_stack_controller = LayerStackController(
             self._node_graph, self._undo_stack, parent=self,
             layer_stack_version=BOTTOM_UP_LAYER_STACK_VERSION)
         self._layer_stack_controller.composition_markers_changed.connect(
-            self._on_composition_markers_changed)
+            self._publish_timeline_metadata)
+        self._layer_stack_controller.layer_shy_changed.connect(
+            self._publish_timeline_metadata)
 
         # Parameter change debounce timer
         self._param_debounce_timer = QTimer(self)
@@ -2605,7 +2653,7 @@ class CompositePage(QWidget):
         )
         return data
 
-    def _on_composition_markers_changed(self, _scope: str = "") -> None:
+    def _publish_timeline_metadata(self, _scope: str = "") -> None:
         """Publish the edited timeline metadata through the project save bridge."""
         if self._current_composite_id:
             self._emit_user_edit_once()
@@ -4041,14 +4089,12 @@ class CompositePage(QWidget):
                 enabled=not node.disabled,
                 node_color=getattr(node, 'header_color', '#666666'),
                 read_only=_page_node_is_locked(self, node_id),
-                # 传当前图像尺寸：让 Properties 面板在 pivot_mode="center" 时
-                # 把 pivot_x/y 显示为真实图像中心（只读），与渲染实际行为一致。
-                # 用 getattr 兜底：测试 / 部分初始化阶段可能还没建好这两个属性。
-                image_size=(
-                    getattr(self, '_last_texture_width', 0),
-                    getattr(self, '_last_texture_height', 0),
-                ),
+                image_size=_parameter_image_size(self, node),
             )
+            sync_animated = getattr(self._properties_panel, "sync_animated_values", None)
+            current_frame = getattr(self, "_current_keyframe_frame", None)
+            if callable(sync_animated) and callable(current_frame):
+                sync_animated(node_id, current_frame())
             # Update thumbnail manager
             if self._thumbnail_manager:
                 self._thumbnail_manager.set_selected_node(node_id)
@@ -5157,9 +5203,12 @@ class CompositePage(QWidget):
         if not changed:
             return
 
+        self._sync_composite_frame_ui(frame)
+
         # 播放中用户 seek：重锚驱动基准并令渲染线程退出当前驱动循环，
         # 随即提交新求值（携带新基准的 playback_drive）让驱动立即重启。
-        if getattr(self, "_drive_active", False) and self._comp_playing:
+        drive_active = getattr(self, "_drive_active", False)
+        if drive_active and self._comp_playing:
             import time as _t
             self._comp_play_start_time = _t.perf_counter()
             self._comp_play_start_frame = frame
@@ -5172,13 +5221,17 @@ class CompositePage(QWidget):
                 except Exception:
                     pass
             self._evaluate_graph()
-            self._refresh_viewer_handles_for_frame()
-            try:
-                self.composite_frame_changed.emit(frame)
-            except RuntimeError:
-                pass
-            return
+        elif not drive_active:
+            self._evaluate_graph()
+        # An animated Transform's gizmo follows the interpolated value.
+        self._refresh_viewer_handles_for_frame()
+        try:
+            self.composite_frame_changed.emit(frame)
+        except RuntimeError:
+            pass
 
+    def _sync_composite_frame_ui(self, frame: int) -> None:
+        """Sync playheads and frame-dependent controls on a full frame update."""
         self._syncing_composite_frame = True
         try:
             # Keep the Keyframes panel's range aligned with the comp clip
@@ -5214,25 +5267,6 @@ class CompositePage(QWidget):
                     pass
         finally:
             self._syncing_composite_frame = False
-
-        # Re-evaluate so the viewer reflects the new animated frame (P0-1).
-        # 渲染线程自驱播放中：求值由驱动循环承担，这里只保留显示同步。
-        if getattr(self, "_drive_active", False):
-            self._refresh_viewer_handles_for_frame()
-            try:
-                self.composite_frame_changed.emit(frame)
-            except RuntimeError:
-                pass
-            return
-        self._evaluate_graph()
-        # Viewer control handles must follow keyframe animation: an animated
-        # Transform's gizmo/handles track the interpolated value per frame.
-        self._refresh_viewer_handles_for_frame()
-        # Notify the transport bar / comp-clip playback listeners of the move.
-        try:
-            self.composite_frame_changed.emit(frame)
-        except RuntimeError:
-            pass
 
     def _total_frames_for_node(self) -> int:
         """Best-effort total frame count for the current composition.
@@ -5421,6 +5455,7 @@ class CompositePage(QWidget):
                 and not getattr(self, "_drive_active", False)):
             return
         self._stop_comp_playback()
+        self._sync_composite_frame_ui(self._composite_current_frame)
 
     def _stop_comp_playback(self) -> None:
         """Stop the page-owned comp timer and render-thread drive state."""
@@ -5525,10 +5560,15 @@ class CompositePage(QWidget):
             if audio is not None:
                 audio.update_position(target)
             if getattr(self, "_drive_active", False):
-                # 渲染线程自驱中：本 tick 只做最轻量的播放头记账（面板同步
-                # 每帧全做会拖住 UI 线程——Keyframes/Properties/Spline 的
-                # 跟随在暂停/seek 时由正常求值路径刷新到当前位置）。
+                # Move the playheads without evaluating the graph or
+                # resampling property controls on every playback tick.
                 self._composite_current_frame = target
+                panel = getattr(self, "_keyframes_panel", None)
+                if panel is not None:
+                    panel.set_current_frame(target, refresh_values=False)
+                spline = getattr(self, "_spline_panel", None)
+                if spline is not None:
+                    spline.set_current_frame(target)
                 try:
                     self.composite_frame_changed.emit(target)
                 except RuntimeError:
@@ -7119,6 +7159,8 @@ class CompositePage(QWidget):
     def properties_panel(self, panel) -> None:
         self._properties_panel = panel
         if panel:
+            if hasattr(panel, "set_scale_link_state") and "_scale_link_state" in self.__dict__:
+                panel.set_scale_link_state(self._scale_link_state)
             panel.parameter_changed.connect(self._on_parameter_changed)
             # B3-2: "Promote to Group" on numeric parameter rows.
             if hasattr(panel, "set_group_promote_hook"):
@@ -7244,6 +7286,7 @@ class CompositePage(QWidget):
         # Save-dirty + re-render
         self._emit_user_edit_once()
         self._evaluate_graph()
+        _sync_composite_parameter_values(self, node_id, param_name, refresh_animated=True)
         self._refresh_keyframes_and_spline_for_node(node_id)
         # P2: keep transport-bar markers in sync with the edited track.
         self.refresh_transport_keyframe_markers()
@@ -7514,7 +7557,7 @@ class CompositePage(QWidget):
             )
             node.set_keyframe_track(param_name, track)
         self._evaluate_graph()
-        self._refresh_properties_panel(data["node_id"])
+        _sync_composite_parameter_values(self, node.id, param_name, refresh_animated=True)
         self._refresh_keyframes_and_spline_for_node(data["node_id"])
 
     @staticmethod
@@ -7605,6 +7648,7 @@ class CompositePage(QWidget):
         before = self._video_trim_snapshot(node)
         self._apply_video_trim_range(node, start, end)
         after = self._video_trim_snapshot(node)
+        _sync_composite_parameter_values(self, node_id, "source_in", "source_out")
         # AUD-9502：trim 与普通参数共用同一累加器，归属不一致时先 flush。
         pending = self._pending_param_change
         if pending is not None and (pending[0], pending[1]) != (node_id, "trim_range"):
@@ -7647,12 +7691,16 @@ class CompositePage(QWidget):
         if node.node_type == "video_frame" and param_name == "trim_range":
             self._on_video_trim_parameter_changed(node_id, value)
             return
+        if param_name in ("motion_blur", MOTION_BLUR_ENABLED_PARAM):
+            self._commit_motion_blur_switch(node_id, param_name, value)
+            return
 
         old_value = node.parameters.get(param_name)
         self._node_graph.set_node_parameter(node_id, param_name, value)
         if (node.node_type == "video_frame"
                 and param_name in ("source_in", "source_out")):
             self._sync_video_trim_layer(node)
+        _sync_composite_parameter_values(self, node_id, param_name)
         self._sync_active_viewer_camera_if_needed(node_id, node)
 
         # Constant's Keyframes rows are mode-dependent.  Changing the mode in
@@ -7708,38 +7756,116 @@ class CompositePage(QWidget):
         # they follow the value live, not only after the debounce flush.
         self.update_viewer_handles()
 
-    def _undo_param(self, data) -> None:
-        node = self._node_graph.get_node(data["node_id"])
-        if node is not None and data["param"] == "trim_range":
-            self._restore_video_trim_snapshot(node, data["old"])
-        else:
-            self._node_graph.set_node_parameter(
-                data["node_id"], data["param"], data["old"])
-            if (node is not None and node.node_type == "video_frame"
-                    and data["param"] in ("source_in", "source_out")):
-                self._sync_video_trim_layer(node)
-        self._refresh_properties_panel(data["node_id"])
-        if data["param"] == "trim_range":
-            self._refresh_keyframes_and_spline_for_node(data["node_id"])
+    def _commit_motion_blur_switch(self, node_id: str, param_name: str, value: bool) -> None:
+        """Commit each switch click before another timeline edit enters history."""
+        self._commit_pending_edit_transactions()
+        node = self._node_graph.get_node(node_id)
+        old_value = node.parameters.get(param_name)
+        if old_value == value:
+            return
+        self._node_graph.set_node_parameter(node_id, param_name, value)
+        action = create_param_change_action(
+            node_id, param_name, old_value, value, self._undo_param, self._redo_param)
+        action.merge_key = None
+        self._undo_stack.push(action)
+        self._refresh_motion_blur_switches(node_id, param_name)
         self._evaluate_graph()
-        # Update viewer handles to sync with new value (S5-14)
-        self.update_viewer_handles()
 
-    def _redo_param(self, data) -> None:
-        node = self._node_graph.get_node(data["node_id"])
-        if node is not None and data["param"] == "trim_range":
-            self._restore_video_trim_snapshot(node, data["new"])
-        else:
-            self._node_graph.set_node_parameter(
-                data["node_id"], data["param"], data["new"])
-            if (node is not None and node.node_type == "video_frame"
-                    and data["param"] in ("source_in", "source_out")):
-                self._sync_video_trim_layer(node)
-        self._refresh_properties_panel(data["node_id"])
-        if data["param"] == "trim_range":
-            self._refresh_keyframes_and_spline_for_node(data["node_id"])
+    def _start_linked_scale_edit(self, node_id: str) -> None:
+        if self._linked_scale_edit is not None and self._linked_scale_edit[0] == node_id:
+            return
+        node = self._node_graph.get_node(node_id)
+        if node is None or _page_node_is_locked(self, node_id):
+            return
+        self._commit_pending_edit_transactions()
+        import copy
+
+        axes = ("scale_x", "scale_y")
+        self._linked_scale_edit = (
+            node_id, self._current_keyframe_frame(),
+            {axis: node.parameters[axis] for axis in axes},
+            {axis: copy.deepcopy(node.keyframe_tracks.get(axis)) for axis in axes},
+        )
+
+    def _change_linked_scale(self, node_id: str, value: float) -> None:
+        discrete = self._linked_scale_edit is None or self._linked_scale_edit[0] != node_id
+        if discrete:
+            self._start_linked_scale_edit(node_id)
+        edit = self._linked_scale_edit
+        if edit is None or edit[0] != node_id:
+            return
+        _, frame, axes, tracks = edit
+        node = self._node_graph.get_node(node_id)
+        if node is None or _page_node_is_locked(self, node_id):
+            return
+        definitions = [node.get_param_defs()[axis] for axis in axes]
+        minimum = max(pdef.min_val for pdef in definitions)
+        maximum = min(pdef.max_val for pdef in definitions)
+        value = max(minimum, min(maximum, value))
+        self._emit_user_edit_once()
+        for axis in axes:
+            if tracks[axis] and tracks[axis].get("keyframes"):
+                self._write_interaction_keyframe(node, axis, frame, value)
+            else:
+                self._node_graph.set_node_parameter(node_id, axis, value)
+        _sync_composite_parameter_values(self, node_id, *axes, refresh_animated=True)
+        self.update_viewer_handles()
         self._evaluate_graph()
-        # Update viewer handles to sync with new value (S5-14)
+        if discrete:
+            self._finish_linked_scale_edit(node_id)
+
+    def _finish_linked_scale_edit(self, node_id: str) -> None:
+        edit = self._linked_scale_edit
+        if edit is None or edit[0] != node_id:
+            return
+        self._linked_scale_edit = None
+        node = self._node_graph.get_node(node_id)
+        if node is None:
+            return
+        _, _, old_values, old_tracks = edit
+        self._undo_stack.begin_group()
+        for axis, old_value in old_values.items():
+            before, after = old_tracks[axis], node.keyframe_tracks.get(axis)
+            if before != after:
+                self._push_keyframe_track_undo(node_id, axis, before, after)
+            if old_value != node.parameters[axis]:
+                self._undo_stack.push(create_param_change_action(
+                    node_id, axis, old_value, node.parameters[axis],
+                    self._undo_param, self._redo_param))
+        self._undo_stack.end_group(I18N.tr("keyframes.link_scale_axes", "Link X and Y scale"))
+        self._refresh_keyframes_and_spline_for_node(node_id)
+        self.refresh_transport_keyframe_markers()
+
+    def _refresh_motion_blur_switches(self, node_id: str, param_name: str) -> None:
+        _sync_composite_parameter_values(self, node_id, param_name)
+        self._refresh_keyframes_and_spline_for_node(node_id)
+        self._publish_timeline_metadata()
+
+    def _undo_param(self, data: dict) -> None:
+        self._restore_parameter_value(data["node_id"], data["param"], data["old"])
+
+    def _redo_param(self, data: dict) -> None:
+        self._restore_parameter_value(data["node_id"], data["param"], data["new"])
+
+    def _restore_parameter_value(self, node_id: str, param_name: str, value: Any) -> None:
+        node = self._node_graph.get_node(node_id)
+        if node is None:
+            return
+        if param_name == "trim_range":
+            self._restore_video_trim_snapshot(node, value)
+            _sync_composite_parameter_values(self, node_id, "source_in", "source_out")
+            self._refresh_keyframes_and_spline_for_node(node_id)
+        else:
+            self._node_graph.set_node_parameter(node_id, param_name, value)
+            if node.node_type == "video_frame" and param_name in ("source_in", "source_out"):
+                self._sync_video_trim_layer(node)
+            if param_name in ("motion_blur", MOTION_BLUR_ENABLED_PARAM):
+                self._refresh_motion_blur_switches(node_id, param_name)
+            else:
+                _sync_composite_parameter_values(self, node_id, param_name)
+                if param_name == "mode" and node.node_type == "constant":
+                    self._refresh_keyframes_and_spline_for_node(node_id)
+        self._evaluate_graph()
         self.update_viewer_handles()
 
     def _flush_param_changes(self) -> None:
@@ -7818,6 +7944,7 @@ class CompositePage(QWidget):
         # 更新所有节点的参数值
         for node_id in node_ids:
             self._node_graph.set_node_parameter(node_id, param_name, new_value)
+            _sync_composite_parameter_values(self, node_id, param_name)
 
         # Accumulate batch changes for undo
         # U-03（AUD 批量归属）：80ms 防抖窗口内若第二个参数（或另一节点
@@ -7878,23 +8005,7 @@ class CompositePage(QWidget):
             if node_id in old_values:
                 self._node_graph.set_node_parameter(
                     node_id, param_name, old_values.get(node_id))
-
-        # Refresh properties panel
-        if hasattr(self, '_properties_panel') and self._properties_panel:
-            nodes_data = []
-            for node_id in node_ids:
-                node = self._node_graph.get_node(node_id)
-                if node:
-                    nodes_data.append({
-                        'node_id': node_id,
-                        'node_type': node.node_type,
-                        'node_title': node.node_title,
-                        'parameters': node.parameters,
-                        'enabled': not node.disabled,
-                        'node_color': getattr(node, 'header_color', '#666666'),
-                        'read_only': _page_node_is_locked(self, node_id),
-                    })
-            self._properties_panel.set_nodes(nodes_data)
+                _sync_composite_parameter_values(self, node_id, param_name)
 
         self._evaluate_graph()
 
@@ -7906,23 +8017,7 @@ class CompositePage(QWidget):
 
         for node_id in node_ids:
             self._node_graph.set_node_parameter(node_id, param_name, new_value)
-
-        # Refresh properties panel
-        if hasattr(self, '_properties_panel') and self._properties_panel:
-            nodes_data = []
-            for node_id in node_ids:
-                node = self._node_graph.get_node(node_id)
-                if node:
-                    nodes_data.append({
-                        'node_id': node_id,
-                        'node_type': node.node_type,
-                        'node_title': node.node_title,
-                        'parameters': node.parameters,
-                        'enabled': not node.disabled,
-                        'node_color': getattr(node, 'header_color', '#666666'),
-                        'read_only': _page_node_is_locked(self, node_id),
-                    })
-            self._properties_panel.set_nodes(nodes_data)
+            _sync_composite_parameter_values(self, node_id, param_name)
 
         self._evaluate_graph()
 
@@ -8222,6 +8317,7 @@ class CompositePage(QWidget):
         if _page_node_is_locked(self, node_id):
             return
         self._node_graph.set_node_parameter(node_id, param_name, value)
+        _sync_composite_parameter_values(self, node_id, param_name)
         self._evaluate_graph()
 
     def _refresh_properties_panel(self, node_id: str) -> None:
@@ -8231,18 +8327,17 @@ class CompositePage(QWidget):
         if node and props is not None:
             param_options = node.get_param_options() if hasattr(node, 'get_param_options') else {}
             param_defs = node.get_param_defs() if hasattr(node, 'get_param_defs') else {}
-            # The node store keeps the static/base value. Properties should
-            # display the value evaluated at the shared composition playhead,
-            # just like the Keyframes Value column does.
-            display_parameters = self._evaluated_node_params(
-                node, self._current_keyframe_frame())
             props.set_node(
                 node_id, node.node_type, node.display_title,
-                display_parameters, param_options, param_defs,
+                node.parameters, param_options, param_defs,
                 enabled=not node.disabled,
                 node_color=getattr(node, 'header_color', '#666666'),
                 read_only=_page_node_is_locked(self, node_id),
+                image_size=_parameter_image_size(self, node),
             )
+            sync_animated = getattr(props, "sync_animated_values", None)
+            if callable(sync_animated):
+                sync_animated(node_id, self._current_keyframe_frame())
 
     def _clear_stale_properties(self) -> None:
         """Clear properties panel if it shows a node that no longer exists."""
@@ -8265,6 +8360,9 @@ class CompositePage(QWidget):
             self._flush_batch_param_changes()
         if self._pending_param_change is not None:
             self._flush_param_changes()
+        linked_scale = self.__dict__.get("_linked_scale_edit")
+        if linked_scale is not None:
+            self._finish_linked_scale_edit(linked_scale[0])
 
     def undo(self) -> None:
         """Undo the last action."""
@@ -8374,6 +8472,8 @@ class CompositePage(QWidget):
         self._keyframes_panel = panel
         if panel is None:
             return
+        if hasattr(panel, "set_scale_link_state") and "_scale_link_state" in self.__dict__:
+            panel.set_scale_link_state(self._scale_link_state)
         if hasattr(panel, "set_view_mode"):
             try:
                 panel.set_view_mode("timeline")
@@ -8477,6 +8577,8 @@ class CompositePage(QWidget):
                 self._on_keyframes_panel_layer_delete)
         if hasattr(panel, 'layer_edit_committed'):
             panel.layer_edit_committed.connect(self._on_keyframes_layer_edit_committed)
+        if hasattr(panel, 'layer_shy_about_to_commit'):
+            panel.layer_shy_about_to_commit.connect(self._commit_pending_edit_transactions)
         if hasattr(panel, 'generated_layer_requested'):
             panel.generated_layer_requested.connect(self._on_keyframes_generated_layer)
         if hasattr(panel, 'remove_layer_effect_requested'):
@@ -8496,6 +8598,8 @@ class CompositePage(QWidget):
         # New keyframes should capture the node's live parameter value.
         if hasattr(panel, 'set_value_provider'):
             panel.set_value_provider(self._kf_panel_param_value)
+        if hasattr(panel, 'set_parameter_image_size_provider'):
+            panel.set_parameter_image_size_provider(lambda node: _parameter_image_size(self, node))
         # Align the panel's timeline range with the comp clip's frame range.
         if hasattr(self, "_sync_keyframes_panel_frame_range"):
             self._sync_keyframes_panel_frame_range()
@@ -8578,48 +8682,10 @@ class CompositePage(QWidget):
         on an animated property anchored to what the user actually sees,
         instead of jumping back to the node's static/base parameter value.
         """
-        if self._node_graph is None:
-            return None
-        try:
-            node = self._node_graph.get_node(node_id)
-        except Exception:
-            return None
+        node = self._node_graph.get_node(node_id) if self._node_graph is not None else None
         if node is None:
             return None
-        try:
-            track_data = getattr(node, "keyframe_tracks", {}).get(param_name)
-            if isinstance(track_data, dict) and track_data.get("keyframes"):
-                from src.shared.keyframe import keyframe_track_from_dict
-                pdef = node.get_param_defs().get(param_name)
-                value_type = getattr(pdef, "ptype", "") or track_data.get(
-                    "value_type", "scalar")
-                track = keyframe_track_from_dict({
-                    "param_name": param_name,
-                    "value_type": value_type,
-                    "keyframes": track_data.get("keyframes", []),
-                    "min_val": track_data.get("min_val", 0.0),
-                    "max_val": track_data.get("max_val", 1.0),
-                    "pre_extrap": track_data.get("pre_extrap", "constant"),
-                    "post_extrap": track_data.get("post_extrap", "constant"),
-                })
-                base = getattr(node, "parameters", {}).get(param_name, 0.0)
-                value = track.get_value(
-                    self.get_composite_current_frame(), default=base)
-                return value
-        except (TypeError, ValueError, AttributeError, KeyError):
-            pass
-        try:
-            raw = node.parameters.get(param_name)
-            return raw
-        except (TypeError, ValueError, AttributeError):
-            pass
-        try:
-            pdef = node.get_param_defs().get(param_name)
-            if pdef is not None:
-                return pdef.default
-        except (TypeError, ValueError, AttributeError):
-            pass
-        return None
+        return node.parameter_value_at_frame(param_name, self._current_keyframe_frame())
 
     def set_keyframes_transport(self, transport: object | None) -> None:
         """Install the transport delegate that drives the viewport bar.
@@ -8681,22 +8747,13 @@ class CompositePage(QWidget):
             self.comp_play()
         else:
             self.comp_pause()
-        self._notify_kf_panel_play_state()
+        self.notify_external_play_state(self._comp_playing)
 
     def _notify_kf_panel_play_state(self) -> None:
-        panel = getattr(self, '_keyframes_panel', None)
         playing = bool(getattr(self, '_comp_playing', False))
-        if panel is not None and hasattr(panel, 'set_playing_state'):
-            try:
-                panel.set_playing_state(playing)
-            except Exception:
-                pass
-        spline = getattr(self, '_spline_panel', None)
-        if spline is not None and hasattr(spline, 'set_playing_state'):
-            try:
-                spline.set_playing_state(playing)
-            except Exception:
-                pass
+        self.notify_external_play_state(playing)
+        self.composite_playing_changed.emit(playing)
+
     def _refresh_keyframes_panel(self) -> None:
         """Rebuild the Keyframes panel model from the current graph."""
         panel = getattr(self, '_keyframes_panel', None)
@@ -8913,19 +8970,8 @@ class CompositePage(QWidget):
         self._emit_user_edit_once()
         self._evaluate_graph()
         kf_panel = getattr(self, '_keyframes_panel', None)
-        dragging_value = bool(
-            getattr(kf_panel, 'property_value_drag_active', False))
-        props = getattr(self, '_properties_panel', None)
-        if dragging_value and props is not None and hasattr(
-                props, 'sync_animated_values'):
-            # Track points and the Properties control update live, but avoid
-            # rebuilding either panel while the mouse is still down.
-            props.sync_animated_values(
-                node_id, self._current_keyframe_frame(), [param_name])
-        else:
-            # Discrete edits use the complete refresh path so row state,
-            # keyframe colors, values and the graph editor all agree.
-            self._refresh_properties_panel(node_id)
+        _sync_composite_parameter_values(self, node_id, param_name, refresh_animated=True)
+        if not getattr(kf_panel, 'property_value_drag_active', False):
             self._refresh_keyframes_and_spline_for_node(node_id)
         # P2: keep transport-bar markers in sync with the edited track.
         self.refresh_transport_keyframe_markers()
@@ -8933,7 +8979,7 @@ class CompositePage(QWidget):
     def _on_keyframes_property_value_drag_finished(
             self, node_id: str, param_name: str) -> None:
         """Complete a Keyframes Value scrub after the mouse is released."""
-        self._refresh_properties_panel(node_id)
+        _sync_composite_parameter_values(self, node_id, param_name, refresh_animated=True)
         self._refresh_keyframes_and_spline_for_node(node_id)
         self.refresh_transport_keyframe_markers()
 
@@ -9201,10 +9247,9 @@ class CompositePage(QWidget):
         self._evaluate_graph()
         self._sync_keyframes_panel_frame_range()
         self._refresh_keyframes_and_spline_for_node(node_id)
-        # The selected Video Frame node exposes the same source trim through
-        # its Properties panel; keep the In/Out handles and fields in sync
-        # after a Keyframes layer-bar edit.
-        self._refresh_properties_panel(node_id)
+        if video_param_edit is not None:
+            _sync_composite_parameter_values(self, video_param_edit["node_id"],
+                                             *video_param_edit["after"])
 
     def _restore_node_time_range(self, data: dict, which: str) -> None:
         """Apply the before/after time_range snapshot (P2)."""
@@ -9241,8 +9286,9 @@ class CompositePage(QWidget):
         self._node_graph.bump_generation()
         self._evaluate_graph()
         self._sync_keyframes_panel_frame_range()
-        self._refresh_properties_panel(data["node_id"])
         self._refresh_keyframes_and_spline_for_node(data["node_id"])
+        if video_node_id and params:
+            _sync_composite_parameter_values(self, video_node_id, *params)
 
     def _on_keyframes_panel_play_range_changed(self, in_frame: int,
                                                out_frame: int) -> None:
@@ -10329,8 +10375,7 @@ class CompositePage(QWidget):
         # coalescing benefit during a drag.
         self._evaluate_graph_now()
 
-        # Update properties panel to show current values (S5-14)
-        self._refresh_properties_panel(node_id)
+        _sync_composite_parameter_values(self, node_id, *params, refresh_animated=True)
 
         # Update viewer handles to match new parameter values (S5-14)
         self.update_viewer_handles()
@@ -10973,33 +11018,11 @@ class CompositePage(QWidget):
         """
         params = dict(node.parameters)
         tracks = getattr(node, 'keyframe_tracks', None) or {}
-        if not tracks:
-            return params
-        from src.shared.keyframe import ColorKeyframeTrack, Keyframe, KeyframeTrack
-        for pname, track_data in tracks.items():
-            if not isinstance(track_data, dict):
-                continue
-            kfs = track_data.get('keyframes')
-            if not kfs:
-                continue
-            try:
-                pdef = node.get_param_defs().get(pname)
-                track = (ColorKeyframeTrack if getattr(pdef, "ptype", "") == "color"
-                         or track_data.get("value_type") == "color"
-                         else KeyframeTrack)(
-                    param_name=pname,
-                    min_val=float(track_data.get('min_val', 0.0)),
-                    max_val=float(track_data.get('max_val', 1.0)),
-                    pre_extrap=track_data.get('pre_extrap', 'constant'),
-                    post_extrap=track_data.get('post_extrap', 'constant'))
-                for kf_data in kfs:
-                    track.add_keyframe(Keyframe.from_dict(kf_data))
-                default = params.get(pname, (0.0, 0.0, 0.0, 1.0)
-                                     if getattr(pdef, "ptype", "") == "color"
-                                     else 0.0)
-                params[pname] = track.get_value(int(frame), default=default)
-            except Exception:
-                continue
+        sample = getattr(node, "parameter_value_at_frame", None)
+        if callable(sample):
+            for name in tracks:
+                if node.is_param_animated(name):
+                    params[name] = sample(name, frame)
         return params
 
     def _refresh_viewer_handles_for_frame(self) -> None:

@@ -75,7 +75,6 @@ from .layer_provenance import (
     LayerProvenanceResolver,
     LayerRoles,
     NodeProvenance,
-    choose_legacy_transform,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,6 +119,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
     # Emitted when composition markers change (B04); markers never affect
     # rendering so this is separate from layer_stack_changed.
     composition_markers_changed = pyqtSignal(str) if _HAVE_QT else None
+    layer_shy_changed = pyqtSignal(str) if _HAVE_QT else None
     # Emitted when the compiler hit a conflict (plan §4.5).  Carries the
     # human-readable reason; the UI asks the user how to proceed.
     layer_stack_conflict = pyqtSignal(str, str) if _HAVE_QT else None
@@ -256,6 +256,16 @@ class LayerStackController(QObject if _HAVE_QT else object):
             return None
         return self.graph.get_node(roles.transform)
 
+    def layer_motion_blur_states(self, layers: Iterable[Layer]) -> dict[str, bool]:
+        """Read the authored switch for layers with an eligible Transform."""
+        states: dict[str, bool] = {}
+        for layer, chain in self.provenance.main_image_chains(layers):
+            transform_id, _, _ = self.provenance.main_transform(layer, chain)
+            transform = self.graph.get_node(transform_id) if transform_id is not None else None
+            if transform is not None and "motion_blur" in transform.parameters:
+                states[layer.layer_id] = bool(transform.parameters["motion_blur"])
+        return states
+
     def _layer_main_chain(self, layer: Layer) -> List[str]:
         """Walk the layer's explicit image main chain, chain head → source.
 
@@ -263,34 +273,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
         layers (their root/source/transform) so a shared upstream branch can
         never leak into this layer's role resolution (B01 §1.4).
         """
-        chain = [layer.root_node_id]
-        source_id = layer.source_node_id
-        if not source_id:
-            return chain
-        foreign: set[str] = set()
-        for other in self.graph.get_all_layers():
-            if other.layer_id == layer.layer_id:
-                continue
-            for node_id in (other.root_node_id, other.source_node_id,
-                            getattr(other, "transform_node_id", None)):
-                if node_id:
-                    foreign.add(node_id)
-        inputs = {(c.dst_node_id, c.dst_port_name): c.src_node_id
-                  for c in self.graph.connections}
-        while chain[-1] != source_id:
-            node = self.graph.get_node(chain[-1])
-            if node is None:
-                break
-            if getattr(node, "node_type", "") in {"precomp", "group"}:
-                break
-            port = next((port for port in node.inputs
-                         if port.data_type == "image"), None)
-            previous_id = inputs.get((node.id, port.name)) \
-                if port is not None else None
-            if not previous_id or previous_id in chain or previous_id in foreign:
-                break
-            chain.append(previous_id)
-        return chain
+        return next(self.provenance.main_image_chains((layer,)))[1]
 
     def _resolve_layer_transform(
             self, layer: Layer,
@@ -300,24 +283,10 @@ class LayerStackController(QObject if _HAVE_QT else object):
         Registered references win. Legacy layers can backfill the role only
         when their image chain contains a unique candidate.
         """
-        registered = getattr(layer, "transform_node_id", None)
-        if registered:
-            node = self.graph.get_node(registered)
-            if node is not None and node.node_type == "transform" and registered in chain:
-                return registered, False, False
-            # Registered but detached: identifiable, repairable missing state.
-            return None, True, False
-
-        transform_ids = frozenset(
-            node_id for node_id in chain
-            if getattr(self.graph.get_node(node_id), "node_type", "") == "transform")
-        candidate = choose_legacy_transform(tuple(chain), transform_ids)
-        if candidate is not None:
-            if backfill:
-                self._register_layer_transform(layer, candidate)
-            return candidate, False, False
-        ambiguous = any(node_id in transform_ids for node_id in chain)
-        return None, False, ambiguous
+        transform_id, missing, ambiguous = self.provenance.main_transform(layer, chain)
+        if backfill and transform_id is not None:
+            self._register_layer_transform(layer, transform_id)
+        return transform_id, missing, ambiguous
 
     def _register_layer_transform(self, layer: Layer, node_id: str) -> None:
         """Persist the stable transform role on the layer instance."""
@@ -2082,8 +2051,14 @@ class LayerStackController(QObject if _HAVE_QT else object):
         stack = self._stack_for_layer(layer_id) or self.main_stack()
         if stack is None:
             return False
+        if prop == "shy":
+            if not isinstance(value, bool) or layer.locked:
+                return False
+            if layer.shy != value:
+                self._set_layer_shy(layer, stack.stack_id, value, description, action_type)
+            return True
         mutable_props = {
-            "name", "enabled", "solo", "locked", "shy", "label_color",
+            "name", "enabled", "solo", "locked", "label_color",
             "opacity", "blend_mode", "parent_layer_id", "in_frame",
             "out_frame", "collapsed", "track_matte_layer_id",
             "track_matte_mode", "track_matte_invert", "audio",
@@ -2096,7 +2071,7 @@ class LayerStackController(QObject if _HAVE_QT else object):
             if not isinstance(value, str) or not value.strip():
                 return False
             value = value.strip()
-        elif prop in {"enabled", "solo", "locked", "shy", "collapsed"}:
+        elif prop in {"enabled", "solo", "locked", "collapsed"}:
             if not isinstance(value, bool):
                 return False
         elif prop == "opacity":
@@ -2184,6 +2159,37 @@ class LayerStackController(QObject if _HAVE_QT else object):
         self._handle_conflict(result, stack.stack_id)
         self.emit_changed(stack.stack_id)
         return True
+
+    def _set_layer_shy(self, layer: Layer, stack_id: str, shy: bool,
+                       description: str, action_type: str) -> None:
+        """Undo the presentation flag without restoring unrelated graph data."""
+        from .undo_stack import UndoAction
+
+        layer_id = layer.layer_id
+
+        def notify() -> None:
+            self.graph.bump_generation()
+            self.emit_changed(stack_id)
+            if self.layer_shy_changed is not None:
+                self.layer_shy_changed.emit(stack_id)
+
+        def restore(state: bool) -> None:
+            current = self.graph.get_layer(layer_id)
+            if current is not None:
+                current.shy = state
+                notify()
+
+        old = layer.shy
+        layer.shy = shy
+        if self.undo_stack is not None:
+            self.undo_stack.push(UndoAction(
+                action_type,
+                {"layer_id": layer_id, "prop": "shy", "old": old, "new": shy},
+                undo_fn=lambda data: restore(data["old"]),
+                redo_fn=lambda data: restore(data["new"]),
+                description=description or "Mark layer to hide",
+            ))
+        notify()
 
     def set_layer_visibility(self, layer_id: str, enabled: bool) -> bool:
         layer = self.graph.get_layer(layer_id)

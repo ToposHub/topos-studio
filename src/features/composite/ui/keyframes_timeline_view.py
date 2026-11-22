@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 from PyQt6.QtCore import QMimeData, Qt, QPoint, QPointF, QRectF, pyqtSignal
 from PyQt6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen, QPolygonF, QResizeEvent
@@ -33,6 +33,8 @@ _RULER_H = KEYFRAMES_RULER_H
 _LAYER_RULER_H = 54
 _NAVIGATOR_H = 16
 _LAYER_WORKAREA_TOP = 36
+_LAYER_RULER_LABEL_GAP = 48.0
+_CLOCK_TICK_STEPS = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800)
 _RANGE_GRIP_HIT = 10
 _MIN_RANGE_SPAN_PX = 16
 _ROW_H = KEYFRAMES_ROW_H
@@ -123,7 +125,7 @@ class KeyframesTimelineView(QWidget):
         self._media_drop_handler = None
         self.setAcceptDrops(True)
         # Ruler label mode + fps (pushed by the panel via set_display()).
-        self._display_mode_str: str = "frame"
+        self._display_mode_str: str = "time"
         self._fps_val: float = 24.0
         self.setMinimumWidth(300)
         self.setMouseTracking(True)
@@ -401,7 +403,6 @@ class KeyframesTimelineView(QWidget):
         # Partially scrolled rows must stay below the fixed ruler.
         p.save()
         p.setClipRect(0, self.ruler_height(), w, max(0, h - self.ruler_height()), Qt.ClipOperation.IntersectClip)
-        self._draw_grid(p, w, h)
 
         # Rows
         rows = self._model.visible_rows()
@@ -430,12 +431,7 @@ class KeyframesTimelineView(QWidget):
             self._draw_playhead(p, w, h)
 
     def _draw_ruler(self, p: QPainter, w: int) -> None:
-        """Draw adaptive major and minor ticks with frame or time labels.
-
-        Label spacing adapts to zoom (1-2-5 series) so labels never
-        overlap; labels show frame numbers or timecode depending on
-        ``state.display_mode``.
-        """
+        """Draw short ruler ticks and keep labels within the visible time range."""
         layers_mode = self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
         p.fillRect(0, 0, w, self.ruler_height(), QColor(C.BG_INPUT if layers_mode else C.BG_DARK))
         if layers_mode:
@@ -446,54 +442,26 @@ class KeyframesTimelineView(QWidget):
         tick_bottom = _LAYER_WORKAREA_TOP if layers_mode else self.ruler_height()
         label_top = _NAVIGATOR_H if layers_mode else _WORKAREA_H + 1
 
-        minor_step, major_step = self._tick_steps()
-        fm = self._fm
-        start_frame = int(fm.x_to_frame(-32.0, _ORIGIN_X))
-        if start_frame < 0:
-            start_frame = 0
-        end_frame = int(fm.x_to_frame(w + 32.0, _ORIGIN_X)) + 1
-        extent = self._layer_time_extent()
-        if extent is not None:
-            start_frame = max(start_frame, extent[0])
-            end_frame = min(end_frame, extent[1])
-
-        minor_col = QColor(C.BORDER_DARK)
-        major_col = QColor(C.TEXT_HINT)
-
-        # Minor ticks: short marks at the ruler bottom.
-        if minor_step < major_step and minor_step * fm.pixels_per_frame >= 4.0:
-            p.setPen(QPen(minor_col))
-            f = math.ceil(start_frame / minor_step) * minor_step
-            while f <= end_frame:
-                if f % major_step != 0:
-                    x = fm.frame_to_x(f, _ORIGIN_X)
-                    if 0 <= x <= w:
-                        p.drawLine(int(x), tick_bottom - 4, int(x), tick_bottom - 1)
-                f += minor_step
-
-        # Major ticks + labels.
         font = QFont(p.font())
         font.setPointSize(8)
         p.setFont(font)
         fmetrics = p.fontMetrics()
+        minor_pen = QPen(QColor(C.BORDER_DARK))
+        major_pen = QPen(QColor(C.TEXT_HINT))
         label_col = QColor(C.TEXT_LABEL if layers_mode else C.TEXT_HINT)
-        f = math.ceil(start_frame / major_step) * major_step
-        while f <= end_frame:
-            x = fm.frame_to_x(f, _ORIGIN_X)
-            if 0 <= x <= w:
-                p.setPen(QPen(major_col))
-                p.drawLine(int(x), tick_bottom - 7, int(x), tick_bottom - 1)
-                label = self._ruler_label(f)
-                lx = int(x) + 3
-                if lx < 2:
-                    lx = 2
-                # Skip labels that would run past the right edge.
-                if lx + fmetrics.horizontalAdvance(label) <= w:
+        next_label_x = 2
+        for x, label in self._ruler_ticks(w):
+            tick_x = round(x)
+            p.setPen(major_pen if label else minor_pen)
+            p.drawLine(tick_x, tick_bottom - (7 if label else 4), tick_x, tick_bottom - 1)
+            if label:
+                lx = tick_x + 3
+                label_end = lx + fmetrics.horizontalAdvance(label)
+                if lx >= next_label_x and label_end <= w:
                     p.setPen(QPen(label_col))
                     p.drawText(lx, label_top, w - lx, tick_bottom - label_top - 5,
-                               Qt.AlignmentFlag.AlignVCenter |
-                               Qt.AlignmentFlag.AlignLeft, label)
-            f += major_step
+                               Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+                    next_label_x = label_end + 8
 
         if layers_mode:
             self._draw_composition_markers(p, w)
@@ -526,6 +494,64 @@ class KeyframesTimelineView(QWidget):
                     QPointF(x - 4, y - 8), QPointF(x + 4, y - 8), QPointF(x, y),
                 ]))
 
+    def _ruler_ticks(self, width: int) -> Iterator[tuple[float, str]]:
+        """Yield visible x coordinates and optional labels for the current zoom."""
+        mapper = self._fm
+        ppf = mapper.pixels_per_frame
+        extent = self._layer_time_extent()
+        first = mapper.x_to_frame(0.0, _ORIGIN_X)
+        last = mapper.x_to_frame(width, _ORIGIN_X)
+        if extent is not None:
+            first = max(first, extent[0])
+            last = min(last, extent[1])
+        else:
+            first = max(first, 0)
+
+        adaptive = (self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
+                    and self._display_mode() == "time")
+        show_seconds = adaptive and _LAYER_RULER_LABEL_GAP / ppf > min(10.0, self._fps() / 2)
+        frames_per_unit = self._fps() if show_seconds else 1.0
+        if show_seconds:
+            target = _LAYER_RULER_LABEL_GAP / (ppf * frames_per_unit)
+            if target > _CLOCK_TICK_STEPS[-1]:
+                _, hours = self._numeric_tick_steps(target / 3600)
+                major = hours * 3600
+            else:
+                major = next(step for step in _CLOCK_TICK_STEPS if step >= target)
+            minor = next((major // parts for parts in (5, 4, 3, 2) if major % parts == 0), major)
+        elif adaptive:
+            minor, major = self._numeric_tick_steps(_LAYER_RULER_LABEL_GAP / ppf)
+        else:
+            minor, major = self._tick_steps()
+        if minor * frames_per_unit * ppf < 4.0:
+            minor = major
+
+        # Calculate time ticks from absolute seconds using the real rate. A
+        # nominal 24 fps interval would accumulate drift at 23.976 fps.
+        start = math.ceil(first / (minor * frames_per_unit) - 1e-9) * minor
+        stop = math.floor(last / frames_per_unit + 1e-9)
+        for tick in range(start, stop + 1, minor):
+            x = mapper.frame_to_x(tick * frames_per_unit, _ORIGIN_X)
+            label = ""
+            if tick % major == 0:
+                label = (self._adaptive_ruler_label(tick, seconds=show_seconds)
+                         if adaptive else self._ruler_label(tick))
+            yield x, label
+
+    @staticmethod
+    def _adaptive_ruler_label(tick: int, *, seconds: bool) -> str:
+        sign = "−" if tick < 0 else ""
+        value = abs(tick)
+        if not seconds:
+            return f"{sign}{value:02d}f"
+        minutes, second = divmod(value, 60)
+        hours, minute = divmod(minutes, 60)
+        if hours:
+            return f"{sign}{hours}:{minute:02d}:{second:02d}"
+        if minutes:
+            return f"{sign}{minute}:{second:02d}"
+        return f"{sign}{second:02d}s"
+
     def _tick_steps(self) -> Tuple[int, int]:
         """Adaptive (minor, major) tick steps in frames (1-2-5 series).
 
@@ -536,19 +562,20 @@ class KeyframesTimelineView(QWidget):
         min_px = 78.0 if mode == "timecode" else 56.0
         ppf = max(self._fm.pixels_per_frame, 1e-6)
         target = min_px / ppf
-        if target <= 1.0:
-            return 1, 1
-        time_labels = (self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
-                       and mode in ("time", "timecode"))
-        unit = 1
-        if time_labels:
+        if target > 1.0 and mode == "timecode" and self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
             fps = max(1, round(self._fps()))
             if target <= fps:
                 step = next(value for value in range(math.ceil(target), fps + 1) if fps % value == 0)
                 minor = next((step // count for count in (5, 4, 3, 2) if step % count == 0), 1)
                 return minor, step
-            unit = fps
-            target /= unit
+            minor, major = self._numeric_tick_steps(target / fps)
+            return minor * fps, major * fps
+        return self._numeric_tick_steps(target)
+
+    @staticmethod
+    def _numeric_tick_steps(target: float) -> tuple[int, int]:
+        if target <= 1.0:
+            return 1, 1
         exp = math.floor(math.log10(target))
         base = 10.0 ** exp
         major = base * 10.0
@@ -558,11 +585,9 @@ class KeyframesTimelineView(QWidget):
                 major = base * m
                 mantissa = m
                 break
-        major_i = max(1, int(round(major)) * unit)
+        major_i = max(1, round(major))
         subdiv = 4 if 1.5 < mantissa <= 2.5 else 5
-        minor_i = major_i // subdiv if major_i % subdiv == 0 else unit
-        if minor_i >= major_i:
-            minor_i = major_i
+        minor_i = major_i // subdiv if major_i % subdiv == 0 else 1
         return minor_i, major_i
 
     def _display_mode(self) -> str:
@@ -573,14 +598,6 @@ class KeyframesTimelineView(QWidget):
         mode = self._display_mode()
         if mode == "timecode":
             return self._format_timecode(frame)
-        if mode == "time" and self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
-            seconds, subframe = divmod(frame, max(1, round(self._fps())))
-            minutes, seconds = divmod(seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-            clock = f"{minutes:02d}:{seconds:02d}"
-            if hours:
-                clock = f"{hours}:{clock}"
-            return f"{clock}+{subframe:02d}f" if subframe else clock
         if mode == "seconds":
             fps = self._fps()
             return f"{frame / fps:.2f}s" if fps > 0 else str(frame)
@@ -591,12 +608,13 @@ class KeyframesTimelineView(QWidget):
 
     def _format_timecode(self, frame: int) -> str:
         fps_i = max(1, int(round(self._fps())))
-        total = max(0, int(frame))
+        total = abs(int(frame))
         ff = total % fps_i
         ss = (total // fps_i) % 60
         mm = (total // fps_i // 60) % 60
         hh = total // fps_i // 3600
-        return f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
+        sign = "−" if frame < 0 else ""
+        return f"{sign}{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
 
     def _navigator_rail(self) -> QRectF:
         return QRectF(7, 3, max(1, self.width() - 14), 10)
@@ -718,25 +736,6 @@ class KeyframesTimelineView(QWidget):
         if 0 <= x1 <= w:
             p.drawRect(int(x1) - 1, _PROJECT_RANGE_Y, 2,
                        cap_height)
-
-    def _draw_grid(self, p: QPainter, w: int, h: int) -> None:
-        """Project major ruler ticks into the layer canvas."""
-        if self._model.view_mode != KeyframesModel.VIEW_MODE_LAYERS:
-            return
-        _, step = self._tick_steps()
-        first_frame = self._fm.x_to_frame(0.0, _ORIGIN_X)
-        end = math.floor(self._fm.x_to_frame(w, _ORIGIN_X))
-        extent = self._layer_time_extent()
-        if extent is not None:
-            first_frame = max(first_frame, extent[0])
-            end = min(end, extent[1])
-        start = max(0, math.ceil(first_frame / step) * step)
-        color = QColor(C.TEXT_LABEL)
-        color.setAlpha(18)
-        p.setPen(QPen(color))
-        for frame in range(start, end + 1, step):
-            x = int(self._fm.frame_to_x(frame, _ORIGIN_X))
-            p.drawLine(x, self.ruler_height(), x, h)
 
     def _draw_out_of_range_shade(self, p: QPainter, w: int, h: int) -> None:
         """Subtle shade over the track area outside the work area."""
@@ -1047,8 +1046,9 @@ class KeyframesTimelineView(QWidget):
             summary = self._hit_paired_keyframe_summary(x, y)
             if summary is not None:
                 row, frame = summary
-                self._model.set_row_expanded(row.row_id, True)
-                self.property_group_revealed.emit(row.node_id)
+                if self._model.view_mode != KeyframesModel.VIEW_MODE_LAYERS:
+                    self._model.set_row_expanded(row.row_id, True)
+                    self.property_group_revealed.emit(row.node_id)
                 self.set_current_frame(frame)
                 self.current_frame_changed.emit(frame)
                 return
@@ -1331,10 +1331,16 @@ class KeyframesTimelineView(QWidget):
             menu.addSeparator()
 
         mode = self._display_mode()
+        layers_mode = self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
+        act_auto = None
+        if layers_mode:
+            act_auto = menu.addAction(I18N.tr("keyframes.ruler_automatic", "Automatic"))
+            act_auto.setCheckable(True)
+            act_auto.setChecked(mode == "time")
         act_frame = menu.addAction(
             I18N.tr("keyframes.ruler_frames", "Frame numbers"))
         act_frame.setCheckable(True)
-        act_frame.setChecked(mode in ("frame", "time", "seconds"))
+        act_frame.setChecked(mode == "frame" if layers_mode else mode in ("frame", "time", "seconds"))
         act_tc = menu.addAction(
             I18N.tr("keyframes.ruler_timecode", "Timecode"))
         act_tc.setCheckable(True)
@@ -1343,7 +1349,9 @@ class KeyframesTimelineView(QWidget):
         chosen = menu.exec(event.globalPos())
         if chosen is None:
             return
-        if chosen is act_frame:
+        if chosen is act_auto:
+            self._set_display_mode("time")
+        elif chosen is act_frame:
             self._set_display_mode("frame")
         elif chosen is act_tc:
             self._set_display_mode("timecode")

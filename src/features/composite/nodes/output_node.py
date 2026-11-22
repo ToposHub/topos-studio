@@ -28,6 +28,8 @@ from src.features.composite.core.format import ImageFormat, BBox
 from src.features.composite.core.color_space import ColorSpace
 from src.features.composite.core.layer_model import EMPTY_LAYER_OUTPUT_PARAM
 
+MOTION_BLUR_ENABLED_PARAM = "motion_blur_enabled"
+
 
 class OutputNode(Node):
     """Terminal output node for the composite graph."""
@@ -68,6 +70,8 @@ class OutputNode(Node):
         # motion-blur 消费节点经 CompositeEvalContext.motion_blur_shutter 读取。
         ParamDef("motion_blur_shutter", "float", 0.5, min_val=0.0, max_val=1.0,
                  step=0.05, group="Motion Blur"),
+        ParamDef(MOTION_BLUR_ENABLED_PARAM, "bool", True, hidden=True,
+                 allow_expression=False),
         ParamDef("width", "int", 1920, min_val=1, max_val=16384, step=1),
         ParamDef("height", "int", 1080, min_val=1, max_val=16384, step=1),
         # Output color space: controls whether the Output node bakes a colour
@@ -97,6 +101,7 @@ class OutputNode(Node):
         self.parameters = {
             "format_mode": "input",
             "output_name": "display",
+            MOTION_BLUR_ENABLED_PARAM: True,
             "width": 1920,
             "height": 1080,
             "output_color_space": "same",

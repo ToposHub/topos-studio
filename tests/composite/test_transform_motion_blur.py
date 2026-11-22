@@ -12,8 +12,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
 
-from src.features.composite.core.node_engine import NODE_REGISTRY
+from src.features.composite.core.layer_stack_controller import LayerStackController
+from src.features.composite.core.node_engine import NodeGraph
+from src.features.composite.evaluators.base_evaluator import BaseEvaluatorMixin
+from src.features.composite.nodes.base_node import TextureResult
+from src.features.composite.nodes.constant_node import ConstantNode
+from src.features.composite.nodes.output_node import MOTION_BLUR_ENABLED_PARAM, OutputNode
 from src.features.composite.nodes.transform_node import TransformNode
+from src.features.composite.render.cache_manager import CacheManager
+from src.features.composite.render.render_scheduler import RenderScheduler
+from src.shared.keyframe import Keyframe, KeyframeTrack
 
 pytestmark = pytest.mark.composite_core
 
@@ -111,3 +119,95 @@ class TestNodeContract:
         before = node.param_revision
         node.set_parameter("samples", 12)
         assert node.param_revision > before
+
+
+@pytest.mark.parametrize("render_mode", ["preview", "export"])
+def test_layer_motion_blur_master_updates_render_at_the_same_frame(render_mode):
+    graph = NodeGraph()
+    aux = OutputNode(node_id="aux")
+    aux.set_parameter("output_name", "aux")
+    aux.set_parameter(MOTION_BLUR_ENABLED_PARAM, False)
+    graph.add_node(aux)
+    master = OutputNode(node_id="main-output")
+    graph.add_node(master)
+    controller = LayerStackController(graph, layer_stack_version=2)
+    controller.ensure_main_stack(master.id)
+    layer_id = controller.create_generated_layer("solid", "Foreground", {})
+    transform = controller.layer_transform_node(layer_id)
+    transform.set_parameter("motion_blur", True)
+    track = KeyframeTrack(param_name="translate_x", min_val=-1000.0, max_val=1000.0)
+    track.add_keyframe(Keyframe(0, 0.0))
+    track.add_keyframe(Keyframe(20, 24.0))
+    transform.set_keyframe_track("translate_x", track)
+
+    effect = TransformNode(node_id="transform-effect")
+    effect.set_parameter("motion_blur", True)
+    graph.add_node(effect)
+    assert graph.connect(graph.get_layer(layer_id).source_node_id, "result", effect.id, "image")
+    assert graph.connect(effect.id, "result", transform.id, "image")
+
+    precomp_id = controller.create_precomp_layer()
+    precomp = graph.get_node(graph.get_layer(precomp_id).root_node_id)
+    nested_stack = precomp.parameters["child_stack_id"]
+    source = ConstantNode(node_id="nested-source")
+    graph.add_node(source)
+    nested_id = controller.add_media_layer("Nested solid", source.id, stack_id=nested_stack,
+                                           _force_transform=True)
+    nested_transform = controller.layer_transform_node(nested_id)
+    nested_transform.set_parameter("motion_blur", True)
+
+    scheduler = RenderScheduler()
+    cache = CacheManager(None)
+    before = graph.snapshot(frame_number=10)
+    scheduler.plan(before, render_mode)
+    assert before.nodes[transform.id].parameters["motion_blur"] is True
+
+    graph.set_node_parameter(master.id, MOTION_BLUR_ENABLED_PARAM, False)
+    after = graph.snapshot(frame_number=10)
+    plan = scheduler.plan(after, render_mode)
+    assert transform.id in plan.dirty_node_ids
+    assert effect.id not in plan.dirty_node_ids
+    assert nested_transform.id not in plan.dirty_node_ids
+    assert after.nodes[effect.id].parameters["motion_blur"] is True
+    assert after.nodes[nested_transform.id].parameters["motion_blur"] is True
+    assert transform.parameters["motion_blur"] is True
+    assert controller.layer_transform_node(layer_id).parameters["motion_blur"] is True
+
+    inputs = {"image": TextureResult(texture_id=1, width=320, height=240)}
+    evaluator = BaseEvaluatorMixin()
+    texture_keys = []
+    for snapshot, expected in ((before, True), (after, False)):
+        state = snapshot.nodes[transform.id]
+        texture_keys.append(cache.compute_key(state, inputs, render_mode=render_mode))
+        evaluator._snapshot = snapshot
+        marker = evaluator._create_ephemeral_node(state).evaluate(
+            inputs, None, None, render_mode=render_mode)
+        assert marker["_effect_params"]["motion_blur"] is expected
+    assert texture_keys[0] != texture_keys[1]
+
+    graph.set_node_parameter(master.id, MOTION_BLUR_ENABLED_PARAM, True)
+    assert graph.snapshot(frame_number=10).nodes[transform.id].parameters["motion_blur"] is True
+
+
+def test_layer_motion_blur_master_round_trips_and_defaults_on_for_old_graphs():
+    graph = NodeGraph()
+    out = OutputNode(node_id="out")
+    graph.add_node(out)
+    controller = LayerStackController(graph)
+    layer_id = controller.create_generated_layer("solid", "Legacy layer", {})
+    transform = controller.layer_transform_node(layer_id)
+    transform.set_parameter("motion_blur", True)
+    out.set_parameter(MOTION_BLUR_ENABLED_PARAM, False)
+    data = graph.to_dict()
+    data["layers"][layer_id].pop("transform_node_id")
+
+    disabled = NodeGraph.from_dict(data)
+    assert disabled.get_node(out.id).parameters[MOTION_BLUR_ENABLED_PARAM] is False
+    assert disabled.snapshot().nodes[transform.id].parameters["motion_blur"] is False
+    assert disabled.get_layer(layer_id).transform_node_id is None
+
+    out_payload = next(item for item in data["nodes"] if item["id"] == out.id)
+    out_payload["parameters"].pop(MOTION_BLUR_ENABLED_PARAM)
+    legacy = NodeGraph.from_dict(data)
+    assert legacy.get_node(out.id).parameters[MOTION_BLUR_ENABLED_PARAM] is True
+    assert legacy.snapshot().nodes[transform.id].parameters["motion_blur"] is True

@@ -15,12 +15,22 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
+import time
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
 
-from src.app.controllers.page_controller import _KeyframesTimelineTransport
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
+
+from src.app.controllers.page_controller import (
+    PageManagementMixin,
+    _KeyframesTimelineTransport,
+)
+from src.features.color.ui.canvas import VideoControlBar
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.keyframes_panel import KeyframesPanel
 
@@ -119,6 +129,69 @@ def test_no_transport_falls_back_to_comp_engine(page_with_panel):
     panel._act_play.setChecked(True)
     assert getattr(page, "_comp_playing", False)
     page.comp_pause()
+
+
+@pytest.mark.parametrize("start_in_layers", [True, False])
+def test_independent_playback_keeps_layer_and_viewer_playheads_in_sync(
+    page_with_panel, monkeypatch, start_in_layers: bool,
+) -> None:
+    page, panel = page_with_panel
+    page._is_comp_clip = True
+    bar = VideoControlBar()
+    host = PageManagementMixin()
+    host.composite_page = page
+    host.composite_viewer = SimpleNamespace(video_control_bar=bar)
+    host._configure_composite_comp_clip_controls()
+    refresh_values = Mock(wraps=panel._tree_view.refresh)
+    monkeypatch.setattr(panel._tree_view, "refresh", refresh_values)
+    panel_seeks: list[int] = []
+    panel.current_frame_changed.connect(panel_seeks.append)
+
+    try:
+        if start_in_layers:
+            QTest.keyClick(panel._tree_view, Qt.Key.Key_Space)
+        else:
+            bar.btn_play.click()
+        assert page._comp_playing and page._drive_active
+
+        tick_time = page._comp_play_start_time + 20.5 / page.comp_clip_fps()
+        with monkeypatch.context() as clock:
+            clock.setattr(time, "perf_counter", lambda: tick_time)
+            page._on_comp_playback_tick()
+
+        assert bar.current_frame == 20
+        assert panel._timeline_view._current_frame == 20
+        assert panel._time_display.current_frame == 20
+        assert panel._act_play.isChecked() and bar.is_playing
+        assert panel_seeks == []
+        refresh_values.assert_not_called()
+
+        if start_in_layers:
+            bar.btn_play.click()
+        else:
+            QTest.keyClick(panel._timeline_view, Qt.Key.Key_Space)
+        assert not page._comp_playing
+        assert not panel._act_play.isChecked() and not bar.is_playing
+        assert panel._tree_view._current_frame == 20
+
+        bar.seek_requested.emit(31)
+        assert panel._timeline_view._current_frame == 31
+        panel.seek_to_frame(40)
+        assert bar.current_frame == 40
+        assert panel_seeks == [40]
+
+        bar.btn_loop.setChecked(False)
+        bar.btn_play.click()
+        end_time = page._comp_play_start_time + CLIP_FRAMES / page.comp_clip_fps()
+        with monkeypatch.context() as clock:
+            clock.setattr(time, "perf_counter", lambda: end_time)
+            page._on_comp_playback_tick()
+        assert panel._timeline_view._current_frame == bar.current_frame == CLIP_FRAMES - 1
+        assert not panel._act_play.isChecked() and not bar.is_playing
+    finally:
+        page.comp_pause()
+        host._teardown_comp_clip_bar_slots()
+        bar.close()
 
 
 def test_broken_transport_falls_back_to_comp_engine(page_with_panel):

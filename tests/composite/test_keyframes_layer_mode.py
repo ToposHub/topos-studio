@@ -110,7 +110,7 @@ def test_groups_follow_render_nodes_and_collapse_by_view_identity():
     assert all(row.locked for row in model.rows)
 
 
-def test_filter_reveals_component_ancestors_without_changing_expansion():
+def test_filter_reveals_matching_vectors_without_splitting_dimensions():
     graph = NodeGraph()
     graph.add_node(OutputNode(node_id="out"))
     controller = LayerStackController(graph, layer_stack_version=2)
@@ -121,18 +121,17 @@ def test_filter_reveals_component_ancestors_without_changing_expansion():
     model = KeyframesModel()
     model.set_filter("animated")
     model.rebuild_layers(controller, selected_layer_id=layer_id)
-    layer_row, transform_row, position_row, x_row = model.visible_rows()
+    layer_row, transform_row, position_row = model.visible_rows()
     assert layer_row.layer_id == layer_id
     assert transform_row.row_id == f"layer:{layer_id}:group:transform"
     assert position_row.component_params == ("translate_x", "translate_y")
     assert position_row.node_id == root.id
-    assert x_row.row_id == f"param:{root.id}:translate_x"
-    assert model.track_for(x_row.row_id).keyframes[0].value == 40.0
+    assert model.track_for(f"param:{root.id}:translate_x").keyframes[0].value == 40.0
 
     model.set_filter("all")
     model.set_text_filter("translate_y")
     model.rebuild_layers(controller, selected_layer_id=layer_id)
-    assert model.visible_rows()[-1].row_id == f"param:{root.id}:translate_y"
+    assert model.visible_rows()[-1].row_id == position_row.row_id
     model.set_text_filter("")
     model.rebuild_layers(controller, selected_layer_id=layer_id)
     assert [r.row_type for r in model.visible_rows()] == ["layer"]
@@ -170,6 +169,7 @@ def test_legacy_layer_gains_groups_without_migrating_tracks_or_topology():
 def test_layer_options_apply_an_effect_without_opening_the_node_graph(qapp):
     from PyQt6.QtWidgets import QMenu
     from src.features.composite.ui.keyframes_panel import KeyframesPanel
+    from src.shared.i18n.i18n import I18N
 
     controller = _controller_with_layers(1)
     layer_id = controller.main_stack().layer_ids[0]
@@ -180,7 +180,8 @@ def test_layer_options_apply_an_effect_without_opening_the_node_graph(qapp):
     menu = QMenu(panel)
     layer = controller.graph.get_layer(layer_id)
     panel._populate_layer_menu(menu, layer, controller.layers_map(), [layer_id], True)
-    effects = [a.menu() for a in menu.actions() if a.menu()][0]
+    effects = next(a.menu() for a in menu.actions()
+                   if a.menu() and a.text() == I18N.tr("keyframes.layer_add_effect", "Add Effect"))
     assert effects.menuAction().isEnabled()
     committed = []
     panel.layer_edit_committed.connect(lambda *args: committed.append(args))

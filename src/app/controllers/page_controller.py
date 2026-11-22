@@ -1879,15 +1879,12 @@ class PageManagementMixin:
                     except TypeError:
                         break
             self._comp_clip_bar_slots = None
-        prev_frame_wiring = getattr(self, "_comp_clip_frame_wiring", None)
-        if prev_frame_wiring is not None:
-            prev_signal, prev_slot = prev_frame_wiring
-            while prev_signal is not None:
-                try:
-                    prev_signal.disconnect(prev_slot)
-                except TypeError:
-                    break
-            self._comp_clip_frame_wiring = None
+        for signal, slot in getattr(self, "_comp_clip_display_wiring", ()):
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+        self._comp_clip_display_wiring = []
 
     def _configure_composite_comp_clip_controls(self) -> None:
         """Wire the Composite viewer transport bar to the comp-clip playback.
@@ -1932,7 +1929,6 @@ class PageManagementMixin:
         def _on_scrub_started(frame) -> None:
             if getattr(page, "_comp_playing", False):
                 page.comp_toggle_play()
-                bar.set_playing(False)
             _on_scrub_moved(frame)
 
         def _on_scrub_moved(frame) -> None:
@@ -1946,10 +1942,6 @@ class PageManagementMixin:
 
         def _on_scrub_finished(_frame):
             pass
-
-        def _on_play() -> None:
-            page.comp_toggle_play()
-            bar.set_playing(page._comp_playing)
 
         def _on_next() -> None:
             page.comp_next_frame()
@@ -1990,7 +1982,7 @@ class PageManagementMixin:
             ("scrub_started", _on_scrub_started),
             ("scrub_moved", _on_scrub_moved),
             ("scrub_finished", _on_scrub_finished),
-            ("play_toggled", _on_play),
+            ("play_toggled", page.comp_toggle_play),
             ("next_frame", _on_next),
             ("prev_frame", _on_prev),
             ("first_frame", _on_first),
@@ -2016,7 +2008,7 @@ class PageManagementMixin:
             bar.set_total_frames(max(1, total))
             bar.set_current_frame(int(cur))
             bar.set_frame_rate(page.comp_clip_fps())
-            bar.set_playing(False)
+            bar.on_play_state_changed(bool(getattr(page, "_comp_playing", False)))
             # Seed an fps-based time display.
             fps = page.comp_clip_fps()
             bar.set_time_info(self._format_comp_time(int(cur), total, fps))
@@ -2036,12 +2028,13 @@ class PageManagementMixin:
             bar.set_current_frame(int(frame))
             bar.set_time_info(self._format_comp_time(
                 int(frame), page.comp_clip_total_frames(), page.comp_clip_fps()))
-        # [AUD-3100] 旧帧刷新槽已在函数开头统一拆卸（连信号源一起存储，
-        # 早退路径也能拆），这里只连接新槽。
-        fps_signal = getattr(page, "composite_frame_changed", None)
-        if fps_signal is not None:
-            fps_signal.connect(_refresh_display)
-            self._comp_clip_frame_wiring = (fps_signal, _refresh_display)
+        # Keep both display subscriptions scoped to the independent engine.
+        for name, slot in (("composite_frame_changed", _refresh_display),
+                           ("composite_playing_changed", bar.on_play_state_changed)):
+            signal = getattr(page, name, None)
+            if signal is not None:
+                signal.connect(slot)
+                self._comp_clip_display_wiring.append((signal, slot))
 
     @staticmethod
     def _format_comp_time(frame: int, total: int, fps: float) -> str:

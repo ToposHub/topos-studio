@@ -1068,9 +1068,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # timeline-bound 合成片段走时间线 controller 的 play/pause。
         if page.is_comp_clip_playback_active():
             page.comp_toggle_play()
-            bar = getattr(getattr(self, "composite_viewer", None), "video_control_bar", None)
-            if bar is not None:
-                bar.set_playing(page._comp_playing)
             return True
 
         # timeline-bound：复用 transport bar 的 play_toggled 信号，

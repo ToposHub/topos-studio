@@ -30,7 +30,7 @@ from src.features.composite.core.graph_edit import (
     EDIT_TYPE_MISMATCH,
 )
 from src.features.composite.nodes.color_node import COLORNode
-from src.features.composite.nodes.output_node import OutputNode
+from src.features.composite.nodes.output_node import MOTION_BLUR_ENABLED_PARAM, OutputNode
 from src.features.composite.nodes.image_input_node import ImageInputNode
 from src.features.composite.nodes.blend_node import MergeNode
 from src.features.composite.nodes.constant_node import ConstantNode
@@ -2142,6 +2142,27 @@ class NodeGraph:
                 frame_number, color_width, color_height, fps)
             return copy.deepcopy(errors)
 
+    def _apply_layer_motion_blur_master(self, node_snaps: Dict[str, NodeSnapshot]) -> None:
+        """Apply the main composition's master to its layer Transform snapshots."""
+        stack = self.get_main_layer_stack()
+        output = node_snaps.get(stack.output_node_id) if stack is not None else None
+        if (output is None or output.node_type != "output"
+                or output.parameters.get(MOTION_BLUR_ENABLED_PARAM, True)):
+            return
+
+        from .layer_provenance import LayerProvenanceResolver
+
+        provenance = LayerProvenanceResolver(self)
+        layers = (layer for layer_id in stack.layer_ids
+                  if (layer := self._layers.get(layer_id)) is not None)
+        for layer, chain in provenance.main_image_chains(layers):
+            transform_id, _, _ = provenance.main_transform(layer, chain)
+            transform = node_snaps.get(transform_id) if transform_id is not None else None
+            if transform is not None and transform.parameters.get("motion_blur", False):
+                # The effective flag enters both scheduler and texture cache
+                # hashes, while the live layer keeps its own authored switch.
+                transform.parameters["motion_blur"] = False
+
     def snapshot(self, color_texture_id: int = 0, color_width: int = 0,
                  color_height: int = 0, color_revision: int = 0,
                  frame_number: int = 0, fps: float = 24.0) -> GraphSnapshot:
@@ -2306,6 +2327,8 @@ class NodeGraph:
                     group_input_mappings=group_inputs,
                     group_output_mappings=group_outputs,
                 )
+
+            self._apply_layer_motion_blur_master(node_snaps)
 
             # Group nodes are macro boundaries rather than extra render steps.
             # Rewrite external edges through their declared ports so the

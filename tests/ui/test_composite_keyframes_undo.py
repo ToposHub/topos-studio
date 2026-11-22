@@ -15,12 +15,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytest
 
 from src.features.composite.core.node_engine import NodeGraph
+from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.transform_node import TransformNode
+from src.features.composite.ui.composite_page import CompositePage
+from src.features.composite.ui.keyframes_panel import KeyframesPanel
 from src.shared.keyframe import Keyframe, KeyframeTrack
 
 
 def _make_page(qapp):
-    from src.features.composite.ui.composite_page import CompositePage
     page = CompositePage()
     page._node_graph = NodeGraph()
     t = TransformNode()
@@ -120,3 +122,45 @@ def test_time_range_undo_from_none_restores_none(qapp):
         t.id, {"comp_start": 0, "comp_end": 30})
     page.undo()
     assert t.time_range is None
+
+
+def test_layer_switches_publish_and_undo_in_click_order(qtbot, monkeypatch) -> None:
+    page = CompositePage()
+    panel = KeyframesPanel()
+    qtbot.addWidget(page)
+    qtbot.addWidget(panel)
+    monkeypatch.setattr(page, "_evaluate_graph", lambda: None)
+    graph = page._node_graph
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = page._layer_stack_controller
+    layer_id = controller.create_generated_layer("solid", "Card", {})
+    transform = controller.layer_transform_node(layer_id)
+    page._current_composite_id = "test-composition"
+    page.set_keyframes_panel(panel)
+    panel.set_layer_view_mode("layers")
+    panel.set_composition_active(True)
+    panel.set_node_graph(graph, selected_layer_id=layer_id)
+    published = []
+    page.composite_graph_changed.connect(lambda _comp_id, data: published.append(data))
+    panel._hide_shy_action.trigger()
+
+    panel._tree_view.layer_motion_blur_changed.emit(layer_id, True)
+    panel._tree_view.layer_shy_changed.emit(layer_id, True)
+    assert transform.parameters["motion_blur"]
+    assert published[-1]["layers"][layer_id]["shy"]
+    assert not panel._model.visible_rows()
+
+    page.undo()
+    assert transform.parameters["motion_blur"]
+    assert not published[-1]["layers"][layer_id]["shy"]
+    assert panel._model.visible_rows()[0].layer_motion_blur
+    page.undo()
+    assert not transform.parameters["motion_blur"]
+    assert not panel._model.visible_rows()[0].layer_motion_blur
+
+    page.redo()
+    page.redo()
+    assert transform.parameters["motion_blur"]
+    assert published[-1]["layers"][layer_id]["shy"]
+    assert not panel._model.visible_rows()

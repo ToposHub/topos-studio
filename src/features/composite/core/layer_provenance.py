@@ -10,7 +10,9 @@ read-only so callers do not mistake them for user-authored effects.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+
+from .layer_model import Layer
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,44 @@ class LayerProvenanceResolver:
 
     def __init__(self, graph: Any) -> None:
         self.graph = graph
+
+    def main_image_chains(self, layers: Iterable[Layer]) -> Iterator[tuple[Layer, list[str]]]:
+        """Walk each layer's image chain from its root towards its source."""
+        owners: dict[str, set[str]] = {}
+        for layer in self.graph.get_all_layers():
+            for node_id in (layer.root_node_id, layer.source_node_id,
+                            getattr(layer, "transform_node_id", None)):
+                if node_id:
+                    owners.setdefault(node_id, set()).add(layer.layer_id)
+        inputs = {(edge.dst_node_id, edge.dst_port_name): edge.src_node_id
+                  for edge in self.graph.connections}
+        for layer in layers:
+            chain = [layer.root_node_id]
+            own_layer = {layer.layer_id}
+            while layer.source_node_id and chain[-1] != layer.source_node_id:
+                node = self.graph.get_node(chain[-1])
+                if node is None or getattr(node, "node_type", "") in self._BOUNDARY_TYPES:
+                    break
+                port = next((port for port in node.inputs if port.data_type == "image"), None)
+                previous_id = inputs.get((node.id, port.name)) if port is not None else None
+                if (not previous_id or previous_id in chain
+                        or owners.get(previous_id, own_layer) != own_layer):
+                    break
+                chain.append(previous_id)
+            yield layer, chain
+
+    def main_transform(self, layer: Layer, chain: list[str]) -> tuple[str | None, bool, bool]:
+        """Return the main Transform ID and missing/ambiguous role indicators."""
+        registered = getattr(layer, "transform_node_id", None)
+        if registered:
+            node = self.graph.get_node(registered)
+            if node is not None and node.node_type == "transform" and registered in chain:
+                return registered, False, False
+            return None, True, False
+        candidates = frozenset(node_id for node_id in chain
+                               if getattr(self.graph.get_node(node_id), "node_type", "") == "transform")
+        candidate = choose_legacy_transform(tuple(chain), candidates)
+        return candidate, False, candidate is None and bool(candidates)
 
     def for_layer(self, layer_id: str,
                   stack_id: Optional[str] = None) -> Optional[LayerProvenance]:

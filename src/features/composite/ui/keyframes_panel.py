@@ -30,13 +30,15 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QColorDialog, QComboBox, QInputDialog, QLabel, QLineEdit,
+    QColorDialog, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QSizePolicy, QMenu, QToolBar, QToolButton, QVBoxLayout,
     QToolTip, QWidget,
 )
 
 from src.features.composite.core.composite_markers import CompositeMarker
 from src.features.composite.core.layer_model import LAYER_BLEND_MODES, LAYER_TYPE_AUDIO, Layer
+from src.features.composite.nodes.output_node import MOTION_BLUR_ENABLED_PARAM
+from .scale_link import ScaleLinkState
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
@@ -144,6 +146,7 @@ class KeyframesPanel(QWidget):
     # AE property-row edits. The panel exposes intent; CompositePage owns the
     # graph mutation, undo record and render refresh.
     parameter_changed = pyqtSignal(str, str, object)
+    layer_shy_about_to_commit = pyqtSignal()
     # Bracket Value-column drags so the host can avoid rebuilding the whole
     # panel on every mouse-move event. The visual track still updates live;
     # the complete cross-panel refresh is performed on release.
@@ -202,6 +205,8 @@ class KeyframesPanel(QWidget):
         self._value_drag_bases: dict[Tuple[str, str], object] = {}
         self._property_value_drag_active = False
         self._property_value_drag_target: Optional[Tuple[str, str]] = None
+        self._parameter_image_size_provider: Callable[[Any], tuple[int, int] | None] | None = None
+        self._scale_link_state: ScaleLinkState | None = None
         self._pending_expression_binding: Optional[Tuple[str, str]] = None
         self._binding_feedback_serial = 0
 
@@ -760,7 +765,7 @@ class KeyframesPanel(QWidget):
         self._rebuild_shortcuts()
         self._model.set_view_mode(mode)
         self._tree_view.set_header_height(self._timeline_view.ruler_height())
-        self._time_display.set_single_line(mode == KeyframesModel.VIEW_MODE_LAYERS)
+        self._time_display.set_layer_header(mode == KeyframesModel.VIEW_MODE_LAYERS)
         self._tree_view.set_header_time_display(self._time_display)
         self._graph_view.set_frame_range(*self._navigation_extent())
         if mode == KeyframesModel.VIEW_MODE_LAYERS:
@@ -769,6 +774,7 @@ class KeyframesPanel(QWidget):
             QTimer.singleShot(0, self._complete_deferred_fit)
         self._sync_layer_mode_actions()
         self._splitter.set_resize_grip(mode == KeyframesModel.VIEW_MODE_LAYERS)
+        self._apply_ae_splitter_defaults()
         self._rebuild_filtered_model()
 
     def set_layer_stack_controller(self, controller: Optional[object]) -> None:
@@ -850,6 +856,8 @@ class KeyframesPanel(QWidget):
             marker_menu.addAction(remove_title, lambda checked=False, item=marker:
                                   controller.remove_marker(item.marker_id))
         menu.addSeparator()
+        menu.addAction(I18N.tr("keyframes.ruler_automatic", "Automatic"),
+                       lambda: self._timeline_view._set_display_mode("time"))
         menu.addAction(I18N.tr("keyframes.ruler_frames", "Frame numbers"),
                        lambda: self._timeline_view._set_display_mode("frame"))
         menu.addAction(I18N.tr("keyframes.ruler_timecode", "Timecode"),
@@ -1121,6 +1129,8 @@ class KeyframesPanel(QWidget):
             self._on_time_display_mode_requested)
         self._time_display.set_menu_display_mode(self._state.display_mode)
         self._tree_view.set_header_time_display(self._time_display)
+        self._layer_header_tools = self._build_layer_header_tools()
+        self._tree_view.set_layer_header_tools(self._layer_header_tools)
         # Keep the range label as a hidden compatibility readout. Frames and
         # In/Out are useful to the work-area logic but too noisy for the
         # compact header, so they are no longer painted in the UI.
@@ -1197,6 +1207,10 @@ class KeyframesPanel(QWidget):
         self._tree_view.layer_disclosure_requested.connect(self._restore_layer_disclosure)
         self._tree_view.layer_name_edited.connect(self._rename_layer_from_timeline)
         self._tree_view.layer_menu_requested.connect(self._open_layer_menu)
+        self._tree_view.dimension_toggle_requested.connect(self._toggle_dimensions)
+        self._tree_view.layer_shy_changed.connect(self._toggle_layer_shy)
+        self._tree_view.layer_motion_blur_changed.connect(self._toggle_layer_motion_blur)
+        self._tree_view.empty_layer_menu_requested.connect(self._open_empty_layer_menu)
         self._timeline_view.layer_menu_requested.connect(self._open_layer_menu)
         self._timeline_view.marker_menu_requested.connect(self._open_composition_marker_menu)
         self._timeline_view.marker_moved.connect(self._move_composition_marker)
@@ -1348,7 +1362,7 @@ class KeyframesPanel(QWidget):
             self.set_view_mode("timeline")
             self.set_expression_editor_expanded(False)
             self._tree_view._close_layer_name_editor()
-        for widget in (self._toolbar, self._time_display, self._graph_view,
+        for widget in (self._toolbar, self._layer_header_tools, self._time_display, self._graph_view,
                        self._expr_editor, self._footer):
             if widget is not None:
                 widget.setEnabled(self._composition_active)
@@ -1406,25 +1420,6 @@ class KeyframesPanel(QWidget):
         bar.setIconSize(QSize(_TOOLBAR_ICON_PX, _TOOLBAR_ICON_PX))
         bar.setStyleSheet(COMPOSITE_KEYFRAMES_TOOLBAR_STYLE +
                           COMPOSITE_KEYFRAMES_ICON_BTN_STYLE)
-
-        new_layer = QToolButton(bar)
-        new_layer.setText(I18N.tr("keyframes.layer_new", "New Layer"))
-        new_layer.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        new_layer.setStyleSheet("QToolButton { padding: 0 18px 0 8px; }")
-        new_menu = QMenu(new_layer)
-        new_menu.addAction(I18N.tr("keyframes.layer_text", "Text"),
-                           self._create_text_layer)
-        new_menu.addAction(I18N.tr("keyframes.layer_solid", "Solid"),
-                           self._create_solid_layer)
-        new_layer.setMenu(new_menu)
-        self._new_layer_action = bar.addWidget(new_layer)
-
-        layer_options = QToolButton(bar)
-        layer_options.setText(I18N.tr("keyframes.layer_options", "Layer Settings"))
-        layer_options.setStyleSheet("QToolButton { padding: 0 8px; }")
-        layer_options.clicked.connect(self._open_selected_layer_menu)
-        self._layer_options_action = bar.addWidget(layer_options)
-        self._layer_options_action.setEnabled(False)
 
         # ── Transport cluster: first / prev / play-pause / next / last ──
         self._act_first = QAction(
@@ -1695,10 +1690,6 @@ class KeyframesPanel(QWidget):
         # T77: also give each icon-only button an accessible name + tooltip
         # (derived from its action's text) and make it keyboard-focusable.
         for btn in bar.findChildren(QToolButton):
-            if btn in (new_layer, layer_options):
-                btn.setFixedHeight(_TOOLBAR_BTN_H)
-                btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-                continue
             btn.setFixedSize(_TOOLBAR_BTN_W, _TOOLBAR_BTN_H)
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             act = btn.defaultAction()
@@ -1711,6 +1702,120 @@ class KeyframesPanel(QWidget):
                         btn.setToolTip(label)
                     btn.setStatusTip(label)
         return bar
+
+    def _build_layer_header_tools(self) -> QWidget:
+        tools = QWidget(self._tree_view)
+        tools.setObjectName("KeyframesLayerHeaderTools")
+        tools.setStyleSheet(
+            COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
+            + "QWidget#KeyframesLayerHeaderTools { background: transparent; }"
+            + "QToolButton::menu-indicator { image: none; width: 0; }"
+        )
+        layout = QHBoxLayout(tools)
+        layout.setContentsMargins(1, 0, 0, 0)
+        layout.setSpacing(2)
+        self._layer_search_edit = QLineEdit(tools)
+        self._layer_search_edit.setObjectName("KeyframesPropertySearch")
+        self._layer_search_edit.setPlaceholderText(self._search_edit.placeholderText())
+        self._layer_search_edit.setToolTip(self._search_edit.toolTip())
+        self._layer_search_edit.setClearButtonEnabled(True)
+        self._layer_search_edit.setFixedHeight(_TOOLBAR_BTN_H)
+        self._layer_search_edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._layer_search_edit.textChanged.connect(self._search_edit.setText)
+        self._search_edit.textChanged.connect(self._layer_search_edit.setText)
+        layout.addWidget(self._layer_search_edit, 1)
+
+        self._hide_shy_action = QAction(make_qicon("shy"),
+            I18N.tr("keyframes.hide_shy_layers", "Hide marked layers"), self)
+        self._hide_shy_action.setCheckable(True)
+        self._hide_shy_action.toggled.connect(self._set_hide_shy_layers)
+        self._motion_blur_action = QAction(make_qicon("motion_blur"),
+            I18N.tr("keyframes.enable_motion_blur", "Enable composition motion blur"), self)
+        self._motion_blur_action.setCheckable(True)
+        self._motion_blur_action.setEnabled(False)
+        self._motion_blur_action.triggered.connect(self._set_composition_motion_blur)
+
+        filter_button = QToolButton(tools)
+        filter_button.setIcon(make_qicon("filter"))
+        filter_button.setToolTip(self._filter_combo.toolTip())
+        filter_button.setAccessibleName(I18N.tr("keyframes.layer_filter", "Filter layers"))
+        filter_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        filter_menu = QMenu(filter_button)
+        filter_menu.aboutToShow.connect(lambda: self._populate_layer_filter_menu(filter_menu))
+        filter_button.setMenu(filter_menu)
+        layout.addWidget(filter_button)
+        for action in (self._hide_shy_action, self._motion_blur_action,
+                       self._act_graph_editor, self._act_nodes_mode):
+            button = QToolButton(tools)
+            button.setDefaultAction(action)
+            button.setAccessibleName(action.text())
+            layout.addWidget(button)
+        for button in tools.findChildren(QToolButton, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            button.setIconSize(QSize(_TOOLBAR_ICON_PX, _TOOLBAR_ICON_PX))
+            button.setFixedSize(18, _TOOLBAR_BTN_H)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        return tools
+
+    def _populate_layer_filter_menu(self, menu: QMenu) -> None:
+        menu.clear()
+        menu.addAction(self._search_edit.placeholderText() + "…", self._prompt_layer_search)
+        menu.addSeparator()
+        for index in range(self._filter_combo.count()):
+            action = menu.addAction(self._filter_combo.itemText(index))
+            action.setCheckable(True)
+            action.setChecked(index == self._filter_combo.currentIndex())
+            action.triggered.connect(
+                lambda _checked=False, i=index: self._filter_combo.setCurrentIndex(i))
+        if self._view_mode == "graph":
+            graph_type = menu.addMenu(I18N.tr("keyframes.graph_type", "Graph"))
+            for index in range(self._graph_type_combo.count()):
+                action = graph_type.addAction(self._graph_type_combo.itemText(index))
+                action.setCheckable(True)
+                action.setChecked(index == self._graph_type_combo.currentIndex())
+                action.triggered.connect(
+                    lambda _checked=False, i=index: self._graph_type_combo.setCurrentIndex(i))
+
+    def _prompt_layer_search(self) -> None:
+        label = self._search_edit.placeholderText()
+        text, accepted = QInputDialog.getText(self, label, label, text=self._search_edit.text())
+        if accepted:
+            self._search_edit.setText(text)
+
+    def _set_hide_shy_layers(self, hide: bool) -> None:
+        self._model.set_hide_shy_layers(hide)
+        self._rebuild_filtered_model()
+
+    def _toggle_dimensions(self, row_id: str) -> None:
+        self._model.toggle_dimensions(row_id)
+        self._rebuild_filtered_model()
+
+    def _toggle_layer_shy(self, layer_id: str, shy: bool) -> None:
+        controller = self._layer_stack_controller
+        if controller is not None:
+            self.layer_shy_about_to_commit.emit()
+            controller.set_layer_property(layer_id, "shy", shy, description="Mark hidden layer")
+
+    def _motion_blur_output(self) -> Optional[Any]:
+        controller = self._layer_stack_controller
+        stack = controller.main_stack() if controller is not None else None
+        node = controller.graph.get_node(stack.output_node_id) if stack is not None else None
+        return node if node is not None and node.node_type == "output" else None
+
+    def _set_composition_motion_blur(self, enabled: bool) -> None:
+        output = self._motion_blur_output()
+        if output is not None:
+            self._apply_property_value(output.id, output, MOTION_BLUR_ENABLED_PARAM,
+                                       enabled, edit_track=False)
+
+    def _toggle_layer_motion_blur(self, layer_id: str, enabled: bool) -> None:
+        controller = self._layer_stack_controller
+        layer = controller.graph.get_layer(layer_id) if controller is not None else None
+        if layer is None or layer.locked:
+            return
+        transform = controller.layer_transform_node(layer_id)
+        if transform is not None and "motion_blur" in transform.parameters:
+            self._apply_property_value(transform.id, transform, "motion_blur",
+                                       enabled, edit_track=False)
 
     def _set_graph_toolbar_controls_visible(self, visible: bool) -> None:
         """Keep graph-only toolbar widgets hidden in the normal timeline."""
@@ -1849,13 +1954,11 @@ class KeyframesPanel(QWidget):
             layers_mode = self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS
             self._act_nodes_mode.setChecked(not layers_mode)
             self._act_layers_mode.setChecked(layers_mode)
-            self._new_layer_action.setVisible(layers_mode)
-            self._layer_options_action.setVisible(layers_mode)
-            controller = self._layer_stack_controller
-            stack = controller.main_stack() if controller is not None else None
-            managed = controller is not None and (stack is None or stack.managed)
-            self._new_layer_action.setEnabled(managed)
-            self._layer_options_action.setEnabled(bool(self._selected_layer_id))
+            self._toolbar.setVisible(not layers_mode)
+            output = self._motion_blur_output()
+            self._motion_blur_action.setEnabled(output is not None)
+            self._motion_blur_action.setChecked(
+                output is not None and bool(output.parameters.get(MOTION_BLUR_ENABLED_PARAM, True)))
 
     def _display_value_for(self, node_id: str,
                            param_name: Optional[str]) -> Optional[str]:
@@ -1893,34 +1996,15 @@ class KeyframesPanel(QWidget):
             if node is None:
                 return None
             pdef = node.get_param_defs().get(param_name)
+            sample = getattr(node, "parameter_value_at_frame", None)
+            value = (sample(param_name, self._state.current_frame) if callable(sample)
+                     else node.parameters.get(param_name))
+            center = self._centered_pivot_value(node, param_name)
+            if center is not None:
+                value = center
             if getattr(pdef, "ptype", "") == "color":
                 from src.features.composite.nodes.constant_node import ConstantNode
-                from src.shared.keyframe import ColorKeyframeTrack
-                base = getattr(node, "parameters", {}).get(
-                    param_name, getattr(pdef, "default", (0.0, 0.0, 0.0, 1.0)))
-                track_data = getattr(node, "keyframe_tracks", {}).get(param_name)
-                if isinstance(track_data, dict) and track_data.get("keyframes"):
-                    base = ColorKeyframeTrack.from_dict(track_data).get_value(
-                        int(self._state.current_frame), default=base)
-                return ConstantNode.rgba_to_hex(*tuple(base)[:3])
-            track_data = getattr(node, "keyframe_tracks", {}).get(param_name)
-            value = None
-            if isinstance(track_data, dict) and track_data.get("keyframes"):
-                from src.shared.keyframe import keyframe_track_from_dict
-                track = keyframe_track_from_dict({
-                    "param_name": param_name,
-                    "value_type": getattr(pdef, "ptype", "scalar"),
-                    "keyframes": track_data.get("keyframes", []),
-                    "min_val": track_data.get("min_val", 0.0),
-                    "max_val": track_data.get("max_val", 1.0),
-                    "pre_extrap": track_data.get("pre_extrap", "constant"),
-                    "post_extrap": track_data.get("post_extrap", "constant"),
-                })
-                value = track.get_value(int(self._state.current_frame),
-                                         default=getattr(node, "parameters", {})
-                                         .get(param_name, 0.0))
-            if value is None:
-                value = getattr(node, "parameters", {}).get(param_name)
+                return ConstantNode.rgba_to_hex(*tuple(value if value is not None else pdef.default)[:3])
             if value is None:
                 return None
             if isinstance(value, bool):
@@ -1949,14 +2033,7 @@ class KeyframesPanel(QWidget):
             return False
 
     def _color_value_at_frame(self, node, param_name: str, frame: int):
-        from src.shared.keyframe import ColorKeyframeTrack
-        default = getattr(node, "parameters", {}).get(
-            param_name, (0.0, 0.0, 0.0, 1.0))
-        data = getattr(node, "keyframe_tracks", {}).get(param_name)
-        if isinstance(data, dict) and data.get("keyframes"):
-            return ColorKeyframeTrack.from_dict(data).get_value(
-                int(frame), default=default)
-        return tuple(float(value) for value in default)
+        return node.parameter_value_at_frame(param_name, frame, (0.0, 0.0, 0.0, 1.0))
 
     def _on_timeline_track_changed(self, node_id: str, param_name: str,
                                    keyframes: list) -> None:
@@ -2052,21 +2129,32 @@ class KeyframesPanel(QWidget):
             if step < 1.0 and decimals <= 0:
                 text = f"{step:.10f}".rstrip("0")
                 decimals = len(text.split(".", 1)[1]) if "." in text else 0
-            displayed = self._display_value_for(node_id, param_name)
-            try:
-                value = float(displayed) if displayed is not None \
-                    else default
-            except (TypeError, ValueError):
-                value = default
+            sample = getattr(node, "parameter_value_at_frame", None)
+            center = self._centered_pivot_value(node, param_name)
+            value = center
+            if value is None:
+                value = (sample(param_name, self._state.current_frame, default) if callable(sample)
+                         else node.parameters.get(param_name, default))
             return {
                 "min_val": min_val,
                 "max_val": max_val,
                 "step": step,
                 "decimals": decimals,
                 "value": float(value),
+                "read_only": center is not None,
             }
         except (TypeError, ValueError, AttributeError, KeyError):
             return None
+
+    def _centered_pivot_value(self, node: Any, param_name: str) -> float | None:
+        provider = self._parameter_image_size_provider
+        if (provider is None or param_name not in ("pivot_x", "pivot_y")
+                or node.parameter_value_at_frame("pivot_mode", self._state.current_frame) != "center"):
+            return None
+        size = provider(node)
+        if size is None:
+            return None
+        return size[0 if param_name == "pivot_x" else 1] / 2.0
 
     def _keyframe_status_for(self, node_id: str, param_name: str) -> dict:
         """Return the state used by the AE-style per-property diamond."""
@@ -2136,7 +2224,7 @@ class KeyframesPanel(QWidget):
         self.track_batch_about_to_commit.emit(label, len(targets))
         try:
             for name in targets:
-                self._on_property_keyframe_toggle(node_id, name)
+                self._on_property_keyframe_toggle(node_id, name, allow_hidden=True)
         finally:
             self.track_batch_committed.emit(label, len(targets))
 
@@ -2156,13 +2244,21 @@ class KeyframesPanel(QWidget):
         """Handle the shared Properties-style DragValue in the Value cell."""
         self._apply_property_numeric_value(node_id, param_name, value)
 
+    def set_scale_link_state(self, state: ScaleLinkState) -> None:
+        self._scale_link_state = state
+        self._tree_view.set_scale_link_state(state)
+
+    def _uses_linked_scale(self, node_id: str, param_name: str) -> bool:
+        return (param_name in ("scale_x", "scale_y")
+                and self._tree_view.scale_is_linked(node_id))
+
     def _apply_property_numeric_value(self, node_id: str, param_name: str,
                                       value: float) -> None:
         """Apply one absolute numeric value using the common AE semantics."""
         if self._node_graph is None:
             return
         node = self._node_graph.get_node(node_id)
-        if node is None:
+        if node is None or self._centered_pivot_value(node, param_name) is not None:
             return
         pdef = node.get_param_defs().get(param_name)
         if pdef is not None:
@@ -2174,6 +2270,12 @@ class KeyframesPanel(QWidget):
         elif (getattr(node, "node_type", "") == "roto_shape"
               and str(param_name).startswith("roto_point_")):
             value = max(0.0, min(1.0, float(value)))
+        if self._uses_linked_scale(node_id, param_name):
+            if self._scale_link_state is not None:
+                self._scale_link_state.value_changed.emit(node_id, value)
+                return
+            peer = "scale_y" if param_name == "scale_x" else "scale_x"
+            self._apply_property_value(node_id, node, peer, value)
         self._apply_property_value(node_id, node, param_name, value)
 
     def _apply_property_value(self, node_id: str, node: Any, param_name: str, value: object,
@@ -2203,12 +2305,22 @@ class KeyframesPanel(QWidget):
         for key in stale:
             del self._display_value_cache[key]
 
+    def sync_parameter_values(self, node_id: str, param_names: tuple[str, ...]) -> None:
+        """Refresh only the affected values while keeping active editors in place."""
+        if "pivot_mode" in param_names:
+            param_names += ("pivot_x", "pivot_y")
+        for param_name in param_names:
+            self._invalidate_display_values(node_id, param_name)
+        self._tree_view.sync_parameter_values(node_id, param_names)
+
     def _on_property_value_drag_started(self, node_id: str,
                                          param_name: str,
                                          base_value: object) -> None:
         self._value_drag_bases[(node_id, param_name)] = base_value
         self._property_value_drag_active = True
         self._property_value_drag_target = (node_id, param_name)
+        if self._scale_link_state is not None and self._uses_linked_scale(node_id, param_name):
+            self._scale_link_state.edit_started.emit(node_id)
         self.property_value_drag_started.emit(node_id, param_name)
 
     def _on_property_value_dragged(self, node_id: str, param_name: str,
@@ -2271,6 +2383,8 @@ class KeyframesPanel(QWidget):
         self._value_drag_bases.pop((node_id, param_name), None)
         self._property_value_drag_active = False
         self._property_value_drag_target = None
+        if self._scale_link_state is not None and param_name in ("scale_x", "scale_y"):
+            self._scale_link_state.edit_finished.emit(node_id)
         self.property_value_drag_finished.emit(node_id, param_name)
 
     @property
@@ -2814,6 +2928,10 @@ class KeyframesPanel(QWidget):
         """Provider(node_id, param_name) → current live value for new kfs."""
         self._value_provider = provider
 
+    def set_parameter_image_size_provider(self,
+            provider: Callable[[Any], tuple[int, int] | None]) -> None:
+        self._parameter_image_size_provider = provider
+
     def set_playing_state(self, playing: bool) -> None:
         """Update the play button icon without re-triggering playback."""
         playing = bool(playing)
@@ -2840,23 +2958,23 @@ class KeyframesPanel(QWidget):
         if not playing and self._play_timer.isActive():
             self._play_timer.stop()
 
-    def set_current_frame(self, frame: int) -> None:
+    def set_current_frame(self, frame: int, *, refresh_values: bool = True) -> None:
         """Silently update the panel playhead (no signal emitted).
 
         P0-1: this is the write-back path called by CompositePage while it is
         syncing frames across panels. It must NOT emit current_frame_changed,
         otherwise the page's anti-recursion guard is the only thing saving us
         from a bounce. User-initiated seeks use seek_to_frame() instead.
+        Playback ticks can skip resampling the left-side property controls.
         """
         if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
             lo, hi = self._navigation_extent()
             frame = max(lo, min(int(frame), hi))
         self._state.current_frame = int(frame)
         self._timeline_view.set_current_frame(int(frame))
-        self._tree_view.set_current_frame(int(frame))
-        # Refresh the shared DragValue controls so their displayed value and
-        # Properties-style edit base follow the same sampled frame.
-        self._tree_view.refresh()
+        if refresh_values:
+            self._tree_view.set_current_frame(int(frame))
+            self._tree_view.refresh()
         self._frame_label.setText(str(int(frame)))
         # T25: keep the time display in sync (it shows timecode + frame).
         if hasattr(self, "_time_display"):
@@ -3040,7 +3158,7 @@ class KeyframesPanel(QWidget):
     def _on_view_display_mode_changed(self, mode: str) -> None:
         """Keep the hidden compatibility combo in sync with the ruler menu."""
         self._state.display_mode = str(mode)
-        index = 3 if str(mode) == "timecode" else 1
+        index = {"time": 0, "frame": 1, "seconds": 2, "timecode": 3}[str(mode)]
         self._time_unit_combo.blockSignals(True)
         try:
             self._time_unit_combo.setCurrentIndex(index)
@@ -3322,6 +3440,10 @@ class KeyframesPanel(QWidget):
         """Select and scroll to a layer after an explicit jump from the graph."""
         self.set_view_mode("timeline")
         self.set_layer_view_mode(KeyframesModel.VIEW_MODE_LAYERS)
+        if self._hide_shy_action.isChecked() and self._layer_stack_controller is not None:
+            layer = self._layer_stack_controller.graph.get_layer(layer_id)
+            if layer is not None and layer.shy:
+                self._hide_shy_action.setChecked(False)
         row_id = f"layer:{layer_id}"
         if (self._search_edit.text()
                 and not any(row.row_id == row_id for row in self._model.visible_rows())):
@@ -3359,11 +3481,21 @@ class KeyframesPanel(QWidget):
             self.generated_layer_requested.emit(
                 "solid", title, {"color_hex": color.name()}, self._layer_insert_index())
 
-    def _open_selected_layer_menu(self) -> None:
-        button = self._toolbar.widgetForAction(self._layer_options_action)
-        if self._selected_layer_id and button is not None:
-            self._open_layer_menu(self._selected_layer_id,
-                                  button.mapToGlobal(button.rect().bottomLeft()))
+    def _populate_new_layer_menu(self, menu: QMenu) -> None:
+        controller = self._layer_stack_controller
+        stack = controller.main_stack() if controller is not None else None
+        menu.setEnabled(self._composition_active and controller is not None
+                        and (stack is None or stack.managed))
+        menu.addAction(I18N.tr("keyframes.layer_text", "Text"), self._create_text_layer)
+        menu.addAction(I18N.tr("keyframes.layer_solid", "Solid"), self._create_solid_layer)
+
+    def _open_empty_layer_menu(self, position: QPoint) -> None:
+        if not self._composition_active or self._layer_stack_controller is None:
+            return
+        menu = QMenu(self)
+        self._populate_new_layer_menu(menu.addMenu(I18N.tr("keyframes.layer_new", "New Layer")))
+        menu.exec(position)
+        menu.deleteLater()
 
     def _open_layer_menu(self, layer_id: str, position: QPoint) -> None:
         controller = self._layer_stack_controller
@@ -3391,6 +3523,8 @@ class KeyframesPanel(QWidget):
         controller = self._layer_stack_controller
         layer_id = layer.layer_id
         editable = managed and not layer.locked
+        self._populate_new_layer_menu(menu.addMenu(I18N.tr("keyframes.layer_new", "New Layer")))
+        menu.addSeparator()
         rename = menu.addAction(I18N.tr("keyframes.layer_rename", "Rename…"),
                                 lambda: self._rename_layer(layer))
         rename.setEnabled(not layer.locked)
@@ -3398,6 +3532,11 @@ class KeyframesPanel(QWidget):
                                    lambda: self._commit_layer_edit(
                                        controller.duplicate_layer(layer_id), layer_id))
         duplicate.setEnabled(editable)
+        shy = menu.addAction(I18N.tr("keyframes.mark_layer_shy", "Mark layer to hide"))
+        shy.setCheckable(True)
+        shy.setChecked(layer.shy)
+        shy.setEnabled(not layer.locked)
+        shy.triggered.connect(lambda checked: self._toggle_layer_shy(layer_id, checked))
         if layer.audio is not None:
             self._populate_layer_audio_menu(menu, layer, editable)
         if controller.graph.get_node(layer.root_node_id) is not None:
@@ -3780,19 +3919,7 @@ class KeyframesPanel(QWidget):
         self._clamp_vertical_scroll()
 
     def _apply_ae_splitter_defaults(self) -> None:
-        """Give the layer/property side the same visual weight as AE.
-
-        The first layout used a fixed 232 px tree regardless of dock width.
-        The current compact default gives the property side roughly 32% of
-        the panel, so the value and binding controls stay close to the names
-        while the timeline keeps the larger editing area.
-        once, after the widget has a real size, while leaving later user
-        splitter drags untouched.
-        """
-        # A panel is often constructed at a small default size and then
-        # stretched by its dock. If the first pass was constrained to the
-        # narrow minimum, allow the later real-size pass to establish the
-        # compact 32/68 ratio as well.
+        """Size the property side while the splitter still uses its default."""
         if self._splitter_user_moved or self._splitter_applying_defaults:
             return
         total = self._splitter.width()
@@ -3805,11 +3932,11 @@ class KeyframesPanel(QWidget):
         ratio_left = int(round(usable * 0.30))
         if total < 900:
             ratio_left = max(timeline_layout.NARROW_LEFT_MIN, ratio_left)
-            right_min = 420
         else:
             ratio_left = max(280, ratio_left)
-            right_min = 420
-        ratio_left = min(ratio_left, max(240, usable - right_min))
+        if self._layer_view_mode == KeyframesModel.VIEW_MODE_LAYERS:
+            ratio_left = min(timeline_layout.DEFAULT_LAYER_TREE_MAX_WIDTH, ratio_left)
+        ratio_left = min(ratio_left, max(240, usable - timeline_layout.NARROW_RIGHT_MIN))
         target_sizes = [ratio_left, max(1, usable - ratio_left)]
         if self._splitter.sizes() != target_sizes:
             self._splitter_applying_defaults = True

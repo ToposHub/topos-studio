@@ -56,26 +56,39 @@ class TestDefaults:
 
 
 class TestFormatting:
-    def test_layer_timecode_uses_edit_type_and_keeps_details_on_one_line(self, qapp):
-        from src.shared.ui.style_sheet import C, timeline_timecode_font
+    def test_layer_timecode_stacks_readout_compactly_under_application_theme(self, qapp):
+        from PyQt6.QtCore import QPoint, Qt
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtWidgets import QWidget
+        from src.shared.ui.style_sheet import C, DARK_THEME
 
-        w = TimelineTimeDisplay(fps=23.976, compact=True)
-        w.set_single_line(True)
-        w.resize(260, 30)
+        parent = QWidget()
+        parent.setStyleSheet(DARK_THEME)
+        w = TimelineTimeDisplay(parent, fps=23.976, compact=True)
+        w.set_layer_header(True)
+        w.resize(520, 54)
         w.set_display_mode("timecode")
         w.set_current_frame(14_412)
-        w.show()
+        parent.resize(w.size())
+        parent.show()
         qapp.processEvents()
         try:
             assert w._top_label.text() == "00:10:00:12"
             assert w._bottom_label.text() == "14412 · 23.976 fps"
-            assert w._top_label.font() == timeline_timecode_font()
+            assert w._top_label.font().pixelSize() == 14
+            assert w._bottom_label.font().pixelSize() == 10
             assert C.TIMELINE_TIMECODE_TEXT in w.styleSheet()
-            assert w._top_label.geometry().right() < w._bottom_label.geometry().left()
-            assert w._top_label.geometry().center().y() == w._bottom_label.geometry().center().y()
+            assert w._top_label.x() == w._bottom_label.x()
+            assert w._bottom_label.y() == w._top_label.geometry().bottom() + 1
+            assert w._readout_rect().width() < 120
             assert w._parse_user_input(w._top_label.text()) == w.current_frame
+            QTest.mouseClick(w, Qt.MouseButton.LeftButton, pos=QPoint(500, 27))
+            assert not w._edit.isVisible()
+            QTest.mouseClick(w, Qt.MouseButton.LeftButton, pos=w._top_label.geometry().center())
+            assert w._edit.isVisible()
+            assert w._edit.width() < 220
         finally:
-            w.close()
+            parent.close()
 
     def test_frame_mode_top_zero_padded(self, qapp):
         w = TimelineTimeDisplay(fps=24.0)

@@ -59,6 +59,8 @@ PLAYHEAD_TRIANGLE_PX = 8
 # column absorb a large empty region on wide docks; 32/68 keeps the AE-style
 # controls close to the property labels while leaving the timeline readable.
 DEFAULT_SPLIT_RATIO = (32, 68)
+DEFAULT_LAYER_TREE_MAX_WIDTH = 360
+LAYER_HEADER_TIMECODE_WIDTH = 108
 NARROW_PANEL_WIDTH = 900       # below this, left min = 310, right min = 420
 NARROW_LEFT_MIN = 240
 NARROW_RIGHT_MIN = 420
@@ -91,14 +93,17 @@ LEFT_COLUMNS: Tuple[ColumnSpec, ...] = (
     ColumnSpec("index", "Index", 0, min_width=0,
                visible_by_default=False),
     ColumnSpec("name", "Name", 0, min_width=80),    # 0 = absorbs remainder
-    # AE-style property controls.  Keep the keyframe and binding cells next
-    # to the value column so a property reads as: name | ◆ | value | link.
+    # Layer properties place the diamond inside the name area.
     ColumnSpec("keyframe", "Key", 22, min_width=20,
                resizable=False),
     ColumnSpec("value", "Value", 64, min_width=44),
     ColumnSpec("bind", "Bind", 22, min_width=20,
                resizable=False),
     ColumnSpec("expr", "Expr", 18, min_width=0),
+)
+LAYER_LEFT_COLUMNS = (
+    *LEFT_COLUMNS[:7], ColumnSpec("motion_blur", "Motion Blur", 18, min_width=16),
+    *LEFT_COLUMNS[7:],
 )
 
 
@@ -118,12 +123,13 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # ``total_width``.  Optional AE switches collapse before the Name column
     # is allowed to become unusably narrow.
     total_width = max(0, int(total_width))
-    fixed = [c for c in LEFT_COLUMNS if c.name != "name"]
+    columns = LAYER_LEFT_COLUMNS if layers_mode else LEFT_COLUMNS
+    fixed = [c for c in columns if c.name != "name"]
     name_col = next(c for c in LEFT_COLUMNS if c.name == "name")
 
     defaults = {c.name: max(0, int(c.width)) for c in fixed}
     if layers_mode:
-        defaults.update(solo=18, index=23, value=110)
+        defaults.update(solo=15, index=17, shy=17, keyframe=0, value=94)
     fixed_default = sum(defaults.values())
     if total_width >= fixed_default + name_col.min_width:
         defaults["name"] = total_width - fixed_default
@@ -133,7 +139,7 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # declared minima. The remaining width belongs to the Name column.
     mins = {c.name: max(0, int(c.min_width)) for c in fixed}
     if layers_mode:
-        mins.update(solo=14, value=80)
+        mins.update(solo=12, shy=16, keyframe=0, value=80)
     fixed_min = sum(mins.values())
     if total_width >= fixed_min + name_col.min_width:
         mins["name"] = total_width - fixed_min
@@ -143,11 +149,13 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # need to identify/select a layer (Eye, Lock, Label, Name, Value) and
     # collapse secondary switches first. This is preferable to painting
     # outside the widget or letting a label overlap an icon.
-    compact_priority = (
+    compact_priority = ((
+        "eye", "lock", "label", "shy", "motion_blur", "value", "bind")
+        if layers_mode else (
         # These are the controls that remain useful at the smallest supported
         # splitter width: identify the row, set a keyframe, edit its value,
         # and expose the parameter/layer pick-whip.
-        "eye", "lock", "label", "keyframe", "value", "bind")
+        "eye", "lock", "label", "keyframe", "value", "bind"))
     widths = {c.name: 0 for c in fixed}
     remaining = total_width
     for name in compact_priority:
@@ -164,12 +172,12 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     return widths
 
 
-def column_x_offsets(total_width: int) -> List[Tuple[str, int, int]]:
+def column_x_offsets(total_width: int, *, layers_mode: bool = False) -> List[Tuple[str, int, int]]:
     """Return [(name, x_start, x_end), ...] in left-to-right paint order."""
-    widths = left_column_widths(total_width)
+    widths = left_column_widths(total_width, layers_mode=layers_mode)
     out: List[Tuple[str, int, int]] = []
     x = 0
-    for col in LEFT_COLUMNS:
+    for col in LAYER_LEFT_COLUMNS if layers_mode else LEFT_COLUMNS:
         w = widths[col.name]
         out.append((col.name, x, x + w))
         x += w

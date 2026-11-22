@@ -7,6 +7,7 @@ can be tested without instantiating the panel.
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 from src.features.composite.ui.node_properties_panel import group_xy_pairs
@@ -130,7 +131,7 @@ def transform_panel(qapp):
 
     panel = NodePropertiesPanel()
     node = TransformNode()
-    pdefs = {pd.name: pd for pd in node.PARAM_DEFS}
+    pdefs = {pd.name: replace(pd, animated=False, keyframes=None) for pd in node.PARAM_DEFS}
     params = {pd.name: pd.default for pd in node.PARAM_DEFS}
     section = NodeSectionWidget(
         node_id="n1", node_type="transform", node_title="Transform",
