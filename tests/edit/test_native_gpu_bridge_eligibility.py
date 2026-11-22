@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -371,7 +372,7 @@ class TestBridgeSelection:
             "output_surface": "nv12",
         }
 
-    def test_bridge_init_failure_cleans_partial_output(
+    def test_bridge_init_failure_preserves_existing_output(
             self, tmp_path, monkeypatch):
         monkeypatch.setenv("TOPOS_EXPORT_NATIVE_VT", "1")
         from src.shared.export.export_stage_telemetry import (
@@ -381,7 +382,7 @@ class TestBridgeSelection:
         telemetry = ExportTelemetryRecorder("t")
         sequence, project = _eligible_project()
         output = tmp_path / "out.mp4"
-        output.write_bytes(b"partial mux from failed bridge")
+        output.write_bytes(b"previous successful export")
         exporter = self._exporter(tmp_path, sequence, project, telemetry)
 
         # 模拟 Metal context 不可用（模块存在但构造抛出）
@@ -398,7 +399,7 @@ class TestBridgeSelection:
         exporter._maybe_create_default_native_gpu_bridge(
             str(output), _StubEncoderConfig())
         assert exporter._gpu_encode_surface_provider is None
-        assert not output.exists(), "半成品输出必须被清理"
+        assert output.read_bytes() == b"previous successful export"
         assert exporter.bridge_selection["reason_code"] == "bridge_init_failed"
         assert telemetry.snapshot().fallback_root_cause.startswith(
             "bridge_init_failed:")
@@ -445,6 +446,98 @@ class TestBridgeSelection:
             "output_surface": "nv12",
         }
         assert created["pixel_format"] == "nv12"
+
+
+@pytest.fixture
+def metal_grade_timeline(tmp_path):
+    from src.features.color.core.color_graph_service import ColorGraphData, ColorGraphService
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.timeline_export import ExportCodec, TimelineExportConfig, TimelineExporter
+    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, Rational, TimelineSequence
+    from src.shared.color.lut_resource_registry import get_lut_resource_session
+
+    service = ColorGraphService()
+    added = service.op_insert_corrector(ColorGraphData.create_serial())
+    lut_node = next(node for node in added.graph.nodes if node.node_type == "corrector")
+    lut = tmp_path / "look.cube"
+    lut.write_text("LUT_3D_SIZE 2\n" + "0.4 0.5 0.6\n" * 8)
+    imported = get_lut_resource_session().import_files([str(lut)])[0]
+    assert imported.entry is not None
+    result = service.op_set_node_lut(added.graph, lut_node.node_id, imported.entry.uri, 0.6)
+    assert result.ok
+    added = service.op_insert_corrector(result.graph, lut_node.node_id, before=False)
+    primary = next(node for node in added.graph.nodes if node.node_type == "corrector"
+                   and node.node_id != lut_node.node_id)
+    result = service.op_set_node_option(added.graph, primary.node_id, "grade_patch", ("exposure", 19.0))
+    assert result.ok
+
+    asset = MediaAsset(asset_id="source", display_name="Source", media_type="video",
+                       path=str(tmp_path / "media.mov"),
+                       metadata={"width": 1920, "height": 1080, "codec": "h264",
+                                 "pixel_format": "yuv420p"})
+    project = EditProject.create("Native Metal grade test").with_media_asset_added(asset)
+    project, stack_id = project.create_color_stack(asset_id=asset.asset_id)
+    project = project.update_color_stack(stack_id, color_graph=result.graph)
+    clip = ClipInstance(clip_id="left", asset_id=asset.asset_id, track_id="v1",
+                        timeline_start=0, timeline_duration=20, source_start=12, source_duration=20,
+                        color_stack_id=stack_id)
+    following = replace(clip, clip_id="right", timeline_start=20, source_start=90)
+    track = EditTrack(track_id="v1", name="V1", track_type="video", index=0,
+                      clips=(clip, following))
+    sequence = TimelineSequence(timeline_id="grade", name="Color", fps=Rational(25, 1),
+                                width=1920, height=1080, video_tracks=(track,))
+    exporter = TimelineExporter(project, sequence, object())
+    exporter._render_plan = TimelineRenderPlan(sequence)
+    config = TimelineExportConfig(codec=ExportCodec.H264, output_path=str(tmp_path / "out.mp4"),
+                                  include_audio=False)
+    return exporter, config, track
+
+
+def test_metal_selects_serial_grading_and_two_sided_dissolve(metal_grade_timeline) -> None:
+    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
+    from src.features.edit.core.timeline_v2 import TransitionInstance
+
+    exporter, config, track = metal_grade_timeline
+    transition = TransitionInstance(track_id="v1", left_clip_id="left", right_clip_id="right",
+                                    center_frame=20, duration=8)
+    sequence = replace(exporter._sequence, video_tracks=(replace(track, transitions=(transition,)),))
+    exporter._sequence = sequence
+    exporter._render_plan = TimelineRenderPlan(sequence)
+    clips, variants = exporter._metal_h264_lut_clips(config, 1920, 1080, 5, 34)
+    assert clips["left"].operations == ("lut", "primary")
+    assert set(clips) == {"left", "right"}
+    assert variants == {(("lut", "primary"),), (("lut", "primary"), ("lut", "primary"))}
+
+
+@pytest.mark.parametrize("clip_patch", [{"timeline_start": 21}, {"opacity": 0.4},
+                                       {"fade_in_duration": 2}, {"freeze_source_frame": 13}])
+def test_metal_preserves_standard_export_for_unsupported_edits(metal_grade_timeline, clip_patch) -> None:
+    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
+
+    exporter, config, track = metal_grade_timeline
+    changed = replace(track, clips=(track.clips[0], replace(track.clips[1], **clip_patch)))
+    sequence = replace(exporter._sequence, video_tracks=(changed,))
+    exporter._sequence = sequence
+    exporter._render_plan = TimelineRenderPlan(sequence)
+    clips, variants = exporter._metal_h264_lut_clips(config, 1920, 1080, 0, 40)
+    assert not clips and not variants
+
+
+def test_metal_lut_hardware_disable_precedes_gpu_admission(metal_grade_timeline, monkeypatch) -> None:
+    from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
+
+    exporter, config, _ = metal_grade_timeline
+    monkeypatch.setenv(MACOS_HW_ENCODE_DISABLE_ENV, "1")
+    monkeypatch.setattr(exporter, "_gpu_render_disabled", False)
+
+    def unexpected_selection(*args):
+        pytest.fail("Hardware disable must bypass native Metal admission")
+
+    monkeypatch.setattr(exporter, "_metal_h264_lut_clips", unexpected_selection)
+    assert exporter._try_export_metal_h264_lut(
+        config, exporter._create_encoder_config(config), 0, 40,
+    ) is None
 
 
 # ---------------------------------------------------------------------------

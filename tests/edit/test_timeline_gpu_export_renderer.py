@@ -163,6 +163,29 @@ def test_gpu_yuv422p10_delivery_gate_requires_topos_bt709_contract():
     assert not ex._gpu_yuv422p10_output_allowed(config, 192, 108)
 
 
+def test_dnxhr_planar_output_requires_opengl_and_final_delivery() -> None:
+    exporter = _make_exporter()
+    exporter._timeline_graphics_backend = "opengl"
+    exporter._encoder = SimpleNamespace(_config=SimpleNamespace(
+        codec="dnxhr", pix_fmt="yuv422p10le"))
+    exporter._export_color_metadata = SimpleNamespace(
+        primaries="bt709", transfer="bt709", matrix="bt709", range="limited")
+    exporter._sequence = SimpleNamespace(format_settings={})
+    config = SimpleNamespace(burn_subtitles=False)
+    assert exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
+
+    exporter._nested_render_stack = {"child"}
+    assert not exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
+    exporter._nested_render_stack.clear()
+    exporter._sequence.format_settings = {"program_guide": {
+        "type": "aspect_ratio", "params": {"fill_black": True, "burn_in": True},
+    }}
+    assert not exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
+    exporter._sequence.format_settings = {}
+    exporter._timeline_graphics_backend = "metal"
+    assert not exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
+
+
 def test_encode_frame_accepts_topos_yuv422p10_gpu_planar_frame():
     ex = _make_exporter()
     encoded = []
@@ -877,6 +900,103 @@ def test_gpu_yuv420_output_matches_pyav_bt709_conversion():
             delta = np.abs(actual.astype(np.int16) - expected.astype(np.int16))
             assert delta.max() <= 2, (
                 f"plane {index}: max difference {delta.max()} codes")
+    finally:
+        renderer.release()
+
+
+@pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
+@pytest.mark.parametrize("pixel_format", ["yuv420p", "yuv422p10le"])
+def test_fused_lut_delivery_matches_the_color_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pixel_format: str,
+) -> None:
+    from src.features.color.core.color_graph_service import ColorGraphData, ColorGraphService
+    from src.features.color.core.color_graph_texture import serial_lut_only
+    from src.features.edit.core.timeline_gpu_export_renderer import (
+        GpuYuvSource, TimelineGpuExportRenderer,
+    )
+
+    path = tmp_path / "swap.cube"
+    path.write_text("LUT_3D_SIZE 2\n" + "".join(
+        f"{b} {g} {r}\n" for b in range(2) for g in range(2) for r in range(2)
+    ))
+    reference = "topos-res://lut_" + "0" * 32
+    monkeypatch.setattr("src.features.color.core.color_graph_texture.resolve_lut_path", lambda ref: path)
+    service = ColorGraphService(lut_reference_validator=lambda ref: ref == reference)
+    inserted = service.apply_intent(ColorGraphData.create_serial(), "insert_corrector", {})
+    assert inserted.ok
+    node = next(n for n in inserted.graph.nodes if n.node_type == "corrector")
+    result = service.apply_intent(inserted.graph, "set_node_lut", {
+        "node_id": node.node_id, "lut_ref": reference, "strength": 0.8,
+    })
+    assert result.ok and serial_lut_only(result.graph) == (reference, 0.8)
+    args = {"color_graph": result.graph, "source_frame": 0}
+    rng = np.random.default_rng(17)
+    renderer = TimelineGpuExportRenderer()
+    try:
+        assert renderer._ensure_ready()
+        if pixel_format == "yuv422p10le":
+            source = GpuYuvSource(
+                planes=(rng.integers(64, 941, (14, 20), dtype=np.uint16),
+                        rng.integers(64, 961, (14, 10), dtype=np.uint16),
+                        rng.integers(64, 961, (14, 10), dtype=np.uint16)),
+                kr=0.2126, kb=0.0722, luma_bits=10, full_range=False,
+                chroma_x_div=2, chroma_y_div=1,
+            )
+            render = renderer.render_planar
+            opts = {"output_u16": True, "output_yuv422p10": True}
+            program_name = "_prog_yuv422p10_lut"
+        else:
+            source = rng.integers(0, 256, (14, 20, 3), dtype=np.uint8)
+            render = renderer.render_packed_bgr
+            opts = {"output_yuv420p": True}
+            program_name = "_prog_yuv420_lut"
+        assert getattr(renderer, program_name) is not None
+        fused = render(source, args, 20, 14, 1.0, **opts)
+        with monkeypatch.context() as patch:
+            patch.setattr(renderer, program_name, None)
+            reference_frame = render(source, args, 20, 14, 1.0, **opts)
+        assert fused is not None and reference_frame is not None
+        for actual, expected in zip(fused.planes, reference_frame.planes):
+            np.testing.assert_allclose(actual, expected, atol=1, rtol=0)
+    finally:
+        renderer.release()
+
+
+@pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
+@pytest.mark.parametrize("height", [5, 6])
+def test_yuv422p10_output_preserves_luma_levels_and_chroma_rows(height: int) -> None:
+    from src.features.edit.core.timeline_gpu_export_renderer import TimelineGpuExportRenderer
+    from src.shared.export.video_encoder import FFmpegVideoEncoder
+
+    pytest.importorskip("av")
+    width = 1024
+    rgb = np.empty((height, width, 4), dtype=np.float32)
+    rgb[..., :3] = np.linspace(0.0, 1.0, width, dtype=np.float32)[None, :, None]
+    rgb[..., 3] = 1.0
+    rgb[1, :, :3] = [1.0, 0.0, 0.0]
+    rgb[2, :, :3] = [0.0, 0.0, 1.0]
+    rgb[3, ::2, :3] = [1.0, 0.0, 0.0]
+    rgb[3, 1::2, :3] = [0.0, 0.0, 1.0]
+    renderer = TimelineGpuExportRenderer()
+    try:
+        assert renderer._ensure_ready()
+        texture = renderer._ctx.texture((width, height), 4, rgb, dtype="f4")
+        try:
+            frame = renderer._read_yuv422p10(
+                texture, width, height, FFmpegVideoEncoder.allocate_yuv422p10_frame)
+        finally:
+            texture.release()
+        assert frame is not None
+        assert (frame.encoder_frame is not None) == (height % 2 == 0)
+        y, u, v = frame.planes
+        assert y.dtype == u.dtype == v.dtype == np.uint16
+        assert np.unique(y[0]).size == 877
+        weights = np.array([0.2126, 0.7152, 0.0722])
+        np.testing.assert_allclose(y, np.rint(64 + 876 * (rgb[..., :3] @ weights)), atol=1, rtol=0)
+        chroma = rgb[..., :3].reshape(height, width // 2, 2, 3).mean(axis=2)
+        luma = chroma @ weights
+        np.testing.assert_allclose(u, np.rint(512 + 896 * (chroma[..., 2] - luma) / 1.8556), atol=1, rtol=0)
+        np.testing.assert_allclose(v, np.rint(512 + 896 * (chroma[..., 0] - luma) / 1.5748), atol=1, rtol=0)
     finally:
         renderer.release()
 

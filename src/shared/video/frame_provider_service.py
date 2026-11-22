@@ -191,6 +191,7 @@ class ClipSession:
     open_error: Optional[str] = None
     playback_mode: str = 'preview'  # 'preview', 'paused', 'export'
     defer_memory_proxy: bool = False
+    master_only: bool = False
     memory_proxy_pending: bool = False
     presentation_index: Optional[PresentationIndex] = field(default=None, repr=False)
     # macOS VT 零拷贝源（可选）。解码线程产出"延迟 GL 导入"的 GpuDecodedFrame，
@@ -756,6 +757,7 @@ class VideoFrameProviderService:
         defer_memory_proxy: bool = False,
         *,
         presentation_index: Optional[PresentationIndex] = None,
+        master_only: bool = False,
     ) -> str:
         """
         打开视频剪辑。
@@ -773,6 +775,7 @@ class VideoFrameProviderService:
                 可能同时请求不同 source frame，必须使用独立解码游标。
             defer_memory_proxy: True 时首帧只同步打开 master/磁盘代理，
                 内存降级 proxy 在后台打开，避免时间线首帧被 proxy 初始化阻塞。
+            master_only: 仅打开母版源，供不需要预览代理或独立 GPU 源的调用方。
 
         Returns:
             clip_id: 剪辑唯一标识
@@ -798,6 +801,7 @@ class VideoFrameProviderService:
                         candidate for candidate in self._path_to_clips[path]
                         if (previous := self._clips.get(candidate)) is not None
                         and previous.presentation_index is presentation_index
+                        and previous.master_only == master_only
                     ]
                     if existing_clip_ids:
                         shared_clip_id = existing_clip_ids[0]
@@ -831,6 +835,7 @@ class VideoFrameProviderService:
             max_proxy_cache=self._max_proxy_cache,
             max_master_cache=self._max_master_cache,
             defer_memory_proxy=defer_memory_proxy,
+            master_only=master_only,
             presentation_index=presentation_index,
         )
 
@@ -845,41 +850,42 @@ class VideoFrameProviderService:
 
         # P1-1: 自动查询 DiskProxyService
         disk_proxy_info = None
-        try:
-            from ..media.disk_proxy_service import get_disk_proxy_service
+        if not master_only:
+            try:
+                from ..media.disk_proxy_service import get_disk_proxy_service
 
-            proxy_service = get_disk_proxy_service()
-            disk_proxy_info = proxy_service.get_disk_proxy_info(path)
+                proxy_service = get_disk_proxy_service()
+                disk_proxy_info = proxy_service.get_disk_proxy_info(path)
 
-            # 记录代理状态
-            logger.info(
-                f"Disk proxy status for {path}: {disk_proxy_info.status.name}"
-            )
-
-            # 只有显式开启时才允许打开素材触发后台转码。编辑时间线
-            # 使用默认 False，避免首播与编码任务争用硬解、CPU 和磁盘带宽。
-            if self._auto_generate_disk_proxies and disk_proxy_info.needs_generation:
-                # 生成 asset_id（基于 clip_id）
-                asset_id = f"asset-{clip_id}"
-
-                # 触发后台生成（不阻塞）
-                proxy_service.generate_proxy(
-                    source_path=path,
-                    asset_id=asset_id,
-                    on_complete=lambda src, info: self._on_proxy_complete(src, info),
-                    on_progress=lambda src, prog: self._on_proxy_progress(src, prog),
-                )
-
+                # 记录代理状态
                 logger.info(
-                    f"Triggered proxy generation for {path}, "
-                    f"status={disk_proxy_info.status.name}"
+                    f"Disk proxy status for {path}: {disk_proxy_info.status.name}"
                 )
 
-        except Exception as e:
-            logger.warning(
-                f"Failed to query DiskProxyService for {path}: {e}, "
-                f"proceeding without disk proxy"
-            )
+                # 只有显式开启时才允许打开素材触发后台转码。编辑时间线
+                # 使用默认 False，避免首播与编码任务争用硬解、CPU 和磁盘带宽。
+                if self._auto_generate_disk_proxies and disk_proxy_info.needs_generation:
+                    # 生成 asset_id（基于 clip_id）
+                    asset_id = f"asset-{clip_id}"
+
+                    # 触发后台生成（不阻塞）
+                    proxy_service.generate_proxy(
+                        source_path=path,
+                        asset_id=asset_id,
+                        on_complete=lambda src, info: self._on_proxy_complete(src, info),
+                        on_progress=lambda src, prog: self._on_proxy_progress(src, prog),
+                    )
+
+                    logger.info(
+                        f"Triggered proxy generation for {path}, "
+                        f"status={disk_proxy_info.status.name}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to query DiskProxyService for {path}: {e}, "
+                    f"proceeding without disk proxy"
+                )
 
         # 在锁外打开媒体源（避免长时间阻塞）
         try:
@@ -972,6 +978,7 @@ class VideoFrameProviderService:
                         candidate for candidate in self._path_to_clips[path]
                         if (previous := self._clips.get(candidate)) is not None
                         and previous.presentation_index is None
+                        and not previous.master_only
                     ]
                     if existing_clip_ids:
                         shared_clip_id = existing_clip_ids[0]
@@ -1094,7 +1101,7 @@ class VideoFrameProviderService:
                 logger.warning(f"Clip not found: {clip_id}")
                 return False
 
-            if session.presentation_index is not None:
+            if session.presentation_index is not None or session.master_only:
                 return False
             session.disk_proxy_info = disk_proxy_info
 
@@ -2073,6 +2080,11 @@ class VideoFrameProviderService:
 
         session.master_source = master_source
         session.metadata = metadata
+        if session.master_only:
+            from ..media.ffmpeg_source import FFmpegMediaSource
+
+            if isinstance(master_source, FFmpegMediaSource):
+                master_source.limit_h264_export_decode_threads()
         if session.presentation_index is not None:
             configure_index = getattr(master_source, "set_presentation_index", None)
             if not callable(configure_index):
@@ -2081,6 +2093,7 @@ class VideoFrameProviderService:
                 raise MediaOpenError("Decoder does not support timestamp indexing.", source_path=path)
             configure_index(session.presentation_index)
             session.metadata = master_source.probe()
+        if session.presentation_index is not None or session.master_only:
             session.is_open = True
             session.open_error = None
             return

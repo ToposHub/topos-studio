@@ -48,6 +48,7 @@ from src.features.color.shaders.node_ops_gl import (
     KEY_MODE_INDEX,
     LAYER_MODE_INDEX,
 )
+from src.shared.project.color_graph import ColorGraphData
 
 #: Metal 后端能力目录（B12.1 矩阵数据源；op → exact/fallback/unsupported）
 METAL_CAPABILITY_CATALOG: Mapping[str, str] = {
@@ -66,6 +67,96 @@ METAL_CAPABILITY_CATALOG: Mapping[str, str] = {
     "alpha_output": "unsupported",
     "compound": "unsupported",
 }
+
+
+def graph_grading_params_for_layer(
+    layer: Mapping[str, Any], width: int, height: int, *, has_mask: bool = False,
+) -> np.ndarray:
+    """Pack primary-grading uniforms for a layer with a supported parameter domain."""
+    from src.features.color.core.composition_uniforms import (
+        composition_uniform_values,
+    )
+
+    values = composition_uniform_values(dict(layer), width=width, height=height)
+    return make_graph_grading_params(
+        exposure=float(values["u_exposure"]),
+        temp=float(values["u_temp"]),
+        tint=float(values["u_tint"]),
+        contrast=float(values["u_contrast"]),
+        saturation=float(values["u_saturation"]),
+        vibrance=float(values["u_vibrance"]),
+        shadow=float(values["u_shadow"]),
+        highlights=float(values["u_highlights"]),
+        hue_shift=float(values["u_hue_shift"]),
+        lift_saturation=float(values["u_lift_saturation"]),
+        gamma_saturation=float(values["u_gamma_saturation"]),
+        gain_saturation=float(values["u_gain_saturation"]),
+        lift=tuple(values["u_lift"]),
+        gamma=tuple(values["u_gamma"]),
+        gain=tuple(values["u_gain"]),
+        pivot=float(values["u_pivot"]),
+        offset=tuple(values["u_offset"]),
+        log_shadow=tuple(values["u_log_shadow"]),
+        log_midtone=tuple(values["u_log_midtone"]),
+        log_highlight=tuple(values["u_log_highlight"]),
+        log_offset=tuple(values["u_log_offset"]),
+        log_low_range=float(values["u_log_low_range"]),
+        log_high_range=float(values["u_log_high_range"]),
+        lum_mix=float(values["u_lum_mix"]),
+        opacity=float(values["u_opacity"]),
+        mask_mode=1 if has_mask else 0,
+        has_curves=layer.get("curves_lut") is not None,
+    )
+
+
+@dataclass(frozen=True)
+class MetalDeliveryCorrector:
+    """A static primary grade and/or LUT in one serial graph node."""
+
+    lut: tuple[str, float] | None
+    primary: np.ndarray | None = None
+
+    @property
+    def operation(self) -> str:
+        if self.primary is None:
+            return "lut"
+        return "primary_lut" if self.lut is not None else "primary"
+
+
+def serial_metal_delivery_grade(
+    graph: ColorGraphData, width: int, height: int,
+) -> tuple[MetalDeliveryCorrector, ...] | None:
+    """Resolve static pointwise nodes without discarding unsupported effects."""
+    from src.features.color.core.color_graph_param_source import node_layer_payload
+    from src.features.color.core.color_graph_texture import corrector_lut_only, serial_correctors
+    from src.features.color.core.color_node_lut_spec import node_lut_projection
+
+    correctors = serial_correctors(graph)
+    if not correctors:
+        return None
+    operations = []
+    for node in correctors:
+        lut = corrector_lut_only(node)
+        if lut is not None:
+            operations.append(MetalDeliveryCorrector(lut))
+            continue
+        if (node.legacy_payload or node.params.keys() - {
+                "grade", "opacity", "blend_mode", "resources", "key_source_mode"}
+                or node.params.get("key_source_mode", "node_input") != "node_input"):
+            return None
+        resources = node.params.get("resources", {})
+        if not isinstance(resources, Mapping) or resources.keys() - {"lut_ref", "lut_strength"}:
+            return None
+        layer = node_layer_payload(node, include_lut_cache=False)
+        if (layer is None or layer.get("curves_lut") is not None
+                or production_layer_domain_errors(layer, backend="metal")):
+            return None
+        reference, strength = node_lut_projection(resources)
+        operations.append(MetalDeliveryCorrector(
+            (reference, strength) if reference is not None else None,
+            graph_grading_params_for_layer(layer, width, height),
+        ))
+    return tuple(operations)
 
 
 class MetalGraphCancelled(Exception):
@@ -551,41 +642,9 @@ class ColorGraphMetalExecutor:
                 f"pass {render_pass.index}: {'; '.join(errors)}"
                 "（fail-closed，不产出少效果结果）",
                 pass_index=render_pass.index)
-        from src.features.color.core.composition_uniforms import (
-            composition_uniform_values,
-        )
-        values = composition_uniform_values(
-            dict(layer), width=width, height=height)
+        params = graph_grading_params_for_layer(
+            layer, width, height, has_mask=key_buf is not None)
         lut = layer.get("curves_lut")
-        params = make_graph_grading_params(
-            exposure=float(values["u_exposure"]),
-            temp=float(values["u_temp"]),
-            tint=float(values["u_tint"]),
-            contrast=float(values["u_contrast"]),
-            saturation=float(values["u_saturation"]),
-            vibrance=float(values["u_vibrance"]),
-            shadow=float(values["u_shadow"]),
-            highlights=float(values["u_highlights"]),
-            hue_shift=float(values["u_hue_shift"]),
-            lift_saturation=float(values["u_lift_saturation"]),
-            gamma_saturation=float(values["u_gamma_saturation"]),
-            gain_saturation=float(values["u_gain_saturation"]),
-            lift=tuple(values["u_lift"]),
-            gamma=tuple(values["u_gamma"]),
-            gain=tuple(values["u_gain"]),
-            pivot=float(values["u_pivot"]),
-            offset=tuple(values["u_offset"]),
-            log_shadow=tuple(values["u_log_shadow"]),
-            log_midtone=tuple(values["u_log_midtone"]),
-            log_highlight=tuple(values["u_log_highlight"]),
-            log_offset=tuple(values["u_log_offset"]),
-            log_low_range=float(values["u_log_low_range"]),
-            log_high_range=float(values["u_log_high_range"]),
-            lum_mix=float(values["u_lum_mix"]),
-            opacity=float(values["u_opacity"]),
-            mask_mode=1 if key_buf is not None else 0,
-            has_curves=lut is not None,
-        )
         curves_buf = self._curves_buffer(lut)
         matte = key_buf if key_buf is not None else self._white_buffer(
             width, height)

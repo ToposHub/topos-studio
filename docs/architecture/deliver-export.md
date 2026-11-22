@@ -238,8 +238,9 @@ degradations（T-P1-70，只记日志不可审计是不被接受的）。
 
 图形后端在 `__init__` 一次性解析（`_select_timeline_graphics_backend`）：
 读 `ConfigManager.get_backend_selection().graphics`，`TOPOS_BACKEND_GRAPHICS`
-环境变量可覆盖；`auto` 时仅当 `probe_d3d11_export_capability().ready` 才选
-d3d11，否则 opengl；显式注入 Metal-only 编码桥时强制 metal。
+环境变量可覆盖。macOS `auto` 将符合 5.1 节条件的 H.264 场景交给 Metal，
+其余场景使用常规合成。Windows `auto` 在 D3D11 导出管线通过完整探测后
+选择 D3D11。显式注入 Metal 编码桥时由 Metal 提供输出表面。
 
 每帧合成的路径选择（`_composite_layers` → `_gpu_render_composite`）：
 
@@ -251,6 +252,16 @@ d3d11，否则 opengl；显式注入 Metal-only 编码桥时强制 metal。
   交付直接回读 YUV422P10 平面，或 H.264 场景回读 YUV420P 平面。
   Metal 路径另有逐 clip 预取线程池（`TOPOS_EXPORT_METAL_PREFETCH`，默认开）
   与 VT 解码重叠。
+- **OpenGL 编码平面**：SDR Rec.709 限幅交付支持单次读取连续 YUV420P 平面。
+  单一 LUT 的串联图可在同一着色器完成 LUT、量化和 YUV420P 转换。
+  DNxHR HQX 的同尺寸、满不透明度、单层调色图可直接从浮点 RGB 生成
+  10-bit 4:2:2 编码平面，双像素横向平均生成色度。单 LUT 调色可与该转换
+  同步执行，沿用 RGB16 输入量化。行宽符合 FFmpeg 平面对齐时，GPU 直接
+  回读到编码帧的缓冲。交付帧自带编码缓冲时可以直接按序提交，首次需要
+  转换的帧启动后台转换。字幕、烧入遮幅或其他合成场景使用
+  常规渲染路径。OpenGL 导出从独立母版会话解码，省去预览代理和单独的 GPU
+  播放会话初始化。Intel macOS 上，符合 8-bit 4:2:0、UHD 及以下且不超过
+  30 fps 条件的 H.264 母版解码使用最多 4 个线程。
 - **CPU 回退**（`_gpu_render_composite` 返回 None）：自适应跳过（主机可见
   单层轻量帧，GPU 往返不划算）、alpha 交付、GPU 不适用 clip、headless
   上下文已失败（本导出内永久）等场景走 `_apply_clip_effects_cpu` +
@@ -453,24 +464,27 @@ macOS 上有**三条互补的硬件通路**，接入点各不相同：
    `VideoToolboxGpuExportBridge` 组合三个部件——`VideoToolboxCompression
    Session`（native 压缩会话，`require_hardware=True`）、`VideoToolboxPacket
    Muxer`（压缩包 mux）、`VideoToolboxGpuSurfaceProvider`（Metal surface 池）。
-   接入点有二：
-   - **默认自动路径**：`TimelineExporter._maybe_create_default_native_gpu_
-     bridge`——仅在 `TOPOS_EXPORT_NATIVE_VT=1` 且 `can_use_native_gpu_
-     bridge()` 纯函数 eligibility 全过（fail-closed 词表：源像素格式→surface
-     映射仅 yuv420p/nv12→NV12 与 yuv420p10le/p010→P010；无字幕内容/无
-     alpha/无转场/无非恒等几何与不透明度/无 clip 效果；TOPOS 4:2:2 家族
-     显式拒绝）时创建。初始化失败时**在写任何帧之前**清理半成品输出并整体
-     回退普通 encoder（渲染侧 metal 选择一并回退，否则宿主会收到 planar
-     帧直接崩溃）；选择状态进 `_bridge_selection` 与 telemetry
-     （`bridge_not_selected:<reason>` / `bridge_init_failed`）。
+   - macOS 的 `auto` 与 `metal` 会优先尝试原生 H.264 路径。适用范围是
+     同尺寸整数帧率、BT.709 限幅的 8-bit H.264 原片与 MP4/MOV 输出。
+     可执行单层的静态一级调色和 LUT，支持最多四个串行 Corrector，也支持
+     两段相邻合格素材的双边 cross-dissolve。控制点曲线、遮罩、插件、关键帧、
+     可见字幕、烧入遮幅、音轨、其他转场以及调色组或时间线附加链走常规路径。
+     解码后的 NV12 和目标 NV12 是 Metal 纹理。合成与交付像素保持在 GPU，
+     码率和 H.264 profile 由交付设置传给 VideoToolbox。
+   - 原生桥写入同目录临时容器，排空编码、校验帧数并完成封装后发布。初始化
+     或运行失败时清理临时容器，按完整区间重新走常规导出。定稿发布前仍会
+     检查取消。`TOPOS_EXPORT_NATIVE_VT=0` 或显式 OpenGL 关闭自动路线，
+     `TOPOS_DISABLE_MACOS_HW_ENCODE` 维持软件编码选择。
+   - `TOPOS_EXPORT_NATIVE_VT=1` 仍可显式试用已有的无调色 H.264 或 HEVC
+     原生桥，沿用 `can_use_native_gpu_bridge` 的格式与场景检查。
    - **调用方注入路径**：构造 `TimelineExporter(gpu_encode_surface_provider=
      bridge)`；`handles_timeline_video=True` 的桥使 `_create_encoder` 返回
      `_ExternalGpuSurfaceEncoder` 适配器（严格校验 codec/pix_fmt 限于
      h264+yuv420p / hevc+yuv420p10le、输出路径与宽高一致），帧以
-     `GpuEncodeSurface` 形态 `submit()` 直达硬件编码；`close_on_export=True`
-     在导出 finally 中关闭。
-3. **Metal 合成后端**：`_gpu_render_composite` 经 `timeline_gpu_export_
-   renderer`（batch-186 审查对象，2.2k 行）在 Metal 栈上完成合成/效果/转场，
+     `GpuEncodeSurface` 形态 `submit()` 直达硬件编码。`close_on_export=True`
+     的桥由导出器定稿，其他注入桥由调用方管理。
+3. **通用 Metal 合成后端**：`_gpu_render_composite` 经 `timeline_metal_export_renderer`
+   在 Metal 上完成已接线的合成、效果与转场，
    直接回读 NV12/P010/YUV422P10 平面喂对应编码器；Metal 解码帧全程 GPU
    驻留 + 逐 clip 预取与 VT 解码重叠。VT **解码**侧（`macos_vt/source.py`、
    `vt_session.py`、`packet_demux.py` 等）为同一 macOS_vt 包的另一半，供

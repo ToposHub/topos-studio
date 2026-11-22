@@ -17,6 +17,7 @@ import ctypes as _ctypes
 import logging
 import platform
 import threading
+import time
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Callable, Optional
@@ -26,6 +27,11 @@ from src.shared.export.gpu_encode_surface import GpuEncodeSurface
 logger = logging.getLogger(__name__)
 
 _MACOS_AVAILABLE = platform.system() == "Darwin"
+_H264_PROFILE_LEVELS = {
+    "baseline": "H264_Baseline_AutoLevel",
+    "main": "H264_Main_AutoLevel",
+    "high": "H264_High_AutoLevel",
+}
 
 
 class VideoToolboxCompressionError(RuntimeError):
@@ -121,6 +127,10 @@ def _configure_native_signatures() -> None:
     ]
     _VT_LIB.VTCompressionSessionInvalidate.restype = None
     _VT_LIB.VTCompressionSessionInvalidate.argtypes = [_ctypes.c_void_p]
+    _VT_LIB.VTSessionSetProperty.restype = _ctypes.c_int32
+    _VT_LIB.VTSessionSetProperty.argtypes = [
+        _ctypes.c_void_p, _ctypes.c_void_p, _ctypes.c_void_p,
+    ]
 
     _CM_LIB.CMSampleBufferGetDataBuffer.restype = _ctypes.c_void_p
     _CM_LIB.CMSampleBufferGetDataBuffer.argtypes = [_ctypes.c_void_p]
@@ -164,6 +174,22 @@ def _configure_native_signatures() -> None:
 
 
 _configure_native_signatures()
+
+
+def _compression_core_foundation() -> Any:
+    cf = _ctypes.cdll.LoadLibrary(
+        "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    cf.CFStringCreateWithCString.restype = _ctypes.c_void_p
+    cf.CFStringCreateWithCString.argtypes = [
+        _ctypes.c_void_p, _ctypes.c_char_p, _ctypes.c_uint32,
+    ]
+    cf.CFNumberCreate.restype = _ctypes.c_void_p
+    cf.CFNumberCreate.argtypes = [
+        _ctypes.c_void_p, _ctypes.c_long, _ctypes.c_void_p,
+    ]
+    cf.CFRelease.restype = None
+    cf.CFRelease.argtypes = [_ctypes.c_void_p]
+    return cf
 
 
 def _codec_fourcc(codec: str) -> tuple[str, int]:
@@ -354,6 +380,9 @@ class VideoToolboxCompressionSession:
         pixel_format: str = "nv12",
         on_packet: Optional[Callable[[VideoToolboxEncodedPacket], Any]] = None,
         require_hardware: bool = True,
+        h264_profile: str | None = None,
+        bit_rate: int | None = None,
+        bt709_limited: bool = False,
     ) -> None:
         if not _MACOS_AVAILABLE or _VT_LIB is None or _CM_LIB is None:
             raise VideoToolboxCompressionError(
@@ -363,7 +392,6 @@ class VideoToolboxCompressionSession:
         self.height = int(height)
         if self.width <= 0 or self.height <= 0:
             raise VideoToolboxCompressionError("invalid_videotoolbox_dimensions")
-        self._codec_name = str(codec).strip().lower()
         self.codec, codec_type = _codec_fourcc(codec)
         self._pixel_format = str(pixel_format).strip().lower()
         if self._pixel_format not in {"nv12", "p010"}:
@@ -371,6 +399,14 @@ class VideoToolboxCompressionSession:
                 "videotoolbox_session_pixel_format_unsupported:"
                 f"{pixel_format}"
             )
+        profile = h264_profile.strip().lower() if h264_profile is not None else "auto"
+        if h264_profile is not None and (self.codec != "h264"
+                or (profile != "auto" and profile not in _H264_PROFILE_LEVELS)):
+            raise VideoToolboxCompressionError(
+                f"videotoolbox_h264_profile_unsupported:{h264_profile}")
+        if bit_rate is not None and (type(bit_rate) is not int or not 0 < bit_rate < 1 << 63):
+            raise VideoToolboxCompressionError("videotoolbox_invalid_average_bit_rate")
+        self._bt709_limited = bt709_limited
         self.fps = max(1, int(fps))
         self._on_packet = on_packet
         # _lock 保护 Python 状态（_pending/_closed/_last_error）；
@@ -411,6 +447,7 @@ class VideoToolboxCompressionSession:
             self._specification_object = None
 
         self._session = _ctypes.c_void_p()
+        self._cf = _compression_core_foundation()
         status = _VT_LIB.VTCompressionSessionCreate(
             None,
             self.width,
@@ -424,63 +461,61 @@ class VideoToolboxCompressionSession:
             _ctypes.byref(self._session),
         )
         if int(status) != 0 or not self._session.value:
-            self._session = _ctypes.c_void_p()
+            self._close_session()
             raise VideoToolboxCompressionError(
                 f"videotoolbox_compression_session_create_failed:{int(status)}"
             )
-        # T-P0-31：交付像素格式决定 profile——P010 必须 Main10。VT 对
-        # HEVC 的默认 profile 是 Main（8-bit），即便输入是 10-bit
-        # CVPixelBuffer，静默产出 8-bit 就是位深造假。
-        if self._codec_name == "hevc":
-            level = (
-                "HEVC_Main10_AutoLevel" if self._pixel_format == "p010"
-                else "HEVC_Main_AutoLevel"
-            )
-            set_status = self._set_profile_level(level)
-            if set_status != 0:
-                # 本机硬件编码器拒绝 Main10（如部分 AMD dGPU 返回 -12900
-                # kVTPropertyUnsupportedErr）时结构化失败，交由上层诚实
-                # 回退 CPU 10-bit 编码——绝不静默用 Main 编 8-bit 冒充
-                # P010 交付。（遗留：VT 软件编码器 Main10 的 mux 链路在
-                # 该场景存在 EINVAL，见 T-P0-31 遗留记录，修复后可在此
-                # 接入软件编码器降级。）
-                self._close_session()
-                raise VideoToolboxCompressionError(
-                    "videotoolbox_hevc_profile_level_rejected:"
-                    f"{self._pixel_format}:{set_status}"
-                )
+        try:
+            # P010 must use Main10 so a rejected profile cannot silently
+            # reduce precision to the native encoder's 8-bit default.
+            level = _H264_PROFILE_LEVELS.get(profile)
+            if self.codec == "hevc":
+                level = ("HEVC_Main10_AutoLevel" if self._pixel_format == "p010"
+                         else "HEVC_Main_AutoLevel")
+            if level is not None:
+                set_status = self._set_profile_level(level)
+                if set_status:
+                    raise VideoToolboxCompressionError(
+                        f"videotoolbox_{self.codec}_profile_level_rejected:"
+                        f"{self._pixel_format}:{set_status}")
+            settings: dict[str, str | int] = {}
+            if bit_rate is not None:
+                settings["AverageBitRate"] = bit_rate
+            if bt709_limited:
+                settings.update(dict.fromkeys(
+                    ("ColorPrimaries", "TransferFunction", "YCbCrMatrix"), "ITU_R_709_2"))
+            for key, value in settings.items():
+                set_status = self._set_property(key, value)
+                if set_status:
+                    raise VideoToolboxCompressionError(
+                        f"videotoolbox_compression_property_rejected:{key}:{set_status}")
+        except BaseException:
+            self._close_session()
+            raise
 
     def _set_profile_level(self, level: str) -> int:
         """Set VTCompressionPropertyKey_ProfileLevel; return the raw status."""
-        cf = _ctypes.cdll.LoadLibrary(
-            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
-        cf.CFStringCreateWithCString.restype = _ctypes.c_void_p
-        cf.CFStringCreateWithCString.argtypes = [
-            _ctypes.c_void_p, _ctypes.c_char_p, _ctypes.c_uint32,
-        ]
-        # AUD-35209：CFStringCreateWithCString 产生调用方持有的
-        # CFStringRef，用完必须 CFRelease——否则每次编码会话泄漏两个
-        # 小 CF 对象，长期反复导出累积原生堆占用。
-        cf.CFRelease.restype = None
-        cf.CFRelease.argtypes = [_ctypes.c_void_p]
-        # kCFStringEncodingUTF8 = 0x08000100；CFString 与 VT 的
-        # CFStringRef 参数 toll-free 同型。
-        key_ref = _ctypes.c_void_p(cf.CFStringCreateWithCString(
-            None, b"ProfileLevel", 0x08000100))
-        value_ref = _ctypes.c_void_p(cf.CFStringCreateWithCString(
-            None, level.encode("ascii"), 0x08000100))
+        return self._set_property("ProfileLevel", level)
+
+    def _set_property(self, key: str, value: str | int) -> int:
+        """Set a CFString or 64-bit CFNumber compression property."""
+        cf = self._cf
+        encoding_utf8 = 0x08000100
+        key_ref = cf.CFStringCreateWithCString(None, key.encode("ascii"), encoding_utf8)
+        value_ref = None
         try:
-            _VT_LIB.VTSessionSetProperty.restype = _ctypes.c_int32
-            _VT_LIB.VTSessionSetProperty.argtypes = [
-                _ctypes.c_void_p, _ctypes.c_void_p, _ctypes.c_void_p,
-            ]
-            return int(_VT_LIB.VTSessionSetProperty(
-                _ctypes.c_void_p(self._session.value), key_ref, value_ref,
-            ))
+            if isinstance(value, str):
+                value_ref = cf.CFStringCreateWithCString(None, value.encode("ascii"), encoding_utf8)
+            else:
+                number = _ctypes.c_int64(value)
+                value_ref = cf.CFNumberCreate(None, 4, _ctypes.byref(number))  # kCFNumberSInt64Type
+            if not key_ref or not value_ref:
+                raise VideoToolboxCompressionError(f"videotoolbox_property_allocation_failed:{key}")
+            return int(_VT_LIB.VTSessionSetProperty(self._session, key_ref, value_ref))
         finally:
-            if key_ref.value:
+            if key_ref:
                 cf.CFRelease(key_ref)
-            if value_ref.value:
+            if value_ref:
                 cf.CFRelease(value_ref)
 
     def _close_session(self) -> None:
@@ -489,7 +524,12 @@ class VideoToolboxCompressionSession:
             session = self._session
             self._session = _ctypes.c_void_p()
             if session is not None and session.value:
-                _VT_LIB.VTCompressionSessionInvalidate(session)
+                try:
+                    _VT_LIB.VTCompressionSessionInvalidate(session)
+                finally:
+                    cf = getattr(self, "_cf", None)
+                    if cf is not None:
+                        cf.CFRelease(session)
 
     @property
     def is_open(self) -> bool:
@@ -529,6 +569,10 @@ class VideoToolboxCompressionSession:
             raise VideoToolboxCompressionError(
                 f"videotoolbox_surface_format_unsupported:{descriptor.pixel_format}"
             )
+        if getattr(self, "_bt709_limited", False) and (
+                str(descriptor.color_range).lower() != "limited"
+                or str(descriptor.color_matrix).lower() != "bt709"):
+            raise VideoToolboxCompressionError("videotoolbox_surface_color_metadata_mismatch")
         with self._lock:
             if self._closed:
                 raise VideoToolboxCompressionError("videotoolbox_session_closed")
@@ -595,6 +639,12 @@ class VideoToolboxCompressionSession:
             )
 
     def close(self) -> None:
+        self._finish(flush=True)
+
+    def abort(self) -> None:
+        self._finish(flush=False)
+
+    def _finish(self, *, flush: bool) -> None:
         with self._lock:
             if self._closed:
                 return
@@ -603,38 +653,32 @@ class VideoToolboxCompressionSession:
             # 窗口。
             self._closed = True
         try:
-            self.complete()
-            # T-P0-31：CompleteFrames 之后，VT 仍在自己的队列上回调最后
-            # 几个输出包（软件编码器帧重排尤甚）。必须等 pending 队列排
-            # 空——bridge 关闭顺序是 session → muxer，若不等待，尾帧包会
-            # 写进已关闭的容器（EINVAL）被静默丢弃（尾帧缺失）。
-            import time as _time
-
-            deadline = _time.monotonic() + 10.0
-            while _time.monotonic() < deadline:
+            if flush:
+                try:
+                    self.complete()
+                    deadline = time.monotonic() + 10.0
+                    while time.monotonic() < deadline:
+                        if self.pending_count == 0:
+                            break
+                        time.sleep(0.01)
+                    if self.pending_count:
+                        raise VideoToolboxCompressionError("videotoolbox_compression_flush_timeout")
+                except Exception as exc:
+                    with self._lock:
+                        self._last_error = str(exc)
+                    logger.warning("VideoToolbox compression completion failed: %s", exc)
+        finally:
+            try:
+                self._close_session()
+            finally:
                 with self._lock:
-                    if not self._pending:
-                        break
-                _time.sleep(0.01)
-        except Exception as exc:
-            with self._lock:
-                self._last_error = str(exc)
-            logger.warning("VideoToolbox compression completion failed: %s", exc)
-        with self._lock:
-            pending = list(self._pending.values())
-            self._pending.clear()
-        # AUD-35206：Invalidate 与 submit/complete 的原生调用共用
-        # _session_lock，保证"会话仍有效"的判定对三者一致。
-        with self._session_lock:
-            session = self._session
-            self._session = _ctypes.c_void_p()
-            if session.value:
-                _VT_LIB.VTCompressionSessionInvalidate(session)
-        for surface in pending:
-            surface.release()
-        self._callback = None
-        self._ref_pointer = None
-        self._ref_object = None
+                    pending = list(self._pending.values())
+                    self._pending.clear()
+                for surface in pending:
+                    surface.release()
+                self._callback = None
+                self._ref_pointer = None
+                self._ref_object = None
 
     def _remove_pending_surface(self, submission_id: int) -> None:
         with self._lock:
@@ -652,7 +696,7 @@ class VideoToolboxCompressionSession:
     ) -> None:
         submission_id = int(source_frame_ref_con or 0)
         with self._lock:
-            surface = self._pending.pop(submission_id, None)
+            surface = self._pending.get(submission_id)
         try:
             if int(status) != 0:
                 # AUD-35208：丢包必须可观测——计数 + warning 留痕，导出侧
@@ -684,11 +728,18 @@ class VideoToolboxCompressionSession:
                 self._on_packet(packet)
         except Exception as exc:  # pragma: no cover - native callback guard
             with self._lock:
+                self._dropped_packets += 1
                 self._last_error = f"videotoolbox_callback_extract_failed:{exc}"
             logger.exception("VideoToolbox packet callback failed")
         finally:
-            if surface is not None:
-                surface.release()
+            # Leave the entry pending until the packet sink returns. Flush
+            # must not close the muxer while a callback is still writing.
+            try:
+                if surface is not None:
+                    surface.release()
+            finally:
+                with self._lock:
+                    self._pending.pop(submission_id, None)
 
     def _extract_packet(
         self,
@@ -790,6 +841,7 @@ class VideoToolboxPacketMuxer:
         codec: str = "h264",
         pixel_format: str = "nv12",
         container_format: str | None = None,
+        bt709_limited: bool = False,
     ) -> None:
         normalized, _ = _codec_fourcc(codec)
         if normalized not in {"h264", "hevc"}:
@@ -827,6 +879,12 @@ class VideoToolboxPacketMuxer:
             self._stream.pix_fmt = (
                 "p010le" if normalized_pixel_format == "p010" else "yuv420p"
             )
+            if bt709_limited:
+                # FFmpeg's BT.709 and MPEG range enumerators are all 1.
+                self._stream.color_primaries = 1
+                self._stream.color_trc = 1
+                self._stream.colorspace = 1
+                self._stream.color_range = 1
         except Exception:
             self._container.close()
             raise
@@ -963,12 +1021,18 @@ class VideoToolboxPacketMuxer:
             return self._audio_stream is not None
 
     def close(self) -> None:
+        self._close_container(flush_audio=True)
+
+    def abort(self) -> None:
+        self._close_container(flush_audio=False)
+
+    def _close_container(self, *, flush_audio: bool) -> None:
         with self._lock:
             if self._closed:
                 return
             self._closed = True
             try:
-                if self._audio_stream is not None:
+                if flush_audio and self._audio_stream is not None:
                     for packet in self._audio_stream.encode(None):
                         self._container.mux(packet)
             finally:

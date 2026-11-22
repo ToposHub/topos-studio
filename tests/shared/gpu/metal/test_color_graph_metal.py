@@ -28,6 +28,7 @@ from src.features.color.core.color_graph_cpu import (
 from src.features.color.core.color_graph_metal import (
     METAL_CAPABILITY_CATALOG,
     ColorGraphMetalExecutor,
+    graph_grading_params_for_layer,
 )
 from src.features.color.core.color_graph_migration import migrate_legacy_stack
 from src.features.color.core.color_graph_service import ColorGraphService
@@ -38,6 +39,7 @@ from src.shared.gpu.metal.kernels_color import (
     GRAPH_GRADING_PARAMS_DTYPE,
     GRAPH_SIZE_PARAMS_DTYPE,
     METAL_GRAPH_OPS_MSL,
+    METAL_POINTWISE_GRADING_MSL,
     make_graph_grading_params,
     make_graph_size_params,
 )
@@ -138,6 +140,31 @@ class TestStructural:
     def test_all_kernels_present_in_msl_source(self) -> None:
         for kernel in GRAPH_KERNELS:
             assert f"kernel void {kernel}(" in METAL_GRAPH_OPS_MSL, kernel
+
+    def test_pointwise_grading_can_be_included_without_graph_kernels(self) -> None:
+        assert "kernel void" not in METAL_POINTWISE_GRADING_MSL
+        assert "struct GraphGradingParams" in METAL_POINTWISE_GRADING_MSL
+        for helper in ("graph_rgb2hsv", "graph_hsv2rgb", "graph_apply_grading", "graph_apply_curves"):
+            declaration = f"static inline float3 {helper}("
+            assert METAL_POINTWISE_GRADING_MSL.count(declaration) == 1
+            assert METAL_GRAPH_OPS_MSL.count(declaration) == 1
+
+    def test_pointwise_grading_packs_layer_parameters(self) -> None:
+        layer = {
+            "opacity": 0.625,
+            "grading_params": {"exposure": 25.0, "pivot": 0.3, "lum_mix": 70.0},
+        }
+        params = graph_grading_params_for_layer(layer, 64, 32)
+        assert params.dtype == GRAPH_GRADING_PARAMS_DTYPE
+        assert params["exposure"].item() == 25.0
+        assert params["pivot"].item() == pytest.approx(0.3)
+        assert params["lum_mix"].item() == 70.0
+        assert params["opacity"].item() == 0.625
+        assert params["mask_mode"].item() == 0 and params["has_curves"].item() == 0
+
+        layer["curves_lut"] = np.zeros((256, 3), dtype=np.float32)
+        params = graph_grading_params_for_layer(layer, 64, 32, has_mask=True)
+        assert params["mask_mode"].item() == 1 and params["has_curves"].item() == 1
 
     def test_grading_param_builder_rejects_non_finite(self) -> None:
         with pytest.raises(ValueError):

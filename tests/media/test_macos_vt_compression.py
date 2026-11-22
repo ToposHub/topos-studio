@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import platform
+import sys
 import threading
+from ctypes import POINTER, c_int64, cast
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Callable
 
 import pytest
 
@@ -22,6 +26,191 @@ from src.shared.media.macos_vt.vt_compression import (
     VideoToolboxPacketMuxer,
     _packet_is_keyframe,
 )
+
+
+@pytest.mark.parametrize("rejected", [None, "ColorPrimaries"])
+def test_vt_compression_options_without_hardware(
+    monkeypatch: pytest.MonkeyPatch, rejected: str | None,
+) -> None:
+    from src.shared.media.macos_vt import vt_compression
+
+    properties: dict[str, Any] = {}
+    objects: dict[int, str | int] = {}
+    invalidated: list[int] = []
+    released: list[int] = []
+
+    def retain_fake(value: str | int) -> int:
+        identifier = len(released) + len(objects) + 20
+        objects[identifier] = value
+        return identifier
+
+    def release_fake(ref: Any) -> None:
+        identifier = getattr(ref, "value", ref)
+        released.append(identifier)
+        objects.pop(identifier, None)
+
+    def start_fake(*args: Any) -> int:
+        args[-1]._obj.value = 11
+        return 0
+
+    def set_fake(_session: Any, key: int, value: int) -> int:
+        name = str(objects[key])
+        properties[name] = objects[value]
+        return -12900 if rejected == name else 0
+
+    cf = SimpleNamespace(
+        CFStringCreateWithCString=lambda _parent, value, _encoding: retain_fake(value.decode("ascii")),
+        CFNumberCreate=lambda _parent, _kind, data: retain_fake(cast(data, POINTER(c_int64)).contents.value),
+        CFRelease=release_fake,
+    )
+    monkeypatch.setattr(vt_compression, "_compression_core_foundation", lambda: cf)
+    monkeypatch.setattr(vt_compression, "_MACOS_AVAILABLE", True)
+    monkeypatch.setattr(vt_compression, "_CM_LIB", object())
+    monkeypatch.setattr(vt_compression, "_VT_LIB", SimpleNamespace(
+        VTCompressionSessionCreate=start_fake,
+        VTSessionSetProperty=set_fake,
+        VTCompressionSessionInvalidate=lambda ref: invalidated.append(ref.value),
+    ))
+
+    def create() -> VideoToolboxCompressionSession:
+        return VideoToolboxCompressionSession(
+            width=1920, height=1080, require_hardware=False,
+            h264_profile="high", bit_rate=50_000_000, bt709_limited=True,
+        )
+
+    if rejected:
+        with pytest.raises(VideoToolboxCompressionError, match="ColorPrimaries:-12900"):
+            create()
+    else:
+        session = create()
+        session.abort()
+        assert properties["TransferFunction"] == properties["YCbCrMatrix"] == "ITU_R_709_2"
+    assert properties["ProfileLevel"] == "H264_High_AutoLevel"
+    assert properties["AverageBitRate"] == 50_000_000
+    assert properties["ColorPrimaries"] == "ITU_R_709_2"
+    assert invalidated == [11] and released.count(11) == 1
+    assert not objects
+
+
+def test_vt_muxer_sdr_tags_without_hardware(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = SimpleNamespace()
+    container = SimpleNamespace(add_stream=lambda *_args, **_kwargs: stream, close=lambda: None)
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=lambda *_args, **_kwargs: container))
+    muxer = VideoToolboxPacketMuxer("test.mp4", width=1920, height=1080, bt709_limited=True)
+    try:
+        assert muxer.stream.pix_fmt == "yuv420p"
+        assert (stream.color_primaries, stream.color_trc, stream.colorspace, stream.color_range) == (1, 1, 1, 1)
+    finally:
+        muxer.close()
+
+
+@pytest.mark.parametrize("mode", [
+    "success", "cancel", "short", "flush_error", "trailer_error", "late_cancel",
+    "cancel_during_flush", "cancel_during_trailer",
+])
+def test_vt_bridge_transaction_without_hardware(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    from src.shared.media.macos_vt import gpu_export_bridge
+
+    destination = tmp_path / "master.mp4"
+    destination.write_bytes(b"existing master")
+    calls: list[str] = []
+    session_options: dict[str, Any] = {}
+    finalizing = threading.Event()
+    cancelled = threading.Event()
+
+    def request_cancel() -> None:
+        if finalizing.wait(timeout=5):
+            cancelled.set()
+
+    class Muxer:
+        def __init__(self, path: str, **settings: Any) -> None:
+            self.path = Path(path)
+            self.packet_count = 0
+            assert self.path.parent == tmp_path and self.path.suffix == ".mp4"
+            assert self.path != destination
+            assert settings["bt709_limited"] is True
+
+        def write_packet(self) -> None:
+            self.packet_count += 1
+
+        def close(self) -> None:
+            calls.append("trailer")
+            assert destination.read_bytes() == b"existing master"
+            if mode == "trailer_error":
+                raise OSError("test trailer failure")
+            self.path.write_bytes(b"complete movie")
+            if mode == "late_cancel":
+                bridge.abort()
+            if mode == "cancel_during_trailer":
+                finalizing.set()
+                assert cancelled.wait(timeout=5)
+
+        def abort(self) -> None:
+            calls.append("muxer cleanup")
+
+    class Session:
+        last_error = ""
+        dropped_packets = 0
+        submit = object()
+
+        def __init__(self, *, on_packet: Callable[[], None], **settings: Any) -> None:
+            session_options.update(settings)
+            self._on_packet = on_packet
+
+        def close(self) -> None:
+            calls.append("flush")
+            if mode == "cancel_during_flush":
+                finalizing.set()
+                assert cancelled.wait(timeout=5)
+            if mode == "flush_error":
+                self.last_error = "test flush failure"
+            self._on_packet()
+            if mode != "short":
+                self._on_packet()
+
+        def abort(self) -> None:
+            calls.append("invalidate")
+
+    monkeypatch.setattr(gpu_export_bridge, "VideoToolboxPacketMuxer", Muxer)
+    monkeypatch.setattr(gpu_export_bridge, "VideoToolboxCompressionSession", Session)
+    monkeypatch.setattr(gpu_export_bridge, "VideoToolboxGpuSurfaceProvider",
+                        lambda *_args, **_kwargs: SimpleNamespace(close=lambda: calls.append("release")))
+    bridge = gpu_export_bridge.VideoToolboxGpuExportBridge(
+        object(), str(destination), width=1920, height=1080, expected_frames=2,
+        h264_profile="high", bit_rate=50_000_000, bt709_limited=True,
+        should_cancel=cancelled.is_set,
+    )
+    assert session_options["h264_profile"] == "high"
+    assert session_options["bit_rate"] == 50_000_000 and session_options["bt709_limited"] is True
+
+    if mode == "cancel":
+        bridge.abort()
+        assert calls == ["invalidate", "release", "muxer cleanup"]
+    elif mode == "short":
+        with pytest.raises(VideoToolboxCompressionError, match="packet_count_mismatch:1!=2"):
+            bridge.close()
+    elif mode == "flush_error":
+        with pytest.raises(VideoToolboxCompressionError, match="test flush failure"):
+            bridge.close()
+    elif mode == "trailer_error":
+        with pytest.raises(OSError, match="test trailer failure"):
+            bridge.close()
+    elif mode in {"cancel_during_flush", "cancel_during_trailer"}:
+        cancellation = threading.Thread(target=request_cancel)
+        cancellation.start()
+        try:
+            assert bridge.close() is False
+        finally:
+            cancellation.join(timeout=5)
+        assert not cancellation.is_alive() and cancelled.is_set()
+    else:
+        assert bridge.close() is (mode == "success")
+        assert calls == ["flush", "release", "trailer", "muxer cleanup"]
+    assert bridge.close() is (mode == "success")
+    assert destination.read_bytes() == (b"complete movie" if mode == "success" else b"existing master")
+    assert list(tmp_path.iterdir()) == [destination]
 
 
 def _fake_surface(

@@ -23,6 +23,8 @@ FFmpeg/PyAV 媒体源实现。
 from __future__ import annotations
 
 import logging
+import platform
+import sys
 import threading
 from dataclasses import replace
 from fractions import Fraction
@@ -786,6 +788,22 @@ class FFmpegMediaSource:
                 (self._preserve_planes or mode == "planar_yuv")
                 and _is_yuv_pixel_format(self._metadata.pixel_format)
             )
+
+    def limit_h264_export_decode_threads(self) -> None:
+        """Reduce the H.264 frame-thread queue while encoding on Intel Macs."""
+        if sys.platform != "darwin" or platform.machine() != "x86_64":
+            return
+        metadata = self._metadata
+        stream = self._video_stream
+        if (metadata is None or stream is None or metadata.pixel_format != "yuv420p"
+                or metadata.width > 3840 or metadata.height > 2160
+                or metadata.fps.to_fps() > 30.0):
+            return
+        decoder = stream.codec_context
+        if decoder.name == "h264" and not decoder.is_open:
+            # Keep smaller explicit budgets. Auto frame threading otherwise
+            # uses the full logical core count alongside export rendering.
+            decoder.thread_count = min(4, decoder.thread_count or 4)
 
     def probe(self) -> VideoMetadata:
         """

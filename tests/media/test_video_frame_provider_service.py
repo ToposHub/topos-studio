@@ -11,6 +11,7 @@ Tests for VideoFrameProviderService (P10.1)
 import pytest
 import tempfile
 import os
+from types import SimpleNamespace
 from unittest.mock import Mock, MagicMock, patch
 
 from src.shared.media.proxy import ProxyConfig, ProxyStrategy
@@ -353,6 +354,39 @@ class TestVideoFrameProviderService:
         assert session is not None
         assert session.defer_memory_proxy is True
         mock_open.assert_called_once()
+
+    def test_master_only_clip_skips_proxy_lookup_and_does_not_share_preview(self) -> None:
+        service = VideoFrameProviderService()
+        with patch.object(service, "_open_clip_sources"), patch(
+            "src.shared.media.disk_proxy_service.get_disk_proxy_service",
+        ) as get_proxy_service:
+            export_id = service.open_clip("/path/to/video.mp4", master_only=True)
+            assert service._clips[export_id].master_only
+            assert not service.update_disk_proxy_info(export_id, Mock())
+            get_proxy_service.assert_not_called()
+
+            preview_id = service.open_clip("/path/to/video.mp4")
+            assert preview_id != export_id
+            get_proxy_service.assert_called_once()
+
+    def test_intel_h264_export_caps_decoder_threads_before_first_frame(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.shared.media import ffmpeg_source
+
+        monkeypatch.setattr(ffmpeg_source, "sys", SimpleNamespace(platform="darwin"))
+        monkeypatch.setattr(ffmpeg_source, "platform", SimpleNamespace(machine=lambda: "x86_64"))
+        source = ffmpeg_source.FFmpegMediaSource("/path/to/video.mp4")
+        source._metadata = SimpleNamespace(
+            width=3840, height=2160, fps=Rational(25, 1), pixel_format="yuv420p")
+        decoder = SimpleNamespace(name="h264", is_open=False, thread_count=0)
+        source._video_stream = SimpleNamespace(codec_context=decoder)
+        source.limit_h264_export_decode_threads()
+        assert decoder.thread_count == 4
+
+        decoder.thread_count = 2
+        source.limit_h264_export_decode_threads()
+        assert decoder.thread_count == 2
 
     def test_open_clip_does_not_start_disk_proxy_generation_by_default(self) -> None:
         """Opening a timeline clip must not compete with playback by transcoding."""

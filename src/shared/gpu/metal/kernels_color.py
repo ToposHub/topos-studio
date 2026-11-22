@@ -603,7 +603,7 @@ def soft_clip_reference(
 # - 邻域参数（mid_detail/sharpness）、插件、mixer/warper/LUT3D/fx 不在
 #   kernel 内——N10 执行器按能力矩阵 fail-closed 拒绝，不静默近似。
 
-METAL_GRAPH_OPS_MSL = """
+_GRAPH_SIZE_PARAMS_MSL = """
 #include <metal_stdlib>
 using namespace metal;
 
@@ -613,7 +613,9 @@ struct GraphSizeParams {
     float    a;        // 通用标量（opacity 等）
     int32_t  b;        // 通用枚举（mode/channel）
 };
+"""
 
+_GRAPH_GRADING_PARAMS_MSL = """
 struct GraphGradingParams {
     float exposure;
     float temp;
@@ -645,7 +647,9 @@ struct GraphGradingParams {
     uint32_t mask_mode;   // 0 = 无 matte（k = opacity）；1 = matte buffer
     uint32_t has_curves;  // 0 = 跳过 curves
 };
+"""
 
+_GRAPH_COPY_MIX_MSL = """
 static inline float3 mix3(float3 x, float3 y, float t) {
     return x * (1.0 - t) + y * t;
 }
@@ -677,7 +681,9 @@ kernel void graph_parallel_mix(
     float k = clamp(float(key[idx].r), 0.0, 1.0);
     out[idx] = half4(float4(mix3(b.rgb, br.rgb, k), b.a));
 }
+"""
 
+_GRAPH_HSV_MSL = """
 // —— GRADING_SNIPPET.rgb2hsv/hsv2rgb 逐条翻译（与 MSL_HSV_FUNCS 同源；
 //    需先于 graph_layer_mix 定义——v1.1 HSV 模式使用）——
 static inline float3 graph_rgb2hsv(float3 c) {
@@ -694,7 +700,9 @@ static inline float3 graph_hsv2rgb(float3 c) {
     float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
+"""
 
+_GRAPH_NODE_OPS_MSL = """
 static inline float graph_overlay(float b, float a) {
     return b < 0.5 ? (2.0 * b * a) : (1.0 - 2.0 * (1.0 - b) * (1.0 - a));
 }
@@ -858,7 +866,29 @@ kernel void graph_masked_mix(
     float k = clamp(float(mask[idx].r), 0.0, 1.0) * p.a;
     out[idx] = half4(float4(mix3(a.rgb, b.rgb, k), a.a));
 }
+"""
 
+METAL_NEGATIVE_LUMA_MSL = """
+static inline float3 graph_protect_negative_luma(float3 color) {
+    float luma = dot(color, float3(0.299, 0.587, 0.114));
+    if (luma < 0.0) {
+        for (int i = 0; i < 3; i++) {
+            float x = color[i];
+            if (x < -0.5) { x = -0.5 - (abs(x + 0.5) * 0.1); }
+            color[i] = x;
+        }
+        float min_channel = min(min(color.r, color.g), color.b);
+        float max_channel = max(max(color.r, color.g), color.b);
+        if (max_channel - min_channel > 0.15 && min_channel < 0.0) {
+            float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
+            color = mix(color, float3(luma), balance_factor);
+        }
+    }
+    return color;
+}
+"""
+
+_GRAPH_APPLY_GRADING_MSL = METAL_NEGATIVE_LUMA_MSL + """
 // —— GRADING_SNIPPET.apply_grading 逐条翻译（点态基础域；mid_detail/
 //    sharpness 邻域位不在此 kernel——执行器 fail-closed 拒绝）——
 static inline float3 graph_apply_grading(float3 color, constant GraphGradingParams& p) {
@@ -903,20 +933,7 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
     color = res;
 
     // 安全修复：暗部负值软性保护（luma 压缩前计算，与 GLSL 同序）
-    float luma_post_grading = dot(color, float3(0.299, 0.587, 0.114));
-    if (luma_post_grading < 0.0) {
-        for (int i = 0; i < 3; i++) {
-            float x = color[i];
-            if (x < -0.5) { x = -0.5 - (abs(x + 0.5) * 0.1); }
-            color[i] = x;
-        }
-        float min_channel = min(min(color.r, color.g), color.b);
-        float max_channel = max(max(color.r, color.g), color.b);
-        if (max_channel - min_channel > 0.15 && min_channel < 0.0) {
-            float balance_factor = clamp(abs(min_channel) * 0.25, 0.0, 0.15);
-            color = mix(color, float3(luma_post_grading), balance_factor);
-        }
-    }
+    color = graph_protect_negative_luma(color);
 
     // 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
     float3 offset = float3(p.offset_x, p.offset_y, p.offset_z);
@@ -1016,7 +1033,9 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
     }
     return color;
 }
+"""
 
+_GRAPH_APPLY_CURVES_MSL = """
 // —— CURVES_SNIPPET.apply_curves 逐条翻译（LUT 为 768 float 线性 buffer）——
 static inline float graph_curves_channel(float x, int ch,
                                          device const float* curves) {
@@ -1055,7 +1074,9 @@ static inline float3 graph_apply_curves(float3 color, device const float* curves
     }
     return res;
 }
+"""
 
+_GRAPH_GRADING_KERNEL_MSL = """
 // Corrector 单 pass：grading → curves → epilogue（mix(input, graded, k*op)）
 kernel void graph_grading(
     device const half4* src      [[buffer(0)]],
@@ -1083,6 +1104,26 @@ kernel void graph_grading(
     out[idx] = half4(float4(mix3(src4.rgb, color, k), src4.a));
 }
 """
+
+# 点态校色库接在调用方的 Metal 标准库与 namespace 声明之后。
+METAL_POINTWISE_GRADING_MSL = (
+    _GRAPH_GRADING_PARAMS_MSL
+    + _GRAPH_HSV_MSL
+    + _GRAPH_APPLY_GRADING_MSL
+    + _GRAPH_APPLY_CURVES_MSL
+)
+
+# 保持完整图 kernel 的源码和定义顺序。
+METAL_GRAPH_OPS_MSL = (
+    _GRAPH_SIZE_PARAMS_MSL
+    + _GRAPH_GRADING_PARAMS_MSL
+    + _GRAPH_COPY_MIX_MSL
+    + _GRAPH_HSV_MSL
+    + _GRAPH_NODE_OPS_MSL
+    + _GRAPH_APPLY_GRADING_MSL
+    + _GRAPH_APPLY_CURVES_MSL
+    + _GRAPH_GRADING_KERNEL_MSL
+)
 
 # GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）
 GRAPH_SIZE_PARAMS_DTYPE = np.dtype([

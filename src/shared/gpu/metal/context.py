@@ -403,6 +403,35 @@ class MetalComputeContext:
             )
         return tex
 
+    def create_rgb_lut_texture(self, table: np.ndarray) -> Any:
+        """Upload a cubic RGB LUT as a linearly filterable Metal texture."""
+        size = table.shape[0]
+        if table.shape != (size, size, size, 3) or size < 2:
+            raise ValueError("3D LUT must contain an RGB cube")
+        if not np.isfinite(table).all() or np.max(np.abs(table)) > np.finfo(np.float16).max:
+            raise ValueError("3D LUT values exceed the filterable Metal texture range")
+        rgba = np.ones((size, size, size, 4), dtype=np.float16)
+        rgba[..., :3] = table
+        metal = self._metal
+        with _autoreleasepool():
+            desc = metal.MTLTextureDescriptor.alloc().init()
+            desc.setTextureType_(metal.MTLTextureType3D)
+            desc.setPixelFormat_(metal.MTLPixelFormatRGBA16Float)
+            desc.setWidth_(size)
+            desc.setHeight_(size)
+            desc.setDepth_(size)
+            desc.setUsage_(metal.MTLTextureUsageShaderRead)
+            desc.setStorageMode_(metal.MTLStorageModeShared
+                                 if self._device.hasUnifiedMemory()
+                                 else metal.MTLStorageModeManaged)
+            texture = self._device.newTextureWithDescriptor_(desc)
+            if texture is None:
+                raise MetalComputeError(f"Cannot allocate {size}³ Metal LUT texture")
+            texture.replaceRegion_mipmapLevel_slice_withBytes_bytesPerRow_bytesPerImage_(
+                metal.MTLRegionMake3D(0, 0, 0, size, size, size), 0, 0,
+                rgba.tobytes(), rgba.strides[1], rgba.strides[0])
+        return texture
+
     # ------------------------------------------------------------------
     # dispatch 与同步
     # ------------------------------------------------------------------

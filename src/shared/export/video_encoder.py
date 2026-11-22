@@ -731,6 +731,18 @@ class FFmpegEncoderConfig:
         return "yuv420p"
 
 
+def videotoolbox_target_bitrate(config: FFmpegEncoderConfig) -> int:
+    """Translate the configured bitrate or CRF intent to a VT average rate."""
+    if config.bitrate is not None:
+        return max(250_000, int(config.bitrate))
+    fps = max(1.0, float(config.fps.to_fps()))
+    crf = 20 if config.crf is None else max(0, min(51, int(config.crf)))
+    # 8 Mbps at 1080p25 is the measured quality anchor for CRF 20.
+    scale = config.width * config.height * fps / (1920 * 1080 * 25)
+    quality_scale = 2.0 ** ((20 - crf) / 6.0)
+    return max(250_000, min(240_000_000, int(8_000_000 * scale * quality_scale)))
+
+
 class FFmpegVideoEncoder:
     """
     FFmpeg/PyAV 视频编码器。
@@ -1183,22 +1195,7 @@ class FFmpegVideoEncoder:
             return False
 
     def _videotoolbox_target_bitrate(self) -> int:
-        """Return VideoToolbox's target bitrate, translating CRF if needed.
-
-        VideoToolbox has no x264-style CRF. 8 Mbps at 1080p/25 is the measured
-        quality anchor (close to this project's CPU CRF 20 export); scale it
-        for resolution, frame rate, and requested CRF. Explicit bitrate modes
-        remain exact.
-        """
-        if self._config.bitrate is not None:
-            return max(250_000, int(self._config.bitrate))
-        fps = max(1.0, float(self._config.fps.to_fps()))
-        crf = 20 if self._config.crf is None else max(0, min(51, int(self._config.crf)))
-        pixels_per_second = self._config.width * self._config.height * fps
-        scale = pixels_per_second / (1920 * 1080 * 25)
-        quality_scale = 2.0 ** ((20 - crf) / 6.0)
-        return max(250_000, min(240_000_000,
-                                int(8_000_000 * scale * quality_scale)))
+        return videotoolbox_target_bitrate(self._config)
 
     def _build_videotoolbox_options(self) -> dict[str, str]:
         """Map project bitrate/CRF intent to VideoToolbox's supported options."""
@@ -1658,38 +1655,28 @@ class FFmpegVideoEncoder:
         except ImportError:
             raise RuntimeError("PyAV is not installed")
 
-        if self._pipelined and not self._convert_threads:
-            target = (
-                self._convert_worker
-                if self._convert_workers == 1
-                else self._convert_worker_multi
-            )
-            self._convert_threads = [
-                threading.Thread(
-                    target=target,
-                    name=f"FFmpegVideoEncoder-Convert-{i}",
-                    daemon=True,
-                )
-                for i in range(self._convert_workers)
-            ]
-            for t in self._convert_threads:
-                t.start()
-
         try:
             pts = self._last_pts
             self._last_pts += 1
 
-            # 零转换快路（2026-09-15 导出提速）：平面帧与编码像素格式一致
-            # 时，转换层本就是逐平面直填（无 swscale、无色彩转换），走转换
-            # 队列反而引入两次线程交接 + pts 重排开销。转换线程是惰性启动
-            # 的——只要此前所有帧都走了内联快路，线程就从未启动，保序性
-            # 天然成立；首个需要转换的帧照常启动线程进入队列路径（其后的
-            # 帧不再内联，队列内重排只涉及队列中的帧，全局保序不破坏）。
-            if not self._convert_threads and self._is_zero_conversion(frame):
-                av_frame = self._create_av_frame(frame)
-                av_frame.pts = pts
-                self._encode_av_frame(av_frame)
-                return
+            # GPU readback can already own storage the encoder can wrap. Skip
+            # the conversion queue until a frame needs the regular path. The
+            # first queued PTS follows any frames already submitted inline.
+            if (self._pipelined and not self._convert_threads
+                    and not self._has_encoder_plane_buffer(frame)):
+                self._next_encode_pts = pts
+                target = (self._convert_worker if self._convert_workers == 1
+                          else self._convert_worker_multi)
+                self._convert_threads = [
+                    threading.Thread(
+                        target=target,
+                        name=f"FFmpegVideoEncoder-Convert-{index}",
+                        daemon=True,
+                    )
+                    for index in range(self._convert_workers)
+                ]
+                for worker in self._convert_threads:
+                    worker.start()
 
             if self._convert_threads:
                 # put 满时阻塞 = 背压（in-flight 转换不超过 workers+1 帧）。
@@ -1850,24 +1837,18 @@ class FFmpegVideoEncoder:
                 raise RuntimeError(f"Frame conversion error: {error}") from error
             self._encode_av_frame(av_frame)
 
-    def _is_zero_conversion(self, frame: "DecodedFrame") -> bool:
-        """判定帧是否命中转换层的同格式直填路径（`_convert_planar_frame`）。
-
-        必须与该函数的实际直填条件保持同构：planar 平面帧、无 packed
-        data、像素格式与编码目标一致且同为 yuv 系。任何不确定（字段
-        缺失、格式为空）都返回 False——快路只优化可证明为零转换的帧。
-        """
-        if frame is None or getattr(frame, "data", None) is not None:
+    def _has_encoder_plane_buffer(self, frame: "DecodedFrame") -> bool:
+        """Recognize GPU plane storage for the inline submission path."""
+        if frame is None or frame.data is not None or not frame.planes:
             return False
-        planes = getattr(frame, "planes", None)
-        if not planes:
+        pixel_format = frame.pixel_format.lower()
+        if pixel_format != self._encode_pix_fmt.lower():
             return False
-        source_format = str(getattr(frame, "pixel_format", "") or "").lower()
-        target_format = str(self._encode_pix_fmt or "").lower()
-        return bool(
-            source_format
-            and source_format == target_format
-            and source_format.startswith("yuv")
+        buffers = frame.extra or {}
+        return (
+            pixel_format == "yuv422p10le" and buffers.get("yuv422p10_frame") is not None
+            or pixel_format == "yuv420p" and frame.height % 4 == 0
+            and buffers.get("yuv420p_buffer") is not None
         )
 
     def _create_av_frame(self, frame: "DecodedFrame") -> Any:
@@ -2262,6 +2243,26 @@ class FFmpegVideoEncoder:
         source_av_frame = self._create_planar_av_frame(frame, source_format)
         return source_av_frame.reformat(format=target_format)
 
+    @staticmethod
+    def allocate_yuv422p10_frame(
+        width: int, height: int,
+    ) -> Optional[tuple[Any, tuple[np.ndarray, ...]]]:
+        """Allocate writable encoder planes for a tightly-packed 10-bit GPU readback."""
+        import av
+        import numpy as np
+
+        if width % 2 or height % 2:
+            return None
+        frame = av.VideoFrame(width, height, "yuv422p10le")
+        widths = (width, width // 2, width // 2)
+        if any(plane.line_size != 2 * columns for plane, columns in zip(frame.planes, widths)):
+            return None
+        planes = tuple(
+            np.frombuffer(plane, dtype="<u2", count=height * columns).reshape(height, columns)
+            for plane, columns in zip(frame.planes, widths)
+        )
+        return frame, planes
+
     def _create_planar_av_frame(self, frame: "DecodedFrame", format_name: str) -> Any:
         """
         从 DecodedFrame 的 planes 创建 PyAV VideoFrame（字节级平面填充）。
@@ -2285,6 +2286,40 @@ class FFmpegVideoEncoder:
             # 有打包数据，直接使用
             temp_frame = av.VideoFrame.from_ndarray(frame.data, format='rgb24')
             return temp_frame.reformat(format=format_name)
+
+        if format_name == "yuv422p10le":
+            backing = (frame.extra or {}).get("yuv422p10_frame")
+            if (isinstance(backing, av.VideoFrame) and backing.format.name == format_name
+                    and (backing.width, backing.height) == (frame.width, frame.height)
+                    and len(frame.planes) == 3
+                    and all(source.dtype == np.dtype("<u2")
+                            and source.shape == (plane.height, plane.width)
+                            and source.flags.c_contiguous and source.ctypes.data == plane.buffer_ptr
+                            for source, plane in zip(frame.planes, backing.planes))):
+                return backing
+
+        if format_name == "yuv420p" and frame.height % 4 == 0:
+            # The GPU readback already owns a contiguous Y, U, V allocation.
+            # PyAV can hold its buffer while the frame is in flight.
+            buffer = (frame.extra or {}).get("yuv420p_buffer")
+            from_buffer = getattr(av.VideoFrame, "from_numpy_buffer", None)
+            if (from_buffer is not None and isinstance(buffer, np.ndarray)
+                    and buffer.dtype == np.uint8 and buffer.flags.c_contiguous
+                    and buffer.shape == (3 * frame.height // 2, frame.width)
+                    and len(frame.planes) == 3):
+                luma_size = frame.width * frame.height
+                address = buffer.ctypes.data
+                chroma_shape = (frame.height // 2, frame.width // 2)
+                layouts = (((frame.height, frame.width), 0),
+                           (chroma_shape, luma_size),
+                           (chroma_shape, luma_size + luma_size // 4))
+                if all(plane.shape == shape and plane.dtype == np.uint8
+                       and plane.flags.c_contiguous and plane.ctypes.data == address + offset
+                       for plane, (shape, offset) in zip(frame.planes, layouts)):
+                    try:
+                        return from_buffer(buffer, format="yuv420p")
+                    except (TypeError, ValueError):
+                        pass
 
         av_frame = av.VideoFrame(frame.width, frame.height, format_name)
 

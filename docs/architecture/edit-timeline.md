@@ -71,6 +71,10 @@ Edit 页面的时间线子系统遵循"**不可变模型 + 命令模式 + 提交
 | 解码 worker 池 | ClipDecodeStream 解码作业 | 不触碰 TimelineSequence |
 | GL/渲染线程 | GpuFramePool、GPU 合成 | 消费 FrameHandle，不回读模型 |
 
+### macOS Metal 预览
+
+自动模式优先以 Metal 预览符合条件的单 LUT 视频。条件为单层、不透明、无有效裁切、变换和视频效果的 BT.709 限幅 NV12。选择 Metal 或设置 `TOPOS_EDIT_METAL_PREVIEW=1` 也会覆盖符合条件的无调色视频。渲染线程使用 Metal 将 VideoToolbox 帧按预览尺寸写入共享 BGRA IOSurface，再拷贝到 Program Viewer 的 OpenGL 呈现槽。槽位确认与 GPU fence 负责回收共享纹理，音频时钟与画面队列沿用已有播放调度。其他画面和 Metal 设备或共享纹理导入不可用的场景由常规路径处理。`TOPOS_EDIT_METAL_PREVIEW=0` 可关闭此路径。
+
 ---
 
 ## 2. 模型层：timeline_v2.py / project.py

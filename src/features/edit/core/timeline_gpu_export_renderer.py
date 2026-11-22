@@ -34,10 +34,11 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.features.color.core.shader_nodes import LUT3D_SNIPPET
 from src.features.edit.core.gpu_transition_shaders import (
     GPU_TRANSITION_FRAGMENT_SHADER_SOURCE,
 )
@@ -291,6 +292,95 @@ void main() {
 }
 """
 
+_FRAG_YUV422P10_SRC = """
+#version 330
+uniform sampler2D u_rgb_tex;
+out uint f_code;
+
+vec3 signal_at(ivec2 p) {
+    return clamp(texelFetch(u_rgb_tex, p, 0).rgb, 0.0, 1.0);
+}
+
+void main() {
+    const vec3 luma_weights = vec3(0.2126, 0.7152, 0.0722);
+    ivec2 size = textureSize(u_rgb_tex, 0);
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    if (p.y < size.y) {
+        f_code = uint(roundEven(64.0 + 876.0 * dot(signal_at(p), luma_weights)));
+        return;
+    }
+    // The atlas stores contiguous Y, Cb, Cr. Each chroma sample spans two
+    // horizontal RGB pixels, with the original number of rows per plane.
+    int chroma_width = size.x / 2;
+    bool second_row = p.x >= chroma_width;
+    int chroma_x = second_row ? p.x - chroma_width : p.x;
+    int chroma_y = 2 * (p.y - size.y) + int(second_row);
+    bool is_cr = chroma_y >= size.y;
+    if (is_cr) chroma_y -= size.y;
+    ivec2 left = ivec2(2 * chroma_x, chroma_y);
+    vec3 rgb = 0.5 * (signal_at(left) + signal_at(left + ivec2(1, 0)));
+    float y = dot(rgb, luma_weights);
+    float chroma = is_cr ? (rgb.r - y) / 1.5748 : (rgb.b - y) / 1.8556;
+    f_code = uint(roundEven(clamp(512.0 + 896.0 * chroma, 64.0, 960.0)));
+}
+"""
+
+_FRAG_YUV422P10_LUT_SRC = _FRAG_YUV422P10_SRC.replace(
+    "uniform sampler2D u_rgb_tex;",
+    "uniform usampler2D u_rgb_tex;\n"
+    "uniform sampler3D u_lut_tex;\nuniform float u_lut_strength;\n"
+    + LUT3D_SNIPPET,
+).replace(
+    "return clamp(texelFetch(u_rgb_tex, p, 0).rgb, 0.0, 1.0);",
+    "vec3 rgb = vec3(texelFetch(u_rgb_tex, p, 0).rgb) / 65535.0;\n"
+    "    return clamp(apply_3dlut(rgb, u_lut_tex, u_lut_strength), 0.0, 1.0);",
+)
+
+_FRAG_YUV420_ATLAS_SRC = """
+#version 330
+uniform sampler2D u_rgb_tex;
+uniform bool u_quantize_rgb;
+out float f_code;
+
+vec3 signal_at(ivec2 p) {
+    vec3 rgb = texelFetch(u_rgb_tex, p, 0).rgb;
+    return u_quantize_rgb ? roundEven(clamp(rgb, 0.0, 1.0) * 255.0) / 255.0 : rgb;
+}
+
+void main() {
+    const vec3 luma_weights = vec3(0.2126, 0.7152, 0.0722);
+    ivec2 size = textureSize(u_rgb_tex, 0);
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    if (p.y < size.y) {
+        float y = dot(signal_at(p), luma_weights);
+        f_code = roundEven(clamp(16.0 + 219.0 * y, 16.0, 235.0)) / 255.0;
+        return;
+    }
+    int chroma_width = size.x / 2;
+    int chroma_height = size.y / 2;
+    bool second_row = p.x >= chroma_width;
+    int chroma_x = second_row ? p.x - chroma_width : p.x;
+    int chroma_y = 2 * (p.y - size.y) + int(second_row);
+    bool is_cr = chroma_y >= chroma_height;
+    if (is_cr) chroma_y -= chroma_height;
+    ivec2 origin = 2 * ivec2(chroma_x, chroma_y);
+    vec3 rgb = 0.25 * (signal_at(origin) + signal_at(origin + ivec2(1, 0))
+        + signal_at(origin + ivec2(0, 1)) + signal_at(origin + ivec2(1, 1)));
+    float y = dot(rgb, luma_weights);
+    float chroma = is_cr ? (rgb.r - y) / 1.5748 : (rgb.b - y) / 1.8556;
+    f_code = roundEven(clamp(128.0 + 224.0 * chroma, 16.0, 240.0)) / 255.0;
+}
+"""
+
+_FRAG_YUV420_LUT_SRC = _FRAG_YUV420_ATLAS_SRC.replace(
+    "vec3 signal_at(ivec2 p)",
+    LUT3D_SNIPPET + "\nuniform sampler3D u_lut_tex;\nuniform float u_lut_strength;\n"
+    "vec3 signal_at(ivec2 p)",
+).replace(
+    "return u_quantize_rgb ?",
+    "rgb = apply_3dlut(rgb, u_lut_tex, u_lut_strength);\n    return u_quantize_rgb ?",
+)
+
 
 # Common export case fast path: an ungraded 8-bit BT.709 4:2:0 source can be
 # resized directly in the Y/U/V domains.  The previous path rendered the
@@ -504,6 +594,12 @@ void main() {
     f_color = uvec4(vec4(u8.b, u8.g, u8.r, 255.0) * 257.0 + vec4(0.5));
 }
 """
+
+_FRAG_SCALE_U16_FROM_FLOAT_SRC = _FRAG_SCALE_U16_FROM_F1_SRC.replace(
+    "vec3 u8 = floor(scaled * 255.0 + vec3(0.5));\n"
+    "    f_color = uvec4(vec4(u8.b, u8.g, u8.r, 255.0) * 257.0 + vec4(0.5));",
+    "f_color = uvec4(roundEven(scaled.bgr * 65535.0), 65535u);",
+)
 
 # ── 多层混合（P0-GPU-3）：RGBA32F 累积 ping-pong，精确镜像 CPU 的
 # "逐层 lerp 进 float32 累积缓冲 + 末端一次量化" ──
@@ -743,6 +839,7 @@ class GpuYuv420Output:
     """Final GPU-converted, limited-range BT.709 8-bit encoder planes."""
 
     planes: Tuple[np.ndarray, np.ndarray, np.ndarray]
+    buffer: Optional[np.ndarray] = None
 
 
 @dataclass(frozen=True)
@@ -755,6 +852,7 @@ class GpuYuv422P10Output:
     """
 
     planes: Tuple[np.ndarray, np.ndarray, np.ndarray]
+    encoder_frame: Any = None
 
 
 @dataclass(frozen=True)
@@ -821,6 +919,10 @@ class TimelineGpuExportRenderer:
         self._fbo_y_out = None
         self._tex_uv_out = None
         self._fbo_uv_out = None
+        self._tex_yuv422p10 = None
+        self._fbo_yuv422p10 = None
+        self._tex_yuv420_atlas = None
+        self._fbo_yuv420_atlas = None
         # u16 管线（高精度交付：>8-bit 源走 RGB16UI 全链，8-bit 源仅出口 u16）
         self._tex_mid_u16: Tuple[Any, Any] = (None, None)
         self._fbo_mid_u16: Tuple[Any, Any] = (None, None)
@@ -837,12 +939,17 @@ class TimelineGpuExportRenderer:
         self._prog_quant_rgb = None
         self._prog_yuv420_luma = None
         self._prog_yuv420_chroma = None
+        self._prog_yuv422p10 = None
+        self._prog_yuv422p10_lut = None
+        self._prog_yuv420_atlas = None
+        self._prog_yuv420_lut = None
         self._prog_yuv420_direct_luma = None
         self._prog_yuv420_direct_chroma = None
         self._prog_yuv_u16 = None
         self._prog_grade_u16 = None
         self._prog_scale_u16 = None
         self._prog_scale_u16_from_f1 = None
+        self._prog_scale_u16_from_float = None
         # 多层混合（P0-GPU-3）
         self._prog_blend_f1 = None
         self._prog_blend_u16 = None
@@ -909,10 +1016,15 @@ class TimelineGpuExportRenderer:
                 ("grade_u16", _FRAG_GRADE_U16_SRC),
                 ("scale_u16", _FRAG_SCALE_U16_SRC),
                 ("scale_u16_from_f1", _FRAG_SCALE_U16_FROM_F1_SRC),
+                ("scale_u16_from_float", _FRAG_SCALE_U16_FROM_FLOAT_SRC),
                 ("scale_rgb", _FRAG_SCALE_RGB_SRC),
                 ("quant_rgb", _FRAG_QUANT_RGB_SRC),
                 ("yuv420_luma", _FRAG_YUV420_LUMA_SRC),
                 ("yuv420_chroma", _FRAG_YUV420_CHROMA_SRC),
+                ("yuv422p10", _FRAG_YUV422P10_SRC),
+                ("yuv422p10_lut", _FRAG_YUV422P10_LUT_SRC),
+                ("yuv420_atlas", _FRAG_YUV420_ATLAS_SRC),
+                ("yuv420_lut", _FRAG_YUV420_LUT_SRC),
                 ("yuv420_direct_luma", _FRAG_YUV420_DIRECT_LUMA_SRC),
                 ("yuv420_direct_chroma", _FRAG_YUV420_DIRECT_CHROMA_SRC),
                 ("blend_f1", _augmented["blend_f1"]),
@@ -943,12 +1055,17 @@ class TimelineGpuExportRenderer:
                 ("quant_rgb", self._prog_quant_rgb),
                 ("yuv420_luma", self._prog_yuv420_luma),
                 ("yuv420_chroma", self._prog_yuv420_chroma),
+                ("yuv422p10", self._prog_yuv422p10),
+                ("yuv422p10_lut", self._prog_yuv422p10_lut),
+                ("yuv420_atlas", self._prog_yuv420_atlas),
+                ("yuv420_lut", self._prog_yuv420_lut),
                 ("yuv420_direct_luma", self._prog_yuv420_direct_luma),
                 ("yuv420_direct_chroma", self._prog_yuv420_direct_chroma),
                 ("yuv_u16", self._prog_yuv_u16),
                 ("grade_u16", self._prog_grade_u16),
                 ("scale_u16", self._prog_scale_u16),
                 ("scale_u16_from_f1", self._prog_scale_u16_from_f1),
+                ("scale_u16_from_float", self._prog_scale_u16_from_float),
                 ("blend_f1", self._prog_blend_f1),
                 ("blend_u16", self._prog_blend_u16),
                 ("quant_u8", self._prog_quant_u8),
@@ -1075,6 +1192,10 @@ class TimelineGpuExportRenderer:
         self, rgb_tex: Any, width: int, height: int, *, quantize_rgb: bool = False,
     ) -> Optional[GpuYuv420Output]:
         """Run BT.709 limited-range conversion and read back only Y/U/V."""
+        if self._prog_yuv420_atlas is not None and width % 2 == height % 2 == 0:
+            result = self._read_yuv420_atlas(rgb_tex, width, height, quantize_rgb)
+            if result is not None:
+                return result
         if not self._ensure_yuv420_output_fbos(width, height):
             return None
         if self._prog_yuv420_luma is None \
@@ -1101,6 +1222,62 @@ class TimelineGpuExportRenderer:
         self._fbo_y_out.read_into(y, components=1, dtype="f1", alignment=1)
         self._fbo_uv_out.read_into(uv, components=2, dtype="f1", alignment=1)
         return GpuYuv420Output((y, uv[..., 0].copy(), uv[..., 1].copy()))
+
+    def _allocate_planar_target(
+        self, size: Tuple[int, int], dtype: str,
+    ) -> Optional[Tuple[Any, Any]]:
+        """Create the optional atlas without invalidating the previous FBO."""
+        import moderngl
+
+        texture = None
+        try:
+            texture = self._ctx.texture(size, 1, dtype=dtype)
+            return texture, self._ctx.framebuffer(texture)
+        except moderngl.Error as error:
+            if texture is not None:
+                texture.release()
+            logger.debug("Could not allocate planar readback target %s: %s", size, error)
+            return None
+
+    def _read_yuv420_atlas(
+        self, rgb: Any, width: int, height: int, quantize_rgb: bool,
+        lut: Optional[Tuple[Any, float]] = None,
+    ) -> Optional[GpuYuv420Output]:
+        """Pack three contiguous planes into one byte texture and read once."""
+        import moderngl
+
+        atlas_size = (width, 3 * height // 2)
+        if self._tex_yuv420_atlas is None or self._tex_yuv420_atlas.size != atlas_size:
+            target = self._allocate_planar_target(atlas_size, "f1")
+            if target is None:
+                return None
+            if self._fbo_yuv420_atlas is not None:
+                self._fbo_yuv420_atlas.release()
+                self._tex_yuv420_atlas.release()
+            self._tex_yuv420_atlas, self._fbo_yuv420_atlas = target
+
+        rgb.use(0)
+        key = "yuv420_atlas" if lut is None else "yuv420_lut"
+        program = self._prog_yuv420_atlas if lut is None else self._prog_yuv420_lut
+        program["u_rgb_tex"].value = 0
+        program["u_quantize_rgb"].value = quantize_rgb
+        if lut is not None:
+            texture, strength = lut
+            texture.use(1)
+            program["u_lut_tex"].value = 1
+            program["u_lut_strength"].value = strength
+        self._fbo_yuv420_atlas.use()
+        self._vao[key].render(mode=moderngl.TRIANGLE_STRIP)
+        luma_size = width * height
+        chroma_size = luma_size // 4
+        pixels = np.empty((atlas_size[1], width), dtype=np.uint8)
+        self._fbo_yuv420_atlas.read_into(pixels, components=1, dtype="f1", alignment=1)
+        flat = pixels.reshape(-1)
+        return GpuYuv420Output((
+            pixels[:height],
+            flat[luma_size:luma_size + chroma_size].reshape(height // 2, width // 2),
+            flat[luma_size + chroma_size:].reshape(height // 2, width // 2),
+        ), buffer=pixels)
 
     @staticmethod
     def _direct_yuv420_allowed(
@@ -1507,6 +1684,15 @@ class TimelineGpuExportRenderer:
         tex.write(np.ascontiguousarray(data[..., :3]), alignment=1)
         return tex
 
+    def _color_graph_renderer(self) -> Any:
+        renderer = getattr(self, "_color_graph_texture_renderer", None)
+        if renderer is None:
+            from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
+
+            renderer = ColorGraphTextureRenderer(self._ctx)
+            self._color_graph_texture_renderer = renderer
+        return renderer
+
     def _prepare_layer_texture(
         self,
         source: Any,
@@ -1547,11 +1733,7 @@ class TimelineGpuExportRenderer:
             if prepared is None:
                 return None
             try:
-                renderer = getattr(self, "_color_graph_texture_renderer", None)
-                if renderer is None:
-                    from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
-                    renderer = ColorGraphTextureRenderer(self._ctx)
-                    self._color_graph_texture_renderer = renderer
+                renderer = self._color_graph_renderer()
                 slot = int(getattr(self, "_color_graph_output_slot", 0))
                 self._color_graph_output_slot = 1 - slot
                 result = renderer.render(prepared[0], packet["color_graph"],
@@ -1739,6 +1921,8 @@ class TimelineGpuExportRenderer:
         opacity: float,
         output_u16: bool = False,
         output_yuv420p: bool = False,
+        output_yuv422p10: bool = False,
+        allocate_yuv422p10: Optional[Callable[[int, int], Optional[Tuple[Any, tuple]]]] = None,
     ) -> Optional[Any]:
         """planar YUV 源 → GPU 全链 → BGR u8/u16 或 YUV420P encoder planes。
 
@@ -1764,11 +1948,36 @@ class TimelineGpuExportRenderer:
                         f"failed ({error}); trying general GPU path")
         deep_u16 = bool(output_u16)
         try:
+            if (output_yuv422p10 and opacity == 1.0 and out_width % 2 == 0
+                    and self._prog_yuv422p10_lut is not None
+                    and source.planes[0].shape == (out_height, out_width)
+                    and isinstance(grade_uniforms, dict)
+                    and not grade_uniforms.get("chain_extra_params")
+                    and grade_uniforms.get("color_graph") is not None):
+                from src.features.color.core.color_graph_texture import serial_lut_only
+
+                lut = serial_lut_only(grade_uniforms["color_graph"])
+                if lut is not None:
+                    prepared = self._prepare_layer_texture(source, None, True)
+                    if prepared is not None and prepared[1]:
+                        reference, strength = lut
+                        texture = self._color_graph_renderer().delivery_lut_texture(reference)
+                        result = self._read_yuv422p10(
+                            prepared[0], out_width, out_height, allocate_yuv422p10,
+                            lut=(texture, strength))
+                        if result is not None:
+                            return result
             prepared = self._prepare_layer_texture(
                 source, grade_uniforms, deep_u16)
             if prepared is None:
                 return None
             graded_tex, is_int = prepared
+            if (output_yuv422p10 and not is_int and opacity == 1.0
+                    and graded_tex.size == (out_width, out_height)):
+                result = self._read_yuv422p10(
+                    graded_tex, out_width, out_height, allocate_yuv422p10)
+                if result is not None:
+                    return result
             if output_yuv420p:
                 if output_u16:
                     return None
@@ -1789,6 +1998,63 @@ class TimelineGpuExportRenderer:
                     f"({error}); CPU fallback for this export")
             return None
 
+    def _read_yuv422p10(
+        self, rgb: Any, width: int, height: int,
+        allocate: Optional[Callable[[int, int], Optional[Tuple[Any, tuple]]]] = None,
+        *, lut: Optional[Tuple[Any, float]] = None,
+    ) -> Optional[GpuYuv422P10Output]:
+        """Convert a same-size RGB signal to a 10-bit Y/Cb/Cr atlas for readback."""
+        program = self._prog_yuv422p10 if lut is None else self._prog_yuv422p10_lut
+        if width % 2 or program is None:
+            return None
+        import moderngl
+
+        atlas_size = (width, height * 2)
+        if self._tex_yuv422p10 is None or self._tex_yuv422p10.size != atlas_size:
+            target = self._allocate_planar_target(atlas_size, "u2")
+            if target is None:
+                return None
+            if self._fbo_yuv422p10 is not None:
+                self._fbo_yuv422p10.release()
+                self._tex_yuv422p10.release()
+            self._tex_yuv422p10, self._fbo_yuv422p10 = target
+
+        rgb.use(0)
+        program["u_rgb_tex"].value = 0
+        if lut is not None:
+            texture, strength = lut
+            texture.use(1)
+            program["u_lut_tex"].value = 1
+            program["u_lut_strength"].value = strength
+        self._fbo_yuv422p10.use()
+        self._vao["yuv422p10" if lut is None else "yuv422p10_lut"].render(
+            mode=moderngl.TRIANGLE_STRIP)
+        if allocate is not None:
+            try:
+                target = allocate(width, height)
+                if target is not None:
+                    backing, planes = target
+                    regions = ((0, 0, width, height),
+                               (0, height, width, height // 2),
+                               (0, height + height // 2, width, height // 2))
+                    for plane, region in zip(planes, regions):
+                        self._fbo_yuv422p10.read_into(
+                            plane, viewport=region, components=1, dtype="u2", alignment=2)
+                    self.frames_rendered += 1
+                    return GpuYuv422P10Output(planes, encoder_frame=backing)
+            except (moderngl.Error, MemoryError) as error:
+                logger.debug("Direct readback to DNxHR encoder planes failed: %s", error)
+        luma_size = width * height
+        chroma_size = luma_size // 2
+        pixels = np.empty(2 * luma_size, dtype=np.uint16)
+        self._fbo_yuv422p10.read_into(pixels, components=1, dtype="u2", alignment=2)
+        self.frames_rendered += 1
+        return GpuYuv422P10Output((
+            pixels[:luma_size].reshape(height, width),
+            pixels[luma_size:luma_size + chroma_size].reshape(height, width // 2),
+            pixels[luma_size + chroma_size:].reshape(height, width // 2),
+        ))
+
     def render_packed_bgr(
         self,
         frame_bgr_u8: np.ndarray | GpuRgbSource,
@@ -1803,6 +2069,26 @@ class TimelineGpuExportRenderer:
         if not self._ensure_ready():
             return None
         try:
+            if (output_yuv420p and not output_u16 and opacity == 1.0
+                    and out_width % 2 == out_height % 2 == 0
+                    and self._prog_yuv420_lut is not None
+                    and isinstance(grade_uniforms, dict)
+                    and not grade_uniforms.get("chain_extra_params")
+                    and grade_uniforms.get("color_graph") is not None):
+                from src.features.color.core.color_graph_texture import serial_lut_only
+
+                pixels = frame_bgr_u8.data if isinstance(frame_bgr_u8, GpuRgbSource) else frame_bgr_u8
+                if pixels.dtype == np.uint8 and pixels.shape == (out_height, out_width, 3):
+                    lut = serial_lut_only(grade_uniforms["color_graph"])
+                    if lut is not None:
+                        reference, strength = lut
+                        rgb = self._upload_packed_8bit(frame_bgr_u8)
+                        texture = self._color_graph_renderer().delivery_lut_texture(reference)
+                        result = self._read_yuv420_atlas(
+                            rgb, out_width, out_height, True, (texture, strength))
+                        if result is not None:
+                            self.frames_rendered += 1
+                            return result
             prepared = self._prepare_layer_texture(
                 frame_bgr_u8, grade_uniforms, False)
             if prepared is None:
@@ -2182,7 +2468,12 @@ class TimelineGpuExportRenderer:
         """末端缩放 → RGB16UI → u16 回读（高精度交付出口）。"""
         import moderngl
 
-        vao_key = "scale_u16" if from_integer else "scale_u16_from_f1"
+        if from_integer:
+            vao_key = "scale_u16"
+        elif source_tex.dtype in ("f2", "f4"):
+            vao_key = "scale_u16_from_float"
+        else:
+            vao_key = "scale_u16_from_f1"
         prog = getattr(self, f"_prog_{vao_key}")
         if prog is None or vao_key not in self._vao:
             return None
@@ -2229,6 +2520,8 @@ class TimelineGpuExportRenderer:
             self._fbo_out, self._tex_out,
             self._fbo_y_out, self._tex_y_out,
             self._fbo_uv_out, self._tex_uv_out,
+            self._fbo_yuv422p10, self._tex_yuv422p10,
+            self._fbo_yuv420_atlas, self._tex_yuv420_atlas,
             self._fbo_mid_u16[0], self._tex_mid_u16[0],
             self._fbo_mid_u16[1], self._tex_mid_u16[1],
             self._fbo_out_u16, self._tex_out_u16,
@@ -2250,10 +2543,15 @@ class TimelineGpuExportRenderer:
         for prog in (self._prog_yuv, self._prog_grade, self._prog_scale,
                      self._prog_scale_rgb, self._prog_quant_rgb,
                      self._prog_yuv420_luma, self._prog_yuv420_chroma,
+                     self._prog_yuv422p10,
+                     self._prog_yuv422p10_lut,
+                     self._prog_yuv420_atlas,
+                     self._prog_yuv420_lut,
                      self._prog_yuv420_direct_luma,
                      self._prog_yuv420_direct_chroma,
                      self._prog_yuv_u16, self._prog_grade_u16,
                      self._prog_scale_u16, self._prog_scale_u16_from_f1,
+                     self._prog_scale_u16_from_float,
                      self._prog_blend_f1, self._prog_blend_u16,
                      self._prog_quant_u8, self._prog_quant_u16,
                      self._prog_wipe, self._prog_blend_f4, self._prog_dip):

@@ -10,15 +10,68 @@ import numpy as np
 from src.features.color.core.cache_manager import CacheTier, LRUCache
 from src.features.color.core.color_graph_compiler import compile_graph
 from src.features.color.core.color_graph_executor import ColorGraphExecutor
+from src.features.color.core.color_node_lut_spec import node_lut_projection
 from src.features.color.core.color_graph_param_source import graph_node_layer_provider
 from src.features.color.core.color_graph_snapshot import freeze_graph
 from src.features.color.core.shader_compiler import ShaderPipeline
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX
 from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
 from src.shared.gpu.framebuffer_scope import preserve_framebuffer, temporary_framebuffer
+from src.shared.project.color_graph import ColorGraphData, ColorNodeData
 
 
 _LUT_CACHE_BYTES = 32 * 1024 * 1024
+
+
+def serial_lut_only(graph: ColorGraphData) -> tuple[str, float] | None:
+    """Recognize a fresh, enabled Corrector whose only operation is a LUT."""
+    if len(graph.nodes) != 3:
+        return None
+    correctors = serial_correctors(graph)
+    return corrector_lut_only(correctors[0]) if correctors else None
+
+
+def serial_correctors(graph: ColorGraphData) -> tuple[ColorNodeData, ...] | None:
+    """Find enabled Correctors in image-edge order for a simple serial graph."""
+    nodes = {node.node_id: node for node in graph.nodes}
+    source = nodes.get(graph.source_node_id)
+    output = nodes.get(graph.output_node_id)
+    if (len(nodes) < 3 or len(nodes) != len(graph.nodes) or len(graph.edges) != len(nodes) - 1
+            or source is None or source.node_type != "source"
+            or output is None or output.node_type != "output"
+            or source.params or output.params or graph.alpha_output_node_id is not None
+            or graph.shared_definitions or graph.working_color_context):
+        return None
+    if any(not node.enabled or node.compound_children
+           or node.shared_definition_id is not None for node in nodes.values()):
+        return None
+    if source.legacy_payload or output.legacy_payload:
+        return None
+    if any(edge.src_port != "image" or edge.dst_port != "image" or edge.slot_id
+           for edge in graph.edges):
+        return None
+    successors = {edge.src_node: edge.dst_node for edge in graph.edges}
+    correctors = []
+    next_id = successors.get(source.node_id)
+    for _ in range(len(nodes) - 2):
+        node = nodes.get(next_id)
+        if node is None or node.node_type != "corrector":
+            return None
+        correctors.append(node)
+        next_id = successors.get(node.node_id)
+    return tuple(correctors) if next_id == output.node_id else None
+
+
+def corrector_lut_only(node: ColorNodeData) -> tuple[str, float] | None:
+    """Recognize a fresh Corrector whose only operation is a LUT."""
+    if (node.legacy_payload or node.params.keys() - {"key_source_mode", "resources"}
+            or node.params.get("key_source_mode", "node_input") != "node_input"):
+        return None
+    resources = node.params.get("resources")
+    if not isinstance(resources, Mapping) or resources.keys() - {"lut_ref", "lut_strength"}:
+        return None
+    reference, strength = node_lut_projection(resources)
+    return (reference, strength) if reference is not None else None
 
 
 def graph_texture_fallback_reason(graph: Any, frame: int) -> str | None:
@@ -216,6 +269,11 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             tex.use(5)
             prog["u_warper_tex"].value = 5
 
+    def delivery_lut_texture(self, reference: str) -> Any:
+        """Resolve a LUT for a caller's stand-alone delivery pass."""
+        self._release_frame()
+        return self._lut_texture(reference)
+
     def render(self, source: Any, graph: Any, frame: int, *,
                output_key: str = "main", integer_source: bool = False) -> Any:
         with preserve_framebuffer(self.ctx):
@@ -254,11 +312,14 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
         if len(plan.passes) == 3 and plan.passes[1].op == "corrector":
             layer = provider(plan.passes[1].node_id) or {}
             effects = layer.get("effects_params") or {}
+            grade = layer.get("grading_params") or {}
             simple = bool(
                 layer.get("active_lut_path")
                 and not layer.get("plugins")
                 and not effects.get("enabled")
                 and not effects.get("blur_enabled")
+                and not grade.get("mid_detail")
+                and not grade.get("sharpness")
                 and not layer.get("mask_shapes")
                 and not (layer.get("qualifier_params") or {}).get("enabled")
                 and not plan.passes[1].key_pipeline

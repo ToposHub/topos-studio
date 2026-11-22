@@ -18,11 +18,128 @@ from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 
+from src.features.color.core.shader_nodes_msl import MSL_LUT3D
 from src.shared.gpu.metal import MetalComputeContext, MetalKernel
 from src.shared.export.gpu_encode_surface import GpuEncodeSurface
 from src.shared.export.gpu_trail import ExportGpuTrail
+from src.shared.media.gpu_frame import GpuDecodedFrame
 
 logger = logging.getLogger(__name__)
+
+
+# Compile separately from the stack compositor. A single dispatch processes a
+# 2×2 block, sharing the four graded pixels between luma and chroma output.
+_NV12_DELIVERY_MSL = """
+#include <metal_stdlib>
+using namespace metal;
+""" + MSL_LUT3D + """
+constexpr sampler delivery_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+constant float3 delivery_luma = float3(0.2126, 0.7152, 0.0722);
+
+float3 delivery_rgb(texture2d<float, access::read> y_plane,
+                    texture2d<float> uv_plane, uint2 p) {
+    float y = (y_plane.read(p).r * 255.0 - 16.0) / 219.0;
+    float2 uv_pos = (float2(p) + 0.5) / float2(y_plane.get_width(), y_plane.get_height());
+    float2 uv = (floor(uv_plane.sample(delivery_sampler, uv_pos).rg * 255.0 + 0.5)
+                 - 128.0) / 224.0;
+    float3 rgb = float3(y + 1.5748 * uv.y,
+                       y - 0.18732427 * uv.x - 0.46812427 * uv.y,
+                       y + 1.8556 * uv.x);
+    return clamp(rgb, 0.0, 1.0);
+}
+"""
+
+_NV12_DELIVERY_BODY = """
+    uint2 block [[thread_position_in_grid]]) {
+    if (block.x >= out_uv.get_width() || block.y >= out_uv.get_height()) return;
+    const uint2 origin = 2 * block;
+    float3 sum = float3(0.0);
+    for (uint dy = 0; dy < 2; ++dy) {
+        for (uint dx = 0; dx < 2; ++dx) {
+            const uint2 p = origin + uint2(dx, dy);
+            /* GRADE */
+            const float3 rgb = rint(clamp(delivery_color, 0.0, 1.0) * 255.0) / 255.0;
+            const float code = rint(16.0 + 219.0 * dot(rgb, delivery_luma));
+            out_y.write(float4(code / 255.0), p);
+            sum += rgb;
+        }
+    }
+    const float3 mean = sum * 0.25;
+    const float y = dot(mean, delivery_luma);
+    const float2 uv = float2((mean.b - y) / 1.8556, (mean.r - y) / 1.5748);
+    const float2 codes = rint(clamp(128.0 + 224.0 * uv, 16.0, 240.0));
+    out_uv.write(float4(codes / 255.0, 0.0, 1.0), block);
+}
+"""
+
+
+def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str, str]:
+    """Bind one or two video sources with a fixed grading sequence per side."""
+    has_primary = any(op != "lut" for side in operations for op in side)
+    kind = {"lut": "l", "primary": "g", "primary_lut": "b"}
+    if has_primary:
+        suffix = "_".join("".join(kind[op] for op in side) or "0" for side in operations)
+    else:
+        suffix = "_".join(str(len(side)) for side in operations)
+    name = "timeline_nv12_lut_" + suffix
+    arguments = []
+    grade_lines = []
+    texture_index = strength_index = primary_index = 0
+    for side, nodes in enumerate(operations):
+        arguments.extend((
+            f"texture2d<float, access::read> y{side} [[texture({texture_index})]]",
+            f"texture2d<float> uv{side} [[texture({texture_index + 1})]]",
+        ))
+        texture_index += 2
+        grade_lines.append(f"float3 rgb{side} = delivery_rgb(y{side}, uv{side}, p);")
+        precision = "65535.0" if nodes else "255.0"
+        grade_lines.append(f"rgb{side} = rint(rgb{side} * {precision}) / {precision};")
+        for index, node in enumerate(nodes):
+            color = f"rgb{side}"
+            if node != "lut":
+                color = f"graded{primary_index}"
+                grade_lines.append(f"float3 {color} = graph_apply_grading(rgb{side}, grades[{primary_index}]);")
+            elif index:
+                # Later LUT-only Correctors receive the signed output of the
+                # previous node and still run the neutral grade's shadow guard.
+                grade_lines.append(f"{color} = graph_protect_negative_luma({color});")
+            if node != "primary":
+                lut = f"lut{strength_index}"
+                arguments.append(f"texture3d<float> {lut} [[texture({texture_index})]]")
+                grade_lines.append(f"{color} = msl_apply_3dlut({color}, {lut}, delivery_sampler, params[{strength_index}]);")
+                texture_index += 1
+                strength_index += 1
+            if node != "lut":
+                grade_lines.append(f"rgb{side} = mix(rgb{side}, {color}, grades[{primary_index}].opacity);")
+                primary_index += 1
+    if len(operations) == 2:
+        # The timeline stack composites the left layer over black, then the
+        # right layer over that result. Each side is quantized as RGB8 before blend.
+        grade_lines.extend(
+            f"rgb{side} = floor(clamp(rgb{side}, 0.0, 1.0) * 255.0 + 0.5) / 255.0;"
+            for side in range(2)
+        )
+        grade_lines.append(
+            f"float3 delivery_color = rgb0 * params[{strength_index}] * "
+            f"(1.0 - params[{strength_index + 1}]) + rgb1 * params[{strength_index + 1}];")
+    else:
+        grade_lines.append("float3 delivery_color = rgb0;")
+    arguments.extend((
+        f"texture2d<float, access::write> out_y [[texture({texture_index})]]",
+        f"texture2d<float, access::write> out_uv [[texture({texture_index + 1})]]",
+        "constant float *params [[buffer(0)]]",
+    ))
+    helpers = ""
+    if has_primary:
+        from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
+        helpers = METAL_POINTWISE_GRADING_MSL
+        arguments.append("constant GraphGradingParams *grades [[buffer(1)]]")
+    elif any(len(nodes) > 1 for nodes in operations):
+        from src.shared.gpu.metal.kernels_color import METAL_NEGATIVE_LUMA_MSL
+        helpers = METAL_NEGATIVE_LUMA_MSL
+    signature = f"kernel void {name}(\n" + ",\n    ".join(arguments) + ",\n"
+    return name, _NV12_DELIVERY_MSL + helpers + signature + _NV12_DELIVERY_BODY.replace(
+        "/* GRADE */", "\n            ".join(grade_lines))
 
 
 def _serialize_renderer_call(method: Callable[..., Any]) -> Callable[..., Any]:
@@ -3358,9 +3475,10 @@ class _MetalBufferImage:
 class TimelineMetalExportRenderer:
     """Metal source conversion, primary grade, scaling, stack blend and export."""
 
-    def __init__(self, gpu_trail: Optional[ExportGpuTrail] = None) -> None:
+    def __init__(self, gpu_trail: Optional[ExportGpuTrail] = None, *,
+                 context: Optional[MetalComputeContext] = None) -> None:
         self._render_lock = threading.RLock()
-        self._context: Optional[MetalComputeContext] = None
+        self._context = context
         self._kernels: Dict[str, MetalKernel] = {}
         self._buffers: Dict[str, Any] = {}
         self._failed = False
@@ -4066,6 +4184,83 @@ class TimelineMetalExportRenderer:
             except Exception:
                 logger.debug(
                     "Metal Topos texture cleanup failed", exc_info=True)
+
+    @_serialize_renderer_call
+    def render_lut_to_nv12(
+        self, layers: tuple[tuple[GpuDecodedFrame, tuple[Any, ...]], ...],
+        kernel: MetalKernel, param_buffer: Any, grading_buffer: Any,
+        surface: GpuEncodeSurface,
+    ) -> Optional[float]:
+        """Grade and composite SDR sources directly into the encoder texture."""
+        from src.shared.gpu.metal.context import MetalComputeError
+
+        ctx = self._context
+        if ctx is None:
+            raise MetalComputeError("Metal LUT delivery requires a prepared context")
+        width, height = surface.descriptor.width, surface.descriptor.height
+        if surface.descriptor.pixel_format != "nv12" or width % 2 or height % 2:
+            raise MetalComputeError("Metal LUT delivery requires an even NV12 output")
+        textures = []
+        for source, luts in layers:
+            textures.extend(self._nv12_input_textures(source, width, height, ctx.device_identity))
+            textures.extend(luts)
+        output = self._resolve_surface_yuv420_textures(surface, width, height)
+        if output is None:
+            raise MetalComputeError(self.last_fallback_reason or "Missing Metal output texture")
+        textures.extend(output)
+        buffers = {0: param_buffer}
+        if grading_buffer is not None:
+            buffers[1] = grading_buffer
+        ctx.dispatch(kernel, buffers=buffers,
+                     textures=dict(enumerate(textures)),
+                     threads=(width // 2, height // 2, 1))
+        ctx.finish()
+        self._record_render_completion(ctx, 0, yuv_output=True, cpu_upload_bytes=0, readback=False)
+        self.frames_rendered += 1
+        return ctx.last_gpu_time_ms
+
+    @staticmethod
+    def _nv12_input_textures(
+        source: GpuDecodedFrame, width: int, height: int, device_identity: str,
+    ) -> tuple[Any, Any]:
+        from src.shared.gpu.metal.context import MetalComputeError
+
+        if (source.pixel_format != "nv12" or source.bit_depth != 8
+                or (source.width, source.height) != (width, height)
+                or source.visible_rect not in (None, (0, 0, width, height))
+                or source.color_matrix != "bt709" or source.color_range != "limited"
+                or source.color_transfer not in (None, "bt709")
+                or source.color_primaries not in (None, "bt709")):
+            raise MetalComputeError("Source is outside the Metal SDR NV12 LUT path")
+        reason = source.validate_for_device(api="metal", device_identity=device_identity)
+        if reason:
+            raise MetalComputeError(reason)
+        planes = {plane.component: plane for plane in source.planes}
+        handles = []
+        for name, plane_width, plane_height in (("Y", width, height),
+                                                ("UV", width // 2, height // 2)):
+            plane = planes.get(name)
+            if plane is None or (plane.width, plane.height) != (plane_width, plane_height):
+                raise MetalComputeError(f"Invalid Metal source plane {name}")
+            handle = plane.resolved_handle()
+            if handle is None:
+                raise MetalComputeError(f"Missing Metal source texture {name}")
+            handles.append(handle)
+        return handles[0], handles[1]
+
+    @_serialize_renderer_call
+    def prepare_nv12_lut(self, operations: tuple[tuple[str, ...], ...]) -> MetalKernel:
+        """Compile the isolated LUT pipeline before any output is submitted."""
+        if not self._ensure_ready():
+            raise RuntimeError("Metal LUT renderer is unavailable")
+        ctx = self._context
+        assert ctx is not None
+        name, msl = _nv12_delivery_shader(operations)
+        kernel = self._kernels.get(name)
+        if kernel is None:
+            kernel = ctx.compile_kernel(name, msl)
+            self._kernels[name] = kernel
+        return kernel
 
     @_serialize_renderer_call
     def render_metal_texture_frame(

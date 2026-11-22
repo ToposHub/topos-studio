@@ -55,6 +55,7 @@ import dataclasses
 import logging
 import math
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -95,6 +96,7 @@ from src.features.edit.core.timeline_render_plan import (
 from src.features.edit.core.pcm_render_cache import PreRenderUntrustedError
 
 if TYPE_CHECKING:
+    from src.features.color.core.color_graph_metal import MetalDeliveryCorrector
     import numpy as np
     from src.shared.media.frame import DecodedFrame
     from src.shared.export.video_encoder import FFmpegVideoEncoder, FFmpegEncoderConfig
@@ -2339,6 +2341,16 @@ class NativeGpuBridgeEligibility:
     required_output_surface: str = ""
 
 
+@dataclass(frozen=True)
+class _MetalH264Clip:
+    path: str
+    correctors: tuple["MetalDeliveryCorrector", ...]
+
+    @property
+    def operations(self) -> tuple[str, ...]:
+        return tuple(corrector.operation for corrector in self.correctors)
+
+
 #: 首版 native VT bridge 支持的源像素格式 → 允许的输出 surface。
 #: T-P0-31（TOPOS 422 R16 → NV12/P010 GPU 转换）落地前，4:2:2 源没有
 #: GPU 路径——必须在此提前拒绝，而不是运行中途把 CPU frame 送进 bridge。
@@ -2506,8 +2518,6 @@ def can_use_native_gpu_bridge(
                 return NativeGpuBridgeEligibility(
                     False,
                     f"source_to_surface_not_supported:{source_fmt}:{surface}")
-    except NativeGpuBridgeEligibility:
-        raise
     except Exception:
         # 几何/资产结构未知 → fail-closed
         return NativeGpuBridgeEligibility(False, "timeline_structure_unknown")
@@ -2571,9 +2581,17 @@ class _ExternalGpuSurfaceEncoder:
         self._bridge.write_audio_samples(samples, sample_rate=sample_rate)
 
     def close(self) -> None:
+        if getattr(self._bridge, "close_on_export", False):
+            self._bridge.close()
         self._is_open = False
 
     def abort(self) -> None:
+        if getattr(self._bridge, "close_on_export", False):
+            abort = getattr(self._bridge, "abort", None)
+            if callable(abort):
+                abort()
+            else:
+                self._bridge.close()
         self._is_open = False
 
 
@@ -2897,6 +2915,7 @@ class TimelineExporter:
             raise ValueError(f"Invalid config: {errors}")
 
         self._active_export_config = config
+        self._bridge_selection = {"selected": False, "reason_code": "not_evaluated", "output_surface": ""}
         self._gpu_trail = ExportGpuTrail(
             f"timeline:{config.output_path}:{time.monotonic_ns()}"
         )
@@ -3152,6 +3171,11 @@ class TimelineExporter:
             # 显式 OETF 转换依据（每帧重复解析素材元数据太浪费）。
             self._export_color_metadata = self._resolve_export_color_metadata()
 
+            metal_outcome = self._try_export_metal_h264_lut(
+                config, encoder_config, start_frame, end_frame)
+            if metal_outcome is not None:
+                return metal_outcome
+
             # 创建编码器
             self._encoder = self._create_encoder(config.output_path, encoder_config)
 
@@ -3353,7 +3377,8 @@ class TimelineExporter:
             gpu_surface_provider = getattr(
                 self, "_gpu_encode_surface_provider", None
             )
-            if getattr(gpu_surface_provider, "close_on_export", False):
+            if (getattr(gpu_surface_provider, "close_on_export", False)
+                    and not isinstance(self._encoder, _ExternalGpuSurfaceEncoder)):
                 try:
                     gpu_surface_provider.close()
                 except Exception:
@@ -5933,6 +5958,9 @@ class TimelineExporter:
             "1", "true", "yes", "on",
         }:
             return
+        from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
+        if os.environ.get(MACOS_HW_ENCODE_DISABLE_ENV):
+            return
         eligibility = can_use_native_gpu_bridge(
             self._sequence,
             self._project,
@@ -5988,6 +6016,8 @@ class TimelineExporter:
                 fps=max(1, int(round(float(getattr(config, "fps", 25.0))))),
                 codec=codec,
                 pixel_format=bridge_pixel_format,
+                expected_frames=getattr(self, "_total_frames", 0) or None,
+                should_cancel=lambda: self._cancel_requested,
             )
         except Exception as exc:
             # T-P0-30 步骤 5：bridge 初始化失败 → 清理半成品（session/mux/
@@ -6003,12 +6033,6 @@ class TimelineExporter:
                     provider.close()
             except Exception:  # noqa: BLE001 — 清理失败不掩盖原始错误
                 pass
-            try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-            except OSError:
-                logger.warning(
-                    "Could not remove partial bridge output %s", output_path)
             self._note_bridge_init_failed(str(exc))
             return
         self._gpu_encode_surface_provider = bridge
@@ -7095,6 +7119,7 @@ class TimelineExporter:
         config: TimelineExportConfig,
         *,
         allow_scalar_delivery: bool = False,
+        allow_color_graph: bool = False,
     ) -> Optional[Tuple["ClipLayerInfo", int, float]]:
         """Allow passthrough only when this frame needs no pixel processing."""
         if bool(getattr(config, "burn_subtitles", False)):
@@ -7114,7 +7139,14 @@ class TimelineExporter:
                 or tuple(getattr(frame_plan, "transitions", ()) or ())):
             return None
 
-        layer = layers[0]
+        return self._identity_delivery_clip_layer(
+            layers[0], frame_idx, allow_scalar_delivery=allow_scalar_delivery,
+            allow_color_graph=allow_color_graph)
+
+    def _identity_delivery_clip_layer(
+        self, layer: "ClipLayerInfo", frame_idx: int, *,
+        allow_scalar_delivery: bool = False, allow_color_graph: bool = False,
+    ) -> Optional[Tuple["ClipLayerInfo", int, float]]:
         from src.shared.tracking.stabilization_state import stabilization_matrix
         if stabilization_matrix(self._clip_stabilization_state(layer), int(layer.source_frame)) is not None:
             return None
@@ -7183,12 +7215,324 @@ class TimelineExporter:
                         < int(getattr(clip, "timeline_end", 0)))):
             return None
 
-        if (self._clip_color_graph(layer) is not None
-                or self._get_clip_color_grade(layer) is not None
-                or self._get_clip_video_denoise(layer) is not None):
+        if (not allow_color_graph and (self._clip_color_graph(layer) is not None
+                                      or self._get_clip_color_grade(layer) is not None)):
+            return None
+        if self._get_clip_video_denoise(layer) is not None:
             return None
 
         return layer, expected_source_frame, opacity
+
+    def _metal_h264_lut_clips(
+        self, config: TimelineExportConfig, width: int, height: int,
+        start_frame: int, end_frame: int,
+    ) -> tuple[dict[str, "_MetalH264Clip"], set[tuple[tuple[str, ...], ...]]]:
+        """Check clip boundaries and coverage before opening the native encoder."""
+        from src.features.color.core.color_graph_metal import serial_metal_delivery_grade
+        from src.features.edit.core.color_chain import chain_extra_params
+        from src.features.edit.core.timeline_render_plan import is_track_renderable
+
+        plan = self._render_plan
+        unsupported = ({}, set())
+        if plan is None or self._delivery_guide_burns_in():
+            return unsupported
+        if config.burn_subtitles and any(
+            track.is_enabled and any(clip.is_enabled for clip in track.clips)
+            for track in self._sequence.subtitle_tracks
+        ):
+            return unsupported
+        tracks = self._sequence.video_tracks
+        solo = any(track.is_solo for track in tracks)
+        spans = []
+        transitions = []
+        for track in tracks:
+            if not is_track_renderable(track, solo):
+                continue
+            for transition in track.transitions:
+                if transition.start_frame >= end_frame or transition.end_frame <= start_frame:
+                    continue
+                if transition.transition_type != "cross_dissolve" or transition.is_one_sided:
+                    return unsupported
+                transitions.append(transition)
+            for clip in track.clips:
+                first = max(start_frame, clip.timeline_start)
+                last = min(end_frame, clip.timeline_end)
+                if clip.is_enabled and first < last:
+                    spans.append((first, last, clip))
+
+        eligible: dict[str, _MetalH264Clip] = {}
+        previous_end = start_frame
+        for first, last, clip in sorted(spans, key=lambda span: span[:2]):
+            if first != previous_end:
+                return unsupported
+            previous_end = last
+            layer = None
+            for frame in (first, last - 1):
+                frame_plan = plan.get_frame_plan(frame)
+                layer = next((entry for entry in frame_plan.layers if entry.clip_id == clip.clip_id), None)
+                if layer is None or self._identity_delivery_clip_layer(
+                    layer, frame, allow_color_graph=True,
+                ) is None:
+                    return unsupported
+            assert layer is not None
+            if self._clip_stabilization_state(layer) or chain_extra_params(
+                self._project, self._sequence.timeline_id, clip,
+            ):
+                return unsupported
+            graph = self._clip_color_graph(layer)
+            if graph is None:
+                if clip.color_stack_id or self._get_clip_color_grade(layer) is not None:
+                    return unsupported
+                correctors = ()
+            else:
+                correctors = serial_metal_delivery_grade(graph, width, height)
+                # Keep variants small and bound the number of bound textures
+                # in two-sided transitions on older Mac GPUs.
+                if not correctors or len(correctors) > 4:
+                    return unsupported
+
+            asset = self._project.get_asset_by_id(clip.asset_id)
+            if asset is None or asset.media_type != "video":
+                return unsupported
+            path = export_source_path(self._project, asset)
+            meta = asset.metadata or {}
+            if (not path or path != asset.path or meta.get("is_vfr") or meta.get("is_hdr")
+                    or meta.get("codec") != "h264" or meta.get("rotation", 0)
+                    or (meta.get("width"), meta.get("height")) != (width, height)
+                    or meta.get("field_order") not in (None, "unknown", "progressive")
+                    or meta.get("pixel_format") not in ("yuv420p", "nv12")
+                    or meta.get("color_matrix") not in (None, "bt709")
+                    or meta.get("color_range") not in (None, "limited", "tv")
+                    or meta.get("color_primaries") not in (None, "bt709")
+                    or meta.get("color_transfer") not in (None, "bt709")):
+                return unsupported
+            eligible[clip.clip_id] = _MetalH264Clip(path, correctors)
+        if (previous_end != end_frame
+                or not (transitions or any(clip.correctors for clip in eligible.values()))):
+            return unsupported
+        variants = {(clip.operations,) for clip in eligible.values()}
+        for transition in transitions:
+            left = eligible.get(transition.left_clip_id)
+            right = eligible.get(transition.right_clip_id)
+            if left is None or right is None:
+                return unsupported
+            variants.add((left.operations, right.operations))
+        return eligible, variants
+
+    def _try_export_metal_h264_lut(
+        self, config: TimelineExportConfig, encoder_config: "FFmpegEncoderConfig",
+        start_frame: int, end_frame: int,
+    ) -> Optional[ExportOutcome]:
+        """Export SDR LUT graphs and supported transitions with native surfaces."""
+        from src.shared.codec.color_metadata_config import ColorMetadataConfig
+        from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
+
+        native = os.getenv("TOPOS_EXPORT_NATIVE_VT", "").strip().lower()
+        preference = getattr(self, "_timeline_graphics_requested", "auto")
+        if (sys.platform != "darwin" or native in {"0", "false", "off", "no"}
+                or preference not in {"auto", "metal"}
+                or os.environ.get(MACOS_HW_ENCODE_DISABLE_ENV)
+                or getattr(self, "_gpu_render_disabled", True)
+                or getattr(self, "_gpu_encode_surface_provider", None) is not None
+                or encoder_config.codec != "h264" or encoder_config.pix_fmt != "yuv420p"
+                or encoder_config.hwaccel not in {"auto", "videotoolbox"}
+                or encoder_config.has_alpha or encoder_config.max_bitrate is not None
+                or encoder_config.color_metadata != ColorMetadataConfig.sdr()
+                or os.path.splitext(config.output_path)[1].lower() not in {".mp4", ".mov"}
+                or (config.include_audio and any(
+                    track.clips for track in self._audio_render_sequence.audio_tracks))):
+            return None
+        width, height = encoder_config.width, encoder_config.height
+        rate = self._rational_pair(encoder_config.fps)
+        if (width % 2 or height % 2 or rate is None or rate[1] != 1
+                or rate != self._rational_pair(self._sequence.fps)
+                or (width, height) != self._get_sequence_resolution()):
+            return None
+        previous_backend = self._timeline_graphics_backend
+        renderer = bridge = None
+        fallback = None
+        published = False
+        recorder = self._export_telemetry
+        try:
+            clips, variants = self._metal_h264_lut_clips(config, width, height, start_frame, end_frame)
+            if not clips:
+                return None
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+
+            import numpy as np
+            from src.features.color.core.cache_manager import CacheTier, LRUCache
+            from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+            from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
+            from src.shared.export.video_encoder import videotoolbox_target_bitrate
+            from src.shared.gpu.metal.context import MetalComputeContext
+            from src.shared.media.gpu_frame import GpuDecodedFrame, safe_release_gpu_frame
+            from src.shared.media.macos_vt.gpu_export_bridge import VideoToolboxGpuExportBridge
+
+            context = MetalComputeContext()
+            renderer = TimelineMetalExportRenderer(self._gpu_trail, context=context)
+            kernels = {}
+            for ops in sorted(variants):
+                if self._cancel_requested:
+                    return ExportOutcome.user_cancelled()
+                kernels[ops] = renderer.prepare_nv12_lut(ops)
+            textures = LRUCache(16, CacheTier.GPU_TEXTURE, max_bytes=32 * 1024 * 1024)
+            references = {node.lut[0] for clip in clips.values() for node in clip.correctors
+                          if node.lut is not None}
+            paths = {ref: resolve_lut_path(ref) for ref in references}
+            param_count = max(sum(len(side) for side in ops) + 2 for ops in variants)
+            values = np.zeros(param_count, dtype=np.float32)
+            param_buffer = context.create_buffer_from_numpy(values)
+            active_ids: tuple[str, ...] = ()
+            active_textures: list[tuple[Any, ...]] = []
+            active_kernel = None
+            grading_buffer = None
+            opacity_offset = 0
+
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+            bridge = VideoToolboxGpuExportBridge(
+                context, config.output_path, width=width, height=height, fps=rate[0],
+                h264_profile=encoder_config.profile, bit_rate=videotoolbox_target_bitrate(encoder_config),
+                bt709_limited=True, expected_frames=end_frame - start_frame,
+                should_cancel=lambda: self._cancel_requested,
+            )
+            self._timeline_graphics_backend = "metal"
+            self._gpu_encode_surface_provider = bridge
+            for frame_idx in range(start_frame, end_frame):
+                if not self._wait_if_paused() or self._cancel_requested:
+                    return ExportOutcome.user_cancelled()
+                frame_plan = self._render_plan.get_frame_plan(frame_idx)
+                layers = frame_plan.layers
+                transitions = frame_plan.transitions
+                if transitions:
+                    transition = transitions[0]
+                    if (len(transitions) != 1 or len(layers) != 2
+                            or transition.transition_type != "cross_dissolve"
+                            or (layers[0].clip_id, layers[1].clip_id) != (
+                                transition.left_clip_id, transition.right_clip_id)):
+                        raise RuntimeError("Two-source Metal transition coverage changed")
+                elif len(layers) != 1:
+                    raise RuntimeError("Metal LUT delivery requires one visible layer")
+
+                layer_ids = tuple(layer.clip_id for layer in layers)
+                changed = layer_ids != active_ids
+                if changed:
+                    active_textures = []
+                    opacity_offset = 0
+                    grade_params = []
+                    active_kernel = kernels[tuple(clips[clip_id].operations for clip_id in layer_ids)]
+                    for clip_id in layer_ids:
+                        layer_textures = []
+                        for node in clips[clip_id].correctors:
+                            if node.primary is not None:
+                                grade_params.append(node.primary)
+                            if node.lut is None:
+                                continue
+                            ref, strength = node.lut
+                            texture = textures.get(ref)
+                            if texture is None:
+                                lut = resample_to_unit_domain(load_lut(paths[ref]))
+                                texture = context.create_rgb_lut_texture(lut.table)
+                                textures.put(ref, texture, estimated_bytes=lut.size ** 3 * 8)
+                            layer_textures.append(texture)
+                            values[opacity_offset] = strength
+                            opacity_offset += 1
+                        active_textures.append(tuple(layer_textures))
+                    grading_buffer = (context.create_buffer_from_numpy(np.concatenate(grade_params))
+                                      if grade_params else None)
+                    active_ids = layer_ids
+                sources = []
+                surface = None
+                try:
+                    for layer in layers:
+                        path = clips[layer.clip_id].path
+                        # Both sides may refer to one file with different
+                        # source positions. Give each side its own VT cursor.
+                        key = layer.clip_id if transitions else layer.decoder_stream_key
+                        source = self._request_video_metal_frame(
+                            path, layer.source_frame, layer.asset_id, key)
+                        if not isinstance(source, GpuDecodedFrame):
+                            raise RuntimeError(f"Metal NV12 decode unavailable at frame {frame_idx}")
+                        sources.append(source)
+                        if source.frame_index != layer.source_frame:
+                            raise RuntimeError(f"Metal NV12 decode returned a different source frame at {frame_idx}")
+                    surface = self._acquire_gpu_encode_surface(
+                        pixel_format="nv12", frame_idx=frame_idx - start_frame,
+                        width=width, height=height,
+                    )
+                    if surface is None:
+                        raise RuntimeError("VideoToolbox output surface unavailable")
+                    started = time.perf_counter()
+                    if transitions:
+                        values[opacity_offset:opacity_offset + 2] = (
+                            transition.left_opacity, transition.right_opacity)
+                    if changed or transitions:
+                        context.write_buffer(param_buffer, values)
+                    gpu_ms = renderer.render_lut_to_nv12(
+                        tuple(zip(sources, active_textures)), active_kernel, param_buffer,
+                        grading_buffer, surface)
+                    recorder.record_stage_sample(
+                        "render", "metal", wall_ms=(time.perf_counter() - started) * 1000.0,
+                        gpu_submit_ms=gpu_ms, frame_index=frame_idx)
+                except Exception:
+                    if surface is not None:
+                        surface.release()
+                    raise
+                finally:
+                    for source in sources:
+                        safe_release_gpu_frame(source)
+                self._encode_frame(surface)
+                self._current_frame = frame_idx - start_frame + 1
+                self._notify_progress()
+
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+            started = time.perf_counter()
+            published = bridge.close()
+            mux_ms = (time.perf_counter() - started) * 1000.0
+            if not published and not self._cancel_requested:
+                raise RuntimeError("VideoToolbox did not publish the output")
+        except Exception as error:  # native setup, decode, dispatch, or finalize failed
+            fallback = f"metal_h264_lut_retry:{type(error).__name__}"
+            logger.warning("Metal H.264 LUT export failed, retrying the full range: %s", error)
+        finally:
+            try:
+                if bridge is not None and not published:
+                    bridge.abort()
+            except Exception:
+                logger.exception("Metal H.264 bridge cleanup failed")
+            finally:
+                try:
+                    try:
+                        if renderer is not None:
+                            renderer.release()
+                    finally:
+                        if bridge is not None:
+                            self._cleanup_clips()
+                except Exception:
+                    logger.exception("Metal H.264 render cleanup failed")
+                finally:
+                    self._gpu_encode_surface_provider = None
+                    self._timeline_graphics_backend = previous_backend
+
+        if published:
+            if any(len(ops) == 2 for ops in variants):
+                delivery_path = "metal_h264_nv12_cross_dissolve"
+            elif any(ops[0] not in ((), ("lut",)) for ops in variants):
+                delivery_path = "metal_h264_nv12_serial_grade"
+            else:
+                delivery_path = "metal_h264_nv12_lut"
+            self._bridge_selection = {"selected": True, "reason_code": "", "output_surface": "nv12"}
+            recorder.record_stage_sample("mux", "videotoolbox", wall_ms=mux_ms)
+            recorder.set_delivery_path(delivery_path)
+            self._write_success_manifest_async(config)
+            return ExportOutcome(success=True, delivery_path=delivery_path)
+        if self._cancel_requested:
+            return ExportOutcome.user_cancelled()
+        self._current_frame = 0
+        self._record_gpu_fallback(fallback or "metal_h264_lut_retry")
+        return None
 
     def _delivery_guide_burns_in(self) -> bool:
         settings = dict(getattr(self._sequence, "format_settings", {}) or {})
@@ -7989,8 +8333,7 @@ class TimelineExporter:
         # straight 对外），Porter-Duff over 语义
         export_alpha = bool(getattr(self, "_export_has_alpha", False))
 
-        # 支持时直接在 GPU 上把最终 RGB 转成编码器需要的 YUV420P，
-        # 避免 BGR 中间帧回读与 CPU 色彩转换。其它格式沿用 BGR 路径。
+        # 支持时直接在 GPU 上生成编码平面，避免 BGR 回读和 CPU 色彩转换。
         gpu_yuv420p = self._gpu_yuv420_output_allowed(
             config, width, height, frame_idx=frame_idx)
         gpu_yuv422p10 = self._gpu_yuv422p10_output_allowed(
@@ -8517,7 +8860,7 @@ class TimelineExporter:
         self, config: TimelineExportConfig, width: int, height: int,
         frame_idx: int = 0,
     ) -> bool:
-        """Allow Metal to emit native Topos ``yuv422p10le`` planes.
+        """Allow GPU finalizers to emit native ``yuv422p10le`` planes.
 
         The finalizer matches the Topos encoder's BT.709 limited-range
         coefficients and 10-bit nominal code values. Unsupported metadata,
@@ -8539,10 +8882,20 @@ class TimelineExporter:
             except Exception:
                 return False
         encoder_config = getattr(getattr(self, "_encoder", None), "_config", None)
-        if (str(getattr(encoder_config, "codec", "")).lower() != "topos"
-                or str(getattr(encoder_config, "pix_fmt", "")).lower()
-                != "yuv422p10le"):
+        codec = str(getattr(encoder_config, "codec", "")).lower()
+        if (str(getattr(encoder_config, "pix_fmt", "")).lower() != "yuv422p10le"
+                or codec not in ("topos", "dnxhr")):
             return False
+        if codec == "dnxhr":
+            if (getattr(self, "_timeline_graphics_backend", "opengl") != "opengl"
+                    or getattr(self, "_nested_render_stack", None)):
+                # A nested sequence returns pixels to the parent compositor.
+                return False
+            guide = (getattr(self._sequence, "format_settings", {}) or {}).get("program_guide")
+            if isinstance(guide, dict) and guide.get("type") == "aspect_ratio":
+                params = guide.get("params", {})
+                if isinstance(params, dict) and params.get("fill_black") and params.get("burn_in"):
+                    return False
         color = getattr(self, "_export_color_metadata", None)
         if color is None or any(
             str(getattr(color, name, "")).lower() != expected
@@ -8628,14 +8981,10 @@ class TimelineExporter:
         dip_color: Optional[Tuple[float, float, float]] = None,
         dip_factor: float = 0.0,
     ) -> Dict[str, Any]:
-        """GPU 渲染入口 kwargs（T-P1-21 门控单点）。
+        """构造各渲染入口支持的输出参数。
 
-        ``output_yuv422p10`` 是 Metal 渲染器独有的原生平面直出参数——
-        OpenGL 渲染器（render_planar/render_layer_stack/render_packed_bgr）
-        签名没有它，GL 走 BGR u8/u16 回读 + encoder sws 转换。此前不分
-        后端一律传入，macOS auto→opengl 下 TOPOS 10-bit 导出每帧
-        TypeError→整帧回落 CPU float 管线（grade 实测 1.4fps，且
-        forced_gpu 与 cpu_render 同速——GPU 链从未生效）。
+        Metal 通用入口支持 10-bit 平面输出。调用侧在选定 OpenGL 单层
+        DNxHR render_planar 快路后附加对应参数。
         """
         kwargs: Dict[str, Any] = {"output_u16": output_u16}
         if include_dip:
@@ -8782,6 +9131,7 @@ class TimelineExporter:
             )
             from src.features.edit.core.timeline_gpu_export_renderer import (
                 GpuRgbSource, GpuWipeElement, GpuYuv420Output, GpuYuv422P10Output,
+                GpuYuvSource,
             )
 
             if self._project is None:
@@ -9021,6 +9371,9 @@ class TimelineExporter:
                     if source is not None:
                         if graphics_backend == "metal":
                             resolved_source_cache[source_key] = source
+                        elif output_yuv420p:
+                            self._prefetch_next_export_frame(
+                                layer, frame_idx, layer_session_key)
                         return source
                     packed = getattr(decoded, "data", None)
                     packed_format = str(
@@ -9030,11 +9383,11 @@ class TimelineExporter:
                             and packed is not None and packed.ndim == 3 \
                             and packed.shape[2] == 3 \
                             and packed.dtype == np.uint8:
+                        if graphics_backend == "opengl" and output_yuv420p:
+                            self._prefetch_next_export_frame(
+                                layer, frame_idx, layer_session_key)
                         if packed_format == "rgb24":
                             if graphics_backend == "opengl":
-                                if output_yuv420p:
-                                    self._prefetch_next_export_frame(
-                                        layer, frame_idx, layer_session_key)
                                 return GpuRgbSource(packed)
                             packed = np.ascontiguousarray(packed[..., ::-1])
                         if graphics_backend == "metal":
@@ -9282,6 +9635,16 @@ class TimelineExporter:
                     output_yuv420p=output_yuv420p,
                     output_yuv422p10=output_yuv422p10,
                 )
+                if (output_yuv422p10 and graphics_backend == "opengl"
+                        and not transitions and isinstance(source, GpuYuvSource)
+                        and isinstance(grade_uniforms, dict)
+                        and grade_uniforms.get("color_graph") is not None
+                        and str(getattr(getattr(self._encoder, "_config", None),
+                                        "codec", "")).lower() == "dnxhr"):
+                    kwargs["output_yuv422p10"] = True
+                    allocate = getattr(self._encoder, "allocate_yuv422p10_frame", None)
+                    if callable(allocate):
+                        kwargs["allocate_yuv422p10"] = allocate
                 output_surface = None
                 if (
                     output_yuv420p
@@ -9385,6 +9748,7 @@ class TimelineExporter:
                     pixel_format="yuv420p",
                     width=width,
                     height=height,
+                    extra={"yuv420p_buffer": result.buffer} if result.buffer is not None else {},
                 )
             if isinstance(result, GpuYuv422P10Output):
                 from src.shared.media.frame import DecodedFrame
@@ -9398,6 +9762,7 @@ class TimelineExporter:
                     pixel_format="yuv422p10le",
                     width=width,
                     height=height,
+                    extra={"yuv422p10_frame": result.encoder_frame} if result.encoder_frame is not None else {},
                 )
             renderer_errors = getattr(
                 renderer, "metal_errors", getattr(renderer, "gl_errors", 0))
@@ -9440,6 +9805,7 @@ class TimelineExporter:
         env_choice = str(os.getenv("TOPOS_BACKEND_GRAPHICS", "") or "").strip().lower()
         if env_choice:
             requested = env_choice.removeprefix("force_")
+        self._timeline_graphics_requested = requested
         if requested == "opengl":
             return "opengl"
         if requested == "metal":
@@ -11582,11 +11948,17 @@ class TimelineExporter:
             if callable(move_to_end):
                 move_to_end(session_key)
             return existing
+        from src.shared.video.frame_provider_service import VideoFrameProviderService
+
+        options = {"share_by_path": False}
+        if (getattr(self, "_timeline_graphics_backend", "opengl") == "opengl"
+                and isinstance(self._frame_provider, VideoFrameProviderService)):
+            options["master_only"] = True
         try:
             # share_by_path=False：导出走独立 ClipSession，避免与
             # Color/Composite 播放共享缓存（导出大量 master 帧会撑爆播放缓存）
             clip_id = self._frame_provider.open_clip(
-                asset_path, share_by_path=False,
+                asset_path, **options,
             )
         except Exception as first_error:
             # 首开瞬时失败重试一次（实测：陈旧原生 codec 库会毒化进程内
@@ -11594,7 +11966,7 @@ class TimelineExporter:
             # 导出首帧黑帧）。立即重试成功则继续；仍失败才放弃本帧。
             try:
                 clip_id = self._frame_provider.open_clip(
-                    asset_path, share_by_path=False,
+                    asset_path, **options,
                 )
                 logger.warning(
                     "Export clip open retry succeeded for %s "
@@ -11697,9 +12069,12 @@ class TimelineExporter:
             if decoded is not None:
                 from src.shared.media.gpu_frame import GpuDecodedFrame
                 if isinstance(decoded, GpuDecodedFrame):
+                    backend = decoded.source_kind
+                    if backend == "unknown" and decoded.decode_path.startswith("macos_vt_"):
+                        backend = "videotoolbox"
                     self._record_gpu_stage(
                         "decode",
-                        str(getattr(decoded, "source_kind", "videotoolbox")),
+                        backend,
                         wall_ms=decode_wall_ms,
                     )
                     self._schedule_metal_prefetch(
@@ -11901,6 +12276,7 @@ class TimelineExporter:
         合成直接消费 planar 帧（省去 CPU bgr16 转换）；失败语义与原实现
         一致（告警 + None）。会话键与视频主会话一致（clip 级分流）。
         """
+        decode_started = time.perf_counter()
         source_key = session_key or asset_id
         source = self._export_high_depth_sources.get(source_key)
         if source is None:
@@ -11961,6 +12337,10 @@ class TimelineExporter:
                 return None
             if len(getattr(decoded, "planes", None) or ()) < 3:
                 return None
+            self._record_gpu_stage(
+                "decode", "ffmpeg_planar",
+                wall_ms=(time.perf_counter() - decode_started) * 1000.0,
+            )
             return decoded
         except Exception as exc:
             logger.warning(

@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 import time
+from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -210,6 +211,48 @@ class _TrackingDict(dict):
 
 
 class TestAud33508ConvertedMapBackpressure:
+    @pytest.mark.parametrize("workers", [1, 3])
+    def test_gpu_planes_then_rgb_resume_conversion_in_order(
+        self, out_path: str, workers: int,
+    ) -> None:
+        def planar(index: int, luma: int) -> DecodedFrame:
+            atlas = np.full((96, 64), 128, dtype=np.uint8)
+            atlas[:64] = luma
+            chroma = atlas[64:].reshape(2, 32, 32)
+            return DecodedFrame(
+                frame_index=index, pts=index, time_seconds=index / 24,
+                planes=(atlas[:64], chroma[0], chroma[1]),
+                pixel_format="yuv420p", extra={"yuv420p_buffer": atlas},
+            )
+
+        encoder = FFmpegVideoEncoder(
+            out_path, _tiny_config(pipelined_conversion=True, convert_workers=workers),
+        )
+        encoder.open()
+        try:
+            encoder.encode_frame(planar(0, 16))
+            encoder.encode_frame(planar(1, 32))
+            assert encoder.frame_count == 2
+            assert not encoder._convert_threads
+            encoder.encode_frame(_rgb_frame(2))
+            encoder.encode_frame(planar(3, 200))
+            assert len(encoder._convert_threads) == workers
+            encoder.close()
+        finally:
+            if encoder.is_open:
+                encoder.close()
+
+        with av.open(out_path) as container:
+            frames = list(container.decode(video=0))
+        assert len(frames) == 4
+        assert [frame.pts * frame.time_base for frame in frames] == [
+            Fraction(index, 24) for index in range(4)
+        ]
+        values = [int(frame.to_ndarray()[0, 0]) for frame in frames]
+        assert values[:2] == [16, 32]
+        assert 32 < values[2] < 200
+        assert values[3] == 200
+
     def test_map_capacity_equals_workers(self, out_path: str) -> None:
         enc = FFmpegVideoEncoder(
             out_path, _tiny_config(

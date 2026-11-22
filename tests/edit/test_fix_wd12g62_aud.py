@@ -205,6 +205,7 @@ def test_aud_18402_manifest_async_uses_entry_snapshot(tmp_path, monkeypatch):
                 preflight_result=kwargs.get("preflight_result"),
                 loudness_report=kwargs.get("loudness_report"),
                 effect_export_skips=kwargs.get("effect_export_skips") or (),
+                output_path=config.output_path,
             ))
         return {"ok": True}
 
@@ -600,8 +601,7 @@ def test_aud_18502_off_thread_release_does_not_latch(caplog):
     from src.features.edit.core.timeline_gpu_export_renderer import (
         TimelineGpuExportRenderer,
     )
-    renderer = TimelineGpuExportRenderer.__new__(TimelineGpuExportRenderer)
-    renderer._released = False
+    renderer = TimelineGpuExportRenderer()
     renderer._ctx = object()  # 非 None：存在待释放资源
     renderer._owner_thread = threading.get_ident() ^ 0x7FFFFFFF
     renderer.frames_rendered = 0
@@ -622,35 +622,7 @@ def test_aud_18502_off_thread_release_does_not_latch(caplog):
 
     renderer._owner_thread = threading.get_ident()
     renderer._ctx = _CtxStub()
-    renderer._vao = {}
-    for attr in (
-            "_tex_y", "_tex_u", "_tex_v", "_tex_packed",
-            "_tex_y_u8", "_tex_u_u8", "_tex_v_u8",
-            "_fbo_out", "_tex_out", "_fbo_y_out", "_tex_y_out",
-            "_fbo_uv_out", "_tex_uv_out", "_fbo_out_u16", "_tex_out_u16",
-            "_fbo_wipe", "_tex_wipe", "_tex_mask",
-            "_tex_f2", "_fbo_f2"):
-        setattr(renderer, attr, None)
-    renderer._tex_mid = (None, None)
-    renderer._fbo_mid = (None, None)
-    renderer._tex_mid_u16 = (None, None)
-    renderer._fbo_mid_u16 = (None, None)
-    renderer._tex_acc = (None, None)
-    renderer._fbo_acc = (None, None)
-    renderer._tex_side = (None, None)
-    renderer._fbo_side = (None, None)
-    for prog_attr in (
-            "_prog_yuv", "_prog_grade", "_prog_scale", "_prog_scale_rgb",
-            "_prog_quant_rgb", "_prog_yuv420_luma", "_prog_yuv420_chroma",
-            "_prog_yuv420_direct_luma", "_prog_yuv420_direct_chroma",
-            "_prog_yuv_u16", "_prog_grade_u16", "_prog_scale_u16",
-            "_prog_scale_u16_from_f1", "_prog_blend_f1", "_prog_blend_u16",
-            "_prog_quant_u8", "_prog_quant_u16", "_prog_wipe",
-            "_prog_blend_f4", "_prog_dip", "_prog_u16_to_f2",
-            "_prog_f2_to_u16"):
-        setattr(renderer, prog_attr, None)
     renderer._quad = SimpleNamespace(release=lambda: released.append("quad"))
-    renderer._effect_runner = None
     renderer.release()
     assert released == ["quad", "ctx"]
     assert renderer._released is True

@@ -693,6 +693,8 @@ class EditGpuPreviewRenderer(QThread):
         # Render resources
         self._composite_fbo = None
         self._composite_tex = None
+        self._metal_preview_mode = "off"
+        self._metal_preview = None
         # P3.2 GPU 复合结果缓存：(generation, frame) -> 全分辨率合成纹理。
         # 命中时 worker 跳过解码、GPU 直接把缓存纹理 blit 进 present slot
         # （暂停态来回微调 / 重访已合成帧 = 纯拷贝）。generation 变化即失效
@@ -1346,6 +1348,13 @@ class EditGpuPreviewRenderer(QThread):
         # Create quad geometry
         self._init_quad()
 
+        from src.features.edit.core.metal_timeline_preview import metal_preview_mode
+
+        try:
+            self._metal_preview_mode = metal_preview_mode()
+        except (OSError, ValueError, TypeError) as error:
+            logger.warning("Could not resolve Metal preview preference: %s", error)
+
         # Initialize YUV GPU uploader for planar CPU frames (ProRes etc.)
         try:
             from src.shared.video.yuv_gpu_upload import YUVGPUUploader
@@ -1876,14 +1885,14 @@ class EditGpuPreviewRenderer(QThread):
             release=GpuFrameRelease(release_callback=_release),
         )
 
-    def _note_zero_copy_import(self, vt_frame) -> None:
+    def _note_zero_copy_import(self, vt_frame: Any, *, timeline_frame: int | None = None) -> None:
         """A0.1：零拷贝 IOSurface 导入成功时为该帧登记 import_upload 段
         "not_applicable" 证据（无 CPU 上传字节；TPR 消费后按
         import_upload_status='not_applicable' annotate，与 planar 上传的
         measured / 无证据的 unset 三态区分）。
         """
         self._store_planar_upload_stats(
-            int(getattr(vt_frame, "frame_index", 0) or 0),
+            timeline_frame if timeline_frame is not None else int(getattr(vt_frame, "frame_index", 0) or 0),
             {
                 "bytes": 0,
                 "ms": 0.0,
@@ -2169,6 +2178,11 @@ class EditGpuPreviewRenderer(QThread):
             self._abandon_current_present_lease()
             return
 
+        self._task_used_io_surface_source = False
+        if self._try_metal_preview(task, w, h):
+            self._publish_composited_frame(task, self._composite_tex, w, h, 1, metal=True)
+            return
+
         # Render each layer to its own FBO (YUV→RGB conversion)
         track_textures = []
         # FX-C02: parallel list of the track_index (z-order) for each entry in
@@ -2183,7 +2197,6 @@ class EditGpuPreviewRenderer(QThread):
         # BUG FIX (画面重叠): Track whether this task samples any
         # IOSurface-backed (VT zero-copy) source texture, so we can insert a
         # GL sync barrier before releasing the CVPixelBuffer backing.
-        self._task_used_io_surface_source = False
         for layer_data in task.layers:
             gpu_frame = layer_data.get('gpu_frame')
             vt_pixel_buffer = layer_data.get('vt_pixel_buffer')
@@ -2591,6 +2604,83 @@ class EditGpuPreviewRenderer(QThread):
         else:
             final_tex = _do_composite()
 
+        self._publish_composited_frame(task, final_tex, w, h, len(track_textures))
+
+    def _try_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
+        """Try one SDR VideoToolbox clip with an optional single LUT."""
+        mode = getattr(self, "_metal_preview_mode", "off")
+        if (mode == "off"
+                or getattr(self, "_effect_hdr", False)
+                or task.background or len(task.layers) != 1
+                or task.adjustment_layers or task.transition_jobs):
+            return False
+        from src.features.edit.core.crop_cpu import crop_is_identity
+
+        layer = task.layers[0]
+        if layer.get("frame_type") != "vt_pixel_buffer":
+            return False
+        info = layer.get("track_info", {})
+        transform = info.get("transform")
+        source = layer.get("vt_pixel_buffer")
+        if (source is None or source.pixel_buffer is None
+                or source.pixel_format != "nv12" or source.bit_depth != 8
+                or source.color_matrix != "bt709" or source.color_range != "limited"
+                or source.color_primaries not in (None, "bt709")
+                or source.color_transfer not in (None, "bt709")
+                or source.width <= 0 or source.height <= 0
+                or info.get("opacity", 1.0) != 1.0
+                or info.get("clip_effects") or (transform and not _transform_tuple_is_identity(transform))
+                or not crop_is_identity(info.get("crop"))):
+            return False
+
+        lut = None
+        grade = info.get("preview_grade")
+        if grade:
+            from src.features.color.core.color_graph_texture import serial_lut_only
+            from src.shared.project.color_graph import ColorGraphData
+
+            graph = grade.get("color_graph")
+            if not isinstance(graph, ColorGraphData) or grade.get("chain_extra_params"):
+                return False
+            lut = serial_lut_only(graph)
+            if lut is None:
+                return False
+        elif mode == "lut":
+            return False
+
+        from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
+
+        try:
+            if self._metal_preview is None:
+                self._metal_preview = MetalTimelinePreview(self.ctx)
+            rendered = self._metal_preview.render(source, (width, height), lut=lut)
+            if rendered is None:
+                return False
+            slot, lease = rendered
+            # Register before GL samples the output, including a blit that
+            # submits reads and then fails. The normal task fence owns it.
+            self._previous_gpu_frames.append(lease)
+            self._task_used_io_surface_source = True
+            self._metal_preview.blit(slot, self._composite_fbo)
+        except Exception as error:
+            self._metal_preview_mode = "off"
+            logger.warning("Edit Metal preview unavailable, using OpenGL: %s", error)
+            playback_trace("gpu_renderer.metal_preview_fallback", frame=task.frame, error=error)
+            return False
+
+        layer["vt_pixel_buffer"] = None
+        source.release()
+        self._note_zero_copy_import(source, timeline_frame=task.frame)
+        playback_trace("gpu_renderer.metal_preview", frame=task.frame,
+                       generation=task.generation_id, lut=lut is not None,
+                       gpu_submit_ms=self._metal_preview.last_gpu_time_ms)
+        return True
+
+    def _publish_composited_frame(
+        self, task: EditRenderTask, final_tex: Any, w: int, h: int, track_count: int,
+        *, metal: bool = False,
+    ) -> None:
+        """Publish either renderer's completed texture through the existing slot protocol."""
         if final_tex is not None:
             # P3.2：暂停/拖拽/后台任务的合成结果存入复合纹理缓存（实时
             # 播放不存，顺序流会冲刷 LRU 且几乎不重访）。
@@ -2617,13 +2707,15 @@ class EditGpuPreviewRenderer(QThread):
             # Batch 1 (缺陷计划 RP-P0-01): 正式 fence + slot ready 协议。
             # 替代临时 glFinish() 止血——用 glFenceSync 让 Viewer 在自己的
             # context 上 glWaitSync 等待 renderer 写完，不阻塞 GPU pipeline。
+            timing = {"metal": True, "metal_gpu_ms": self._metal_preview.last_gpu_time_ms} if metal else {}
             present_frame = self._finalize_present_frame(
                 final_tex=final_tex,
                 frame=task.frame,
                 generation_id=task.generation_id,
                 width=w,
                 height=h,
-                track_count=len(track_textures),
+                track_count=track_count,
+                **timing,
             )
 
             if present_frame is not None:
@@ -5344,6 +5436,8 @@ void main() {
         width: int,
         height: int,
         track_count: int,
+        metal: bool = False,
+        metal_gpu_ms: float | None = None,
     ) -> Optional[GpuPresentFrame]:
         """
         Composite 完成后：插入 GL fence，标记 slot READY，构造 GpuPresentFrame。
@@ -5363,11 +5457,12 @@ void main() {
         # 发起帧的真实值由 TPR 完成 drain_completed_gpu_queries 后按
         # trace_id 回填。timer 不可用时保持 fail-closed。
         _timer = self._gl_pass_timer
-        gpu_time_unavailable = _timer is None or _timer.unsupported
+        gpu_time_unavailable = metal_gpu_ms is None if metal else _timer is None or _timer.unsupported
         gpu_extra = {
-            "gpu_submit_ms": None,
+            "gpu_submit_ms": metal_gpu_ms,
             "gpu_time_unavailable": gpu_time_unavailable,
-            "gpu_query_deferred": not gpu_time_unavailable,
+            "gpu_query_deferred": not metal and not gpu_time_unavailable,
+            "render_backend": "metal" if metal else "opengl",
         }
 
         if lease is None or not self._present_pool_registered:
@@ -5737,6 +5832,13 @@ void main() {
         self._task_used_io_surface_source = bool(self._previous_gpu_frames)
         self._release_previous_frames()
         self._drain_deferred_gpu_frame_releases(block=True)
+        metal_preview = getattr(self, "_metal_preview", None)
+        if metal_preview is not None:
+            try:
+                metal_preview.release()
+            except Exception as error:
+                logger.warning("Edit Metal preview cleanup failed: %s", error)
+            self._metal_preview = None
 
         for tex in self._track_texes:
             try:

@@ -165,6 +165,110 @@ def test_success_publishes_once_and_releases_imported_frame_once(renderer) -> No
     source.release.assert_called_once()
 
 
+def _metal_preview_task() -> tuple[EditRenderTask, Mock]:
+    source = Mock(pixel_buffer=object(), pixel_format='nv12', bit_depth=8,
+                  width=64, height=32, color_matrix='bt709', color_range='limited',
+                  color_primaries='bt709', color_transfer='bt709')
+    return EditRenderTask(88, 1, [{
+        'frame_type': 'vt_pixel_buffer', 'vt_pixel_buffer': source,
+    }], output_fbo_size=(64, 32)), source
+
+
+def test_metal_preview_publishes_gl_slot_and_fences_shared_surface(renderer) -> None:
+    worker, _ = renderer
+    task, source = _metal_preview_task()
+    slot, release = object(), GpuFrameRelease(release_callback=Mock())
+    worker._metal_preview_mode = "all"
+    worker._metal_preview = Mock()
+    worker._metal_preview.render.return_value = (slot, release)
+    worker._composite_fbo = object()
+    worker._composite_tex = SimpleNamespace(glo=20)
+    worker._import_vt_pixel_buffer_frame = Mock()
+    worker._note_zero_copy_import = Mock()
+    emitted = Mock()
+    worker.frame_ready.connect(emitted)
+
+    worker._process_task_with_gpu_lane(task)
+
+    worker._metal_preview.render.assert_called_once_with(source, (64, 32), lut=None)
+    worker._metal_preview.blit.assert_called_once_with(slot, worker._composite_fbo)
+    worker._import_vt_pixel_buffer_frame.assert_not_called()
+    emitted.assert_called_once_with(88, 1, 20, 64, 32)
+    source.release.assert_called_once()
+    assert task.layers[0]['vt_pixel_buffer'] is None
+    assert worker._deferred_gpu_frame_releases == [(71, [release])]
+    assert not release.is_released
+    worker._release_gpu_frame_list(worker._deferred_gpu_frame_releases.pop()[1])
+    assert release.is_released
+
+
+def test_metal_preview_blit_failure_preserves_source_for_gl_retry(renderer) -> None:
+    worker, _ = renderer
+    task, source = _metal_preview_task()
+    slot, release = object(), GpuFrameRelease(release_callback=Mock())
+    worker._metal_preview_mode = "all"
+    worker._metal_preview = Mock()
+    worker._metal_preview.render.return_value = (slot, release)
+    worker._metal_preview.blit.side_effect = RuntimeError('surface blit failed')
+    worker._composite_fbo = object()
+    releases: list[int] = []
+    imported = _frame(releases, 88, source)
+    worker._import_vt_pixel_buffer_frame = Mock(return_value=imported)
+
+    worker._process_task_with_gpu_lane(task)
+
+    worker._import_vt_pixel_buffer_frame.assert_called_once_with(source)
+    assert worker._metal_preview_mode == "off"
+    source.release.assert_not_called()
+    assert worker._deferred_gpu_frame_releases == [(71, [release, imported])]
+    worker._release_gpu_frame_list(worker._deferred_gpu_frame_releases.pop()[1])
+    assert release.is_released
+    source.release.assert_called_once()
+
+
+@pytest.mark.parametrize('track_info', [
+    {'opacity': 0.5}, {'crop': (0.1, 0.0, 0.0, 0.0, 0.0)},
+    {'transform': (5.0, 0.0, 1.0, 1.0, 0.0, 'center', 0.0, 0.0)},
+    {'preview_grade': {'color_graph': object()}}, {'clip_effects': (object(),)},
+])
+def test_metal_preview_skips_modified_layers(renderer, track_info: dict) -> None:
+    worker, _ = renderer
+    task, _ = _metal_preview_task()
+    task.layers[0]['track_info'] = track_info
+    worker._metal_preview_mode = "all"
+    worker._metal_preview = Mock()
+
+    assert not worker._try_metal_preview(task, 64, 32)
+
+    worker._metal_preview.render.assert_not_called()
+
+
+@pytest.mark.parametrize(('platform', 'graphics', 'override', 'expected'), [
+    ('darwin', 'auto', '', 'lut'), ('darwin', 'auto', '1', 'all'),
+    ('darwin', 'force_opengl', '1', 'off'), ('darwin', 'force_metal', '', 'all'),
+    ('darwin', 'metal', '0', 'off'), ('linux', 'metal', '1', 'off'),
+])
+def test_metal_preview_preference(monkeypatch: pytest.MonkeyPatch, platform: str,
+                                  graphics: str, override: str, expected: str) -> None:
+    from src.features.edit.core import metal_timeline_preview
+
+    monkeypatch.setattr(metal_timeline_preview.sys, 'platform', platform)
+    monkeypatch.setenv('TOPOS_BACKEND_GRAPHICS', graphics)
+    monkeypatch.setenv('TOPOS_EDIT_METAL_PREVIEW', override)
+
+    assert metal_timeline_preview.metal_preview_mode() == expected
+
+
+def test_metal_preview_auto_keeps_ordinary_nv12_on_existing_route(renderer) -> None:
+    worker, _ = renderer
+    task, _ = _metal_preview_task()
+    worker._metal_preview_mode = "lut"
+    worker._metal_preview = Mock()
+
+    assert not worker._try_metal_preview(task, 64, 32)
+    worker._metal_preview.render.assert_not_called()
+
+
 def test_cancelled_unstarted_task_releases_source_without_import_or_fence(renderer) -> None:
     renderer, _ = renderer
     source = Mock()

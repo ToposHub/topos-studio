@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import threading
+from collections.abc import Callable
+from pathlib import Path
+from tempfile import mkstemp
 from typing import TYPE_CHECKING, Any
 
 from src.shared.export.gpu_encode_surface import GpuEncodeSurface
@@ -10,6 +14,7 @@ from src.shared.media.macos_vt.gpu_encode_surface import (
     VideoToolboxGpuSurfaceProvider,
 )
 from src.shared.media.macos_vt.vt_compression import (
+    VideoToolboxCompressionError,
     VideoToolboxCompressionSession,
     VideoToolboxPacketMuxer,
 )
@@ -27,6 +32,12 @@ class VideoToolboxGpuExportBridge:
     ``close`` after the export loop.  It supports single-layer Metal NV12 or
     P010 output into VideoToolbox H.264/HEVC MP4/MOV when the caller selects
     a matching pixel format and codec.
+
+    By default the finished movie replaces the destination atomically.
+    ``expected_frames`` enables exact packet-count validation. An existing
+    destination, an expected count, or a cancellation check requires staging.
+    ``should_cancel`` must read caller state without blocking or calling back
+    into the bridge.
     """
 
     # TimelineExporter may be given this bridge directly.  The bridge owns the
@@ -47,23 +58,47 @@ class VideoToolboxGpuExportBridge:
         pixel_format: str = "nv12",
         container_format: str | None = None,
         require_hardware: bool = True,
+        h264_profile: str | None = None,
+        bit_rate: int | None = None,
+        bt709_limited: bool = False,
+        expected_frames: int | None = None,
+        transactional: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.output_path = str(output_path)
         self.width = int(width)
         self.height = int(height)
         self.fps = max(1, int(fps))
         self.codec = str(codec).strip().lower()
-        self._muxer = VideoToolboxPacketMuxer(
-            output_path,
-            width=self.width,
-            height=self.height,
-            fps=self.fps,
-            codec=codec,
-            pixel_format=pixel_format,
-            container_format=container_format,
-        )
+        if expected_frames is not None and (type(expected_frames) is not int or expected_frames <= 0):
+            raise ValueError("expected_frames must be a positive integer")
+        self._expected_frames = expected_frames
+        self._should_cancel = should_cancel
+        self._staged_path: Path | None = None
+        self._closed = False
+        self._abort_requested = False
+        self._published = False
+        self._close_lock = threading.Lock()
+
+        target = Path(self.output_path)
+        muxer = None
         session = None
         try:
+            if (transactional or expected_frames is not None or should_cancel is not None
+                    or os.path.lexists(target)):
+                fd, temp = mkstemp(prefix=f".{target.stem}.topos-", suffix=target.suffix, dir=target.parent)
+                self._staged_path = Path(temp)
+                os.close(fd)
+            muxer = VideoToolboxPacketMuxer(
+                str(self._staged_path or target),
+                width=self.width,
+                height=self.height,
+                fps=self.fps,
+                codec=codec,
+                pixel_format=pixel_format,
+                container_format=container_format,
+                bt709_limited=bt709_limited,
+            )
             session = VideoToolboxCompressionSession(
                 width=self.width,
                 height=self.height,
@@ -73,22 +108,29 @@ class VideoToolboxGpuExportBridge:
                 # 导致 P010 surface 喂进 8-bit 默认会话（HEVC Main 而非
                 # Main10，probe 位深不符）。
                 pixel_format=str(pixel_format).strip().lower(),
-                on_packet=self._muxer.write_packet,
+                on_packet=muxer.write_packet,
                 require_hardware=require_hardware,
+                h264_profile=h264_profile,
+                bit_rate=bit_rate,
+                bt709_limited=bt709_limited,
             )
             self._provider = VideoToolboxGpuSurfaceProvider(
                 metal_context,
                 submitter=session.submit,
             )
             self._session = session
-        except Exception:
-            if session is not None:
-                session.close()
-            self._muxer.close()
+            self._muxer = muxer
+        except BaseException:
+            try:
+                if session is not None:
+                    session.abort()
+            finally:
+                try:
+                    if muxer is not None:
+                        muxer.abort()
+                finally:
+                    self._discard_staged_output()
             raise
-        self._closed = False
-        # AUD-35010：close() 防重入标志的锁
-        self._close_lock = threading.Lock()
 
     @property
     def provider(self) -> VideoToolboxGpuSurfaceProvider:
@@ -127,26 +169,76 @@ class VideoToolboxGpuExportBridge:
     def submit(self, surface: GpuEncodeSurface) -> dict[str, Any]:
         return self._session.submit(surface)
 
-    def close(self) -> None:
-        # AUD-35010：防重入标志的检查-置位放入实例锁，两个线程并发
-        # close 不再都执行关闭链
-        with self._close_lock:
-            if self._closed:
-                return
-            self._closed = True
+    def close(self) -> bool:
+        """Drain the native encoder and return whether the movie was published."""
+        if not self._begin_shutdown(abort=False):
+            with self._close_lock:
+                return self._published
         try:
-            self._session.close()
+            try:
+                self._session.close()
+            finally:
+                self._provider.close()
+            if self._session.last_error or self._session.dropped_packets:
+                raise VideoToolboxCompressionError(
+                    self._session.last_error or "videotoolbox_compression_dropped_packets")
+            count = self.packet_count
+            if self._expected_frames is not None and count != self._expected_frames:
+                raise VideoToolboxCompressionError(
+                    f"videotoolbox_packet_count_mismatch:{count}!={self._expected_frames}")
+            self._muxer.close()
+            with self._close_lock:
+                if self._abort_requested or (self._should_cancel is not None and self._should_cancel()):
+                    return False
+                if count and self._staged_path is not None:
+                    if self._staged_path.stat().st_size == 0:
+                        raise VideoToolboxCompressionError("videotoolbox_empty_staged_output")
+                    os.replace(self._staged_path, self.output_path)
+                self._published = bool(count)
+                return self._published
+        finally:
+            try:
+                self._muxer.abort()
+            finally:
+                self._discard_staged_output()
+
+    def abort(self) -> None:
+        """Discard this export and keep any previously published destination."""
+        if not self._begin_shutdown(abort=True):
+            return
+        try:
+            self._session.abort()
         finally:
             try:
                 self._provider.close()
             finally:
-                self._muxer.close()
+                try:
+                    self._muxer.abort()
+                finally:
+                    self._discard_staged_output()
+
+    def _begin_shutdown(self, *, abort: bool) -> bool:
+        with self._close_lock:
+            if abort:
+                self._abort_requested = True
+            if self._closed:
+                return False
+            self._closed = True
+            return True
+
+    def _discard_staged_output(self) -> None:
+        if self._staged_path is not None:
+            self._staged_path.unlink(missing_ok=True)
+            self._staged_path = None
 
     def __enter__(self) -> "VideoToolboxGpuExportBridge":
         return self
 
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
+    def __exit__(self, exc_type: type[BaseException] | None, *_exc: object) -> None:
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
 
 
 __all__ = ["VideoToolboxGpuExportBridge"]
