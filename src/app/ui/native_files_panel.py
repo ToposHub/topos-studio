@@ -1917,6 +1917,8 @@ class NativeFilesPanel(QWidget):
             self._preview.close_preview()
 
     def _on_video_player_failed(self, message: str) -> None:
+        if self._video_host is not None:
+            self._video_host.stop()
         self.status.setText(str(message or "视频播放失败"))
         if self._preview.is_open:
             self._preview.show_message(
@@ -1983,6 +1985,8 @@ class NativeFilesPanel(QWidget):
         self._preview.show_message(path, f"无法解码：{message}")
 
     def _on_preview_closed(self) -> None:
+        if self._video_host is not None:
+            self._video_host.stop()
         self._preview_path = ""
         self._preview_decoder.cancel()
         self.preview_closed.emit()

@@ -17,7 +17,10 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 qtwidgets = pytest.importorskip("PyQt6.QtMultimedia")
 
-from PyQt6.QtCore import QCoreApplication  # noqa: E402
+from PyQt6.QtCore import QCoreApplication, QSize  # noqa: E402
+from PyQt6.QtGui import QImage, QResizeEvent  # noqa: E402
+from PyQt6.QtWidgets import QWidget  # noqa: E402
+from pytestqt.qtbot import QtBot  # noqa: E402
 from PyQt6.QtMultimedia import QAudio, QMediaPlayer  # noqa: E402
 
 from src.shared.playback import topos_audio as topos_audio_module  # noqa: E402
@@ -61,7 +64,7 @@ def test_libav_poll_ring_holds_while_frames_pending(qtbot):
     player._audio_active = False
     player._playing = True
     player._shown_index = 0            # 末帧还在队列里没呈现
-    player._pending.append((1, object()))
+    player._ring.append((1, object()))
     player._decode_exhausted = True
     finished = []
     player._on_playback_finished = lambda: finished.append(True)
@@ -70,7 +73,7 @@ def test_libav_poll_ring_holds_while_frames_pending(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# ToposPlayer：音频主时钟路径 + 严格按序路径
+# ToposPlayer：音频主时钟路径 + 单调时钟路径
 # ---------------------------------------------------------------------------
 
 class _FakeAudio:
@@ -110,7 +113,7 @@ def test_topos_audio_clock_path_waits_for_drain(qtbot):
     assert finished == [True] and not player._playing
 
 
-def test_topos_sequential_path_publishes_without_audio(qtbot):
+def test_topos_wall_clock_path_publishes_without_audio(qtbot):
     player = ToposPlayer()
     qtbot.addWidget(player)
     player._session = _fake_session(frame_count=1)
@@ -287,3 +290,56 @@ def test_ultimate_slider_seek_clears_replay_flag(qtbot):
     player.slider.setValue(500)
     player.on_slider_released()
     assert not player._at_eof      # 片尾回跳后继续播，不再触发从头重播
+
+
+def test_topos_silent_clock_catches_up_and_paused_seek_presents_one_frame(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    player = ToposPlayer()
+    qtbot.addWidget(player)
+    player._session = _fake_session(frame_count=30)
+    player._playing = True
+    player._clock_started_at = 10.0
+    monkeypatch.setattr('src.shared.playback.topos_player.time.monotonic', lambda: 10.16)
+    player._ring.extend((index, QImage()) for index in range(6))
+    player._poll_ring()
+    assert player._shown_index == 4
+    assert len(player._ring) == 1
+
+    player.toggle_play()
+    player._poll_ring()
+    assert player._shown_index == 4
+    assert len(player._ring) == 1
+
+    player.slider.setRange(0, 29)
+    player.slider.setValue(4)
+    player.slider.triggerAction(player.slider.SliderAction.SliderPageStepAdd)
+    assert player._seek_target == 14
+    player._ring.extend((index, QImage()) for index in (14, 15))
+    player._poll_ring()
+    player._poll_ring()
+    assert player._shown_index == 14
+    assert len(player._ring) == 1
+
+
+@pytest.mark.parametrize("player_class", [UltimatePlayer, ToposPlayer, LibavPlayer])
+def test_player_controls_stay_inside_a_narrow_preview(
+    qtbot: QtBot, player_class: type[QWidget],
+) -> None:
+    player = player_class()
+    qtbot.addWidget(player)
+    player.resize(320, 270)
+    player.lbl_title.setText("Extremely long source media title " * 10)
+    player.resizeEvent(QResizeEvent(player.size(), QSize(321, 270)))
+
+    if isinstance(player, UltimatePlayer):
+        header, controls = player.header_container, player.controls_container
+    else:
+        header, controls = player._header, player._controls
+    header.layout().activate()
+    controls.layout().activate()
+
+    close = header.layout().itemAt(header.layout().count() - 1).widget()
+    assert player.rect().contains(controls.geometry())
+    assert header.rect().contains(close.geometry())
+    assert player.slider.width() > 20

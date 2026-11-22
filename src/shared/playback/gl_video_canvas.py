@@ -38,7 +38,7 @@ import logging
 
 import numpy as np
 
-from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtCore import QRectF, Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPainter, QSurfaceFormat
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -194,7 +194,7 @@ class GLVideoCanvas(QOpenGLWidget):
         self._release_gl()
         super().closeEvent(event)
 
-    def set_image(self, image) -> None:
+    def set_image(self, image: YuvFrame | QImage | None) -> None:
         """接收 QImage（RGB 回退）或 YuvFrame（GPU 主路径）。
 
         [E5] worker 存活时 YuvFrame 只入队（渲染线程消费），GUI 不做
@@ -203,7 +203,13 @@ class GLVideoCanvas(QOpenGLWidget):
         self._frame = image
         if isinstance(image, YuvFrame) and self._worker_alive():
             self._render_worker.submit_frame(image)
-        self.update()
+        else:
+            self.update()
+
+    @pyqtSlot(int)
+    def _on_frame_ready(self, _frame_id: int) -> None:
+        if isinstance(self._frame, YuvFrame):
+            self.update()
 
     def display_size(self):
         """设备像素显示区尺寸（快照）；工作线程安全。"""
@@ -237,6 +243,7 @@ class GLVideoCanvas(QOpenGLWidget):
         if worker.start():
             self._render_worker = worker
             worker.worker_failed.connect(self._on_worker_failed)
+            worker.frame_ready.connect(self._on_frame_ready, Qt.ConnectionType.QueuedConnection)
             if self._size_cache:
                 worker.submit_size(self._size_cache)
             self._gpu_active = True
@@ -269,12 +276,15 @@ class GLVideoCanvas(QOpenGLWidget):
         logger.warning('[GL-CANVAS] render worker failed (%s); '
                        'falling back to GUI direct path', reason)
         self._gpu_error = reason
+        self.update()
 
     def resizeGL(self, w: int, h: int) -> None:
         # 尺寸变化只触发重绘；纹理仍复用，避免每帧重复上传。
         self.refresh_size_cache()
         if self._worker_alive() and self._size_cache:
             self._render_worker.submit_size(self._size_cache)
+            if isinstance(self._frame, YuvFrame):
+                self._render_worker.submit_frame(self._frame)
         self.update()
 
     def paintGL(self) -> None:

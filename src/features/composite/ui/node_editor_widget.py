@@ -3973,6 +3973,11 @@ class NodeEditorWidget(QGraphicsView):
             widget = widget.parent()
         return None
 
+    def set_node_bypassed(self, node_id: str, disabled: bool) -> bool:
+        """Set bypass through the same graph action as the canvas."""
+        return (self._actions is not None and not self.is_node_locked(node_id)
+                and self._actions.set_bypass(node_id, disabled))
+
     def _toggle_bypass_selected(self) -> None:
         """Toggle bypass/disable on selected nodes."""
         if self._selection_contains_locked_node():

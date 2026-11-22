@@ -146,6 +146,9 @@ def test_value_column_horizontal_drag_emits_step_adjusted_value(qapp) -> None:
     panel = KeyframesPanel()
     panel.resize(800, 300)
     panel.set_node_graph(graph)
+    pair = next(row for row in panel._model.rows if row.node_id == transform.id
+                and "scale_x" in row.component_params)
+    panel._toggle_dimensions(pair.row_id)
     panel.set_value_provider(lambda _node_id, _param_name: 0.0)
     changed = []
     panel.parameter_changed.connect(
@@ -157,7 +160,7 @@ def test_value_column_horizontal_drag_emits_step_adjusted_value(qapp) -> None:
     row_index = next(i for i, row in enumerate(tree._model.visible_rows())
                      if row.node_id == transform.id
                      and row.param_name == "scale_x")
-    y = 30 + row_index * 24 + 12
+    y = tree._header_height + row_index * 24 + 12
     x = (x0 + x1) / 2
     _mouse(tree, QMouseEvent.Type.MouseButtonPress, x, y,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
@@ -178,6 +181,9 @@ def test_value_column_drag_updates_keyframe_under_playhead(qapp) -> None:
     panel = KeyframesPanel()
     panel.resize(800, 300)
     panel.set_node_graph(graph)
+    pair = next(row for row in panel._model.rows if row.node_id == transform.id
+                and "scale_x" in row.component_params)
+    panel._toggle_dimensions(pair.row_id)
     panel.set_current_frame(0)
     panel.set_value_provider(
         lambda _node_id, param_name: "1" if param_name == "scale_x" else "0")
@@ -186,7 +192,7 @@ def test_value_column_drag_updates_keyframe_under_playhead(qapp) -> None:
     row_index = next(i for i, row in enumerate(tree._model.visible_rows())
                      if row.node_id == transform.id
                      and row.param_name == "scale_x")
-    y = 30 + row_index * 24 + 12
+    y = tree._header_height + row_index * 24 + 12
     _mouse(tree, QMouseEvent.Type.MouseButtonPress, value_x, y,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
     _mouse(tree, QMouseEvent.Type.MouseMove, value_x + 10, y,
@@ -263,6 +269,9 @@ def test_pick_whip_drag_reports_parameter_source(qapp) -> None:
     panel = KeyframesPanel()
     panel.resize(800, 300)
     panel.set_node_graph(graph)
+    pair = next(row for row in panel._model.rows if row.node_id == transform.id
+                and "translate_x" in row.component_params)
+    panel._toggle_dimensions(pair.row_id)
     received = []
     panel.parameter_binding_changed.connect(
         lambda *args: received.append(args))
@@ -277,8 +286,8 @@ def test_pick_whip_drag_reports_parameter_source(qapp) -> None:
                         if row.node_id == blur.id
                         and row.param_name == "radius")
     x = (bind_x[0] + bind_x[1]) / 2
-    y0 = 30 + target_index * 24 + 12
-    y1 = 30 + source_index * 24 + 12
+    y0 = tree._header_height + target_index * 24 + 12
+    y1 = tree._header_height + source_index * 24 + 12
     _mouse(tree, QMouseEvent.Type.MouseButtonPress, x, y0,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
     _mouse(tree, QMouseEvent.Type.MouseMove, x, y1,

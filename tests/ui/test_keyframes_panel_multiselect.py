@@ -29,7 +29,6 @@ from src.shared.keyframe import Keyframe, KeyframeTrack
 
 CLIP_FRAMES = 100
 CLIP_FPS = 24.0
-_RULER_H = 30
 _ROW_H = 24
 PPF = 10.0  # 测试用固定缩放：1 帧 = 10px
 
@@ -52,6 +51,9 @@ def panel(qapp):
     p = KeyframesPanel()
     p.resize(1000, 300)
     p.set_node_graph(g)
+    for row in list(p._model.rows):
+        if "translate_x" in row.component_params:
+            p._toggle_dimensions(row.row_id)
     p.set_frame_range(0, CLIP_FRAMES - 1, fps=CLIP_FPS)
     # 固定缩放/滚动 → frame_to_x(f) = f * 10，断言坐标可预测。
     p._frame_mapper.set_zoom(PPF)
@@ -63,7 +65,7 @@ def _param_row_y(panel, node_id, param):
     """参数行的垂直中心（widget 坐标）。"""
     for i, row in enumerate(panel._model.visible_rows()):
         if row.row_id == f"param:{node_id}:{param}":
-            return _RULER_H + i * _ROW_H - panel._timeline_view._scroll_y \
+            return panel._timeline_view.ruler_height() + i * _ROW_H - panel._timeline_view._scroll_y \
                 + _ROW_H // 2
     raise AssertionError("param row not found")
 

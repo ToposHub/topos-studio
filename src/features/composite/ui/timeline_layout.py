@@ -41,7 +41,7 @@ from typing import Dict, List, Mapping, Tuple
 DEFAULT_DOCK_HEIGHT = 300
 MIN_DOCK_HEIGHT = 180
 TOOLBAR_HEIGHT = 32
-RULER_HEIGHT = 30          # == KEYFRAMES_RULER_H in keyframes_model.py
+RULER_HEIGHT = 54
 ROW_HEIGHT = 24            # == KEYFRAMES_ROW_H
 EXPRESSION_ROW_HEIGHT = 22
 EXPRESSION_ERROR_ROW_HEIGHT = 32
@@ -83,31 +83,22 @@ class ColumnSpec:
 
 LEFT_COLUMNS: Tuple[ColumnSpec, ...] = (
     ColumnSpec("eye", "Eye", 22, min_width=20),
-    # Optional AE layer switches stay available through the column model but
-    # are collapsed by default; painting an empty 22 px cell for every row
-    # creates the large gaps users see in a compact property list.
-    ColumnSpec("solo", "Solo", 0, min_width=0),
+    ColumnSpec("solo", "Solo", 15, min_width=12),
     ColumnSpec("lock", "Lock", 20, min_width=18),
-    ColumnSpec("shy", "Shy", 0, min_width=0),
+    ColumnSpec("shy", "Shy", 17, min_width=16),
     ColumnSpec("label", "Label", 8, min_width=8, resizable=False),
-    ColumnSpec("index", "Index", 0, min_width=0,
-               visible_by_default=False),
+    ColumnSpec("index", "Index", 17),
     ColumnSpec("name", "Name", 0, min_width=80),    # 0 = absorbs remainder
-    # Layer properties place the diamond inside the name area.
-    ColumnSpec("keyframe", "Key", 22, min_width=20,
-               resizable=False),
-    ColumnSpec("value", "Value", 64, min_width=44),
-    ColumnSpec("bind", "Bind", 22, min_width=20,
-               resizable=False),
-    ColumnSpec("expr", "Expr", 18, min_width=0),
-)
-LAYER_LEFT_COLUMNS = (
-    *LEFT_COLUMNS[:7], ColumnSpec("motion_blur", "Motion Blur", 18, min_width=16),
-    *LEFT_COLUMNS[7:],
+    ColumnSpec("motion_blur", "Motion Blur", 18, min_width=16),
+    # Each property inserts its keyframe icon into its own name area.
+    ColumnSpec("keyframe", "Key", 0, resizable=False),
+    ColumnSpec("value", "Value", 94, min_width=80),
+    ColumnSpec("bind", "Bind", 22, min_width=20, resizable=False),
+    ColumnSpec("expr", "Expr", 18),
 )
 
 
-def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[str, int]:
+def left_column_widths(total_width: int) -> Dict[str, int]:
     """Resolve column widths for a given total left-panel width.
 
     The ``name`` column absorbs the remainder after every fixed column
@@ -123,13 +114,10 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # ``total_width``.  Optional AE switches collapse before the Name column
     # is allowed to become unusably narrow.
     total_width = max(0, int(total_width))
-    columns = LAYER_LEFT_COLUMNS if layers_mode else LEFT_COLUMNS
-    fixed = [c for c in columns if c.name != "name"]
+    fixed = [c for c in LEFT_COLUMNS if c.name != "name"]
     name_col = next(c for c in LEFT_COLUMNS if c.name == "name")
 
     defaults = {c.name: max(0, int(c.width)) for c in fixed}
-    if layers_mode:
-        defaults.update(solo=15, index=17, shy=17, keyframe=0, value=94)
     fixed_default = sum(defaults.values())
     if total_width >= fixed_default + name_col.min_width:
         defaults["name"] = total_width - fixed_default
@@ -138,8 +126,6 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # At normal compact sizes retain all switches but shrink them to their
     # declared minima. The remaining width belongs to the Name column.
     mins = {c.name: max(0, int(c.min_width)) for c in fixed}
-    if layers_mode:
-        mins.update(solo=12, shy=16, keyframe=0, value=80)
     fixed_min = sum(mins.values())
     if total_width >= fixed_min + name_col.min_width:
         mins["name"] = total_width - fixed_min
@@ -149,13 +135,7 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     # need to identify/select a layer (Eye, Lock, Label, Name, Value) and
     # collapse secondary switches first. This is preferable to painting
     # outside the widget or letting a label overlap an icon.
-    compact_priority = ((
-        "eye", "lock", "label", "shy", "motion_blur", "value", "bind")
-        if layers_mode else (
-        # These are the controls that remain useful at the smallest supported
-        # splitter width: identify the row, set a keyframe, edit its value,
-        # and expose the parameter/layer pick-whip.
-        "eye", "lock", "label", "keyframe", "value", "bind"))
+    compact_priority = ("eye", "lock", "label", "shy", "motion_blur", "value", "bind")
     widths = {c.name: 0 for c in fixed}
     remaining = total_width
     for name in compact_priority:
@@ -172,12 +152,12 @@ def left_column_widths(total_width: int, *, layers_mode: bool = False) -> Dict[s
     return widths
 
 
-def column_x_offsets(total_width: int, *, layers_mode: bool = False) -> List[Tuple[str, int, int]]:
+def column_x_offsets(total_width: int) -> List[Tuple[str, int, int]]:
     """Return [(name, x_start, x_end), ...] in left-to-right paint order."""
-    widths = left_column_widths(total_width, layers_mode=layers_mode)
+    widths = left_column_widths(total_width)
     out: List[Tuple[str, int, int]] = []
     x = 0
-    for col in LAYER_LEFT_COLUMNS if layers_mode else LEFT_COLUMNS:
+    for col in LEFT_COLUMNS:
         w = widths[col.name]
         out.append((col.name, x, x + w))
         x += w

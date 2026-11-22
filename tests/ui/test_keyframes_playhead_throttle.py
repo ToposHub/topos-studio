@@ -35,7 +35,6 @@ from src.shared.keyframe import Keyframe, KeyframeTrack
 
 CLIP_FRAMES = 100
 CLIP_FPS = 24.0
-_RULER_H = 30
 PPF = 10.0
 
 
@@ -59,21 +58,21 @@ def panel(qapp):
 def _move(view, x, mods=Qt.KeyboardModifier.NoModifier):
     btn = Qt.MouseButton.LeftButton
     view.mouseMoveEvent(QMouseEvent(
-        QEvent.Type.MouseMove, QPointF(x, _RULER_H // 2),
+        QEvent.Type.MouseMove, QPointF(x, view.ruler_height() // 2),
         Qt.MouseButton.NoButton, btn, mods))
 
 
 def _press(view, x, mods=Qt.KeyboardModifier.NoModifier):
     btn = Qt.MouseButton.LeftButton
     view.mousePressEvent(QMouseEvent(
-        QEvent.Type.MouseButtonPress, QPointF(x, _RULER_H // 2),
+        QEvent.Type.MouseButtonPress, QPointF(x, view.ruler_height() // 2),
         btn, btn, mods))
 
 
 def _release(view, x, mods=Qt.KeyboardModifier.NoModifier):
     btn = Qt.MouseButton.LeftButton
     view.mouseReleaseEvent(QMouseEvent(
-        QEvent.Type.MouseButtonRelease, QPointF(x, _RULER_H // 2),
+        QEvent.Type.MouseButtonRelease, QPointF(x, view.ruler_height() // 2),
         btn, Qt.MouseButton.NoButton, mods))
 
 

@@ -4192,6 +4192,12 @@ class NodePropertiesPanel(QWidget):
                 editor.set_bounds(0, maximum)
             editor.set_values(start, maximum if raw_end < 0 else raw_end)
 
+    def sync_node_enabled(self, node_id: str, enabled: bool) -> None:
+        """Mirror a bypass edit in the corresponding live property section."""
+        section = self._sections.get(node_id)
+        if section is not None:
+            section.set_enabled(enabled)
+
     def sync_base_parameter_values(self, node_id: str, values: Dict[str, Any]) -> None:
         """Mirror changed base values into a visible node section in place."""
         section = self._sections.get(node_id)

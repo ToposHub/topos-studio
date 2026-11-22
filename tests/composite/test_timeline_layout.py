@@ -47,7 +47,7 @@ class TestPanelGeometry:
     def test_defaults_match_plan_section_3_1(self):
         assert DEFAULT_DOCK_HEIGHT == 300
         assert MIN_DOCK_HEIGHT == 180
-        assert RULER_HEIGHT == 30
+        assert RULER_HEIGHT == 54
         assert ROW_HEIGHT == 24
         assert LEFT_COLUMN_DEFAULT_WIDTH == 330
         assert LEFT_COLUMN_MIN_WIDTH == 240
@@ -75,7 +75,7 @@ class TestLeftColumns:
         names = [c.name for c in LEFT_COLUMNS]
         # §16.4 plus the AE property controls added after the Name cell.
         assert names == ["eye", "solo", "lock", "shy", "label",
-                         "index", "name", "keyframe", "value", "bind",
+                         "index", "name", "motion_blur", "keyframe", "value", "bind",
                          "expr"]
 
     def test_label_column_is_thin_and_not_resizable(self):
@@ -103,12 +103,11 @@ class TestLeftColumns:
         widths = left_column_widths(LEFT_COLUMN_MIN_WIDTH)
         assert all(w >= 0 for w in widths.values())
 
-    def test_narrow_layout_keeps_minimums(self):
-        """At the floor width, fixed columns shrink to their min but the
-        name column still gets at least its min_width."""
+    def test_narrow_layout_keeps_name_and_critical_controls(self):
         widths = left_column_widths(LEFT_COLUMN_MIN_WIDTH)
-        name_col = next(c for c in LEFT_COLUMNS if c.name == "name")
-        assert widths["name"] >= name_col.min_width
+        assert widths["name"] >= 60
+        assert widths["value"] >= 80
+        assert widths["keyframe"] == 0  # the property row supplies its own slot
 
 
 # ── T36: off-screen layout check at 800 / 1200 / 1920 ──────────────────

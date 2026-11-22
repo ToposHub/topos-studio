@@ -27,8 +27,8 @@ pytestmark = pytest.mark.composite_core
 @pytest.mark.usefixtures("qapp")
 def test_keyframes_panel_exposes_professional_property_filters(qapp):
     panel = KeyframesPanel()
-    data = [panel._filter_combo.itemData(i)
-            for i in range(panel._filter_combo.count())]
+    panel._populate_header_menu()
+    data = [action.data() for action in panel._header_menu.actions() if action.data()]
     assert data == ["all", "animated", "modified", "expression", "selected"]
     panel.deleteLater()
 

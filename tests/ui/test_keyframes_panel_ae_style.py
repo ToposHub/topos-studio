@@ -527,6 +527,8 @@ def test_wheel_zoom_clamped_for_frame_precision(panel):
 
 def test_shift_wheel_pans_horizontally(panel):
     view = panel._timeline_view
+    panel._frame_mapper.set_zoom(20.0)
+    panel._frame_mapper.set_scroll(-200.0)
     before = panel._frame_mapper.scroll_offset
     _wheel_at(view, 100, 100, delta=120,
               mods=Qt.KeyboardModifier.ShiftModifier)
@@ -548,6 +550,8 @@ def test_alt_wheel_bubbles_for_vertical_scroll(panel):
 
 def test_middle_button_drag_pans(panel):
     view = panel._timeline_view
+    panel._frame_mapper.set_zoom(20.0)
+    panel._frame_mapper.set_scroll(-200.0)
     before = panel._frame_mapper.scroll_offset
     _mouse(view, QEvent.Type.MouseButtonPress, 300, 100,
            Qt.MouseButton.MiddleButton, Qt.MouseButton.MiddleButton)
@@ -642,12 +646,13 @@ def test_workarea_band_drag_updates_range(panel):
     ranges: list[tuple[int, int]] = []
     panel.play_range_changed.connect(lambda i, o: ranges.append((i, o)))
 
+    y = view.ruler_height() - 10
     x_out = fm.frame_to_x(61)  # end+1 边缘
-    _mouse(view, QEvent.Type.MouseButtonPress, x_out, 2,
+    _mouse(view, QEvent.Type.MouseButtonPress, x_out, y,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
-    _mouse(view, QEvent.Type.MouseMove, fm.frame_to_x(71), 2,
+    _mouse(view, QEvent.Type.MouseMove, fm.frame_to_x(72), y,
            Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
-    _mouse(view, QEvent.Type.MouseButtonRelease, fm.frame_to_x(71), 2,
+    _mouse(view, QEvent.Type.MouseButtonRelease, fm.frame_to_x(72), y,
            Qt.MouseButton.LeftButton)
 
     assert panel.effective_play_range() == (20, 71)
@@ -830,7 +835,9 @@ def test_timecode_mode_widens_tick_spacing(panel):
     _m1, major_frame = view._tick_steps()
     view.set_display("timecode", CLIP_FPS)
     _m2, major_tc = view._tick_steps()
-    assert major_tc >= major_frame
+    assert major_tc * fm.pixels_per_frame >= 78
+    assert major_frame * fm.pixels_per_frame >= 56
+    assert major_tc % CLIP_FPS == 0
 
 
 def test_context_menu_switch_syncs_footer_combo(panel):

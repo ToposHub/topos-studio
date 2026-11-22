@@ -150,7 +150,7 @@ def test_empty_layer_canvas_accepts_supported_local_drops(
 
     canvas = getattr(panel, surface)
     assert canvas.isEnabled() and canvas.acceptDrops()
-    assert not panel._toolbar.isEnabled()
+    assert not panel._header_tools.isEnabled()
     assert panel.findChild(QWidget, "KeyframesEmptyStateOverlay") is None
     if surface == "_timeline_view":
         QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=QPoint(150, 24))

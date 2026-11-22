@@ -126,10 +126,10 @@ def test_gui_present_paints_front(qtbot, gl_canvas):
     if worker is None or not worker.alive:
         pytest.skip("渲染线程不可用")
     worker.submit_size(canvas._size_cache or (120, 90))
-    canvas.set_image(_yuv_frame("red", w=8, h=6))   # 生产线径：set_image 入队
-    _wait_rendered(qtbot, worker)
-    canvas.update()
-    qtbot.wait(80)
+    qtbot.wait(80)  # 先排空显示窗口首次产生的交换事件
+    with qtbot.waitSignal(canvas.frameSwapped, timeout=8000):
+        canvas.set_image(_yuv_frame("red", w=8, h=6))
+    assert worker.rendered_frames == 1
     image = canvas.grabFramebuffer()
     assert not image.isNull()
     center = image.pixelColor(image.width() // 2, image.height() // 2)

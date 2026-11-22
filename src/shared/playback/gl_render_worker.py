@@ -89,7 +89,7 @@ class _RenderThread(QThread):
         # 共享组探测：macOS NSOpenGL 常见"falling back to unshared context"
         # （Qt 警告）——无共享组时 GUI 采样不到 worker 纹理，前台帧改走
         # CPU 回读发布（转换仍在渲染线程；呈现层收 QImage 结果）
-        state["shared"] = ctx.shareGroup() is not None
+        state["shared"] = QOpenGLContext.areSharing(ctx, worker._base_context)
         if not state["shared"]:
             logger.info("[GL-WORKER] no share group; front frames "
                         "published via CPU readback (GPU work still "
@@ -183,13 +183,13 @@ class _RenderThread(QThread):
 
         mctx = state["mctx"]
         fbo.use()
-        mctx.viewport = (0, 0, fw, fh)
+        fbo.viewport = (0, 0, fw, fh)
         fbo.clear(0.0, 0.0, 0.0, 1.0)
         # letterbox：与 gl_video_canvas._paint_yuv 同一几何（等比、黑边）
         scale = min(fw / frame.width, fh / frame.height)
         vw = max(1, int(frame.width * scale))
         vh = max(1, int(frame.height * scale))
-        mctx.viewport = ((fw - vw) // 2, (fh - vh) // 2, vw, vh)
+        fbo.viewport = ((fw - vw) // 2, (fh - vh) // 2, vw, vh)
 
         if frame is not state["last_frame"]:
             worker._frame_index += 1
@@ -227,8 +227,8 @@ class _RenderThread(QThread):
         )
         # 发布前显式同步：share group 无跨上下文 fence 的诚实版本——
         # 完成即提交（finish 开销换正确性；帧率由 latest-wins 吸收）
-        mctx.finish()
         if state["shared"]:
+            mctx.finish()
             published_payload = ("texture", texture.glo, fw, fh)
         else:
             # 无共享组：渲染线程回读 RGBA（GUI 无法采样 worker 纹理；
@@ -236,7 +236,7 @@ class _RenderThread(QThread):
             rgba = np.frombuffer(
                 fbo.read(components=4, dtype="f1", alignment=1),
                 dtype=np.uint8).reshape(fh, fw, 4)
-            published_payload = ("cpu", rgba, fw, fh)
+            published_payload = ("cpu", np.ascontiguousarray(rgba[::-1]), fw, fh)
         with worker._front_lock:
             # 前后台互换：GUI 只读 front，worker 只写 back；同时发布
             # 线程安全的前台快照——GUI 呈现不跨线程触碰 ModernGL 对象，

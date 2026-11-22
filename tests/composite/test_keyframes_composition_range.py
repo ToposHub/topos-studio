@@ -4,7 +4,7 @@ import pytest
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QInputDialog, QMenu
+from PyQt6.QtWidgets import QToolBar, QInputDialog, QMenu
 
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.core.node_engine import NodeGraph
@@ -98,8 +98,8 @@ def test_long_media_bar_remains_visible_beyond_composition(qapp) -> None:
     model.set_comp_range(0, 99)
     model.rebuild(graph)
     view = KeyframesTimelineView(model, FrameMapper(pixels_per_frame=4.0))
-    view.set_composition_range(0, 99)
-    view.resize(2200, 200)
+    view.resize(2000, 200)
+    view.set_composition_range(0, 99, display_range=(0, 499))
     assert view.project_range() == (0, 99)
 
     track = model.track_for("node:video")
@@ -108,8 +108,8 @@ def test_long_media_bar_remains_visible_beyond_composition(qapp) -> None:
 
     x0, x1 = view._range_bar_x_bounds(track.range_bar)
     assert x0 == pytest.approx(0.0)
-    assert x1 == pytest.approx(1996.0)  # full source end, frame 499
-    assert view._hit_range_bar(x1, 42) == ("node:video", "right")
+    assert x1 == pytest.approx(2000.0)  # right edge of inclusive frame 499
+    assert view._hit_range_bar(x1 - 1, view.ruler_height() + 12) == ("node:video", "right")
 
     # Trim handles are allowed to reach beyond the comp extent, but never
     # beyond the source. This is what makes a 2911-frame source editable
@@ -261,15 +261,14 @@ def test_layer_header_replaces_top_bar_and_exposes_useful_layer_switches(qtbot) 
     panel.set_node_graph(graph, selected_layer_id=card)
     panel.resize(1760, 360)
     panel.show()
-    assert panel._toolbar.isHidden()
-    assert panel._layer_header_tools.isVisible()
-    assert panel._layer_header_tools.geometry().left() > panel._time_display.geometry().right()
-    assert panel._layer_header_tools.geometry().bottom() < panel._tree_view._header_height
+    assert panel.findChild(QToolBar, "KeyframesToolbar") is None
+    assert panel._header_tools.isVisible()
+    assert panel._header_tools.geometry().left() > panel._time_display.geometry().right()
+    assert panel._header_tools.geometry().bottom() < panel._tree_view._header_height
 
-    panel._layer_search_edit.setText("Card")
-    assert panel._search_edit.text() == "Card"
+    panel._search_edit.setText("Card")
     assert [row.layer_id for row in panel._model.visible_rows() if row.row_type == "layer"] == [card]
-    panel._layer_search_edit.clear()
+    panel._search_edit.clear()
 
     tree = panel._tree_view
 
@@ -309,9 +308,20 @@ def test_layer_header_replaces_top_bar_and_exposes_useful_layer_switches(qtbot) 
     assert transform.parameters["motion_blur"]
     panel._act_graph_editor.trigger()
     assert panel._view_mode == "graph"
-    panel._act_nodes_mode.trigger()
-    assert panel._layer_header_tools.isHidden()
-    assert panel._toolbar.isVisible()
+    header = panel._header_tools
+    timecode = panel._time_display
+    tree = panel._tree_view
+    view = panel._timeline_view
+    panel._projection_button.click()
+    assert panel.layer_view_mode == "nodes"
+    assert panel._header_tools is header and header.isVisible()
+    assert panel._time_display is timecode
+    assert panel._tree_view is tree and panel._timeline_view is view
+    assert panel._view_mode == "graph"
+    assert panel.findChild(QToolBar, "KeyframesToolbar") is None
+    panel._projection_button.click()
+    assert panel.layer_view_mode == "layers"
+    assert panel._header_tools is header
 
 
 def test_blank_layer_tree_context_menu_can_create_a_layer(qtbot, monkeypatch) -> None:
@@ -406,3 +416,16 @@ def test_layer_one_frame_work_area_still_has_a_body_to_drag(qapp) -> None:
         assert view._hit_workarea(x, view.ruler_height() - 8) == "body"
     finally:
         panel.close()
+
+
+def test_switch_to_layers_publishes_clamped_playhead_once(qtbot) -> None:
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_frame_range(0, 499)
+    panel.set_comp_extent(0, 99)
+    panel.set_current_frame(150)
+
+    with qtbot.waitSignal(panel.current_frame_changed) as seek:
+        panel._projection_button.click()
+    assert seek.args == [99]
+    assert panel._timeline_view._current_frame == 99

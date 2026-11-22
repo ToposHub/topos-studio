@@ -220,6 +220,11 @@ class NativeFilesPreview(QWidget):
         self._sync_fit_button()
         self.title.setText(title or path.rsplit("/", 1)[-1])
         self.meta.setText("载入中…")
+        self.meta.show()
+        self.fit_button.show()
+        self.prev_button.show()
+        self.next_button.show()
+        self.legacy_button.hide()
         self._header_widget.show()
         self.video_slot.hide()
         self.scroll.show()
@@ -271,10 +276,15 @@ class NativeFilesPreview(QWidget):
     def show_message(self, path: str, message: str, *, open_in_legacy: bool = True) -> None:
         if path != self._path:
             return
+        video_error = self.is_video
         self._decode_pending = False
         self._image = None
         self._mode = "image"
         self.meta.setText(message)
+        self.meta.setVisible(not video_error)
+        self.fit_button.setVisible(not video_error)
+        self.prev_button.setVisible(not video_error)
+        self.next_button.setVisible(not video_error)
         self._header_widget.show()
         self.video_slot.hide()
         self.scroll.show()
@@ -282,6 +292,8 @@ class NativeFilesPreview(QWidget):
         self.body.setText(message)
         self._resize_body_text()
         self.legacy_button.setVisible(open_in_legacy)
+        if video_error:
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def set_steppers_enabled(self, enabled: bool) -> None:
         """单张图没有"上一张/下一张"；多张才启用，避免点了没反应。"""

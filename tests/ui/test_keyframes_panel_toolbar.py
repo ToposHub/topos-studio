@@ -54,25 +54,9 @@ def panel(qapp, graph):
     return p
 
 
-# ── keyframe buttons use diamond glyphs ───────────────────────────────
-
-
-class TestKeyframeButtonIcons:
-    def test_add_kf_action_has_icon(self, panel):
-        """The add-keyframe action must carry a non-null icon (the diamond
-        glyph), not the legacy plain '+'."""
-        assert panel._act_add_kf.icon() is not None
-        assert not panel._act_add_kf.icon().isNull()
-
-    def test_del_kf_action_has_icon(self, panel):
-        assert panel._act_del_kf.icon() is not None
-        assert not panel._act_del_kf.icon().isNull()
-
-    def test_add_kf_tooltip_mentions_cmd_k(self, panel):
-        """Plan §3.2.B: the add-kf tooltip must advertise Ctrl/Cmd+K so the
-        shortcut is discoverable from the toolbar."""
-        tip = panel._act_add_kf.toolTip().lower()
-        assert "ctrl" in tip or "cmd" in tip or "k" in tip
+def test_keyframe_shortcut_remains_available(panel):
+    assert panel._shortcut_add_kf_mod.isEnabled()
+    assert panel._shortcut_add_kf_mod.key().toString() == "Ctrl+K"
 
 
 # ── view + zoom group (§3.2.D) ─────────────────────────────────────────
@@ -205,10 +189,11 @@ class TestTransportNavRegression:
     def test_play_action_still_checkable(self, panel):
         assert panel._act_play.isCheckable()
 
-    def test_first_last_frame_actions_present(self, panel):
-        assert panel._act_first is not None
-        assert panel._act_last is not None
+    def test_transport_shortcuts_remain_available(self, panel):
+        from src.features.composite.ui import timeline_shortcuts as shortcuts
 
-    def test_prev_next_frame_actions_present(self, panel):
-        assert panel._act_prev_frame is not None
-        assert panel._act_next_frame is not None
+        handlers = panel._shortcut_dispatcher.handlers
+        assert handlers[shortcuts.CMD_NAV_FIRST_FRAME] == panel._goto_first_frame
+        assert handlers[shortcuts.CMD_NAV_LAST_FRAME] == panel._goto_last_frame
+        assert handlers[shortcuts.CMD_NAV_STEP_BACK] == panel._step_frame_backward
+        assert handlers[shortcuts.CMD_NAV_STEP_FWD] == panel._step_frame_forward

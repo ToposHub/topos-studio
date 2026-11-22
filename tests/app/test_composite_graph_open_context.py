@@ -244,7 +244,7 @@ def test_audio_drop_creates_registered_layer_and_waveform(qtbot, tmp_path) -> No
     assert layer["audio"]["asset_id"] == asset.asset_id
     assert saved["duration_frames"] == 3
     qtbot.waitUntil(lambda: layer["layer_id"] in getattr(panel._timeline_view, "_audio_waveforms", {}))
-    panel._on_layer_eye_changed(layer["root_node_id"], False)
+    panel._on_row_eye_changed(layer["root_node_id"], False)
     assert page.node_graph.get_layer(layer["layer_id"]).audio.mute
     page.undo()
     assert not page.node_graph.get_layer(layer["layer_id"]).audio.mute

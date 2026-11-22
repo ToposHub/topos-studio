@@ -162,7 +162,9 @@ def test_legacy_layer_gains_groups_without_migrating_tracks_or_topology():
     assert graph.to_dict() == before
 
     model.rebuild(graph)
-    assert not any(row.row_type == "group" for row in model.rows)
+    root = f"node:{old_layer.root_node_id}"
+    assert [row.component_params for row in model.rows if row.parent_row_id == root
+            and row.component_params] == pairs
     assert model.track_for(y_row_id).keyframes[0].frame == 7
 
 
@@ -224,9 +226,9 @@ class TestRebuildLayers(unittest.TestCase):
         layer_rows = [r for r in m.rows if r.row_type == "layer"]
         self.assertEqual(len(layer_rows), 3)
         # Top layer (added last, "Layer 2") gets index 1.
-        self.assertEqual(layer_rows[0].layer_index, 1)
+        self.assertEqual(layer_rows[0].display_index, 1)
         self.assertEqual(layer_rows[0].label, "Layer 2")
-        self.assertEqual(layer_rows[-1].layer_index, 3)
+        self.assertEqual(layer_rows[-1].display_index, 3)
         self.assertEqual(layer_rows[-1].label, "Layer 0")
 
     def test_child_param_rows_indented(self):

@@ -43,6 +43,8 @@ def decide_route(path: str) -> str:
     - libav：ProRes/DNxHR 等 mezzanine → LibavPlayer（PyAV 多线程解码）
     - qt：  其余视频 → UltimatePlayer（Qt Multimedia）
     """
+    if path.lower().endswith(('.braw', '.r3d')):
+        return 'libav'
     if is_topos_content(path):
         return 'topos'
     from .libav_player import is_mezzanine

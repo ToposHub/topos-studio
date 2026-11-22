@@ -4293,6 +4293,35 @@ class CompositePage(QWidget):
         if panel is not None:
             panel.clear()
 
+    def _on_timeline_node_visibility_requested(self, node_id: str, enabled: bool) -> None:
+        node = self._node_graph.get_node(node_id)
+        if node is None:
+            return
+        if (not _page_node_is_locked(self, node_id)
+                and self._node_editor.set_node_bypassed(node_id, not enabled)):
+            return
+        self._sync_node_enabled_controls({node_id: node.disabled})
+
+    def _on_timeline_node_lock_requested(self, node_id: str, locked: bool) -> None:
+        if self._node_editor.set_node_locked(node_id, locked):
+            self._publish_timeline_metadata()
+        else:
+            self._refresh_node_timeline()
+
+    def _sync_node_enabled_controls(self, changes: dict[str, bool]) -> None:
+        timeline = getattr(self, "_keyframes_panel", None)
+        properties = getattr(self, "_properties_panel", None)
+        for node_id, disabled in changes.items():
+            if hasattr(timeline, "sync_node_enabled"):
+                timeline.sync_node_enabled(node_id, not disabled)
+            if hasattr(properties, "sync_node_enabled"):
+                properties.sync_node_enabled(node_id, not disabled)
+
+    def _refresh_node_timeline(self) -> None:
+        panel = getattr(self, "_keyframes_panel", None)
+        if panel is not None and getattr(panel, "layer_view_mode", None) == "nodes":
+            panel.set_node_graph(self._node_graph, selected_node_id=self._last_selected_node_id)
+
     def _on_node_bypass_toggled(self, node_id: str) -> None:
         """Handle bypass toggle — update data model and re-evaluate."""
         if _page_node_is_locked(self, node_id):
@@ -4304,6 +4333,7 @@ class CompositePage(QWidget):
             # U-07：旁路/启停必须有撤销记录。toggle 语义是取反，
             # before/after 可由当前态直接推导。
             self._push_node_enabled_undo({node_id: item._disabled})
+            self._sync_node_enabled_controls({node_id: item._disabled})
             self._evaluate_graph()
 
     def _on_nodes_bypass_batch_toggled(self, changes: dict) -> None:
@@ -4317,6 +4347,7 @@ class CompositePage(QWidget):
         for nid, state in applied.items():
             self._node_graph.set_node_disabled(nid, state)
         self._push_node_enabled_undo(applied)
+        self._sync_node_enabled_controls(applied)
         self._evaluate_graph()
 
     def _push_node_enabled_undo(self, changes: dict) -> None:
@@ -4337,6 +4368,7 @@ class CompositePage(QWidget):
                 if item:
                     item.set_disabled(state)
                 self._refresh_properties_panel(nid)
+            self._sync_node_enabled_controls(data["state"])
             self._evaluate_graph()
 
         count = len(after)
@@ -4355,6 +4387,7 @@ class CompositePage(QWidget):
 
     def _on_node_lock_changed(self, node_id: str, locked: bool) -> None:
         """Refresh selected properties when a canvas lock changes."""
+        self._refresh_node_timeline()
         if self._properties_panel is None:
             return
         selected_ids = [
@@ -7226,6 +7259,7 @@ class CompositePage(QWidget):
             item.update()
         # U-07：属性面板启停与 H 快捷键共用同一撤销命令
         self._push_node_enabled_undo({node_id: not enabled})
+        self._sync_node_enabled_controls({node_id: not enabled})
         self._evaluate_graph()
 
     def _on_props_node_color_changed(self, node_id: str, color: str) -> None:
@@ -8567,6 +8601,10 @@ class CompositePage(QWidget):
         # P9: selecting a node row in the Keyframes tree selects it everywhere.
         if hasattr(panel, 'node_selected'):
             panel.node_selected.connect(self._on_keyframes_panel_node_selected)
+        if hasattr(panel, "node_visibility_requested"):
+            panel.node_visibility_requested.connect(self._on_timeline_node_visibility_requested)
+        if hasattr(panel, "node_lock_requested"):
+            panel.node_lock_requested.connect(self._on_timeline_node_lock_requested)
         if hasattr(panel, 'layer_selected'):
             panel.layer_selected.connect(
                 self._on_keyframes_panel_layer_selected)

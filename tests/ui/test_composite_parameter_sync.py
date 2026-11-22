@@ -237,3 +237,89 @@ def test_linked_scale_writes_the_current_keyframe_and_undoes_both_axes(panels) -
     page.redo()
     assert layer_values() == pytest.approx([275, 275])
     assert properties_values() == pytest.approx([2.75, 2.75])
+
+
+def test_projection_switch_keeps_axis_controls_and_selection_shared(panels, qtbot):
+    page, panel, props, transform = panels
+    tree = panel._tree_view
+    viewport = panel._timeline_view
+    panel.set_frame_range(0, 99)
+    panel.set_comp_extent(0, 99)
+    panel.fit_time_range()
+    viewport.zoom_time_at(viewport.width() / 2, 2)
+    before = panel._frame_mapper.pixels_per_frame, panel._frame_mapper.scroll_offset
+    track = KeyframeTrack("scale_x")
+    track.add_keyframe(Keyframe(6, 1.1))
+    transform.set_keyframe_track("scale_x", track)
+    panel._rebuild_filtered_model()
+    pair = next(row for row in panel._model.rows
+                if row.node_id == transform.id and row.component_params == ("scale_x", "scale_y"))
+    panel._toggle_dimensions(pair.row_id)
+    row_id = f"param:{transform.id}:scale_x"
+    viewport._select_keyframe(row_id, 6)
+    assert viewport.selected_keyframes() == [(row_id, 6)]
+
+    panel._projection_button.click()
+    assert panel.layer_view_mode == "nodes"
+    assert (panel._frame_mapper.pixels_per_frame, panel._frame_mapper.scroll_offset) == before
+    assert panel._tree_view is tree and panel._timeline_view is viewport
+    assert viewport.selected_keyframes() == [(row_id, 6)]
+    assert row_id in {row.row_id for row in panel._model.visible_rows()}
+    panel._set_filter_mode("selected")
+    assert viewport.selected_keyframes() == [(row_id, 6)]
+    assert row_id in {row.row_id for row in panel._model.visible_rows()}
+    panel._set_filter_mode("all")
+
+    panel._search_edit.setText(transform.display_title)
+    panel.set_current_frame(6)
+    qtbot.waitUntil(lambda: (transform.id, "scale_x") in tree._value_controls)
+    section = props._sections[transform.id]
+    lock = tree._scale_buttons[transform.id]
+    assert lock.isChecked()
+    lock.click()
+    control = section._param_widgets["scale_x"]["widget"]
+    props_lock = next(btn for btn in control.parentWidget().findChildren(QToolButton)
+                      if btn.property("link_button"))
+    assert not props_lock.isChecked()
+    tree._value_controls[(transform.id, "scale_x")].setValue(145)
+    assert transform.parameter_value_at_frame("scale_x", 6) == pytest.approx(1.45)
+    page.set_composite_current_frame(6)
+    assert section._param_widgets["scale_x"]["widget"].value() == pytest.approx(1.45)
+
+
+def test_node_timeline_eye_and_lock_share_properties_and_canvas_state(panels, qtbot):
+    from PyQt6.QtCore import QPoint, Qt
+
+    page, panel, props, transform = panels
+    editor = page._node_editor
+    editor.build_from_graph(page._node_graph)
+    editor.select_node(transform.id)
+    panel._projection_button.click()
+    panel._search_edit.setText(transform.display_title)
+    tree = panel._tree_view
+
+    def row():
+        return next(row for row in panel._model.visible_rows()
+                    if row.node_id == transform.id and row.row_type == "node")
+
+    def click(column):
+        left, right = tree._column_geometry()[column]
+        index = panel._model.visible_rows().index(row())
+        point = QPoint((left + right) // 2, tree._header_height + 24 * index + 12)
+        qtbot.mouseClick(tree, Qt.MouseButton.LeftButton, pos=point)
+
+    section = props._sections[transform.id]
+    qtbot.mouseClick(section._enable_btn, Qt.MouseButton.LeftButton)
+    assert transform.disabled and not row().layer_enabled
+    click("eye")
+    assert not transform.disabled and row().layer_enabled
+    assert section._enable_btn.isChecked()
+    page.undo()
+    assert transform.disabled and not row().layer_enabled
+    assert not props._sections[transform.id]._enable_btn.isChecked()
+
+    click("lock")
+    assert editor.is_node_locked(transform.id) and row().locked
+    assert not tree._value_controls[(transform.id, "rotation")].isEnabled()
+    click("lock")
+    assert not editor.is_node_locked(transform.id) and not row().locked
