@@ -1048,6 +1048,57 @@
     "magenta": "洋红",
     "automation": {
       "write_protected": "该轨道自动化已写保护"
+    },
+    "vca": {
+      "title": "VCA 编组",
+      "new": "新建编组",
+      "name": "名称",
+      "gain": "编组增益",
+      "muted": "编组静音",
+      "description": "成员保留各自的路由。多个编组的增益会相乘。",
+      "members": "成员音轨与总线",
+      "delete": "删除编组",
+      "missing": "部分成员已离线；应用后将移除缺失成员。",
+      "name_required": "请输入编组名称。",
+      "apply": "应用",
+      "close": "关闭",
+      "rejected": "VCA 修改被拒绝"
+    },
+    "health": {
+      "title": "音频引擎健康状态",
+      "metric": "指标",
+      "value": "实测值",
+      "unknown": "未采集",
+      "sample_rate": "采样率",
+      "buffer_size": "设备块大小",
+      "render_p50_ms": "渲染耗时 p50",
+      "render_p95_ms": "渲染耗时 p95",
+      "render_p99_ms": "渲染耗时 p99",
+      "render_deadline_ms": "当前渲染块时间预算",
+      "deadline_miss_count": "窗口内超时块数",
+      "ring_fill_ratio": "环形缓冲填充率",
+      "underruns": "欠载次数",
+      "overflows": "溢出次数",
+      "pdc_total_samples": "延迟补偿",
+      "active_tracks": "音轨数",
+      "active_buses": "总线数",
+      "sound_key_active": "当前声音标识"
+    },
+    "clip_editor": {
+      "long_source_view": "完整源波形 · 缩放可查看采样细节。片段编辑的试听与处理目前最多支持300秒，片段完整范围保持不变。"
+    },
+    "console": {
+      "solo_safe": "独奏保护"
+    },
+    "routing": {
+      "rejected": "路由修改被拒绝"
+    },
+    "recovery": {
+      "title": "恢复中断的录音…",
+      "progress": "正在校验并恢复录制音频…",
+      "cancel": "取消",
+      "failed": "录音恢复失败",
+      "complete": "已恢复部分录音"
     }
   },
   "mask": {

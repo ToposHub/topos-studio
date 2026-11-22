@@ -4,9 +4,8 @@
 mono/DIM/Mute 与监听音量——**只影响监听输出**，绝不改写 Master/Stem/
 录音源内容（监听隔离不变量由测试锁定）。
 
-- PFL：轨道推子前 tap；AFL：推子后 tap；SIP 复用路由可听闭包并加入
-  solo-safe 返回轨规则（safe 轨在其他轨 solo 时仍可听）。PFL/AFL 不修改
-  节目可听集合。
+- PFL：轨道推子前 tap；AFL：推子后 tap；SIP 消费共享节目图已按路由
+  可听闭包和 solo-safe 规则处理后的 Master。PFL/AFL 不修改节目可听集合。
 - mono 经布局矩阵（stereo=(L+R)/2 双声道同值）；非立体声布局必须显式
   注册矩阵，缺失时诊断拒绝，不得对 5.1 简单 mean（Center/LFE 语义错）。
 - DIM/Mute/音量切换用短增益斜坡（默认 5ms，可配置），斜坡包络由测试
@@ -17,6 +16,7 @@ mono/DIM/Mute 与监听音量——**只影响监听输出**，绝不改写 Mast
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Mapping, Optional, Tuple
 
@@ -55,14 +55,25 @@ class MonitorSessionState:
                 f"source_tap must be one of {MONITOR_SOURCES}: "
                 f"{self.source_tap!r}")
 
+        if not all(math.isfinite(float(value)) for value in
+                   (self.gain_db, self.dim_db, self.ramp_ms)):
+            raise ValueError("monitor gain and ramp must be finite")
+        if self.ramp_ms < 0.0:
+            raise ValueError("monitor ramp must be nonnegative")
+        try:
+            gain = 10.0 ** ((float(self.gain_db) +
+                            (float(self.dim_db) if self.dim else 0.0)) / 20.0)
+        except OverflowError as exc:
+            raise ValueError("monitor gain is outside supported range") from exc
+        if not math.isfinite(gain):
+            raise ValueError("monitor gain must be finite")
+
     def target_gain(self) -> float:
         """目标线性增益（mute=0；dim 叠加 dim_db；与监听音量相乘）。"""
         if self.muted:
             return 0.0
-        gain = 10.0 ** (float(self.gain_db) / 20.0)
-        if self.dim:
-            gain *= 10.0 ** (float(self.dim_db) / 20.0)
-        return gain
+        return 10.0 ** ((float(self.gain_db) +
+                         (float(self.dim_db) if self.dim else 0.0)) / 20.0)
 
 
 @dataclass
@@ -89,7 +100,11 @@ class MonitorService:
     def __init__(self, sample_rate: float,
                  mono_matrices: Optional[Dict[str, np.ndarray]] = None) -> None:
         self._sample_rate = float(sample_rate)
-        self._mono_matrices: Dict[str, np.ndarray] = dict(mono_matrices or {})
+        if not math.isfinite(self._sample_rate) or self._sample_rate <= 0.0:
+            raise ValueError("monitor sample rate must be finite and positive")
+        self._mono_matrices: Dict[str, np.ndarray] = {}
+        for matrix_id, matrix in (mono_matrices or {}).items():
+            self.register_mono_matrix(matrix_id, matrix)
         self._state = MonitorSessionState()
         self._ramp = _RampState()
 
@@ -112,7 +127,11 @@ class MonitorService:
         self._ramp = _RampState(last_gain=self._state.target_gain())
 
     def register_mono_matrix(self, matrix_id: str, matrix: np.ndarray) -> None:
-        self._mono_matrices[str(matrix_id)] = np.asarray(matrix, dtype=np.float64)
+        value = np.array(matrix, dtype=np.float64, copy=True)
+        if not matrix_id or value.ndim != 2 or min(value.shape) < 1 or not np.isfinite(value).all():
+            raise ValueError("mono matrix must be a finite nonempty 2D array with an id")
+        value.setflags(write=False)
+        self._mono_matrices[str(matrix_id)] = value
 
     # ── 监听源选择 ────────────────────────────────────────────────────
 
@@ -133,29 +152,26 @@ class MonitorService:
         if source == "input":
             return tuple(sorted(
                 k for k in program_taps if k.startswith("input")))
-        selected = tuple(self._state.selected_listen_ids)
+        selected = tuple(dict.fromkeys(self._state.selected_listen_ids))
         if source == "pfl":
             return tuple(f"track:{tid}:pre" for tid in selected
                          if f"track:{tid}:pre" in program_taps)
         if source == "afl":
             return tuple(f"track:{tid}:post" for tid in selected
                          if f"track:{tid}:post" in program_taps)
-        # SIP：复用路由可听闭包 + solo-safe 返回轨（safe 轨不被 solo 静音）
-        if audible_solo is None:
-            return ("master",)
-        audible = set(audible_solo) | set(solo_safe)
-        return tuple(sorted(
-            k for k in program_taps
-            if k.startswith("track:") and k.endswith(":post")
-            and k[len("track:"):-len(":post")] in audible
-        ))
+        # SIP is the programme graph after solo/solo-safe evaluation. Summing
+        # every post tap would double-count both source and bus, bypass master
+        # processing and ignore send levels. Only the shared graph can produce
+        # that signal; audible_solo/solo_safe are descriptive here, not a second
+        # independent routing implementation.
+        return ("master",)
 
     # ── 渲染 ──────────────────────────────────────────────────────────
 
     def render_block(
         self,
         program_taps: Mapping[str, np.ndarray],
-        input_taps: Mapping[str, np.ndarray] = {},
+        input_taps: Optional[Mapping[str, np.ndarray]] = None,
         *,
         audible_solo: Optional[set] = None,
         solo_safe: Tuple[str, ...] = (),
@@ -163,11 +179,11 @@ class MonitorService:
         """渲染一个监听块；输入数组**只读**（返回新数组）。
 
         program_taps: {tap_key: (channels, n)}；input_taps 键约定
-        ``input:<device_session_id>``。选中的 PFL/AFL/SIP tap 求和后经
-        mono 矩阵与增益斜坡输出。
+        ``input:<device_session_id>``。选中的 PFL/AFL tap 求和，Program/SIP
+        保留共享 Master，随后经 mono 矩阵与增益斜坡输出。
         """
         taps: Dict[str, np.ndarray] = dict(program_taps)
-        for key, buf in input_taps.items():
+        for key, buf in (input_taps or {}).items():
             taps[f"input:{key}"] = buf
         selected = self._select_tap_ids(taps, audible_solo, solo_safe)
 
@@ -180,20 +196,27 @@ class MonitorService:
             buf = taps.get(key)
             if buf is None or buf.size == 0:
                 continue
+            if buf.ndim != 2 or buf.shape[0] < 1:
+                raise ValueError(f"monitor tap {key!r} must be planar PCM")
             selected_bufs.append((key, buf))
             n = max(n, buf.shape[-1])
             if out_ch is None:
                 out_ch = buf.shape[0]
         if not selected_bufs or n == 0:
-            return np.zeros((2, 1), dtype=np.float32)
+            # No selected tap still consumes a complete device block. Keep
+            # its layout/clock and advance any gain transition through silence.
+            template = taps.get("master")
+            if template is None:
+                template = next(iter(taps.values()), np.zeros((2, 1), np.float32))
+            out_ch, n = template.shape
+
         out = np.zeros((out_ch, n), dtype=np.float32)
         for key, buf in selected_bufs:
             if buf.shape[0] != out.shape[0]:
                 # 布局不一致的 tap 不静默相加（B06 合同：显式矩阵处理）
-                logger.warning(
-                    "MonitorService: tap %r layout %d != %d; skipped",
-                    key, buf.shape[0], out.shape[0])
-                continue
+                raise ValueError(
+                    f"monitor tap {key!r} layout {buf.shape[0]} != "
+                    f"{out.shape[0]}; explicit layout conversion required")
             width = min(out.shape[-1], buf.shape[-1])
             out[:, :width] += buf[:, :width]
 
@@ -228,15 +251,14 @@ class MonitorService:
             total = int(ramp.ramp_samples_left)
             count = min(total, out.shape[-1])
             if count > 0:
-                full = np.linspace(ramp.ramp_from, target, total + 1,
-                                   dtype=np.float64)
-                gains = full[1:count + 1]
+                gains = (ramp.ramp_from + (target - ramp.ramp_from)
+                         * np.arange(1, count + 1, dtype=np.float64) / total)
                 envelope = np.full(out.shape[-1], target, dtype=np.float64)
                 envelope[:count] = gains
                 out = out * envelope[np.newaxis, :].astype(np.float32)
                 ramp.ramp_samples_left = total - count
-                ramp.last_gain = float(full[count])
-                ramp.ramp_from = float(full[count])
+                ramp.last_gain = float(gains[-1])
+                ramp.ramp_from = float(gains[-1])
             else:
                 ramp.last_gain = target
         else:

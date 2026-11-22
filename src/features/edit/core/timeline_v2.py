@@ -6003,7 +6003,7 @@ class TimelineSequence:
     _KNOWN_SEQUENCE_KEYS = frozenset({
         "timeline_id", "name", "fps", "width", "height", "sample_rate",
         "format_settings", "video_tracks", "audio_tracks", "subtitle_tracks",
-        "caption_graphics", "markers", "range_start", "range_end",
+        "caption_graphics", "markers", "vcas", "range_start", "range_end",
         "master_volume", "master_muted", "master_automation",
         "master_automation_mode", "master_strip_eq", "master_effect_chain",
         "revision", "audio_fx_schema_version",
@@ -6329,6 +6329,7 @@ class TimelineSequence:
             caption_track_graphic_styles=(self.caption_track_graphic_styles if caption_track_graphic_styles is None else caption_track_graphic_styles),
             caption_graphics_extra=dict(self.caption_graphics_extra if caption_graphics_extra is None else caption_graphics_extra),
             markers=self.markers if markers is None else markers,
+            vcas=self.vcas,
             range_start=self.range_start if range_start is ... else range_start,
             range_end=self.range_end if range_end is ... else range_end,
             master_volume=self.master_volume if master_volume is None else master_volume,

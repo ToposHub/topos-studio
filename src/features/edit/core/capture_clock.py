@@ -28,7 +28,7 @@ import zlib
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import numpy as np
 
@@ -149,15 +149,37 @@ def punch_slice(block: np.ndarray, first: int, start: int,
 
 def apply_punch(blocks: List[Tuple[int, np.ndarray]], start: int,
                 end: int) -> np.ndarray:
-    """跨块拼接 punch 结果（按 first_device_sample 顺序传入）。"""
-    chunks = [punch_slice(b, first, start, end) for first, b in blocks
-              if b.size]
-    if not chunks:
-        return np.zeros((0, 0), dtype=np.float32)
-    channels = chunks[0].shape[0]
-    return np.concatenate(
-        [c if c.shape[0] == channels else c[:channels] for c in chunks],
-        axis=1)
+    """Join an exact punch window, refusing missing/overlapping channel data.
+
+    Packing discontinuous chunks back-to-back would shorten a failed take and
+    hide a recording dropout. Callers must explicitly repair/mark partial takes
+    rather than receive an apparently complete punch result.
+    """
+    if end <= start:
+        raise ValueError("empty punch")
+    chunks: List[np.ndarray] = []
+    expected = start
+    channels: Optional[int] = None
+    for first, block in blocks:
+        block = np.asarray(block)
+        if block.ndim != 2:
+            raise ValueError("punch pcm must be planar (channels, samples)")
+        chunk = punch_slice(block, first, start, end)
+        if not chunk.shape[-1]:
+            continue
+        lo = max(first, start)
+        if lo != expected:
+            raise ValueError("punch window has missing or overlapping samples")
+        if channels is None:
+            channels = block.shape[0]
+        elif channels != block.shape[0]:
+            raise ValueError("punch channel layout changed between blocks")
+        chunks.append(chunk)
+        expected += chunk.shape[-1]
+    if expected != end:
+        raise ValueError("punch window is incomplete")
+    return np.concatenate(chunks, axis=1)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +206,9 @@ class ClockAnchor:
 
     def add_anchor(self, device_sample: int, timeline_sample: int) -> None:
         """追加成对锚（loopback 校准/ punched 起点等；≥2 对后可估漂移）。"""
+        if self._pairs and (device_sample <= self._pairs[-1].device_sample
+                            or timeline_sample <= self._pairs[-1].timeline_sample):
+            raise ValueError("clock anchors must advance both clocks strictly")
         self._pairs.append(AnchorPair(int(device_sample), int(timeline_sample)))
         self._slope = None
         self._intercept = None
@@ -257,6 +282,7 @@ class JournalSegment:
     sample_count: int
     crc32: int
     fsynced: bool
+    _journal_written: bool = field(default=False, repr=False, compare=False)
 
 
 class CaptureJournal:
@@ -275,30 +301,81 @@ class CaptureJournal:
         self._segments: List[JournalSegment] = []
         self._pending_writes = 0
         self._fh = None
+        self._confirmed_bytes = 0
         self._load_existing()
+
+    @staticmethod
+    def _read_journal(path: Path) -> Tuple[List[JournalSegment], int]:
+        """Read durable checkpoints; never promote a merely readable v2 tail.
+
+        Legacy unversioned JSONL records remain readable. Version 2 records
+        become confirmed only when followed by their matching checkpoint.
+        Returning the byte boundary lets a resumed writer remove crash debris
+        before appending, so one torn line cannot hide all future recordings.
+        """
+        segments: List[JournalSegment] = []
+        confirmed_bytes = 0
+        for group, boundary in CaptureJournal._iter_confirmed_groups(path):
+            segments.extend(group)
+            confirmed_bytes = boundary
+        return segments, confirmed_bytes
+
+    @staticmethod
+    def _iter_confirmed_groups(path: Path) -> Iterator[Tuple[Tuple[JournalSegment, ...], int]]:
+        """Stream checkpoint groups with bounded parsing memory.
+
+        Production writers checkpoint every eight blocks. Refuse pathological
+        groups over 4096 records rather than allocating an unbounded recovery
+        index; the previously confirmed prefix remains recoverable.
+        """
+        import json
+
+        pending: List[JournalSegment] = []
+        with open(path, "rb") as fh:
+            while line := fh.readline(65536):
+                if len(line) >= 65536:
+                    break  # corrupt journal metadata cannot allocate an unbounded line
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                    if not isinstance(rec, dict):
+                        break
+                    version = rec.get("journal_version", 1)
+                    if isinstance(version, bool) or version not in (1, 2):
+                        break
+                    if version == 2 and "confirmed_segments" in rec:
+                        count = rec["confirmed_segments"]
+                        if isinstance(count, bool) or not isinstance(count, int) or count != len(pending) or count <= 0:
+                            break
+                        yield tuple(pending), fh.tell()
+                        pending = []
+                        continue
+                    fields = (rec["sequence_no"], rec["first_device_sample"],
+                              rec["sample_count"], rec.get("crc32", 0))
+                    if any(isinstance(v, bool) or not isinstance(v, int) for v in fields):
+                        break
+                    seq, first, count, crc = fields
+                    if seq < 0 or first < 0 or count <= 0 or not 0 <= crc <= 0xFFFFFFFF:
+                        break
+                except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                    break
+                segment = JournalSegment(seq, first, count, crc, True)
+                if version == 1:
+                    if pending:
+                        break
+                    yield (segment,), fh.tell()
+                else:
+                    pending.append(segment)
+                    if len(pending) > 4096:
+                        break
 
     def _load_existing(self) -> None:
         if not self._path.exists():
             return
-        import json
-
         try:
-            with open(self._path, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except ValueError:
-                        break  # 半行（崩溃残留）→ 前缀有效
-                    self._segments.append(JournalSegment(
-                        sequence_no=int(rec["sequence_no"]),
-                        first_device_sample=int(rec["first_device_sample"]),
-                        sample_count=int(rec["sample_count"]),
-                        crc32=int(rec.get("crc32", 0)),
-                        fsynced=True,
-                    ))
+            segments, self._confirmed_bytes = self._read_journal(self._path)
+            self._segments.extend(segments)
         except OSError:
             logger.warning("capture journal unreadable: %s", self._path,
                            exc_info=True)
@@ -327,70 +404,78 @@ class CaptureJournal:
 
         seg = next((s for s in reversed(self._segments)
                     if s.sequence_no == sequence_no), None)
-        if seg is None or seg.fsynced:
+        if seg is None or seg.fsynced or seg._journal_written:
             return False
         self._path.parent.mkdir(parents=True, exist_ok=True)
         if self._fh is None:
-            self._fh = open(self._path, "a", encoding="utf-8")
+            # A previous crash may leave a complete but unconfirmed record or
+            # a torn line. Truncate only that tail, preserving the durable prefix.
+            self._fh = open(self._path, "r+" if self._path.exists() else "w+",
+                            encoding="utf-8")
+            self._fh.seek(self._confirmed_bytes)
+            self._fh.truncate()
         self._fh.write(json.dumps({
+            "journal_version": 2,
             "sequence_no": seg.sequence_no,
             "first_device_sample": seg.first_device_sample,
             "sample_count": seg.sample_count,
             "crc32": seg.crc32,
         }) + "\n")
+        seg._journal_written = True
         self._pending_writes += 1
         if self._pending_writes >= self._fsync_every:
-            self._fh.flush()
-            os.fsync(self._fh.fileno())
-            self._pending_writes = 0
-        seg.fsynced = True
+            self._checkpoint()
         return True
 
+    def _checkpoint(self) -> None:
+        """Sync data records before publishing and syncing their commit marker."""
+        import json
+
+        if self._fh is None or self._pending_writes == 0:
+            return
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+        self._fh.write(json.dumps({"journal_version": 2,
+                                   "confirmed_segments": self._pending_writes}) + "\n")
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+        self._confirmed_bytes = self._fh.tell()
+        self._pending_writes = 0
+        for recorded in self._segments:
+            if recorded._journal_written:
+                recorded.fsynced = True
+
     def close(self) -> None:
-        """收尾：flush + fsync 全部未落盘日志（会话结束/停录调用）。"""
+        """Flush and checkpoint every written segment when recording stops."""
         if self._fh is not None:
-            self._fh.flush()
-            os.fsync(self._fh.fileno())
+            self._checkpoint()
             self._fh.close()
             self._fh = None
-            self._pending_writes = 0
 
     def recoverable_prefix(self) -> Tuple[int, int]:
         """(连续已 fsync 段数, 前缀总样本数)——恢复 partial take 的依据。"""
-        import json
-
-        # 以日志文件为准（崩溃后内存态不可信）
         confirmed: List[JournalSegment] = []
         if self._path.exists():
             try:
-                with open(self._path, "r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except ValueError:
-                            break
-                        confirmed.append(JournalSegment(
-                            sequence_no=int(rec["sequence_no"]),
-                            first_device_sample=int(rec["first_device_sample"]),
-                            sample_count=int(rec["sample_count"]),
-                            crc32=int(rec.get("crc32", 0)),
-                            fsynced=True,
-                        ))
+                confirmed, _ = self._read_journal(self._path)
             except OSError:
-                pass
+                logger.warning("capture journal unreadable: %s", self._path,
+                               exc_info=True)
         total = 0
         expected_seq = 0
+        expected_device: Optional[int] = None
         for seg in confirmed:
             if seg.sequence_no == 0 and expected_seq > 0:
                 # sequence 重置 = 新会话开始（日志文件跨会话追加）——恢复
                 # 依据切换到最新会话，不把旧会话的段计入新 take 的前缀。
                 total = 0
                 expected_seq = 0
+                expected_device = None
             if seg.sequence_no != expected_seq:
                 break
+            if expected_device is not None and seg.first_device_sample != expected_device:
+                break
+            expected_device = seg.first_device_sample + seg.sample_count
             total += seg.sample_count
             expected_seq += 1
         return expected_seq, total

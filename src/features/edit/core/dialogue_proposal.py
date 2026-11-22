@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -180,7 +181,10 @@ def validate_proposal(
     seen_align: set = set()
     for op in proposal.operations:
         if op.op_type == OPERATION_ALIGN:
-            if op.confidence < ALIGNMENT_AUTO_APPLY_CONFIDENCE:
+            if (not math.isfinite(op.confidence)
+                    or not 0.0 <= op.confidence <= 1.0):
+                errors.append(f"alignment for clip {op.clip_id} has invalid confidence")
+            elif op.confidence < ALIGNMENT_AUTO_APPLY_CONFIDENCE:
                 errors.append(
                     f"alignment for clip {op.clip_id} confidence "
                     f"{op.confidence:.2f} below auto-apply threshold "
@@ -210,16 +214,20 @@ def apply_alignment_to_clip(clip: Any, offset_samples: int) -> Any:
     offset = int(offset_samples)
     if offset == 0:
         return clip
+    audio_offset = int(getattr(clip, "audio_sample_offset", 0) or 0)
+    source_offset = int(getattr(clip, "source_sample_offset", 0) or 0)
+    # Reverse an existing displacement first; otherwise +N followed by -N
+    # leaves both offsets nonzero and inserts an audible gap at the clip head.
     if offset > 0:
-        return _replace(
-            clip,
-            audio_sample_offset=int(getattr(clip, "audio_sample_offset", 0) or 0)
-            + offset)
-    # 左移：源侧修剪 |offset| 个样本（内容在时间线上前移）
-    return _replace(
-        clip,
-        source_sample_offset=int(getattr(clip, "source_sample_offset", 0) or 0)
-        + (-offset))
+        consumed = min(offset, source_offset)
+        source_offset -= consumed
+        audio_offset += offset - consumed
+    else:
+        consumed = min(-offset, audio_offset)
+        audio_offset -= consumed
+        source_offset += -offset - consumed
+    return _replace(clip, audio_sample_offset=audio_offset,
+                    source_sample_offset=source_offset)
 
 
 @dataclass(frozen=True)
@@ -242,8 +250,11 @@ class ApplyDialogueProposalCommand:
         offsets: list = []
         skipped: list = []
         for op in proposal.operations:
-            if op.op_type != OPERATION_ALIGN or not op.clip_id:
+            if (op.op_type != OPERATION_ALIGN or not op.clip_id
+                    or op.track_id != track_id):
                 continue
+            if not math.isfinite(op.confidence) or not 0.0 <= op.confidence <= 1.0:
+                raise ValueError(f"invalid alignment confidence for {op.clip_id}")
             if (op.confidence < ALIGNMENT_AUTO_APPLY_CONFIDENCE
                     and not include_low_confidence):
                 skipped.append(
@@ -251,6 +262,8 @@ class ApplyDialogueProposalCommand:
                     "auto-apply threshold")
                 continue
             offsets.append((op.clip_id, int(op.offset_samples)))
+        if len({clip_id for clip_id, _ in offsets}) != len(offsets):
+            raise ValueError("multiple alignment operations for the same clip")
         return ApplyDialogueProposalCommand(
             command_id=str(uuid.uuid4()),
             label=f"Apply dialogue proposal ({proposal.proposal_id[:8]})",
@@ -259,10 +272,16 @@ class ApplyDialogueProposalCommand:
             align_offsets=tuple(offsets),
         ), tuple(skipped)
 
-    def apply(self, timeline: Any):
+    def apply(self, timeline: Any) -> Tuple[Any, "ApplyDialogueProposalCommand"]:
         track = timeline.get_track_by_id(self.track_id)
         if track is None:
             raise ValueError(f"Track not found: {self.track_id}")
+        if bool(getattr(track, "is_locked", False)):
+            raise ValueError(f"Track is locked: {self.track_id}")
+        if not self.align_offsets or all(offset == 0 for _, offset in self.align_offsets):
+            return timeline, self
+        if len(dict(self.align_offsets)) != len(self.align_offsets):
+            raise ValueError("multiple alignment operations for the same clip")
         from dataclasses import replace as _replace
 
         old: Dict[str, Tuple[int, int]] = {}

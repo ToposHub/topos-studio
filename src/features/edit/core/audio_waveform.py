@@ -34,6 +34,10 @@ from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal, QThread, QMutex
 
 logger = logging.getLogger(__name__)
 
+# A new window may replace a closed singleton while an interrupted native
+# decoder is still unwinding. Keep its owner reachable until finished.
+_retired_waveform_owners: set[QObject] = set()
+
 # Default waveform parameters
 # Keep a high-resolution envelope (roughly 2K peak columns/sec) so zooming in
 # reveals real transient detail instead of enlarged coarse blocks. Rendering
@@ -916,6 +920,9 @@ class WaveformExtractor(QObject):
         self._queued_requests: OrderedDict[str, str] = OrderedDict()
         self._deferred_ready: OrderedDict[str, WaveformData] = OrderedDict()
         self._playback_active: bool = False
+        self._shutdown = False
+        if self._application is not None:
+            self._application.aboutToQuit.connect(self.shutdown)
         # AUD-15605: cancel_all 超时后仍在运行的 worker 移入托管表，保住
         # Python 引用直到 finished 触发（防 QThread wrapper 被 GC 时线程仍在跑）。
         self._detached_workers: Dict[str, WaveformExtractorWorker] = {}
@@ -926,6 +933,8 @@ class WaveformExtractor(QObject):
 
     def set_playback_active(self, active: bool) -> None:
         """Defer new waveform decoding while timeline playback has priority."""
+        if self._shutdown:
+            return
         self._playback_active = bool(active)
         if self._playback_active:
             # Cooperatively stop the current low-priority decode at the next
@@ -964,6 +973,7 @@ class WaveformExtractor(QObject):
             cls._instance is None
             or sip.isdeleted(cls._instance)
             or cls._instance._application is not current_application
+            or cls._instance._shutdown
         ):
             cls._instance = cls(parent)
         return cls._instance
@@ -986,6 +996,8 @@ class WaveformExtractor(QObject):
             file_path: Audio file path
             callback: Optional callback when waveform is ready
         """
+        if self._shutdown:
+            return
         cache = WaveformCache()
 
         # Check if already cached
@@ -1056,7 +1068,7 @@ class WaveformExtractor(QObject):
 
     def _start_next_queued_worker(self) -> None:
         """Start the next request only after an active decoder has finished."""
-        if self._playback_active:
+        if self._shutdown or self._playback_active:
             return
         while (len(self._workers) < MAX_CONCURRENT_WAVEFORM_EXTRACTIONS
                and self._queued_requests):
@@ -1073,6 +1085,8 @@ class WaveformExtractor(QObject):
 
     def _on_waveform_ready(self, asset_id: str, waveform: WaveformData) -> None:
         """Handle waveform ready from worker without interrupting interaction."""
+        if self._shutdown:
+            return
         # ``waveform_ready`` is emitted from ``run()`` before the QThread has
         # emitted ``finished``.  Do not pop/delete the worker here.  The
         # finished handler owns the cleanup and queue advancement.
@@ -1105,7 +1119,7 @@ class WaveformExtractor(QObject):
 
     def _on_extraction_deferred(self, asset_id: str, file_path: str) -> None:
         """Requeue interrupted work without treating it as a failed asset."""
-        if WaveformCache().is_pending(asset_id):
+        if not self._shutdown and WaveformCache().is_pending(asset_id):
             self._queued_requests[asset_id] = file_path
 
     def _on_extraction_failed(
@@ -1121,6 +1135,8 @@ class WaveformExtractor(QObject):
         此刻其代际已递增，本处理器（旧代际）必须保留新回调，只上报失败。
         ``generation=None``（直接调用/旧接线）保持旧行为：无条件清回调。
         """
+        if self._shutdown:
+            return
         if error == "No audio data found":
             logger.info(f"No waveform available for {asset_id}: {error}")
         else:
@@ -1160,6 +1176,19 @@ class WaveformExtractor(QObject):
             # AUD-15607: 请求终结且未再排队 → 代际记录一并释放。
             self._request_generations.pop(asset_id, None)
         self._start_next_queued_worker()
+        if self._shutdown and not self._workers and not self._detached_workers:
+            _retired_waveform_owners.discard(self)
+
+    def shutdown(self) -> None:
+        """Stop background extraction without resuming queued jobs on app exit."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self._playback_active = False
+        self.cancel_all()
+        self._request_generations.clear()
+        if self._detached_workers:
+            _retired_waveform_owners.add(self)
 
     def cancel_all(self) -> None:
         """Cancel all pending extractions."""
@@ -1387,6 +1416,10 @@ class ClipEffectWaveformRenderer(QObject):
         super().__init__(parent)
         self._application = QCoreApplication.instance()
         self._worker: Optional[ClipEffectWaveformWorker] = None
+        self._detached_workers: Dict[int, ClipEffectWaveformWorker] = {}
+        self._shutdown = False
+        if self._application is not None:
+            self._application.aboutToQuit.connect(self.shutdown)
         # clip_id -> (file_path, start_seconds, duration_seconds, entries)
         self._queued: OrderedDict[str, tuple] = OrderedDict()
         self._playback_active: bool = False
@@ -1400,12 +1433,15 @@ class ClipEffectWaveformRenderer(QObject):
             cls._instance is None
             or sip.isdeleted(cls._instance)
             or cls._instance._application is not current_application
+            or cls._instance._shutdown
         ):
             cls._instance = cls(parent)
         return cls._instance
 
     def set_playback_active(self, active: bool) -> None:
         """Defer clip-FX waveform rendering while playback has priority."""
+        if self._shutdown:
+            return
         self._playback_active = bool(active)
         if self._playback_active:
             worker = self._worker
@@ -1422,13 +1458,15 @@ class ClipEffectWaveformRenderer(QObject):
         duration_seconds: float,
         entries: Optional[list],
     ) -> None:
+        if self._shutdown:
+            return
         self._queued[clip_id] = (
             file_path, float(start_seconds), float(duration_seconds), entries)
         if not self._playback_active:
             self._start_next()
 
     def _start_next(self) -> None:
-        if self._worker is not None or self._playback_active or not self._queued:
+        if self._shutdown or self._worker is not None or self._playback_active or not self._queued:
             return
         clip_id, (file_path, start_s, dur_s, entries) = self._queued.popitem(last=False)
         worker = ClipEffectWaveformWorker(
@@ -1438,14 +1476,18 @@ class ClipEffectWaveformRenderer(QObject):
         # Keep the worker alive until Qt emits ``finished`` (same lifetime
         # rule as the waveform extraction workers).
         worker.finished.connect(
-            lambda cid=clip_id: self._on_worker_finished(cid))
+            lambda cid=clip_id, finished_worker=worker:
+                self._on_worker_finished(cid, finished_worker))
         self._worker = worker
         worker.start(QThread.Priority.LowPriority)
 
     def _on_ready(self, clip_id: str, waveform: WaveformData) -> None:
-        self.effect_waveform_ready.emit(clip_id, waveform)
+        if not self._shutdown:
+            self.effect_waveform_ready.emit(clip_id, waveform)
 
     def _on_failed(self, clip_id: str, error: str) -> None:
+        if self._shutdown:
+            return
         if error == EFFECT_WAVEFORM_DEFERRED_ERROR:
             # Playback preempted the render; drop it (the next paint after
             # playback re-requests if the effect is still applied).
@@ -1453,12 +1495,34 @@ class ClipEffectWaveformRenderer(QObject):
             return
         self.effect_waveform_failed.emit(clip_id, error)
 
-    def _on_worker_finished(self, clip_id: str) -> None:
-        worker = self._worker
-        self._worker = None
+    def _on_worker_finished(
+        self, clip_id: str, finished_worker: Optional[ClipEffectWaveformWorker] = None,
+    ) -> None:
+        worker = finished_worker if finished_worker is not None else self._worker
+        if self._worker is worker:
+            self._worker = None
         if worker is not None:
+            self._detached_workers.pop(id(worker), None)
             worker.deleteLater()
         self._start_next()
+        if self._shutdown and not self._detached_workers:
+            _retired_waveform_owners.discard(self)
+
+    def shutdown(self) -> None:
+        """Cancel queued FX renders and retain an interrupted slow worker until finished."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self._playback_active = False
+        self._queued.clear()
+        worker = self._worker
+        self._worker = None
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            if not worker.wait(WAVEFORM_CANCEL_WAIT_MS):
+                self._detached_workers[id(worker)] = worker
+                _retired_waveform_owners.add(self)
+                logger.warning("Clip-effect waveform worker is finishing in the background")
 
 
 def request_effect_waveform(

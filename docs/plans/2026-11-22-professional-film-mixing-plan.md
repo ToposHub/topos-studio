@@ -1,6 +1,6 @@
 # Topos Studio 专业影视混音全面审计与实施计划
 
-日期：2026-11-22。范围：当前工作区的生产混音页、共享剪辑时间线、实时音频、离线成片/Stem、录音和工程持久化。本文是后续实施的主计划；本轮**只实现 UI/交互**，所有声音后端问题保留为待办，没有用界面改动代替后端修复。
+日期：2026-11-22。范围：当前工作区的生产混音页、共享剪辑时间线、实时音频、离线成片/Stem、录音和工程持久化。本文初版只实现 UI/交互；后续批次已实施部分后端。**最新完成度以§21的生产路径复查为准**：核心存在、示例通过、功能实际接入、外部验收分别记录，不能把本计划整体标为完成。
 
 配套材料：
 
@@ -1332,3 +1332,103 @@ assert math.isclose(comparison_gain(-20.0, -23.0), 10.0 ** (-3.0 / 20.0))
 | 7 | B18 | 原生多声道+profile+独立renderer | 明确ADM子集、外部渲染/交接验收 |
 
 各任务完成时在主计划逐行更新“完成/部分/待设备”与证据链接；**不能仅因本文存在、示例能运行或纯函数单测通过就勾选整项完成**。现场验收缺席时记录明确缺口及待测设备/软件，后续按同一fixture补齐，避免又生成一套独立声音系统。
+
+## 21. 执行完成度复查与补交付（2026-11-22）
+
+本节覆盖批次8之后用户要求的“检查完成质量、直接修复、继续未完成项”。复查起点为 `0bfd9245`。核查采用真实调用者、独立采样坐标期望、实际编码文件、共享命令栈和真实 Qt 窗口交互；此前“核心部分完成”的表述没有被提升为整项完成。
+
+### 21.1 本次发现并修复的问题
+
+| 范围 | 可观测问题 | 已实施修复与证据 |
+| --- | --- | --- |
+| B00 参考工程 | 把48k样本填入帧字段，所谓10分钟并非600秒；自动化时间也错域 | 参考工程统一转换帧/源采样偏移，真实范围14400帧@24fps；生成真实合成WAV，以 `EditProjectIO.save_project/load_project` 实际保存重开 `.topos` 验证VCA/Trim/声音hash |
+| B01 声音身份 | 快照遗漏所属轨、完整speed/reverse、FX顺序、动画、插值/手柄/外推、源时长 | 纳入显式声音投影；加入声音schema、DSP与PDC版本；独立单字段变异回归 |
+| B01 路由事务 | output和多条Send分多次历史；以目标Bus作字典会折叠两个同目标Send；Bus预览被传成普通轨 | `SetTrackRoutingCommand`在写模型前校验完整候选图，整体保留send_id/enabled/tap/muted，一次提交/撤销；引擎发布使用真实is_bus |
+| B01 路由窗口身份 | 非模态窗口关闭会用旧UI覆盖外部修改/Undo；换序列复用轨ID后会改到新序列 | 完成编辑时提交，关闭只还原当前模型；窗口绑定创建序列身份，跨序列旧preview/commit不落模型和引擎 |
+| B03 VCA持久化 | `TimelineSequence._rebuild`遗漏vcas，普通轨编辑会清空；from_dict又把vcas放入extra，后续保存覆盖新值 | 重建保留vcas、列为已知字段；新增正式 `SetVcaGroupCommand`及VCA窗口；真实Apply/Delete/Undo/Redo/重开回归 |
+| B02 延迟线 | 每块concatenate复制整条长延迟线，开销随补偿长度增长 | 共享 `PdcDelayLine`固定环形存储；不同块长、跨环边界、长延迟与输入只读oracle通过。仍是首次使用分配，不能称编译worker预分配 |
+| B02/B10 Solo | 4元Send仍被按2元拆包；muted Send入闭包；导出提前剔除未Solo上游/Bus；solo_safe仅在模型 | 共享闭包支持tap/mute和safe；移除成片/Stem提前Solo过滤；实际实时/成片/Stem PCM对拍；条带右键提供独奏保护，走已有命令 |
+| B04/B05 文件交付 | profile/测量/发布只有测试调用；发布中途失败不能恢复旧文件；取消可能留下替换文件；前缀按显示名重命名失配 | 生产Stem worker任务目录渲染→真实WAV回读→技术QC/manifest→回滚式发布；真实位深/布局/率/样本数/SHA绑定。无响度目标默认不改变声音；发布复制时再次核对已测SHA；关闭解码器后和发布中取消均回滚；同目录跨进程串行。校验大小写/Unicode文件名碰撞与basename路径，profile不洗白非法类型。失败/取消不发布当前候选 |
+| B07 自动化 | 简化用样本序号而非真实帧坐标，保护点未分段约束，静音被抬成微小非零 | 按真实重放插值检验dB误差，保护点分段且保留精确零增益 |
+| B08 波形预算/源时长 | 金字塔首层无条件超预算、未累计声道/层级；长源spec静默截为300秒 | 金字塔遵守累计预算；源spec保持完整时长。长源缩放触发异步预算窗口，按全局采样位置显示；8分钟真实WAV第7分钟脉冲对齐通过，局部PCM不进入整段处理/试听 |
+| B08 波形生命周期 | 没有音频manager时退出页面未清scrub/延迟恢复token，波形全局播放优先可永久暂停；测试mock也共享单例残留状态 | 页面离开清状态并恢复后台任务；窗口退出传`resume_background=False`，清队列并协作取消/托管线程，不在退出时启动排队解码；mock测试使用独立owner |
+| UI 包络命中性能 | 1200节点的每次命中遍历整条包络，200次实测超过250ms | 二分缩小横向半径候选，保留欧氏距离、并列索引、几何变化和overlay语义。相同机器200次由271–370ms降至约8.6ms；原250ms验收阈值未修改 |
+| B09 健康遥测 | UI采健康会等待混音锁；未知超时次数伪为0；设备块预算并未采集 | 非阻塞采集，争锁返回未知；按每个真实渲染块记录预算/超时。生产Options接健康窗口，隐藏停止轮询，不创建音频设备、不同步扫盘 |
+| B10 监听核心 | 空选轨输出缩成1样本且不推进ramp；混合布局静默丢轨；SIP累加所有post重复计算上游和Bus | 空源保留块形状推进ramp；混合布局明确拒绝；矩阵/参数安全验证；SIP只消费统一图已产生的Master，不另建Solo求和器 |
+| B11 录音恢复 | 日志仅序号连续就放行，坏schema/缺设备样本/半行和未fsync尾段处理不严；实际录制停止前并不持久化PCM | checkpoint v2仅发布已同步前缀，核连续性；真实RecordingManager接有界后台spool，录制时落PCM+校验日志。CRC恢复仅导出已验证连续前缀；Options提供可取消恢复入口，成功沿原Take资产导入/撤销路径，不猜测时间线锚点。明确software received-frame clock，未冒称硬件时钟；恢复流式限额/可取消，零durable样本不冒充partial成功，Qt计时器/编码线程失败路径不在UI join或同步写盘，采集线程启动失败不残留伪录音状态 |
+| B12 AAF | 子帧起点导入时长短缺；Composition引用的Master重复作为时间线导入；并发临时文件冲突 | 使用绝对尾边界转换时长；有Composition时不再重复Master；限制输入规模/拒绝不支持选项/唯一暂存文件。无法表示的任意采样尾端明确给阻断诊断 |
+| B13 对白候选 | 跨轨候选混入、NaN置信度绕门、锁轨/重复目标、相反偏移叠加留下静音 | 限定目标轨、有限置信度与锁轨验证；零变更不占历史；正反对齐先抵消相反域偏移 |
+| B14 Comp | 负源窗可编译，切残片把旧外缘fade移到新切口；缺正式提交命令 | 坐标/版本验证；保留正确外缘fade；`FlattenAudioCompCommand`复用普通Clip和共享历史。拒绝离线/变速/待bake输入与不能精确表示的采样尾端 |
+| B20/B21 参考/产物 | 反极性参考失配、DC被认成有效对齐；旧Registry实例回退新状态或复活删除项 | 对齐拒绝无信息/非有限输入并处理反极性；Registry跨进程锁内仅合并本次delta，保留未知字段；坏/未来sidecar不覆盖，失败不污染内存 |
+| B23 效果器注册 | exciter/subharmonic缺完整默认值；嵌套默认dict跨实例共享 | 补完整Params默认值，深复制实例参数；两个EQ实例独立修改回归。另修正旧测试硬编码v4及把已支持Quad当未知的过期oracle |
+
+新增UI证据：`docs/audit/2026-11-22-mixer-completion-review/vca-groups-zh.png`、`engine-health-zh.png`。这两份截图来自真实Qt控件；表计数字为显示布局的注入fixture，不是物理设备测量。
+
+### 21.2 各任务的实际完成度与剩余交付
+
+下面每一行的剩余工作仍按前文对应章节实施，**不得全选完成**。其中存在软件未实现项，并非全部只是等待硬件。
+
+| 任务 | 本次之后的实际状态 | 仍需完成/验证 |
+| --- | --- | --- |
+| B00 | 参考工程、五类反例、真实磁盘保存重开已接通 | 完整10分钟三端导出、旧版本golden、44.1/96k与各帧率组合 |
+| B01 | 双签名/版本投影、原子路由事务与跨序列身份已修 | 所有worker/预渲染磁盘key统一消费同一完整声音快照；资源指纹和全部字段变异表 |
+| B02 | 边级PDC、串联Bus、Send、固定环缓冲、Solo三端已有回归 | 检测侧链边时序、编译worker预分配总预算、动态延迟变化平滑换图 |
+| B03 | Trim/VCA三端修复，正式命令/VCA UI/持久化可用 | 全采样率/Bus/Master作用域矩阵；完整保存重开声音对拍 |
+| B04 | mono/stereo 16/24bit PCM WAV真实文件回读技术门接生产 | 其他编码/布局、成片导出同门、独立参考测量器认证、损坏/变更全矩阵 |
+| B05 | Stem默认技术QC、结构化报告、错误回滚发布可用 | BWF/完整客户profile UI与包规则、dialogue/ungated、M&E分组、独立合规测量；多文件断电恢复事务 |
+| B06 | 能力真值测试保持，尚未扩为原生多声道图 | Track/Bus/Master完整mono/5.1/7.1 DSP、布局身份/下混与真实设备验证 |
+| B07 | 现有录制结束接dB误差简化，Trim coalesce可撤销 | 全参数/Clip/Bus/Master作用域与完整Touch/Latch/Preview/Capture状态机 |
+| B08 | 完整源时长与异步滚动源波形窗口已接生产 | 长片段全处理栈流式渲染、全长Clip Edit试听、频谱tile/磁盘cache；300秒处理限制仍明确保留 |
+| B09 | 真实耗时/欠载只读遥测及健康UI可用 | 图编译worker隔离、设备创建/销毁线程合同、换图/失败/90分钟负载 |
+| B10 | 监听核心安全修复、Solo-safe真实三端可用 | 控制室最终设备路径/PFL/AFL tap、独立patch与校准；MonitorService尚未接设备输出 |
+| B11 | 实际录制期间后台持久化、checkpoint、CRC部分恢复与可取消恢复UI | 重启自动发现、真实硬件sample clock、SessionPlan/Punch接线、跨设备漂移/loopback |
+| B12 | 本地AAF音频子集、精确子帧起点与阻断诊断可用 | 外部接收端往返、任意采样尾端模型、bake依赖/媒体打包；capability保持禁用 |
+| B13 | 候选验证与采样对齐命令正确性已修 | 生产候选审核/Room Tone/Field Recorder/ADR对齐完整分析→试听→资产提交 |
+| B14 | 精确可表示子集flatten正式命令可用 | Take playlist/Audition lanes UI、跨Take handles重叠淡化、任意采样终点、旧工程迁移 |
+| B15 | 映射/保护区间纯核心 | cue/automation/clip全工程事务、候选UI、真实改版试片 |
+| B16 | descriptor/隔离身份/quarantine oracle | 真实隔离扫描及宿主进程/IPC、一个格式SDK适配/状态/PDC/崩溃恢复 |
+| B17 | MTC/状态机/去回声纯核心 | 生产协议会话、控制台绑定、LTC/MTC chase、外部时钟验证 |
+| B18 | UID/chna子集核心 | 对象自动化、ADM/XML/profile、完整renderer、独立回读与外部交付 |
+| B19 | 探针/校准/patch冲突算法 | 原生多输出、物理patch/cue、外设insert/PDC/故障旁路与实机校准 |
+| B20 | 参考对齐/匹配参数核心已修 | 实际A/B监听输出时钟与参考源、响度匹配、版本资产登记/重开 |
+| B21 | registry持久化与失效核心安全已修 | Freeze/Print/Bounce真实作业、asset/command、替换/恢复、依赖失效生产接线 |
+| B22 | 新旧定向回归、保存重开/故障注入 | 夜间90分钟多轨负载、独立硬件/平台矩阵、归档恢复与发布门 |
+| B23 | 默认参数/实例隔离、现有效果器回归 | E01–E09未完成项仍按详表；Clip检源/实例遥测、可移植IR等仍有生产缺口 |
+| B24 | 保留已有效降噪/修复能力与测试 | 新RestorationProfile、非平稳降噪、对白音色/环境匹配、候选/residue、独立听音；ML/WPE未实现 |
+
+优先继续顺序：B01统一worker声音快照 → B02/B09编译与实时稳定性 → B08全长处理 → B10监听/B11设备时钟 → B13/B14/B20/B21生产工作流，再原生多声道与外部宿主/交换。这里的顺序是依赖关系；没有将硬件缺席当成软件任务完成的理由。
+
+使用位置：混音台顶部“⋯”菜单包含 **VCA编组、音频引擎健康状态、恢复中断录音**。独奏保护位于通道标签右键菜单。恢复选择录音输出目录里的 `topos_capture_*.json`，后台校验后另存WAV；有原工程时沿现有素材导入撤销链加入媒体池，不猜测丢失的时间线/硬件时钟锚点。恢复源保留，便于再次核对。
+
+### 21.3 本次验证入口
+
+新增回归文件：
+
+- `tests/edit/test_mixer_transaction_audit.py`：路由原子性、同Bus多Send、VCA编辑/持久化、可变块长固定PDC环。
+- `tests/edit/test_mixer_completion_signal_review.py`：声音字段变异、自动化真实帧误差、三端Solo/Solo-safe。
+- `tests/edit/test_capture_durability_review.py`：停止/入队竞态、异步取消、Qt基础设施故障、有界/可取消恢复与旧输出保留。
+- `tests/edit/test_mixer_delivery_transaction_review.py`：QC后源文件变更、关闭解码器/发布中取消、文件名逃逸与碰撞、并发发布、恢复副本、profile严格类型。
+- `tests/edit/test_mixer_delivery_readback.py`：实际WAV文件回读、损坏/静音/取消、位深/layout/身份、生产worker。
+- `tests/edit/test_mixer_core_safety_review.py`：累计预算、跨写者产物注册、监听参数/形状、非阻塞健康采样。
+- `tests/edit/test_workflow_completion_review.py`：Comp命令、对白候选、AAF时域、参考工程、录制spool/恢复故障。
+- `tests/mixer/test_long_clip_waveform_window.py`：真实长WAV尾部视窗、绝对时间、取消/换源/未知时长/预算。
+- `tests/mixer/test_envelope_hit_search_review.py`：密集节点、重复节点、并列距离、半径边界、resize和overlay的独立暴力命中oracle。
+- `tests/app/test_mixer_recovery_lifecycle_review.py`：跨工程、重复发起、真实宿主销毁时取消；`test_fix_wd2g9_aud.py`验证实际窗口接受退出才取消恢复，终止音频不恢复排队解码。
+- `tests/mixer/test_project_workspace.py`新增VCA Apply/Delete/Undo、健康窗口生命周期、独奏保护菜单、Bus预览回滚与跨序列旧窗口拒绝，以及真实恢复worker/取消/既有资产导入合同。
+
+所有结果以本次最终实际测试记录为准；批次8的45923项历史全量结果不代表本次改动重跑了全库。
+
+### 21.4 最终验证结果
+
+机器可读证据、完整可复制命令和本轮变更文件指纹保存在
+[复查验证记录](/Users/heng/Documents/vscode/topos-studio/docs/validation/2026-11-22-mixer-completion-review.json)。
+
+- 混音UI、音频核心、导出、录音、AAF、自动化、PDC、示例及相关控制器综合组：**3141通过、3跳过、零失败**，346.80秒。按声音相关表达式筛选，不是全仓库测试。
+- 窗口退出与录音恢复生命周期：**27通过**。
+- 波形owner与密集包络正确性：**11通过**。
+- 录音启动/停止/取消/恢复最终定向组：**104通过**。
+- 最后补的VCA高精度增益保留及UI路径：**7通过**。仅修改编组名称不再因两位小数显示而改动实际增益/声音hash。
+- 五项实际审计反例重新运行，全部 `contract_satisfied=true`。
+- 本轮Python文件通过AST解析，JSON可解析，`git diff --check`通过；两张中文Qt截图已目视检查。
+
+各组存在重叠，不能相加当作独立测试总数。综合组首次复跑曾暴露包络命中性能和波形全局状态污染；已修复生产路径并保留原验收断言后按原顺序重跑通过。最终VCA精度小补由独立UI组覆盖。硬件、独立外部软件与90分钟长压未执行；§21.2仍是实际未完成清单。

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
+from itertools import islice
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
@@ -153,7 +155,10 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
         raise ValueError("preserve_source_metadata=False not supported in v1")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    fd, temporary = tempfile.mkstemp(prefix=output_path.name + ".",
+                                     suffix=".tmp", dir=output_path.parent)
+    os.close(fd)
+    tmp_path = Path(temporary)
 
     from src.features.edit.core.interchange import frames_to_samples as _f2s
 
@@ -187,8 +192,9 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
             path="sequence.audio_tracks[buses]",
         ))
 
-    f = aaf2.open(str(tmp_path), "w")
+    f = None
     try:
+        f = aaf2.open(str(tmp_path), "w")
         create = f.create
         comp = create.from_name("CompositionMob")
         comp.name = str(getattr(sequence, "name", "") or "Topos Sequence")
@@ -286,7 +292,8 @@ def export_aaf(sequence: Any, output_path: str | Path, *,
         os.replace(tmp_path, output_path)
     except Exception:
         try:
-            f.close()
+            if f is not None:
+                f.close()
         except Exception:  # noqa: BLE001 — 关闭失败不掩盖原始异常
             pass
         try:
@@ -412,7 +419,11 @@ def import_aaf(source: str | Path, *,
     """
     _require_aaf2()
     options = options or AafOptions()
+    if options != AafOptions():
+        raise ValueError("AAF import v1 only supports default options")
     source = Path(source)
+    if source.stat().st_size > INSPECT_MAX_FILE_BYTES:
+        raise ValueError("AAF source exceeds import size budget")
     entries: list[InterchangeEntry] = []
     diagnostics: list[dict[str, Any]] = []
     from src.features.edit.core.timeline_v2 import (
@@ -430,8 +441,13 @@ def import_aaf(source: str | Path, *,
         relink_requests: list[AssetRelinkRequest] = []
         sequences: list[TimelineSequence] = []
         assets: list[dict[str, Any]] = []
-        comp_mobs = list(f.content.compositionmobs()) + list(
-            f.content.mastermobs())
+        comp_mobs = list(islice(f.content.compositionmobs(), 9))
+        # Master mobs normally describe referenced source material. Importing
+        # both them and compositions duplicates media as extra timelines.
+        if not comp_mobs:
+            comp_mobs = list(islice(f.content.mastermobs(), 9))
+        if len(comp_mobs) > 8:
+            raise ValueError("AAF composition count exceeds import budget (8)")
         if not comp_mobs:
             diagnostics.append({
                 "severity": "error", "code": "aaf.no_composition",
@@ -503,16 +519,18 @@ def import_aaf(source: str | Path, *,
                     src_frame, src_off = _samples_to_frame_offset(
                         src_start_ref, import_fps, REF_RATE)
                     dur_frames = _samples_to_frames_ceil(
-                        length_samples, import_fps, REF_RATE)
-                    if _frames_to_samples_exact(
-                            dur_frames, import_fps, REF_RATE) != length_samples:
+                        tl_end, import_fps, REF_RATE) - tl_frame
+                    represented_end = _frames_to_samples_exact(
+                        tl_frame + dur_frames, import_fps, REF_RATE)
+                    if represented_end != tl_end:
                         diagnostics.append({
-                            "severity": "info", "code": "aaf.subframe_length",
+                            "severity": "error", "code": "aaf.subframe_length",
                             "message": (
                                 f"clip length {length_samples} samples "
-                                f"quantized up to {dur_frames} frames "
-                                "(model duration is frame-domain; sub-frame "
-                                "tail handled by source window)"),
+                                f"end extended by {represented_end - tl_end} samples "
+                                "in the candidate; frame-domain duration cannot "
+                                "represent this tail. Exact import requires baking "
+                                "or sample-end support; do not commit unchanged."),
                         })
                     asset_key = (str(src_mob.name) if src_mob is not None
                                  else f"mob:{comp_item.mobid}")

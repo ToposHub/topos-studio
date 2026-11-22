@@ -69,8 +69,8 @@ def simplify_samples(
     Returns:
         简化后的关键帧列表（frame 单调递增）
     """
-    if len(samples) <= 2:
-        return list(samples)
+    if not math.isfinite(threshold) or threshold < 0:
+        raise ValueError("threshold must be finite and nonnegative")
 
     # 先去重同帧（保留最后值）
     deduped: Dict[int, float] = {}
@@ -93,7 +93,11 @@ def simplify_samples(
     for i, frame in enumerate(frames):
         if frame in protected:
             kept[i] = True
-    stack: List[Tuple[int, int]] = [(0, len(pts) - 1)]
+    # A protected point changes the segments that will actually be replayed.
+    # Merely retaining it while measuring against the original outer line can
+    # leave the two new segments outside the promised error bound.
+    anchors = [i for i, keep in enumerate(kept) if keep]
+    stack: List[Tuple[int, int]] = list(zip(anchors, anchors[1:]))
     while stack:
         start, end = stack.pop()
         if end - start < 2:
@@ -152,16 +156,20 @@ def simplify_volume_db(
     Returns:
         简化后的关键帧列表（frame 单调递增）
     """
-    if max_error_db <= 0:
-        raise ValueError("max_error_db must be positive")
-    if len(samples) <= 2:
-        return list(samples)
+    if not math.isfinite(max_error_db) or max_error_db <= 0:
+        raise ValueError("max_error_db must be finite and positive")
+    if not samples:
+        return []
     deduped: Dict[int, float] = {}
     for s in samples:
         deduped[s.frame] = s.value
     frames = sorted(deduped.keys())
-    values = [max(1e-6, float(deduped[f])) for f in frames]
-    dbs = [20.0 * math.log10(v) for v in values]
+    values = [float(deduped[f]) for f in frames]
+    if any(not math.isfinite(v) or v < 0 for v in values):
+        raise ValueError("volume samples must be finite and nonnegative")
+    # The floor belongs to the error metric, never to stored gain: exact zero
+    # is a meaningful mute and must remain zero after recording.
+    dbs = [20.0 * math.log10(max(v, 1e-6)) for v in values]
     n = len(frames)
     protected = protected_frames or set()
     kept: List[int] = [0, n - 1]
@@ -175,7 +183,7 @@ def simplify_volume_db(
         import bisect as _bisect
         pos = _bisect.bisect_right(kept, idx)
         lo, hi = kept[pos - 1], kept[pos]
-        t = (idx - lo) / (hi - lo)
+        t = (frames[idx] - frames[lo]) / (frames[hi] - frames[lo])
         replay_value = values[lo] + t * (values[hi] - values[lo])
         return 20.0 * math.log10(max(replay_value, 1e-6))
 

@@ -115,7 +115,7 @@ def freeze_staleness(
     artifact: RenderArtifact,
     *,
     current_sound_hash: str,
-    current_dependencies: Tuple[str, ...] = (),
+    current_dependencies: Optional[Tuple[str, ...]] = None,
     file_sha256: str = "",
 ) -> Optional[str]:
     """冻结产物失效判定；返回失效原因（None=仍新鲜）。
@@ -130,7 +130,7 @@ def freeze_staleness(
     if current_sound_hash and artifact.sound_hash != current_sound_hash:
         return (f"sound hash changed: {artifact.sound_hash[:12]}… → "
                 f"{current_sound_hash[:12]}…")
-    if current_dependencies and set(current_dependencies) != set(
+    if current_dependencies is not None and set(current_dependencies) != set(
             artifact.source_dependencies):
         return "source dependencies changed"
     if file_sha256 and artifact.file_sha256 != file_sha256:
@@ -198,55 +198,65 @@ class ArtifactRegistry:
             logger.warning("render artifacts sidecar unreadable: %s",
                            self.path, exc_info=True)
 
-    def _save(self, *, drop_ids: Tuple[str, ...] = ()) -> None:
-        """原子写 sidecar；写前重读磁盘按 id 合并（多写者互不覆盖）。
+    def _save(self, *, upserts: Tuple[RenderArtifact, ...] = (),
+              drop_ids: Tuple[str, ...] = ()) -> bool:
+        """Apply only this transaction's changes under the shared file lock.
 
-        已加载实例不再无条件整表覆盖——其他进程/窗口注册的条目
-        （本实例内存未知）必须保留；本实例的删除以 ``drop_ids`` 显式
-        应用。按 id 后写胜；无跨进程锁（crash 一致性由原子 replace 保证）。
+        A loaded registry is a read cache, never an authoritative replacement
+        for the disk table. Failed writes leave both disk and cache unchanged.
+        Unknown sidecar/record fields survive edits of other records.
         """
+        from src.shared.plugins.install_lock import create_lock
+
         self._dir.mkdir(parents=True, exist_ok=True)
-        merged: Dict[str, RenderArtifact] = {}
+        lock = create_lock(self._dir / "artifacts.lock")
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            for item in payload.get("artifacts", []):
-                artifact = RenderArtifact.from_dict(item)
-                merged[artifact.artifact_id] = artifact
-        except FileNotFoundError:
-            pass
-        except Exception:  # noqa: BLE001 — 损坏 sidecar：退化为只写本地视图
-            logger.warning("render artifacts sidecar unreadable before save: %s",
-                           self.path, exc_info=True)
-            merged = {}
-        for artifact_id in drop_ids:
-            merged.pop(artifact_id, None)
-        merged.update(self._artifacts)
-        self._artifacts = dict(merged)
-        payload_out = {
-            "meta_version": ARTIFACT_META_VERSION,
-            "artifacts": [a.to_dict() for a in
-                          sorted(merged.values(),
-                                 key=lambda a: a.artifact_id)],
-        }
-        data = json.dumps(payload_out, ensure_ascii=False, indent=2) + "\n"
-        fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(data)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp_name, self.path)
-        except Exception:
+            lock.acquire()
             try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
+                payload = json.loads(self.path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                payload = {"meta_version": ARTIFACT_META_VERSION, "artifacts": []}
+            if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
+                raise ValueError("invalid render artifacts sidecar")
+            if payload.get("meta_version", ARTIFACT_META_VERSION) != ARTIFACT_META_VERSION:
+                raise ValueError("unsupported render artifacts metadata version")
+            records: Dict[str, Dict[str, Any]] = {}
+            for item in payload["artifacts"]:
+                artifact = RenderArtifact.from_dict(item)
+                records[artifact.artifact_id] = dict(item)
+            removed = any(artifact_id in records for artifact_id in drop_ids)
+            for artifact_id in drop_ids:
+                records.pop(artifact_id, None)
+            for artifact in upserts:
+                record = dict(records.get(artifact.artifact_id, {}))
+                record.update(artifact.to_dict())
+                records[artifact.artifact_id] = record
+            payload["artifacts"] = [records[key] for key in sorted(records)]
+            data = json.dumps(payload, ensure_ascii=False, indent=2,
+                              allow_nan=False) + "\n"
+            fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp_name, self.path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name)
+                except FileNotFoundError:
+                    pass
+                raise
+            self._artifacts = {
+                key: RenderArtifact.from_dict(record) for key, record in records.items()
+            }
+            self._loaded = True
+            return removed
+        finally:
+            lock.close()
 
     def register(self, artifact: RenderArtifact) -> RenderArtifact:
-        self._ensure_loaded()
-        self._artifacts[artifact.artifact_id] = artifact
-        self._save()
+        self._save(upserts=(artifact,))
         return artifact
 
     def get(self, artifact_id: str) -> Optional[RenderArtifact]:
@@ -262,12 +272,7 @@ class ArtifactRegistry:
         )
 
     def remove(self, artifact_id: str) -> bool:
-        self._ensure_loaded()
-        if artifact_id not in self._artifacts:
-            return False
-        del self._artifacts[artifact_id]
-        self._save(drop_ids=(artifact_id,))
-        return True
+        return self._save(drop_ids=(artifact_id,))
 
 
 __all__ = [

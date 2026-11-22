@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import logging
 import threading
+from copy import deepcopy
 
 # AUD-16807：EffectInstance 顶层导入。effect_instance 只依赖 src.shared，
 # 与本模块无环（模块底部的延迟 import 是历史遗留，只会让单例/缓存的
@@ -444,7 +445,7 @@ def _get_audio_default_params() -> dict:
                     DeEsserParams, TruePeakLimiterParams, DynamicEqParams,
                     BusCompParams, MultibandCompParams, ConvolutionReverbParams,
                     TransientDesignerParams, TremoloAutoPanParams,
-                    ChorusFlangerParams, PhaserParams,
+                    ChorusFlangerParams, PhaserParams, ExciterParams, SubharmonicParams,
                 )
                 # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
                 #（旧数据无损承接为 Gate），新增 expander 类型。
@@ -474,6 +475,8 @@ def _get_audio_default_params() -> dict:
                     "tremolo_auto_pan": TremoloAutoPanParams.default().to_dict(),
                     "chorus_flanger": ChorusFlangerParams.default().to_dict(),
                     "phaser": PhaserParams.default().to_dict(),
+                    "exciter": ExciterParams.default().to_dict(),
+                    "subharmonic": SubharmonicParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -1211,7 +1214,7 @@ def create_effect_instance(effect_type: str, order: int = 0) -> Optional[EffectI
         if full_defaults:
             return EffectInstance(
                 effect_type=effect_type,
-                params=dict(full_defaults),
+                params=deepcopy(full_defaults),
                 is_enabled=True,
                 order=order,
             )

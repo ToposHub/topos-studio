@@ -498,12 +498,10 @@ class RoutingDialog(QDialog):
         return is_valid
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        """关闭时发最终提交。
+        """Edits commit on completion; closing discards an unfinished preview.
 
-        AUD-37810: 校验失败（环/未知目标）时同样阻止提交，与
-        _on_committed 的门控一致 —— 无效路由不得经关闭路径落盘。
+        Re-emitting a stale widget snapshot here would overwrite an undo or
+        another committed edit made while this non-modal dialog was open.
+        The controller restores the canonical route when ``finished`` fires.
         """
-        payload = self._collect()
-        if self._validate_and_warn(payload):
-            self.routing_committed.emit(self._track_id, payload)
         super().closeEvent(event)

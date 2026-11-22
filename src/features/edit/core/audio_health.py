@@ -55,7 +55,7 @@ class AudioHealthSnapshot:
     render_p95_ms: Optional[float] = None
     render_p99_ms: Optional[float] = None
     render_deadline_ms: Optional[float] = None
-    deadline_miss_count: int = 0               # p99 语义下的超限计数（窗口内）
+    deadline_miss_count: Optional[int] = None  # 已测块超预算次数；未测=None
     ring_fill_ratio: Optional[float] = None    # 0..1；None=无 ring
     underruns: Optional[int] = None
     overflows: Optional[int] = None
@@ -164,6 +164,9 @@ def probe_dir_size_mb(
     try:
         for root, _dirs, files in os.walk(path):
             for f in files:
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    break
                 try:
                     total += os.path.getsize(os.path.join(root, f))
                 except OSError as e:

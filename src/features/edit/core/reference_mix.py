@@ -103,7 +103,8 @@ def comparison_gain(
     不是 LUFS 测量算法；静音/无效测量（非有限值）禁用。目标提升超过
     ``max_boost_db`` 拒绝（监听余量策略，不用限幅偷改所谓参考）。
     """
-    if not (math.isfinite(reference_lufs) and math.isfinite(programme_lufs)):
+    if not (math.isfinite(reference_lufs) and math.isfinite(programme_lufs)
+            and math.isfinite(max_boost_db) and max_boost_db >= 0.0):
         raise ValueError("comparison needs finite measurements")
     boost = programme_lufs - reference_lufs
     if boost > max_boost_db:
@@ -129,6 +130,11 @@ def align_reference_offset(
     """
     prog = np.asarray(programme, dtype=np.float64)
     ref = np.asarray(reference, dtype=np.float64)
+    if (prog.ndim not in (1, 2) or ref.ndim not in (1, 2)
+            or prog.size == 0 or ref.size == 0):
+        raise ValueError("signals must be nonempty mono or planar PCM")
+    if not np.isfinite(prog).all() or not np.isfinite(ref).all():
+        raise ValueError("signals must contain only finite samples")
     if prog.ndim > 1:
         prog = prog.mean(axis=0)
     if ref.ndim > 1:
@@ -139,6 +145,8 @@ def align_reference_offset(
         raise ValueError("silent signals cannot be aligned")
     prog = prog - prog.mean()
     ref = ref - ref.mean()
+    if np.max(np.abs(prog)) < 1e-6 or np.max(np.abs(ref)) < 1e-6:
+        raise ValueError("constant signals cannot be aligned")
     n = 1 << int(np.ceil(np.log2(prog.size + ref.size)))
     corr = np.fft.irfft(np.fft.rfft(prog, n) * np.conj(np.fft.rfft(ref, n)), n)
     # 窗口必须非退化：max_lag=0 时 corr[-0:] 是整个数组（正/负窗重复），
@@ -149,7 +157,7 @@ def align_reference_offset(
             f"max_offset_samples must be >= 1 (got {max_offset_samples!r})")
     max_lag = max(1, int(min(max_offset_samples, n // 2)))
     lags = np.concatenate([corr[:max_lag + 1], corr[-max_lag:]])
-    peak = int(np.argmax(lags))
+    peak = int(np.argmax(np.abs(lags)))
     lag = peak if peak <= max_lag else peak - len(lags)
     denom = float(np.sqrt(np.sum(prog ** 2) * np.sum(ref ** 2))) or 1.0
     confidence = float(np.abs(lags[peak]) / denom)

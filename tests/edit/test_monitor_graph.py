@@ -231,18 +231,15 @@ class TestMonitorService:
         taps = _taps()
         svc = MonitorService(48000.0)
         svc.set_state(MonitorSessionState(source_tap="sip"))
-        # DX solo；MX 无 safe → 不可听；DX solo_safe → 仍可听
+        # The shared engine owns the solo graph. The monitor must retain its
+        # resulting bus/master signal, not reconstruct it by summing strips.
         out = svc.render_block(taps, audible_solo={"mx"},
                                solo_safe=("dx",))
-        spec = np.abs(np.fft.rfft(out[0].astype(np.float64)))
-        freqs = np.fft.rfftfreq(out.shape[-1], d=1.0 / 48000.0)
-        peak = freqs[int(np.argmax(spec))]
-        # 可听集合 = {mx} ∪ {dx safe} → 两者都有；主峰在两者之一
-        assert peak in (pytest.approx(997.0, abs=12.0),
-                        pytest.approx(1511.0, abs=12.0))
-        # 无 safe 时 SIP 只含 solo 闭包（mx）
+        np.testing.assert_array_equal(out, taps["master"])
+        # A bus with its own processing must not be summed a second time.
+        taps["track:bus:post"] = taps["master"] * 7.0
         out2 = svc.render_block(taps, audible_solo={"mx"}, solo_safe=())
-        assert _dominant_freq(out2) == pytest.approx(1511.0, abs=12.0)
+        np.testing.assert_array_equal(out2, taps["master"])
 
     def test_monitor_never_mutates_program(self) -> None:
         """监听隔离不变量：Master/Stem 输入数组字节级不变。"""

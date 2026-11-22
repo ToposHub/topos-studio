@@ -31,6 +31,8 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.audio_edit import steps_signature
 
+SOUND_SNAPSHOT_SCHEMA_VERSION = 2
+
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
@@ -71,6 +73,11 @@ class ClipNodeSnapshot:
     effects_signature: Tuple = ()  # clip FX 摘要
     # P0-3：Clip Editor 处理栈摘要（enabled 步骤的有序指纹；变化必须重建）。
     audio_edit_signature: Tuple = ()
+    # Source-to-strip ownership and the full retime contract are sound fields.
+    # Numeric speed alone loses reverse/pitch/ramp settings.
+    track_id: str = ""
+    speed_signature: Optional[str] = None
+    source_duration: int = 0
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,7 @@ class TrackNodeSnapshot:
     panner_signature: Optional[str] = None
     audio_transitions_signature: Tuple = ()
     bus_layout: str = "stereo"
+    solo_safe: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,7 +157,12 @@ class AudioGraphSnapshot:
         否则用 snapshot 替代 signature 会丢重建触发。已补齐 clip 的 asset_id/source_start
         与 track 的 is_enabled（这三项此前漏算，会导致换素材/改源起点/禁用轨不触发重建）。
         """
+        from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+
         data = {
+            "sound_schema": SOUND_SNAPSHOT_SCHEMA_VERSION,
+            "dsp_algorithm": ALGORITHM_VERSION,
+            "pdc_algorithm": "edge-dag/1",
             "fps": round(self.fps, 6),
             "sr": self.sample_rate,
             # clip: asset_id（换素材）、source_start（改源起点）都会改变声音
@@ -159,7 +172,8 @@ class AudioGraphSnapshot:
                    c.is_enabled, c.fade_in_samples, c.fade_out_samples,
                    c.audio_sample_offset, c.source_sample_offset,
                    c.freeze_source_frame,
-                   c.effects_signature, c.audio_edit_signature) for c in self.clips],
+                   c.effects_signature, c.audio_edit_signature,
+                   c.track_id, c.speed_signature, c.source_duration) for c in self.clips],
             # track: is_enabled（禁用轨不发声）；B01: sends 含 tap/muted、
             # automation_trim 参与声音身份
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
@@ -167,7 +181,7 @@ class AudioGraphSnapshot:
                    t.effect_chain_signature, t.automation_signature, t.automation_mode,
                    t.automation_trim, t.stem_group, t.is_bus,
                    t.panner_signature, t.audio_transitions_signature,
-                   t.bus_layout) for t in self.tracks],
+                   t.bus_layout, t.solo_safe) for t in self.tracks],
             "m": (self.master.volume, self.master.muted,
                   self.master.automation_signature, self.master.automation_mode,
                   self.master.strip_eq_signature, self.master.effect_chain_signature),
@@ -208,11 +222,14 @@ def _clip_effects_signature(clip: Any) -> Tuple:
     """clip FX 摘要（effect_type + enabled + params hash）。"""
     effects = getattr(clip, "effects", ()) or ()
     sig = []
-    for ef in effects:
+    for ef in sorted(effects, key=lambda effect: getattr(effect, "order", 0)):
         etype = getattr(ef, "effect_type", "")
         enabled = bool(getattr(ef, "is_enabled", True))
         params = getattr(ef, "params", None) or {}
-        sig.append((etype, enabled, repr(sorted(params.items()) if params else [])))
+        sig.append((etype, enabled, repr(sorted(params.items()) if params else []),
+                    _repr_signature(getattr(ef, "animated_params", None)),
+                    getattr(ef, "algorithm_version", None),
+                    _repr_signature(getattr(ef, "plugin_identity", None))))
     return tuple(sig)
 
 
@@ -236,9 +253,16 @@ def _repr_signature(obj: Any) -> Optional[str]:
     """通用对象签名（None=None；to_dict 稳定排序；否则 repr）。"""
     if obj is None:
         return None
-    if hasattr(obj, "to_dict"):
-        return repr(sorted(obj.to_dict().items()))
-    return repr(obj)
+    def payload(value: Any) -> Any:
+        if hasattr(value, "to_dict"):
+            return payload(value.to_dict())
+        if isinstance(value, dict):
+            return {str(key): payload(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [payload(item) for item in value]
+        return value
+
+    return json.dumps(payload(obj), sort_keys=True, default=str)
 
 
 def _audio_transitions_signature(track: Any) -> Tuple:
@@ -266,8 +290,14 @@ def _automation_signature(auto: Any) -> Optional[str]:
         return None
     parts = []
     for param, track in auto.items():
-        kfs = getattr(track, "keyframes", []) or []
-        parts.append((param, [(kf.frame, kf.value) for kf in kfs]))
+        if hasattr(track, "to_dict"):
+            # KeyframeTrack serialization includes interpolation, handles,
+            # bounds and pre/post extrapolation. Equal key values can replay
+            # different audio when any of these contracts changes.
+            parts.append((param, track.to_dict()))
+        else:
+            kfs = getattr(track, "keyframes", []) or []
+            parts.append((param, [(kf.frame, kf.value) for kf in kfs]))
     return repr(sorted(parts))
 
 
@@ -294,6 +324,7 @@ def build_audio_graph_snapshot(
             continue
         for clip in getattr(track, "clips", ()) or ():
             speed = getattr(clip, "speed", 1.0)
+            speed_signature = _repr_signature(speed)
             if hasattr(speed, "speed"):
                 speed = speed.speed
             clips.append(ClipNodeSnapshot(
@@ -318,6 +349,9 @@ def build_audio_graph_snapshot(
                 effects_signature=_clip_effects_signature(clip),
                 audio_edit_signature=steps_signature(
                     getattr(clip, "audio_edit", None)),
+                track_id=getattr(track, "track_id", ""),
+                speed_signature=speed_signature,
+                source_duration=int(getattr(clip, "source_duration", 0) or 0),
             ))
 
     # track/bus 节点
@@ -354,6 +388,7 @@ def build_audio_graph_snapshot(
             audio_transitions_signature=_audio_transitions_signature(track),
             bus_layout=str(getattr(track, "bus_layout", "stereo")
                            or "stereo"),
+            solo_safe=bool(getattr(track, "solo_safe", False)),
         ))
 
     # master 节点

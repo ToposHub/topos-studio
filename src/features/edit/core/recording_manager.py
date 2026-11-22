@@ -29,6 +29,9 @@ Recording Manager — 录音/ADR（AM-08 阶段 4.4）。
 from __future__ import annotations
 
 import logging
+import json
+import queue
+from pathlib import Path
 import os
 import re
 import shutil
@@ -42,6 +45,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, List, Optional, Tuple
 import numpy as np
 
 from src.features.edit.core.shared_recording_input import SharedRecordingInput
+from src.features.edit.core.capture_clock import CaptureBlock, CaptureJournal
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
     from PyQt6.QtMultimedia import QAudio
@@ -64,6 +68,180 @@ class DiskSpaceExhausted(Exception):
     """溢写磁盘空间耗尽（P0-07）：录音需安全终止并保留已录数据。"""
 
 
+class _DurablePcmSpool:
+    """Bounded asynchronous capture writer; all fsync stays off the Qt thread.
+
+    Indices count received software frames, not an inferred hardware clock.
+    A checkpoint is published only after the corresponding raw PCM is synced.
+    """
+
+    def __init__(self, directory: str, channels: int, sample_rate: int,
+                 memory_limit: int = _DEFAULT_SPOOL_LIMIT_BYTES,
+                 on_disk_warning: Optional[Callable[[str], None]] = None) -> None:
+        self.channels = channels
+        self.sample_rate = sample_rate
+        self.limit = max(1024, memory_limit)
+        self.prefix = Path(directory) / f"topos_capture_{uuid.uuid4().hex}"
+        self.raw_path = self.prefix.with_suffix(".f32")
+        self.journal_path = self.prefix.with_suffix(".jsonl")
+        self.manifest_path = self.prefix.with_suffix(".json")
+        self.error: Optional[Exception] = None
+        self.confirmed_samples = 0
+        self._on_disk_warning = on_disk_warning
+        self._disk_warned = False
+        self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
+        self._bytes = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._discard = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="CaptureSpool", daemon=True)
+        self._thread.start()
+
+    @property
+    def memory_bytes(self) -> int:
+        with self._lock:
+            return self._bytes
+
+    def append(self, block: np.ndarray) -> None:
+        if block.ndim != 2 or block.shape[0] != self.channels or block.shape[1] <= 0:
+            raise ValueError("capture block must have the configured channels and nonempty samples")
+        # Admission and shutdown share one lock. A finish/failure cannot drain
+        # the queue between checking its state and admitting an unwritable block.
+        with self._lock:
+            if self.error is not None:
+                raise DiskSpaceExhausted(f"capture spool failed: {self.error}") from self.error
+            if self._stop.is_set():
+                raise DiskSpaceExhausted("capture spool has stopped")
+            required_bytes = block.size * np.dtype(np.float32).itemsize
+            if self._bytes + required_bytes > self.limit:
+                raise DiskSpaceExhausted("capture writer queue exceeded its memory budget")
+            # A backend may reuse its callback array; count the owned float32
+            # representation, rather than the caller's possibly float64 dtype.
+            owned = np.array(block, dtype=np.float32, order="C", copy=True)
+            try:
+                self._queue.put_nowait(owned)
+            except queue.Full as exc:
+                raise DiskSpaceExhausted("capture writer queue overloaded") from exc
+            self._bytes += owned.nbytes
+
+    def request_finish(self) -> None:
+        """Stop admission and let the owning writer drain without waiting."""
+        with self._lock:
+            self._stop.set()
+
+    def finish(self) -> None:
+        self.request_finish()
+        self._thread.join()
+
+    def discard(self) -> None:
+        # No Qt-thread join on a potentially stalled disk. The owning writer
+        # removes its files after its current write finishes.
+        with self._lock:
+            self._discard.set()
+            self._stop.set()
+        if not self._thread.is_alive():
+            self._remove_files()
+
+    def _remove_files(self) -> None:
+        for path in (self.raw_path, self.journal_path, self.manifest_path):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("could not remove recording recovery file %s", path)
+
+    def _run(self) -> None:
+        journal: Optional[CaptureJournal] = None
+        try:
+            self.prefix.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.manifest_path, "w", encoding="utf-8") as manifest:
+                json.dump(dict(version=1, channels=self.channels, sample_rate=self.sample_rate,
+                               sample_format="interleaved_float32_le", clock_domain="received_pcm_frames",
+                               raw_file=self.raw_path.name, journal_file=self.journal_path.name), manifest)
+                manifest.flush()
+                os.fsync(manifest.fileno())
+            journal = CaptureJournal(self.journal_path, fsync_every=8)
+            with open(self.raw_path, "wb") as raw_file:
+                sample_index = 0
+                sequence = 0
+                while not self._stop.is_set() or not self._queue.empty():
+                    try:
+                        block = self._queue.get(timeout=0.025)
+                    except queue.Empty:
+                        continue
+                    try:
+                        if self._discard.is_set():
+                            continue
+                        if sequence % 64 == 0:
+                            free = shutil.disk_usage(self.prefix.parent).free
+                            if free - block.nbytes < _DISK_FAIL_BYTES:
+                                raise DiskSpaceExhausted("recording disk reserve exhausted")
+                            if free - block.nbytes < _DISK_WARN_BYTES and not self._disk_warned:
+                                self._disk_warned = True
+                                if self._on_disk_warning is not None:
+                                    self._on_disk_warning("Recording disk space is running low")
+                        raw_file.write(np.ascontiguousarray(block.T, dtype="<f4").tobytes())
+                        # Journal checkpoint can never outrun durable PCM.
+                        raw_file.flush()
+                        os.fsync(raw_file.fileno())
+                        record = CaptureBlock("received-pcm", sequence, sample_index,
+                                              time.monotonic_ns(), block)
+                        journal.record_segment(record)
+                        journal.commit_segment(sequence)
+                        sample_index += block.shape[1]
+                        sequence += 1
+                        if journal._pending_writes == 0:
+                            self.confirmed_samples = sample_index
+                            # The durable file is the recovery authority. Keep
+                            # only uncheckpointed metadata in this live writer,
+                            # not one Python object per callback for a long take.
+                            journal._segments.clear()
+                    finally:
+                        with self._lock:
+                            self._bytes -= block.nbytes
+                        self._queue.task_done()
+                if not self._discard.is_set():
+                    raw_file.flush()
+                    os.fsync(raw_file.fileno())
+                    journal.close()
+                    self.confirmed_samples = sample_index
+        except Exception as exc:  # worker boundary must fail closed and preserve recovery
+            with self._lock:
+                self.error = exc
+            logger.warning("recording recovery spool failed: %s", exc)
+            # confirmed_samples advances only after a successfully synced
+            # checkpoint. Re-reading an arbitrarily long journal here is both
+            # unnecessary and unsafe when the underlying disk just failed.
+        finally:
+            # Do not gracefully checkpoint after a failed PCM write.
+            if journal is not None and journal._fh is not None:
+                journal._fh.close()
+                journal._fh = None
+            while True:
+                try:
+                    block = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                with self._lock:
+                    self._bytes -= block.nbytes
+                self._queue.task_done()
+            if self._discard.is_set():
+                self._remove_files()
+
+    def iter_blocks(self, block_frames: int = 65536) -> Iterator[np.ndarray]:
+        self.finish()
+        remaining = self.confirmed_samples
+        if not remaining:
+            return
+        with open(self.raw_path, "rb") as fh:
+            while remaining:
+                count = min(remaining, max(1, block_frames))
+                raw = fh.read(count * self.channels * 4)
+                if len(raw) != count * self.channels * 4:
+                    raise OSError("recording recovery PCM was truncated")
+                yield np.ascontiguousarray(np.frombuffer(raw, dtype="<f4").reshape(-1, self.channels).T)
+                remaining -= count
+
+
 class _ChunkedPcmBuffer:
     """分块 planar PCM 缓冲。
 
@@ -80,6 +258,8 @@ class _ChunkedPcmBuffer:
         spool_dir: str = "",
         memory_limit_bytes: int = _DEFAULT_SPOOL_LIMIT_BYTES,
         on_disk_warning: Optional[Callable[[str], None]] = None,
+        durable_spool: bool = False,
+        sample_rate: int = 48000,
     ) -> None:
         self._channels = max(1, int(channels))
         self._chunks: List[np.ndarray] = []  # 每个 (channels, n) planar float32
@@ -92,6 +272,9 @@ class _ChunkedPcmBuffer:
         self._spooled_samples = 0
         self._on_disk_warning = on_disk_warning
         self._disk_warned = False
+        self._durable = (_DurablePcmSpool(self._spool_dir, self._channels,
+                                         sample_rate, self._memory_limit, on_disk_warning)
+                         if durable_spool else None)
 
     # ── 兼容视图 ──
 
@@ -106,11 +289,12 @@ class _ChunkedPcmBuffer:
 
     @property
     def memory_bytes(self) -> int:
-        return self._memory_bytes
+        return self._durable.memory_bytes if self._durable is not None else self._memory_bytes
 
     @property
     def spooled_bytes(self) -> int:
-        return self._spooled_samples * self._channels * 4
+        count = self._durable.confirmed_samples if self._durable is not None else self._spooled_samples
+        return count * self._channels * 4
 
     def __bool__(self) -> bool:
         return self._total_samples > 0
@@ -122,6 +306,12 @@ class _ChunkedPcmBuffer:
         if block.ndim == 1:
             block = block.reshape(1, -1)
         block = np.ascontiguousarray(block, dtype=np.float32)
+        if block.ndim != 2 or block.shape[0] != self._channels:
+            raise ValueError("recording block channel layout does not match capture")
+        if self._durable is not None:
+            self._durable.append(block)
+            self._total_samples += block.shape[1]
+            return
         self._chunks.append(block)
         self._memory_bytes += block.nbytes
         self._total_samples += block.shape[1]
@@ -177,6 +367,9 @@ class _ChunkedPcmBuffer:
 
     def iter_blocks(self, block_frames: int = 65536) -> Iterator[np.ndarray]:
         """按顺序产出 (channels, n) 块：先磁盘溢写部分，后内存部分。"""
+        if self._durable is not None:
+            yield from self._durable.iter_blocks(block_frames)
+            return
         if self._spool_file is not None:
             self._spool_file.flush()
             frames_per_io = max(1, block_frames)
@@ -194,8 +387,21 @@ class _ChunkedPcmBuffer:
         """整体物化（仅短 take / 测试诊断用）。"""
         return np.concatenate(list(self.iter_blocks()), axis=1)
 
+    def finish(self) -> None:
+        """Drain the capture writer; call from the existing TakeFlush worker."""
+        if self._durable is not None:
+            self._durable.finish()
+            self._total_samples = self._durable.confirmed_samples
+
+    def request_finish(self) -> None:
+        """Request durable draining; safe on the UI thread even on a stalled disk."""
+        if self._durable is not None:
+            self._durable.request_finish()
+
     def clear(self) -> None:
         """丢弃全部数据并删除溢写临时文件。"""
+        if self._durable is not None:
+            self._durable.discard()
         self._chunks = []
         self._memory_bytes = 0
         self._total_samples = 0
@@ -888,6 +1094,7 @@ class RecordingManager:
         # 落盘中的线程与轮询定时器（flushing 期间防重复 stop/finalize）
         self._flush_thread: Optional[threading.Thread] = None
         self._flush_timer: Any = None
+        self._failed_flush_buffers: dict[str, _ChunkedPcmBuffer] = {}
 
         # Qt 设备（惰性初始化，避免无 Qt 环境测试失败）
         self._audio_source: Any = None
@@ -1062,19 +1269,29 @@ class RecordingManager:
         self._current_take = take
 
         # PCM 缓冲（P0-07：分块 + 磁盘溢写，长录音内存有界）
-        with self._buffer_lock:
-            if self._pcm_buffer is not None:  # 防御：上次录音残留
-                self._pcm_buffer.clear()
-            self._pcm_buffer = _ChunkedPcmBuffer(
-                channels=self._config.channels,
-                spool_dir=self._config.output_dir or ".",
-                # 预警只入队：append 在 _buffer_lock 内执行，直接回调
-                # on_error 会在持锁状态下运行外部代码（回调若再入
-                # stop_recording→_finalize_take 将二次加锁死锁）。
-                on_disk_warning=self._pending_disk_warnings.append,
-            )
-            self._rolling_chunks = []
-            self._rolling_samples = 0
+        try:
+            with self._buffer_lock:
+                if self._pcm_buffer is not None:  # 防御：上次录音残留
+                    self._pcm_buffer.clear()
+                self._pcm_buffer = None
+                self._pcm_buffer = _ChunkedPcmBuffer(
+                    channels=self._config.channels,
+                    spool_dir=self._config.output_dir or ".",
+                    # Warning callbacks run after the buffer lock is released.
+                    on_disk_warning=self._pending_disk_warnings.append,
+                    durable_spool=True, sample_rate=self._config.sample_rate,
+                )
+                self._rolling_chunks = []
+                self._rolling_samples = 0
+        except (RuntimeError, OSError, ValueError, MemoryError) as exc:
+            # The capture writer must exist before opening the input device.
+            # Exhausted thread resources must not leave a phantom live take.
+            self._current_take = None
+            self._set_state(self.STATE_FAILED)
+            logger.warning("Recording capture writer could not start: %s", exc)
+            if self.on_error is not None:
+                self.on_error(f"Recording capture writer could not start: {exc}")
+            return False
 
         if self._shared_input is not None and not self._start_capture_device():
             with self._buffer_lock:
@@ -1477,6 +1694,17 @@ class RecordingManager:
         锁纪律：pcm 已在 _finalize_take 内完成交接（独占引用），本方法
         不取任何管理器锁。
         """
+        pcm.finish()
+        if pcm._durable is not None and pcm._durable.error is not None:
+            save_partial = True
+            take.notes += f"\nCapture interrupted; recovery: {pcm._durable.manifest_path}"
+        if pcm.total_samples <= 0:
+            # Accepted callback frames can all be lost before the first durable
+            # checkpoint. An empty encoded WAV must never become an approved
+            # completed_partial take or trigger the import callback.
+            take.duration_seconds = 0.0
+            take.status = "failed"
+            return
         # P1-10：时长用采样数（含 pre-roll 内容），比墙钟精确
         take.duration_seconds = pcm.total_samples / float(self._config.sample_rate)
         ok = write_take_blocks(
@@ -1485,11 +1713,13 @@ class RecordingManager:
             sample_rate=self._config.sample_rate,
             bit_depth=self._config.bit_depth, take=take,
         )
-        pcm.clear()
         if ok:
+            pcm.clear()
             take.status = "completed" if not save_partial else "completed_partial"
         else:
             take.status = "failed"
+            if pcm._durable is not None:
+                take.notes += f"\nRecovery retained: {pcm._durable.manifest_path}"
 
     def _archive_take(self, take: TakeInfo) -> TakeInfo:
         """归档完成的 take（主线程执行：列表追加 + 状态回调）。"""
@@ -1505,18 +1735,25 @@ class RecordingManager:
         pcm: _ChunkedPcmBuffer,
         save_partial: bool,
     ) -> bool:
-        """AUD-17601：后台落盘。成功启动返回 True（调用方返回 None）。
+        """Handle GUI finalization, returning True even if GUI startup fails.
 
-        任何前置条件不满足（未启用/无 Qt 事件循环/已在落盘中/定时器不可
-        用）都返回 False，调用方回退同步落盘；线程一旦启动则必须完成交付
-        （轮询定时器在主线程驱动归档，不依赖跨线程 Qt 调用）。
+        Explicit offline/no-Qt callers retain the synchronous path. Once a Qt
+        application exists, infrastructure failure must never fall back to UI
+        disk work or joining a worker. Preserve the recovery source and archive
+        a failed take instead. Start polling before launching the encoder so a
+        timer failure cannot leave an unobservable encoding thread behind.
         """
         if not self.enable_background_flush or self._flush_thread is not None:
             return False
         try:
             from PyQt6.QtCore import QCoreApplication, QTimer
-            if QCoreApplication.instance() is None:
-                return False
+        except ImportError:
+            return False
+        if QCoreApplication.instance() is None:
+            return False
+
+        poll = None
+        try:
             done = threading.Event()
             poll = QTimer()
             poll.setInterval(15)
@@ -1530,44 +1767,46 @@ class RecordingManager:
                 self._archive_take(take)
 
             poll.timeout.connect(_poll_flush_done)
-        except Exception:
-            logger.debug("background flush unavailable, falling back to sync")
-            return False
 
-        def _flush_worker() -> None:
-            try:
-                self._write_take_payload(take, pcm, save_partial)
-            except Exception as e:  # noqa: BLE001 — worker 边界必须交付
-                logger.warning(f"Take flush failed: {e}", exc_info=True)
-                take.status = "failed"
-            finally:
-                done.set()
+            def _flush_worker() -> None:
+                try:
+                    self._write_take_payload(take, pcm, save_partial)
+                except Exception as e:  # noqa: BLE001 — worker boundary
+                    logger.warning(f"Take flush failed: {e}", exc_info=True)
+                    take.status = "failed"
+                finally:
+                    done.set()
 
-        self._set_state(self.STATE_FLUSHING)
-        thread = threading.Thread(
-            target=_flush_worker, name="TakeFlush", daemon=True,
-        )
-        started = False
-        try:
-            thread.start()
-            started = True
+            thread = threading.Thread(target=_flush_worker, name="TakeFlush", daemon=True)
             poll.start()
-        except Exception:
-            # 线程/定时器启动失败的同步兜底。已启动的 worker 必须先 join
-            #（它可能正在写同一文件），归档但绝不二次写盘。
-            logger.warning(
-                "background flush start failed, completing synchronously",
-                exc_info=True,
-            )
-            if started:
-                thread.join()
-            else:
-                self._write_take_payload(take, pcm, save_partial)
+            if not poll.isActive():
+                raise RuntimeError("capture completion timer did not start")
+            self._flush_thread = thread
+            self._flush_timer = poll
+            self._set_state(self.STATE_FLUSHING)
+            thread.start()
+        except Exception as error:  # GUI/thread startup boundary; never do I/O here
+            if poll is not None:
+                try:
+                    poll.stop()
+                except RuntimeError:
+                    logger.warning("capture completion timer was already destroyed")
             self._flush_thread = None
+            self._flush_timer = None
+            pcm.request_finish()
+            take.status = "failed"
+            if pcm._durable is not None:
+                take.notes += f"\nEncoding could not start; recovery retained: {pcm._durable.manifest_path}"
+            else:
+                # Compatibility for an injected legacy in-memory buffer. Keep
+                # its bytes owned until the caller can retry/recover them.
+                self._failed_flush_buffers[take.take_id] = pcm
+                take.notes += "\nEncoding could not start; captured PCM retained in memory"
+            logger.warning("background flush startup failed; recovery preserved: %s", error)
             self._archive_take(take)
+            if self.on_error is not None:
+                self.on_error(f"Recording finalization could not start: {error}")
             return True
-        self._flush_thread = thread
-        self._flush_timer = poll
         return True
 
     def discard_current_take(self) -> None:
@@ -1610,10 +1849,12 @@ class RecordingManager:
         """取消录音（不落盘，丢弃缓冲）。"""
         # AUD-17601：落盘已在进行（flushing）时，后台写盘不可中断——
         # 等它结束后 cancel 只清理剩余状态（take 由归档路径交付）。
-        flush_thread = self._flush_thread
-        if flush_thread is not None:
-            flush_thread.join()
-            self._flush_thread = None
+        if self._flush_thread is not None:
+            # Final encoding is already owned by TakeFlush. Keep its flushing
+            # state and completion timer until it archives the take; joining a
+            # stalled disk here freezes Qt, and clearing state before the timer
+            # runs lets the old completion overwrite a newly started recording.
+            return
         if self._pre_roll_timer is not None:
             try:
                 self._pre_roll_timer.stop()
@@ -1692,3 +1933,137 @@ class RecordingManager:
             self._current_take.peak_dbfs = max(self._current_take.peak_dbfs, dbfs)
             if self.on_level:
                 self.on_level(dbfs)
+
+
+def recover_capture_spool(
+    manifest_path: str | Path,
+    output_path: str | Path,
+    *,
+    memory_limit_bytes: int = 8 * 1024 * 1024,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> TakeInfo:
+    """Recover only checksum-verified, checkpointed PCM as a partial take.
+
+    Recovery never registers an asset or claims device-clock alignment. Return
+    through the same TakeInfo/import command contract as normal recording.
+    The source recovery files are retained until the user archives/discards them.
+    """
+    import zlib
+
+    def check_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise InterruptedError("recording recovery cancelled")
+
+    check_cancelled()
+    manifest_path = Path(manifest_path)
+    with open(manifest_path, "r", encoding="utf-8") as fh:
+        metadata = json.load(fh)
+    if (not isinstance(metadata, dict) or metadata.get("version") != 1
+            or metadata.get("sample_format") != "interleaved_float32_le"
+            or metadata.get("clock_domain") != "received_pcm_frames"):
+        raise ValueError("unsupported recording recovery manifest")
+    channels = metadata.get("channels")
+    rate = metadata.get("sample_rate")
+    if (isinstance(channels, bool) or not isinstance(channels, int) or not 1 <= channels <= 64
+            or isinstance(rate, bool) or not isinstance(rate, int) or not 8000 <= rate <= 384000):
+        raise ValueError("invalid recording recovery layout/rate")
+    if type(memory_limit_bytes) is not int or memory_limit_bytes < channels * 12:
+        raise ValueError("recovery memory budget must hold at least one PCM frame")
+    block_frames = max(1, min(65536, memory_limit_bytes // (channels * 12)))
+    for key in ("raw_file", "journal_file"):
+        name = metadata.get(key)
+        if not isinstance(name, str) or Path(name).name != name or not name:
+            raise ValueError("recovery paths must be local filenames")
+    raw_path = manifest_path.parent / metadata["raw_file"]
+    journal_path = manifest_path.parent / metadata["journal_file"]
+    if Path(output_path).resolve() in {raw_path.resolve(), journal_path.resolve(), manifest_path.resolve()}:
+        raise ValueError("recovery output cannot overwrite its source")
+    valid_segments = 0
+    total = 0
+    def identity(path: Path) -> Tuple[int, int, int]:
+        stat = path.stat()
+        return stat.st_size, stat.st_mtime_ns, stat.st_ino
+
+    raw_identity, journal_identity = identity(raw_path), identity(journal_path)
+    raw_size = raw_identity[0]
+
+    def segment_blocks(first: int, count: int) -> Iterator[np.ndarray]:
+        with open(raw_path, "rb") as raw_file:
+            raw_file.seek(first * channels * 4)
+            remaining = count
+            while remaining:
+                check_cancelled()
+                size = min(remaining, block_frames)
+                raw = raw_file.read(size * channels * 4)
+                if len(raw) != size * channels * 4:
+                    raise OSError("recovery PCM changed while recovering")
+                yield np.ascontiguousarray(np.frombuffer(raw, dtype="<f4").reshape(-1, channels).T)
+                remaining -= size
+
+    def segment_checksum(first: int, count: int) -> int:
+        # Journal v1/v2 CRC covers *planar* bytes. Preserve that byte ordering
+        # with bounded scans per channel rather than materializing the whole
+        # segment from an untrusted sample_count (possibly many gigabytes).
+        checksum = 0
+        for channel in range(channels):
+            for planar in segment_blocks(first, count):
+                checksum = zlib.crc32(np.ascontiguousarray(planar[channel]).tobytes(), checksum)
+        return checksum & 0xFFFFFFFF
+
+    def journal_segments() -> Iterator[Any]:
+        for group, _boundary in CaptureJournal._iter_confirmed_groups(journal_path):
+            check_cancelled()
+            yield from group
+
+    for segment in journal_segments():
+        if segment.sequence_no != valid_segments or segment.first_device_sample != total:
+            break
+        count = segment.sample_count
+        if count > raw_size // (channels * 4) - total:
+            break
+        if segment_checksum(total, count) != segment.crc32:
+            break
+        valid_segments += 1
+        total += count
+    if not valid_segments:
+        raise ValueError("no checksum-verified recording prefix is recoverable")
+    if identity(raw_path) != raw_identity or identity(journal_path) != journal_identity:
+        raise OSError("recovery source changed during validation")
+
+    def blocks() -> Iterator[np.ndarray]:
+        expected_first = 0
+        for index, segment in enumerate(journal_segments()):
+            if index >= valid_segments:
+                break
+            first, count, checksum = segment.first_device_sample, segment.sample_count, segment.crc32
+            if segment.sequence_no != index or first != expected_first:
+                raise OSError("recovery journal changed while recovering")
+            yield from segment_blocks(first, count)
+            # The WAV writer publishes only after exhausting this generator.
+            # A mutation while streaming must therefore fail its temporary
+            # output before it replaces an existing approved take.
+            if segment_checksum(first, count) != checksum:
+                raise OSError("recovery PCM changed while recovering")
+            expected_first += count
+        if expected_first != total:
+            raise OSError("recovery journal changed while recovering")
+        if identity(raw_path) != raw_identity or identity(journal_path) != journal_identity:
+            raise OSError("recovery source changed while recovering")
+        check_cancelled()
+
+    take = TakeInfo(name="Recovered partial recording", file_path=str(output_path),
+                    sample_rate=rate, channels=channels, duration_seconds=total / rate,
+                    status="failed", notes=f"Recovered from {manifest_path.name}; hardware clock/alignment unknown")
+    output_path = Path(output_path)
+    staged = output_path.with_name(f".{output_path.name}.recovery-{uuid.uuid4().hex}.wav")
+    try:
+        if write_take_blocks(str(staged), blocks(), channels=channels, sample_rate=rate,
+                             bit_depth=24, take=take):
+            check_cancelled()
+            os.replace(staged, output_path)
+            take.status = "completed_partial"
+        else:
+            check_cancelled()
+    finally:
+        staged.unlink(missing_ok=True)
+    return take

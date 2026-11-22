@@ -1238,7 +1238,7 @@ class EditPage(QWidget):
             except RuntimeError:
                 pass  # The detached view or its scene has already been destroyed.
 
-    def shutdown_audio_playback(self) -> None:
+    def shutdown_audio_playback(self, *, resume_background: bool = True) -> None:
         """Fully stop and release all edit-page audio worker resources.
 
         ``AudioPlaybackManager.stop()`` only joins the live playback thread;
@@ -1252,7 +1252,16 @@ class EditPage(QWidget):
         self._audio_active = False
         self._audio_timeline_signature = None
         self._disconnect_timeline_level_meter()  # W08：停机即断电平订阅
+        # Shutdown may interrupt a scrub before its mouse-release signal (and
+        # may run before an audio device exists). Invalidate queued callbacks
+        # and release global background-work priority in every case.
+        self._scrub_active = False
+        self._pending_scrub_request_frame = None
+        self._scrub_request_timer_pending = False
+        self._scrub_request_timer_token += 1
+        self._background_media_resume_token += 1
         if manager is None:
+            self._finish_background_media_shutdown(resume_background)
             return
 
         try:
@@ -1266,6 +1275,20 @@ class EditPage(QWidget):
             # Shutdown must continue far enough to let the remaining Qt
             # workers be stopped by their owners; never mask window close.
             logger.exception("Failed to clean up edit-page audio playback")
+        finally:
+            self._finish_background_media_shutdown(resume_background)
+
+    def _finish_background_media_shutdown(self, resume_background: bool) -> None:
+        if resume_background:
+            self._set_thumbnail_playback(False)
+            return
+        # Terminal window shutdown must not use set_playback_active(False):
+        # that would start queued decoders while their UI is being destroyed.
+        from src.features.edit.core.audio_waveform import (
+            WaveformExtractor, ClipEffectWaveformRenderer,
+        )
+        WaveformExtractor.instance().shutdown()
+        ClipEffectWaveformRenderer.instance().shutdown()
 
     def start_timeline_audio_playback(self, timeline: Any, start_frame: int) -> bool:
         """Start timeline audio for a transport driven outside the Edit page.
@@ -1580,6 +1603,7 @@ class EditPage(QWidget):
                     solo=track.is_solo,
                     pan=track.pan,
                     enabled=track.is_enabled,
+                    solo_safe=bool(getattr(track, "solo_safe", False)),
                 )
                 try:
                     register_bus = getattr(audio_mgr, "register_bus_track", None)
@@ -1608,6 +1632,7 @@ class EditPage(QWidget):
                 solo=track.is_solo,
                 pan=track.pan,
                 enabled=track.is_enabled,
+                solo_safe=bool(getattr(track, "solo_safe", False)),
             )
 
             registered_any = False
@@ -2092,6 +2117,7 @@ class EditPage(QWidget):
                 float(getattr(track, "pan", 0.0) or 0.0),
                 bool(getattr(track, "is_muted", False)),
                 bool(getattr(track, "is_solo", False)),
+                bool(getattr(track, "solo_safe", False)),
                 bool(getattr(track, "is_enabled", True)),
                 # AM-05: 轨道级 EQ / FX / automation 此前完全未纳入签名
                 _strip_eq_sig(track),
@@ -2532,6 +2558,7 @@ class EditPage(QWidget):
                     solo=track.is_solo,
                     pan=track.pan,
                     enabled=track.is_enabled,
+                    solo_safe=bool(getattr(track, "solo_safe", False)),
                 )
                 self._audio_manager._mixer.set_track_state(track_id, new_state)
                 logger.debug(f"Audio track state updated: {track_id}")
@@ -3193,7 +3220,8 @@ class EditPage(QWidget):
     def _set_thumbnail_playback(self, active: bool) -> None:
         """Give playback priority over thumbnail and waveform background work."""
         if self._timeline_panel:
-            tl_view = self._timeline_panel.get_timeline_view()
+            get_view = getattr(self._timeline_panel, "get_timeline_view", None)
+            tl_view = get_view() if callable(get_view) else None
             if tl_view and hasattr(tl_view, 'set_playback_active_for_thumbnails'):
                 tl_view.set_playback_active_for_thumbnails(active)
         # Waveform decoding uses PyAV and can otherwise contend with the video

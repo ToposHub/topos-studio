@@ -433,7 +433,7 @@ def resolve_stem_track_ids(
         if not getattr(t, "is_bus", False)
         and (getattr(t, "stem_group", "") or "") == group
         and len(getattr(t, "clips", ()) or ()) > 0
-        and is_track_renderable(t, has_solo)
+        and is_track_renderable(t, False)
         and (not has_solo or t.track_id in audible_solo)
     )
 
@@ -4365,7 +4365,7 @@ class TimelineExporter:
         audio_tracks = []
         bus_tracks = []
         for track in audio_sequence.audio_tracks:
-            if not is_track_renderable(track, has_solo):
+            if not is_track_renderable(track, False):
                 continue
             # RMA-04: solo 闭包过滤——可见/启用/未静音之外，还要在可听闭包内。
             if has_solo and track.track_id not in audible_solo and not getattr(track, "is_bus", False):

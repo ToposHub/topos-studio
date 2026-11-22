@@ -417,6 +417,7 @@ def compute_audible_solo_closure(
     track_ids: list,
     routing: dict,
     solo_ids: list,
+    solo_safe_ids: Optional[list] = None,
 ) -> set:
     """RMA-04: 计算 solo 时的可听节点闭包。
 
@@ -451,26 +452,30 @@ def compute_audible_solo_closure(
     #    （普通轨 solo → 其 output 链上的 Bus 必须保留；Bus solo → 其下游 Bus 链保留。）
     #    send 是并行 tap：solo 节点的 send 目标 Bus 也必须保留（否则 wet 信号丢失），
     #    并从该 send Bus 继续沿 output_bus_id 走到 Master。
+    downstream_seen: set = set()
+
     def _walk_downstream(node_id: str) -> None:
-        cur = node_id
-        seen: set = set()
-        while cur is not None and cur not in seen:
-            seen.add(cur)
+        stack = [node_id]
+        while stack:
+            cur = stack.pop()
+            if cur in downstream_seen or cur not in track_set:
+                continue
+            downstream_seen.add(cur)
             audible.add(cur)
             r = routing.get(cur, {})
             if isinstance(r, dict):
                 # send 目标（并行 tap）也要保留，并继续走其下游
-                for send_bus_id, send_level in r.get("sends", []) or []:
-                    if send_level > 0.0 and send_bus_id in track_set:
-                        _walk_downstream(send_bus_id)
+                for send in r.get("sends", []) or []:
+                    send_bus_id, send_level, _tap, muted = unpack_send(send)
+                    if not muted and send_level > 0.0 and send_bus_id in track_set:
+                        stack.append(send_bus_id)
                 target = r.get("output_bus_id")
             else:
                 target = None
-            if target is None or target not in track_set:
-                break
-            cur = target
+            if target in track_set:
+                stack.append(target)
 
-    for s in solo_set:
+    for s in solo_set | set(solo_safe_ids or ()):
         _walk_downstream(s)
 
     # 2) 上游闭包：solo 的 Bus 需要其上游输入（普通轨 + 上游 Bus）才能收到信号。
@@ -487,8 +492,9 @@ def compute_audible_solo_closure(
         out_target = r.get("output_bus_id")
         if out_target in track_set:
             upstream_of[out_target].append(nid)
-        for send_bus_id, send_level in r.get("sends", []) or []:
-            if send_bus_id in track_set and send_level > 0.0:
+        for send in r.get("sends", []) or []:
+            send_bus_id, send_level, _tap, muted = unpack_send(send)
+            if not muted and send_bus_id in track_set and send_level > 0.0:
                 upstream_of[send_bus_id].append(nid)
 
     def _walk_upstream(bus_id: str) -> None:
@@ -500,8 +506,8 @@ def compute_audible_solo_closure(
                 continue
             seen.add(cur)
             for up in upstream_of.get(cur, []):
-                if up not in audible:
-                    audible.add(up)
+                audible.add(up)
+                if up not in seen:
                     stack.append(up)
 
     # 只对*显式 solo* 的 Bus 取上游输入。普通轨 solo 时，它的下游 Bus
@@ -590,6 +596,7 @@ class AudioTrackState:
     solo: bool = False
     pan: float = 0.0
     enabled: bool = True
+    solo_safe: bool = False
 
     def __post_init__(self) -> None:
         if not self.track_id:
@@ -624,6 +631,7 @@ class AudioTrackState:
             "solo": self.solo,
             "pan": self.pan,
             "enabled": self.enabled,
+            "solo_safe": self.solo_safe,
         }
 
     @staticmethod
@@ -635,6 +643,7 @@ class AudioTrackState:
             solo=data.get("solo", False),
             pan=data.get("pan", 0.0),
             enabled=data.get("enabled", True),
+            solo_safe=bool(data.get("solo_safe", False)),
         )
 
 
@@ -1811,6 +1820,7 @@ class AudioMixer:
         self._pdc_send_edges: Dict[str, int] = {}
         # B09 · 渲染健康遥测：最近 512 块 mix_samples 耗时（ms）
         self._render_times_ms: deque = deque(maxlen=512)
+        self._render_deadlines_ms: deque = deque(maxlen=512)
         self._sound_key_active: Optional[str] = None
         # A5: solo 计数器，避免 mix_samples 每帧 `any(t.solo for t in self._tracks.values())` 遍历。
         # 所有修改 _tracks 的入口（add/remove/set_track_state/update_track_solo）都负责维护它。
@@ -2346,6 +2356,7 @@ class AudioMixer:
                 volume=max(MIN_VOLUME, min(MAX_VOLUME, volume)),
                 muted=state.muted, solo=state.solo,
                 pan=state.pan, enabled=state.enabled,
+                solo_safe=state.solo_safe,
             )
             self._tracks[track_id] = new_state
             return new_state
@@ -2360,6 +2371,7 @@ class AudioMixer:
                 track_id=track_id, volume=state.volume,
                 muted=state.muted, solo=state.solo,
                 pan=max(-1.0, min(1.0, pan)), enabled=state.enabled,
+                solo_safe=state.solo_safe,
             )
             self._tracks[track_id] = new_state
             return new_state
@@ -2374,6 +2386,7 @@ class AudioMixer:
                 track_id=track_id, volume=state.volume,
                 muted=muted, solo=state.solo,
                 pan=state.pan, enabled=state.enabled,
+                solo_safe=state.solo_safe,
             )
             self._tracks[track_id] = new_state
             return new_state
@@ -2396,6 +2409,7 @@ class AudioMixer:
                 track_id=track_id, volume=state.volume,
                 muted=state.muted, solo=solo,
                 pan=state.pan, enabled=state.enabled,
+                solo_safe=state.solo_safe,
             )
             self._tracks[track_id] = new_state
             # AUD-15506: solo 翻转 → 闭包缓存失效
@@ -2681,7 +2695,7 @@ class AudioMixer:
             )
 
     def health_snapshot(self, ring_stats: Optional[dict] = None) -> "AudioHealthSnapshot":
-        """B09：实时混音运行态健康快照（持锁采集；UI 节流消费）。
+        """B09：实时混音运行态健康快照（非阻塞采集；UI 节流消费）。
 
         未知数据保持 None（unknown 语义），不显示健康绿灯。ring 统计由
         调用方注入（播放线程 ring 归 manager 所有）；渲染百分位来自最近
@@ -2691,7 +2705,9 @@ class AudioMixer:
             AudioHealthSnapshot as _Snapshot,
             render_percentiles_ms,
         )
-        with QMutexLocker(self._mutex):
+        if not self._mutex.tryLock(0):
+            return _Snapshot()
+        try:
             ring = ring_stats or {}
             p50, p95, p99, _miss = render_percentiles_ms(
                 tuple(self._render_times_ms))
@@ -2699,6 +2715,16 @@ class AudioMixer:
             deadline = None
             if self._sample_rate and buffer_size:
                 deadline = 1000.0 * float(buffer_size) / float(self._sample_rate)
+            budgets = tuple(self._render_deadlines_ms)
+            durations = tuple(self._render_times_ms)
+            misses = None
+            if budgets and len(budgets) == len(durations):
+                # Each renderer block owns its budget; 23.976fps and sample
+                # rate changes must not reuse a guessed device block length.
+                deadline = float(budgets[-1])
+                misses = sum(duration > budget for duration, budget in zip(durations, budgets))
+            elif deadline is not None and durations:
+                misses = sum(duration > deadline for duration in durations)
             fill = ring.get("fill_ratio")
             if fill is None and ring:
                 filled = ring.get("filled")
@@ -2719,6 +2745,7 @@ class AudioMixer:
                 buffer_size=int(buffer_size) if buffer_size else None,
                 render_p50_ms=p50, render_p95_ms=p95, render_p99_ms=p99,
                 render_deadline_ms=deadline,
+                deadline_miss_count=misses,
                 ring_fill_ratio=(float(fill) if fill is not None else None),
                 underruns=ring.get("underruns"),
                 overflows=ring.get("overflows"),
@@ -2729,6 +2756,9 @@ class AudioMixer:
                 spectrum_metering=bool(self._spectrum_metering_enabled),
                 lufs_metering=bool(self._lufs_metering_enabled),
             )
+
+        finally:
+            self._mutex.unlock()
 
     def set_active_sound_key(self, sound_key: Optional[str]) -> None:
         """B09/B01：记录当前生效的声音身份（图提交时下发；诊断显示用）。"""
@@ -3194,6 +3224,7 @@ class AudioMixer:
                     all_track_ids = list(self._tracks.keys())
                     audible_solo = compute_audible_solo_closure(
                         all_track_ids, self._track_routing, solo_ids,
+                        [tid for tid, st in self._tracks.items() if st.solo_safe],
                     )
                     self._solo_closure_cache = audible_solo
 
@@ -4199,6 +4230,8 @@ class AudioMixer:
             # B09：渲染耗时遥测（窗口 512 块；health_snapshot() 消费百分位）。
             self._render_times_ms.append(
                 (time.perf_counter() - _render_t0) * 1000.0)
+            self._render_deadlines_ms.append(
+                1000.0 * num_samples / self._sample_rate)
             return output, per_track_peaks
 
 
@@ -6633,7 +6666,7 @@ class AudioPlaybackManager(QObject):
         """
         return self._clock.get_audio_time()
 
-    def ring_stats(self) -> dict:
+    def ring_stats(self, *, nonblocking: bool = False) -> dict:
         """
         Final-5 (FINAL-P0-06): 暴露 AudioRingBuffer 统计（underrun/overflow/filled）。
 
@@ -6647,13 +6680,13 @@ class AudioPlaybackManager(QObject):
         if ring is None:
             return {}
         try:
-            return ring.stats()
+            return ring.stats(blocking=False) if nonblocking else ring.stats()
         except Exception:
             return {}
 
     def health_snapshot(self) -> "AudioHealthSnapshot":
         """B09：健康快照（manager 层合并播放线程 ring 统计与 mixer 遥测）。"""
-        return self._mixer.health_snapshot(ring_stats=self.ring_stats())
+        return self._mixer.health_snapshot(ring_stats=self.ring_stats(nonblocking=True))
 
     def set_active_sound_key(self, sound_key: Optional[str]) -> None:
         """B09/B01：声音身份下发（转发 AudioMixer）。"""

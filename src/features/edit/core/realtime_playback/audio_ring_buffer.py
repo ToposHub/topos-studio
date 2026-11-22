@@ -238,8 +238,11 @@ class AudioRingBuffer:
     # stats
     # ------------------------------------------------------------------
 
-    def stats(self) -> dict:
-        with self._lock:
+    def stats(self, *, blocking: bool = True) -> dict:
+        """Read a consistent snapshot; nonblocking diagnostics return unknown when busy."""
+        if not self._lock.acquire(blocking=blocking):
+            return {}
+        try:
             return {
                 "channels": self._channels,
                 "capacity": self._capacity,
@@ -251,6 +254,8 @@ class AudioRingBuffer:
                 "underruns": self._underruns,
                 "overflows": self._overflows,
             }
+        finally:
+            self._lock.release()
 
     def reset_stats(self) -> None:
         with self._lock:

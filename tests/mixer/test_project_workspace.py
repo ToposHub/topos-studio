@@ -1920,6 +1920,227 @@ def test_routing_overview_opens_owned_editor_and_shares_timeline_history(
     overview.close()
 
 
+def test_vca_editor_commits_through_timeline_history_and_survives_reopen(
+    project_host: ProjectHost, qtbot: QtBot,
+) -> None:
+    from src.features.edit.core.timeline_v2 import VcaGroup
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    host.show_mixer()
+    host._on_mixer_show_vca_groups()
+    dialog = host._mixer_vca_dialog
+    assert dialog.isVisible() and dialog.parentWidget() is host
+    dialog.name.setText("Dialogue VCA")
+    dialog.gain.setValue(-6.0)
+    rect = dialog.members.visualItemRect(dialog.members.item(0))
+    qtbot.mouseClick(dialog.members.viewport(), Qt.MouseButton.LeftButton,
+                     pos=QPoint(rect.left() + 8, rect.center().y()))
+    qtbot.mouseClick(dialog.apply_button, Qt.MouseButton.LeftButton)
+    groups = view.get_timeline().vcas
+    assert len(groups) == 1
+    assert groups[0].member_track_ids == ("audio-track",)
+    assert groups[0].gain_db == -6.0
+    assert dialog.groups.currentData() == groups[0].vca_id
+    view.undo()
+    assert not view.get_timeline().vcas
+    assert dialog.groups.count() == 1
+    view.redo()
+    reopened = TimelineSequence.from_dict(view.get_timeline().to_dict())
+    assert reopened.vcas == groups
+    dialog.set_sequence(reopened)
+    dialog.groups.setCurrentIndex(dialog.groups.findData(groups[0].vca_id))
+    qtbot.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)
+    assert not view.get_timeline().vcas
+    view.undo()
+    assert view.get_timeline().vcas == groups
+    host.edit_page._current_timeline = None
+    host._sync_audio_mixer_from_current_timeline()
+    assert not dialog.apply_button.isEnabled()
+    dialog.close()
+
+
+def test_health_panel_uses_current_engine_and_stops_polling_when_hidden(
+    project_host: ProjectHost, qtbot: QtBot,
+) -> None:
+    from src.features.edit.core.audio_health import AudioHealthSnapshot
+
+    host = project_host
+    host._on_mixer_show_health()
+    dialog = host._mixer_health_dialog
+    assert dialog.timer.isActive()
+    unknown = I18N.tr("mixer.health.unknown", "Not measured")
+    assert dialog.table.item(0, 1).text() == unknown
+    calls = []
+    host.edit_page._audio_manager = SimpleNamespace(health_snapshot=lambda: (
+        calls.append(1) or AudioHealthSnapshot(sample_rate=48000, underruns=3)))
+    dialog.refresh()
+    assert dialog.table.item(0, 1).text() == "48000 Hz"
+    assert dialog.table.item(8, 1).text() == "3"
+    assert len(calls) == 1
+    host.edit_page._current_timeline = None
+    dialog.refresh()
+    assert dialog.table.item(0, 1).text() == unknown
+    assert len(calls) == 1
+    dialog.close()
+    assert not dialog.timer.isActive()
+
+
+def test_vca_rename_preserves_existing_gain_precision(project_host: ProjectHost, qtbot: QtBot) -> None:
+    from src.features.edit.core.commands import SetVcaGroupCommand
+    from src.features.edit.core.timeline_v2 import VcaGroup
+    from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    group = VcaGroup("precise-vca", "Dialogue", ("audio-track",), -6.020599913279624)
+    view.execute_command(SetVcaGroupCommand.create(group.vca_id, group))
+    sound_key = build_audio_graph_snapshot(view.get_timeline()).stable_hash
+    host._on_mixer_show_vca_groups()
+    dialog = host._mixer_vca_dialog
+    dialog.name.setText("Renamed dialogue")
+    qtbot.mouseClick(dialog.apply_button, Qt.MouseButton.LeftButton)
+    assert view.get_timeline().vcas[0].gain_db == group.gain_db
+    assert view.get_timeline().vcas[0].name == "Renamed dialogue"
+    assert build_audio_graph_snapshot(view.get_timeline()).stable_hash == sound_key
+    dialog.close()
+
+
+def test_solo_safe_context_action_uses_canonical_command_and_undo(
+    project_host: ProjectHost, qtbot: QtBot, monkeypatch,
+) -> None:
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    host.audio_mixer_panel.track_solo_safe_requested.connect(host._on_mixer_solo_safe_requested)
+    strip = host.audio_mixer_panel._track_mixers["audio-track"]
+    checked = []
+
+    def choose(menu: QMenu, _position: QPoint) -> None:
+        action = next(a for a in menu.actions() if a.objectName() == "mixerSoloSafe")
+        checked.append(action.isChecked())
+        action.trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose)
+    strip._on_label_context_menu(QPoint())
+    assert view.get_timeline().get_track_by_id("audio-track").solo_safe
+    assert strip._solo_safe
+    view.undo()
+    assert not strip._solo_safe
+    assert not view.get_timeline().get_track_by_id("audio-track").solo_safe
+    assert checked == [False]
+
+
+def test_recording_recovery_uses_real_worker_and_existing_take_import_contract(
+    project_host: ProjectHost, qtbot: QtBot, tmp_path: Path, monkeypatch,
+) -> None:
+    from PyQt6.QtWidgets import QFileDialog
+    from src.features.edit.core.recording_manager import _ChunkedPcmBuffer
+
+    host = project_host
+    buffer = _ChunkedPcmBuffer(2, spool_dir=str(tmp_path), durable_spool=True, sample_rate=48000)
+    buffer.append(np.full((2, 1024), 0.25, np.float32))
+    buffer.finish()
+    manifest = str(buffer._durable.manifest_path)
+    output = tmp_path / "recovered.wav"
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (manifest, ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(output), ""))
+    imported = []
+    host._current_edit_project = SimpleNamespace(project_id="origin-project")
+    host._on_take_recorded = lambda track_id, take, **kw: imported.append((track_id, take, kw))
+    before = host.timeline_panel.timeline_view.get_timeline().to_dict()
+    host._on_mixer_recover_recording()
+    worker = host._mixer_recovery_worker
+    qtbot.waitUntil(lambda: bool(imported), timeout=5000)
+    qtbot.waitUntil(lambda: not worker.isRunning(), timeout=5000)
+    assert imported[0][0] == ""
+    assert imported[0][1].status == "completed_partial"
+    assert imported[0][2] == {"recorded_project_id": "origin-project"}
+    assert output.is_file() and Path(manifest).is_file()
+    assert host.timeline_panel.timeline_view.get_timeline().to_dict() == before
+
+
+def test_recording_recovery_cancel_is_nonblocking_and_preserves_output(
+    project_host: ProjectHost, qtbot: QtBot, tmp_path: Path, monkeypatch,
+) -> None:
+    import threading
+    from PyQt6.QtWidgets import QFileDialog
+    from src.features.edit.core import recording_manager
+
+    entered = threading.Event()
+    def recover(_manifest, _output, *, cancel_check):
+        entered.set()
+        while not cancel_check():
+            threading.Event().wait(0.005)
+        raise InterruptedError("cancelled")
+
+    host = project_host
+    output = tmp_path / "existing.wav"
+    output.write_bytes(b"old-delivery")
+    monkeypatch.setattr(recording_manager, "recover_capture_spool", recover)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(tmp_path / "capture.json"), ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(output), ""))
+    host._on_mixer_recover_recording()
+    worker = host._mixer_recovery_worker
+    progress = host._mixer_recovery_progress
+    qtbot.waitUntil(entered.is_set)
+    qtbot.mouseClick(progress.findChild(QPushButton), Qt.MouseButton.LeftButton)
+    assert host._mixer_recovery_key is None
+    assert output.read_bytes() == b"old-delivery"
+    qtbot.waitUntil(lambda: not worker.isRunning(), timeout=5000)
+
+
+def test_bus_route_preview_cancel_preserves_bus_kind_and_current_undo_state(
+    project_host: ProjectHost, qtbot: QtBot,
+) -> None:
+    from src.features.edit.core.commands import SetTrackRoutingCommand
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    host._on_mixer_add_bus_requested()
+    host._on_mixer_add_bus_requested()
+    first, second = [t for t in view.get_timeline().audio_tracks if t.is_bus]
+    calls = []
+    host.edit_page._audio_manager = SimpleNamespace(set_track_routing=lambda *a, **k: calls.append((a, k)))
+    host._on_mixer_show_routing(first.track_id)
+    host._on_mixer_routing_preview(first.track_id, {"output_bus_id": second.track_id, "sends": []})
+    assert calls[-1][1]["is_bus"] is True
+    view.execute_command(SetTrackRoutingCommand.create(first.track_id, second.track_id, ()))
+    host._routing_dialog.close()
+    assert calls[-1][0][1] == second.track_id
+    assert calls[-1][1]["is_bus"] is True
+
+
+def test_stale_routing_editor_cannot_preview_or_commit_to_another_sequence(
+    project_host: ProjectHost, qtbot: QtBot,
+) -> None:
+    from dataclasses import replace
+
+    host = project_host
+    view = host.timeline_panel.timeline_view
+    host._on_mixer_add_bus_requested()
+    original = view.get_timeline()
+    bus = next(track for track in original.audio_tracks if track.is_bus)
+    host._on_mixer_show_routing("audio-track")
+    previous_editor = host._routing_dialog
+    switched = replace(original, timeline_id="other-sequence")
+    view.load_timeline(switched)
+    host.edit_page._current_timeline = switched
+    calls = []
+    host.edit_page._audio_manager = SimpleNamespace(
+        set_track_routing=lambda *args, **kwargs: calls.append((args, kwargs)))
+    payload = {"output_bus_id": bus.track_id, "sends": []}
+    undo_count = len(view._command_stack._undo_stack)
+    host._on_mixer_routing_preview("audio-track", payload)
+    host._on_mixer_routing_committed("audio-track", payload)
+    assert calls == []
+    assert view.get_timeline() is switched
+    assert len(view._command_stack._undo_stack) == undo_count
+    host._on_mixer_show_routing("audio-track")
+    assert host._routing_dialog is not previous_editor
+    assert host._routing_dialog_baseline["timeline_id"] == "other-sequence"
+    host._routing_dialog.close()
+
+
 @pytest.mark.parametrize("narrow", [False, True], ids=["standard", "compact"])
 def test_channel_strip_footer_text_fits_under_dark_theme(qtbot: QtBot, narrow: bool) -> None:
     window = QWidget()

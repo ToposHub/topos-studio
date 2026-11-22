@@ -254,7 +254,7 @@ def main() -> None:
         "audit_date": "2026-11-22",
         "scope": "read-only synthetic probes; no media/device/project mutations",
         "source_revision": revision,
-        "source_state": "working tree including approved mixer UI changes",
+        "source_state": "working tree including mixer plan implementation and completion review",
         "python": platform.python_version(),
         "numpy": np.__version__,
         "sample_rate": 48000,

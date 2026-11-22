@@ -1008,6 +1008,57 @@
     "magenta": "Magenta",
     "automation": {
       "write_protected": "Track automation is write-protected"
+    },
+    "vca": {
+      "title": "VCA groups",
+      "new": "New group",
+      "name": "Name",
+      "gain": "Group gain",
+      "muted": "Mute group",
+      "description": "Members keep their routing. Overlapping group gains multiply.",
+      "members": "Member audio tracks and buses",
+      "delete": "Delete group",
+      "missing": "Some members are offline; applying removes missing members.",
+      "name_required": "Enter a group name.",
+      "apply": "Apply",
+      "close": "Close",
+      "rejected": "VCA change rejected"
+    },
+    "health": {
+      "title": "Audio engine health",
+      "metric": "Metric",
+      "value": "Measured value",
+      "unknown": "Not measured",
+      "sample_rate": "Sample rate",
+      "buffer_size": "Device block",
+      "render_p50_ms": "Render p50",
+      "render_p95_ms": "Render p95",
+      "render_p99_ms": "Render p99",
+      "render_deadline_ms": "Render block budget",
+      "deadline_miss_count": "Deadline misses in window",
+      "ring_fill_ratio": "Ring fill",
+      "underruns": "Underruns",
+      "overflows": "Overflows",
+      "pdc_total_samples": "PDC",
+      "active_tracks": "Audio tracks",
+      "active_buses": "Buses",
+      "sound_key_active": "Active sound identity"
+    },
+    "clip_editor": {
+      "long_source_view": "Full source waveform · Zoom in for sample detail. Clip Edit audition and processing currently support up to 300 seconds; the full clip range stays intact."
+    },
+    "console": {
+      "solo_safe": "Solo safe"
+    },
+    "routing": {
+      "rejected": "Routing change rejected"
+    },
+    "recovery": {
+      "title": "Recover interrupted recording…",
+      "progress": "Verifying and recovering recorded audio…",
+      "cancel": "Cancel",
+      "failed": "Recording recovery failed",
+      "complete": "Recovered partial recording"
     }
   },
   "mask": {

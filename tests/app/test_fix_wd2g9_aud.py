@@ -95,6 +95,7 @@ def _clean_main_window(mw) -> None:
     for key in (
         "_shutdown_playback_pipeline", "_confirm_save_before_close",
         "_update_checker", "script_engine", "denoise_panel", "deblur_panel",
+        "_cancel_mixer_recording_recovery",
     ):
         mw.__dict__.pop(key, None)
 
@@ -151,6 +152,7 @@ def test_close_cancel_aborts_before_any_shutdown(main_window):
     mw = main_window
     _reset_shutdown_state(mw)
     mw._confirm_save_before_close = Mock(return_value=False)
+    mw._cancel_mixer_recording_recovery = Mock()
 
     event = _close_event()
     mw.closeEvent(event)
@@ -160,6 +162,7 @@ def test_close_cancel_aborts_before_any_shutdown(main_window):
     mw.tracking_service.shutdown.assert_not_called()
     mw.files_panel.shutdown.assert_not_called()
     mw._shutdown_playback_pipeline.assert_not_called()
+    mw._cancel_mixer_recording_recovery.assert_not_called()
     # 取消后管线未进入不可恢复的已停机状态
     assert mw._pipeline_shutdown_done is False
 
@@ -175,12 +178,14 @@ def test_close_confirm_runs_before_all_shutdowns(main_window, monkeypatch):
     mw.tracking_service.shutdown.side_effect = lambda: order.append("tracking")
     mw.files_panel.shutdown.side_effect = lambda: order.append("files")
     mw._shutdown_playback_pipeline.side_effect = lambda: order.append("pipeline")
+    mw._cancel_mixer_recording_recovery = lambda: order.append("recovery")
 
     event = _close_event()
     mw.closeEvent(event)
 
     assert order[0] == "confirm"
-    assert set(order[1:]) == {"tangent", "tracking", "files", "pipeline"}
+    assert set(order[1:]) == {"recovery", "tangent", "tracking", "files", "pipeline"}
+    assert order.index("recovery") < order.index("pipeline")
     assert order.index("confirm") < min(
         order.index(k) for k in ("tangent", "tracking", "files", "pipeline"))
 
@@ -314,7 +319,7 @@ def test_shutdown_playback_pipeline_idempotent(main_window):
     mw._shutdown_playback_pipeline()  # 第二次必须整体跳过
 
     pause.assert_called_once()
-    audio_shutdown.assert_called_once()
+    audio_shutdown.assert_called_once_with(resume_background=False)
     stop_playback.assert_called_once()
     preview_shutdown.assert_called_once()
     assert mw._pipeline_shutdown_done is True

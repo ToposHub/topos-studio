@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import json
 from pathlib import Path
 
 import numpy as np
@@ -219,7 +220,8 @@ class TestJournalCrossSession:
         assert j2.commit_segment(0) is True  # 不得被旧会话 seq0 吞掉
         j2.close()
         lines = path.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) == 4
+        # v2 checkpoints are separate records; still exactly four PCM segments.
+        assert sum("sequence_no" in json.loads(line) for line in lines) == 4
         # 恢复前缀 = 最新会话的前缀（1 段 × 64 样本）
         j3 = CaptureJournal(path)
         count, samples = j3.recoverable_prefix()

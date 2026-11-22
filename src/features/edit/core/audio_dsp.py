@@ -3912,6 +3912,44 @@ def _ensure_effect_registry() -> dict:
     return _EFFECT_CLASS_REGISTRY
 
 
+class PdcDelayLine:
+    """Fixed storage for one edge; processing work depends on block length."""
+
+    def __init__(self, channels: int, delay: int) -> None:
+        self.buffer = np.zeros((channels, delay), dtype=np.float32)
+        self.cursor = 0
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.buffer.shape
+
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
+        # Diagnostics only. The chronological history is not needed in the
+        # render path, so avoid rolling/copying delay-sized buffers per block.
+        data = self.buffer if dtype is None else self.buffer.astype(dtype, copy=False)
+        return data.copy() if copy else data
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        width = samples.shape[-1]
+        delay = self.buffer.shape[-1]
+        out = np.empty(samples.shape, dtype=np.float32)
+        if width >= delay:
+            first = delay - self.cursor
+            out[:, :first] = self.buffer[:, self.cursor:]
+            out[:, first:delay] = self.buffer[:, :self.cursor]
+            out[:, delay:] = samples[:, :width - delay]
+            self.buffer[:] = samples[:, width - delay:]
+            self.cursor = 0
+        else:
+            first = min(width, delay - self.cursor)
+            out[:, :first] = self.buffer[:, self.cursor:self.cursor + first]
+            out[:, first:] = self.buffer[:, :width - first]
+            self.buffer[:, self.cursor:self.cursor + first] = samples[:, :first]
+            self.buffer[:, :width - first] = samples[:, first:]
+            self.cursor = (self.cursor + width) % delay
+        return out
+
+
 def apply_pdc_delay_line(
     lines: dict, node_id: str, delay: int, samples: np.ndarray,
 ) -> np.ndarray:
@@ -3919,17 +3957,20 @@ def apply_pdc_delay_line(
 
     首块前视为已有 ``delay`` 个零样本的历史——输出从第一块起就对齐
     绝对时间（被推迟的内容由尾音预算延长的 drain 区释放）。``lines``
-    是 {node_id: 尾部缓冲}，调用方负责清空时机（seek/重算）。
+    是 {node_id: PdcDelayLine}，调用方负责清空时机（seek/重算）。
+    固定延迟存储复用；不再每块 concatenate 复制整条长延迟线。
     """
     if delay <= 0 or samples.shape[-1] == 0:
         return samples
     buffered = lines.get(node_id)
-    pending = (buffered if buffered is not None and buffered.shape[-1] > 0
-               else np.zeros((samples.shape[0], delay), dtype=np.float32))
-    combined = np.concatenate([pending, samples], axis=1)
-    out = combined[:, :samples.shape[-1]]
-    lines[node_id] = combined[:, samples.shape[-1]:]
-    return np.ascontiguousarray(out, dtype=np.float32)
+    if not isinstance(buffered, PdcDelayLine) or buffered.shape != (samples.shape[0], delay):
+        ring = PdcDelayLine(samples.shape[0], delay)
+        # Compatibility for already-buffered array state in old host adapters.
+        if isinstance(buffered, np.ndarray) and buffered.shape[0] == samples.shape[0]:
+            count = min(delay, buffered.shape[-1])
+            ring.buffer[:, :count] = buffered[:, :count]
+        lines[node_id] = buffered = ring
+    return buffered.process(samples)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

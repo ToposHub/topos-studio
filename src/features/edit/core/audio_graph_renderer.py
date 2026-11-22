@@ -140,7 +140,7 @@ class _TrackNode:
     """
 
     __slots__ = (
-        "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled",
+        "track_id", "is_bus", "volume", "pan", "muted", "solo", "enabled", "solo_safe",
         "output_bus_id", "bus_layout", "sends", "automation", "automation_mode",
         "automation_trim", "eq_filter", "effect_chain", "panner", "fx_sampler",
     )
@@ -152,6 +152,7 @@ class _TrackNode:
         self.pan = float(getattr(track, "pan", 0.0))
         self.muted = bool(getattr(track, "is_muted", False))
         self.solo = bool(getattr(track, "is_solo", False))
+        self.solo_safe = bool(getattr(track, "solo_safe", False))
         self.enabled = bool(getattr(track, "is_enabled", True))
         # AM-07: 自动化模式（off/read/write/touch/latch）
         self.automation_mode = str(getattr(track, "automation_mode", "off") or "off").lower()
@@ -614,6 +615,7 @@ class AudioGraphRenderer:
             return set()
         return compute_audible_solo_closure(
             list(self._nodes.keys()), self._build_routing_dict(), solo_ids,
+            [nid for nid, node in self._nodes.items() if node.solo_safe],
         )
 
     def is_track_audible(self, track_id: str, has_solo: bool, audible: set = None) -> bool:

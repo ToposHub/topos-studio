@@ -41,7 +41,7 @@ from fractions import Fraction
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional
 
-from PyQt6.QtWidgets import QMessageBox, QFileDialog, QWidget
+from PyQt6.QtWidgets import QMessageBox, QFileDialog, QWidget, QProgressDialog
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QPixmap
 
@@ -2713,6 +2713,9 @@ class EditControllerMixin:
         panel = getattr(self, 'audio_mixer_panel', None)
         if panel is None or timeline is None:
             return
+        vca_dialog = getattr(self, "_mixer_vca_dialog", None)
+        if vca_dialog is not None and vca_dialog.isVisible():
+            vca_dialog.set_sequence(timeline)
         audio_tracks = getattr(timeline, 'audio_tracks', ())
         tracks = []
         for idx, track in enumerate(audio_tracks, start=1):
@@ -2724,6 +2727,7 @@ class EditControllerMixin:
                 "pan": float(getattr(track, 'pan', 0.0)),
                 "is_muted": bool(getattr(track, 'is_muted', False)),
                 "is_solo": bool(getattr(track, 'is_solo', False)),
+                "solo_safe": bool(getattr(track, 'solo_safe', False)),
                 "is_bus": getattr(track, "is_bus", False),
                 "output_bus_id": getattr(track, "output_bus_id", None),
                 "sends": [{"target_bus_id": send.target_bus_id, "level": send.level,
@@ -2846,6 +2850,9 @@ class EditControllerMixin:
                 panel.set_master_volume_linear(1.0)
                 panel.set_master_muted(False)
                 panel.set_master_strip_state(None, None)
+            vca_dialog = getattr(self, "_mixer_vca_dialog", None)
+            if vca_dialog is not None:
+                vca_dialog.set_sequence(None)
         # 混音器录音工作流：轨集/时间线变化后重算 patch、arm 与录制状态。
         refresh = getattr(self, "_refresh_mixer_recording_controls", None)
         if callable(refresh):
@@ -4806,7 +4813,9 @@ class EditControllerMixin:
         existing = getattr(self, "_routing_dialog", None)
         if existing is not None:
             try:
-                if existing.isVisible() and existing._track_id == track_id:
+                baseline = getattr(self, "_routing_dialog_baseline", None) or {}
+                if (existing.isVisible() and existing._track_id == track_id
+                        and baseline.get("timeline_id") == sequence.timeline_id):
                     existing.raise_()
                     existing.activateWindow()
                     return
@@ -4835,6 +4844,8 @@ class EditControllerMixin:
         # 关闭对话框时把引擎恢复到最后一次提交（无提交则恢复打开前原路由）。
         dialog.routing_preview.connect(self._on_mixer_routing_preview)
         self._routing_dialog_baseline = {
+            "timeline_id": sequence.timeline_id,
+            "is_bus": bool(track.is_bus),
             "output_bus_id": getattr(track, "output_bus_id", None),
             "sends": [
                 (s.target_bus_id, s.level,
@@ -4904,6 +4915,12 @@ class EditControllerMixin:
         sequence = EditControllerMixin._mixer_routing_sequence(tview)
         if sequence is None:
             return
+        baseline = getattr(self, "_routing_dialog_baseline", None) or {}
+        if ("timeline_id" in baseline
+                and baseline["timeline_id"] != sequence.timeline_id):
+            # The editor is nonmodal. Track IDs can repeat in another
+            # sequence, so an old editor must not preview into the new graph.
+            return
         try:
             from src.features.edit.core.audio_playback import validate_routing_graph
             bus_ids, routing = self._build_routing_validation_graph(
@@ -4925,13 +4942,14 @@ class EditControllerMixin:
                      bool(getattr(s, "muted", False)))
                     for s in new_sends if getattr(s, "enabled", True)
                 ]
-                mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
+                mgr.set_track_routing(track_id, output_bus_id, sends_list,
+                                      is_bus=bool(sequence.get_track_by_id(track_id).is_bus))
                 self._routing_dialog_preview_dirty = True
             except Exception as e:
                 logger.debug("routing preview apply failed: %s", e)
 
     def _on_mixer_routing_dialog_finished(self, _result: int) -> None:
-        """E18: Routing 对话框关闭——回滚未提交的预览路由（引擎侧 only）。"""
+        """Restore the current committed model, including edits/undo while open."""
         dialog = getattr(self, "_routing_dialog", None)
         dirty = getattr(self, "_routing_dialog_preview_dirty", False)
         baseline = getattr(self, "_routing_dialog_baseline", None)
@@ -4939,125 +4957,65 @@ class EditControllerMixin:
         self._routing_dialog_baseline = None
         if not dirty or baseline is None or dialog is None:
             return
-        mgr = self._get_mixer_audio_manager()
-        if mgr is not None and hasattr(mgr, 'set_track_routing'):
-            try:
-                mgr.set_track_routing(
-                    dialog._track_id, baseline.get("output_bus_id"),
-                    list(baseline.get("sends", [])), is_bus=False,
-                )
-            except Exception as e:
-                logger.debug("routing preview rollback failed: %s", e)
+        view = getattr(getattr(self, "timeline_panel", None), "timeline_view", None)
+        sequence = EditControllerMixin._mixer_routing_sequence(view)
+        if sequence is None or sequence.timeline_id != baseline.get("timeline_id"):
+            return
+        track = sequence.get_track_by_id(dialog._track_id)
+        if track is None:
+            return
+        manager = self._get_mixer_audio_manager()
+        if manager is not None:
+            manager.set_track_routing(
+                track.track_id, track.output_bus_id,
+                [(s.target_bus_id, s.level, s.tap, s.muted) for s in track.sends if s.enabled],
+                is_bus=track.is_bus,
+            )
 
-    def _on_mixer_routing_committed(self, track_id: str, payload) -> None:
-        """AM-08 阶段 4.2: Routing 提交（output_bus + sends 整体替换）。
+    def _on_mixer_routing_committed(self, track_id: str, payload: Any) -> None:
+        """Commit the entire validated route once; publish engine state afterwards."""
+        from src.features.edit.core.commands import SetTrackRoutingCommand
 
-        实时听感：mgr.set_track_routing（与命令栈解耦）。
-        命令栈：SetTrackOutputBusCommand + AddSendCommand/RemoveSendCommand/UpdateSendCommand。
-        AUD-37810: 提交前以完整路由图复核 —— 校验失败（路由环/未知目标）
-        必须阻止提交（实时听感与命令栈都不落），不得静默通过。
-        """
         if not isinstance(payload, dict):
             return
-        output_bus_id = payload.get("output_bus_id")
-        new_sends = payload.get("sends", []) or []
-
-        # E18: 提交后基线更新为提交值——此后关闭对话框不再回滚到
-        # 对话框打开前的旧路由。
+        view = getattr(getattr(self, "timeline_panel", None), "timeline_view", None)
+        sequence = EditControllerMixin._mixer_routing_sequence(view)
+        track = sequence.get_track_by_id(track_id) if sequence is not None else None
+        if track is None:
+            return
+        baseline = getattr(self, "_routing_dialog_baseline", None) or {}
+        if ("timeline_id" in baseline
+                and baseline["timeline_id"] != sequence.timeline_id):
+            return
+        output = payload.get("output_bus_id")
+        sends = tuple(payload.get("sends", ()) or ())
+        if not EditControllerMixin._validate_mixer_routing(self, sequence, track_id, output, sends):
+            return
         try:
-            self._routing_dialog_baseline = {
-                "output_bus_id": output_bus_id,
-                "sends": [
-                    (s.target_bus_id, s.level,
-                     str(getattr(s, "tap", "post_fader") or "post_fader"),
-                     bool(getattr(s, "muted", False)))
-                    for s in new_sends if getattr(s, "enabled", True)
-                ],
-            }
-            self._routing_dialog_preview_dirty = False
-        except Exception:  # noqa: BLE001 基线更新失败不影响提交链路
-            logger.debug("routing baseline update failed", exc_info=True)
-
-        tview = getattr(getattr(self, 'timeline_panel', None), 'timeline_view', None)
-        if tview is None:
+            command = SetTrackRoutingCommand.create(track_id, output, sends)
+            # Public production entry; retain older controller host adapters.
+            execute = getattr(view, "execute_command", None) or view._execute_command
+            execute(command)
+        except (ValueError, TypeError, AttributeError) as exc:
+            logger.warning("Routing change rejected: %s", exc)
+            status = getattr(self, "status_bar", None)
+            if status is not None:
+                status.showMessage(I18N.tr("mixer.routing.rejected", "Routing change rejected") + f": {exc}", 5000)
             return
-        sequence = EditControllerMixin._mixer_routing_sequence(tview)
-        if sequence is None:
+        committed = EditControllerMixin._mixer_routing_sequence(view).get_track_by_id(track_id)
+        if committed is None or committed.output_bus_id != output or committed.sends != sends:
+            # Provisional/locked views may decline a command without raising.
             return
-
-        # AUD-37810 消费端提交门控（防御纵深）：发射侧 RoutingDialog 已按
-        # 校验结果阻止发射，此处再以完整图复核，保证任何发射路径都无法
-        # 把非法路由写入引擎或命令栈。
-        if not EditControllerMixin._validate_mixer_routing(self, sequence, track_id, output_bus_id, new_sends):
-            return
-
-        # 实时听感（MX-14: 4 元组带 tap/muted）
-        mgr = self._get_mixer_audio_manager()
-        if mgr is not None and hasattr(mgr, 'set_track_routing'):
-            try:
-                sends_list = [
-                    (s.target_bus_id, s.level,
-                     str(getattr(s, "tap", "post_fader") or "post_fader"),
-                     bool(getattr(s, "muted", False)))
-                    for s in new_sends if getattr(s, "enabled", True)
-                ]
-                mgr.set_track_routing(track_id, output_bus_id, sends_list, is_bus=False)
-            except Exception as e:
-                logger.debug("routing apply failed: %s", e)
-
-        # 命令栈：先 output_bus，再 sends（diff 当前 vs 新）
-        try:
-            from src.features.edit.core.commands import (
-                SetTrackOutputBusCommand, AddSendCommand, RemoveSendCommand, UpdateSendCommand,
-            )
-            track = sequence.get_track_by_id(track_id)
-            if track is None:
-                return
-
-            # output_bus 变更
-            if getattr(track, "output_bus_id", None) != output_bus_id:
-                cmd = SetTrackOutputBusCommand.create(track_id, output_bus_id)
-                tview._execute_command(cmd)
-                # 重新获取 track（命令执行后 timeline 已变）
-                track = EditControllerMixin._mixer_routing_sequence(tview).get_track_by_id(track_id)
-
-            # sends diff：以 target_bus_id 为 key 比较（简化：整体替换）
-            old_sends = {s.target_bus_id: s for s in (track.sends or ())}
-            new_sends_map = {s.target_bus_id: s for s in new_sends}
-
-            # 删除不再存在的
-            for target, old_s in old_sends.items():
-                if target not in new_sends_map:
-                    cmd = RemoveSendCommand.create(track_id, old_s.send_id)
-                    tview._execute_command(cmd)
-            # 重新获取
-            track = EditControllerMixin._mixer_routing_sequence(tview).get_track_by_id(track_id)
-            old_sends = {s.target_bus_id: s for s in (track.sends or ())}
-
-            # 添加新的 + 更新已变化的（MX-14: tap/muted 参与 diff 与提交）
-            for target, new_s in new_sends_map.items():
-                new_tap = str(getattr(new_s, "tap", "post_fader") or "post_fader")
-                new_muted = bool(getattr(new_s, "muted", False))
-                if target not in old_sends:
-                    cmd = AddSendCommand.create(
-                        track_id, target, level=float(new_s.level),
-                        tap=new_tap, muted=new_muted)
-                    tview._execute_command(cmd)
-                else:
-                    old_s = old_sends[target]
-                    if (abs(old_s.level - new_s.level) > 1e-6
-                            or old_s.enabled != new_s.enabled
-                            or str(getattr(old_s, "tap", "post_fader")) != new_tap
-                            or bool(getattr(old_s, "muted", False)) != new_muted):
-                        cmd = UpdateSendCommand.create(
-                            track_id, old_s.send_id,
-                            level=float(new_s.level),
-                            enabled=bool(new_s.enabled),
-                            tap=new_tap, muted=new_muted,
-                        )
-                        tview._execute_command(cmd)
-        except Exception as e:
-            logger.warning("Failed to commit routing: %s", e)
+        manager = self._get_mixer_audio_manager()
+        sends_list = [(s.target_bus_id, s.level, s.tap, s.muted)
+                      for s in committed.sends if s.enabled]
+        if manager is not None and hasattr(manager, "set_track_routing"):
+            manager.set_track_routing(track_id, output, sends_list, is_bus=committed.is_bus)
+        self._routing_dialog_baseline = {
+            "timeline_id": sequence.timeline_id, "is_bus": committed.is_bus,
+            "output_bus_id": output, "sends": sends_list,
+        }
+        self._routing_dialog_preview_dirty = False
 
     def _validate_mixer_routing(
         self, sequence: Any, track_id: str, output_bus_id: str | None, sends: Iterable[Any],
@@ -5090,6 +5048,145 @@ class EditControllerMixin:
             if self._validate_mixer_routing(sequence, track_id, output_bus_id, track.sends):
                 view.execute_command(SetTrackOutputBusCommand.create(track_id, output_bus_id))
         self._sync_audio_mixer_from_current_timeline()
+
+    def _on_mixer_solo_safe_requested(self, track_id: str, safe: bool) -> None:
+        from src.features.edit.core.commands import SetTrackSoloSafeCommand
+
+        view = self._edit_timeline_view()
+        sequence = view.get_timeline() if view is not None else None
+        track = sequence.get_track_by_id(track_id) if sequence is not None else None
+        if track is None or track.solo_safe == safe or view.has_provisional_timeline():
+            return
+        view.execute_command(SetTrackSoloSafeCommand.create(track_id, safe))
+
+    def _on_mixer_recover_recording(self) -> None:
+        """Recover a checkpointed take in the existing cancellable audio worker."""
+        from pathlib import Path
+        from src.features.edit.core.recording_manager import recover_capture_spool
+        from src.features.mixer.ui.clip_preview_worker import ClipPreviewWorker
+
+        previous = getattr(self, "_mixer_recovery_worker", None)
+        if (getattr(self, "_mixer_recovery_key", None) is not None
+                or previous is not None and previous.isRunning()):
+            return
+        parent = self if isinstance(self, QWidget) else None
+        title = I18N.tr("mixer.recovery.title", "Recover interrupted recording…")
+        manifest, _ = QFileDialog.getOpenFileName(parent, title, "", "Topos capture (topos_capture_*.json)")
+        if not manifest:
+            return
+        output, _ = QFileDialog.getSaveFileName(
+            parent, title, str(Path(manifest).with_suffix(".recovered.wav")), "WAV (*.wav)")
+        if not output:
+            return
+        project = getattr(self, "_current_edit_project", None)
+        identity = (uuid.uuid4().hex, getattr(project, "project_id", None), output)
+        worker = ClipPreviewWorker()
+        progress = QProgressDialog(
+            I18N.tr("mixer.recovery.progress", "Verifying and recovering recorded audio…"),
+            I18N.tr("mixer.recovery.cancel", "Cancel"), 0, 0, parent)
+        progress.setWindowTitle(title)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        self._mixer_recovery_key = identity
+        self._mixer_recovery_worker = worker
+        self._mixer_recovery_progress = progress
+        progress.canceled.connect(self._cancel_mixer_recording_recovery)
+        progress.destroyed.connect(worker.finish)
+        worker.preview_ready.connect(self._on_mixer_recording_recovered)
+        worker.preview_failed.connect(self._on_mixer_recording_recovery_failed)
+        worker.finished.connect(self._on_mixer_recording_recovery_worker_finished)
+        worker.submit_cancellable(identity, lambda cancelled: (
+            identity, recover_capture_spool(manifest, output, cancel_check=cancelled)))
+        progress.show()
+
+    def _cancel_mixer_recording_recovery(self) -> None:
+        self._mixer_recovery_key = None
+        worker = getattr(self, "_mixer_recovery_worker", None)
+        if worker is not None:
+            worker.finish()
+        progress = getattr(self, "_mixer_recovery_progress", None)
+        self._mixer_recovery_progress = None
+        if progress is not None:
+            progress.close()
+            progress.deleteLater()
+
+    def _on_mixer_recording_recovery_worker_finished(self) -> None:
+        if getattr(self, "_mixer_recovery_worker", None) is self.sender():
+            self._mixer_recovery_worker = None
+
+    def _on_mixer_recording_recovery_failed(self, key: tuple, message: str) -> None:
+        if key != getattr(self, "_mixer_recovery_key", None):
+            return
+        self._cancel_mixer_recording_recovery()
+        self.status_bar.showMessage(
+            I18N.tr("mixer.recovery.failed", "Recording recovery failed") + f": {message}", 8000)
+
+    def _on_mixer_recording_recovered(self, payload: tuple) -> None:
+        key, take = payload
+        if key != getattr(self, "_mixer_recovery_key", None):
+            return
+        self._cancel_mixer_recording_recovery()
+        if take.status != "completed_partial":
+            self.status_bar.showMessage(I18N.tr("mixer.recovery.failed", "Recording recovery failed"), 8000)
+            return
+        # This enters the existing asset/undo path, never guesses a missing
+        # hardware-clock timeline anchor. A project switch preserves the WAV.
+        if key[1] is not None:
+            self._on_take_recorded("", take, recorded_project_id=key[1])
+        self.status_bar.showMessage(
+            I18N.tr("mixer.recovery.complete", "Recovered partial recording") + f": {take.file_path}", 8000)
+
+    def _on_mixer_show_vca_groups(self) -> None:
+        from src.features.mixer.ui.vca_groups import VcaGroupsDialog
+
+        view = self._edit_timeline_view()
+        sequence = view.get_timeline() if view is not None else None
+        if sequence is None:
+            return
+        dialog = getattr(self, "_mixer_vca_dialog", None)
+        if dialog is None:
+            dialog = VcaGroupsDialog(view.window())
+            dialog.group_requested.connect(self._on_mixer_vca_group_requested)
+            self._mixer_vca_dialog = dialog
+        dialog.set_sequence(sequence)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_mixer_vca_group_requested(self, identity: str, group: Any) -> None:
+        from src.features.edit.core.commands import SetVcaGroupCommand
+
+        view = self._edit_timeline_view()
+        if view is None or view.get_timeline() is None or view.has_provisional_timeline():
+            return
+        try:
+            view.execute_command(SetVcaGroupCommand.create(identity, group))
+        except ValueError as exc:
+            logger.warning("VCA edit rejected: %s", exc)
+            status = getattr(self, "status_bar", None)
+            if status is not None:
+                status.showMessage(I18N.tr("mixer.vca.rejected", "VCA change rejected") + f": {exc}", 5000)
+        self._sync_audio_mixer_from_current_timeline()
+
+    def _on_mixer_show_health(self) -> None:
+        from src.features.mixer.ui.engine_health import EngineHealthDialog
+
+        dialog = getattr(self, "_mixer_health_dialog", None)
+        if dialog is None:
+            view = self._edit_timeline_view()
+            dialog = EngineHealthDialog(self._mixer_health_snapshot,
+                                        view.window() if view is not None else None)
+            self._mixer_health_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _mixer_health_snapshot(self) -> Any:
+        """Use the existing engine only; opening diagnostics never creates one."""
+        manager = self._get_mixer_audio_manager()
+        if manager is None or getattr(getattr(self, "edit_page", None), "_current_timeline", None) is None:
+            return None
+        return manager.health_snapshot()
 
     def _on_mixer_add_bus_requested(self) -> None:
         from src.features.edit.core.commands import AddBusCommand

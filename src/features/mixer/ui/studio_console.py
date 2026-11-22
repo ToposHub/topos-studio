@@ -33,6 +33,7 @@ class StudioChannelStrip(TrackMixerWidget):
 
     output_bus_requested = pyqtSignal(str, object)
     recording_input_requested = pyqtSignal(str)
+    solo_safe_requested = pyqtSignal(str, bool)
 
     def __init__(
         self, track_id: str, track_name: str, track_tag: str, parent: QWidget,
@@ -43,6 +44,8 @@ class StudioChannelStrip(TrackMixerWidget):
         self._playback_levels = (VOLUME_DB_MIN, VOLUME_DB_MIN)
         self._showing_input_level = False
         super().__init__(track_id, track_name, track_tag, parent, is_master)
+        self._solo_safe = False
+        self.mixer_menu_requested.connect(self._append_solo_safe_action)
         for widget in (self._fx_badge, self._dy_badge, self._eq_badge, self._meter_section, self._gain_section):
             widget.hide()
 
@@ -124,6 +127,18 @@ class StudioChannelStrip(TrackMixerWidget):
         if not is_master:
             self.set_output_routing(None, ())
         self._sync_recording_controls()
+
+    def _append_solo_safe_action(self, menu: QMenu) -> None:
+        if self._is_master:
+            return
+        action = menu.addAction(I18N.tr("mixer.console.solo_safe", "Solo safe"))
+        action.setObjectName("mixerSoloSafe")
+        action.setCheckable(True)
+        action.setChecked(self._solo_safe)
+        action.triggered.connect(lambda checked: self.solo_safe_requested.emit(self._track_id, checked))
+
+    def set_solo_safe(self, safe: bool) -> None:
+        self._solo_safe = safe
 
     def set_recording_input(self, label: str) -> None:
         """Apply the host's patched input label to the track."""
@@ -333,6 +348,10 @@ class StudioAudioMixerPanel(AudioMixerPanel):
     adr_requested = pyqtSignal()
     output_levels_changed = pyqtSignal(list)
     output_meter_reset = pyqtSignal()
+    vca_groups_requested = pyqtSignal()
+    health_requested = pyqtSignal()
+    track_solo_safe_requested = pyqtSignal(str, bool)
+    recover_recording_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         self._recording_inputs: dict[str, str] = {}
@@ -433,6 +452,9 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         menu.clear()
         self._populate_mixer_menu(menu)
         menu.addSeparator()
+        menu.addAction(I18N.tr("mixer.vca.title", "VCA groups"), self.vca_groups_requested.emit)
+        menu.addAction(I18N.tr("mixer.health.title", "Audio engine health"), self.health_requested.emit)
+        menu.addAction(I18N.tr("mixer.recovery.title", "Recover interrupted recording…"), self.recover_recording_requested.emit)
         reset = menu.addAction(I18N.tr("mixer.console.reset_view", "Reset channel view"))
         reset.triggered.connect(self.reset_channel_view)
 
@@ -568,6 +590,7 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         strip = StudioChannelStrip(track_id, track_name, track_tag, self, is_master=is_master)
         strip.output_bus_requested.connect(self.track_output_requested)
         strip.recording_input_requested.connect(self.track_input_requested)
+        strip.solo_safe_requested.connect(self.track_solo_safe_requested)
         strip.set_recording_input(self._recording_inputs.get(track_id, ""))
         strip.set_recording_workflow_active(self._recording_workflow_active)
         if self._recording_workflow_active:
@@ -579,6 +602,7 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         buses = tuple((track["track_id"], track["name"] or track["tag"]) for track in tracks if track.get("is_bus"))
         for track in tracks:
             strip = self._track_mixers[track["track_id"]]
+            strip.set_solo_safe(bool(track.get("solo_safe", False)))
             strip.set_output_routing(track.get("output_bus_id"), buses)
             strip.set_recording_track_kind(bus=bool(track.get("is_bus")), locked=bool(track.get("is_locked")))
             tag = track.get("tag", "")

@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import unicodedata
 
 from src.features.edit.core import delivery_dither
 from src.features.edit.core.interchange import frames_to_samples
@@ -46,6 +47,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CH
 import numpy as np
 
 if TYPE_CHECKING:
+    from src.features.edit.core.delivery_profile import DeliveryProfile, MeasurementResult
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
 logger = logging.getLogger(__name__)
@@ -89,7 +91,10 @@ class StemSpec:
     def filename(self) -> str:
         """文件名安全版本（空格→下划线）。"""
         if self.filename_override:
-            return self.filename_override
+            name = self.filename_override
+            if name in (".", "..") or "/" in name or "\\" in name or os.path.isabs(name):
+                raise ValueError("stem filename_override must be a basename")
+            return name
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.name)
         return f"{safe or 'stem'}.wav"
 
@@ -109,7 +114,7 @@ def dedupe_stem_filenames(specs: List[StemSpec]) -> List[StemSpec]:
         base = spec.filename
         candidate = base
         counter = 2
-        while candidate in used:
+        while unicodedata.normalize("NFC", candidate).casefold() in used:
             stem_part, ext = os.path.splitext(base)
             candidate = f"{stem_part}_{counter}{ext}"
             counter += 1
@@ -120,7 +125,7 @@ def dedupe_stem_filenames(specs: List[StemSpec]) -> List[StemSpec]:
                 base, candidate,
             )
             spec = replace(spec, filename_override=candidate)
-        used.add(candidate)
+        used.add(unicodedata.normalize("NFC", candidate).casefold())
         out.append(spec)
     return out
 
@@ -423,7 +428,7 @@ def _iter_stem_pcm_chunks(
         if getattr(t, "is_bus", False):
             renderable_tracks.append(t)
         elif len(getattr(t, "clips", ())) > 0:
-            if is_track_renderable(t, has_solo):
+            if is_track_renderable(t, False):
                 # RMA-04: 闭包过滤
                 if has_solo and t.track_id not in audible_solo:
                     continue
@@ -552,7 +557,7 @@ def _iter_stem_pcm_chunks(
         if getattr(_t, "is_bus", False) or _t.track_id in stem_ids:
             continue
         if _t.track_id in sc_needed_ids and len(getattr(_t, "clips", ())) > 0 \
-                and is_track_renderable(_t, has_solo):
+                and is_track_renderable(_t, False):
             _sc_only_ids.add(_t.track_id)
             renderable_tracks.append(_t)
             for _clip in getattr(_t, "clips", ()):
@@ -1214,10 +1219,14 @@ class StemExportResult:
     # F3.4：路由 sidecar 路径（routing.json 与 stem WAV 同目录；含
     # Bus/Send 结构与重组声明——分轨重组按此 manifest 重建，而非简单相加）
     routing_manifest_path: str = ""
+    delivery_manifest_path: str = ""
+    output_files: List[str] = field(default_factory=list)
+    measurements: Dict[str, "MeasurementResult"] = field(default_factory=dict)
+    qc_errors: List[str] = field(default_factory=list)
 
     @property
     def all_succeeded(self) -> bool:
-        return all(s for _, s in self.stems)
+        return not self.cancelled and all(s for _, s in self.stems) and not self.qc_errors
 
 
 def export_all_stems(
@@ -1237,6 +1246,8 @@ def export_all_stems(
     pre_render_base_fn: Optional[Callable] = None,
     frame_range: Optional[Tuple[int, int]] = None,
     dither: Optional[delivery_dither.DitherSettings] = None,
+    qc_profile: Optional["DeliveryProfile"] = None,
+    qc_stem_ids: Optional[Dict[str, str]] = None,
 ) -> StemExportResult:
     """导出工程的全部 stem（AM-10 阶段 3.5 顶层入口）。
 
@@ -1279,6 +1290,29 @@ def export_all_stems(
     result = StemExportResult(
         output_dir=output_dir, sample_rate=sample_rate, channels=channels,
     )
+    if qc_profile is not None:
+        if qc_profile.file_format.lower() != "wav":
+            raise ValueError("stem writer supports WAV; BWF metadata/profile export is not implemented")
+        if (qc_profile.sample_rate != sample_rate
+                or len(qc_profile.channel_order) != channels
+                or qc_profile.bit_depth != bit_depth):
+            raise ValueError("delivery profile does not match the requested output format")
+
+    def qc_stem_identity(spec: StemSpec) -> str:
+        from src.features.edit.core.delivery_preset import FULL_STEM_SET
+        return (qc_stem_ids or {}).get(
+            spec.filename,
+            "FullMix" if spec.stem_type is StemType.MASTER else (
+                spec.name if spec.name in FULL_STEM_SET else "FullMix"))
+
+    if qc_profile is not None:
+        for spec in specs:
+            rule = qc_profile.stem_rule(qc_stem_identity(spec))
+            if rule is not None:
+                if rule.pre_master is not None and rule.pre_master != (not spec.include_master):
+                    raise ValueError(f"delivery profile tap mismatch for {spec.filename}")
+                if rule.tail_seconds > 0.0:
+                    raise ValueError("explicit profile tail duration is not supported by this stem writer")
 
     total = len(specs)
     for i, spec in enumerate(specs):
@@ -1301,7 +1335,9 @@ def export_all_stems(
             first = next(gen, None)
             if first is None:
                 logger.info(f"Stem '{spec.name}' has no content, skipping")
-                result.stems.append((spec.name, True))
+                result.stems.append((spec.name, qc_profile is None))
+                if qc_profile is not None:
+                    result.qc_errors.append(f"{spec.filename}: no rendered samples")
                 continue
             writer = _StemWavWriter(
                 path, sample_rate=sample_rate, channels=channels,
@@ -1312,6 +1348,10 @@ def export_all_stems(
             writer.write(first)
             first = None  # 尽早释放首块引用
             for chunk_pcm in gen:
+                if cancel_check is not None and cancel_check():
+                    result.cancelled = True
+                    ok = False
+                    break
                 writer.write(chunk_pcm)
         except Exception as e:  # noqa: BLE001 — 单 stem 失败不阻断其余
             logger.warning(f"Stem '{spec.name}' export failed: {e}")
@@ -1325,7 +1365,52 @@ def export_all_stems(
                     closed = False
             else:
                 closed = True
-        result.stems.append((spec.name, ok and closed))
+        succeeded = ok and closed
+        if succeeded and qc_profile is not None:
+            from pathlib import Path
+            from src.features.edit.core.delivery_readback import (
+                measure_delivery_wav, delivery_profile_rejection,
+            )
+            stem_id = qc_stem_identity(spec)
+            measurement = measure_delivery_wav(
+                Path(path), stem_id=stem_id, cancel_check=cancel_check)
+            result.measurements[spec.filename] = measurement
+            rejection = delivery_profile_rejection(measurement, qc_profile)
+            if rejection is not None:
+                result.qc_errors.append(f"{spec.filename}: {rejection}")
+                succeeded = False
+            if measurement.status == "cancelled":
+                result.cancelled = True
+        result.stems.append((spec.name, succeeded))
+        if succeeded:
+            result.output_files.append(path)
+        if result.cancelled:
+            return result
+
+    if qc_profile is not None:
+        from pathlib import Path
+        from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
+        from src.features.edit.core.delivery_profile import build_delivery_manifest_v2
+        import json
+
+        files = {
+            Path(path).name: {
+                "path": Path(path).name,
+                "sha256": result.measurements[Path(path).name].file_sha256,
+                "sample_count": result.measurements[Path(path).name].sample_count,
+                "bytes": Path(path).stat().st_size,
+            } for path in result.output_files
+        }
+        manifest = build_delivery_manifest_v2(
+            qc_profile, sound_hash=build_audio_graph_snapshot(sequence).stable_hash,
+            files=files, measurements=result.measurements,
+        )
+        manifest["qc_passed"] = result.all_succeeded
+        manifest["qc_errors"] = list(result.qc_errors)
+        manifest_path = Path(output_dir) / "delivery.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2,
+                                             allow_nan=False), encoding="utf-8")
+        result.delivery_manifest_path = str(manifest_path)
 
     # F3.4：路由 sidecar——与 stem WAV 同目录（声明分轨重组的真实路由）
     try:
@@ -1336,6 +1421,8 @@ def export_all_stems(
             json.dump(manifest, fh, ensure_ascii=False, indent=2)
         result.routing_manifest_path = manifest_path
     except Exception as e:  # noqa: BLE001 — sidecar 失败不阻断 stems
+        if qc_profile is not None:
+            raise OSError("validated stem delivery requires its routing manifest") from e
         logger.warning(f"routing manifest write failed: {e}")
 
     if progress_callback is not None:
@@ -1361,7 +1448,8 @@ def build_routing_manifest(sequence: "TimelineSequence") -> dict:
                 "target_bus_id": str(getattr(s, "target_bus_id", "")),
                 "level": float(getattr(s, "level", 0.0)),
                 "enabled": bool(getattr(s, "enabled", True)),
-                "tap": "post-fader",
+                "tap": str(getattr(s, "tap", "post_fader") or "post_fader").replace("_", "-"),
+                "muted": bool(getattr(s, "muted", False)),
             }
             for s in (getattr(t, "sends", ()) or ())
         ]

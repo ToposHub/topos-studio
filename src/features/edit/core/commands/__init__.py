@@ -33,6 +33,10 @@ import logging
 from src.features.edit.core.timeline_v2 import TimelineSequence, ClipInstance
 
 from src.features.edit.core.adr_cues import SetAdrCuesCommand
+from src.features.edit.core.commands.routing_transaction import SetTrackRoutingCommand
+from src.features.edit.core.commands.vca_commands import SetVcaGroupCommand
+from src.features.edit.core.audio_comp import FlattenAudioCompCommand
+from src.features.edit.core.dialogue_proposal import ApplyDialogueProposalCommand
 from src.features.edit.core.commands.clip_props_commands import SetDialogueGroupCommand
 from src.features.edit.core.commands.audio_commands import (
     SetTrackAutomationTrimCommand,
@@ -1198,6 +1202,10 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "AddBusCommand": AddBusCommand.from_dict,
     "RemoveBusCommand": RemoveBusCommand.from_dict,
     "SetTrackOutputBusCommand": SetTrackOutputBusCommand.from_dict,
+    "SetTrackRoutingCommand": SetTrackRoutingCommand.from_dict,
+    "SetVcaGroupCommand": SetVcaGroupCommand.from_dict,
+    "FlattenAudioCompCommand": FlattenAudioCompCommand.from_dict,
+    "ApplyDialogueProposalCommand": ApplyDialogueProposalCommand.from_dict,
     "AddSendCommand": AddSendCommand.from_dict,
     "RemoveSendCommand": RemoveSendCommand.from_dict,
     "UpdateSendCommand": UpdateSendCommand.from_dict,

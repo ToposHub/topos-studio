@@ -21,11 +21,14 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import unicodedata
+import math
 import shutil
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from src.features.edit.core.delivery_preset import (
     FULL_STEM_SET,
@@ -90,11 +93,11 @@ class StemRule:
         return cls(
             stem_id=stem_id,
             required_measurements=required,
-            allow_silence=bool(data.get("allow_silence", False)),
-            target_lufs=(None if target is None else float(target)),
-            max_true_peak_dbtp=(None if dbtp is None else float(dbtp)),
-            pre_master=(None if pre_master is None else bool(pre_master)),
-            tail_seconds=float(data.get("tail_seconds", 0.0) or 0.0),
+            allow_silence=data.get("allow_silence", False),
+            target_lufs=target,
+            max_true_peak_dbtp=dbtp,
+            pre_master=pre_master,
+            tail_seconds=data.get("tail_seconds", 0.0),
         )
 
 
@@ -140,9 +143,36 @@ class DeliveryProfile:
                 f"{self.verification!r}")
         if not self.profile_id:
             raise ValueError("profile_id cannot be empty")
+        for name in ("target_lufs", "max_true_peak_dbtp", "max_sample_peak_dbfs", "tolerance_lu"):
+            value = getattr(self, name)
+            if value is not None and (type(value) not in (int, float)
+                                      or not math.isfinite(value)):
+                raise ValueError(f"{name} must be a finite number or None")
+        if self.tolerance_lu is None or self.tolerance_lu < 0:
+            raise ValueError("tolerance_lu must be nonnegative")
+        if type(self.sample_rate) is not int or self.sample_rate <= 0:
+            raise ValueError("sample_rate must be a positive integer")
+        if type(self.bit_depth) is not int or self.bit_depth <= 0:
+            raise ValueError("bit_depth must be a positive integer")
+        if not self.channel_order or len(set(self.channel_order)) != len(self.channel_order):
+            raise ValueError("channel_order must contain unique speaker labels")
+        if len({rule.stem_id for rule in self.stems}) != len(self.stems):
+            raise ValueError("duplicate stem rules")
         for rule in self.stems:
+            if type(rule.allow_silence) is not bool or (rule.pre_master is not None
+                                                       and type(rule.pre_master) is not bool):
+                raise ValueError("stem silence/tap permissions must be booleans")
+            if rule.tail_seconds is None:
+                raise ValueError("stem tail_seconds must be finite")
             if rule.stem_id not in FULL_STEM_SET:
                 raise ValueError(f"unknown stem: {rule.stem_id!r}")
+            for name in ("target_lufs", "max_true_peak_dbtp", "tail_seconds"):
+                value = getattr(rule, name)
+                if value is not None and (type(value) not in (int, float)
+                                          or not math.isfinite(value)):
+                    raise ValueError(f"stem {rule.stem_id} {name} must be finite")
+            if rule.tail_seconds < 0:
+                raise ValueError("stem tail_seconds must be nonnegative")
 
     # ── required 集合推导（§11 步骤 2：由 profile 生成，不全局放行）──
 
@@ -234,13 +264,13 @@ class DeliveryProfile:
             source_doc_hash=str(data.get("source_doc_hash", "")),
             acquired_date=str(data.get("acquired_date", "")),
             measurement_mode=str(data.get("measurement_mode", "programme")),
-            target_lufs=(None if target is None else float(target)),
-            tolerance_lu=float(data.get("tolerance_lu", 1.0)),
-            max_true_peak_dbtp=(None if dbtp is None else float(dbtp)),
-            max_sample_peak_dbfs=(None if peak is None else float(peak)),
+            target_lufs=target,
+            tolerance_lu=data.get("tolerance_lu", 1.0),
+            max_true_peak_dbtp=dbtp,
+            max_sample_peak_dbfs=peak,
             channel_order=tuple(data.get("channel_order", ("L", "R")) or ("L", "R")),
-            sample_rate=int(data.get("sample_rate", 48000)),
-            bit_depth=int(data.get("bit_depth", 24)),
+            sample_rate=data.get("sample_rate", 48000),
+            bit_depth=data.get("bit_depth", 24),
             file_format=str(data.get("file_format", "bwf")),
             stems=stems,
             extra=extra,
@@ -308,6 +338,7 @@ class MeasurementResult:
     measurements: Dict[str, float] = field(default_factory=dict)
     warnings: Tuple[str, ...] = ()
     error: Optional[str] = None
+    bit_depth: int = 0  # 0 = legacy evidence did not inspect encoded precision
 
     def __post_init__(self) -> None:
         if self.status not in MEASUREMENT_STATUSES:
@@ -328,6 +359,7 @@ class MeasurementResult:
             "measurements": dict(self.measurements),
             "warnings": list(self.warnings),
             "error": self.error,
+            "bit_depth": self.bit_depth,
         }
 
     @classmethod
@@ -338,8 +370,8 @@ class MeasurementResult:
             file_sha256=str(data.get("file_sha256", "")),
             sample_rate=int(data.get("sample_rate", 0)),
             channel_order=tuple(data.get("channel_order", ()) or ()),
-            start_sample=int(data.get("start_sample", 0) or 0),
-            sample_count=int(data.get("sample_count", 0) or 0),
+            start_sample=data.get("start_sample", 0),
+            sample_count=data.get("sample_count", 0),
             algorithm_version=str(data.get("algorithm_version", "")),
             gate_mode=str(data.get("gate_mode", "programme")),
             # 忠实保留原始值类型（不做 float() 洗涤）：bool/str/None 载入后
@@ -352,6 +384,7 @@ class MeasurementResult:
             },
             warnings=tuple(str(w) for w in (data.get("warnings") or ())),
             error=data.get("error"),
+            bit_depth=int(data.get("bit_depth", 0)),
         )
 
 
@@ -371,9 +404,13 @@ def measurement_rejection(
        bool/字符串拒绝）。
     4. silence：仅 allow_silence 的 stem；且 sample_count>0（空文件不是
        静音，是失败）、布局/率/hash 一致。
+    5. 所有可用状态要求有效样本范围、算法身份和匹配的门限模式。
+       此函数只检查测量证据可用性，数值限值由交付 QC 另行比较。
     """
     if result.status not in ("complete", "silence"):
         return f"measurement status not usable: {result.status}"
+    if expected_sha256 and not isinstance(result.file_sha256, str):
+        return "measurement is not bound to a file checksum"
     if expected_sha256 and result.file_sha256 != expected_sha256:
         return ("measurement bound to a different file "
                 f"({result.file_sha256[:12]}… != {expected_sha256[:12]}…)")
@@ -384,16 +421,15 @@ def measurement_rejection(
         return (f"channel order mismatch: {result.channel_order} "
                 f"!= profile {profile.channel_order}")
     if result.status == "silence":
+        if type(result.sample_count) is not int or result.sample_count <= 0:
+            return "silence result with zero samples or invalid count is not a valid measurement"
         allow = (allow_silence_override if allow_silence_override is not None
                  else profile.allows_silence(result.stem_id))
         if not allow:
             return f"stem {result.stem_id} is silent but profile forbids silence"
-        if result.sample_count <= 0:
-            return "silence result with zero samples is not a valid measurement"
-        return None
-    import math
-
-    for key in profile.required_measurements_for(result.stem_id):
+    required = (() if result.status == "silence"
+                else profile.required_measurements_for(result.stem_id))
+    for key in required:
         value = result.measurements.get(key)
         if value is None:
             return f"missing required measurement: {key}"
@@ -407,6 +443,21 @@ def measurement_rejection(
             # 有限但荒谬的值不是可用测量。
             return (f"required measurement {key} outside plausible "
                     f"range: {value!r}")
+    if result.stem_id not in FULL_STEM_SET:
+        return f"unknown measurement stem: {result.stem_id}"
+    if type(result.sample_count) is not int or result.sample_count <= 0:
+        return "measurement has no valid samples (zero samples or invalid count)"
+    if type(result.start_sample) is not int or result.start_sample < 0:
+        return "measurement has an invalid sample range"
+    if not isinstance(result.file_sha256, str) or not result.file_sha256:
+        return "measurement is not bound to a file checksum"
+    if not isinstance(result.algorithm_version, str) or not result.algorithm_version:
+        return "measurement algorithm version is missing"
+    if result.error:
+        return f"measurement reports an error: {result.error}"
+    if result.gate_mode != profile.measurement_mode:
+        return (f"measurement gate mode mismatch: {result.gate_mode} "
+                f"!= profile {profile.measurement_mode}")
     return None
 
 
@@ -448,63 +499,128 @@ def build_delivery_manifest_v2(
     }
 
 
+
+class DeliveryPublicationCancelled(RuntimeError):
+    """Cancellation accepted before the delivery's final commit boundary."""
+
+
 def publish_delivery_atomic(
     files: Mapping[str, Path],
     out_dir: Path,
     *,
     validator: Optional[Any] = None,
+    expected_checksums: Optional[Mapping[str, str]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[Path, ...]:
     """把交付文件原子发布到 ``out_dir``（§10 步骤 4 / B05）。
 
     全部文件先复制到同一临时目录（可选 ``validator(path)`` 逐文件校验，
-    抛异常即中止），再逐个 ``os.replace`` 到正式目录；任何失败清理临时
-    产物且正式目录零污染。返回发布后的路径元组。
+    抛异常即中止），备份已有目标，再逐个 ``os.replace`` 到正式目录。
+    可捕获的发布错误会恢复旧文件并移除新文件；各文件替换是原子的，
+    多文件集合不是崩溃原子事务，调用方应以完成 manifest 作发布门。
+    返回发布后的路径元组。
     """
+    from src.shared.plugins.install_lock import create_lock
+
+    def check_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise DeliveryPublicationCancelled("delivery publication cancelled")
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    canonical = out_dir.resolve()
+    # Keep the stable lock outside the deliverable itself. Removing a live
+    # lock file would let another process lock a different inode mid-commit.
+    lock = create_lock(canonical.parent / f".{canonical.name}.delivery.publish.lock")
     staging = Path(tempfile.mkdtemp(prefix=".delivery-tmp-", dir=out_dir))
     published: list[Path] = []
-    # 发布前已存在的目标路径（回滚时不得误删调用方的旧文件——os.replace
-    # 已覆盖的内容无法恢复，只能保留现状并在异常里说明）。
-    preexisting: set[Path] = set()
+    backups: Dict[Path, Path] = {}
+    preserve_staging = False
     try:
+        lock.acquire()
+        check_cancelled()
         staged: list[tuple[Path, Path]] = []
-        for stem_id, src in files.items():
+        names: set[str] = set()
+        for index, (stem_id, src) in enumerate(files.items()):
+            check_cancelled()
             src = Path(src)
             if not src.is_file():
                 raise FileNotFoundError(
                     f"delivery file missing for {stem_id}: {src}")
             final_path = out_dir / Path(src).name
-            if any(final == final_path for _, final in staged):
+            name_key = unicodedata.normalize("NFC", final_path.name).casefold()
+            if name_key in names:
                 # 同名 basename 冲突：后一个 stem 会覆盖前一个的暂存/
                 # 发布内容——发布名必须唯一，拒绝而非静默取其一。
                 raise ValueError(
                     f"multiple delivery stems share basename "
                     f"{final_path.name!r}; published names must be unique")
-            if final_path.exists():
-                preexisting.add(final_path)
-            # 暂存名按 stem_id（防同名互覆）；发布名保持源文件名。
-            target = staging / f"{stem_id}{src.suffix or '.bin'}"
-            shutil.copyfile(src, target)
+            names.add(name_key)
+            if final_path.is_dir():
+                raise IsADirectoryError(f"delivery target is a directory: {final_path}")
+            # Stem IDs are external metadata, never path fragments. Numeric
+            # names also prevent two distinct IDs from colliding after suffixes.
+            target = staging / f"file-{index}{src.suffix or '.bin'}"
+            expected = (expected_checksums or {}).get(stem_id)
+            if expected is not None:
+                digest = hashlib.sha256()
+                # Copy exactly the bytes whose identity is checked. Long WAVs
+                # remain cancellable at bounded I/O boundaries before commit.
+                with src.open("rb") as source, target.open("wb") as destination:
+                    while chunk := source.read(1024 * 1024):
+                        check_cancelled()
+                        destination.write(chunk)
+                        digest.update(chunk)
+                if digest.hexdigest() != expected:
+                    raise ValueError(f"delivery checksum changed after QC: {src.name}")
+            else:
+                shutil.copyfile(src, target)
+            check_cancelled()
             if validator is not None:
                 validator(target)
             staged.append((target, final_path))
+        # Keep the original directory entry (including a symlink) until every
+        # publish succeeds. A late replace failure must restore old deliveries,
+        # not leave a mixture of old and new versions.
+        for index, (_, final_path) in enumerate(staged):
+            check_cancelled()
+            if final_path.exists() or final_path.is_symlink():
+                backup = staging / f"backup-{index}"
+                shutil.copy2(final_path, backup, follow_symlinks=False)
+                backups[final_path] = backup
         # 全部校验通过 → 原子改名发布
         for tmp_path, final_path in staged:
+            check_cancelled()
             os.replace(tmp_path, final_path)
             published.append(final_path)
-    except Exception:
-        # 回滚：删除本次新发布的文件（不动发布前已存在的路径），
-        # 保证"失败后正式目录零新增污染"的合同。
-        for final_path in published:
-            if final_path in preexisting:
-                continue
+        check_cancelled()
+    except BaseException as publish_error:
+        # A process-level interrupt must not delete the only backups while
+        # unwinding a partially published batch.
+        preserve_staging = bool(published)
+        rollback_errors: list[str] = []
+        for final_path in reversed(published):
             try:
-                final_path.unlink()
-            except OSError:
-                pass
-        shutil.rmtree(staging, ignore_errors=True)
+                backup = backups.get(final_path)
+                if backup is not None:
+                    os.replace(backup, final_path)
+                else:
+                    final_path.unlink()
+            except OSError as rollback_error:
+                rollback_errors.append(f"{final_path}: {rollback_error}")
+        if rollback_errors:
+            # Preserve backups for explicit recovery; never silently delete the
+            # only remaining copy after a rollback itself fails.
+            preserve_staging = True
+            raise OSError(
+                f"delivery rollback failed; recovery files retained at {staging}: "
+                + "; ".join(rollback_errors)) from publish_error
+        preserve_staging = False
         raise
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            if not preserve_staging:
+                shutil.rmtree(staging, ignore_errors=True)
+        finally:
+            lock.close()
     return tuple(published)

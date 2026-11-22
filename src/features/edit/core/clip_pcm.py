@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 源监视器首次打开时的时长，以及各层独立的字节上限。
+# 整段编辑/试听限制与各层字节上限；窗口显示保留完整逻辑范围。
 MAX_CLIP_PCM_SECONDS = 300.0
 MAX_DECODED_PCM_BYTES = 256 * 1024 * 1024
 PCM_CACHE_CAPACITY = 4
@@ -218,18 +218,21 @@ def resolve_clip_audio_spec(
 def resolve_asset_audio_spec(
     project, asset, *,
     working_rate: int = AUDIO_REFERENCE_SAMPLE_RATE,
+    duration_seconds: Optional[float] = None,
 ) -> Optional[ClipAudioRenderSpec]:
-    """源监视模式：从音频起点取样，最多五分钟。"""
+    """Resolve the complete logical source extent; callers choose bounded windows."""
     if asset is None or working_rate <= 0:
         return None
     path, offset = resolve_audio_source(project, asset)
     if not path:
         return None
     source_asset = _bound_source_asset(project, asset) or asset
-    duration = getattr(source_asset, "duration_seconds", None)
+    duration = duration_seconds if duration_seconds is not None else getattr(source_asset, "duration_seconds", None)
     if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
-        duration = MAX_CLIP_PCM_SECONDS
-    total = round(min(duration, MAX_CLIP_PCM_SECONDS) * working_rate)
+        # Unknown length is not permission to invent a five-minute asset.
+        # The asynchronous waveform probe may provide a complete extent later.
+        return None
+    total = round(duration * working_rate)
     return ClipAudioRenderSpec(
         project_id=str(getattr(project, "project_id", "") or "") if project is not None else "",
         timeline_id="",
@@ -250,6 +253,68 @@ def resolve_asset_audio_spec(
         source_asset_id=str(source_asset.asset_id),
     )
 
+
+
+@dataclass(frozen=True)
+class ClipWaveformWindow:
+    """A bounded source-only display window, in full-clip local sample coordinates.
+
+    This payload must never be attached as a full audio-edit/audition base.
+    """
+
+    spec_key: tuple
+    start_sample: int
+    end_sample: int
+    pcm: np.ndarray
+
+
+WAVEFORM_WINDOW_MAX_BYTES = 8 * 1024 * 1024
+
+
+def full_clip_pcm_available(spec: ClipAudioRenderSpec) -> bool:
+    """Keep full-stack preview limits explicit until streaming processors exist."""
+    duration = max(spec.sample_count / max(1, spec.sample_rate), spec.display_duration)
+    return (math.isfinite(duration) and duration <= MAX_CLIP_PCM_SECONDS
+            and max(spec.sample_count, round(duration * spec.sample_rate))
+            * spec.processing_channel_count * 4 <= MAX_DECODED_PCM_BYTES)
+
+
+def decode_clip_waveform_window(
+    spec: ClipAudioRenderSpec, start_sample: int, end_sample: int, *,
+    max_bytes: int = WAVEFORM_WINDOW_MAX_BYTES,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> Optional[ClipWaveformWindow]:
+    """Read a complete viewport with bounded prefetch, preserving absolute position.
+
+    A viewport too wide for the budget returns no detail: the existing full
+    source envelope stays visible. Incomplete files never stretch a partial
+    window across the requested interval. Reverse maps before the source read.
+    """
+    from src.features.edit.core.waveform_pyramid import plan_decode_window
+
+    if source_fingerprint(spec.source_path) != spec.source_fingerprint:
+        return None
+    plan = plan_decode_window(
+        0, spec.sample_count, start_sample, end_sample,
+        spec.processing_channel_count, max_bytes=max_bytes,
+        prefetch_samples=spec.sample_rate // 2)
+    if plan.window_start != max(0, start_sample) or plan.window_end < min(spec.sample_count, end_sample):
+        return None
+    local_start, local_end = plan.prefetch_start, plan.prefetch_end
+    if spec.reverse:
+        source_start, source_end = spec.end_sample - local_end, spec.end_sample - local_start
+    else:
+        source_start, source_end = spec.start_sample + local_start, spec.start_sample + local_end
+    pcm = decode_audio_range(
+        spec.source_path, source_start, source_end, spec.sample_rate,
+        channel_map=spec.source_channel_map or None, cancel_check=cancel_check)
+    if (pcm is None or pcm.shape[1] != local_end - local_start
+            or source_fingerprint(spec.source_path) != spec.source_fingerprint):
+        return None
+    if spec.reverse:
+        pcm = np.ascontiguousarray(pcm[:, ::-1])
+    pcm.setflags(write=False)
+    return ClipWaveformWindow(spec.cache_key(), local_start, local_end, pcm)
 
 def _decode_window_frames(
     container: av.container.InputContainer, stream: av.AudioStream,

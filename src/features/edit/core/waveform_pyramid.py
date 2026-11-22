@@ -3,7 +3,7 @@
 - ``WaveformPyramid``：min/max/RMS 多级金字塔（每级 tile 宽度 × 级倍增），
   按每屏像素取对应 level，**保留极值**（父 tile 的 min/max 由子 tile 聚合，
   不重采样丢失）。内存预算按 ``channels × tiles × itemsize`` 显式核算；
-  超预算时降低级数而不是悄悄溢出。
+  超预算时降低首层分辨率并截断后续级数，累计存储不超过预算。
 - ``plan_decode_window``：视窗 + 预读的解码窗口规划（纯函数）——完整
   逻辑时长（ClipExtent）与当前缓存窗（DecodedWindow）分离的查询入口；
   字节预算 ``channels × samples × itemsize`` 硬约束，预算内按视窗前后
@@ -21,7 +21,7 @@ import numpy as np
 
 BASE_TILE_SAMPLES = 512          # 第 0 级 tile 宽度（样本）
 LEVEL_GROWTH = 8                 # 每升一级 tile 宽度倍增（8×）
-DEFAULT_PYRAMID_LEVELS = 6       # 512→8192…，覆盖概览到放大层级
+DEFAULT_PYRAMID_LEVELS = 6       # 512→4096…，覆盖概览到放大层级
 
 
 def _tile_count(total_samples: int, tile: int) -> int:
@@ -55,33 +55,54 @@ class WaveformPyramid:
             raise ValueError("levels must be >= 1")
         self._channels = int(pcm.shape[0])
         self._total_samples = int(pcm.shape[1])
+        if self._channels < 1:
+            raise ValueError("pcm must have at least one channel")
+        if max_bytes < 3 * self._channels * np.dtype(np.float32).itemsize:
+            raise ValueError("pyramid byte budget cannot hold one tile")
         self._levels: List[PyramidLevel] = []
         tile = BASE_TILE_SAMPLES
-        # 内存预算：各级 (3 × channels × tiles × 4B)；超预算截断级数
-        # （不静默溢出；概览级保留最后一级）。
+        used_bytes = 0
+        # Coarsen the first level until it fits: a long source must never
+        # allocate a full-resolution pyramid before checking its budget.
+        while 3 * self._channels * _tile_count(self._total_samples, tile) * 4 > max_bytes:
+            tile *= LEVEL_GROWTH
         for level_index in range(levels):
             tiles = _tile_count(self._total_samples, tile)
             cost = 3 * self._channels * tiles * 4
-            if level_index > 0 and cost > max_bytes:
+            if used_bytes + cost > max_bytes:
                 break
-            src = pcm
             minimum = np.empty((self._channels, tiles), dtype=np.float32)
-            maximum = np.empty((self._channels, tiles), dtype=np.float32)
-            rms = np.empty((self._channels, tiles), dtype=np.float32)
-            for ch in range(self._channels):
-                row = src[ch]
-                for t in range(tiles):
-                    seg = row[t * tile:(t + 1) * tile]
-                    if seg.size:
-                        minimum[ch, t] = float(seg.min())
-                        maximum[ch, t] = float(seg.max())
-                        rms[ch, t] = float(np.sqrt(np.mean(
-                            seg.astype(np.float64) ** 2)))
-                    else:
-                        minimum[ch, t] = 0.0
-                        maximum[ch, t] = 0.0
-                        rms[ch, t] = 0.0
+            maximum = np.empty_like(minimum)
+            rms = np.empty_like(minimum)
+            previous = self._levels[-1] if self._levels else None
+            for t in range(tiles):
+                lo, hi = t * tile, min((t + 1) * tile, self._total_samples)
+                if hi <= lo:
+                    minimum[:, t] = maximum[:, t] = rms[:, t] = 0.0
+                elif previous is None:
+                    seg = pcm[:, lo:hi]
+                    minimum[:, t] = seg.min(axis=1)
+                    maximum[:, t] = seg.max(axis=1)
+                    # Accumulate in float64 without allocating a float64
+                    # copy/square of a potentially very long coarse tile.
+                    energy = np.einsum("ij,ij->i", seg, seg, dtype=np.float64)
+                    rms[:, t] = np.sqrt(energy / (hi - lo))
+                else:
+                    first = lo // previous.tile_samples
+                    last = (hi + previous.tile_samples - 1) // previous.tile_samples
+                    minimum[:, t] = previous.minimum[:, first:last].min(axis=1)
+                    maximum[:, t] = previous.maximum[:, first:last].max(axis=1)
+                    lengths = np.minimum(previous.tile_samples,
+                                         self._total_samples - np.arange(first, last)
+                                         * previous.tile_samples)
+                    energy = previous.rms[:, first:last].astype(np.float64) ** 2
+                    rms[:, t] = np.sqrt((energy * lengths).sum(axis=1) / (hi - lo))
+            for array in (minimum, maximum, rms):
+                array.setflags(write=False)
             self._levels.append(PyramidLevel(tile, minimum, maximum, rms))
+            used_bytes += cost
+            if tiles == 1:
+                break
             tile *= LEVEL_GROWTH
 
     # ── 基本属性 ──────────────────────────────────────────────────────
@@ -99,7 +120,7 @@ class WaveformPyramid:
         return len(self._levels)
 
     def memory_bytes(self) -> int:
-        return sum(3 * lv.minimum.nbytes // max(1, lv.minimum.shape[0])
+        return sum(lv.minimum.nbytes + lv.maximum.nbytes + lv.rms.nbytes
                    for lv in self._levels)
 
     # ── 查询 ──────────────────────────────────────────────────────────
@@ -127,6 +148,10 @@ class WaveformPyramid:
                              f"[0, {self._total_samples})")
         if start == end:
             return 0.0, 0.0, 0.0
+        if not 0 <= channel < self._channels:
+            raise ValueError("channel outside pyramid layout")
+        if raw_pcm is not None and np.shape(raw_pcm) != (self._channels, self._total_samples):
+            raise ValueError("raw_pcm must match pyramid source shape")
         level0 = self._levels[0]
         # 选区间内可整除的最细级
         best: Optional[PyramidLevel] = None
@@ -250,6 +275,10 @@ def plan_decode_window(
     - 预算不足时优先保视窗（window 预算减半后仍不足则保窗口最小段），
       预读丢弃；``clamped=True`` 记录原因——不静默截短可听内容。
     """
+    if prefetch_samples < 0:
+        raise ValueError("prefetch_samples must be nonnegative")
+    if max_bytes < channels * dtype_bytes:
+        raise ValueError("decode byte budget cannot hold one sample frame")
     if extent_end <= extent_start:
         raise ValueError("empty clip extent")
     if channels < 1 or dtype_bytes < 1:
