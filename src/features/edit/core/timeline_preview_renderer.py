@@ -7684,6 +7684,13 @@ class TimelinePreviewRenderer(QObject):
 
     def _make_present_ack_callback(self, present_frame: object) -> object | None:
         """Viewer 面向的 ack 回调，绑定该描述符自己的租约键。"""
+        if getattr(present_frame, 'is_native', False) is True:
+            # A native frame lives in the renderer's Metal slot pool, not in
+            # the GL present pool: the render thread returns it when the
+            # viewport lets go (MetalPresentPort).  The viewer-side callback
+            # only records that the protocol reached its end; calling the GL
+            # ack here would count a stale acknowledgement against another pool.
+            return self._make_native_present_ack_callback(present_frame)
         gpu_renderer = getattr(self, '_gpu_renderer', None)
         if gpu_renderer is None or not hasattr(gpu_renderer, 'ack_present_slot'):
             return None
@@ -7693,6 +7700,15 @@ class TimelinePreviewRenderer(QObject):
 
         def ack(slot_id: int, _key: object = lease_key) -> None:
             self._ack_present_slot_safe(slot_id, _key)
+
+        return ack
+
+    def _make_native_present_ack_callback(self, present_frame: object) -> object:
+        """Viewer-side acknowledgement of a native frame: bookkeeping only."""
+
+        def ack(slot_id: int, _frame: object = present_frame) -> None:
+            playback_trace("renderer.native_present_released", slot_id=int(slot_id))
+            self._annotate_present_status_for_slot(int(slot_id), "slot_released")
 
         return ack
 

@@ -23,6 +23,7 @@ from src.features.edit.core.edit_gpu_preview_renderer import EditGpuPreviewRende
 from src.features.edit.core.timeline_preview_renderer import TimelinePreviewRenderer
 from src.shared.gpu.present_frame import (
     GpuPresentFrame,
+    NativePresentDescriptor,
     OutputSlotPool,
     PresentLeaseKey,
     SlotState,
@@ -132,9 +133,10 @@ class _RecordingRenderer:
         self.calls.append((slot_id, lease_key))
 
 
-def _tpr(renderer) -> SimpleNamespace:
-    shell = SimpleNamespace(_gpu_renderer=renderer)
-    for name in ("_ack_present_slot_safe", "_make_present_ack_callback"):
+def _tpr(renderer, **attrs) -> SimpleNamespace:
+    shell = SimpleNamespace(_gpu_renderer=renderer, _annotated=[], **attrs)
+    for name in ("_ack_present_slot_safe", "_make_present_ack_callback",
+                 "_make_native_present_ack_callback", "_annotate_present_status_for_slot"):
         setattr(shell, name, getattr(TimelinePreviewRenderer, name).__get__(shell))
     return shell
 
@@ -155,6 +157,25 @@ class TestPreviewRendererCarriesTheKey:
         legacy = GpuPresentFrame(texture_id=5, width=2, height=2, frame=1,
                                  generation_id=1, slot_id=0)
         assert shell._make_present_ack_callback(legacy) == renderer.ack_present_slot
+
+    def test_native_frame_callback_never_touches_the_gl_pool(self) -> None:
+        """A native slot is freed by the render thread, not by a GL ack."""
+        renderer = _RecordingRenderer()
+        shell = _tpr(renderer)
+        native = GpuPresentFrame(
+            texture_id=0, width=4, height=4, frame=1, generation_id=1, slot_id=0,
+            extra={"render_backend": "metal"},
+            native=NativePresentDescriptor(
+                api="metal", device_identity="metal:GPU:1", resource=object()),
+        )
+        assert native.is_native is True
+        ack = shell._make_present_ack_callback(native)
+        shell._annotate_present_status_for_slot = (
+            lambda slot_id, status: shell._annotated.append(slot_id))
+        ack(0)
+        assert renderer.calls == []
+        # TPR's own protocol end is still noted once per slot.
+        assert shell._annotated == [0]
 
     def test_no_renderer_means_no_callback(self) -> None:
         shell = _tpr(None)

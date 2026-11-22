@@ -271,6 +271,41 @@ logger = logging.getLogger(__name__)
 _LEAKED_GPU_OBJECTS: list = []
 
 
+def _enable_native_program_viewport(host, gpu_renderer) -> None:
+    """Let the Program Viewer present frames on a Metal layer (opt-in).
+
+    Metal 迁移 2.1–2.3：会话显式开启时（TOPOS_EDIT_METAL_VIEWPORT=1）合格的帧
+    直接呈现到 CAMetalLayer。未开启、平台不支持或挂载失败时什么都不变——
+    GL Viewer 照常呈现每一帧。  模块级函数：``host`` 可以是任何持有
+    ``program_viewer_widget`` 的控制器（含测试宿主）。
+    """
+    widget = getattr(host, "program_viewer_widget", None)
+    enable = getattr(widget, "enable_native_viewport", None)
+    opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
+    if not callable(enable) or not callable(opted_in) or not opted_in():
+        return
+    try:
+        enabled = bool(enable(gpu_renderer))
+    except Exception:  # noqa: BLE001 - a refusal must leave the GL viewer intact
+        logger.exception("Program Viewer: native viewport could not be enabled; using OpenGL")
+        return
+    if enabled:
+        logger.info("Program Viewer: native Metal viewport enabled")
+
+
+def _disable_native_program_viewport(host) -> None:
+    """Take the Metal layer back while the render thread can still confirm."""
+    widget = getattr(host, "program_viewer_widget", None)
+    disable = getattr(widget, "disable_native_viewport", None)
+    enabled = getattr(widget, "native_viewport_enabled", None)
+    if not callable(disable) or not callable(enabled) or not enabled():
+        return
+    try:
+        disable()
+    except Exception:  # noqa: BLE001 - closing must go on
+        logger.exception("Program Viewer: native viewport teardown failed")
+
+
 def _stop_gpu_renderer_deferred(renderer, timeout_ms: int = 10000) -> None:
     """停止 GPU 渲染线程；超时则推迟销毁并显式上报（P1-THREAD-01）。
 
@@ -2686,6 +2721,9 @@ class FileOpsMixin:
                 gpu_decode_manager=gpu_decode_manager,
                 gpu_renderer=gpu_renderer,
             )
+
+            # Metal 迁移 2.1–2.3：仅在会话显式开启时生效（见函数说明）。
+            _enable_native_program_viewport(self, gpu_renderer)
 
             # 注入主 GL context 给 worker，用于渲染 comp_clip（合成片段嵌入时间线）。
             # worker 在 GUI 线程创建共享 context + offscreen surface 后转交自身线程，
@@ -7581,6 +7619,7 @@ class FileOpsMixin:
         # In test_mode, only clean up essential resources (no panels were created)
         if getattr(self, '_test_mode', False):
             # Stop engine worker threads to prevent crash during GC
+            _disable_native_program_viewport(self)
             if hasattr(self, 'engine') and self.engine:
                 if hasattr(self.engine, 'renderer') and self.engine.renderer:
                     _stop_gpu_renderer_deferred(self.engine.renderer)
@@ -7764,6 +7803,8 @@ class FileOpsMixin:
         self.db.set_setting("last_state", self.saveState().toHex().data().decode())
 
         # Stop background threads
+        # 原生视口先于渲染线程收回：握手需要渲染线程仍在轮询。
+        _disable_native_program_viewport(self)
         if hasattr(self, 'engine') and self.engine:
             if self.engine.renderer:
                 # P1-THREAD-01：检查 stop() 返回值，超时推迟销毁而非放任

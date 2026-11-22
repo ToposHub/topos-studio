@@ -106,8 +106,12 @@ class NativePreviewProducer:
 
     @property
     def enabled(self) -> bool:
-        """Whether the next eligible frame can take the native path."""
-        return self._pool is not None and not self._transactions.paused
+        """Whether the next eligible frame can take the native path.
+
+        The slot pool is created on first use; only a paused GPU (completions
+        stopped arriving) keeps frames off this path.
+        """
+        return not self._transactions.paused
 
     @property
     def paused_reason(self) -> Optional[str]:

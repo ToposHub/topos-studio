@@ -131,6 +131,17 @@ def producer():
 
 
 class TestHappyPath:
+    def test_a_fresh_producer_is_enabled_before_its_first_frame(self) -> None:
+        """The renderer asks ``enabled`` before anything created the slots."""
+        fresh = NativePreviewProducer(_Preview(), pool_size=2)
+        try:
+            assert fresh.enabled is True
+            assert fresh.try_render(_task(1), (W, H), _VtFrame(1), None) == SUBMITTED
+            assert fresh._size == (W, H)
+            _settle(fresh)
+        finally:
+            assert fresh.shutdown() is True
+
     def test_frame_is_published_only_after_the_gpu_finished(self, producer) -> None:
         made, preview = producer
         source = _VtFrame(11)

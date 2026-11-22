@@ -5642,11 +5642,20 @@ void main() {
         self._native_port: Optional[Any] = None        # render thread only
         self._native_producer: Optional[Any] = None    # render thread only
         self._native_request_generation: Optional[int] = None
+        # Flipped off by the viewer while its Metal layer cannot be on screen
+        # (fullscreen viewer window, Trim monitor on top): new frames then
+        # take the GL path so the viewer keeps showing pictures.
+        self._native_frames_wanted: bool = True
 
     def native_viewport_opted_in(self) -> bool:
         """Whether the session asked for the native Metal viewport."""
         self._ensure_native_viewport_state()
         return bool(self._native_viewport_opt_in)
+
+    def set_native_frames_wanted(self, wanted: bool) -> None:
+        """GUI thread: whether new frames should take the native path."""
+        self._ensure_native_viewport_state()
+        self._native_frames_wanted = bool(wanted)
 
     def native_viewport_active(self) -> bool:
         """Whether the render thread currently presents through a Metal layer."""
@@ -5768,14 +5777,16 @@ void main() {
                 )
                 from src.features.edit.ui.metal_viewport_host import METAL_VIEWPORT_PIXEL_FORMAT
 
-                if self._metal_preview is None:
+                metal_preview = getattr(self, "_metal_preview", None)
+                if metal_preview is None:
                     from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
-                    self._metal_preview = MetalTimelinePreview(self.ctx)
+                    metal_preview = MetalTimelinePreview(self.ctx)
+                    self._metal_preview = metal_preview
                 present_pass = MetalPresentPass(
-                    self._metal_preview.metal_context, METAL_VIEWPORT_PIXEL_FORMAT)
+                    metal_preview.metal_context, METAL_VIEWPORT_PIXEL_FORMAT)
                 sink = CAMetalLayerSink(layer, METAL_VIEWPORT_PIXEL_FORMAT)
                 self._native_port = MetalPresentPort(sink, present_pass, publisher)
-                self._native_producer = NativePreviewProducer(self._metal_preview)
+                self._native_producer = NativePreviewProducer(metal_preview)
             except Exception as error:  # noqa: BLE001 - refusal falls back to GL
                 self._native_port = None
                 self._native_producer = None
@@ -5855,13 +5866,19 @@ void main() {
             self.native_viewport_failed.emit(producer.paused_reason)
         self._emit_task_render_error(task, error)
 
-    @staticmethod
-    def _release_native_frame(present: Any, reason: str, producer: Any = None) -> None:
-        """Render thread: the viewport is done with a frame — free its slot."""
+    def _release_native_frame(self, present: Any, reason: str, producer: Any = None) -> None:
+        """Render thread: the viewport is done with a frame — free its slot.
+
+        This is the one release path of a native slot.  ``slot_acked`` is
+        raised like the GL path, so the presenter sees the protocol end.
+        """
         if producer is None:
             return
+        slot_id = int(getattr(present, "slot_id", -1))
         try:
             producer.ack(present, reason)
+            if slot_id >= 0:
+                self.slot_acked.emit(slot_id)
         except Exception:  # noqa: BLE001 - a slot must never be stranded silently
             logger.warning("Edit native frame ack failed", exc_info=True)
 
@@ -5869,6 +5886,8 @@ void main() {
         """Take an eligible frame to the native viewport.  ``True``: settled here."""
         producer = self.__dict__.get("_native_producer")
         if producer is None or not producer.enabled:
+            return False
+        if not self.__dict__.get("_native_frames_wanted", True):
             return False
         if (getattr(self, "_effect_hdr", False) or task.background
                 or task.cached_composite or getattr(self, "_snapshot_armed", False)):
