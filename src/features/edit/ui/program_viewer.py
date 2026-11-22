@@ -807,6 +807,22 @@ class TransportControlBar(QFrame):
 # ProgramViewer - OpenGL Viewport
 # ================================================================
 
+def _annotate_present_path(trace_id: int, path: str) -> None:
+    """Record which surface showed a frame: the GL viewer or the Metal layer.
+
+    The playback trace sums these as ``present_path_counts``; a Metal-computed
+    frame may leave through either surface, so the render backend alone does
+    not tell.
+    """
+    if not trace_id:
+        return
+    try:
+        from src.shared.video.playback_frame_trace import get_trace_collector
+        get_trace_collector().annotate(int(trace_id), extra={"present_path": path})
+    except Exception:  # noqa: BLE001 - telemetry must never break presenting
+        logger.debug("present path annotate failed", exc_info=True)
+
+
 class ProgramViewer(QOpenGLWidget):
     """
     OpenGL viewport for the Program Viewer (Edit page).
@@ -1919,6 +1935,7 @@ class ProgramViewer(QOpenGLWidget):
             self._video_aspect_ratio = present_frame.width / present_frame.height
         if self._view_transform.mode == "fit":
             self._fit_to_window()
+        _annotate_present_path(trace_id, "gl_viewer")
         self.update()
 
     def set_fence_wait_function(self, wait_fn: Optional[callable]) -> None:
@@ -3994,6 +4011,15 @@ class ProgramViewerWidget(QWidget):
         )
         if not taken:
             return False
+        # Same state effects as the GL viewer's set_present_frame: a new
+        # frame clears stale error / offline feedback and re-fits in fit mode.
+        viewer._error_state = "none"
+        viewer._error_message = ""
+        viewer._offline_media = ()
+        transform = getattr(viewer, "_view_transform", None)
+        if transform is not None and transform.mode == "fit":
+            viewer._fit_to_window()
+        _annotate_present_path(trace_id, "native_metal")
         if trace_id:
             traces = self.__dict__.setdefault("_native_trace_by_frame", {})
             traces[int(frame)] = int(trace_id)

@@ -71,6 +71,10 @@ CONFIGS: Dict[str, PlaybackConfig] = {
                                 "TOPOS_EDIT_METAL_PREVIEW": "0"}),
     "auto": PlaybackConfig("auto", {"TOPOS_BACKEND_GRAPHICS": "auto"}),
     "metal": PlaybackConfig("metal", {"TOPOS_BACKEND_GRAPHICS": "metal"}),
+    # The native CAMetalLayer viewport (plan 2.1-2.3): Metal frames go straight
+    # to the layer instead of through the IOSurface -> GL slot detour.
+    "native": PlaybackConfig("native", {"TOPOS_BACKEND_GRAPHICS": "metal",
+                                        "TOPOS_EDIT_METAL_VIEWPORT": "1"}),
 }
 
 TRACE_COUNTERS = (
@@ -89,6 +93,7 @@ TRACE_DISTRIBUTIONS = (
     "readback_kind_counts",
     "fallback_reasons",
     "backend_counts",
+    "present_path_counts",
 )
 
 
@@ -407,6 +412,7 @@ def summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "fallback_reasons": distributions["fallback_reasons"],
             "readback_kind_counts": distributions["readback_kind_counts"],
             "backend_counts": distributions["backend_counts"],
+            "present_path_counts": distributions["present_path_counts"],
             "max_cpu_upload_bytes": max((m.get("cpu_upload_bytes") or 0) for m in members),
             "max_cpu_download_bytes": max((m.get("cpu_download_bytes") or 0) for m in members),
             **counts,
@@ -435,8 +441,8 @@ def render_markdown(report: Dict[str, Any]) -> str:
         "时间线未加载或 0 帧的用例计为无效轮，不进入统计。",
         "",
         "| 配置 | 环境变量 | 时间线 | 呈现帧中位数 | 各轮呈现帧 | 无效轮 | 丢帧中位数 | "
-        "实际渲染后端 | 解码路径 | 旧帧覆盖 | 槽位未确认复用 | CPU 上传/回读字节 |",
-        "|---|---|---|---:|---|---:|---:|---|---|---:|---:|---:|",
+        "实际渲染后端 | 实际呈现面 | 解码路径 | 旧帧覆盖 | 槽位未确认复用 | CPU 上传/回读字节 |",
+        "|---|---|---|---:|---|---:|---:|---|---|---|---:|---:|---:|",
     ]
     for row in report["summary"]:
         env = " ".join(f"{k}={v}" for k, v in row["env"].items())
@@ -445,7 +451,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(
                 f"| `{row['config']}` | `{env}` | "
                 f"{row['source']} {'LUT' if row['graded'] else 'Original'} | — | — | "
-                f"{row['invalid_rounds']} | — | — | — | — | — | — | — |"
+                f"{row['invalid_rounds']} | — | — | — | — | — | — | — | — |"
             )
             continue
         lines.append(
@@ -453,6 +459,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
             f"{row['presented_median']:g} | {rounds} | {row['invalid_rounds']} | "
             f"{row['dropped_median']:g} | "
             f"`{json.dumps(row['backend_counts'], ensure_ascii=False)}` | "
+            f"`{json.dumps(row.get('present_path_counts') or {}, ensure_ascii=False)}` | "
             f"`{json.dumps(row['decode_path_counts'], ensure_ascii=False)}` | "
             f"{row['stale_frame_emitted']} | {row['texture_slot_reuse_without_ack']} | "
             f"{row['max_cpu_upload_bytes']}/{row['max_cpu_download_bytes']} |"

@@ -485,6 +485,8 @@ class FrameTraceCollector:
                 'readback_kind_counts': {},
                 # 实际渲染后端分布（opengl / metal / cpu）
                 'backend_counts': {},
+                # 实际呈现面（gl_viewer / native_metal）
+                'present_path_counts': {},
                 'annotate': {'merged': 0, 'missed': 0},
                 'import_upload_coverage': {
                     'measured_frames': 0, 'not_applicable_frames': 0,
@@ -530,6 +532,14 @@ class FrameTraceCollector:
                 if t.backend:
                     backend_counts[t.backend] = backend_counts.get(t.backend, 0) + 1
 
+            # 实际呈现面。Metal 计算的帧既可以经 IOSurface 落回 GL 槽位上屏，
+            # 也可以直接进 CAMetalLayer；只有这里能证明一帧是从哪个面出去的。
+            present_path_counts: Dict[str, int] = {}
+            for t in traces:
+                path = t.extra.get('present_path') if isinstance(t.extra, dict) else None
+                if path:
+                    present_path_counts[str(path)] = present_path_counts.get(str(path), 0) + 1
+
             # 性能统计
             decode_times = [t.decode_ms for t in traces if t.decode_ms > 0]
             render_times = [t.render_ms for t in traces if t.render_ms > 0]
@@ -550,6 +560,7 @@ class FrameTraceCollector:
                 'decode_path_counts': decode_paths,
                 'render_path_counts': render_paths,
                 'backend_counts': backend_counts,
+                'present_path_counts': present_path_counts,
                 'decode_avg_ms': sum(decode_times) / len(decode_times) if decode_times else 0.0,
                 'render_avg_ms': sum(render_times) / len(render_times) if render_times else 0.0,
                 'total_avg_ms': sum(total_times) / len(total_times) if total_times else 0.0,

@@ -314,6 +314,19 @@ class TestLayerCannotShow:
         assert renderer.wanted[-1] is True
 
 
+class TestStateEffects:
+    def test_a_native_frame_clears_stale_error_feedback_like_the_gl_viewer(self, widget) -> None:
+        """A fresh picture must not keep an old error overlay on screen."""
+        renderer = _FakeRenderer()
+        host = _arm(widget, renderer)
+        viewer = widget._viewer
+        viewer.set_error_state("render_error", "boom")
+        viewer._offline_media = ("/gone/clip.mov",)
+        widget.set_frame(1, _result(_native_present(frame=1), _Ack()))
+        assert viewer._error_state == "none" and viewer._error_message == ""
+        assert viewer._offline_media == ()
+        assert host.overlay_images[-1] is None
+
 class TestRefreshAndOverlays:
     def test_zoom_change_re_presents_the_kept_frame(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
@@ -365,8 +378,9 @@ class TestRefreshAndOverlays:
     def test_leaving_native_mode_clears_the_overlay(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
         host = _arm(widget, renderer)
-        widget._viewer.set_error_state("render_error", "boom")
         widget.set_frame(1, _result(_native_present(frame=1), _Ack()))
+        # An overlay that appears while the native picture is on screen.
+        widget._viewer.set_error_state("render_error", "boom")
         qapp.processEvents()
         assert host.overlay_images[-1] is not None
         image = QImage(8, 8, QImage.Format.Format_RGB32)
