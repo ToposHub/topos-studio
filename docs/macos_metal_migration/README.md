@@ -21,6 +21,7 @@
 | [evidence/metal-preview-gate-diag.json](evidence/metal-preview-gate-diag.json) | 0.4 | `metal` 配置下预览门控的逐帧判定统计（实际后端的直接证据） |
 | [evidence/metal-preview-gate-diag-auto.json](evidence/metal-preview-gate-diag-auto.json) | 0.4 | 同上，`auto` 配置 |
 | [samples.md](samples.md) | 0.3 / 0.5 | 回归样本工程清单（A～G）、媒体实测事实、测量前置条件 |
+| `evidence/ab-playback-native-smoke-5292d843.json` | 2.4 | 原生视口在真实应用里的功能冒烟（显示器休眠，帧数不作比较） |
 
 ## 工具
 
@@ -29,6 +30,7 @@
 | `tools/bench_metal_ab_topos.py` | 导出 A/B 采样：隔离目录、首跑 + N 次暖跑、逐轮交替顺序、成片核验、汇总 JSON / Markdown |
 | `tools/bench_metal_ab_playback.py` | 播放 A/B 采样：三种后端配置显式声明、用例有效性判定、停滞看门狗、显示器清醒检查 |
 | `tools/diag_edit_metal_preview_gate.py` | 预览门控诊断：统计每帧首个不满足的条件与实际由 Metal 渲染的帧数 |
+| `tools/bench_metal_ab_playback.py` 的 `native` 配置 | `TOPOS_BACKEND_GRAPHICS=metal` + `TOPOS_EDIT_METAL_VIEWPORT=1`：Metal 帧直接进 `CAMetalLayer` |
 
 ## 重跑
 
@@ -54,9 +56,9 @@ python tools/bench_metal_ab_topos.py \
   --output-json docs/macos_metal_migration/evidence/ab-export-<提交>.json \
   --output-md docs/macos_metal_migration/evidence/ab-export-<提交>.md
 
-# 0.4 播放基线（需要显示器清醒、窗口可见；期间不要跑其它负载）
+# 0.4 / 2.4 播放基线（需要显示器清醒、窗口可见；期间不要跑其它负载）
 python tools/bench_metal_ab_playback.py \
-  --ab-dir bench_out/metal-ab.<日期> --configs gl,auto,metal --repeats 4 \
+  --ab-dir bench_out/metal-ab.<日期> --configs gl,auto,metal,native --repeats 4 \
   --output-json docs/macos_metal_migration/evidence/ab-playback-<提交>.json \
   --output-md docs/macos_metal_migration/evidence/ab-playback-<提交>.md
 ```
@@ -88,3 +90,10 @@ python tools/bench_metal_ab_playback.py \
 - **缩略图服务对 OpenCV 打不开的媒体会持续重试**：一次约 6.5 分钟的会话里
   `Failed to open video: 4K_DNxHR HQX 10bit.mov` 出现 18,935 次，并伴随时间线视图的重绘风暴。
   与 Metal 无关，但会干扰播放测量，建议单独处理。
+## 原生 Metal 视口（阶段 2）
+
+- 默认关闭。会话设置 `TOPOS_EDIT_METAL_VIEWPORT=1` 且 Metal 预览模式不是 `off` 时，合格的帧
+  （单层 SDR VideoToolbox NV12，可选单个 LUT）直接呈现到 `CAMetalLayer`；其余帧照常经 GL Viewer。
+- 报告里的 `实际呈现面` 一列（`present_path_counts`）区分 `native_metal` 与 `gl_viewer`。只看
+  `实际渲染后端` 不够：Metal 计算的帧也可以经 IOSurface 落回 GL 上屏。
+- 播放采样器带 `native` 配置；显示器休眠时拒绝测量，除非显式 `--allow-display-asleep`（数值不可比）。

@@ -12,8 +12,9 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | 0 环境和基线 | ✅ 0.1–0.4 完成；0.5 样本 A 完成，B–G 已登记规格与归属阶段 | Resolve 对照沿用同机 11-22 记录，本次未驱动正在运行的 Resolve |
-| 1 共享 GPU 帧 | ✅ 1.1–1.3 代码与定向测试完成 | 原生发布分支、租约键与带键 ack 已在生产协议上生效；异步调度器与帧事务已就绪但尚未接入预览路径（阶段 2 接线） |
-| 2 原生视口和剪辑 | ⏳ 未开始 | 开工前须先解决播放基线里的旧帧覆盖（见 0.4） |
+| 1 共享 GPU 帧 | ✅ 1.1–1.3 完成 | 原生发布分支、租约键与带键 ack 已在生产协议上生效；帧事务自阶段 2 起承载原生预览帧 |
+| 2 原生视口和剪辑 | 🟡 2.1–2.3 代码与定向测试完成，默认关闭；2.4 的真机性能验收待做 | 需 `TOPOS_EDIT_METAL_VIEWPORT=1` 显式开启。本机已验证：像素逐位一致、真实图层呈现成功、真实应用冒烟正常。播放帧数、seek p95、GPU 时间、换屏与叠加交互对照**尚未测量**（测量时显示器已休眠） |
+| 2.5–2.6 | ⏳ 未开始 | Source Viewer 与扩展 GPU 计划 |
 | 3–8 | ⏳ 未开始 | — |
 
 既有失败（与迁移无关，均在基线代码上复现或属本机环境）：
@@ -178,9 +179,9 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
   VT 源 `GpuDecodedFrame.device_identity` 此前都是空串，`validate_for_device()` 的设备比对实际被
   跳过。现在桥接层与 `import_pixel_buffer_frame_metal` 填充进程内稳定身份，格式与
   `MetalComputeContext.device_identity` 一致。
-- **边界**：调度器与帧事务在生产代码里尚无调用方——预览仍走每帧同步 `finish()`，导出走自己的
-  路径。它们在阶段 2 接入原生视口时才真正承载帧；异步完成、超时暂停与退役目前只有注入故障的
-  单元测试证据，没有真机证据。
+- **边界（阶段 2 更新）**：调度器与帧事务自阶段 2 起由 `NativePreviewProducer` 用于原生预览帧
+  （会话显式开启时）；未开启时预览仍走每帧同步 `finish()`。退役与超时暂停目前只有注入故障的
+  单元测试证据，没有连续拖动 / 反复开关窗口的真机证据。
 - 测试：`test_submission_scheduler_owner_thread.py` 22 项、`test_context_discard_pending.py` 5 项、
   `test_frame_transaction.py` 19 项（含 300 帧乱序完成的压测，每个输入与输出恰好释放一次）、
   `test_cv_metal_bridge.py` +2 项（含真实设备导入）。既有 3 个断言旧契约的调度器测试按新契约更新。
@@ -203,3 +204,122 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 
 计划 1.2 给出的 `GpuFrameRelease` 片段（两个消费者都结束后只回收一次）在现有实现上原样通过，
 未作改动。
+
+## 阶段 2 原生 Metal 视口和剪辑预览
+
+**默认关闭。** 只有会话设置 `TOPOS_EDIT_METAL_VIEWPORT=1` 且 `metal_preview_mode()` 不是 `off` 时，
+合格的帧才进原生视口。未开启、平台不是 Cocoa、图层挂载失败、呈现停滞，任何一种情况下 GL Viewer
+照常呈现每一帧。计划的发布门（阶段 8）之前不改变默认行为。
+
+| 编号 | 提交 | 内容 |
+|---|---|---|
+| 2.1 | `64e4ae17` | 呈现端口与着色器（`present_port.py`） |
+| 2.1 | `106b7373` | GUI 宿主控件（`metal_viewport_host.py`） |
+| 2.2 | `bfc498e7` | 原生帧生产器（`native_metal_preview.py`）与渲染器接线 |
+| 2.2 / 2.3 | `97ca6c0a` | Viewer 路由、叠加层图像、`file_controller` 接入 |
+| — | `20bf448a` | 帧_trace 的呈现面计数 `present_path_counts` |
+| — | `5292d843` | 真机冒烟发现的缺陷修复（见下） |
+
+### 2.1 原生视口适配器
+
+- **呈现端口** `MetalPresentPort`（资源线程）：至多 2 个在途 drawable、至多 2 帧等待；最新提交的帧胜出，
+  队满时挤掉最旧的等待帧并由资源线程归还其租约。帧只有在仍匹配请求（时间线 generation、拖动令牌、
+  渲染尺寸、截止时间）且图层可用时才上屏；否则归还租约、保留上一帧。拖动令牌与截止时间随帧携带，
+  后一帧不能放宽前一帧的约束。`nextDrawable` 不阻塞（`allowsNextDrawableTimeout = False`）。
+- **呈现着色器**：全屏三角形把帧纹理采样进 drawable，画面按显示矩形等比缩放，黑边保持背景色，
+  左上原点纹理做行翻转。
+- **租约释放规则**：一帧的呈现命令缓冲完成、且已被更新的帧替换、且没有重绘还在读它的纹理时，
+  恰好释放一次。缩放 / 平移 / 改尺寸用保留的上一帧重绘，不占新槽位。
+- **GUI 宿主** `MetalViewportHost`：GUI 线程创建、定位、移除 `NSView` + `CAMetalLayer`，并把尺寸、
+  缩放、可见性与尺寸代次发布给渲染线程。两个附加视图的 `hitTest:` 返回 nil，鼠标事件仍到达下层的
+  Qt 视图——字幕拖拽、变换手柄、缩放平移的既有代码没有改动。非 Cocoa 平台一律拒绝（`winId()`
+  只在 Cocoa 下是 NSView 指针）。
+- **停滞检测**：已提交的呈现超过 1 秒没有完成（显示器休眠或被遮挡）时端口进入停滞状态。那些帧
+  的纹理可能仍被显示系统读取，因此保留；渲染线程报告一次原因，让新帧走 GL 路径，完成事件回来后
+  原生路径自行恢复。
+
+### 2.2 播放引擎接线
+
+- `NativePreviewProducer`（渲染线程）：把预览内核直接写进原生 present 槽位纹理，经阶段 1 的帧事务提交，
+  GPU 完成后在 `poll()` 里把槽位置为 READY 并发布原生 `GpuPresentFrame`。VT 源帧与 CVMetal 导入是
+  事务的输入，完成时各释放一次。任何回退都把帧原样留给 GL 路径。
+- `EditGpuPreviewRenderer`：GUI 线程请求 attach / detach 并转交帧；渲染线程在自己的线程上建端口与
+  生产器，每次循环轮询（有帧在 GPU 上时 2 ms 内唤醒），经 `present_frame_ready` 加既有的 `frame_ready`
+  发布，后者继续驱动预览渲染器的状态机。代际变化即时到达端口。
+- `TimelinePreviewRenderer` 的守卫不变：generation、单调帧、拖动终帧的校验仍在帧到达 Viewer 之前；
+  端口在呈现前再比对一次。
+- 音频主时钟与丢帧策略没有改动，仍在 `EditPlaybackController.tick()`。
+
+### 2.3 叠加层
+
+- `ProgramViewer._paint_overlays()` 是唯一的叠加绘制序列，`paintGL` 与原生叠加层图像共用。缩放、
+  平移、字幕拖拽命中与手柄的坐标映射沿用 Viewer 的显示矩形。
+- 原生模式下叠加层画进一张透明 `QImage`，显示在视频图层上方的独立视图里。Viewer 的 `update()`
+  被调用时（叠加状态变化都经由它）按事件循环合并刷新一次。
+- 叠加层与视频的像素和交互对照**尚未做**（需要显示器清醒时的人工或截屏比对）。
+
+### 验证结果
+
+| 项目 | 结果 | 方式 |
+|---|---|---|
+| 呈现着色器像素 | ✅ 4 项通过 | 真实设备离屏渲染并读回：左上原点正立且不镜像、左下原点翻转、黑边背景、Alpha 不透明 |
+| 端口逻辑 | ✅ 33 项通过 | 无需 Metal：匹配校验、截止时间、无 drawable、停滞、重复上屏、乱序完成 |
+| 原生帧生产器 | ✅ 12 项通过 | 真实设备：GPU 完成后才发布、内核输出落在槽位纹理、输入各释放一次、ack 后复用 |
+| 渲染器接线 | ✅ 30 项通过 | 假端口与假生产器 |
+| GUI 宿主 | ✅ 12 项（Cocoa）/ 拒绝路径（offscreen） | 真实 Cocoa 窗口 |
+| Viewer 路由与叠加层 | ✅ 26 项通过 | 替身渲染器 |
+| 端到端像素对拍 | ✅ MAE 0、最大差 0 | 真实视频帧：原生槽位纹理与 IOSurface 路径逐位相同 |
+| 真实图层呈现 | ✅ presented = 1 | 真实 `CAMetalLayer` 取到 drawable 并提交呈现（显示器清醒时） |
+| 真实应用冒烟 | ✅ 正常 | 见下 |
+| 相关回归 | ✅ 4862 通过 | 其余失败均逐项在基线代码上复现，见文首 |
+| 播放帧数、seek p95、GPU 时间 | ⏳ 未测 | 测量时显示器已休眠，数值不可比 |
+| 连续 resize、换屏、全屏、关闭 | ⏳ 未测 | 需要显示器清醒 |
+| 叠加层像素与交互对照 | ⏳ 未测 | 同上 |
+| Apple Silicon | ⏳ 未采集 | 无机器 |
+
+真实应用冒烟（显示器休眠，**帧数不作比较**，`--allow-display-asleep`）：
+
+| 时间线 | 实际渲染后端 | 实际呈现面 | 旧帧覆盖 | 槽位违规 |
+|---|---|---|---:|---:|
+| H.264 Original | metal 147 / opengl 3 | `native_metal` 147 | 0 | 0 |
+| H.264 LUT | metal 80 | `native_metal` 80 | 0 | 0 |
+| DNxHR Original | opengl 42 | `gl_viewer` 42 | 0 | 0 |
+| DNxHR LUT | opengl 53 | `gl_viewer` 52 | 0 | 0 |
+
+DNxHR 解码为 planar 帧，不满足 Metal 预览的资格，按设计留在 OpenGL。
+
+### 真机冒烟发现并修掉的缺陷（`5292d843`）
+
+1. **被拒收的原生帧泄漏槽位。** 端口队满或图层无法上屏时，Viewer 退回帧——但原生帧的 Viewer 侧回调
+   只做记录，槽位从未归还。4 帧之后原生池耗尽，后续帧全部静默回落到 IOSurface → GL 路径。现在
+   未被接手的帧交给渲染线程归还（`release_native_frame`）。
+2. **呈现停滞没有显式处理。** 现在有停滞检测与报告（见 2.1）。
+3. **关闭时白等 2 秒。** 原生视口的收回原先排在关闭流程靠后，那时预览渲染线程已经退出。现在放在
+   保存确认之后、第一个线程停止之前；线程已退出时立即确认。
+4. **宿主创建期报错。** Qt 在控件创建过程中就会派发事件，而 `event()` 读到的字段尚未赋值。
+
+### 复现命令
+
+```bash
+source .venv/bin/activate
+export PYTHONPATH=.
+# 单元与真机（第二、三个需要 Cocoa 平台）
+.venv/bin/python -m pytest -q tests/shared/gpu/metal/ \
+  tests/edit/test_native_metal_preview_producer.py \
+  tests/edit/test_native_viewport_renderer_wiring.py \
+  tests/edit/test_program_viewer_native_viewport.py
+QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
+  tests/edit/test_metal_viewport_host.py tests/edit/test_native_viewport_end_to_end.py
+# 真实应用（显示器必须清醒，数值才可比）
+.venv/bin/python tools/bench_metal_ab_playback.py \
+  --ab-dir bench_out/metal-ab.2026-11-23 --configs gl,metal,native --repeats 4 \
+  --output-json docs/macos_metal_migration/evidence/ab-playback-native.json \
+  --output-md docs/macos_metal_migration/evidence/ab-playback-native.md
+```
+
+### 2.4 待办（需要显示器清醒）
+
+- 三种配置（`gl` / `metal` / `native`）各 4 轮：显示帧数、掉帧、首帧与 seek p95、GPU 时间、
+  峰值 GPU 资源、每帧搬运量。
+- 连续 resize、隐藏、全屏、换屏、关闭：GUI 无等待，无旧帧覆盖，无悬挂槽。
+- 叠加层：字幕拖拽命中、辅助线、变换手柄、错误状态的像素与交互对照。
