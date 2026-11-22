@@ -749,7 +749,7 @@ assert np.allclose(g, [1.0, 10 ** (-12.0 / 20)])
   payload 保留、100× undo/redo 回原始、coalesce 帧级求值 parity。
   夜间长压/故障注入/真机矩阵保持待实施。
 - **B23/B24 现状核查**：`test_audio_fx_completed_controls.py` +
-  `test_audio_denoise.py` + `test_audio_repair.py` + 
+  `test_audio_denoise.py` + `test_audio_repair.py` +
   `test_de_click_dehum.py` 33 项通过——已交付能力健康；E01–E09 与
   B24 进阶项按原计划保持待实施（不为"全实现"重写旧算法）。
 
