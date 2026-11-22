@@ -306,6 +306,35 @@ def _disable_native_program_viewport(host) -> None:
         logger.exception("Program Viewer: native viewport teardown failed")
 
 
+def _enable_native_source_viewport(host, gpu_renderer) -> None:
+    """Let the Source Viewer present frames on a Metal layer (same opt-in)."""
+    widget = getattr(host, "source_viewer_widget", None)
+    enable = getattr(widget, "enable_native_viewport", None)
+    opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
+    if not callable(enable) or not callable(opted_in) or not opted_in():
+        return
+    try:
+        enabled = bool(enable(gpu_renderer))
+    except Exception:  # noqa: BLE001 - a refusal must leave the GL canvas intact
+        logger.exception("Source Viewer: native viewport could not be enabled; using OpenGL")
+        return
+    if enabled:
+        logger.info("Source Viewer: native Metal viewport enabled")
+
+
+def _disable_native_source_viewport(host) -> None:
+    """Take the Source Viewer's Metal layer back while its thread can confirm."""
+    widget = getattr(host, "source_viewer_widget", None)
+    disable = getattr(widget, "disable_native_viewport", None)
+    enabled = getattr(widget, "native_viewport_enabled", None)
+    if not callable(disable) or not callable(enabled) or not enabled():
+        return
+    try:
+        disable()
+    except Exception:  # noqa: BLE001 - closing must go on
+        logger.exception("Source Viewer: native viewport teardown failed")
+
+
 def _stop_gpu_renderer_deferred(renderer, timeout_ms: int = 10000) -> None:
     """停止 GPU 渲染线程；超时则推迟销毁并显式上报（P1-THREAD-01）。
 
@@ -2845,6 +2874,9 @@ class FileOpsMixin:
             # Wire the provider that submits tasks to this renderer
             self._setup_source_gpu_provider(gpu_decode_manager, source_renderer)
 
+            # Metal 迁移 2.5：与节目监视器同一个 opt-in 开关。
+            _enable_native_source_viewport(self, source_renderer)
+
             logger.info("Source Viewer GPU renderer created and started")
         except Exception as e:
             logger.warning(f"Source GPU renderer creation failed: {e}")
@@ -2858,14 +2890,49 @@ class FileOpsMixin:
         VP-B02: the gate releases (acks) any pending descriptor this one
         displaces — a dropped pending must never strand its slot.
         """
+        if getattr(present, "is_native", False) is True:
+            # Metal 迁移 2.5：原生帧住在渲染线程的 Metal 槽位池里。门的 ack 不带
+            # 租约键，会把确认打到 GL 池的同号槽上，所以原生帧走这个单槽：被顶
+            # 掉的那一帧交回渲染线程归还。
+            self._stash_source_native_present(present)
+            return
         gate = getattr(self, '_source_present_gate', None)
         if gate is None:  # renderer created before this wiring existed
             self._source_pending_present = present
             return
         gate.stash(present)
 
+    def _stash_source_native_present(self, present: object) -> None:
+        """Latest-wins slot for a native Source frame (see _on_source_present_frame_ready)."""
+        previous = getattr(self, '_source_native_present', None)
+        self._source_native_present = present
+        if previous is not None and previous is not present:
+            self._release_source_native_present(previous, "superseded")
+
+    def _release_source_native_present(self, present: object, reason: str) -> None:
+        """Return a native Source frame to the render thread, which owns its slot."""
+        renderer = getattr(self, '_source_gpu_renderer', None)
+        release = getattr(renderer, 'release_native_frame', None)
+        if callable(release):
+            release(present, f"source_{reason}")
+
     def _on_source_gpu_frame_ready(self, frame: int, generation: int, tex_id: int, w: int, h: int) -> None:
         """Handle GPU-rendered frame for Source Viewer."""
+        if getattr(self, '_source_native_present', None) is not None:
+            # present_frame_ready always precedes frame_ready of the same task
+            # on the same thread: a native descriptor that is not this frame's
+            # has been superseded.
+            present, self._source_native_present = self._source_native_present, None
+            widget = self.source_viewer_widget
+            if (widget is not None
+                    and int(getattr(present, 'frame', -1)) == int(frame)
+                    and int(getattr(present, 'generation_id', -1)) == int(generation)):
+                try:
+                    widget.set_native_gpu_frame(present, frame=frame, generation=generation)
+                except RuntimeError:
+                    self._release_source_native_present(present, "widget_gone")
+                return
+            self._release_source_native_present(present, "unpaired")
         gate = getattr(self, '_source_present_gate', None)
         if gate is None:
             return
@@ -7643,6 +7710,7 @@ class FileOpsMixin:
                     self._source_decode_worker.stop()
                 except Exception:
                     pass
+            _disable_native_source_viewport(self)
             if hasattr(self, '_source_gpu_renderer') and self._source_gpu_renderer is not None:
                 _stop_gpu_renderer_deferred(self._source_gpu_renderer, 1000)
             QMainWindow.closeEvent(self, event)
@@ -7689,6 +7757,8 @@ class FileOpsMixin:
             except AttributeError:
                 pass  # widget without the B11 entry point
 
+        # Source 的原生视口先于 Source 线程收回（握手需要其渲染线程仍在轮询）。
+        _disable_native_source_viewport(self)
         # Stop Source decode worker thread, then the GPU renderer thread
         if hasattr(self, '_source_decode_worker') and self._source_decode_worker is not None:
             try:
