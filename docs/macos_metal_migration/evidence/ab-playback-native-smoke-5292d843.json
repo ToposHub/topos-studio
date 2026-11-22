@@ -403,7 +403,8 @@
   ],
   "notes": [
     "功能冒烟，不是性能基线：测量时显示器休眠（电源状态 1/4），呈现帧数不可与清醒基线比较。",
-    "提交 5292d843，配置 native = TOPOS_BACKEND_GRAPHICS=metal + TOPOS_EDIT_METAL_VIEWPORT=1。",
+    "源码状态等于提交 5292d843：运行时 HEAD 是 20bf448a，工作树里带着随后提交为 5292d843 的改动；运行之后到提交之间源码没有再变（只跑了回归）。记录里的 commit 字段是驱动取的运行时 HEAD。",
+    "配置 native = TOPOS_BACKEND_GRAPHICS=metal + TOPOS_EDIT_METAL_VIEWPORT=1。",
     "看点在实际渲染后端与实际呈现面：H.264 帧经 native_metal 上屏；DNxHR 为 planar 帧，留在 gl_viewer。",
     "旧帧覆盖 0、槽位未确认复用 0；应用正常启动与退出，日志无原生视口相关告警或 Traceback。"
   ]
