@@ -394,17 +394,31 @@ class MetalPresentPort:
         max_in_flight: int = 2,
         max_pending: int = 2,
         wall_ns: Optional[Callable[[], int]] = None,
+        stall_timeout_s: float = 1.0,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         if int(max_in_flight) < 1 or int(max_pending) < 1:
             raise ValueError("max_in_flight and max_pending must be >= 1")
+        if float(stall_timeout_s) <= 0.0:
+            raise ValueError("stall_timeout_s must be > 0")
         self._sink = sink
         self._presenter = presenter
         self.publisher = publisher or SurfacePublisher()
         self._max_in_flight = int(max_in_flight)
         self._max_pending = int(max_pending)
         self._wall_ns = wall_ns or time.time_ns
+        self._clock = clock or time.monotonic
+        # A present that was committed but whose completion never came (the
+        # display asleep or occluded).  Its frames cannot be released, so the
+        # owner stops feeding the port until the GPU reports back.
+        self._stall_timeout_s = float(stall_timeout_s)
+        self._in_flight_since: Optional[float] = None
+        self._stalled = False
         self._lock = threading.Lock()
         self._pending: Deque[HeldFrame] = deque()
+        # Frames pushed out of a full wait queue.  They are released by the
+        # owner thread in poll(), never on the submitting thread.
+        self._displaced: Deque[HeldFrame] = deque()
         self._request = PresentRequest()
         self._records: Dict[int, HeldFrame] = {}
         self._next_token = 1
@@ -418,8 +432,8 @@ class MetalPresentPort:
         self._presented_tokens: Deque[int] = deque()
         self.stats: Dict[str, int] = {
             "submitted": 0, "presented": 0, "released": 0, "actually_presented": 0,
-            "no_drawable": 0, "stale": 0, "past_deadline": 0, "dropped_full": 0,
-            "failed": 0,
+            "no_drawable": 0, "stale": 0, "past_deadline": 0, "displaced": 0,
+            "failed": 0, "stalled": 0,
         }
 
     # ------------------------------------------------------------------
@@ -449,6 +463,17 @@ class MetalPresentPort:
         with self._lock:
             return sum(1 for record in self._records.values() if not record.is_repeat)
 
+    @property
+    def stalled(self) -> bool:
+        """A committed present has not completed within the stall timeout.
+
+        The textures of those frames may still be read by the display, so
+        they are kept; the owner should stop producing frames for this port
+        and show them another way until the completions arrive.
+        """
+        with self._lock:
+            return self._stalled
+
     def current_request(self) -> PresentRequest:
         with self._lock:
             return replace(self._request)
@@ -477,7 +502,12 @@ class MetalPresentPort:
         scrub_token: Any = _UNSET,
         deadline_ns: int = 0,
     ) -> bool:
-        """Queue one native frame.  ``False``: the queue is full, frame not taken.
+        """Queue one native frame; the newest waiting frame wins.
+
+        A full wait queue pushes out its oldest frame — it is older than this
+        one, so it would never be shown anyway — and that frame's lease is
+        returned by the owner thread.  ``False`` only means the frame was not
+        taken at all (the caller keeps its lease).
 
         ``scrub_token`` and ``deadline_ns`` belong to this frame and are fixed
         at submission: a later frame cannot loosen what a waiting frame has
@@ -497,9 +527,9 @@ class MetalPresentPort:
             scrub_token=scrub_token, deadline_ns=int(deadline_ns or 0),
         )
         with self._lock:
-            if len(self._pending) >= self._max_pending:
-                self.stats["dropped_full"] += 1
-                return False
+            while len(self._pending) >= self._max_pending:
+                self._displaced.append(self._pending.popleft())
+                self.stats["displaced"] += 1
             self._pending.append(held)
             self._latest_scrub_token = scrub_token
             self._has_submission = True
@@ -545,8 +575,33 @@ class MetalPresentPort:
     def poll(self) -> List[PresentOutcome]:
         """Reclaim finished frames, then present what is waiting.  Owner thread."""
         outcomes = self._apply_completions()
+        with self._lock:
+            was_stalled = self._stalled
+            self._stalled = (
+                self._in_flight_since is not None
+                and self._clock() - self._in_flight_since > self._stall_timeout_s
+            )
+            if self._stalled and not was_stalled:
+                self.stats["stalled"] += 1
+        outcomes.extend(self._release_displaced())
         outcomes.extend(self._present_pending())
         return outcomes
+
+    def _release_displaced(self) -> List[PresentOutcome]:
+        """Return the leases of frames a newer submission pushed out."""
+        with self._lock:
+            displaced = list(self._displaced)
+            self._displaced.clear()
+        outcomes: List[PresentOutcome] = []
+        for held in displaced:
+            outcome = self._release(held, "displaced")
+            if outcome is not None:
+                outcomes.append(outcome)
+        return outcomes
+
+    def _in_flight_locked(self) -> int:
+        """Caller holds the lock."""
+        return sum(1 for record in self._records.values() if record.status == "in_flight")
 
     def _apply_completions(self) -> List[PresentOutcome]:
         with self._lock:
@@ -558,6 +613,8 @@ class MetalPresentPort:
                 record = self._records.get(token)
                 if record is not None:
                     record.status = "done"
+            if self._in_flight_locked() == 0:
+                self._in_flight_since = None
         outcomes: List[PresentOutcome] = []
         for token, error in completed:
             record = self._records.get(token)
@@ -640,6 +697,8 @@ class MetalPresentPort:
                     outcomes.append(outcome)
                 continue
             with self._lock:
+                if self._in_flight_since is None:
+                    self._in_flight_since = self._clock()
                 if not held.is_repeat:
                     self._displayed = held
             self.stats["presented"] += 1
@@ -715,6 +774,8 @@ class MetalPresentPort:
             waiting = list(self._pending)
             self._pending.clear()
             records = list(self._records.values())
+            self._stalled = False
+            self._in_flight_since = None
         for held in waiting + records:
             outcome = self._release(held, "shutdown")
             if outcome is not None:

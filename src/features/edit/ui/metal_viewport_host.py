@@ -111,13 +111,9 @@ class MetalViewportHost(QWidget):
     """Native window surface for Metal presentation.  GUI thread only."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("MetalViewportHost")
-        # A native window of our own: the NSView must exist before anything
-        # can be added to it, and ancestors stay in Qt's backing store.
-        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
+        # Plain attributes first: creating the widget and its native window
+        # below already delivers events (WinIdChange, scale changes) to
+        # event(), which reads them.
         self._publisher = SurfacePublisher()
         self._layer: Any = None
         self._metal_view: Any = None
@@ -127,6 +123,13 @@ class MetalViewportHost(QWidget):
         self._failure: str = ""
         self._overlay_image: Optional[QImage] = None
         self._overlay_buffer: Optional[bytes] = None
+        super().__init__(parent)
+        self.setObjectName("MetalViewportHost")
+        # A native window of our own: the NSView must exist before anything
+        # can be added to it, and ancestors stay in Qt's backing store.
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
 
     # ------------------------------------------------------------------
     # 查询
@@ -253,8 +256,8 @@ class MetalViewportHost(QWidget):
 
     def _sync_surface(self) -> SurfaceState:
         """Bring the views to the widget's current size and publish the state."""
-        if self._layer is None:
-            return self._publisher.current()
+        if self.__dict__.get("_layer") is None:
+            return self.__dict__.get("_publisher", SurfacePublisher()).current()
         width, height = max(1, self.width()), max(1, self.height())
         scale = float(self.devicePixelRatioF())
         drawable = (max(1, round(width * scale)), max(1, round(height * scale)))
@@ -310,8 +313,8 @@ class MetalViewportHost(QWidget):
         try:
             if event.type() in self._SURFACE_EVENT_TYPES:
                 self._sync_surface()
-        except Exception:  # noqa: BLE001
-            logger.warning("MetalViewportHost: surface event failed", exc_info=True)
+        except Exception:  # noqa: BLE001 - a failed sync keeps the last surface state
+            logger.debug("MetalViewportHost: surface event failed", exc_info=True)
         return super().event(event)
 
     # ------------------------------------------------------------------

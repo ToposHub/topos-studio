@@ -47,7 +47,7 @@ import logging
 import math
 import numpy as np
 import time
-from typing import Optional, Tuple, Dict, Any, Callable
+from typing import Optional, Tuple, Dict, Any, Callable, Union
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
@@ -3746,18 +3746,20 @@ class ProgramViewerWidget(QWidget):
                 trace_id = int(result.get("trace_id") or 0)
                 if is_native:
                     show_native = getattr(self, "_show_native_frame", None)
-                    if callable(show_native) and show_native(frame, present, ack_cb, trace_id):
+                    # True when the viewport took the frame; otherwise why not.
+                    outcome = show_native(frame, present, ack_cb, trace_id) if callable(show_native) else False
+                    if outcome is True:
                         return
-                    # No native viewport can show it: give the lease back at
-                    # once and keep the previous picture.
+                    # No native viewport can show it: give the lease back and
+                    # keep the previous picture.  A native slot belongs to the
+                    # render thread's pool — ask it to release the frame.
+                    unclaimed = getattr(self, "_unclaim_native_frame", None)
+                    if callable(unclaimed):
+                        unclaimed(present, ack_cb, trace_id,
+                                  outcome if isinstance(outcome, str) and outcome else "no_native_viewport")
                     playback_trace(
                         "program_viewer.native_frame_unclaimed", frame=frame,
                         slot_id=getattr(present, "slot_id", -1), scrub_active=scrub_active_for_trace)
-                    return_native_lease = getattr(self, "_return_native_lease", None)
-                    if callable(return_native_lease):
-                        return_native_lease(present, ack_cb, trace_id, "no_native_viewport")
-                    elif ack_cb is not None:
-                        ack_cb(present.slot_id)
                     return
                 playback_trace(
                     "program_viewer.set_frame_present_dict",
@@ -3987,17 +3989,21 @@ class ProgramViewerWidget(QWidget):
 
     def _show_native_frame(
         self, frame: int, present: Any, ack_cb: Any, trace_id: int,
-    ) -> bool:
-        """Hand a native frame to the viewport.  ``False``: it was not taken."""
+    ) -> Union[bool, str]:
+        """Hand a native frame to the viewport.
+
+        ``True`` when it was taken; otherwise the reason it was not (the
+        caller returns the frame to the render thread with that reason).
+        """
         renderer, host = self._native_renderer, self._metal_host
         if renderer is None or host is None:
-            return False
+            return "no_native_viewport"
         if not self._native_host_can_show():
             # Re-evaluate on every frame: the layer may have been pushed off
             # screen (Trim monitor, fullscreen viewer) without an event we
             # saw.  New frames must now take the GL path.
             self._layout_native_host()
-            return False
+            return "layer_not_on_screen"
         viewer = self._viewer
         # The view transform and the overlays work from the texture size.
         viewer._tex_width, viewer._tex_height = int(present.width), int(present.height)
@@ -4010,7 +4016,7 @@ class ProgramViewerWidget(QWidget):
                 released, ack_cb, trace_id),
         )
         if not taken:
-            return False
+            return "viewport_queue_refused"
         # Same state effects as the GL viewer's set_present_frame: a new
         # frame clears stale error / offline feedback and re-fits in fit mode.
         viewer._error_state = "none"
@@ -4028,6 +4034,20 @@ class ProgramViewerWidget(QWidget):
         self._set_native_showing(True)
         self._refresh_native_view()
         return True
+
+    def _unclaim_native_frame(self, present: Any, ack_cb: Any, trace_id: int, reason: str) -> None:
+        """A native frame that will not be shown: its slot goes back via the
+        render thread, which owns the pool.  The viewer-side callback of a
+        native frame is bookkeeping only and cannot free the slot."""
+        renderer = self.__dict__.get("_native_renderer")
+        release = getattr(renderer, "release_native_frame", None)
+        if callable(release):
+            release(present, reason)
+        else:
+            logger.error(
+                "ProgramViewerWidget: native frame %s cannot be returned (no renderer)",
+                getattr(present, "frame", -1))
+        self._return_native_lease(present, ack_cb, trace_id, reason)
 
     def _return_native_lease(
         self, present: Any, ack_cb: Any, trace_id: int, reason: str,

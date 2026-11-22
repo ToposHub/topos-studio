@@ -30,6 +30,19 @@ from src.shared.gpu.metal.present_port import (
 )
 
 
+class _Clock:
+    """Controllable monotonic clock."""
+
+    def __init__(self, start: float = 100.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class _CommandBuffer:
     def __init__(self) -> None:
         self.error_value = None
@@ -256,8 +269,8 @@ class TestLatestSubmissionWins:
     def test_a_newer_scrub_token_retires_waiting_frames_of_the_old_one(self) -> None:
         port, _sink, presenter = _port(drawables=0)
         port.submit(_frame(1, token=5))
-        port.submit(_frame(2, token=6))         # queue full afterwards
-        assert port.represent_displayed((0, 0, 1, 1)) is False
+        port.submit(_frame(2, token=6))
+        assert port.represent_displayed((0, 0, 1, 1)) is False   # nothing displayed yet
         # Free a drawable: frame 1 is stale now, frame 6's frame is shown.
         port._sink._free.append(object())
         outcomes = port.poll()
@@ -331,14 +344,19 @@ class TestBackPressure:
         assert [(o.frame.frame, o.reason) for o in port.poll()] == [(2, "past_deadline")]
         assert port.pending == 0
 
-    def test_full_queue_refuses_a_frame_without_touching_its_lease(self) -> None:
+    def test_a_full_queue_keeps_the_newest_frame_and_returns_the_older_one(self) -> None:
         port, sink, _presenter = _port(drawables=0, max_pending=1)
-        port.submit(_frame(1))
-        lease = _Lease()
-        assert port.submit(_frame(2), on_released=lease) is False
+        older, lease = _frame(1), _Lease()
+        assert port.submit(older, on_released=lease) is True
+        assert port.submit(_frame(2)) is True            # takes the queue place
+        # The displaced frame's lease is returned by the owner thread, never
+        # on the thread that submitted.
         assert lease.released == []
-        assert port.stats["dropped_full"] == 1
+        outcomes = port.poll()
+        assert [(o.frame, o.event, o.reason) for o in outcomes] == [(older, "released", "displaced")]
+        assert lease.released == ["displaced"]
         assert port.pending == 1
+        assert port.stats["displaced"] == 1
 
     def test_in_flight_drawables_are_bounded(self) -> None:
         port, sink, presenter = _port(max_in_flight=2)
@@ -396,6 +414,52 @@ class TestFailures:
         # Frame 2 is shown; frame 1 is released and its broken callback is logged.
         assert [o.event for o in port.poll()] == ["presented", "released"]
         assert port.displayed_frame.frame == 2
+
+
+class TestStall:
+    def test_a_present_that_never_completes_stalls_the_port(self) -> None:
+        """Display asleep or occluded: the committed present does not come
+        back.  Its frames are kept; the owner is told to stop feeding."""
+        clock = _Clock()
+        port, sink, presenter = _port(stall_timeout_s=1.0, clock=clock)
+        port.submit(_frame(1))
+        assert [o.event for o in port.poll()] == ["presented"]
+        assert port.stalled is False
+        clock.advance(0.5)
+        port.poll()
+        assert port.stalled is False
+        clock.advance(0.6)                       # beyond the timeout
+        port.poll()
+        assert port.stalled is True
+        assert port.stats["stalled"] == 1
+        port.poll()
+        assert port.stats["stalled"] == 1       # one episode, not one per poll
+        assert presenter.calls                  # the frame was really committed
+
+        sink.complete_next()                     # the display came back
+        sink.show_next()
+        port.poll()
+        assert port.stalled is False
+        assert port.displayed_frame is not None   # the picture was kept
+
+    def test_a_stall_episode_is_counted_per_recovery(self) -> None:
+        clock = _Clock()
+        port, sink, _presenter = _port(stall_timeout_s=1.0, clock=clock)
+        for _ in range(2):
+            port.submit(_frame(1))
+            port.poll()
+            clock.advance(2.0)
+            port.poll()
+            assert port.stalled is True
+            sink.complete_next()
+            sink.show_next()
+            port.poll()
+            assert port.stalled is False
+        assert port.stats["stalled"] == 2
+
+    def test_timeout_must_be_positive(self) -> None:
+        with pytest.raises(ValueError):
+            MetalPresentPort(_FakeSink(), publisher=_visible(), stall_timeout_s=0.0)
 
 
 class TestRepeatedShowing:

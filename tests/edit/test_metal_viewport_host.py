@@ -18,6 +18,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QWidget
 
@@ -113,6 +114,22 @@ class TestAttach:
 
 
 class TestAddedViews:
+    def test_creating_and_showing_the_host_logs_no_surface_error(self, qapp, caplog) -> None:
+        """Qt delivers events while the widget is being built; the host must
+        already hold its state by then."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="src.features.edit.ui.metal_viewport_host"):
+            host = MetalViewportHost()
+            host.resize(128, 72)
+            host.show()
+            host.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+            qapp.processEvents()
+            host.close()
+        assert not [r for r in caplog.records
+                    if "surface event failed" in r.getMessage()], caplog.records
+
+
     def test_views_do_not_take_mouse_events(self, window) -> None:
         assert window.attach() is True
         view = window._metal_view

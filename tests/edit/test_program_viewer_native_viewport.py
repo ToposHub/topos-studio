@@ -54,6 +54,7 @@ class _FakeRenderer(QObject):
         self.submits: list = []
         self.represented: list = []
         self.wanted: list = []
+        self.released: list = []          # frames sent back for the render thread
 
     def native_viewport_opted_in(self) -> bool:
         return self.opted_in
@@ -80,6 +81,9 @@ class _FakeRenderer(QObject):
 
     def set_native_frames_wanted(self, wanted: bool) -> None:
         self.wanted.append(bool(wanted))
+
+    def release_native_frame(self, present, reason: str = "unclaimed") -> None:
+        self.released.append((present, reason))
 
 
 class _FakeHost(QWidget):
@@ -174,13 +178,18 @@ class TestEnabling:
 
 
 class TestRouting:
-    def test_native_frame_without_a_viewport_returns_its_lease(self, widget) -> None:
+    def test_native_frame_without_a_viewport_is_returned_and_logged(self, widget, caplog) -> None:
+        """No renderer can free the slot: the frame is dropped and that is logged."""
+        import logging
+
         shown: list = []
         widget._viewer.set_present_frame = lambda *args, **kwargs: shown.append(args)
         ack = _Ack()
-        widget.set_frame(10, _result(_native_present(), ack, trace_id=0))
-        assert ack.slots == [3]
+        with caplog.at_level(logging.ERROR, logger="src.features.edit.ui.program_viewer"):
+            widget.set_frame(10, _result(_native_present(), ack, trace_id=0))
+        assert ack.slots == [3]                  # bookkeeping only
         assert shown == []                       # the GL viewer cannot show it
+        assert any("cannot be returned" in r.getMessage() for r in caplog.records)
 
     def test_native_frame_is_handed_over_and_the_layer_is_shown(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
@@ -227,9 +236,12 @@ class TestRouting:
         _arm(widget, renderer)
         renderer.accept = False
         ack = _Ack()
-        widget.set_frame(5, _result(_native_present(frame=5, slot=2), ack))
-        assert ack.slots == [2]
+        present = _native_present(frame=5, slot=2)
+        widget.set_frame(5, _result(present, ack))
         assert widget._metal_host.isHidden()
+        # The slot is the render thread's to free: the frame is sent back to it.
+        assert [(f, r) for f, r in renderer.released] == [(present, "viewport_queue_refused")]
+        assert ack.slots == [2]              # bookkeeping only, as for any native ack
 
     def test_a_cpu_snapshot_takes_the_screen_back(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
@@ -301,9 +313,11 @@ class TestLayerCannotShow:
         monitor.show()
         widget._trim_monitor_widget = monitor
         ack = _Ack()
-        widget.set_frame(3, _result(_native_present(frame=3), ack))
+        frame = _native_present(frame=3)
+        widget.set_frame(3, _result(frame, ack))
         assert ack.slots == [3]
         assert renderer.submits == []
+        assert [(f, r) for f, r in renderer.released] == [(frame, "layer_not_on_screen")]
         # New frames are told to take the GL path so the viewer keeps moving.
         assert renderer.wanted[-1] is False
 

@@ -5642,10 +5642,17 @@ void main() {
         self._native_port: Optional[Any] = None        # render thread only
         self._native_producer: Optional[Any] = None    # render thread only
         self._native_request_generation: Optional[int] = None
+        # Set while a committed present never completed (display asleep or
+        # occluded): its frames hold native slots, so new frames take the GL
+        # path until the GPU reports back.
+        self._native_stalled: bool = False
         # Flipped off by the viewer while its Metal layer cannot be on screen
         # (fullscreen viewer window, Trim monitor on top): new frames then
         # take the GL path so the viewer keeps showing pictures.
         self._native_frames_wanted: bool = True
+        # Native frames the viewer could not hand over; the render thread
+        # returns them (it owns the slot pool).
+        self._native_release_requests: list = []
 
     def native_viewport_opted_in(self) -> bool:
         """Whether the session asked for the native Metal viewport."""
@@ -5683,11 +5690,19 @@ void main() {
         with self._native_viewport_lock:
             self._native_viewport_request = ("detach", done)
             port = self._native_port
+        running = self.isRunning()
         if port is None and not self.is_initialized:
             # Nothing was ever built and no render thread will pick the
             # request up: settle it here.
             with self._native_viewport_lock:
                 self._native_viewport_request = None
+            done.set()
+        elif not running:
+            # The render thread is gone and can no longer touch the layer:
+            # nothing to wait for (it released the port on its way out).
+            with self._native_viewport_lock:
+                self._native_viewport_request = None
+                self._native_port = None
             done.set()
         return done.wait(timeout=max(0.0, float(timeout_s)))
 
@@ -5716,6 +5731,16 @@ void main() {
             on_presented=self._note_native_frame_presented, on_released=on_released,
         )
 
+    def release_native_frame(self, present: Any, reason: str = "unclaimed") -> None:
+        """Any thread: a native frame will not be shown — return its slot.
+
+        Only the render thread may touch the native slot pool, so the frame is
+        queued here and released in its next poll.  Idempotent per frame.
+        """
+        self._ensure_native_viewport_state()
+        with self._native_viewport_lock:
+            self._native_release_requests.append((present, str(reason)))
+
     def represent_native_viewport(self, rect: tuple) -> bool:
         """GUI thread: show the on-screen frame again (resize, zoom, pan)."""
         self._ensure_native_viewport_state()
@@ -5741,6 +5766,13 @@ void main() {
         if request is not None:
             self._apply_native_viewport_request(request)
         port, producer = self._native_port, self._native_producer
+        with self._native_viewport_lock:
+            unclaimed, self._native_release_requests = self._native_release_requests, []
+        for present, reason in unclaimed:
+            playback_trace(
+                "gpu_renderer.native_preview_unclaimed", frame=getattr(present, "frame", -1),
+                slot_id=getattr(present, "slot_id", -1), reason=reason)
+            self._release_native_frame(present, reason, producer)
         if port is not None:
             try:
                 outcomes = port.poll()
@@ -5750,12 +5782,35 @@ void main() {
             for outcome in outcomes:
                 if outcome.event == "released":
                     self._release_native_frame(outcome.frame, outcome.reason, producer)
+            self._track_native_stall(port)
         if producer is not None:
             published, failed = producer.poll()
             for item in published:
                 self._emit_native_present(item)
             for item in failed:
                 self._fail_native_frame(item)
+
+    def _track_native_stall(self, port: Any) -> None:
+        """Render thread: report a present that stopped completing, and recovery.
+
+        The frames of such a present cannot be released (the display may
+        still read them).  While it lasts, new frames are produced for the
+        GL path instead; the viewer puts its GL viewer back on screen.  When
+        the completions arrive the native path resumes by itself.
+        """
+        stalled = bool(port.stalled)
+        if stalled and not self._native_stalled:
+            self._native_stalled = True
+            self.native_viewport_failed.emit(
+                f"present_stalled:{port.stats.get('stalled', 0)}:no completion within "
+                f"{getattr(port, '_stall_timeout_s', '?')}s; showing frames through OpenGL")
+            playback_trace(
+                "gpu_renderer.native_viewport_stalled",
+                in_flight=port.in_flight, pending=port.pending,
+            )
+        elif not stalled and self._native_stalled:
+            self._native_stalled = False
+            playback_trace("gpu_renderer.native_viewport_recovered")
 
     def _apply_native_viewport_request(self, request: tuple) -> None:
         """Render thread: build or tear down the native viewport."""
@@ -5888,6 +5943,8 @@ void main() {
         if producer is None or not producer.enabled:
             return False
         if not self.__dict__.get("_native_frames_wanted", True):
+            return False
+        if self.__dict__.get("_native_stalled"):
             return False
         if (getattr(self, "_effect_hdr", False) or task.background
                 or task.cached_composite or getattr(self, "_snapshot_armed", False)):

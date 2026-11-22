@@ -38,6 +38,10 @@ class _FakePort:
         self.shutdown_outcomes: list = []
         self.shutdown_calls = 0
         self.represented = None
+        self.stalled = False
+        self.in_flight = 0
+        self.pending = 0
+        self.stats = {"stalled": 0}
 
     def set_request(self, **changes) -> None:
         self.requests.append(changes)
@@ -161,10 +165,19 @@ class TestAttachAndDetach:
         assert renderer.detach_native_viewport(timeout_s=0.1) is True
         assert renderer._native_viewport_request is None
 
+    def test_a_stopped_render_thread_cannot_hold_the_layer(self, native) -> None:
+        """No thread will answer: settle at once instead of waiting."""
+        native._native_port = _FakePort()        # a port the thread left behind
+        assert native.isRunning() is False
+        assert native.detach_native_viewport(timeout_s=5.0) is True
+        assert native._native_viewport_request is None
+        assert native._native_port is None
+
     def test_detach_runs_on_the_render_thread_and_confirms(self, native) -> None:
         released = SimpleNamespace(frame=1)
         native._native_port.shutdown_outcomes = [PresentOutcome(released, "released", "shutdown")]
         producer = native._native_producer
+        native.isRunning = lambda: True                 # a live render thread
         native.detach_native_viewport(timeout_s=0.0)   # only queues the request
         done = native._native_viewport_request[1]
         assert not done.is_set()
@@ -330,6 +343,43 @@ class TestRenderThreadLoop:
         native._native_port.poll = explode
         native._poll_native_viewport()      # must not raise
         assert native._native_producer.polled == 1
+
+    def test_unclaimed_frames_are_freed_by_the_render_thread(self, native) -> None:
+        """The viewer may ask from its own thread; the slot pool is the
+        render thread's, so the release happens in the next poll."""
+        frame = SimpleNamespace(frame=8, slot_id=1)
+        acked: list = []
+        native.slot_acked.connect(acked.append)
+        native.release_native_frame(frame, "viewport_queue_refused")     # any thread
+        native.release_native_frame(frame, "again")                      # coalesced
+        assert native._native_producer.acked == []                        # nothing yet
+        native._poll_native_viewport()
+        assert [(f, r) for f, r in native._native_producer.acked] == [
+            (frame, "viewport_queue_refused"), (frame, "again")]
+        assert acked == [1, 1]                 # the presenter sees the protocol end
+
+    def test_a_stalled_present_moves_new_frames_to_the_gl_path(self, native) -> None:
+        """The display stopped completing presents: report it once, stop
+        feeding frames to the native path, resume when completions return."""
+        failures: list = []
+        native.native_viewport_failed.connect(failures.append)
+        port = native._native_port
+        source = _VtFrame()
+        task = _task(source)
+
+        port.stalled = True
+        native._poll_native_viewport()
+        native._poll_native_viewport()
+        assert len(failures) == 1 and failures[0].startswith("present_stalled:")
+        # The frame is left whole for the GL path.
+        assert native._try_native_metal_preview(task, 960, 540) is False
+        assert task.layers[0]["vt_pixel_buffer"] is source
+        assert native._native_producer.rendered == []
+
+        port.stalled = False
+        native._poll_native_viewport()
+        assert len(failures) == 1               # recovery is silent
+        assert native._try_native_metal_preview(task, 960, 540) is True
 
     def test_presented_frames_are_counted(self, native) -> None:
         shown: list = []

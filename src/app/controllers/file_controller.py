@@ -7655,6 +7655,10 @@ class FileOpsMixin:
             event.ignore()
             return
 
+        # Metal 迁移 2.1–2.3：原生视口先于一切线程收回。握手需要预览渲染
+        # 线程仍在轮询，所以放在保存确认之后、第一个线程停止之前。
+        _disable_native_program_viewport(self)
+
         # AudioPlaybackManager is parented below EditPage and contains live
         # QThread children (playback + scrub preview).  Join them explicitly
         # before Qt starts deleting the MainWindow/child QWidget hierarchy;
@@ -7803,8 +7807,6 @@ class FileOpsMixin:
         self.db.set_setting("last_state", self.saveState().toHex().data().decode())
 
         # Stop background threads
-        # 原生视口先于渲染线程收回：握手需要渲染线程仍在轮询。
-        _disable_native_program_viewport(self)
         if hasattr(self, 'engine') and self.engine:
             if self.engine.renderer:
                 # P1-THREAD-01：检查 stop() 返回值，超时推迟销毁而非放任
