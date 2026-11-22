@@ -5,6 +5,8 @@ import json
 import zipfile
 from pathlib import Path
 
+from PyQt6.QtGui import QImage
+
 from src.app.ui.library_grade_badges import LibraryGradeBadges
 from src.features.files.services.facade import FacadeOutcome
 from src.shared.project.image_sidecar import resolve_image_sidecar
@@ -54,7 +56,10 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         def run(self, key, request_id, work, listener) -> None:
             self.jobs.append((key, request_id, work, listener))
 
-        def finish(self, index: int, *, value: dict[str, bool] | None = None) -> None:
+        def graded_thumbnail(self, path: str, *, verified_sidecar: str | None = None) -> bytes | None:
+            return None
+
+        def finish(self, index: int, *, value: dict[str, tuple[bool, QImage | None]] | None = None) -> None:
             key, request, work, listener = self.jobs[index]
             listener(FacadeOutcome(request, key, index, result=work() if value is None else value))
 
@@ -68,7 +73,7 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         qtbot.waitUntil(lambda: len(facade.jobs) == 1)
         badges.invalidate(path)
         assert not badges.is_graded(path)
-        facade.finish(0, value={path: True})
+        facade.finish(0, value={path: (True, None)})
         qtbot.waitUntil(lambda: len(facade.jobs) == 2)
         assert not badges.is_graded(path)
         _project(tmp_path / "photo.topos", source)
@@ -79,7 +84,7 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         assert not badges.is_graded(path)
         qtbot.waitUntil(lambda: len(facade.jobs) == 3)
         badges.reset()
-        facade.finish(2, value={path: True})
+        facade.finish(2, value={path: (True, None)})
         assert not badges.is_graded(path)
     finally:
         badges.shutdown()

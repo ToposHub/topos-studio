@@ -198,9 +198,17 @@ class GradeSetTransfer(QObject):
         self._worker.submit(copy_luts).add_done_callback(done)
 
     def paste(self, path: str) -> None:
-        host = self._host
         grade = self._grade
         if self._closed or self._busy or grade is None or path == grade.source:
+            return
+        self._paste_to_image(path, grade)
+
+    def _paste_to_image(self, path: str, grade: _PhotoGrade) -> None:
+        if self._closed:
+            return
+        host = self._host
+        if (path != host.grade_set_panel.active_path
+                and not host._prepare_to_leave_photo(lambda: self._paste_to_image(path, grade))):
             return
         host._open_grade_set_image(path)
         if host._active_grade_set_image() != path or host.grade_set_panel.active_path != path:

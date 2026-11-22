@@ -18,6 +18,36 @@
       "folders_heading": "Folders",
       "rename_folder": "Rename Folder…",
       "libraries_heading": "Libraries",
+      "inspector": "File Information",
+      "select": "Select a file to view its information",
+      "basic_info": "Basic Information",
+      "metadata": "Marks",
+      "rating": "Rating",
+      "rating_stars": "{count} / 5 stars",
+      "clear_rating": "Clear rating",
+      "color_label": "Color Label",
+      "label_color": {
+        "none": "Clear color label",
+        "red": "Red",
+        "yellow": "Yellow",
+        "green": "Green",
+        "blue": "Blue",
+        "purple": "Purple"
+      },
+      "mixed": "Mixed",
+      "tags": "Tags",
+      "tags_hint": "Comma-separated tags",
+      "comments": "Notes",
+      "comment_hint": "Add a note",
+      "field": {
+        "type": "Type",
+        "size": "Size",
+        "mtime": "Modified",
+        "duration": "Duration",
+        "resolution": "Resolution",
+        "fps": "Frame Rate",
+        "codec": "Codec"
+      },
       "add_library": "Add Media Library…",
       "register_current": "Add Current Folder as a Library",
       "library_updated": "Media library updated",
@@ -758,6 +788,7 @@
     "close_panel": "Close Panel"
   },
   "grade_sets": {
+    "open_in_color": "Open in Color",
     "title": "Grade Sets",
     "default_name": "Default Grade Set",
     "default_fixed": "The default grade set is always available",
@@ -802,7 +833,10 @@
     "lut_transfer_failed": "Could not transfer a LUT: {detail}",
     "unavailable": "Grade sets are unavailable",
     "missing": "Grade set no longer exists",
+    "loading_image": "Loading {name}…",
     "image_missing": "Image file is unavailable",
+    "export_photo": "Export selected photo",
+    "export_source_changed": "The selected photo changed. Open Export again.",
     "no_images": "Choose supported image files"
   },
   "panel": {

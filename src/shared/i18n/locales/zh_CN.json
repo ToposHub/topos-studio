@@ -16,6 +16,36 @@
       "copy_started": "正在复制 {n} 项…",
       "move_started": "正在移动 {n} 项…",
       "libraries_heading": "素材库",
+      "inspector": "文件信息",
+      "select": "选择素材查看信息",
+      "basic_info": "基本信息",
+      "metadata": "标记",
+      "rating": "评分",
+      "rating_stars": "{count} 星",
+      "clear_rating": "清除评分",
+      "color_label": "颜色标签",
+      "label_color": {
+        "none": "清除颜色标签",
+        "red": "红色",
+        "yellow": "黄色",
+        "green": "绿色",
+        "blue": "蓝色",
+        "purple": "紫色"
+      },
+      "mixed": "混合",
+      "tags": "标签",
+      "tags_hint": "逗号分隔，例如 采访, 夜景",
+      "comments": "备注",
+      "comment_hint": "备注",
+      "field": {
+        "type": "类型",
+        "size": "大小",
+        "mtime": "修改日期",
+        "duration": "时长",
+        "resolution": "分辨率",
+        "fps": "帧率",
+        "codec": "编码"
+      },
       "add_library": "添加素材库…",
       "register_current": "将当前文件夹添加为素材库",
       "library_updated": "已更新素材库",
@@ -756,6 +786,7 @@
     "close_panel": "关闭面板"
   },
   "grade_sets": {
+    "open_in_color": "进入调色",
     "title": "调色集",
     "default_name": "默认调色集",
     "default_fixed": "默认调色集始终可用",
@@ -800,7 +831,10 @@
     "lut_transfer_failed": "无法复制 LUT：{detail}",
     "unavailable": "调色集暂不可用",
     "missing": "调色集已不存在",
+    "loading_image": "正在加载 {name}…",
     "image_missing": "图片文件不可用",
+    "export_photo": "导出所选照片",
+    "export_source_changed": "所选照片已变化，请重新打开导出。",
     "no_images": "请选择支持的图片文件"
   },
   "panel": {

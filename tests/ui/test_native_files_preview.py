@@ -52,6 +52,23 @@ def test_decode_preview_rejects_garbage_with_reason():
     assert error  # 必须给出原因，不能静默空白
 
 
+def test_library_lightbox_file_info_hides_and_returns_on_next_photo(qtbot) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    parent.show()
+    preview = NativeFilesPreview(parent)
+    preview.open_for("first.jpg", auto_hide_info=True, can_grade=True)
+    assert preview._info_timer.interval() == 3000
+    assert preview.title.isVisible() and preview.meta.isVisible()
+    preview._info_timer.start(20)
+    qtbot.waitUntil(lambda: preview.title.isHidden() and preview.meta.isHidden())
+    assert preview.grade_button.isVisible() and preview.close_button.isVisible()
+    preview.open_for("second.jpg", auto_hide_info=True, can_grade=True)
+    assert preview.title.isVisible() and preview.meta.isVisible()
+    preview.close_preview()
+    assert not preview._info_timer.isActive()
+
+
 def test_preview_overlay_fit_toggle_and_escape(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
@@ -104,6 +121,57 @@ def test_panel_space_on_image_requests_preview_and_ignores_stale_bytes(qtbot):
     panel.show_preview_bytes("/media/B.png", _png_bytes())
     qtbot.waitUntil(lambda: panel._preview._image is not None, timeout=4000)
     assert panel._preview._image.width() == 40
+
+
+def test_lightbox_paints_cached_card_then_loads_fit_and_original(qtbot, tmp_path):
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    payload = _png_bytes(2200, 1200)
+    first.write_bytes(payload)
+    second.write_bytes(payload)
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    panel.resize(900, 620)
+    panel.show()
+    panel.show_libraries([{"path": str(tmp_path), "library_id": "test-preview"}])
+    panel.set_entries(str(tmp_path), [
+        {"name": path.name, "path": str(path), "type": "image"}
+        for path in (first, second)
+    ])
+    panel.set_thumbnail(str(first), _png_bytes())
+    requested = []
+    panel.preview_requested.connect(requested.append)
+
+    assert panel.open_path_native(str(first))
+    preview = panel._preview
+    assert not preview.body.pixmap().isNull()
+    assert preview._image is None and preview._decode_pending
+    panel.show_preview_bytes(str(first), payload)
+    qtbot.waitUntil(lambda: preview._image is not None)
+    assert preview._image.width() < 2200
+    assert not preview._has_detail
+
+    preview.toggle_fit()
+    assert requested == [str(first), str(first)]
+    assert not preview.body.pixmap().isNull()
+    panel.preview_load_failed(str(first), "detail failed")
+    assert preview._fit and not preview.body.pixmap().isNull()
+    preview.toggle_fit()
+    assert requested == [str(first), str(first), str(first)]
+    panel.show_preview_bytes(str(first), payload)
+    qtbot.waitUntil(lambda: preview._has_detail)
+    assert preview._image.width() == 2200
+
+    preview.close_preview()
+    assert panel.open_path_native(str(first))
+    assert len(requested) == 3
+    assert preview._image is not None and not preview._decode_pending
+    panel.preview_load_failed(str(first), "late error")
+    assert "late error" not in preview.meta.text()
+    first.write_bytes(_png_bytes(1800, 1200))
+    assert panel.open_path_native(str(first))
+    assert requested[-1] == str(first) and len(requested) == 4
+    assert preview._image is None
 
 
 def test_panel_routes_video_to_native_preview(qtbot, monkeypatch):
@@ -184,13 +252,13 @@ def test_capabilities_disable_metadata_controls_with_reason(qtbot, capability):
         capability,
         {"key": "preview.image", "available": True},
     ])
-    assert not panel.rating_combo.isEnabled()
+    assert not panel.rating_buttons[0].isEnabled()
     assert not panel.tag_edit.isEnabled()
     assert "只读挂载" in panel.meta_status.text()
     panel.apply_capabilities([{"key": "metadata.patch", "available": True}])
-    assert not panel.rating_combo.isEnabled()  # 能力恢复后仍需有效选区
+    assert not panel.rating_buttons[0].isEnabled()  # 能力恢复后仍需有效选区
     panel.set_entries("/media", [
         {"name": "A.png", "path": "/media/A.png", "type": "image"},
     ])
     _select_path(panel, "/media/A.png")
-    assert panel.rating_combo.isEnabled()
+    assert panel.rating_buttons[0].isEnabled()

@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import zipfile
 
 import pytest
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QObject
 
 from src.app.controllers import edit_controller, file_controller
 from src.app.controllers.edit_controller import EditControllerMixin
@@ -39,10 +39,11 @@ class _Config:
         pass
 
 
-class _ImageHost(FileOpsMixin, EditControllerMixin):
+class _ImageHost(QObject, FileOpsMixin, EditControllerMixin):
     _create_standalone_image_color_session = PageManagementMixin._create_standalone_image_color_session
 
     def __init__(self) -> None:
+        super().__init__()
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
@@ -60,7 +61,8 @@ class _ImageHost(FileOpsMixin, EditControllerMixin):
         self.edit_project_io = EditProjectIO()
         self.status_bar = SimpleNamespace(showMessage=Mock())
         self.engine = SimpleNamespace(layers=[Layer("Base")], active_layer_index=0,
-                                      current_raw_params={})
+                                      current_raw_params={}, img_full_original=object())
+        self.close = Mock()
         self.titles: list[str] = []
         self.recent: list[str] = []
         self.edit_project_dirty = False
@@ -93,6 +95,10 @@ class _ImageHost(FileOpsMixin, EditControllerMixin):
 
     def load_image(self, path: str, *, project_path: str | None = None) -> None:
         """Keep rendering outside this lifecycle test; read real saved layers."""
+        if not self._prepare_to_leave_photo(lambda: self.load_image(path, project_path=project_path)):
+            return
+        if not self._confirm_project_replacement_for_image(path):
+            return
         self.current_file_path = path
         assert self._ensure_image_project(path, project_path)
         self._create_standalone_image_color_session(path, project_path=project_path)
@@ -100,6 +106,10 @@ class _ImageHost(FileOpsMixin, EditControllerMixin):
             data = self.save_router.load_single_asset_data(project_path)
             assert data is not None
             self.engine.layers = data["layers"]
+        else:
+            self.engine.layers = [Layer("Base")]
+        if self._has_grade_set_photo():
+            self._start_photo_preview()
 
 
 @pytest.fixture()
@@ -107,6 +117,9 @@ def image_host(qapp, monkeypatch):
     monkeypatch.setenv("TOPOS_PRODUCT_MODE", "color")
     host = _ImageHost()
     yield host
+    timer = getattr(host, "_autosave_router_timer", None)
+    if timer is not None:
+        timer.stop()
     host.edit_project_io.cleanup()
 
 
@@ -168,52 +181,102 @@ def test_replacing_image_cancel_preserves_current_document(image_host, tmp_path:
     image_host._close_current_project.assert_called_once_with()
 
 
-def test_cancelling_grade_set_switch_leaves_live_photo_untouched(
-    image_host, tmp_path: Path, monkeypatch,
+def test_switching_preview_photos_does_not_prompt_or_create_projects(
+    image_host, tmp_path: Path, monkeypatch, qtbot,
 ) -> None:
-    first = str(tmp_path / "first.png")
-    image_host.load_image(first)
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
     image_host.grade_set_panel = Mock()
-    image_host.unload_video = Mock()
-    image_host.save_router.save = Mock()
-    image_host._autosave_router_timer = QTimer()
-    image_host._autosave_router_timer.setSingleShot(True)
-    image_host._autosave_router_timer.start(1000)
-    original = image_host._current_edit_project
-
-    def question(*args: object) -> edit_controller.QMessageBox.StandardButton:
-        assert not image_host._autosave_router_timer.isActive()
-        return edit_controller.QMessageBox.StandardButton.Cancel
-
+    image_host.grade_set_model = object()
+    question = Mock()
     monkeypatch.setattr(edit_controller.QMessageBox, "question", question)
-    FileOpsMixin.load_image(image_host, str(tmp_path / "second.png"))
-    assert image_host._autosave_router_timer.isActive()
-    image_host._autosave_router_timer.stop()
-    assert image_host._current_edit_project is original
-    assert image_host.current_file_path == first
-    image_host.save_router.save.assert_not_called()
-    image_host.grade_set_panel.invalidate_graded_thumbnail.assert_not_called()
-    image_host.unload_video.assert_not_called()
+    image_host.load_image(str(first))
+    assert not image_host._has_unsaved_changes()
+    assert not image_host.titles[-1].endswith("*")
+    # A completed interaction can queue autosave without changing parameters.
+    image_host._trigger_autosave()
+    image_host.load_image(str(second))
+    qtbot.waitUntil(lambda: image_host.current_file_path == str(second))
+    image_host._perform_periodic_save()
+    assert image_host._confirm_save_before_close()
+    image_host._persist_active_project_before_close()
+    question.assert_not_called()
+    assert not list(tmp_path.glob("*.topos"))
 
 
-def test_discarding_grade_set_photo_expires_preview_without_saving(
-    image_host, tmp_path: Path, monkeypatch,
+@pytest.mark.parametrize("write_fails", [False, True])
+def test_switching_after_grade_edit_waits_for_archive_without_prompt(
+    image_host, tmp_path: Path, monkeypatch, qtbot, write_fails: bool,
 ) -> None:
-    first = str(tmp_path / "first.png")
-    image_host.load_image(first)
+    first = tmp_path / "first.png"
+    first.write_bytes(b"source placeholder")
+    second = tmp_path / "second.png"
+    second.write_bytes(b"source placeholder")
     image_host.grade_set_panel = Mock()
-    image_host.save_router.save = Mock()
-    image_host._autosave_router_timer = QTimer()
-    image_host._autosave_router_timer.setSingleShot(True)
-    image_host._autosave_router_timer.start(1000)
-    monkeypatch.setattr(edit_controller.QMessageBox, "question",
-                        lambda *args: edit_controller.QMessageBox.StandardButton.Discard)
+    image_host.grade_set_model = object()
+    question = Mock()
+    monkeypatch.setattr(edit_controller.QMessageBox, "question", question)
+    image_host.load_image(str(first))
+    stack_id = image_host._color_session_manager.get_current_color_stack_id()
+    image_host.engine.layers[0].grading_params["exposure"] = 1.25
+    image_host._trigger_autosave()
+    if write_fails:
+        monkeypatch.setattr(image_host.edit_project_io, "save_project", lambda *args, **kwargs: False)
 
-    assert image_host._close_current_project()
-    assert not image_host._autosave_router_timer.isActive()
-    image_host.save_router.save.assert_not_called()
-    image_host.grade_set_panel.invalidate_graded_thumbnail.assert_called_once_with(first)
-    image_host.grade_set_panel.set_active_path.assert_called_once_with(None)
+    image_host._open_media_path(str(second))
+    assert image_host.current_file_path == str(first)
+    package = first.with_suffix(".topos")
+    if write_fails:
+        qtbot.waitUntil(lambda: image_host._photo_action_after_save is None)
+        assert image_host.current_file_path == str(first)
+        assert image_host.edit_project_dirty
+        assert not package.exists()
+    else:
+        qtbot.waitUntil(lambda: image_host.current_file_path == str(second), timeout=10000)
+        assert not image_host.edit_project_dirty
+        assert not second.with_suffix(".topos").exists()
+        loaded, _, _ = image_host.edit_project_io.load_project(str(package))
+        assert loaded.color_stacks[stack_id].grading_params["exposure"] == 1.25
+    question.assert_not_called()
+
+
+def test_switch_after_inflight_save_keeps_new_edits_and_latest_selection(
+    image_host, tmp_path: Path, monkeypatch, qtbot,
+) -> None:
+    first, second, third = (tmp_path / name for name in ("first.png", "second.png", "third.png"))
+    for path in (first, second, third):
+        path.write_bytes(b"source placeholder")
+    image_host.grade_set_model = object()
+    image_host.load_image(str(first))
+    stack_id = image_host._color_session_manager.get_current_color_stack_id()
+    original_save = image_host.edit_project_io.save_project
+    entered = threading.Event()
+    gate = threading.Event()
+
+    def slow_save(*args: Any, **kwargs: Any) -> bool:
+        entered.set()
+        assert gate.wait(5)
+        return original_save(*args, **kwargs)
+
+    monkeypatch.setattr(image_host.edit_project_io, "save_project", slow_save)
+    try:
+        image_host.engine.layers[0].grading_params["exposure"] = 1.0
+        image_host._trigger_autosave()
+        image_host._open_media_path(str(second))
+        qtbot.waitUntil(entered.is_set)
+
+        image_host.engine.layers[0].grading_params["exposure"] = 2.0
+        image_host._trigger_autosave()
+        image_host._open_media_path(str(third))
+        assert image_host.current_file_path == str(first)
+        gate.set()
+
+        qtbot.waitUntil(lambda: image_host.current_file_path == str(third), timeout=10000)
+        assert not second.with_suffix(".topos").exists()
+        loaded, _, _ = image_host.edit_project_io.load_project(str(first.with_suffix(".topos")))
+        assert loaded.color_stacks[stack_id].grading_params["exposure"] == 2.0
+    finally:
+        gate.set()
 
 
 def test_standalone_photo_retains_history_and_resources_until_archive_worker_finishes(
@@ -337,6 +400,7 @@ def test_idle_grade_save_adopts_sidecar_only_after_archive_commit(image_host, tm
     image_host.load_image(str(source))
     stack_id = image_host._color_session_manager.get_current_color_stack_id()
     image_host.engine.layers[0].grading_params["exposure"] = 1.35
+    image_host._trigger_autosave()
     target = source.with_suffix(".topos")
 
     image_host._perform_debounced_save()
@@ -351,29 +415,21 @@ def test_idle_grade_save_adopts_sidecar_only_after_archive_commit(image_host, tm
     assert loaded.color_stacks[stack_id].grading_params["exposure"] == 1.35
 
 
-@pytest.mark.parametrize("discard", [True, False])
-def test_app_quit_prompt_pauses_idle_photo_save(image_host, tmp_path: Path,
-                                               monkeypatch, discard: bool) -> None:
+def test_app_quit_saves_photo_before_resuming_close(image_host, tmp_path: Path,
+                                                   monkeypatch, qtbot) -> None:
     source = tmp_path / "photo.png"
+    source.write_bytes(b"source placeholder")
     image_host.grade_set_model = object()
     image_host.load_image(str(source))
-    image_host._autosave_router_timer = QTimer()
-    image_host._autosave_router_timer.setSingleShot(True)
-    image_host._autosave_router_timer.start(1000)
-    image_host._save_image_project_as = Mock()
-
-    def answer(*args: object) -> file_controller.QMessageBox.StandardButton:
-        assert not image_host._autosave_router_timer.isActive()
-        image_host._perform_debounced_save()
-        if discard:
-            return file_controller.QMessageBox.StandardButton.Discard
-        return file_controller.QMessageBox.StandardButton.Cancel
-
-    monkeypatch.setattr(file_controller.QMessageBox, "question", answer)
-    assert image_host._confirm_save_before_close() is discard
-    image_host._save_image_project_as.assert_not_called()
-    assert image_host._autosave_router_timer.isActive() is not discard
-    image_host._autosave_router_timer.stop()
+    image_host.engine.layers[0].grading_params["exposure"] = 0.75
+    image_host._trigger_autosave()
+    question = Mock()
+    monkeypatch.setattr(file_controller.QMessageBox, "question", question)
+    assert not image_host._confirm_save_before_close()
+    qtbot.waitUntil(lambda: image_host.close.called, timeout=10000)
+    assert source.with_suffix(".topos").exists()
+    assert image_host._confirm_save_before_close()
+    question.assert_not_called()
 
 
 def test_failed_image_save_as_keeps_path_dirty_and_model(image_host, tmp_path: Path,

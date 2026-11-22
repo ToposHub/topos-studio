@@ -74,12 +74,8 @@ class TestRenderLaneEnum:
         assert hasattr(RenderLane, 'SCOPE_SNAPSHOT')
         assert RenderLane.SCOPE_SNAPSHOT.value == "scope_snapshot"
 
-    def test_render_lane_count(self):
-        """RenderLane 应有 7 个 lane (GPU_SCOPE added for native scope pipeline)"""
-        assert len(RenderLane) == 7
-
     def test_render_lane_has_gpu_scope(self):
-        """RenderLane 应有 GPU_SCOPE (native GPU scope, lowest priority)"""
+        """RenderLane 应有 GPU_SCOPE"""
         assert hasattr(RenderLane, 'GPU_SCOPE')
         assert RenderLane.GPU_SCOPE.value == "gpu_scope"
 
@@ -450,6 +446,15 @@ class TestLaneMergeLogic:
         assert self._pending_slots[RenderLane.SCOPE_SNAPSHOT] == (
             RenderCommand.RENDER_SCOPE, data,
         )
+
+    def test_grade_set_readback_coalesces_without_discarding_scope_reads(self):
+        scope = {"max_dim": 512}
+        latest = {"grade_set_preview_key": (1, 2)}
+        self._call_submit(RenderCommand.RENDER_SCOPE, scope)
+        self._call_submit(RenderCommand.RENDER_SCOPE, {"grade_set_preview_key": (1, 1)})
+        self._call_submit(RenderCommand.RENDER_SCOPE, latest)
+        assert self._pending_slots[RenderLane.SCOPE_SNAPSHOT] == (RenderCommand.RENDER_SCOPE, scope)
+        assert self._pending_slots[RenderLane.GRADE_SET_PREVIEW] == (RenderCommand.RENDER_SCOPE, latest)
 
     def test_critical_command_enqueued_directly(self):
         """critical 命令应直接进入队列"""

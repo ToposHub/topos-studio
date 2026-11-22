@@ -507,8 +507,7 @@ class GradeSetPanel(QWidget):
             self._model.add(self._active_id, paths)
 
     def _open_image(self, path: str) -> None:
-        if path != self.active_path:
-            self.image_requested.emit(path)
+        self.image_requested.emit(path)
 
     def set_active_path(self, path: str | None) -> None:
         """Highlight only after the host accepted the image switch."""
@@ -520,6 +519,14 @@ class GradeSetPanel(QWidget):
         for changed in (previous, path):
             self._update_card(changed)
         self.active_photo_name_changed.emit(Path(path).name if path else "")
+
+    def following_photo(self, path: str) -> str | None:
+        """Use the same visible sort and filters as photo navigation."""
+        index = self._order.mapFromSource(self._images.path_index(path))
+        count = self._order.rowCount()
+        if not index.isValid() or count < 2:
+            return None
+        return self._order.index((index.row() + 1) % count, 0).data(_PATH_ROLE)
 
     def _show_context_menu(self, pos: QPoint) -> None:
         menu = self._build_context_menu(pos)
@@ -598,7 +605,8 @@ class GradeSetPanel(QWidget):
                 continue
             self._candidates.pop(path, None)
             if self._transport is None:
-                self._transport = NativeFilesTransport(lambda: "", None, self, facade_workers=2)
+                self._transport = NativeFilesTransport(
+                    lambda: "", None, self, facade_workers=2, prefer_graded_thumbnails=True)
                 self._transport.thumbnail_loaded.connect(self._thumbnail_loaded)
                 self._transport.thumbnail_failed.connect(self._thumbnail_failed)
             self._pending.add(path)

@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
+    from numpy import ndarray
     from src.features.files.services.ai_library import LibraryAnalysisPolicy
+    from src.features.files.services.thumbnail_cache import GradedThumbnailStamp
 
 from src.features.files.contracts import (
     FilesError,
@@ -281,6 +283,18 @@ class FilesFacade:
         if cancel.is_set():
             raise ValueError("缩略图请求已取消")
         return self._thumbnail_cache.get_or_create(path, version, lambda: thumbnail_bytes(path, cancel=cancel))
+
+    def graded_thumbnail(self, path: str, *, verified_sidecar: str | None = None) -> bytes | None:
+        return self._thumbnail_cache.read_graded(path, verified_sidecar=verified_sidecar)
+
+    def cache_graded_thumbnail(self, stamp: GradedThumbnailStamp, rgb: ndarray) -> bool:
+        import cv2
+
+        if self.graded_thumbnail(stamp.source) is not None:
+            return True
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        ok, data = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 48, cv2.IMWRITE_JPEG_OPTIMIZE, 1])
+        return bool(ok and self._thumbnail_cache.store_graded(stamp, data.tobytes()))
 
     @property
     def dropped_results(self) -> int:

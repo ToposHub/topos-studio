@@ -87,6 +87,7 @@ def test_library_grade_set_sidebar_and_multi_selection(
                 panel.selection.select(index, flags)
         selected = panel.selection.selectedRows(0)
         assert len(selected) == 2
+        assert panel.inspector_export_button.isHidden()
         position = view.visualRect(selected[0]).center()
         menu = panel._build_context_menu(view, position)
         label = I18N.tr("grade_sets.add_to", "添加到调色集")
@@ -134,6 +135,24 @@ def test_library_grade_set_sidebar_and_multi_selection(
         qtbot.waitUntil(lambda: panel._view_location.get("collection_id") == collection_id
                         and panel.model.rowCount() == 3)
         assert locations.currentIndex() == portraits
+        index = panel.proxy.index(0, 0)
+        photo_path = index.data(FilesEntryModel.ENTRY_ROLE).path
+        panel.selection.select(index, flags)
+        assert not panel.inspector_export_button.isHidden()
+        with qtbot.waitSignal(library.photo_export_requested) as export:
+            panel.inspector_export_button.click()
+        assert export.args == [photo_path]
+        panel.selection.select(panel.proxy.index(1, 0), flags)
+        assert panel.inspector_export_button.isHidden()
+        with qtbot.waitSignal(library.photo_grade_requested) as grade:
+            view.doubleClicked.emit(index)
+        assert grade.args == [photo_path]
+        with qtbot.waitSignal(library.image_lightbox_active) as opened:
+            assert panel.open_path_native(photo_path)
+        assert opened.args == [True]
+        with qtbot.waitSignal(library.photo_grade_requested) as grade:
+            panel._preview.grade_button.click()
+        assert grade.args == [photo_path] and not panel._preview.is_open
         locations.collapse(grade_sets)
         panel.selection.clear()
         panel.selection.select(panel.proxy.index(0, 0), flags)

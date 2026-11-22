@@ -126,6 +126,35 @@ def make_fullres_bookkeeping(**overrides: Any) -> AsyncRenderer:
     return make_qt_stub(**attrs)
 
 
+def test_grade_set_preview_crops_fit_margins_and_reuses_only_matching_scope() -> None:
+    key = (2, 5)
+    front, scope = Mock(glo=12), Mock(glo=42)
+    params = dict(grade_set_preview_key=key, photo_size=(800, 1200),
+                  scene_visible_rect=(-400, 0, 1600, 1200))
+    raw = np.zeros((192, 128, 3), dtype=np.uint8)
+    raw[-1] = 251
+    render = make_qt_stub(
+        _last_scope_render_params=params, ctx=Mock(), pyramid_textures=[Mock()],
+        video_playback_active=False, current_front_size=(1600, 1200), current_front_tex_id=12,
+        tex_pair=[front], _read_scaled_texture=Mock(return_value=raw.tobytes()),
+        _scope_color_output_revision=9, _scope_content_revision=9, _scope_color_output_photo_key=key,
+        _scope_color_output_tex=scope, _do_render_color_output=Mock())
+    preview = render._read_grade_set_preview(key)
+    assert preview is not None and np.all(preview[0] == 251)
+    render._read_scaled_texture.assert_called_once_with(front, (128, 192), dtype="f1", uv=(0.25, 1., 0.75, 0.))
+
+    render._read_scaled_texture.reset_mock()
+    params["scene_visible_rect"] = (80, 80, 300, 300)
+    assert render._read_grade_set_preview(key) is not None
+    render._read_scaled_texture.assert_called_once_with(scope, (128, 192), dtype="f1", uv=None)
+    render._read_scaled_texture.reset_mock()
+    render._scope_color_output_photo_key = (2, 4)
+    assert render._read_grade_set_preview(key) is None
+    assert render._read_grade_set_preview((3, 5)) is None
+    render._read_scaled_texture.assert_not_called()
+    render._do_render_color_output.assert_not_called()
+
+
 # =============================================================================
 # 纯逻辑：matte 缓存键（P1-COLOR-08）
 # =============================================================================
@@ -1949,6 +1978,29 @@ class TestDoUploadWithoutContext:
         )
         renderer._do_upload(np.zeros((2, 2, 3), dtype=np.uint8))
         assert renderer.pyramid_textures == []
+
+    def test_source_shares_wipe_texture_until_working_pixels_are_replaced(self) -> None:
+        original, cropped, next_photo = (Mock(glo=texture_id) for texture_id in (1, 2, 3))
+        ctx = Mock()
+        ctx.texture.side_effect = (original, cropped, next_photo)
+        renderer = make_stub(
+            ctx=ctx, pyramid_textures=[], reference_pyramid_textures=[],
+            _ensure_source_tiles=Mock(),
+        )
+        pixels = np.zeros((2, 2, 3), dtype=np.float32)
+        renderer._do_upload(pixels, use_source_as_reference=True)
+        assert renderer.get_original_texture_id() == 1
+        assert renderer.reference_pyramid_textures == []
+
+        renderer._do_upload(pixels)
+        assert renderer.get_original_texture_id() == 1
+        assert renderer.pyramid_textures == [cropped]
+        original.release.assert_not_called()
+
+        renderer._do_upload(pixels, use_source_as_reference=True)
+        assert renderer.get_original_texture_id() == 3
+        original.release.assert_called_once_with()
+        cropped.release.assert_called_once_with()
 
 
 # =============================================================================

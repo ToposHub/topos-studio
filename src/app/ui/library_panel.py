@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QInputDialog, QMenu, QWidget
 from src.app.ui.files_panel import FilesPanel
 from src.app.ui.library_grade_badges import LibraryGradeBadges
 from src.app.ui.native_files_panel import FilesEntryModel
+from src.features.files.contracts import Availability, Entry
 from src.shared.config.config_manager import ConfigManager
 from src.shared.i18n.i18n import I18N
 from src.shared.media.format_registry import is_image
@@ -26,6 +28,9 @@ class LibraryPanel(FilesPanel):
     video_selected = pyqtSignal(str)
     grade_applied = pyqtSignal(str)
     quick_project_requested = pyqtSignal(str)
+    photo_grade_requested = pyqtSignal(str)
+    photo_export_requested = pyqtSignal(str)
+    image_lightbox_active = pyqtSignal(bool)
 
     def __init__(self, start_path: str | None = None, parent: QWidget | None = None) -> None:
         self.config = ConfigManager()
@@ -40,6 +45,9 @@ class LibraryPanel(FilesPanel):
         self.path_edit = panel.path_edit
         self._image_grade_badges = LibraryGradeBadges(self._native_transport._runtime, self)
         panel.card_delegate.is_graded = self._image_grade_badges.is_graded
+        panel.card_delegate.image_for_entry = self._image_for_card
+        panel.image_lightbox_active.connect(self.image_lightbox_active)
+        panel.preview_grade_requested.connect(self._grade_photo)
         self._image_grade_badges.changed.connect(self.list_view.viewport().update)
         self.model.modelReset.connect(self._image_grade_badges.reset)
         for view in (panel.icon_view, panel.detail_view):
@@ -53,6 +61,10 @@ class LibraryPanel(FilesPanel):
         """Recheck the affected card after a standalone image project is saved."""
         self._image_grade_badges.invalidate(path)
 
+    def _image_for_card(self, entry: Entry) -> QImage | None:
+        image = self._image_grade_badges.preview(entry.path)
+        return image if image is not None else self._native_panel._image_for_entry(entry)
+
     def shutdown(self) -> None:
         self._image_grade_badges.shutdown()
         super().shutdown()
@@ -62,11 +74,27 @@ class LibraryPanel(FilesPanel):
 
     def _open_native_file(self, path: str) -> None:
         from src.shared.media.format_registry import VIDEO_EXTENSIONS
-        if Path(path).suffix.lower() in VIDEO_EXTENSIONS and not (
+        if self._grade_set_view is not None and is_image(path):
+            self._grade_photo(path)
+        elif Path(path).suffix.lower() in VIDEO_EXTENSIONS and not (
                 self._grade_sets is not None and is_image(path)):
             self.quick_project_requested.emit(path)
         else:
             self.image_selected.emit(path)
+
+    def _grade_photo(self, path: str) -> None:
+        if self._grade_sets is None:
+            return
+        if self._grade_set_view is not None:
+            self._grade_sets.select(self._grade_set_view[0])
+        self.photo_grade_requested.emit(path)
+
+    def close_lightbox(self) -> None:
+        self._native_panel.close_preview()
+
+    @property
+    def browsing_grade_set(self) -> bool:
+        return self._grade_set_view is not None
 
     def set_grade_sets(self, model: GradeSetModel) -> None:
         """Attach the shared image collection model to the Library sidebar."""
@@ -74,6 +102,10 @@ class LibraryPanel(FilesPanel):
             return
         self._grade_sets = model
         panel = self._native_panel
+        panel.enable_grade_lightbox()
+        panel.inspector_export_button.clicked.connect(self._request_photo_export)
+        panel.selection.selectionChanged.connect(self._update_inspector_export)
+        panel.model.modelReset.connect(self._update_inspector_export)
         panel.enable_grade_set_locations(lambda: self._create_grade_set())
         panel.locations.grade_set_requested.connect(self._open_grade_set)
         panel.locations.grade_set_images_dropped.connect(model.add)
@@ -89,6 +121,30 @@ class LibraryPanel(FilesPanel):
         self._native_transport.collection_loaded.connect(self._sync_grade_sets)
         self._native_transport.collection_failed.connect(self._leave_grade_set_view)
         self._sync_grade_sets()
+
+    def selected_grade_set_photo(self) -> str | None:
+        view = self._grade_set_view
+        panel = self._native_panel
+        location = panel._view_location
+        if view is None or location.get("kind") != "collection" or location.get("collection_id") != view[0]:
+            return None
+        if getattr(panel, "_pending_collection_id", None) != view[0] or not panel._ready:
+            return None
+        entries = panel._selected_entries()
+        if len(entries) != 1:
+            return None
+        entry = entries[0]
+        if entry.is_dir or entry.availability == Availability.OFFLINE or not is_image(entry.path):
+            return None
+        return entry.path
+
+    def _update_inspector_export(self, *_args: object) -> None:
+        self._native_panel.inspector_export_button.setVisible(self.selected_grade_set_photo() is not None)
+
+    def _request_photo_export(self) -> None:
+        path = self.selected_grade_set_photo()
+        if path is not None:
+            self.photo_export_requested.emit(path)
 
     def _sync_grade_sets(self) -> None:
         model = self._grade_sets
@@ -111,6 +167,7 @@ class LibraryPanel(FilesPanel):
         collection = by_id.get(collection_id)
         if collection is None:
             self._grade_set_view = None
+            self._update_inspector_export()
             panel.navigate(panel.current_path or panel.home_path)
             return
         panel.locations.select_grade_set(collection_id)
@@ -139,10 +196,12 @@ class LibraryPanel(FilesPanel):
 
     def _leave_grade_set_view(self, *_args: object) -> None:
         self._grade_set_view = None
+        self._update_inspector_export()
 
     def _track_grade_set_view(self, collection_id: int, _name: str) -> None:
         if self._grade_set_view is not None and self._grade_set_view[0] != collection_id:
             self._grade_set_view = None
+        self._update_inspector_export()
 
     def _remove_collection_members(self, collection_id: int, paths: list[str]) -> None:
         model = self._grade_sets

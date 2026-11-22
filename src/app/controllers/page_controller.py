@@ -408,6 +408,14 @@ class PageManagementMixin:
         self.qualifier_panel.set_picker_active(False)
 
         # Hooks for leaving page
+        if from_page == "Library" and page_name != from_page:
+            close_lightbox = getattr(getattr(self, "library_panel", None), "close_lightbox", None)
+            if callable(close_lightbox):
+                close_lightbox()
+        if from_page == "Color" and page_name != from_page:
+            previews = getattr(self, "_grade_set_previews", None)
+            if previews is not None:
+                previews.leave_page()
         self.leave_page_hook(self.current_page)
 
         # Save current state (both legacy and LayoutStore)

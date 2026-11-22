@@ -463,6 +463,8 @@ class DockLayoutMixin:
             )
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_grade_sets)
             self.tabifyDockWidget(self.dock_presets, self.dock_grade_sets)
+            self.dock_grade_sets.visibilityChanged.connect(
+                lambda visible: self._grade_set_previews.schedule() if visible else None)
 
         # P9.1: Timeline Clip Strip Dock (Color page)
         self.dock_color_timeline_clips = create_custom_dock(

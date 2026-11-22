@@ -907,6 +907,10 @@ class MenuToolbarMixin:
 
     def _restart_application(self) -> None:
         """Restart the application with the same arguments."""
+        from src.app.controllers.file_controller import FileOpsMixin
+        FileOpsMixin._cancel_grade_set_image_request(self)
+        if not FileOpsMixin._prepare_to_leave_photo(self, lambda: self._restart_application()):
+            return
         # [R2-6] 统一走共享的 detached-subprocess 重启实现
         self.close()
         from src.shared.app_restart import restart_application
@@ -1575,6 +1579,7 @@ class MenuToolbarMixin:
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(20, 20))
+        self.main_toolbar = toolbar
         self.addToolBar(toolbar)
 
         # Actions for Undo/Redo (Hidden from toolbar but exist for shortcuts)

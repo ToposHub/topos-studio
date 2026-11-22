@@ -389,6 +389,39 @@ def test_metadata_tags_clear_roundtrip(qtbot, env):
         transport.shutdown()
 
 
+def test_rapid_metadata_writes_are_applied_in_click_order(qtbot, env, monkeypatch):
+    asset = _seed(env, "rapid.png")
+    env.catalog.upsert_asset(env.library.library_id, asset)
+    facade = FilesFacade(env.catalog, max_workers=2)
+    transport = NativeFilesTransport(lambda: "", None, facade=facade)
+    entered = threading.Event()
+    release = threading.Event()
+    patch_metadata = facade.metadata.patch_metadata
+
+    def gated_patch(paths, patch, **kwargs):
+        if patch == {"rating": 5}:
+            entered.set()
+            assert release.wait(5)
+        return patch_metadata(paths, patch, **kwargs)
+
+    monkeypatch.setattr(facade.metadata, "patch_metadata", gated_patch)
+    try:
+        applied = []
+        transport.metadata_applied.connect(lambda _paths, patch, _msg: applied.append(patch))
+        transport.patch_metadata([str(asset)], {"rating": 5})
+        qtbot.waitUntil(entered.is_set)
+        transport.patch_metadata([str(asset)], {"color": 4})
+        transport.patch_metadata([str(asset)], {"rating": 2})
+        release.set()
+        qtbot.waitUntil(lambda: len(applied) == 3)
+        assert applied == [{"rating": 5}, {"color": 4}, {"rating": 2}]
+        row = env.catalog.asset(env.library.library_id, asset)
+        assert (row["rating"], row["color"]) == (2, 4)
+    finally:
+        release.set()
+        transport.shutdown()
+
+
 def test_rejected_metadata_is_not_reported_as_saved(qtbot, env):
     asset = _seed(env, "rating.png")
     env.catalog.upsert_asset(env.library.library_id, asset)

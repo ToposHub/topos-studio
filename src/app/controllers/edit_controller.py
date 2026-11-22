@@ -9042,7 +9042,11 @@ class EditControllerMixin:
             saved_grade = grade_state(snapshot)
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             logger.exception("Image Save As snapshot failed")
-            QMessageBox.critical(self, I18N.tr("error.title", "Error"), str(exc))
+            if autosave:
+                self._photo_action_after_save = None
+                self.status_bar.showMessage(str(exc), 5000)
+            else:
+                QMessageBox.critical(self, I18N.tr("error.title", "Error"), str(exc))
             return
 
         io = self.edit_project_io
@@ -9082,6 +9086,7 @@ class EditControllerMixin:
                 unchanged = model_unchanged and grade_state(current_snapshot) == saved_grade
             except (ValueError, TypeError, KeyError, AttributeError) as exc:
                 logger.exception("Image state changed incompatibly during Save As")
+                self._photo_action_after_save = None
                 self.status_bar.showMessage(str(exc), 5000)
                 return
             self._current_edit_project = current_snapshot
@@ -9091,6 +9096,9 @@ class EditControllerMixin:
                 self._sync_mg_preset_project_root(filepath)
             if unchanged:
                 self._clear_all_dirty_states()
+                previews = getattr(self, "_grade_set_previews", None)
+                if source_path and previews is not None:
+                    previews.after_save(source_path, filepath)
             else:
                 self.edit_project_dirty = True
             self.setWindowTitle(f"Topos - {current_snapshot.name}" + ("" if unchanged else " *"))
@@ -9100,12 +9108,15 @@ class EditControllerMixin:
                 self.config_manager.save_config()
                 self.status_bar.showMessage(
                     I18N.tr("status.edit_project_saved_as", f"Project saved: {os.path.basename(filepath)}"), 3000)
+            if getattr(self, "_photo_action_after_save", None) is not None:
+                self._schedule_autosave(0)
 
         def failed(saved_path: str, message: str) -> None:
             if saved_path != filepath:
                 return
             disconnect()
             if still_current():
+                self._photo_action_after_save = None
                 self.status_bar.showMessage(message, 5000)
 
         io.project_saved.connect(completed, Qt.ConnectionType.QueuedConnection)
@@ -9115,6 +9126,7 @@ class EditControllerMixin:
             force_project_mode="standalone_image")
         if not accepted:
             disconnect()
+            self._photo_action_after_save = None
             self.status_bar.showMessage(
                 I18N.tr("error.save_project", "Failed to save project."), 5000)
 
@@ -9126,6 +9138,11 @@ class EditControllerMixin:
         from src.shared.project.document_mode import infer_project_mode
 
         standalone_image = infer_project_mode(self._current_edit_project) == "standalone_image"
+        has_grade_set_photo = getattr(self, "_has_grade_set_photo", None)
+        auto_saved_photo = callable(has_grade_set_photo) and has_grade_set_photo()
+        if auto_saved_photo and not self._prepare_to_leave_photo(self._close_current_project):
+            return False
+
         project_io = getattr(self, "edit_project_io", None)
         has_pending_write = getattr(project_io, "has_pending_archive_write", None)
 
@@ -9148,7 +9165,7 @@ class EditControllerMixin:
             autosave.stop()
         proceed = True
         discarded = False
-        if self._has_unsaved_changes():
+        if not auto_saved_photo and self._has_unsaved_changes():
             reply = QMessageBox.question(
                 self,
                 I18N.tr("dialog.unsaved_changes", "Unsaved Changes"),
@@ -9178,7 +9195,11 @@ class EditControllerMixin:
             from src.shared.color.lut_resource_registry import get_lut_resource_session
             from src.shared.project.resource_resolver import set_active_project_resolver
 
-            history = getattr(getattr(self, "engine", None), "history", None)
+            engine = getattr(self, "engine", None)
+            invalidate_raw = getattr(engine, "invalidate_raw_decode", None)
+            if callable(invalidate_raw):
+                invalidate_raw()
+            history = getattr(engine, "history", None)
             if history is not None:
                 history.clear()
             set_active_project_resolver(None)

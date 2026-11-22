@@ -9,10 +9,10 @@ from src.app.ui.native_files_panel import NativeFilesPanel
 def _entries():
     return [
         {"name": "A.mov", "path": "/m/A.mov", "type": "video", "size_bytes": 1024,
-         "rating": 3, "tags": "采访, 夜景", "comments": "主镜头",
+         "rating": 3, "color": 1, "tags": "采访, 夜景", "comments": "主镜头",
          "duration": 65.0, "width": 1920, "height": 1080, "codec": "ProRes 422"},
         {"name": "B.mov", "path": "/m/B.mov", "type": "video", "size_bytes": 2048,
-         "rating": 5, "tags": "空镜", "comments": "备用"},
+         "rating": 5, "color": 4, "tags": "空镜", "comments": "备用"},
     ]
 
 
@@ -40,7 +40,10 @@ def _select(panel, *names: str) -> None:
 def test_single_selection_fills_metadata_and_technical_info(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov")
-    assert panel.rating_combo.currentData() == 3
+    assert len(panel.rating_buttons) == 5
+    assert all(not button.icon().isNull() for button in panel.rating_buttons + panel.color_buttons)
+    assert panel.rating_buttons[2].isChecked()
+    assert panel.color_buttons[1].isChecked()
     assert panel.tag_edit.text() == "采访,夜景"  # tag_text 统一为无空格分隔
     assert panel.comment_edit.text() == "主镜头"
     assert panel.info_fields["resolution"].text() == "1920×1080"  # TechnicalMetadata.resolution 用紧凑写法
@@ -52,7 +55,7 @@ def test_rating_change_sends_only_that_field(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov")
     with qtbot.waitSignal(panel.metadata_patch_requested) as received:
-        panel.rating_combo.setCurrentIndex(panel.rating_combo.findData(5))
+        panel.rating_buttons[4].click()
     assert received.args[0] == ["/m/A.mov"]
     assert received.args[1] == {"rating": 5}  # tags/comments 不得顺带写回
     assert "保存" in panel.meta_status.text()
@@ -61,7 +64,7 @@ def test_rating_change_sends_only_that_field(qtbot):
 def test_applied_patch_updates_model_and_display(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov")
-    panel.rating_combo.setCurrentIndex(panel.rating_combo.findData(5))
+    panel.rating_buttons[4].click()
     panel.apply_metadata_result(["/m/A.mov"], {"rating": 5}, "已保存")
     entry = panel.model.entries[panel._entry_rows["/m/A.mov"]]
     assert entry.user.rating == 5
@@ -72,7 +75,9 @@ def test_applied_patch_updates_model_and_display(qtbot):
 def test_mixed_values_show_mixed_and_do_not_clear_tags(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov", "B.mov")
-    assert panel.rating_combo.currentData() == -1
+    assert not panel.rating_mixed.isHidden()
+    assert not panel.color_mixed.isHidden()
+    assert not any(button.isChecked() for button in panel.rating_buttons + panel.color_buttons)
     assert panel.tag_edit.text() == ""
     assert "混合" in panel.tag_edit.placeholderText()
 
@@ -82,7 +87,7 @@ def test_mixed_values_show_mixed_and_do_not_clear_tags(qtbot):
     assert emitted == []
 
     with qtbot.waitSignal(panel.metadata_patch_requested) as received:
-        panel.rating_combo.setCurrentIndex(panel.rating_combo.findData(2))
+        panel.rating_buttons[1].click()
     assert sorted(received.args[0]) == ["/m/A.mov", "/m/B.mov"]
     assert received.args[1] == {"rating": 2}
 
@@ -90,12 +95,50 @@ def test_mixed_values_show_mixed_and_do_not_clear_tags(qtbot):
 def test_failed_patch_relabels_and_keeps_old_values(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov")
-    panel.rating_combo.setCurrentIndex(panel.rating_combo.findData(5))
+    panel.rating_buttons[4].click()
     panel.metadata_failed(["/m/A.mov"], {"rating": 5}, "只读挂载")
     assert "只读挂载" in panel.meta_status.text()
     entry = panel.model.entries[panel._entry_rows["/m/A.mov"]]
     assert entry.user.rating == 3  # 未确认的写入不得落到模型
-    assert panel.rating_combo.currentData() == 3
+    assert panel.rating_buttons[2].isChecked()
+    assert not panel.rating_buttons[4].isChecked()
+
+
+def test_markers_can_be_cleared_and_only_commit_the_clicked_field(qtbot):
+    panel = _panel(qtbot)
+    _select(panel, "A.mov")
+    with qtbot.waitSignal(panel.metadata_patch_requested) as received:
+        panel.rating_clear_button.click()
+    assert received.args[:2] == [["/m/A.mov"], {"rating": 0}]
+    panel.apply_metadata_result(["/m/A.mov"], {"rating": 0})
+    assert not any(button.isChecked() for button in panel.rating_buttons)
+
+    for value in (3, 0):
+        with qtbot.waitSignal(panel.metadata_patch_requested) as received:
+            panel.color_buttons[value].click()
+        assert received.args[:2] == [["/m/A.mov"], {"color": value}]
+        panel.apply_metadata_result(["/m/A.mov"], {"color": value})
+        assert panel.color_buttons[value].isChecked()
+
+
+def test_marker_reply_preserves_a_note_being_typed(qtbot):
+    panel = _panel(qtbot)
+    panel.resize(1200, 700)
+    panel.show()
+    _select(panel, "A.mov")
+    panel.activateWindow()
+    panel.comment_edit.setFocus()
+    qtbot.waitUntil(panel.comment_edit.hasFocus)
+    panel.comment_edit.selectAll()
+    qtbot.keyClicks(panel.comment_edit, "draft")
+    assert panel.comment_edit.isModified()
+
+    panel.apply_metadata_snapshot({"/m/A.mov": {"rating": 4, "comments": "主镜头"}})
+    panel.apply_metadata_result(["/m/A.mov"], {"rating": 4})
+    assert panel.rating_buttons[3].isChecked()
+    assert panel.comment_edit.text() == "draft"
+    _select(panel, "B.mov")
+    assert panel.comment_edit.text() == "备用"
 
 
 def test_multi_selection_aggregates_real_totals(qtbot):

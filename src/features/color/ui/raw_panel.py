@@ -243,6 +243,8 @@ class RawPanel(QWidget):
     def end_interaction(self) -> None:
         self.interaction_timer.stop()
         if self._is_interacting:
+            self.update_timer.stop()
+            self._emit_params()
             self._is_interacting = False
             self.interaction_ended.emit()
 

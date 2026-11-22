@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QImage, QKeyEvent, QPainter, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame,
@@ -24,15 +24,18 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
+import qtawesome as qta
 
 from src.app.ui.image_decode_runtime import (
     ImageDecodeRuntime,
     decode_image_scaled,
     shared_runtime,
 )
+from src.shared.i18n.i18n import I18N
 
 # 兼容旧引用：解码上限现由共享 runtime 统一（8192 边长）
 MAX_DECODE_PIXELS = 8192
@@ -70,14 +73,15 @@ class PreviewDecoder(QObject):
         self._generation = 0
         self._current: Optional[tuple[int, str]] = None
 
-    def start(self, path: str, data: bytes) -> None:
+    def start(self, path: str, data: bytes, *, max_edge: int = MAX_DECODE_PIXELS) -> None:
         self.cancel()
         self._generation += 1
         generation = self._generation
         self._current = (generation, path)
         self._lease.submit(
             path, data,
-            decode=lambda payload: decode_preview(payload),
+            decode=(decode_preview if max_edge == MAX_DECODE_PIXELS
+                    else lambda payload: decode_image_scaled(payload, max_edge=max_edge)),
             on_done=lambda p, image, error, g=generation: self._on_finished(g, p, image, error))
 
     def cancel(self) -> None:
@@ -110,6 +114,8 @@ class NativeFilesPreview(QWidget):
     open_in_legacy_requested = pyqtSignal(str)
     next_requested = pyqtSignal()
     previous_requested = pyqtSignal()
+    detail_requested = pyqtSignal()
+    grade_requested = pyqtSignal(str)
 
     def __init__(self, parent: QWidget, *, bg: str = "#141414", fg: str = "#d8d8d8",
                  muted: str = "#8b8b8b") -> None:
@@ -119,9 +125,15 @@ class NativeFilesPreview(QWidget):
         self._muted = muted
         self._path = ""
         self._image: Optional[QImage] = None
+        self._placeholder: QImage | None = None
+        self._has_detail = False
+        self._preview_only = False
         self._mode = "image"
         self._fit = True
         self._decode_pending = False
+        self._auto_hide_info = False
+        self._info_timer = QTimer(self, singleShot=True, interval=3000)
+        self._info_timer.timeout.connect(self._hide_file_info)
         self.setObjectName("nativeFilesPreview")
         self.setStyleSheet(f"#nativeFilesPreview {{ background: {bg}; }}")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -135,6 +147,7 @@ class NativeFilesPreview(QWidget):
         header.setSpacing(8)
         self._header_widget = QWidget(self)
         self._header_widget.setLayout(header)
+        self._header_widget.installEventFilter(self)
         header.setContentsMargins(0, 0, 0, 0)
         self.title = QLabel("", self)
         self.title.setStyleSheet(f"color: {fg};")
@@ -142,11 +155,14 @@ class NativeFilesPreview(QWidget):
         title_font.setBold(True)
         self.title.setFont(title_font)
         self.title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        header.addWidget(self.title, 1)
-
         self.meta = QLabel("", self)
         self.meta.setStyleSheet(f"color: {muted};")
-        header.addWidget(self.meta)
+        file_info = QWidget(self._header_widget)
+        file_info_layout = QHBoxLayout(file_info)
+        file_info_layout.setContentsMargins(0, 0, 0, 0)
+        file_info_layout.addWidget(self.title, 1)
+        file_info_layout.addWidget(self.meta)
+        header.addWidget(file_info, 1)
 
         self.fit_button = QPushButton("原尺寸", self)
         self.fit_button.setToolTip("在「适配窗口」与「原尺寸」之间切换（F）")
@@ -168,6 +184,16 @@ class NativeFilesPreview(QWidget):
         self.legacy_button.clicked.connect(
             lambda: self.open_in_legacy_requested.emit(self._path))
         header.addWidget(self.legacy_button)
+
+        self.grade_button = QToolButton(self)
+        self.grade_button.setObjectName("nativeLightboxGrade")
+        grade_label = I18N.tr("grade_sets.open_in_color", "Open in Color")
+        self.grade_button.setToolTip(grade_label)
+        self.grade_button.setAccessibleName(grade_label)
+        self.grade_button.setIcon(qta.icon("mdi.palette", color=fg))
+        self.grade_button.clicked.connect(lambda: self.grade_requested.emit(self._path))
+        self.grade_button.hide()
+        header.addWidget(self.grade_button)
 
         self.close_button = QPushButton("关闭", self)
         self.close_button.setToolTip("关闭预览（Esc）")
@@ -208,23 +234,42 @@ class NativeFilesPreview(QWidget):
     def eventFilter(self, obj: QObject, event) -> bool:  # type: ignore[override]
         if obj is self.parent() and event.type() == event.Type.Resize:
             self.setGeometry(self.parent().rect())
+        if obj is getattr(self, "_header_widget", None) and event.type() == QEvent.Type.Enter:
+            if self._auto_hide_info and self.is_open and not self.is_video:
+                self._show_file_info()
         return super().eventFilter(obj, event)
 
-    def open_for(self, path: str, title: str = "") -> None:
+    def _show_file_info(self) -> None:
+        self.title.show()
+        self.meta.show()
+        if self._auto_hide_info:
+            self._info_timer.start()
+
+    def _hide_file_info(self) -> None:
+        self.title.hide()
+        self.meta.hide()
+
+    def open_for(self, path: str, title: str = "", *, preview_only: bool = False,
+                 auto_hide_info: bool = False, can_grade: bool = False) -> None:
         """显示浮层并进入"载入中"状态（字节与解码由调用方驱动）。"""
         self._path = path
         self._image = None
+        self._placeholder = None
+        self._has_detail = False
+        self._preview_only = preview_only
         self._mode = "image"
+        self._auto_hide_info = auto_hide_info
         self._decode_pending = True
         self._fit = True
         self._sync_fit_button()
         self.title.setText(title or path.rsplit("/", 1)[-1])
         self.meta.setText("载入中…")
-        self.meta.show()
-        self.fit_button.show()
+        self._show_file_info()
+        self.fit_button.setVisible(not preview_only)
         self.prev_button.show()
         self.next_button.show()
         self.legacy_button.hide()
+        self.grade_button.setVisible(can_grade)
         self._header_widget.show()
         self.video_slot.hide()
         self.scroll.show()
@@ -246,8 +291,13 @@ class NativeFilesPreview(QWidget):
         """Open the overlay in video mode; the player is hosted in video_slot."""
         self._path = path
         self._image = None
+        self._placeholder = None
         self._decode_pending = False
         self._mode = "video"
+        self._auto_hide_info = False
+        self._info_timer.stop()
+        self.title.show()
+        self.grade_button.hide()
         self.title.setText(title or path.rsplit("/", 1)[-1])
         self.meta.setText("正在打开视频…")
         self.body.clear()
@@ -265,12 +315,19 @@ class NativeFilesPreview(QWidget):
             layout.activate()
         self.video_slot.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def show_image(self, path: str, image: QImage) -> None:
+    def show_placeholder(self, path: str, image: QImage) -> None:
+        if path == self._path and self._image is None and (self._decode_pending or self._preview_only):
+            self._placeholder = image
+            self._render()
+
+    def show_image(self, path: str, image: QImage, *, has_detail: bool = True) -> None:
         if path != self._path:
             return
         self._decode_pending = False
         self._image = image
-        self.meta.setText(f"{image.width()} × {image.height()} · {self._kind_text()}")
+        self._placeholder = None
+        self._has_detail = has_detail and not self._preview_only
+        self.legacy_button.hide()
         self._render()
 
     def show_message(self, path: str, message: str, *, open_in_legacy: bool = True) -> None:
@@ -278,19 +335,25 @@ class NativeFilesPreview(QWidget):
             return
         video_error = self.is_video
         self._decode_pending = False
-        self._image = None
         self._mode = "image"
+        if not self._has_detail:
+            self._fit = True
+            self._sync_fit_button()
         self.meta.setText(message)
-        self.meta.setVisible(not video_error)
-        self.fit_button.setVisible(not video_error)
+        if not video_error:
+            self._show_file_info()
+        else:
+            self.meta.hide()
+        self.fit_button.setVisible(not video_error and not self._preview_only)
         self.prev_button.setVisible(not video_error)
         self.next_button.setVisible(not video_error)
         self._header_widget.show()
         self.video_slot.hide()
         self.scroll.show()
-        self.body.setPixmap(QPixmap())
-        self.body.setText(message)
-        self._resize_body_text()
+        if self._image is None and self._placeholder is None:
+            self.body.setPixmap(QPixmap())
+            self.body.setText(message)
+            self._resize_body_text()
         self.legacy_button.setVisible(open_in_legacy)
         if video_error:
             self.setFocus(Qt.FocusReason.OtherFocusReason)
@@ -309,9 +372,11 @@ class NativeFilesPreview(QWidget):
     def close_preview(self) -> None:
         was_open = self.is_open
         self._image = None
+        self._placeholder = None
         self._path = ""
         self._mode = "image"
         self._decode_pending = False
+        self._info_timer.stop()
         self._jobs_cleanup()
         self._header_widget.show()
         self.video_slot.hide()
@@ -326,8 +391,15 @@ class NativeFilesPreview(QWidget):
         self.body.setPixmap(QPixmap())
 
     def toggle_fit(self) -> None:
+        if self._preview_only:
+            return
         self._fit = not self._fit
+        if self._auto_hide_info:
+            self._show_file_info()
         self._sync_fit_button()
+        if not self._fit and not self._has_detail:
+            self.begin_load()
+            self.detail_requested.emit()
         self._render()
 
     def _sync_fit_button(self) -> None:
@@ -343,21 +415,32 @@ class NativeFilesPreview(QWidget):
         size = self.scroll.viewport().size()
         return QSize(max(1, size.width()), max(1, size.height()))
 
+    def fit_decode_edge(self) -> int:
+        size = self.size()
+        return max(1024, min(4096, int(max(size.width(), size.height()) * self.devicePixelRatioF())))
+
     def _render(self) -> None:
-        if self._image is None:
+        image = self._image if self._image is not None else self._placeholder
+        if image is None:
             return
-        if self._fit:
-            pixmap = QPixmap.fromImage(self._image).scaled(
-                self._viewport_size(),
+        if self._fit or not self._has_detail:
+            dpr = self.devicePixelRatioF()
+            pixmap = QPixmap.fromImage(image).scaled(
+                self._viewport_size() * dpr,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation)
-            self.body.setPixmap(pixmap)
-            self.body.resize(pixmap.size())
+            pixmap.setDevicePixelRatio(dpr)
         else:
-            pixmap = QPixmap.fromImage(self._image)
-            self.body.setPixmap(pixmap)
-            self.body.resize(pixmap.size())
-        self.meta.setText(f"{self._image.width()} × {self._image.height()} · {self._kind_text()}")
+            pixmap = QPixmap.fromImage(image)
+        self.body.setPixmap(pixmap)
+        self.body.resize(pixmap.deviceIndependentSize().toSize())
+        if self._decode_pending:
+            self.meta.setText("载入中…" if self._fit else "载入原尺寸…")
+        elif self._image is not None:
+            kind = "浏览预览" if self._preview_only else self._kind_text()
+            if not self._has_detail:
+                kind += " · 预览像素"
+            self.meta.setText(f"{image.width()} × {image.height()} · {kind}")
 
     def _resize_body_text(self) -> None:
         width = max(200, self._viewport_size().width() - 24)
@@ -366,7 +449,7 @@ class NativeFilesPreview(QWidget):
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
-        if self._image is not None:
+        if self._image is not None or self._placeholder is not None:
             self._render()
         elif self.body.pixmap().isNull():
             self._resize_body_text()

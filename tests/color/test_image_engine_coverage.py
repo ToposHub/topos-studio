@@ -436,6 +436,17 @@ class TestOnRawParamsChanged:
 
 
 class TestOnRawUpdateFinished:
+    def test_ignores_pixels_from_superseded_raw_request(self, image_engine: ImageEngine) -> None:
+        image_engine.renderer = MagicMock()
+        image_engine._raw_decode_request = 2
+        raw_pixels = _small_image(8, 8)
+        original = image_engine.img_full_original
+
+        image_engine._on_raw_update_finished(raw_pixels, raw_pixels, raw_pixels, {}, request_id=1)
+
+        assert image_engine.img_full_original is original
+        image_engine.renderer.submit.assert_not_called()
+
     def test_none_full_ignored(self, image_engine: ImageEngine) -> None:
         engine = image_engine
         engine.renderer = MagicMock()

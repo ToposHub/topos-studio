@@ -41,8 +41,9 @@ class _ThumbnailRequests(QObject):
     thumbnail_loaded = pyqtSignal(str, bytes)
     thumbnail_failed = pyqtSignal(str)
 
-    def __init__(self, url, token, parent, *, facade_workers: int) -> None:
+    def __init__(self, url, token, parent, *, facade_workers: int, prefer_graded_thumbnails: bool) -> None:
         super().__init__(parent)
+        assert prefer_graded_thumbnails
         self.requests: list[str] = []
         self.cancel_count = 0
         self.closed = False
@@ -228,7 +229,7 @@ def test_switching_set_discards_pending_requests_and_only_open_success_marks_act
     assert panel.active_path is None
     panel.set_active_path(source)
     qtbot.mouseClick(panel.view.viewport(), Qt.MouseButton.LeftButton, pos=first)
-    assert opened == [source]
+    assert opened == [source, source]
 
     panel.set_selector.setCurrentIndex(1)
     assert model.active_id == 2

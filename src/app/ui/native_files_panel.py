@@ -14,19 +14,19 @@ from PyQt6.QtCore import (
     QItemSelectionModel, QMimeData, QModelIndex, QPersistentModelIndex, QPoint, QRect, QSignalBlocker,
     QSize, QSortFilterProxyModel, Qt, QTimer, QUrl, pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QPainter, QPen, QPixmap, QResizeEvent
+from PyQt6.QtGui import QBrush, QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QPainter, QPen, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QBoxLayout, QDialog, QFileDialog, QHBoxLayout, QInputDialog,
     QFrame, QFormLayout, QHeaderView, QLabel, QLayout, QLineEdit,
     QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSlider,
-    QStackedWidget, QStyle, QTreeView,
+    QStackedWidget, QStyle, QToolButton, QTreeView,
     QVBoxLayout, QWidget,
 )
 
 from src.app.ui.add_library_dialog import AddLibraryDialog
-from src.shared.assets.icon_manager import IconColors, icon_new_folder
+from src.shared.assets.icon_manager import IconColors, get_icon, icon_export, icon_new_folder
 from src.shared.i18n.i18n import I18N
-from src.shared.media.format_registry import get_media_type
+from src.shared.media.format_registry import get_media_type, is_image
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.app.ui.native_files_gallery import FilesCardDelegate, FilesListDelegate
@@ -34,8 +34,9 @@ from src.app.ui.native_files_gallery_view import GALLERY_ENTRY_ROLE, FilesGaller
 from src.app.ui.native_files_locations import HomeDirectoryTree
 from src.app.ui.native_files_transfer import DRAG_SOURCE_PROPERTY, FileDropTarget, cut_token, local_file_paths, mark_cut
 from src.shared.ui.panel_splitter import PanelSplitter
-from src.app.ui.native_files_preview import NativeFilesPreview, PreviewDecoder
+from src.app.ui.native_files_preview import MAX_DECODE_PIXELS, NativeFilesPreview, PreviewDecoder
 from src.shared.playback.player_host import NativePlayerHost
+from src.features.files.services.media import RAW_PREVIEW_SUFFIXES
 from src.features.files.contracts import (
     Availability, Entry, FilesError, format_bytes, format_duration,
     normalize_path, parse_entry,
@@ -60,6 +61,14 @@ def _number(value: Any) -> float:
 
 KIND_LABELS = {"dir": "文件夹", "image": "图片", "video": "视频", "audio": "音频",
                "doc": "文档", "other": "文件"}
+INSPECTOR_COLORS = (
+    ("none", "清除颜色标签", C.TEXT_DIM),
+    ("red", "红色", "#e16a65"),
+    ("yellow", "黄色", "#eac363"),
+    ("green", "绿色", "#74bd83"),
+    ("blue", "蓝色", "#6da5e3"),
+    ("purple", "紫色", "#aa8bd8"),
+)
 
 
 def _kind_label(kind: str) -> str:
@@ -336,6 +345,8 @@ class NativeFilesPanel(QWidget):
     # 音频/模型等尚未原生化的媒体仍交给既有查看器；图片/视频走原生浮层。
     preview_external_requested = pyqtSignal(str)
     preview_closed = pyqtSignal()
+    image_lightbox_active = pyqtSignal(bool)
+    preview_grade_requested = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None, *, home_path: str | None = None,
                  preferences: Any = None, transport: NativeFilesTransport | None = None) -> None:
@@ -372,6 +383,7 @@ class NativeFilesPanel(QWidget):
         self._inspector_preference: bool | None = None
         self._info_lock = False
         self._pending_patch: tuple[list[str], dict[str, Any]] | None = None
+        self._metadata_selection: frozenset[str] = frozenset()
         self._tag_display = ""
         self._comment_display = ""
         self._library_active = False
@@ -408,6 +420,11 @@ class NativeFilesPanel(QWidget):
         self._prefs = preferences
         self._apply_preferences()
         self._preview_path = ""
+        self._library_lightbox = False
+        self._preview_edge = MAX_DECODE_PIXELS
+        self._preview_loading = False
+        self._preview_cache: OrderedDict[tuple, tuple[QImage, bool]] = OrderedDict()
+        self._preview_cache_key: tuple | None = None
         self._preview = NativeFilesPreview(
             self,
             bg=C.BG_DARKEST,
@@ -421,7 +438,9 @@ class NativeFilesPanel(QWidget):
         self._preview.closed.connect(self._on_preview_closed)
         self._preview.next_requested.connect(lambda: self._step_preview(1))
         self._preview.previous_requested.connect(lambda: self._step_preview(-1))
+        self._preview.detail_requested.connect(self._request_preview_detail)
         self._preview.open_in_legacy_requested.connect(self.preview_external_requested)
+        self._preview.grade_requested.connect(self._grade_previewed_image)
         self.selection.selectionChanged.connect(self._update_info)
         self.proxy.rowsInserted.connect(self._update_info)
         self.proxy.rowsRemoved.connect(self._update_info)
@@ -487,10 +506,21 @@ class NativeFilesPanel(QWidget):
             QLabel#filesSection {{ color: {C.TEXT_PRIMARY}; font-size: 13px; font-weight: 600; }}
             QLabel#filesSidebarHeading {{ color: {C.TEXT_DIM}; font-size: 11px; font-weight: 600; padding-left: 5px; }}
             QLabel#filesHint {{ color: {C.TEXT_HINT}; font-size: 11px; }}
-            QWidget#filesSidebar, QTreeView#filesHomeTree {{ background: #222226; }}
-            QWidget#filesInspector {{ background: {C.BG_DARKEST}; }}
+            QWidget#filesSidebar, QTreeView#filesHomeTree,
+            QWidget#filesInspector, QWidget#filesInspectorBody {{ background: #222226; }}
             QScrollArea#filesInspectorScroll {{ background: transparent; border: none; }}
-            QWidget#filesInspectorBody {{ background: {C.BG_DARKEST}; }}
+            QWidget#filesInspectorBody QLabel[filesInfoDetail="true"] {{ color: {C.TEXT_DIM}; font-size: 11px; }}
+            QWidget#filesInspectorBody QLineEdit {{ font-size: 11px; }}
+            QWidget#filesMarkerRow {{ background: transparent; }}
+            QToolButton[filesMetadataButton="true"] {{
+                background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0;
+            }}
+            QToolButton[filesMetadataButton="true"]:hover {{ background: {C.BG_ACTIVE}; }}
+            QToolButton#filesColorDot:checked {{ border-color: {C.TEXT_PRIMARY}; }}
+            QToolButton[filesMetadataButton="true"]:focus {{ border-color: {C.ORANGE}; }}
+            QPushButton#filesInspectorExport {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
+            QPushButton#filesInspectorExport:hover {{ border-color: {C.TEXT_DIM}; }}
+            QPushButton#filesInspectorExport:focus {{ border-color: {C.ORANGE}; }}
             QAbstractItemView {{ background: transparent; color: {C.TEXT_PRIMARY}; border: none; outline: none; }}
             QTreeView#filesDetails::item {{ border: none; }}
             QTreeView#filesDetails {{ alternate-background-color: {C.BG_HOVER}; }}
@@ -797,7 +827,7 @@ class NativeFilesPanel(QWidget):
         self.preview_cover.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.preview_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_cover.installEventFilter(self)
-        self.preview_cover.setStyleSheet(f"background: {C.BG_INPUT_DARK}; border-radius: 7px;")
+        self.preview_cover.setVisible(False)
         info_layout.addWidget(self.preview_cover)
         self.info = QLabel(_tr("select", "选择素材查看信息"), self.inspector)
         self.info.setObjectName("filesSection")
@@ -815,7 +845,7 @@ class NativeFilesPanel(QWidget):
         info_layout.addWidget(self.info_path)
         form = QFormLayout()
         self.technical_form = form
-        form.setVerticalSpacing(6)
+        form.setVerticalSpacing(4)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
@@ -828,7 +858,10 @@ class NativeFilesPanel(QWidget):
             value.setWordWrap(True)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.info_fields[key] = value
-            form.addRow(_tr(f"field.{key}", label), value)
+            title = QLabel(_tr(f"field.{key}", label))
+            for detail in (title, value):
+                detail.setProperty("filesInfoDetail", True)
+            form.addRow(title, value)
         # 可编辑元数据：只提交用户真正改过的字段（混合值不清空）
         info_layout.addSpacing(4)
         meta_heading = QLabel(_tr("metadata", "标记"))
@@ -836,21 +869,29 @@ class NativeFilesPanel(QWidget):
         info_layout.addWidget(meta_heading)
         info_layout.addWidget(self._rule())
         meta_form = QFormLayout()
-        meta_form.setVerticalSpacing(7)
-        self.rating_combo = ChevronComboBox(self.inspector)
-        self.rating_combo.setAccessibleName(_tr("rating", "评分"))
-        for label, value in (("未评分", 0), ("1★", 1), ("2★", 2), ("3★", 3), ("4★", 4), ("5★", 5),
-                             (_tr("mixed", "混合"), -1)):
-            self.rating_combo.addItem(label, value)
-        self.rating_combo.currentIndexChanged.connect(self._rating_changed)
-        meta_form.addRow(_tr("rating", "评分"), self.rating_combo)
-        self.color_combo = ChevronComboBox(self.inspector)
-        self.color_combo.setAccessibleName(_tr("color_label", "颜色标签"))
-        for label, value in (("无", 0), ("红", 1), ("黄", 2), ("绿", 3), ("蓝", 4), ("紫", 5),
-                             (_tr("mixed", "混合"), -1)):
-            self.color_combo.addItem(label, value)
-        self.color_combo.currentIndexChanged.connect(self._color_changed)
-        meta_form.addRow(_tr("color_label", "颜色标签"), self.color_combo)
+        meta_form.setVerticalSpacing(5)
+        meta_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self._rating_value = self._color_value = 0
+        self._star_filled = get_icon("mdi.star", color=C.ORANGE)
+        self._star_outline = get_icon("mdi.star-outline", color=C.TEXT_DIM)
+        self.rating_stars = self._marker_row(meta_form, _tr("rating", "评分"))
+        self.rating_buttons = [self._add_marker_button(
+            self.rating_stars, _tr("rating_stars", "{count} 星").format(count=value),
+            lambda value=value: self._rating_clicked(value)) for value in range(1, 6)]
+        self.rating_clear_button = self._add_marker_button(
+            self.rating_stars, _tr("clear_rating", "清除评分"), lambda: self._rating_clicked(0))
+        self.rating_clear_button.setIcon(get_icon("mdi.close-circle-outline", color=C.TEXT_DIM))
+        self.rating_clear_button.setCheckable(False)
+        self.rating_mixed = self._finish_marker_row(self.rating_stars)
+        self.color_dots = self._marker_row(meta_form, _tr("color_label", "颜色标签"))
+        self.color_buttons: list[QToolButton] = []
+        for value, (key, label, color) in enumerate(INSPECTOR_COLORS):
+            button = self._add_marker_button(self.color_dots, _tr(f"label_color.{key}", label),
+                                             lambda value=value: self._color_clicked(value))
+            button.setObjectName("filesColorDot")
+            button.setIcon(get_icon("mdi.circle" if value else "mdi.close-circle-outline", color=color))
+            self.color_buttons.append(button)
+        self.color_mixed = self._finish_marker_row(self.color_dots)
         self.tag_edit = QLineEdit(self.inspector)
         self.tag_edit.setPlaceholderText(_tr("tags_hint", "逗号分隔，例如 采访, 夜景"))
         self.tag_edit.setAccessibleName(_tr("tags", "标签"))
@@ -861,6 +902,8 @@ class NativeFilesPanel(QWidget):
         self.comment_edit.setAccessibleName(_tr("comments", "备注"))
         self.comment_edit.editingFinished.connect(self._comment_committed)
         meta_form.addRow(_tr("comments", "备注"), self.comment_edit)
+        for field in (self.tag_edit, self.comment_edit):
+            meta_form.labelForField(field).setProperty("filesInfoDetail", True)
         info_layout.addLayout(meta_form)
         self.meta_status = QLabel("", self.inspector)
         self.meta_status.setObjectName("filesHint")
@@ -875,6 +918,12 @@ class NativeFilesPanel(QWidget):
         info_layout.addWidget(technical_heading)
         info_layout.addWidget(self._rule())
         info_layout.addLayout(form)
+        self.inspector_export_button = QPushButton(icon_export(), I18N.tr("action.export", "导出"),
+                                                   self.inspector_body)
+        self.inspector_export_button.setObjectName("filesInspectorExport")
+        self.inspector_export_button.setToolTip(I18N.tr("grade_sets.export_photo", "导出所选照片"))
+        self.inspector_export_button.hide()
+        info_layout.addWidget(self.inspector_export_button)
         info_layout.addStretch()
         self.inspector.hide()
         self.splitter.setSizes([184, 680, 260])
@@ -1201,6 +1250,8 @@ class NativeFilesPanel(QWidget):
         if image.isNull():
             self.thumbnail_failed(path)
             return
+        if path == self._preview_path and self._preview.is_open:
+            self._preview.show_placeholder(path, image)
         self._images[path] = image
         self.icon_view.setAspectRatio(path, image.width() / image.height())
         self._images.move_to_end(path)
@@ -1617,6 +1668,7 @@ class NativeFilesPanel(QWidget):
 
     def _update_info(self, *_: Any) -> None:
         entries = self._selected_entries()
+        self.preview_cover.setVisible(len(entries) == 1)
         self.status.setText(_tr("counts", "{visible} / {total} 项 · 已选 {selected} 项").format(visible=self.proxy.rowCount(), total=self.model.rowCount(), selected=len(entries)))
         if len(entries) == 1:
             self._describe_single(entries[0])
@@ -1657,7 +1709,18 @@ class NativeFilesPanel(QWidget):
         image = self._image_for_entry(entry) if self._ready else None
         if image is not None:
             cover_size = self.preview_cover.contentsRect().size()
-            self.preview_cover.setPixmap(QPixmap.fromImage(image).scaled(cover_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            cover = QPixmap.fromImage(image).scaled(cover_size, Qt.AspectRatioMode.KeepAspectRatio,
+                                                    Qt.TransformationMode.SmoothTransformation)
+            rounded = QPixmap(cover.size())
+            rounded.fill(Qt.GlobalColor.transparent)
+            if not rounded.isNull():
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(cover))
+                painter.drawRoundedRect(rounded.rect(), 6, 6)
+                painter.end()
+            self.preview_cover.setPixmap(rounded)
         else:
             source = self.model.index(self._entry_rows.get(entry.path, 0), 0)
             pixmap = source.data(Qt.ItemDataRole.DecorationRole)
@@ -1671,7 +1734,7 @@ class NativeFilesPanel(QWidget):
             self.preview_cover.clear()
             for label in self.info_fields.values():
                 label.setText("—")
-            self._enable_metadata_controls(False)
+            self._fill_metadata_controls([])
             return
         self.info.setText(_tr("selected", "已选择 {count} 项").format(count=len(entries)))
         folders = sum(1 for entry in entries if entry.is_dir)
@@ -1704,6 +1767,50 @@ class NativeFilesPanel(QWidget):
                                 ("codec", {"image", "video", "audio"})):
             self.technical_form.setRowVisible(self.info_fields[key], bool(kinds & applicable))
 
+    def _marker_row(self, form: QFormLayout, title: str) -> QHBoxLayout:
+        row = QWidget(self.inspector_body)
+        row.setObjectName("filesMarkerRow")
+        row.setAccessibleName(title)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+        label = QLabel(title)
+        label.setProperty("filesInfoDetail", True)
+        form.addRow(label, row)
+        return layout
+
+    def _add_marker_button(self, layout: QHBoxLayout, title: str,
+                           choose: Callable[[], None]) -> QToolButton:
+        button = QToolButton(self.inspector_body)
+        button.setProperty("filesMetadataButton", True)
+        button.setAccessibleName(title)
+        button.setToolTip(title)
+        button.setCheckable(True)
+        button.setFixedSize(20, 22)
+        button.setIconSize(QSize(14, 14))
+        button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda _checked=False: choose())
+        layout.addWidget(button)
+        return button
+
+    def _finish_marker_row(self, layout: QHBoxLayout) -> QLabel:
+        mixed = QLabel(_tr("mixed", "混合"), self.inspector_body)
+        mixed.setProperty("filesInfoDetail", True)
+        mixed.hide()
+        layout.addWidget(mixed)
+        layout.addStretch()
+        return mixed
+
+    def _sync_marker_buttons(self, has_selection: bool = True) -> None:
+        for value, button in enumerate(self.rating_buttons, 1):
+            button.setIcon(self._star_filled if value <= self._rating_value else self._star_outline)
+            button.setChecked(value == self._rating_value)
+        for value, button in enumerate(self.color_buttons):
+            button.setChecked(has_selection and value == self._color_value)
+        self.rating_mixed.setVisible(self._rating_value == -1)
+        self.color_mixed.setVisible(self._color_value == -1)
+
     def _enable_metadata_controls(self, enabled: bool) -> None:
         """[FR-12] 启用条件 = 有选择 **且** 服务能力可用，二者缺一不可。
 
@@ -1711,7 +1818,8 @@ class NativeFilesPanel(QWidget):
         提交入口也不复核——用户会看到能改的控件，保存却永远失败。
         """
         allowed = enabled and self._capability_available("metadata.patch")
-        for widget in (self.rating_combo, self.color_combo, self.tag_edit, self.comment_edit):
+        for widget in (self.rating_stars.parentWidget(), self.color_dots.parentWidget(),
+                       self.tag_edit, self.comment_edit):
             widget.setEnabled(allowed)
         if not self._capability_available("metadata.patch"):
             reason = self._capability_reason("metadata.patch")
@@ -1719,8 +1827,15 @@ class NativeFilesPanel(QWidget):
 
     def _fill_metadata_controls(self, entries: list[Entry]) -> None:
         """回填不触发写入：整体加锁，避免程序化回填再次发起元数据提交。"""
+        selection = frozenset(entry.path for entry in entries)
+        same_selection = selection == self._metadata_selection
+        self._metadata_selection = selection
         self._enable_metadata_controls(bool(entries))
         if not entries:
+            self._rating_value = self._color_value = 0
+            self._sync_marker_buttons(has_selection=False)
+            self.tag_edit.clear()
+            self.comment_edit.clear()
             self._tag_display = self._comment_display = ""
             return
         ratings = {entry.user.rating for entry in entries}
@@ -1729,48 +1844,30 @@ class NativeFilesPanel(QWidget):
         comments = {entry.user.comments for entry in entries}
         self._info_lock = True
         try:
-            self._select_data(self.rating_combo, next(iter(ratings)) if len(ratings) == 1 else -1)
-            self._select_data(self.color_combo, next(iter(colors)) if len(colors) == 1 else -1)
-            if len(tags) == 1:
-                self._tag_display = next(iter(tags))
-                self.tag_edit.setText(self._tag_display)
-                self.tag_edit.setPlaceholderText(_tr("tags_hint", "逗号分隔，例如 采访, 夜景"))
-            else:
-                self._tag_display = ""
-                self.tag_edit.clear()
-                self.tag_edit.setPlaceholderText(_tr("mixed_tags", "混合标签，输入以统一"))
-            if len(comments) == 1:
-                self._comment_display = next(iter(comments))
-                self.comment_edit.setText(self._comment_display)
-                self.comment_edit.setPlaceholderText(_tr("comment_hint", "备注"))
-            else:
-                self._comment_display = ""
-                self.comment_edit.clear()
-                self.comment_edit.setPlaceholderText(_tr("mixed_comments", "混合备注，输入以统一"))
+            self._rating_value = next(iter(ratings)) if len(ratings) == 1 else -1
+            self._color_value = next(iter(colors)) if len(colors) == 1 else -1
+            self._sync_marker_buttons()
+            self._tag_display = next(iter(tags)) if len(tags) == 1 else ""
+            self._comment_display = next(iter(comments)) if len(comments) == 1 else ""
+            self.tag_edit.setPlaceholderText(_tr("tags_hint", "逗号分隔，例如 采访, 夜景") if len(tags) == 1
+                                             else _tr("mixed_tags", "混合标签，输入以统一"))
+            self.comment_edit.setPlaceholderText(_tr("comment_hint", "备注") if len(comments) == 1
+                                                 else _tr("mixed_comments", "混合备注，输入以统一"))
+            for field, saved in ((self.tag_edit, self._tag_display), (self.comment_edit, self._comment_display)):
+                if not (same_selection and field.hasFocus() and field.isModified() and field.text() != saved):
+                    field.setText(saved)
         finally:
             self._info_lock = False
 
-    @staticmethod
-    def _select_data(combo: ChevronComboBox, value: int) -> None:
-        index = combo.findData(value)
-        if index >= 0:
-            combo.setCurrentIndex(index)
+    def _rating_clicked(self, value: int) -> None:
+        self._sync_marker_buttons()
+        if not self._info_lock:
+            self._submit_patch({"rating": value})
 
-    def _rating_changed(self, _index: int) -> None:
-        if self._info_lock:
-            return
-        value = self.rating_combo.currentData()
-        if value is None or int(value) < 0:
-            return
-        self._submit_patch({"rating": int(value)})
-
-    def _color_changed(self, _index: int) -> None:
-        if self._info_lock:
-            return
-        value = self.color_combo.currentData()
-        if value is None or int(value) < 0:
-            return
-        self._submit_patch({"color": int(value)})
+    def _color_clicked(self, value: int) -> None:
+        self._sync_marker_buttons()
+        if not self._info_lock:
+            self._submit_patch({"color": value})
 
     def _tags_committed(self) -> None:
         if self._info_lock:
@@ -1874,14 +1971,55 @@ class NativeFilesPanel(QWidget):
         elif entry.kind in ("image", "video", "doc"):
             self.thumbnail_requested.emit(entry.path, entry.thumb_version)
 
-    def _start_preview(self, entry: Entry) -> None:
+    def _start_preview(self, entry: Entry, paths: list[str] | None = None) -> None:
         if self._video_host is not None:
             self._video_host.stop()
+        self._preview_decoder.cancel()
         self._preview_path = entry.path
-        self._preview.open_for(entry.path, entry.name)
-        self._preview.set_steppers_enabled(len(self._previewable_paths()) > 1)
-        self.preview_requested.emit(entry.path)
-        self._cache_opened_thumbnail(entry)
+        preview_only = os.path.splitext(entry.path)[1].lower() in RAW_PREVIEW_SUFFIXES | {".toos"}
+        self._preview.open_for(
+            entry.path, entry.name, preview_only=preview_only, auto_hide_info=self._library_lightbox,
+            can_grade=self._library_lightbox and is_image(entry.path))
+        if self._library_lightbox:
+            self.image_lightbox_active.emit(True)
+        if paths is None:
+            paths = self._previewable_paths()
+        self._preview.set_steppers_enabled(len(paths) > 1)
+        self._preview_edge = self._preview.fit_decode_edge()
+        self._preview_cache_key = self._preview_key(entry.path)
+        cached = self._preview_cache.get(self._preview_cache_key)
+        self._preview_loading = cached is None
+        if cached is not None:
+            self._preview_cache.move_to_end(self._preview_cache_key)
+            image, has_detail = cached
+            self._preview.show_image(entry.path, image, has_detail=has_detail)
+        else:
+            placeholder = self._image_for_entry(entry) if entry.path in self._entry_paths else None
+            if placeholder is not None:
+                self._preview.show_placeholder(entry.path, placeholder)
+            self.preview_requested.emit(entry.path)
+        if len(paths) > 1 and entry.path in paths:
+            row = paths.index(entry.path)
+            for delta in (-1, 1):
+                neighbor = self._entry_for_path(paths[(row + delta) % len(paths)])
+                if neighbor is not None:
+                    self._image_for_entry(neighbor)
+
+    def _preview_key(self, path: str) -> tuple | None:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        return path, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, self._preview_edge
+
+    def _request_preview_detail(self) -> None:
+        if not self._preview_path or (self._preview_loading and self._preview_edge == MAX_DECODE_PIXELS):
+            return
+        self._preview_decoder.cancel()
+        self._preview_edge = MAX_DECODE_PIXELS
+        self._preview_cache_key = None
+        self._preview_loading = True
+        self.preview_requested.emit(self._preview_path)
 
     def open_path_native(self, path: str) -> bool:
         """Open supported media through the registered native preview host."""
@@ -1980,31 +2118,53 @@ class NativeFilesPanel(QWidget):
 
     def show_preview_bytes(self, path: str, data: bytes) -> None:
         """transport 拿到原始字节后交给解码线程；与当前会话不匹配一律丢弃。"""
-        if not self._preview.is_open or path != self._preview_path:
+        if not self._preview_loading or not self._preview.is_open or path != self._preview_path:
             return
-        self._preview_decoder.start(path, data)
+        self._preview_decoder.start(path, data, max_edge=self._preview_edge)
 
     def preview_load_failed(self, path: str, message: str) -> None:
-        if not self._preview.is_open or path != self._preview_path:
+        if not self._preview_loading or not self._preview.is_open or path != self._preview_path:
             return
+        self._preview_loading = False
         self._preview.show_message(path, message)
 
     def _on_preview_image(self, path: str, image: Any) -> None:
         if path != self._preview_path or not self._preview.is_open:
             return
-        self._preview.show_image(path, image)
+        self._preview_loading = False
+        has_detail = self._preview_edge == MAX_DECODE_PIXELS or max(image.width(), image.height()) < self._preview_edge
+        key = self._preview_cache_key
+        if key is not None and key == self._preview_key(path) and image.sizeInBytes() <= 64 * 1024 * 1024:
+            self._preview_cache[key] = (image, has_detail)
+            self._preview_cache.move_to_end(key)
+            while (len(self._preview_cache) > 8
+                   or sum(cached.sizeInBytes() for cached, _ in self._preview_cache.values()) > 64 * 1024 * 1024):
+                self._preview_cache.popitem(last=False)
+        self._preview.show_image(path, image, has_detail=has_detail)
 
     def _on_preview_decode_failed(self, path: str, message: str) -> None:
         if path != self._preview_path or not self._preview.is_open:
             return
+        self._preview_loading = False
         self._preview.show_message(path, f"无法解码：{message}")
 
     def _on_preview_closed(self) -> None:
         if self._video_host is not None:
             self._video_host.stop()
         self._preview_path = ""
+        self._preview_loading = False
         self._preview_decoder.cancel()
+        if self._library_lightbox:
+            self.image_lightbox_active.emit(False)
         self.preview_closed.emit()
+
+    def enable_grade_lightbox(self) -> None:
+        self._library_lightbox = True
+
+    def _grade_previewed_image(self, path: str) -> None:
+        if self._library_lightbox and self._preview.is_open and path == self._preview_path and is_image(path):
+            self.close_preview()
+            self.preview_grade_requested.emit(path)
 
     def close_preview(self) -> None:
         if self._video_host is not None:
@@ -2035,7 +2195,7 @@ class NativeFilesPanel(QWidget):
         target = paths[(index + delta) % len(paths)]
         entry = self._entry_for_path(target)
         if entry is not None:
-            self._start_preview(entry)
+            self._start_preview(entry, paths)
 
     def _entry_for_path(self, path: str) -> Entry | None:
         row = self._entry_rows.get(path)

@@ -164,7 +164,7 @@ class Tile:
 
 class RawUpdateWorker(QObject):
     """Background worker for heavy RAW decoding tasks."""
-    finished = pyqtSignal(object, object, object, dict) # full, high, low, applied_params
+    finished = pyqtSignal(object, object, object, dict, int)
     error = pyqtSignal(str)
 
     def __init__(self):
@@ -172,28 +172,29 @@ class RawUpdateWorker(QObject):
         super().__init__()
         self._is_busy = False
         self._cancel_event = threading.Event()
+        self.latest_request_id = 0
 
     def request_cancel(self) -> None:
         """Stop delivery of a decode result after the current native call."""
         self._cancel_event.set()
 
-    @pyqtSlot(str, dict)
-    def decode(self, path, params):
+    @pyqtSlot(str, dict, int)
+    def decode(self, path: str, params: dict, request_id: int = 0) -> None:
         """Decode a RAW file on the worker thread and emit the result.
 
-        Emits ``finished`` with (full, high, low, applied_params) or
+        Emits ``finished`` with (full, high, low, applied_params, request_id) or
         ``error``; after :meth:`request_cancel` the pending result is
         dropped instead of emitted.
         """
         self._is_busy = True
         try:
-            if self._cancel_event.is_set():
+            if self._cancel_event.is_set() or request_id != self.latest_request_id:
                 return
             from src.shared.io.file_io import FileIO
             full, high, low, applied_params = FileIO.update_raw_decoding(path, params, preview_only=False)
-            if self._cancel_event.is_set():
+            if self._cancel_event.is_set() or request_id != self.latest_request_id:
                 return
-            self.finished.emit(full, high, low, applied_params)
+            self.finished.emit(full, high, low, applied_params, request_id)
         except Exception as e:
             if not self._cancel_event.is_set():
                 self.error.emit(str(e))
@@ -238,7 +239,7 @@ class ImageEngine(QObject, WindowRasterizer):
             return False
     
     frame_ready = pyqtSignal(int)
-    grade_set_preview_ready = pyqtSignal(int, object)
+    grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB pixels
     scope_snapshot_ready = pyqtSignal(object)
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     error_occurred = pyqtSignal(str)
@@ -305,6 +306,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._color_graph_revision = 0
 
         # RAW Background Worker
+        self._raw_decode_request = 0
         self.raw_worker_thread = QThread()
         # 命名：QThread destroyed-while-running 崩溃报告可直指责任线程
         self.raw_worker_thread.setObjectName("ImageEngineRawWorker")
@@ -349,6 +351,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # 按代数守卫丢弃。
         self._bake_generation = {}  # {layer_id: int}
         self._source_epoch = 0  # 每次替换源图递增，参与前缀摘要
+        self._still_grade_revision = 0
 
         self._clipboard_layer = None  # Instance-level clipboard for layer copy/paste
         self.viewport_size = (2048, 2048)
@@ -658,6 +661,7 @@ class ImageEngine(QObject, WindowRasterizer):
         black_canvas = np.zeros((height, width, 3), dtype=np.uint8)
 
         # Set the placeholder as the "original" image for rendering pipeline
+        self.invalidate_raw_decode()
         self.img_full_original = black_canvas
         self.img_source_full = black_canvas.copy()
 
@@ -752,10 +756,16 @@ class ImageEngine(QObject, WindowRasterizer):
             return
         self.renderer.submit(RenderCommand.RENDER_SCOPE, {'max_dim': max(1, int(max_dim))})
 
-    def request_grade_set_preview(self) -> None:
-        """Request a coalesced preview of the current still source."""
+    @property
+    def grade_set_preview_key(self) -> tuple[int, int]:
+        return self._source_epoch, self._still_grade_revision
+
+    def request_grade_set_preview(self) -> bool:
+        """Request a small copy of an already rendered still."""
         if self.renderer is not None and self.img_full_original is not None and not self._is_video_mode:
-            self.renderer.submit(RenderCommand.RENDER_SCOPE, {"grade_set_source_epoch": self._source_epoch})
+            self.renderer.submit(RenderCommand.RENDER_SCOPE, {"grade_set_preview_key": self.grade_set_preview_key})
+            return True
+        return False
 
     @property
     def source_epoch(self) -> int:
@@ -898,7 +908,8 @@ class ImageEngine(QObject, WindowRasterizer):
                 "1", "true", "yes", "on")
         return bool(self._color_graph_render_enabled)
 
-    def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None):
+    def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None,
+                  *, camera_white_balance: tuple[float, ...] | None = None, render: bool = True) -> None:
         """Sets the source images. Uploads to GPU asynchronously.
 
         Args:
@@ -909,6 +920,8 @@ class ImageEngine(QObject, WindowRasterizer):
             path: File path
             is_video: Whether this is a video frame (skips Mipmap generation)
             video_path: Original video file path
+            camera_white_balance: RAW white balance already read with the source.
+            render: Queue a render immediately when the viewer is ready.
         """
         if full is None: return
 
@@ -928,7 +941,8 @@ class ImageEngine(QObject, WindowRasterizer):
             self.img_source_full = full.copy()
 
         if is_new_file:
-            self.img_source_full = full.copy()
+            self.invalidate_raw_decode()
+            self.img_source_full = full if full.flags.owndata and not full.flags.writeable else full.copy()
             self.img_full_original = full.copy()
             self._flip_h = False
             self._flip_v = False
@@ -973,16 +987,10 @@ class ImageEngine(QObject, WindowRasterizer):
             # Extract RAW metadata for lock-free preview calculation
             if is_raw:
                 from src.shared.io.file_io import FileIO
-                with FileIO._raw_lock:
-                    if FileIO._current_raw_path == path and FileIO._current_raw_obj:
-                        self.current_raw_metadata["camera_wb"] = FileIO._get_normalized_camera_wb(FileIO._current_raw_obj)
-                    else:
-                        try:
-                            import rawpy
-                            with rawpy.imread(path) as raw:
-                                self.current_raw_metadata["camera_wb"] = FileIO._get_normalized_camera_wb(raw)
-                        except Exception:
-                            self.current_raw_metadata["camera_wb"] = [2.0, 1.0, 1.5, 1.0]
+                self.current_raw_metadata["camera_wb"] = (
+                    list(camera_white_balance) if camera_white_balance is not None
+                    else FileIO.read_camera_white_balance(path)
+                )
 
                 # ===== 正确的修改方式 =====
                 # 同步底层的初次解码状态。将真实的相机白平衡作为基准线。
@@ -1023,17 +1031,20 @@ class ImageEngine(QObject, WindowRasterizer):
                 'image': img_for_upload,
                 'original_size': (orig_w, orig_h),
                 'is_video': is_video,  # FIX: 传递 is_video 标志，防止 _do_upload 清除视频纹理状态
+                'use_source_as_reference': is_new_file and not render and not is_video,
             })
         else:
             self._upload_to_gpu(img_for_upload, high)
             self._generate_pyramid(img_for_upload)
 
-        if is_new_file:
+        if is_new_file and render:
             # 参考图也必须与 GPU 主纹理尺寸保持一致
-            self.set_reference_image(self.img_high)
+            if self.renderer:
+                self.renderer.submit(RenderCommand.UPLOAD_REFERENCE, img_for_upload)
 
         self.temp_image = None
-        self.render_pipeline()
+        if render:
+            self.render_pipeline()
 
     def set_interaction_mode(self, is_active: bool, itype: str = "general") -> None:
         """进入/退出交互模式（滑杆拖动、裁剪、蒙版绘制等）。
@@ -2352,7 +2363,11 @@ class ImageEngine(QObject, WindowRasterizer):
         return True
 
     @pyqtSlot(dict)
-    def on_raw_params_changed(self, params: dict) -> None:
+    def invalidate_raw_decode(self) -> None:
+        self._raw_decode_request += 1
+        self.raw_worker.latest_request_id = self._raw_decode_request
+
+    def on_raw_params_changed(self, params: dict, *, redecode: bool = True, render: bool = True) -> None:
         """Handles RAW parameter changes from RawPanel.
 
         AUD-0612: 入口先浅拷贝调用方 dict——本方法会写入 ``user_wb``、
@@ -2363,7 +2378,8 @@ class ImageEngine(QObject, WindowRasterizer):
         params = dict(params)  # AUD-0612: 与调用方对象解耦
         if self._last_applied_raw_params == params:
             return
-            
+
+        self.invalidate_raw_decode()
         self.current_raw_params = params
         if not self.current_file_path:
             return
@@ -2442,33 +2458,37 @@ class ImageEngine(QObject, WindowRasterizer):
                     'path': input_lut
                 })
         
-        self.render_pipeline(render_reason='grading')
+        if render:
+            self.render_pipeline(render_reason='grading')
 
         # Only trigger heavy re-decoding for non-interacting changes or WB 'auto'
         # Also ensure we only call decode for actual RAW files
         is_raw = self.current_file_path and os.path.splitext(self.current_file_path)[1].lower() in self.RAW_EXTENSIONS
 
-        if is_raw and (not self.is_interacting or wb_type == 'auto'):
+        if is_raw and redecode and (not self.is_interacting or wb_type == 'auto'):
             from PyQt6.QtCore import QMetaObject, Q_ARG
             # AUD-0612: 传给 worker 前再浅拷贝一次——queued 连接只传递
             # Python 对象引用，拷贝后 worker 与 engine 各持独立 dict。
             QMetaObject.invokeMethod(self.raw_worker, "decode",
                                    Qt.ConnectionType.QueuedConnection,
                                    Q_ARG(str, self.current_file_path),
-                                   Q_ARG(dict, dict(params)))
+                                   Q_ARG(dict, dict(params)),
+                                   Q_ARG(int, self._raw_decode_request))
         elif not is_raw:
             # For non-RAW files, we don't call the worker, so we must update 
             # the last applied params immediately to keep the state in sync.
             self._last_applied_raw_params = params.copy()
 
-    def _on_raw_update_finished(self, full, high, low, applied_params):
+    def _on_raw_update_finished(self, full, high, low, applied_params,
+                                request_id: int | None = None) -> None:
         """Consume a finished background RAW decode (RawUpdateWorker.finished).
 
         重解码把 RAW 参数烘焙进了新图：重置 shader 侧 RAW 预览 uniforms、
         同步 _last_applied_raw_params 基线、重置所有层蒙版置脏，并把新
         预览图上传渲染线程后触发全量渲染。
         """
-        if full is None: return
+        if full is None or (request_id is not None and request_id != self._raw_decode_request):
+            return
         
         # Reset Shader RAW Previews since they are now baked into the decoded image
         # Note: Some parameters might still need to be applied in shader if not baked by raw decoder
@@ -3098,6 +3118,12 @@ class ImageEngine(QObject, WindowRasterizer):
                         forget(render_params['render_request_id'])
                     raise
             else:
+                if not self._is_video_mode and self.img_full_original is not None:
+                    if render_reason != 'viewport_refresh':
+                        self._still_grade_revision += 1
+                    h, w = self.img_full_original.shape[:2]
+                    render_params['grade_set_preview_key'] = self.grade_set_preview_key
+                    render_params['photo_size'] = (w, h)
                 self.renderer.submit(RenderCommand.RENDER_FRAME, render_params)
             return render_params['render_request_id']
 
@@ -3892,8 +3918,8 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         mutex = self.gl_manager.mutex
         # Never stall the GUI event loop behind a long render-thread pass.
-        # Canvas will retain the previously presented frame and paint again on
-        # the next frame_ready signal once the renderer releases this mutex.
+        # Canvas retries a still-image paint when the worker owns the lock.
+        # Video playback can use the next frame notification.
         if not mutex.tryLock():
             return False
         try:

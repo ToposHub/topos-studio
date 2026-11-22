@@ -25,6 +25,7 @@ class _Host(QObject):
         self.color_resource_controller = None
         self.cancel_image_switch = False
         self._apply_grade_set_layers = Mock()
+        self._prepare_to_leave_photo = Mock(return_value=True)
 
     def _active_grade_set_image(self) -> str:
         return self.grade_set_panel.active_path
@@ -71,6 +72,24 @@ def test_paste_cancelling_image_switch_leaves_current_grade_untouched(qtbot: QtB
         host._apply_grade_set_layers.assert_not_called()
         host.grade_set_panel.invalidate_graded_thumbnail.assert_not_called()
         assert host.grade_set_panel.active_path == "/first.png"
+    finally:
+        transfer.shutdown()
+
+
+def test_paste_resumes_after_source_photo_autosave(qtbot: QtBot) -> None:
+    host = _Host()
+    host._prepare_to_leave_photo.return_value = False
+    transfer = GradeSetTransfer(host)
+    try:
+        transfer.copy("/first.png")
+        transfer.paste("/second.png")
+        host._apply_grade_set_layers.assert_not_called()
+        assert host.grade_set_panel.active_path == "/first.png"
+        resume, = host._prepare_to_leave_photo.call_args.args
+        host._prepare_to_leave_photo.return_value = True
+        resume()
+        host._apply_grade_set_layers.assert_called_once()
+        assert host.grade_set_panel.active_path == "/second.png"
     finally:
         transfer.shutdown()
 

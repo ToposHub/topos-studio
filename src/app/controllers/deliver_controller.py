@@ -34,6 +34,7 @@ import platform
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 
 import numpy as np
 
@@ -245,7 +246,7 @@ class DeliverControllerMixin:
             self.status_bar.showMessage("Export failed!", 5000)
             QMessageBox.critical(self, "Export Error", f"Failed to save image to {path}")
 
-    def perform_quick_export(self, settings) -> None:
+    def perform_quick_export(self, settings, *, source_is_current: Callable[[], bool] | None = None) -> None:
         """执行导出 — 支持 Color 和 Composite 两个来源。"""
         # Auto-apply crop if tool is still active
         if self.crop_panel.is_crop_active():
@@ -262,9 +263,17 @@ class DeliverControllerMixin:
         export_source = settings.get("export_source", "color")
         if export_source == "composite" and self._composite_available and self.composite_page:
             export_img = self._export_composite(settings)
+        elif source_is_current is not None:
+            # The cached path temporarily swaps the engine's original while its
+            # nested render loop runs. Library navigation can replace that source.
+            export_img = self._export_color({**settings, "quick_export": False},
+                                            source_is_current=source_is_current)
         else:
             export_img = self._export_color(settings)
 
+        if source_is_current is not None and not source_is_current():
+            self._show_export_source_changed()
+            return
         if export_img is None:
             self.status_bar.showMessage("Export failed: Could not render image.", 5000)
             QMessageBox.critical(self, "Export Error", "Failed to render image.")
@@ -303,7 +312,7 @@ class DeliverControllerMixin:
             self.status_bar.showMessage("Export failed!", 5000)
             QMessageBox.critical(self, "Export Error", f"Failed to save image to {path}")
 
-    def _export_color(self, settings) -> 'np.ndarray | None':
+    def _export_color(self, settings, *, source_is_current: Callable[[], bool] | None = None) -> 'np.ndarray | None':
         """导出 Color pipeline 输出（原有行为）。"""
         is_quick = settings.get("quick_export", True)
         target_size = settings.get("options", {}).get("resize")
@@ -322,6 +331,8 @@ class DeliverControllerMixin:
             self.status_bar.showMessage(f"Exporting (high quality) to {os.path.basename(path)}...", 0)
             QApplication.processEvents()
 
+            if source_is_current is not None and not source_is_current():
+                return None
             export_img = self.engine.get_current_image(force_full_res=True)
 
             if target_size and export_img is not None:
@@ -1136,7 +1147,11 @@ class DeliverControllerMixin:
     # Export File As (quick export dialog)
     # ------------------------------------------------------------------
 
-    def export_file_as(self) -> None:
+    def _show_export_source_changed(self) -> None:
+        self.status_bar.showMessage(I18N.tr(
+            "grade_sets.export_source_changed", "The selected photo changed. Open Export again."), 4000)
+
+    def export_file_as(self, *, source_is_current: Callable[[], bool] | None = None) -> None:
         """快速导出功能（支持图像、LUT 和视频导出）"""
         from src.shared.export.quick_export_dialog import QuickExportDialog
 
@@ -1195,6 +1210,9 @@ class DeliverControllerMixin:
         )
 
         if dialog.exec():
+            if source_is_current is not None and not source_is_current():
+                self._show_export_source_changed()
+                return
             settings = dialog.get_settings()
             export_type = settings.get("export_type")
             if export_type == "lut":
@@ -1216,6 +1234,8 @@ class DeliverControllerMixin:
                         I18N.tr("export.video_export_failed", "视频导出失败"),
                         str(exc),
                     )
+            elif source_is_current is not None:
+                self.perform_quick_export(settings, source_is_current=source_is_current)
             else:
                 self.perform_quick_export(settings)
 

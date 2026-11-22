@@ -14,6 +14,7 @@ from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.app.controllers.layer_controller import LayerOpsMixin
 from src.features.color.core.layer import Layer
 from src.features.color.ui.canvas import Canvas
+from src.features.color.ui.raw_panel import RawPanel
 from src.shared.feature_flags import uses_image_layer_workflow
 
 
@@ -24,6 +25,21 @@ from src.shared.feature_flags import uses_image_layer_workflow
 def test_layer_workflow_is_specific_to_image_or_color_product(monkeypatch, product, mode, expected):
     monkeypatch.setenv("TOPOS_PRODUCT_MODE", product)
     assert uses_image_layer_workflow(SimpleNamespace(get=lambda key: mode)) is expected
+
+
+def test_raw_interaction_flushes_parameter_before_photo_autosave(qtbot) -> None:
+    panel = RawPanel()
+    qtbot.addWidget(panel)
+    events = []
+    panel.raw_params_changed.connect(lambda params: events.append(params["gamma"]))
+    panel.interaction_ended.connect(lambda: events.append("finished"))
+
+    panel.gamma_combo["combo"].setCurrentText("Rec.709")
+    assert not events
+    panel.end_interaction()
+
+    assert events == ["Rec.709", "finished"]
+    assert not panel.update_timer.isActive()
 
 
 class _LayerMenuHost(QMainWindow, MenuToolbarMixin):
