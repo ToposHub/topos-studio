@@ -31,6 +31,10 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 from src.features.edit.core.audio_edit import steps_signature
 
+# The render identity changes with the corrected resampler alignment and
+# de-esser envelope, even when an older project's serialized fields match.
+SOUND_SNAPSHOT_SCHEMA_VERSION = 4
+
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
@@ -55,9 +59,27 @@ class ClipNodeSnapshot:
     fade_curve: Optional[str] = None
     fade_curve_in: Optional[str] = None
     fade_curve_out: Optional[str] = None
+    # B01: clip 增益（dB，听感字段；审计反例 clip_gain_control——此前
+    # 快照完全缺该字段，改增益不触发重建）
+    audio_gain_db: float = 0.0
+    # 快照超集补齐（对照 edit_page 签名复审）：is_enabled（离线导出跳过
+    # 禁用 clip）、采样域淡化（覆盖帧域值）、子帧放置偏移（F3.3）——
+    # 任何一项变化都必须改变 stable_hash。
+    is_enabled: bool = True
+    fade_in_samples: Optional[int] = None
+    fade_out_samples: Optional[int] = None
+    audio_sample_offset: int = 0
+    source_sample_offset: int = 0
+    # A2：冻结 clip 注册时被跳过（无声化）——冻结状态是听感字段。
+    freeze_source_frame: Optional[int] = None
     effects_signature: Tuple = ()  # clip FX 摘要
     # P0-3：Clip Editor 处理栈摘要（enabled 步骤的有序指纹；变化必须重建）。
     audio_edit_signature: Tuple = ()
+    # Source-to-strip ownership and the full retime contract are sound fields.
+    # Numeric speed alone loses reverse/pitch/ramp settings.
+    track_id: str = ""
+    speed_signature: Optional[str] = None
+    source_duration: int = 0
 
 
 @dataclass(frozen=True)
@@ -72,12 +94,23 @@ class TrackNodeSnapshot:
     is_solo: bool
     is_enabled: bool
     output_bus_id: Optional[str]
-    sends: Tuple[Tuple[str, float], ...]  # (target_bus_id, level)
+    # B01: (target_bus_id, level, tap, muted)——tap 决定取样点、muted 独立
+    # 断开 send 贡献；二者此前遗漏（审计反例 send_tap/send_muted）。
+    sends: Tuple[Tuple[str, float, str, bool], ...]
     strip_eq_signature: Optional[str]
     effect_chain_signature: Optional[str]
     automation_signature: Optional[str]
     automation_mode: str
-    stem_group: str
+    # B01/P1-5: volume trim 倍率（离线渲染消费；审计反例 automation_trim）
+    automation_trim: Tuple[Tuple[str, float], ...] = ()
+    stem_group: str = ""
+    # 快照超集补齐（对照 edit_page 签名复审）：空间声像器、audio:* 转场、
+    # Bus 声道布局（引擎 set_bus_layouts 消费）都是听感字段。
+    panner_signature: Optional[str] = None
+    audio_transitions_signature: Tuple = ()
+    bus_layout: str = "stereo"
+    solo_safe: bool = False
+    audio_layout: str = ""
 
 
 @dataclass(frozen=True)
@@ -87,6 +120,10 @@ class MasterNodeSnapshot:
     muted: bool
     automation_signature: Optional[str]
     automation_mode: str
+    # MX-03: Master 条带（EQ/FX 链）——edit_page 签名已含，快照超集补齐。
+    strip_eq_signature: Optional[str] = None
+    effect_chain_signature: Optional[str] = None
+    audio_layout: str = ""
 
 
 @dataclass(frozen=True)
@@ -102,6 +139,9 @@ class AudioGraphSnapshot:
     clips: Tuple[ClipNodeSnapshot, ...]
     tracks: Tuple[TrackNodeSnapshot, ...]
     master: MasterNodeSnapshot
+    # B01: VCA 组快照（(vca_id, gain_db, muted, member_track_ids) 稳定序）。
+    # VCA 增益/静音/成员变化改变实时听感（审计反例 vca_gain）。
+    vcas: Tuple[Tuple[str, float, bool, Tuple[str, ...]], ...] = ()
     # 编译期校验结果
     validation_errors: Tuple[str, ...] = ()
 
@@ -121,21 +161,37 @@ class AudioGraphSnapshot:
         否则用 snapshot 替代 signature 会丢重建触发。已补齐 clip 的 asset_id/source_start
         与 track 的 is_enabled（这三项此前漏算，会导致换素材/改源起点/禁用轨不触发重建）。
         """
+        from src.features.edit.core.audio_dsp import ALGORITHM_VERSION
+
         data = {
+            "sound_schema": SOUND_SNAPSHOT_SCHEMA_VERSION,
+            "dsp_algorithm": ALGORITHM_VERSION,
+            "pdc_algorithm": "edge-dag/1",
             "fps": round(self.fps, 6),
             "sr": self.sample_rate,
             # clip: asset_id（换素材）、source_start（改源起点）都会改变声音
             "c": [(c.clip_id, c.asset_id, c.source_start, c.timeline_start,
                    c.timeline_duration, c.speed, c.fade_in_frames, c.fade_out_frames,
-                   c.fade_curve, c.fade_curve_in, c.fade_curve_out,
-                   c.effects_signature, c.audio_edit_signature) for c in self.clips],
-            # track: is_enabled（禁用轨不发声）
+                   c.fade_curve, c.fade_curve_in, c.fade_curve_out, c.audio_gain_db,
+                   c.is_enabled, c.fade_in_samples, c.fade_out_samples,
+                   c.audio_sample_offset, c.source_sample_offset,
+                   c.freeze_source_frame,
+                   c.effects_signature, c.audio_edit_signature,
+                   c.track_id, c.speed_signature, c.source_duration) for c in self.clips],
+            # track: is_enabled（禁用轨不发声）；B01: sends 含 tap/muted、
+            # automation_trim 参与声音身份
             "t": [(t.track_id, t.volume, t.pan, t.is_muted, t.is_solo, t.is_enabled,
                    t.output_bus_id, t.sends, t.strip_eq_signature,
                    t.effect_chain_signature, t.automation_signature, t.automation_mode,
-                   t.stem_group, t.is_bus) for t in self.tracks],
+                   t.automation_trim, t.stem_group, t.is_bus,
+                   t.panner_signature, t.audio_transitions_signature,
+                   t.bus_layout, t.solo_safe, t.audio_layout) for t in self.tracks],
             "m": (self.master.volume, self.master.muted,
-                  self.master.automation_signature, self.master.automation_mode),
+                  self.master.automation_signature, self.master.automation_mode,
+                  self.master.strip_eq_signature, self.master.effect_chain_signature,
+                  self.master.audio_layout),
+            # B01: VCA 组（gain/mute/成员）
+            "v": self.vcas,
         }
         return hashlib.sha256(
             json.dumps(data, sort_keys=True, default=str).encode("utf-8")
@@ -171,11 +227,14 @@ def _clip_effects_signature(clip: Any) -> Tuple:
     """clip FX 摘要（effect_type + enabled + params hash）。"""
     effects = getattr(clip, "effects", ()) or ()
     sig = []
-    for ef in effects:
+    for ef in sorted(effects, key=lambda effect: getattr(effect, "order", 0)):
         etype = getattr(ef, "effect_type", "")
         enabled = bool(getattr(ef, "is_enabled", True))
         params = getattr(ef, "params", None) or {}
-        sig.append((etype, enabled, repr(sorted(params.items()) if params else [])))
+        sig.append((etype, enabled, repr(sorted(params.items()) if params else []),
+                    _repr_signature(getattr(ef, "animated_params", None)),
+                    getattr(ef, "algorithm_version", None),
+                    _repr_signature(getattr(ef, "plugin_identity", None))))
     return tuple(sig)
 
 
@@ -195,13 +254,55 @@ def _effect_chain_signature(chain: Any) -> Optional[str]:
     return repr(chain)
 
 
+def _repr_signature(obj: Any) -> Optional[str]:
+    """通用对象签名（None=None；to_dict 稳定排序；否则 repr）。"""
+    if obj is None:
+        return None
+    def payload(value: Any) -> Any:
+        if hasattr(value, "to_dict"):
+            return payload(value.to_dict())
+        if isinstance(value, dict):
+            return {str(key): payload(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [payload(item) for item in value]
+        return value
+
+    return json.dumps(payload(obj), sort_keys=True, default=str)
+
+
+def _audio_transitions_signature(track: Any) -> Tuple:
+    """轨内 audio:* 转场签名（crossfade 参数；视频转场不影响声音）。"""
+    entries = []
+    for tr in (getattr(track, "transitions", ()) or ()):
+        ttype = str(getattr(tr, "transition_type", ""))
+        if not ttype.startswith("audio:"):
+            continue
+        entries.append((
+            ttype,
+            getattr(tr, "transition_id", ""),
+            getattr(tr, "left_clip_id", ""),
+            getattr(tr, "right_clip_id", ""),
+            int(getattr(tr, "center_frame", 0) or 0),
+            int(getattr(tr, "duration", 0) or 0),
+            str(getattr(tr, "alignment", "centered") or "centered"),
+            repr(sorted((getattr(tr, "params", None) or {}).items())),
+        ))
+    return tuple(entries)
+
+
 def _automation_signature(auto: Any) -> Optional[str]:
     if not auto:
         return None
     parts = []
     for param, track in auto.items():
-        kfs = getattr(track, "keyframes", []) or []
-        parts.append((param, [(kf.frame, kf.value) for kf in kfs]))
+        if hasattr(track, "to_dict"):
+            # KeyframeTrack serialization includes interpolation, handles,
+            # bounds and pre/post extrapolation. Equal key values can replay
+            # different audio when any of these contracts changes.
+            parts.append((param, track.to_dict()))
+        else:
+            kfs = getattr(track, "keyframes", []) or []
+            parts.append((param, [(kf.frame, kf.value) for kf in kfs]))
     return repr(sorted(parts))
 
 
@@ -228,6 +329,7 @@ def build_audio_graph_snapshot(
             continue
         for clip in getattr(track, "clips", ()) or ():
             speed = getattr(clip, "speed", 1.0)
+            speed_signature = _repr_signature(speed)
             if hasattr(speed, "speed"):
                 speed = speed.speed
             clips.append(ClipNodeSnapshot(
@@ -242,19 +344,33 @@ def build_audio_graph_snapshot(
                 fade_curve=getattr(clip, "fade_curve", None),
                 fade_curve_in=getattr(clip, "effective_fade_curve_in", None),
                 fade_curve_out=getattr(clip, "effective_fade_curve_out", None),
+                audio_gain_db=float(getattr(clip, "audio_gain_db", 0.0) or 0.0),
+                is_enabled=bool(getattr(clip, "is_enabled", True)),
+                fade_in_samples=getattr(clip, "fade_in_samples", None),
+                fade_out_samples=getattr(clip, "fade_out_samples", None),
+                audio_sample_offset=int(getattr(clip, "audio_sample_offset", 0) or 0),
+                source_sample_offset=int(getattr(clip, "source_sample_offset", 0) or 0),
+                freeze_source_frame=getattr(clip, "freeze_source_frame", None),
                 effects_signature=_clip_effects_signature(clip),
                 audio_edit_signature=steps_signature(
                     getattr(clip, "audio_edit", None)),
+                track_id=getattr(track, "track_id", ""),
+                speed_signature=speed_signature,
+                source_duration=int(getattr(clip, "source_duration", 0) or 0),
             ))
 
     # track/bus 节点
     tracks: List[TrackNodeSnapshot] = []
     for track in getattr(sequence, "audio_tracks", ()) or ():
+        # B01: send 4 元组带 tap/muted（MX-14 模型 v2 字段入声音身份）
         sends = tuple(
-            (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)))
+            (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)),
+             str(getattr(s, "tap", "post_fader") or "post_fader"),
+             bool(getattr(s, "muted", False)))
             for s in (getattr(track, "sends", ()) or ())
             if getattr(s, "enabled", True)
         )
+        trim = getattr(track, "automation_trim", {}) or {}
         tracks.append(TrackNodeSnapshot(
             track_id=getattr(track, "track_id", ""),
             name=getattr(track, "name", ""),
@@ -270,15 +386,27 @@ def build_audio_graph_snapshot(
             effect_chain_signature=_effect_chain_signature(getattr(track, "effect_chain", None)),
             automation_signature=_automation_signature(getattr(track, "automation", {})),
             automation_mode=str(getattr(track, "automation_mode", "off") or "off"),
+            automation_trim=tuple(sorted(
+                (str(k), float(v)) for k, v in trim.items())),
             stem_group=str(getattr(track, "stem_group", "") or ""),
+            panner_signature=_repr_signature(getattr(track, "panner", None)),
+            audio_transitions_signature=_audio_transitions_signature(track),
+            bus_layout=str(getattr(track, "bus_layout", "stereo")
+                           or "stereo"),
+            solo_safe=bool(getattr(track, "solo_safe", False)),
+            audio_layout=str(getattr(track, "audio_layout", "")),
         ))
 
     # master 节点
     master = MasterNodeSnapshot(
         volume=float(getattr(sequence, "master_volume", 1.0)),
         muted=bool(getattr(sequence, "master_muted", False)),
+        audio_layout=str(getattr(sequence, "master_audio_layout", "")),
         automation_signature=_automation_signature(getattr(sequence, "master_automation", {})),
         automation_mode=str(getattr(sequence, "master_automation_mode", "off") or "off"),
+        strip_eq_signature=_strip_eq_signature(getattr(sequence, "master_strip_eq", None)),
+        effect_chain_signature=_effect_chain_signature(
+            getattr(sequence, "master_effect_chain", None)),
     )
 
     # 编译期校验（环/未知目标）
@@ -288,6 +416,17 @@ def build_audio_graph_snapshot(
     if hasattr(fps, "num"):
         fps = float(fps.num) / float(fps.den) if fps.den else 24.0
 
+    # B01: VCA 组快照（稳定序，成员轨 ID 排序）
+    vcas = tuple(sorted(
+        (
+            str(getattr(v, "vca_id", "")),
+            float(getattr(v, "gain_db", 0.0)),
+            bool(getattr(v, "muted", False)),
+            tuple(sorted(str(m) for m in getattr(v, "member_track_ids", ()) or ())),
+        )
+        for v in (getattr(sequence, "vcas", ()) or ())
+    ))
+
     return AudioGraphSnapshot(
         revision=revision,
         fps=fps,
@@ -295,6 +434,7 @@ def build_audio_graph_snapshot(
         clips=tuple(clips),
         tracks=tuple(tracks),
         master=master,
+        vcas=vcas,
         validation_errors=tuple(validation_errors),
     )
 

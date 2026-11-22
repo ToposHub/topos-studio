@@ -21,13 +21,38 @@ class _CompositeAdapterBase(AudioEffect):
     def __init__(self, sample_rate: float = 48000.0) -> None:
         super().__init__(sample_rate)
         self._impl = self._impl_factory(float(sample_rate))
+        self._uses_legacy = False
+        self._async_resources_enabled = False
 
     def set_params(self, params: object, sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
         if sample_rate is not None:
             self._sample_rate = float(sample_rate)
+        legacy_factory = getattr(self, "_legacy_impl_factory", None)
+        use_legacy = (callable(legacy_factory) and algorithm_version is not None
+                      and int(algorithm_version) <= 4)
+        if use_legacy != self._uses_legacy:
+            self.release_resources()
+            factory = legacy_factory if use_legacy else self._impl_factory
+            self._impl = factory(self._sample_rate)
+            self._uses_legacy = use_legacy
+            if self._async_resources_enabled:
+                self.enable_async_resources()
         self._impl.set_params(params, sample_rate=sample_rate,
                               algorithm_version=algorithm_version)
+
+    def enable_async_resources(self) -> None:
+        """Allow resource-owning implementations to prepare outside callbacks."""
+        self._async_resources_enabled = True
+        enable = getattr(self._impl, "enable_async_resources", None)
+        if callable(enable):
+            enable()
+
+    def release_resources(self) -> None:
+        """Cancel resource jobs when a chain discards this instance."""
+        release = getattr(self._impl, "release_resources", None)
+        if callable(release):
+            release()
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         return self._impl.process(samples)
@@ -54,7 +79,11 @@ class _CompositeAdapterBase(AudioEffect):
         return bool(self._impl.install_freeze_capture(capture))
 
     def collect_telemetry(self) -> dict:
-        return dict(self._impl.collect_telemetry())
+        # Analysis is optional for DSP implementations. Stable instance IDs
+        # enable chain taps for every adapter, including processors without an
+        # analysis publisher (e.g. convolution and modulation effects).
+        collect = getattr(self._impl, "collect_telemetry", None)
+        return dict(collect()) if callable(collect) else {}
 
 
 class SpectralManglerAdapter(_CompositeAdapterBase):
@@ -90,11 +119,25 @@ class TruePeakLimiterAdapter(_CompositeAdapterBase):
         )
         return TruePeakLimiterEffect(sr)
 
+    def _legacy_impl_factory(self, sr: float) -> AudioEffect:
+        from src.features.edit.core.audio_effects.legacy_v4.true_peak_limiter import (
+            TruePeakLimiterEffect,
+        )
+        return TruePeakLimiterEffect(sr)
+
 
 class DynamicEqAdapter(_CompositeAdapterBase):
     """P1 · Dynamic EQ（对白/音乐避让、轨道与 Bus）。"""
 
     effect_type = "dynamic_eq"
+
+    @property
+    def sc_source(self) -> str:
+        return self._impl.sc_source
+
+    def process(self, samples: np.ndarray,
+                sidechain: Optional[np.ndarray] = None) -> np.ndarray:
+        return self._impl.process(samples, sidechain=sidechain)
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.dynamic_eq import (
@@ -152,6 +195,14 @@ class ModulationAdapterBase(_CompositeAdapterBase):
 class TransientDesignerAdapter(_CompositeAdapterBase):
     effect_type = "transient_designer"
 
+    @property
+    def sc_source(self) -> str:
+        return self._impl.sc_source
+
+    def process(self, samples: np.ndarray,
+                sidechain: Optional[np.ndarray] = None) -> np.ndarray:
+        return self._impl.process(samples, sidechain=sidechain)
+
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
             TransientDesignerEffect,
@@ -178,12 +229,24 @@ class ChorusFlangerAdapter(_CompositeAdapterBase):
         )
         return ChorusFlangerEffect(sr)
 
+    def _legacy_impl_factory(self, sr: float) -> AudioEffect:
+        from src.features.edit.core.audio_effects.legacy_v4.modulation_tools import (
+            ChorusFlangerEffect,
+        )
+        return ChorusFlangerEffect(sr)
+
 
 class PhaserAdapter(_CompositeAdapterBase):
     effect_type = "phaser"
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
+            PhaserEffect,
+        )
+        return PhaserEffect(sr)
+
+    def _legacy_impl_factory(self, sr: float) -> AudioEffect:
+        from src.features.edit.core.audio_effects.legacy_v4.modulation_tools import (
             PhaserEffect,
         )
         return PhaserEffect(sr)

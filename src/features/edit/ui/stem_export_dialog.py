@@ -8,19 +8,23 @@ QThread worker 调用 :func:`src.features.edit.core.stem_export.export_all_stems
 - Edit→File→Export Stems...（file_controller.export_stem_tracks）
 - Deliver 页 "Export Stems…" 按钮（deliver_page）
 
-取消语义：worker 在每个 stem 渲染开始前轮询取消标志，粒度为单个 stem；
-已完成的 stem 文件保留。
+取消语义：worker 在渲染块和回读块边界轮询取消。当前批次仅在全部
+文件通过后发布；失败/取消清理暂存，已有交付文件保持不变。
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from dataclasses import replace
+from pathlib import Path
+import tempfile
 from typing import Any, Callable, List, Optional, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -36,6 +40,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.features.edit.core.channel_layout import ChannelLayout
+from src.features.edit.core.native_mix_layout import MIX_LAYOUTS, mix_layout
 from src.features.edit.core.stem_export import (
     StemSpec,
     StemType,
@@ -43,6 +49,10 @@ from src.features.edit.core.stem_export import (
     plan_stems_from_sequence,
 )
 from src.features.edit.core.nested_sequence import NestedAudioExpansionError
+from src.features.edit.core.delivery_profile import (
+    DeliveryProfile, StemRule, publish_delivery_atomic, DeliveryPublicationCancelled,
+)
+from src.features.edit.core.delivery_preset import FULL_STEM_SET
 from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
@@ -81,6 +91,8 @@ class StemExportWorker(QThread):
         parent: Optional[QWidget] = None,
         *,
         sequence_resolver: Optional[Callable] = None,
+        delivery_profile: Optional[DeliveryProfile] = None,
+        channel_layout: ChannelLayout = ChannelLayout.STEREO,
     ) -> None:
         super().__init__(parent)
         self._sequence = sequence
@@ -90,12 +102,23 @@ class StemExportWorker(QThread):
         self.failure_diagnostics: tuple = ()
         self._output_dir = output_dir
         self._specs = specs
-        # 规范化前缀：分隔符由 _apply_prefix 统一补，避免出现双下划线
+        self._channel_layout = channel_layout
+        # Normalize before assigning final spec filenames, avoiding duplicate separators.
         self._prefix = (prefix or "").strip().rstrip("_- ")
+        # Default is an evidence profile, not a customer loudness target. It
+        # verifies encoded WAV integrity and records measurements without
+        # normalizing audio or imposing an unsolicited LUFS/peak requirement.
+        self._delivery_profile = delivery_profile or DeliveryProfile(
+            profile_id="topos-stem-technical-v1", name="Stem WAV technical readback",
+            file_format="wav", target_lufs=None, max_true_peak_dbtp=None,
+            channel_order=channel_layout.channel_labels,
+            max_sample_peak_dbfs=None,
+            stems=tuple(StemRule(stem, allow_silence=True) for stem in FULL_STEM_SET),
+        )
         self._cancel_requested = False
 
     def cancel(self) -> None:
-        """请求取消（下个 stem 边界生效）。"""
+        """请求取消（下个渲染/回读块边界生效）。"""
         self._cancel_requested = True
 
     def run(self) -> None:
@@ -108,30 +131,80 @@ class StemExportWorker(QThread):
                 self._project,
                 float(getattr(self._sequence, "fps", 24.0) or 24.0),
                 STEM_SAMPLE_RATE,
+                bool(getattr(self._sequence, "master_audio_layout", "")),
             )
             # §3.3：预渲染处理栈（STFT 类步骤）的缓存基底。
             pre_render_base_fn = create_pre_render_base_fn(
                 self._project, self._sequence)
+            decoders_closed = False
             try:
-                result = export_all_stems(
-                    self._sequence,
-                    self._output_dir,
-                    decode_clip_fn=decode_fn,
-                    pre_render_base_fn=pre_render_base_fn,
-                    sample_rate=STEM_SAMPLE_RATE,
-                    channels=STEM_CHANNELS,
-                    bit_depth=STEM_BIT_DEPTH,
-                    specs=list(self._specs),
-                    cancel_check=lambda: self._cancel_requested,
-                    progress_callback=self._emit_progress,
-                    sequence_resolver=self._sequence_resolver,
-                    asset_lookup=self._asset_lookup,
-                )
+                output = Path(self._output_dir)
+                output.mkdir(parents=True, exist_ok=True)
+                safe_prefix = "".join(
+                    c if c.isalnum() or c in "-_" else "_" for c in self._prefix)
+                specs = [replace(spec, filename_override=(
+                    f"{safe_prefix}_{spec.filename}" if safe_prefix else spec.filename))
+                    for spec in self._specs]
+                # Render and inspect in a task-owned directory; no failed or
+                # cancelled job can overwrite a user's existing delivery.
+                with tempfile.TemporaryDirectory(prefix=".stem-job-", dir=output) as staging:
+                    result = export_all_stems(
+                        self._sequence, staging,
+                        decode_clip_fn=decode_fn,
+                        pre_render_base_fn=pre_render_base_fn,
+                        sample_rate=STEM_SAMPLE_RATE,
+                        channels=self._channel_layout.channel_count,
+                        bit_depth=STEM_BIT_DEPTH,
+                        specs=specs,
+                        cancel_check=lambda: self._cancel_requested,
+                        progress_callback=self._emit_progress,
+                        sequence_resolver=self._sequence_resolver,
+                        asset_lookup=self._asset_lookup,
+                        qc_profile=self._delivery_profile,
+                    )
+                    if self._cancel_requested:
+                        result.cancelled = True
+                    # Resource cleanup is part of job success. Do it before
+                    # publication so a cleanup exception cannot report failure
+                    # after approved files have already been overwritten.
+                    close_fn()
+                    decoders_closed = True
+                    if self._cancel_requested:
+                        result.cancelled = True
+                    if not result.cancelled:
+                        if not result.all_succeeded:
+                            raise ValueError("Stem render/readback failed: " + "; ".join(
+                                result.qc_errors or [name for name, ok in result.stems if not ok]))
+                        paths = list(result.output_files)
+                        paths += [result.routing_manifest_path, result.delivery_manifest_path]
+                        files = {str(index): Path(path) for index, path in enumerate(paths) if path}
+                        checksums = {
+                            key: result.measurements[path.name].file_sha256
+                            for key, path in files.items() if path.suffix.lower() == ".wav"
+                        }
+                        try:
+                            publish_delivery_atomic(
+                                files, output, expected_checksums=checksums,
+                                cancel_check=lambda: self._cancel_requested)
+                        except DeliveryPublicationCancelled:
+                            result.cancelled = True
+                    if not result.cancelled:
+                        result.output_files = [str(output / Path(path).name)
+                                               for path in result.output_files]
+                        if result.routing_manifest_path:
+                            result.routing_manifest_path = str(output / "routing.json")
+                        if result.delivery_manifest_path:
+                            result.delivery_manifest_path = str(output / "delivery.json")
+                    else:
+                        result.stems = [(name, False) for name, _ok in result.stems]
+                        result.output_files = []
+                        result.routing_manifest_path = ""
+                        result.delivery_manifest_path = ""
+                    result.output_dir = self._output_dir
             finally:
-                close_fn()
+                if not decoders_closed:
+                    close_fn()
 
-            if self._prefix and not result.cancelled:
-                self._apply_prefix(result)
             self.progress_changed.emit(len(result.stems), len(result.stems), "")
             self.finished_ok.emit(result)
         except Exception as exc:  # noqa: BLE001 — worker 边界，错误回 UI
@@ -141,26 +214,6 @@ class StemExportWorker(QThread):
 
     def _emit_progress(self, current: int, total: int, name: str) -> None:
         self.progress_changed.emit(current, total, name)
-
-    def _apply_prefix(self, result: Any) -> None:
-        """非空前缀：完成后把 <name>.wav 重命名为 <prefix>_<name>.wav。"""
-        renamed: List[Tuple[str, bool]] = []
-        for name, ok in result.stems:
-            if not ok:
-                renamed.append((name, ok))
-                continue
-            src = os.path.join(self._output_dir, f"{name}.wav")
-            dst = os.path.join(self._output_dir, f"{self._prefix}_{name}.wav")
-            try:
-                if os.path.exists(dst):
-                    os.remove(dst)
-                os.rename(src, dst)
-                renamed.append((f"{self._prefix}_{name}", ok))
-            except OSError as exc:
-                logger.warning("Stem rename failed (%s): %s", src, exc)
-                renamed.append((name, False))
-        result.stems = renamed
-
 
 class StemExportDialog(QDialog):
     """Stem 规划勾选 + 输出配置 + worker 进度/结果摘要。
@@ -261,9 +314,15 @@ class StemExportDialog(QDialog):
             self._prefix_input,
         )
 
-        format_label = QLabel(
-            I18N.tr("edit.stem_export.format_wav_stereo", "WAV · 48 kHz · 24 bit · 立体声"))
-        out_form.addRow(I18N.tr("edit.stem_export.format_label", "格式:"), format_label)
+        format_label = QLabel("WAV · 48 kHz · 24 bit")
+        out_form.addRow(I18N.tr("edit.stem_export.format_label", "Format"), format_label)
+        self._layout_combo = QComboBox()
+        for name in MIX_LAYOUTS:
+            self._layout_combo.addItem(name, name)
+        master = getattr(sequence, "master_audio_layout", "")
+        index = self._layout_combo.findData(master or "stereo")
+        self._layout_combo.setCurrentIndex(max(0, index))
+        out_form.addRow(I18N.tr("mixer.layout.title", "Channel layouts"), self._layout_combo)
         layout.addWidget(out_group)
 
         # 3. 进度
@@ -350,6 +409,7 @@ class StemExportDialog(QDialog):
             output_dir,
             tuple(specs),
             prefix=self._prefix_input.text(),
+            channel_layout=mix_layout(str(self._layout_combo.currentData())),
             parent=self,
             sequence_resolver=self._sequence_resolver,
         )
@@ -363,7 +423,7 @@ class StemExportDialog(QDialog):
             self._worker.cancel()
             self._cancel_btn.setEnabled(False)
             self._status_label.setText(
-                I18N.tr("edit.stem_export.cancelling", "正在取消（当前 stem 完成后停止）…")
+                I18N.tr("edit.stem_export.cancelling_block", "正在取消…")
             )
 
     def _switch_running(self, running: bool) -> None:
@@ -379,6 +439,7 @@ class StemExportDialog(QDialog):
             box.setEnabled(not running)
         self._dir_input.setEnabled(not running)
         self._prefix_input.setEnabled(not running)
+        self._layout_combo.setEnabled(not running)
 
     # ------------------------------------------------------------------
     # Worker 回调（UI 线程）
@@ -402,8 +463,8 @@ class StemExportDialog(QDialog):
         lines: List[str] = []
         if getattr(result, "cancelled", False):
             lines.append(I18N.tr(
-                "edit.stem_export.cancelled",
-                "已取消：完成的 stem 已保留。",
+                "edit.stem_export.cancelled_unpublished",
+                "已取消：此批次文件未发布，已有交付文件保持不变。",
             ))
         if result.all_succeeded and result.stems:
             lines.append(I18N.tr(
@@ -418,9 +479,12 @@ class StemExportDialog(QDialog):
                 "导出完成：{ok}/{n} 成功（{dir}）",
                 ok=ok_count, n=len(result.stems), dir=result.output_dir,
             ))
-        for name, ok in result.stems:
-            mark = "✔" if ok else "✘"
-            lines.append(f"  {mark} {name}.wav")
+        if result.all_succeeded and getattr(result, "output_files", None):
+            lines.extend(f"  ✔ {Path(path).name}" for path in result.output_files)
+        else:
+            for name, ok in result.stems:
+                mark = "✔" if ok else "✘"
+                lines.append(f"  {mark} {name}.wav")
         self._status_label.setText("\n".join(lines))
         self._worker = None
 

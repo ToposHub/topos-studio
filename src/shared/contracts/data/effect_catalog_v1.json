@@ -604,6 +604,42 @@
     },
     {
       "category": "audio",
+      "description": "Two-band harmonic exciter (even/odd branches mixed back into dry)",
+      "effect_type": "exciter",
+      "name": "Exciter",
+      "params": {
+        "ex_crossover_hz": {
+          "default": 2000.0,
+          "label": "Crossover",
+          "max": 8000.0,
+          "min": 100.0,
+          "type": "float"
+        },
+        "ex_output_gain_db": {
+          "default": 0.0,
+          "label": "Output",
+          "max": 24.0,
+          "min": -24.0,
+          "type": "float"
+        },
+        "ex_oversampling": {
+          "default": 1.0,
+          "label": "Oversampling",
+          "max": 2.0,
+          "min": 1.0,
+          "type": "float"
+        },
+        "ex_wet": {
+          "default": 1.0,
+          "label": "Wet",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
       "description": "Downward expander with gate mode",
       "effect_type": "expander",
       "name": "Expander / Gate",
@@ -1015,6 +1051,42 @@
           "label": "Master Gain",
           "max": 20.0,
           "min": -20.0,
+          "type": "float"
+        }
+      }
+    },
+    {
+      "category": "audio",
+      "description": "Confidence-gated octave-down generator for bass sources",
+      "effect_type": "subharmonic",
+      "name": "Subharmonic",
+      "params": {
+        "sh_mix": {
+          "default": 0.5,
+          "label": "Mix",
+          "max": 1.0,
+          "min": 0.0,
+          "type": "float"
+        },
+        "sh_octave1_gain_db": {
+          "default": -6.0,
+          "label": "Oct 1",
+          "max": 0.0,
+          "min": -36.0,
+          "type": "float"
+        },
+        "sh_octave2_gain_db": {
+          "default": -12.0,
+          "label": "Oct 2",
+          "max": 0.0,
+          "min": -36.0,
+          "type": "float"
+        },
+        "sh_source_center_hz": {
+          "default": 90.0,
+          "label": "Source Center",
+          "max": 180.0,
+          "min": 45.0,
           "type": "float"
         }
       }

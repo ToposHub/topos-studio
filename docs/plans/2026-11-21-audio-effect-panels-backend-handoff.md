@@ -2,6 +2,8 @@
 
 2026-11-21 · 覆盖 23 款效果器与音频片段编辑器
 
+**实施复核：** 当前24项都有代码覆盖，尚未全部验收；本轮修复、测试及逐项剩余范围见 [交付记录末尾的复核表](2026-11-21-audio-fx-delivery-record.md#本轮代码复核与补交付2026-11-21)。原计划各节“现状”为实施前快照。
+
 “现状”来自当前工作区。各节的新字段名、默认值、算法选择和数值门槛为实施建议。每个批次先重跑现有用例，再把采用的合同写进新测试。代码示例用于学习、复现和建立独立验算，生产接入位置见各节实施步骤。 [面板来源](../../src/features/mixer/effects/source_manifest.json) · [原型参数](../../src/features/mixer/effects/parameter_schemas.json) · [经典参数映射](../../src/features/mixer/effects/classic_bindings.py) · [机架参数映射](../../src/features/mixer/effects/rack_bindings.py)
 
 现有处理器从新版面板的功能卡读取参数。后续扩展也在对应功能卡内增加控件或补齐接线，并使用同一试听和提交流程。Qt 根据可见控件计算窗口所需空间，新增控件时同时检查紧凑尺寸和两种语言下的完整显示。

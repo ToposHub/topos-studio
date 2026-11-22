@@ -35,7 +35,9 @@ from __future__ import annotations
 import logging
 import math
 import os
+import unicodedata
 
+from src.features.edit.core import delivery_dither
 from src.features.edit.core.interchange import frames_to_samples
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -45,6 +47,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CH
 import numpy as np
 
 if TYPE_CHECKING:
+    from src.features.edit.core.delivery_profile import DeliveryProfile, MeasurementResult
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
 logger = logging.getLogger(__name__)
@@ -88,7 +91,10 @@ class StemSpec:
     def filename(self) -> str:
         """文件名安全版本（空格→下划线）。"""
         if self.filename_override:
-            return self.filename_override
+            name = self.filename_override
+            if name in (".", "..") or "/" in name or "\\" in name or os.path.isabs(name):
+                raise ValueError("stem filename_override must be a basename")
+            return name
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.name)
         return f"{safe or 'stem'}.wav"
 
@@ -108,7 +114,7 @@ def dedupe_stem_filenames(specs: List[StemSpec]) -> List[StemSpec]:
         base = spec.filename
         candidate = base
         counter = 2
-        while candidate in used:
+        while unicodedata.normalize("NFC", candidate).casefold() in used:
             stem_part, ext = os.path.splitext(base)
             candidate = f"{stem_part}_{counter}{ext}"
             counter += 1
@@ -119,7 +125,7 @@ def dedupe_stem_filenames(specs: List[StemSpec]) -> List[StemSpec]:
                 base, candidate,
             )
             spec = replace(spec, filename_override=candidate)
-        used.add(candidate)
+        used.add(unicodedata.normalize("NFC", candidate).casefold())
         out.append(spec)
     return out
 
@@ -276,7 +282,9 @@ def _iter_stem_pcm_chunks(
     from src.features.edit.core.audio_graph_renderer import AudioGraphRenderer
     from src.features.edit.core.audio_dsp import EffectChain
     from src.features.edit.core.timeline_render_plan import is_track_renderable
-    from src.features.edit.core.channel_layout import adapt_samples_for_delivery
+    from src.features.edit.core.channel_layout import ChannelLayout, route_pcm
+    from src.features.edit.core.native_mix_layout import adapt_clip_pcm
+    codec_layout_for = getattr(decode_clip_fn, "codec_layout_for", None)
 
     # P1-15：序列 fps 是 Rational（有理精度），守卫/换算统一转 float
     fps = float(getattr(sequence, "fps", 24.0) or 24.0)
@@ -333,6 +341,9 @@ def _iter_stem_pcm_chunks(
     # 构建 renderer（从原始 sequence 配置，保持 EQ/FX/routing/master 参数）
     renderer = AudioGraphRenderer(float(sample_rate))
     renderer.configure_from_sequence(sequence)
+    delivery_layout = ChannelLayout.from_channel_count(channels)
+    master_layout = renderer.master_layout(channels) if stem.include_master else delivery_layout
+    master_channels = master_layout.channel_count
 
     # H03 辅助：clip FX 条目 → 链尾音估算（预算用，不建持久链）
     from src.features.edit.core.audio_retime import clip_fx_entries as _cfe
@@ -422,7 +433,7 @@ def _iter_stem_pcm_chunks(
         if getattr(t, "is_bus", False):
             renderable_tracks.append(t)
         elif len(getattr(t, "clips", ())) > 0:
-            if is_track_renderable(t, has_solo):
+            if is_track_renderable(t, False):
                 # RMA-04: 闭包过滤
                 if has_solo and t.track_id not in audible_solo:
                     continue
@@ -551,7 +562,7 @@ def _iter_stem_pcm_chunks(
         if getattr(_t, "is_bus", False) or _t.track_id in stem_ids:
             continue
         if _t.track_id in sc_needed_ids and len(getattr(_t, "clips", ())) > 0 \
-                and is_track_renderable(_t, has_solo):
+                and is_track_renderable(_t, False):
             _sc_only_ids.add(_t.track_id)
             renderable_tracks.append(_t)
             for _clip in getattr(_t, "clips", ()):
@@ -594,6 +605,11 @@ def _iter_stem_pcm_chunks(
         _tail_budget[_t.track_id] = (
             _n.effect_chain.tail_estimate_samples()
             if (_n is not None and _n.effect_chain is not None) else 0)
+        # B02 · PDC：链尾音之后串行经过边延迟线——零喂预算须覆盖
+        # 链尾音 + 最大出边延迟（否则间隙冻结延迟线，下一 clip 起点
+        # 错位涌出持留内容）。
+        _tail_budget[_t.track_id] += renderer.pdc_out_edges_max_delay(
+            _t.track_id)
         _tail_left[_t.track_id] = 0
 
     # work 按 (SC 序轨序, clip 序) 稳定重排——Phase 1 的求和顺序确定
@@ -612,12 +628,15 @@ def _iter_stem_pcm_chunks(
 
     for f0 in range(feed_start, end_frame, chunk_frames):
         f1 = min(f0 + chunk_frames, end_frame)
-        s0 = frames_to_samples(f0 - feed_start, fps_exact, sample_rate)
-        s1 = frames_to_samples(f1 - feed_start, fps_exact, sample_rate)
+        sample_bounds = [
+            frames_to_samples(frame - feed_start, fps_exact, sample_rate)
+            for frame in range(f0, f1 + 1)
+        ]
+        s0, s1 = sample_bounds[0], sample_bounds[-1]
         if s1 <= s0:
             continue
         chunk_len = s1 - s0
-        buf = np.zeros((channels, chunk_len), dtype=np.float32)
+        buf = np.zeros((master_channels, chunk_len), dtype=np.float32)
         bus_bufs: Dict[str, np.ndarray] = {}
 
         # 先落位上一块 carry 的跨块样本
@@ -636,13 +655,15 @@ def _iter_stem_pcm_chunks(
         # ── Phase 1：clip 解码 + clip 阶段 → (track, frame) 求和 ──
         frame_sum: Dict[Tuple[str, int], np.ndarray] = {}
         for track, clip, ovl_start, ovl_end in work:
+            domain, native_track = renderer.track_domain(track.track_id, master_channels)
+            track_channels = domain.channel_count
+            edit_in_source = native_track and track_channels != 2
             frame_lo = max(ovl_start, f0)
             frame_hi = min(ovl_end, f1)
             for frame_idx in range(frame_lo, frame_hi):
                 # D06：块长用精确相邻样本边界差（与成片导出同源）。
-                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
-                out_next = frames_to_samples(
-                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
+                index = frame_idx - f0
+                out_start, out_next = sample_bounds[index], sample_bounds[index + 1]
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -650,7 +671,7 @@ def _iter_stem_pcm_chunks(
                 if decode_clip_fn is not None:
                     samples = decode_clip_fn(track, clip, frame_idx, fps, block_len)
                 else:
-                    samples = np.zeros((channels, block_len), dtype=np.float32)
+                    samples = np.zeros((track_channels, block_len), dtype=np.float32)
 
                 synthesized_from_base = False
                 if samples is None:
@@ -673,7 +694,7 @@ def _iter_stem_pcm_chunks(
                                         * sample_rate / fps)),
                                     block_len,
                                     sample_rate=int(sample_rate),
-                                    channels=channels,
+                                    channels=track_channels,
                                 )
                                 synthesized_from_base = samples is not None
                     if samples is None:
@@ -690,11 +711,12 @@ def _iter_stem_pcm_chunks(
                     samples = samples[:, :actual]
                 else:
                     # P1-09：与时间线导出同源的声道适配。
-                    samples = adapt_samples_for_delivery(
-                        samples[:, :actual] if samples.ndim == 2 else samples,
-                        channels,
-                        context=f"stem {getattr(track, 'stem_group', '')} clip {getattr(clip, 'clip_id', '')}",
-                    )
+                    source_channels = samples.shape[0] if samples.ndim == 2 else 1
+                    samples = samples.reshape(source_channels, -1)[:, :actual]
+                    codec_name = codec_layout_for(clip.clip_id) if native_track and callable(codec_layout_for) else ""
+                    if not edit_in_source:
+                        samples = adapt_clip_pcm(samples, domain, None, native=native_track,
+                                                 context=f"stem clip {clip.clip_id}", codec_name=codec_name)
 
                 # P0-3: Clip Editor 处理栈（clip 增益/淡化之前；与实时
                 # mix_samples、成片导出同一调用序列，parity 锁定）。
@@ -718,6 +740,10 @@ def _iter_stem_pcm_chunks(
                         sample_rate=int(sample_rate),
                         pre_render_base=_pre_base,
                     )
+
+                if edit_in_source and not synthesized_from_base:
+                    samples = adapt_clip_pcm(samples, domain, None, native=True,
+                                             context=f"stem clip {clip.clip_id}", codec_name=codec_name)
 
                 # C3: 片段级增益（renderer 节点链之前）。
                 _clip_gain_db = float(getattr(clip, "audio_gain_db", 0.0) or 0.0)
@@ -790,13 +816,18 @@ def _iter_stem_pcm_chunks(
                     samples = apply_pdc_delay_line(
                         clip_pdc_lines, clip.clip_id, _rel, samples)
 
+                if native_track:
+                    samples = renderer.pan_native_clip(
+                        track.track_id, samples,
+                        track_channels if synthesized_from_base else source_channels,
+                        frame_idx, fps)
                 key = (track.track_id, frame_idx)
                 frame_buf = frame_sum.get(key)
                 if frame_buf is None:
-                    frame_buf = np.zeros((channels, block_len), dtype=np.float32)
+                    frame_buf = np.zeros((track_channels, block_len), dtype=np.float32)
                     frame_sum[key] = frame_buf
                 _n = min(samples.shape[-1], frame_buf.shape[-1])
-                frame_buf[:, :_n] += samples[:channels, :_n].astype(
+                frame_buf[:, :_n] += samples[:, :_n].astype(
                     np.float32, copy=False)
 
             # H03：clip FX 尾音——clip 在本 chunk 内结束时按链尾音预算
@@ -823,19 +854,17 @@ def _iter_stem_pcm_chunks(
                     _ctail_frames = int(math.ceil(_ctail / _spf))
                     for _tf in range(_clip_end,
                                      min(f1, _clip_end + _ctail_frames)):
-                        _ts = frames_to_samples(
-                            _tf - feed_start, fps_exact, sample_rate)
-                        _tn = frames_to_samples(
-                            _tf + 1 - feed_start, fps_exact, sample_rate)
+                        index = _tf - f0
+                        _ts, _tn = sample_bounds[index], sample_bounds[index + 1]
                         _tbl = _tn - _ts
                         if _tbl <= 0:
                             continue
                         if _c_active:
                             _tblock = _chain.process(
-                                np.zeros((channels, _tbl), dtype=np.float32))
+                                np.zeros((track_channels, _tbl), dtype=np.float32))
                         else:
                             _tblock = np.zeros(
-                                (channels, _tbl), dtype=np.float32)
+                                (track_channels, _tbl), dtype=np.float32)
                         if _crel > 0:
                             from src.features.edit.core.audio_dsp import (
                                 apply_pdc_delay_line,
@@ -845,11 +874,11 @@ def _iter_stem_pcm_chunks(
                         _key = (track.track_id, _tf)
                         _tbuf = frame_sum.get(_key)
                         if _tbuf is None:
-                            _tbuf = np.zeros((channels, _tbl),
+                            _tbuf = np.zeros((track_channels, _tbl),
                                              dtype=np.float32)
                             frame_sum[_key] = _tbuf
                         _m = min(_tblock.shape[-1], _tbuf.shape[-1])
-                        _tbuf[:, :_m] += _tblock[:channels, :_m].astype(
+                        _tbuf[:, :_m] += _tblock[:, :_m].astype(
                             np.float32, copy=False)
 
         # ── Phase 2：轨阶段（求和帧一次过链）+ 路由 + sends + SC tap ──
@@ -857,12 +886,11 @@ def _iter_stem_pcm_chunks(
         chunk_sc_until: Dict[str, int] = {}
         for track in _content_tracks:
             node = renderer.get_node(track.track_id)
-            _track_frames = sorted(
-                f for (tid, f) in frame_sum if tid == track.track_id)
+            domain, native_track = renderer.track_domain(track.track_id, master_channels)
+            track_channels = domain.channel_count
             for frame_idx in range(f0, f1):
-                out_start = frames_to_samples(frame_idx - feed_start, fps_exact, sample_rate)
-                out_next = frames_to_samples(
-                    frame_idx + 1 - feed_start, fps_exact, sample_rate)
+                index = frame_idx - f0
+                out_start, out_next = sample_bounds[index], sample_bounds[index + 1]
                 block_len = max(0, out_next - out_start)
                 if block_len <= 0:
                     continue
@@ -871,9 +899,11 @@ def _iter_stem_pcm_chunks(
                     if _tail_left.get(track.track_id, 0) > 0:
                         _tail_left[track.track_id] = max(
                             0, _tail_left[track.track_id] - block_len)
-                        summed = np.zeros((channels, block_len), dtype=np.float32)
+                        summed = np.zeros((track_channels, block_len), dtype=np.float32)
                     else:
-                        continue  # 间隙且无尾音 → 冻结（与实时/成片一致）
+                        # 间隙且无尾音（尾音预算已含 PDC 出边延迟——延迟线
+                        # 持留内容随零喂按绝对时间流出）→ 冻结。
+                        continue
                 else:
                     _tail_left[track.track_id] = _tail_budget.get(
                         track.track_id, 0)
@@ -885,21 +915,24 @@ def _iter_stem_pcm_chunks(
                 } or None
                 processed = renderer.render_track_block(
                     track.track_id, summed, frame_idx, fps=fps,
-                    sidechain_taps=_taps)
+                    sidechain_taps=_taps, pan_already_applied=native_track)
                 if processed is None:
                     continue
                 actual = min(processed.shape[-1], block_len,
                              (total_samples + preroll_samples) - out_start)
                 if actual <= 0:
                     continue
-                proc = processed[:channels, :actual]
+                # B02 · PDC：processed 为未延迟节点输出；主路边延迟在此应用
+                # （检源缓冲/路由消费同一延迟后内容）。
+                routed = renderer._apply_pdc(track.track_id, processed)
+                proc = routed[:, :actual]
                 local = out_start - s0
                 take = min(actual, chunk_len - local)
                 if take > 0 and track.track_id in _sc_only_ids:
                     # SC-only 轨：不入 stem 混音/路由/sends，只喂检源 tap
                     _scbuf = chunk_sc.get(track.track_id)
                     if _scbuf is None:
-                        _scbuf = np.zeros((channels, chunk_len), dtype=np.float32)
+                        _scbuf = np.zeros((track_channels, chunk_len), dtype=np.float32)
                         chunk_sc[track.track_id] = _scbuf
                     _scbuf[:, local:local + take] += proc[:, :take]
                     chunk_sc_until[track.track_id] = out_next - s0
@@ -909,18 +942,21 @@ def _iter_stem_pcm_chunks(
                     if target is not None and target in stem_ids:
                         if target not in bus_bufs:
                             bus_bufs[target] = np.zeros(
-                                (channels, chunk_len), dtype=np.float32)
-                        bus_bufs[target][:, local:local + take] += proc[:, :take]
+                                (renderer._bus_layout_of(target).channel_count, chunk_len),
+                                dtype=np.float32)
+                        bus_bufs[target][:, local:local + take] += route_pcm(
+                            proc[:, :take], renderer._bus_layout_of(target), domain)
                     elif stem.stem_type == StemType.BUS:
                         # F3.4：BUS stem 语义 = 该 Bus 的输出；路由到别处/
                         # 直达 Master 的轨只经 send 贡献，干声不落 stem 缓冲。
                         pass
                     else:
-                        buf[:, local:local + take] += proc[:, :take]
+                        buf[:, local:local + take] += route_pcm(proc[:, :take], master_layout, domain)
                     if node is not None:
-                        for send_entry in node.sends:
+                        for send_index, send_entry in enumerate(node.sends):
                             # R03/MX-14: pre_fader 取求和帧（推子前），
                             # post_fader 取处理后输出；muted 只断开该 send。
+                            # B02 · PDC：每条 send 经独立延迟线对齐。
                             send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted \
@@ -928,27 +964,35 @@ def _iter_stem_pcm_chunks(
                                 continue
                             if send_bus_id not in bus_bufs:
                                 bus_bufs[send_bus_id] = np.zeros(
-                                    (channels, chunk_len), dtype=np.float32)
+                                    (renderer._bus_layout_of(send_bus_id).channel_count, chunk_len),
+                                    dtype=np.float32)
+                            send_layout = renderer._bus_layout_of(send_bus_id)
                             if send_tap == "pre_fader":
                                 pre_take = min(summed.shape[-1], take)
+                                pre_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    summed[:, :pre_take])
                                 bus_bufs[send_bus_id][
                                     :, local:local + pre_take] += \
-                                    summed[:channels, :pre_take] * send_level
+                                    route_pcm(pre_delayed, send_layout, domain) * send_level
                             else:
+                                send_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    processed[:, :take])
                                 bus_bufs[send_bus_id][
                                     :, local:local + take] += \
-                                    proc[:, :take] * send_level
+                                    route_pcm(send_delayed, send_layout, domain) * send_level
                     # R03：检源轨块内 tap（供后续被控轨与 bus/master 阶段）
                     if track.track_id in sc_needed_ids:
                         _scbuf = chunk_sc.get(track.track_id)
                         if _scbuf is None:
-                            _scbuf = np.zeros((channels, chunk_len),
+                            _scbuf = np.zeros((track_channels, chunk_len),
                                               dtype=np.float32)
                             chunk_sc[track.track_id] = _scbuf
                         _scbuf[:, local:local + take] += proc[:, :take]
                         chunk_sc_until[track.track_id] = out_next - s0
                 if take < actual and f1 < end_frame:
-                    carry.append((out_start + take, proc[:, take:]))
+                    carry.append((out_start + take, route_pcm(proc[:, take:], master_layout, domain)))
         frame_sum.clear()
 
         # Bus stage（仅本块的 Bus 输入；renderer 自动补零缓冲）
@@ -974,7 +1018,7 @@ def _iter_stem_pcm_chunks(
                 continue
             if skip > 0:
                 buf = np.ascontiguousarray(buf[:, skip:])
-        yield buf
+        yield route_pcm(buf, delivery_layout, master_layout)
 
 
 def render_stem_pcm(
@@ -1039,11 +1083,14 @@ class _StemWavWriter:
         sample_rate: int = 48000,
         channels: int = 2,
         bit_depth: int = 24,
+        dither: "Optional[delivery_dither.DitherSettings]" = None,
     ) -> None:
         self._path = path
         self._sample_rate = int(sample_rate)
         self._samples_written = 0
         self._bit_depth = int(bit_depth)
+        self._dither = (delivery_dither.DeliveryQuantizer(dither, self._bit_depth)
+                        if dither is not None else None)
         self._ok = True
         self._container = None
         self._stream = None
@@ -1059,7 +1106,10 @@ class _StemWavWriter:
         self._av = av
 
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        codec = "pcm_s24le" if bit_depth == 24 else "pcm_s16le"
+        codecs = {16: "pcm_s16le", 24: "pcm_s24le", 32: "pcm_f32le"}
+        if self._bit_depth not in codecs:
+            raise ValueError("Stem WAV bit depth must be 16, 24 or 32 (float)")
+        codec = codecs[self._bit_depth]
         # AM-08 阶段 4.1：用标准 ChannelLayout 推断 PyAV layout（替代 ad-hoc 字符串）。
         from src.features.edit.core.channel_layout import ChannelLayout
         try:
@@ -1084,15 +1134,29 @@ class _StemWavWriter:
         return self._ok and self._container is not None
 
     def write(self, block: np.ndarray) -> None:
-        """写入一块 PCM (channels, n) float32（自动 clip 到 [-1, 1]）。"""
+        """写入一块 PCM (channels, n) float32（自动 clip 到 [-1, 1]）。
+
+        配置了交付 dither（FX-23）时：整数位深先在 Python 侧完成
+        TPDF dither + 最终 1 LSB 量化（编码器收到的已是网格值）。
+        """
         if not self.usable or block.size == 0:
             return
         if block.ndim == 1:
             block = block.reshape(1, -1)
+        if self._dither is not None:
+            block = self._dither.apply(block)
         # fltp 格式输入（float planar），编码器负责量化
-        clipped = np.clip(block, -1.0, 1.0).astype(np.float32)
-        frame = self._av.AudioFrame.from_ndarray(
-            clipped, format="fltp", layout=self._layout)
+        clipped = (block.astype(np.float32) if self._bit_depth == 32 else
+                   np.clip(block, -1.0, 1.0).astype(np.float32))
+        # PyAV can expose a ninth plane for an eight-channel planar frame.
+        # Packed float uses one plane and preserves the same speaker order.
+        if clipped.shape[0] == 8:
+            interleaved = np.ascontiguousarray(clipped.T).reshape(1, -1)
+            frame = self._av.AudioFrame.from_ndarray(
+                interleaved, format="flt", layout=self._layout)
+        else:
+            frame = self._av.AudioFrame.from_ndarray(
+                clipped, format="fltp", layout=self._layout)
         frame.sample_rate = self._sample_rate
         frame.time_base = Fraction(1, self._sample_rate)
         frame.pts = self._samples_written
@@ -1128,6 +1192,7 @@ def write_stem_wav(
     samples: np.ndarray,
     sample_rate: int = 48000,
     bit_depth: int = 24,
+    dither: Optional[delivery_dither.DitherSettings] = None,
 ) -> bool:
     """将 stem PCM 写入 WAV 文件（PCM s16le/s24le）。
 
@@ -1147,13 +1212,13 @@ def write_stem_wav(
         samples = samples.reshape(1, -1)
     writer = _StemWavWriter(
         path, sample_rate=sample_rate, channels=int(samples.shape[0]),
-        bit_depth=bit_depth)
+        bit_depth=bit_depth, dither=dither)
     if not writer.usable:
         return False
     try:
         # 分块写入（避免一次性大内存）
         n = samples.shape[1]
-        clipped = np.clip(samples, -1.0, 1.0).astype(np.float32)
+        clipped = samples.astype(np.float32)
         chunk = 8192
         for i in range(0, n, chunk):
             writer.write(clipped[:, i:i + chunk])
@@ -1182,10 +1247,14 @@ class StemExportResult:
     # F3.4：路由 sidecar 路径（routing.json 与 stem WAV 同目录；含
     # Bus/Send 结构与重组声明——分轨重组按此 manifest 重建，而非简单相加）
     routing_manifest_path: str = ""
+    delivery_manifest_path: str = ""
+    output_files: List[str] = field(default_factory=list)
+    measurements: Dict[str, "MeasurementResult"] = field(default_factory=dict)
+    qc_errors: List[str] = field(default_factory=list)
 
     @property
     def all_succeeded(self) -> bool:
-        return all(s for _, s in self.stems)
+        return not self.cancelled and all(s for _, s in self.stems) and not self.qc_errors
 
 
 def export_all_stems(
@@ -1204,6 +1273,9 @@ def export_all_stems(
     asset_lookup: Optional[Callable] = None,
     pre_render_base_fn: Optional[Callable] = None,
     frame_range: Optional[Tuple[int, int]] = None,
+    dither: Optional[delivery_dither.DitherSettings] = None,
+    qc_profile: Optional["DeliveryProfile"] = None,
+    qc_stem_ids: Optional[Dict[str, str]] = None,
 ) -> StemExportResult:
     """导出工程的全部 stem（AM-10 阶段 3.5 顶层入口）。
 
@@ -1246,6 +1318,29 @@ def export_all_stems(
     result = StemExportResult(
         output_dir=output_dir, sample_rate=sample_rate, channels=channels,
     )
+    if qc_profile is not None:
+        if qc_profile.file_format.lower() != "wav":
+            raise ValueError("stem writer supports WAV; BWF metadata/profile export is not implemented")
+        if (qc_profile.sample_rate != sample_rate
+                or len(qc_profile.channel_order) != channels
+                or qc_profile.bit_depth != bit_depth):
+            raise ValueError("delivery profile does not match the requested output format")
+
+    def qc_stem_identity(spec: StemSpec) -> str:
+        from src.features.edit.core.delivery_preset import FULL_STEM_SET
+        return (qc_stem_ids or {}).get(
+            spec.filename,
+            "FullMix" if spec.stem_type is StemType.MASTER else (
+                spec.name if spec.name in FULL_STEM_SET else "FullMix"))
+
+    if qc_profile is not None:
+        for spec in specs:
+            rule = qc_profile.stem_rule(qc_stem_identity(spec))
+            if rule is not None:
+                if rule.pre_master is not None and rule.pre_master != (not spec.include_master):
+                    raise ValueError(f"delivery profile tap mismatch for {spec.filename}")
+                if rule.tail_seconds > 0.0:
+                    raise ValueError("explicit profile tail duration is not supported by this stem writer")
 
     total = len(specs)
     for i, spec in enumerate(specs):
@@ -1268,17 +1363,23 @@ def export_all_stems(
             first = next(gen, None)
             if first is None:
                 logger.info(f"Stem '{spec.name}' has no content, skipping")
-                result.stems.append((spec.name, True))
+                result.stems.append((spec.name, qc_profile is None))
+                if qc_profile is not None:
+                    result.qc_errors.append(f"{spec.filename}: no rendered samples")
                 continue
             writer = _StemWavWriter(
                 path, sample_rate=sample_rate, channels=channels,
-                bit_depth=bit_depth)
+                bit_depth=bit_depth, dither=dither)
             if not writer.usable:
                 result.stems.append((spec.name, False))
                 continue
             writer.write(first)
             first = None  # 尽早释放首块引用
             for chunk_pcm in gen:
+                if cancel_check is not None and cancel_check():
+                    result.cancelled = True
+                    ok = False
+                    break
                 writer.write(chunk_pcm)
         except Exception as e:  # noqa: BLE001 — 单 stem 失败不阻断其余
             logger.warning(f"Stem '{spec.name}' export failed: {e}")
@@ -1292,7 +1393,70 @@ def export_all_stems(
                     closed = False
             else:
                 closed = True
-        result.stems.append((spec.name, ok and closed))
+        succeeded = ok and closed
+        if succeeded and qc_profile is not None:
+            from pathlib import Path
+            from src.features.edit.core.delivery_readback import (
+                measure_delivery_wav, delivery_profile_rejection,
+            )
+            stem_id = qc_stem_identity(spec)
+            measurement = measure_delivery_wav(
+                Path(path), stem_id=stem_id, cancel_check=cancel_check)
+            result.measurements[spec.filename] = measurement
+            rejection = delivery_profile_rejection(measurement, qc_profile)
+            if rejection is not None:
+                result.qc_errors.append(f"{spec.filename}: {rejection}")
+                succeeded = False
+            if measurement.status == "cancelled":
+                result.cancelled = True
+        result.stems.append((spec.name, succeeded))
+        if succeeded:
+            result.output_files.append(path)
+        if result.cancelled:
+            return result
+
+    if qc_profile is not None:
+        from pathlib import Path
+        from src.features.edit.core.audio_graph_snapshot import build_audio_graph_snapshot
+        from src.features.edit.core.delivery_profile import build_delivery_manifest_v2
+        import json
+
+        files = {
+            Path(path).name: {
+                "path": Path(path).name,
+                "sha256": result.measurements[Path(path).name].file_sha256,
+                "sample_count": result.measurements[Path(path).name].sample_count,
+                "bytes": Path(path).stat().st_size,
+            } for path in result.output_files
+        }
+        manifest = build_delivery_manifest_v2(
+            qc_profile, sound_hash=build_audio_graph_snapshot(sequence).stable_hash,
+            files=files, measurements=result.measurements,
+        )
+        manifest["qc_passed"] = result.all_succeeded
+        manifest["qc_errors"] = list(result.qc_errors)
+        # Only the actual master-tap print can become a trusted mix version.
+        # Measurement IDs may classify an ungrouped track as FullMix for QC;
+        # they alone do not establish that the file contains the programme.
+        fps = getattr(sequence, "fps", 24.0)
+        start_frame = max(0, int(frame_range[0])) if frame_range is not None and files else 0
+        all_track_ids = {track.track_id for track in sequence.audio_tracks}
+        manifest["full_mix_prints"] = {
+            spec.filename: {
+                "version": 1,
+                "sequence_id": sequence.timeline_id,
+                "source_revision": sequence.revision,
+                "start_sample": frames_to_samples(start_frame, fps, sample_rate),
+            }
+            for spec in specs
+            if spec.filename in files and spec.stem_type is StemType.MASTER
+            and spec.include_master
+            and (not spec.track_ids or set(spec.track_ids) == all_track_ids)
+        }
+        manifest_path = Path(output_dir) / "delivery.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2,
+                                             allow_nan=False), encoding="utf-8")
+        result.delivery_manifest_path = str(manifest_path)
 
     # F3.4：路由 sidecar——与 stem WAV 同目录（声明分轨重组的真实路由）
     try:
@@ -1303,6 +1467,8 @@ def export_all_stems(
             json.dump(manifest, fh, ensure_ascii=False, indent=2)
         result.routing_manifest_path = manifest_path
     except Exception as e:  # noqa: BLE001 — sidecar 失败不阻断 stems
+        if qc_profile is not None:
+            raise OSError("validated stem delivery requires its routing manifest") from e
         logger.warning(f"routing manifest write failed: {e}")
 
     if progress_callback is not None:
@@ -1328,7 +1494,8 @@ def build_routing_manifest(sequence: "TimelineSequence") -> dict:
                 "target_bus_id": str(getattr(s, "target_bus_id", "")),
                 "level": float(getattr(s, "level", 0.0)),
                 "enabled": bool(getattr(s, "enabled", True)),
-                "tap": "post-fader",
+                "tap": str(getattr(s, "tap", "post_fader") or "post_fader").replace("_", "-"),
+                "muted": bool(getattr(s, "muted", False)),
             }
             for s in (getattr(t, "sends", ()) or ())
         ]
@@ -1404,6 +1571,7 @@ def create_clip_decode_fn(
     project: Any,
     fps: float,
     sample_rate: int,
+    native_master: bool = False,
 ) -> Tuple[Callable, Callable[[], None]]:
     """构建生产用 decode_clip_fn（与时间线导出同源的取源/变速/声道逻辑）。
 
@@ -1434,16 +1602,115 @@ def create_clip_decode_fn(
         needs_retime,
         preserve_pitch_request,
     )
+    from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame
+    from src.features.edit.core.channel_layout import SpeakerLayoutError, codec_bed_layout
+    from src.features.edit.core.clip_pcm import resolve_source_channel_map
     from src.features.edit.core.proxy_policy import export_source_path
-
-    decoders: Dict[str, AudioDecoder] = {}
-    retime_readers: Dict[str, Optional[ClipRetimeReader]] = {}
-    pp_readers: Dict[str, Optional[PreservedPitchReader]] = {}
-    _pp_unsupported_warned: set = set()
-    # F3.3：子帧偏移门（时间线侧+源侧合计；与成片导出/实时预览同语义）
     from src.features.edit.core.sample_time import SampleSkipGate
-    _sample_skip_gates: Dict[str, SampleSkipGate] = {}
+    from src.features.edit.core.source_patch import SourcePatchSpec
+
+    decoders: dict[tuple[str, str, float], AudioDecoder] = {}
+    side_surround_sources: set[str] = set()
+    ReadClip = Callable[[Any, int, int], Optional[np.ndarray]]
+    prepared: dict[str, tuple[Any, float, Optional[ReadClip]]] = {}
     spf = int(sample_rate / fps) if fps > 0 else 0
+
+    def prepare_clip(clip: Any, fps_value: float) -> Optional[ReadClip]:
+        # The worker consumes a project snapshot. Resolve static source
+        # metadata, patch and the proper reader just once for each clip.
+        if getattr(clip, "freeze_source_frame", None) is not None:
+            return None
+        assets = getattr(project, "assets", {})
+        asset = assets.get(clip.asset_id)
+        if asset is None or getattr(asset, "is_nested_sequence", False):
+            return None
+        asset_path = export_source_path(project, asset)
+        if not asset_path:
+            return None
+
+        audio_offset = 0.0
+        binding = binding_for_asset(
+            getattr(project, "audio_sync_bindings", None) or {}, clip.asset_id)
+        if binding is not None:
+            wav_path = getattr(assets.get(binding.wav_asset_id), "path", "")
+            if wav_path:
+                asset_path = wav_path
+                audio_offset = binding.offset_seconds
+            else:
+                logger.warning(
+                    "stem clip %s: bound WAV asset unreadable (%s) "
+                    "— falling back to camera audio", clip.clip_id, binding.wav_asset_id)
+
+        decoder_key = (clip.asset_id, asset_path, fps_value)
+        decoder = decoders.get(decoder_key)
+        if decoder is None:
+            decoder = AudioDecoder()
+            if not decoder.open(asset_path, timeline_fps=fps_value, output_sample_rate=sample_rate):
+                return None
+            decoders[decoder_key] = decoder
+
+        patch = SourcePatchSpec(audio_channel_map=resolve_source_channel_map(project, asset))
+        source_fps = clip_source_fps(clip, fps_value)
+        codec_layout = getattr(decoder, "source_layout_name", "")
+        skip_samples = (int(getattr(clip, "audio_sample_offset", 0) or 0)
+                        + int(getattr(clip, "source_sample_offset", 0) or 0))
+        skip_gate = SampleSkipGate(skip_samples)
+        last_frame: Optional[int] = None
+        validated_channels = 0
+
+        reader: ClipRetimeReader | PreservedPitchReader | None = None
+        requested, pp_speed = preserve_pitch_request(clip)
+        if requested:
+            if pp_speed is None:
+                logger.warning("stem clip %s preserve-pitch 不支持倒放/速度曲线，回退变调",
+                               clip.clip_id)
+            else:
+                candidate = PreservedPitchReader(
+                    decoder, clip, fps, spf, sample_rate, source_offset_seconds=audio_offset)
+                if candidate.available:
+                    reader = candidate
+        if reader is None and needs_retime(clip):
+            candidate_retime = ClipRetimeReader(
+                decoder, clip, fps, spf, sample_rate=sample_rate,
+                source_offset_seconds=audio_offset)
+            if candidate_retime.available:
+                reader = candidate_retime
+            else:
+                logger.warning("stem clip %s retime 窗口不可用", clip.clip_id)
+
+        def read_clip(track: Any, frame_idx: int, n_samples: int) -> Optional[np.ndarray]:
+            nonlocal last_frame, validated_channels
+            if reader is not None:
+                samples = reader.read_frame(frame_idx, n_samples)
+            else:
+                try:
+                    source_frame = clip.timeline_to_source_frame(frame_idx)
+                except (ValueError, AttributeError):
+                    return None
+                if audio_offset:
+                    source_frame = bound_audio_frame(source_frame, audio_offset, source_fps)
+                samples = decoder.decode_samples_for_frame(source_frame, source_fps, n_samples)
+            if samples is None:
+                return None
+            if samples.ndim == 1:
+                samples = samples[np.newaxis, :]
+            selected = patch.select_channels(samples) if patch.audio_channel_map else samples
+            if selected is samples and (native_master or getattr(track, "audio_layout", "")):
+                if patch.audio_channel_map:
+                    raise SpeakerLayoutError(
+                        f"{clip.clip_id}: source channel patch does not match decoded PCM")
+                if codec_layout and validated_channels != samples.shape[0]:
+                    codec_bed_layout(codec_layout, samples.shape[0])
+                    validated_channels = samples.shape[0]
+                    if codec_layout == "5.1(side)":
+                        side_surround_sources.add(clip.clip_id)
+            if last_frame is not None and frame_idx <= last_frame:
+                # export_all_stems replays the same clip for each selected stem.
+                skip_gate.reset(skip_samples)
+            last_frame = frame_idx
+            return skip_gate.feed(selected)
+
+        return read_clip
 
     def decode_clip(
         track: Any,
@@ -1452,165 +1719,13 @@ def create_clip_decode_fn(
         fps_value: float,
         n_samples: int,
     ) -> Optional[np.ndarray]:
-        del track  # render_stem_pcm 按轨筛选后才回调，此处无需 track
-        # D05：冻结段无音频进度——成片混音跳过，Stem 同语义返回 None。
-        if getattr(clip, "freeze_source_frame", None) is not None:
-            return None
-        asset = getattr(project, "assets", {}).get(getattr(clip, "asset_id", "")) \
-            if project is not None else None
-        if asset is None:
-            return None
-        if getattr(asset, "is_nested_sequence", False):
-            return None
-
-        # F2.1 · Source Patching：素材级源声道映射（保调/retime/直读三条
-        # 返回路径统一经此选道，与成片导出/预览同语义）。无映射时恒等。
-        from src.features.edit.core.clip_pcm import resolve_source_channel_map
-        from src.features.edit.core.source_patch import SourcePatchSpec
-        patch = SourcePatchSpec(audio_channel_map=resolve_source_channel_map(project, asset))
-
-        def _select_source_channels(
-                samples: Optional[np.ndarray]) -> Optional[np.ndarray]:
-            if samples is None:
-                return None
-            return patch.select_channels(samples)
-
-        def _apply_sample_gate(
-                samples: Optional[np.ndarray]) -> Optional[np.ndarray]:
-            """F3.3：子帧偏移门（成片/预览同刻；pp/retime/1x 三路统一）。"""
-            if samples is None or samples.shape[-1] == 0:
-                return samples
-            gate = _sample_skip_gates.get(clip.clip_id)
-            if gate is None:
-                from src.features.edit.core.sample_time import (
-                    SampleSkipGate as _Gate,
-                )
-                gate = _Gate(int(getattr(clip, "audio_sample_offset", 0) or 0)
-                             + int(getattr(clip, "source_sample_offset", 0) or 0))
-                _sample_skip_gates[clip.clip_id] = gate
-            return gate.feed(samples)
-
-        asset_path = export_source_path(project, asset)
-        if not asset_path:
-            return None
-
-        # F2.10/M03（S05）：外录绑定——音频消费切到 WAV 源（偏移折算）；
-        # retime/保调片段同样使用 WAV（reader 的 source_offset_seconds
-        # 平移源窗，与成片/实时预览同口径——此前与成片同政策对变速
-        # 绑定片段静默回退机内声）。仅 WAV 缺失/不可读才回退。
-        from src.features.edit.core.audio_sync import (
-            binding_for_asset,
-            bound_audio_frame,
-        )
-        binding = binding_for_asset(
-            getattr(project, "audio_sync_bindings", None) or {},
-            clip.asset_id)
-        audio_offset = 0.0
-        if binding is not None:
-            wav = project.assets.get(binding.wav_asset_id)
-            wav_path = getattr(wav, "path", "") if wav is not None else ""
-            if wav_path:
-                asset_path = wav_path
-                audio_offset = binding.offset_seconds
-            else:
-                logger.warning(
-                    "stem clip %s: bound WAV asset unreadable (%s) "
-                    "— falling back to camera audio",
-                    clip.clip_id, binding.wav_asset_id)
-                binding = None
-        if binding is not None:
-            decoder_key = (clip.asset_id, asset_path)
-        else:
-            decoder_key = clip.asset_id
-
-        decoder = decoders.get(decoder_key)
-        if decoder is None:
-            decoder = AudioDecoder()
-            if not decoder.open(
-                asset_path,
-                timeline_fps=float(fps_value),
-                output_sample_rate=int(sample_rate),
-            ):
-                return None
-            decoders[decoder_key] = decoder
-        elif float(fps_value) != float(fps):
-            # fps 漂移守卫：render_stem_pcm 全程使用同一 fps，正常不触发
-            decoder.close()
-            if not decoder.open(
-                asset_path,
-                timeline_fps=float(fps_value),
-                output_sample_rate=int(sample_rate),
-            ):
-                return None
-
-        # R05：保调变速走共享 WSOLA 读取器（与成片同一实现）。
-        requested, pp_speed = preserve_pitch_request(clip)
-        if requested:
-            if pp_speed is None:
-                if clip.clip_id not in _pp_unsupported_warned:
-                    _pp_unsupported_warned.add(clip.clip_id)
-                    logger.warning(
-                        "stem clip %s preserve-pitch 不支持倒放/速度曲线，回退变调",
-                        clip.clip_id,
-                    )
-            else:
-                pp_reader = pp_readers.get(clip.clip_id, False)
-                if pp_reader is False:
-                    candidate = PreservedPitchReader(
-                        decoder, clip, float(fps), spf, int(sample_rate),
-                        source_offset_seconds=audio_offset)
-                    pp_reader = candidate if candidate.available else None
-                    pp_readers[clip.clip_id] = pp_reader
-                    if pp_reader is None:
-                        logger.warning(
-                            "stem clip %s preserve-pitch 预解码失败，回退变调",
-                            clip.clip_id,
-                        )
-                if pp_reader is not None:
-                    return _apply_sample_gate(_select_source_channels(
-                        pp_reader.read_frame(frame_idx, int(n_samples))))
-
-        # D01：retime 片段走共享样本域重采样（与成片导出同源）。
-        if needs_retime(clip):
-            reader = retime_readers.get(clip.clip_id, False)
-            if reader is False:
-                reader = ClipRetimeReader(
-                    decoder, clip, float(fps), spf,
-                    sample_rate=int(sample_rate),
-                    source_offset_seconds=audio_offset)
-                retime_readers[clip.clip_id] = (
-                    reader if reader.available else None
-                )
-                if not reader.available:
-                    logger.warning(
-                        "stem clip %s retime 窗口不可用，本帧静音跳过",
-                        clip.clip_id,
-                    )
-                    reader = None
-            if reader is not None:
-                return _apply_sample_gate(_select_source_channels(
-                    reader.read_frame(frame_idx, int(n_samples))))
-
-        # 1x 直读：canonical 映射（混合 fps/帧相位由模型处理）。
-        # R06：解码定位用素材源帧率时钟。
-        try:
-            source_frame = clip.timeline_to_source_frame(frame_idx)
-        except (ValueError, AttributeError):
-            return None
-        if audio_offset:
-            source_frame = bound_audio_frame(
-                source_frame, audio_offset,
-                clip_source_fps(clip, float(fps_value)))
-        samples = decoder.decode_samples_for_frame(
-            source_frame, clip_source_fps(clip, float(fps_value)),
-            int(n_samples),
-        )
-        if samples is None:
-            return None
-        if samples.ndim == 1:
-            samples = samples.reshape(1, -1)
-        return _apply_sample_gate(_select_source_channels(
-            np.ascontiguousarray(samples, dtype=np.float32)))
+        entry = prepared.get(clip.clip_id)
+        if entry is None or entry[0] is not clip or entry[1] != fps_value:
+            side_surround_sources.discard(clip.clip_id)
+            entry = (clip, fps_value, prepare_clip(clip, fps_value))
+            prepared[clip.clip_id] = entry
+        read_clip = entry[2]
+        return read_clip(track, frame_idx, n_samples) if read_clip is not None else None
 
     def close_all() -> None:
         for decoder in decoders.values():
@@ -1619,8 +1734,11 @@ def create_clip_decode_fn(
             except Exception:  # noqa: BLE001 — 释放失败不阻塞导出收尾
                 pass
         decoders.clear()
-        retime_readers.clear()
-        pp_readers.clear()
-        _pp_unsupported_warned.clear()
+        prepared.clear()
+        side_surround_sources.clear()
 
+    def codec_layout_for(clip_id: str) -> str:
+        return "5.1(side)" if clip_id in side_surround_sources else ""
+
+    decode_clip.codec_layout_for = codec_layout_for
     return decode_clip, close_all

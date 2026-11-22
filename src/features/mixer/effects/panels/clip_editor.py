@@ -673,6 +673,8 @@ class WaveformSpectralCanvas(QWidget):
         self._peaks_max: list[list[float]] = [[], []]
         self._wave_channels: list[tuple[np.ndarray, np.ndarray]] = []
         self._waveform_samples: np.ndarray | None = None
+        self._waveform_window_start = 0.0
+        self._waveform_window_rate: float | None = None
         self._cache_wave_channels()
         self._spec_matrix: list[list[float]] = []  # [time_bins][freq_bins] 归一化 0.0~1.0
         self._spec_values: np.ndarray | None = None
@@ -833,9 +835,25 @@ class WaveformSpectralCanvas(QWidget):
                                for high, low in zip(self._peaks_max, self._peaks_min)]
 
     def setWaveformSamples(self, samples: np.ndarray | None) -> None:
-        if samples is not self._waveform_samples:
+        if samples is not self._waveform_samples or self._waveform_window_rate is not None:
             self._waveform_samples = samples
+            self._waveform_window_start = 0.0
+            self._waveform_window_rate = None
             self._invalidate_cache()
+
+    def setWaveformWindow(self, samples: np.ndarray, start_seconds: float, samples_per_second: float) -> None:
+        """Install source detail in global canvas time without changing clip extent."""
+        if (samples.ndim != 2 or samples.shape[0] < 1
+                or not math.isfinite(start_seconds) or start_seconds < 0.0
+                or not math.isfinite(samples_per_second) or samples_per_second <= 0.0):
+            raise ValueError("invalid waveform window")
+        self._waveform_samples = samples
+        self._waveform_window_start = float(start_seconds)
+        self._waveform_window_rate = float(samples_per_second)
+        if not self._wave_channels:
+            # Fine detail may finish before the full-file envelope worker.
+            self._channels = samples.shape[0]
+        self._invalidate_cache()
 
     def set_channels_separate(self, separate: bool) -> None:
         if separate != self._show_channels_separately:
@@ -2146,7 +2164,10 @@ class WaveformSpectralCanvas(QWidget):
     # 多级波形绘制
     # -----------------------------------------------------------------
     def _waveform_display_channels(self) -> tuple[tuple[int, ...], bool]:
-        channels = tuple(range(len(self._wave_channels)))
+        count = len(self._wave_channels)
+        if not count and self._waveform_window_rate is not None and self._waveform_samples is not None:
+            count = self._waveform_samples.shape[0]
+        channels = tuple(range(count))
         if self._edit_channel in channels:
             channels = (self._edit_channel,)
         audible = tuple(ch for ch in channels if not self._channel_is_muted(ch))
@@ -2158,15 +2179,20 @@ class WaveformSpectralCanvas(QWidget):
         span = max(1e-6, self._view_end - self._view_start)
         fraction = span / self._duration
         pcm = self._waveform_samples
-        if pcm is not None and (channels[-1] >= len(pcm) or pcm.shape[1] * fraction > 262144):
+        origin = self._waveform_window_start
+        step = (self._waveform_window_rate or (pcm.shape[1] / self._duration)) if pcm is not None else 0.0
+        covered = (self._waveform_window_rate is None or
+                   (origin <= self._view_start and self._view_end <= origin + pcm.shape[1] / step)) if pcm is not None else False
+        if pcm is not None and (not covered or channels[-1] >= len(pcm) or span * step > 262144):
             pcm = None
-        step = pcm.shape[1] / self._duration if pcm is not None else 0.0
+        if pcm is None:
+            step, origin = 0.0, 0.0
         exact = pcm is not None and pcm.shape[1] >= 2 and area.width() >= 2.2 * max(1.0, span * step)
         if exact:
-            first = max(0, math.floor(self._view_start * step) - 1)
-            last = min(pcm.shape[1], math.ceil(self._view_end * step) + 2)
+            first = max(0, math.floor((self._view_start - origin) * step) - 1)
+            last = min(pcm.shape[1], math.ceil((self._view_end - origin) * step) + 2)
             sample_slice = slice(first, last)
-            times = np.arange(first, last) / step
+            times = origin + np.arange(first, last) / step
         else:
             columns = int(area.width())
             if columns < 2:
@@ -2210,6 +2236,8 @@ class WaveformSpectralCanvas(QWidget):
     ) -> tuple[np.ndarray, np.ndarray] | None:
         extrema = None
         for ch in channels:
+            if pcm is None and ch >= len(self._wave_channels):
+                continue  # Missing overview is unknown, not synthetic silence.
             high, low = self._wave_channels[ch] if pcm is None else (pcm[ch], pcm[ch])
             count = min(len(high), len(low))
             if count < 2:
@@ -2217,7 +2245,11 @@ class WaveformSpectralCanvas(QWidget):
             if sample_slice is not None:
                 high, low = high[sample_slice], low[sample_slice]
             else:
-                indices = np.clip((times * (count / self._duration)).astype(np.intp), 0, count - 1)
+                if pcm is not None and self._waveform_window_rate is not None:
+                    indices = np.clip(((times - self._waveform_window_start)
+                                       * self._waveform_window_rate).astype(np.intp), 0, count - 1)
+                else:
+                    indices = np.clip((times * (count / self._duration)).astype(np.intp), 0, count - 1)
                 high = self._wave_column_extrema(high, indices, np.maximum)
                 low = self._wave_column_extrema(low, indices, np.minimum)
             if not self.waveform_includes_processing and ch < len(self._ch_phase_inv) and self._ch_phase_inv[ch]:

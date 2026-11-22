@@ -245,7 +245,7 @@ class TestUpgradeCommand:
         tl2, cmd2 = cmd.apply(tl)
         versions = [e.algorithm_version
                     for e in tl2.get_track_by_id("T").effect_chain.effects]
-        assert versions == [4, 4, 777]  # future 不动
+        assert versions == [ALGORITHM_VERSION, ALGORITHM_VERSION, 777]  # future 不动
         # 参数逐字段不变（只改版本）
         assert tl2.get_track_by_id("T").effect_chain.effects[0].params == \
             {"enabled": True, "k": 5}

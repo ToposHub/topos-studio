@@ -11,6 +11,8 @@ M&E。``evaluate_delivery`` 把实测（LUFS/dBTP/峰值/静音）对到预设
 """
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Optional, Tuple
 
@@ -188,6 +190,49 @@ def build_delivery_manifest(
     }
 
 
+def _required_measurements(loudness: "LoudnessTarget") -> Tuple[Tuple[str, Optional[float]], ...]:
+    """B04：preset 声明了限值的指标 → 必须有有效测量。
+
+    没有测量值就无法校验限值；缺测/非数值/NaN/Inf 一律阻断，禁止
+    沿用"NaN 越界比较为 False"的漏检路径。返回 (key, declared_limit)。
+    """
+    required: list[Tuple[str, Optional[float]]] = []
+    if loudness.target_lufs is not None:
+        required.append(("integrated_lufs", loudness.target_lufs))
+    if loudness.max_true_peak_dbtp is not None:
+        required.append(("true_peak_dbtp", loudness.max_true_peak_dbtp))
+    if loudness.max_sample_peak_dbfs is not None:
+        required.append(("peak_dbfs", loudness.max_sample_peak_dbfs))
+    return tuple(required)
+
+
+def _invalid_measurement(values: Dict[str, object],
+                         required: Tuple[Tuple[str, Optional[float]], ...],
+                         stem: str) -> Optional[dict]:
+    """必测字段防线：缺字段/None/bool/字符串/NaN/±Inf → BLOCKING finding。"""
+    for key, _limit in required:
+        value = values.get(key)
+        if value is None:
+            return {
+                "check_id": f"delivery.{stem}.measurement_missing",
+                "severity": "blocking",
+                "message": (
+                    f"stem {stem} 缺少必测指标 {key}（preset 声明了对应限值，"
+                    "缺测量无法校验交付）"),
+                "details": {"stem": stem, "measurement": key},
+            }
+        if type(value) not in (int, float) or not math.isfinite(float(value)):
+            return {
+                "check_id": f"delivery.{stem}.measurement_invalid",
+                "severity": "blocking",
+                "message": (
+                    f"stem {stem} 必测指标 {key} 非有效数值（{value!r}）；"
+                    "测量未完成或文件损坏时不得生成成功交付"),
+                "details": {"stem": stem, "measurement": key, "value": repr(value)},
+            }
+    return None
+
+
 def evaluate_delivery(
     preset: DeliveryPreset,
     measured: Dict[str, Dict[str, float]],
@@ -195,11 +240,13 @@ def evaluate_delivery(
     """实测对目标：返回 (findings, passed)。
 
     findings 为轻量 dict（check_id/severity/message/details），语义与
-    ``delivery_qc.QCFinding`` 对齐（调用方可转换入库）。缺 stem、
-    LUFS 超容差、dBTP/峰值越界、过量静音都是 BLOCKING——未知效果或
-    渲染错误不能产出成功交付。
+    ``delivery_qc.QCFinding`` 对齐（调用方可转换入库）。缺 stem、缺必测
+    指标、LUFS 超容差、dBTP/峰值越界、过量静音都是 BLOCKING——未知效果或
+    渲染错误不能产出成功交付。B04：声明了限值的指标必须先通过必测防线
+    （缺测/NaN/bool/字符串阻断），比较才允许进行。
     """
     findings: list[dict] = []
+    required = _required_measurements(preset.loudness)
     for stem in preset.stems:
         values = measured.get(stem)
         if values is None:
@@ -210,38 +257,50 @@ def evaluate_delivery(
                 "details": {"stem": stem},
             })
             continue
-        lufs = float(values.get("integrated_lufs", float("nan")))
-        dbtp = float(values.get("true_peak_dbtp", float("nan")))
-        peak = float(values.get("peak_dbfs", float("nan")))
+        invalid = _invalid_measurement(values, required, stem)
+        if invalid is not None:
+            findings.append(invalid)
+            continue
+        # 必测防线只强制"声明了限值"的键；限值为 None 的指标不参与比较
+        # （此前无条件取键会在 target_lufs=None 时 KeyError——B04 防线
+        # 本就为 None 限值场景预留）。
+        lufs = values.get("integrated_lufs")
+        dbtp = values.get("true_peak_dbtp")
+        peak = values.get("peak_dbfs")
         silence = float(values.get("max_silence_seconds", 0.0))
-        if not preset.loudness.within_loudness(lufs):
+        if (lufs is not None and preset.loudness.target_lufs is not None
+                and not preset.loudness.within_loudness(float(lufs))):
             findings.append({
                 "check_id": f"delivery.{stem}.loudness",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} 响度 {lufs:+.1f} LUFS 超出目标 "
+                    f"stem {stem} 响度 {float(lufs):+.1f} LUFS 超出目标 "
                     f"{preset.loudness.target_lufs:+.1f} "
                     f"±{preset.loudness.tolerance_lu:.1f} LU"),
-                "details": {"stem": stem, "measured_lufs": lufs,
+                "details": {"stem": stem, "measured_lufs": float(lufs),
                             "target_lufs": preset.loudness.target_lufs},
             })
-        if dbtp > preset.loudness.max_true_peak_dbtp:
+        if (dbtp is not None
+                and preset.loudness.max_true_peak_dbtp is not None
+                and float(dbtp) > preset.loudness.max_true_peak_dbtp):
             findings.append({
                 "check_id": f"delivery.{stem}.true_peak",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} True Peak {dbtp:+.1f} dBTP 超上限 "
+                    f"stem {stem} True Peak {float(dbtp):+.1f} dBTP 超上限 "
                     f"{preset.loudness.max_true_peak_dbtp:+.1f}"),
-                "details": {"stem": stem, "measured_dbtp": dbtp},
+                "details": {"stem": stem, "measured_dbtp": float(dbtp)},
             })
-        if peak > preset.loudness.max_sample_peak_dbfs:
+        if (peak is not None
+                and preset.loudness.max_sample_peak_dbfs is not None
+                and float(peak) > preset.loudness.max_sample_peak_dbfs):
             findings.append({
                 "check_id": f"delivery.{stem}.sample_peak",
                 "severity": "blocking",
                 "message": (
-                    f"stem {stem} 样本峰值 {peak:+.1f} dBFS 超上限 "
+                    f"stem {stem} 样本峰值 {float(peak):+.1f} dBFS 超上限 "
                     f"{preset.loudness.max_sample_peak_dbfs:+.1f}"),
-                "details": {"stem": stem, "measured_peak_dbfs": peak},
+                "details": {"stem": stem, "measured_peak_dbfs": float(peak)},
             })
         if silence > preset.max_silence_seconds:
             findings.append({

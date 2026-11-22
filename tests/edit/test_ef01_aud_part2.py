@@ -499,6 +499,7 @@ class TestAud16807RegistrySingletonLock:
             "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
             "multiband_comp", "convolution_reverb", "transient_designer",
             "tremolo_auto_pan", "chorus_flanger", "phaser",
+            "exciter", "subharmonic",
         }
 
 

@@ -302,7 +302,7 @@ def build_capability_registry() -> CapabilityRegistry:
         title="AAF 交换",
         status=CapabilityStatus.UNAVAILABLE,
         evidence=("src/features/edit/core/interchange.py (INTERCHANGE_CAPABILITIES 评估)",),
-        notes="需 aaf2（BSD-3），评估优先级低于 FCPXML。",
+        notes="需 pyaaf2 1.7.1（MIT，版本许可已核实；见 interchange.py AAF 能力记录）。",
     ))
     caps.append(Capability(
         capability_id="edit.interchange.omf",

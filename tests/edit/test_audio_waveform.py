@@ -428,7 +428,10 @@ class TestWaveformExtractor:
         mock_worker = MagicMock()
         mock_worker_class.return_value = mock_worker
 
-        extractor = WaveformExtractor.instance()
+        # A mocked request must not share the application's live decode queue
+        # or leave an immortal MagicMock worker in its singleton. Real playback
+        # priority/serialization are tested separately against a real page.
+        extractor = WaveformExtractor()
         extractor.request_waveform("new_request_test", "/fake/path/audio.wav")
 
         # Worker should be created and started
@@ -437,6 +440,9 @@ class TestWaveformExtractor:
 
         # Should be marked pending
         assert is_waveform_pending("new_request_test") == True
+        extractor._on_worker_finished("new_request_test")
+        WaveformCache().clear_pending("new_request_test")
+        assert not extractor._workers
 
     def test_ready_waveform_ui_notification_is_deferred_during_interaction(self) -> None:
         """Playback/scrub must not trigger waveform repaint work immediately."""

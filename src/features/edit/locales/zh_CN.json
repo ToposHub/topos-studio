@@ -307,6 +307,10 @@
       "track_locked": "目标轨道已锁定"
     },
     "properties": {
+      "audio_clip": "音频片段",
+      "clip_gain": "片段增益 (dB)",
+      "fade_in_ms": "淡入 (ms)",
+      "fade_out_ms": "淡出 (ms)",
       "blend_mode": "混合模式",
       "interpolation": "插值",
       "interp_nearest": "最近帧",

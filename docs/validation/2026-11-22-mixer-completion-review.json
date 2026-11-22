@@ -1,0 +1,71 @@
+{
+  "review_date": "2026-11-22",
+  "source_revision": "0bfd9245e6eaeec62a28adb956467a5b266ed9db",
+  "working_tree_changes_included": true,
+  "changed_implementation_sha256": "5793a5adacd024a3a2802c93e7946db775729617543c9ca18747f90e43e19cfc",
+  "changed_implementation_file_count": 61,
+  "fingerprint_format": "sorted src/tests .py/.json: relative_path UTF-8 + NUL + file bytes + NUL",
+  "validation": {
+    "python_ast_files": 60,
+    "json_files_before_this_report": 3,
+    "git_diff_check": true,
+    "ui_screenshots_visually_reviewed": [
+      "docs/audit/2026-11-22-mixer-completion-review/vca-groups-zh.png",
+      "docs/audit/2026-11-22-mixer-completion-review/engine-health-zh.png"
+    ]
+  },
+  "test_runs": [
+    {
+      "name": "integrated_mixing",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/mixer tests/edit tests/app/test_audio_mixer_initial_sync.py tests/app/test_fix_wd17w2_aud.py tests/shared/test_fix_wd17g98_aud.py docs/plans/examples -k 'audio or mixer or pdc or vca or delivery or monitor or automation or stem or reconform or capture_clock or capture_durability or waveform_pyramid or dialogue_proposal or pro_audio_oracles or b22 or workflow_completion or channel_layout_truth or fix_wd17g98 or fix_wd17w2 or reference_algorithms' -q --tb=short",
+      "result": "3141 passed, 3 skipped, 12268 deselected in 346.80s (0:05:46)",
+      "overlaps_other_runs": true
+    },
+    {
+      "name": "window_and_recovery_lifecycle",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/app/test_fix_wd2g9_aud.py tests/app/test_mixer_recovery_lifecycle_review.py -q --tb=short",
+      "result": "27 passed in 4.44s",
+      "overlaps_other_runs": true
+    },
+    {
+      "name": "waveform_and_envelope",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_edit_page_waveform_signal_lifecycle.py tests/mixer/test_envelope_hit_search_review.py -q --tb=short",
+      "result": "11 passed in 3.93s",
+      "overlaps_other_runs": true
+    },
+    {
+      "name": "capture_final",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/edit/test_capture_durability_review.py tests/edit/test_recording_manager.py tests/edit/test_workflow_completion_review.py -q --tb=short",
+      "result": "104 passed in 18.28s",
+      "overlaps_other_runs": true
+    },
+    {
+      "name": "ui_final_gain_precision",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/mixer/test_project_workspace.py -k 'vca or health or recording_recovery or solo_safe_context or bus_route_preview' -q --tb=short",
+      "result": "7 passed, 47 deselected in 8.15s",
+      "overlaps_other_runs": true
+    }
+  ],
+  "test_count_note": "Runs overlap. Do not add their counts as unique tests. Integrated run excludes unrelated tests; this is not a full repository run. Final UI precision change was checked by ui_final_gain_precision after the integrated run.",
+  "audit_contracts": {
+    "dag_pdc": true,
+    "automation_trim_export": true,
+    "delivery_qc_missing_measurements": true,
+    "audible_field_signatures": true,
+    "vca_with_read_volume_automation": true
+  },
+  "completion_status": "partially implemented; see plan section 21.2 for each B00-B24 remaining deliverable",
+  "unimplemented_software_examples": [
+    "native multichannel Track/Bus/Master DSP graph",
+    "isolated third-party audio plugin host",
+    "control-room device output and PFL/AFL integration",
+    "reference-mix A/B clock/output integration",
+    "full-length Clip Edit processing and audition beyond the current 300-second capability"
+  ],
+  "not_performed": [
+    "physical device listening and loopback",
+    "independent external AAF receiver roundtrip",
+    "real third-party plugin compatibility",
+    "90-minute hardware stress run"
+  ]
+}

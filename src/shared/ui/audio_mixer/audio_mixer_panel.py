@@ -575,6 +575,10 @@ class AudioMixerPanel(QWidget):
         except (AttributeError, RuntimeError):
             pass
 
+    def set_master_effect_processing_layout(self, layout: str) -> None:
+        if self._master_mixer is not None:
+            self._master_mixer.set_effect_processing_layout(layout)
+
     def set_master_muted(self, muted: bool) -> None:
         """W12: 静默回填 Master 静音状态（不发信号）。"""
         if self._master_mixer:
@@ -863,6 +867,7 @@ class AudioMixerPanel(QWidget):
             # W26: FX 机架效果器链回填（EQ/Dynamics/FX 列表效果器都存这里）
             if "effect_chain" in t:
                 mixer.set_effect_chain(t.get("effect_chain"))
+            mixer.set_effect_processing_layout(str(t.get("fx_layout") or "stereo"))
             # W16: 颜色回填
             if "color" in t:
                 mixer.set_track_color(t.get("color"))

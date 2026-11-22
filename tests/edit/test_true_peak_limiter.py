@@ -76,7 +76,7 @@ class TestTruePeakLimiter:
             0.05, abs=1e-3)  # 安静声道不受联动
 
     def test_block_size_consistency(self) -> None:
-        """任意块长：上限合规 + 稳态幅度一致（边界 lookahead 窗近似）。"""
+        """任意块长：上限合规 + 整段与分块逐位一致（流式 FIR + 原始目标尾）。"""
         pcm = _intersample_peak_tone(1.15)
         fx_whole = _make()
         whole = fx_whole.process(pcm.copy())
@@ -88,10 +88,62 @@ class TestTruePeakLimiter:
         stitched = np.concatenate(chunks, axis=1)
         # 块长无关的上限合规（交付语义）。
         assert _measure_dbtp(stitched[:, RATE // 10:]) <= CEILING + 0.3
-        # 稳态一致：差异分位数（边界窗近似的余量）。
-        diff = np.abs(whole[:, RATE // 4:] - stitched[:, RATE // 4:])
-        assert float(np.percentile(diff, 95)) < 0.03   # ≈0.2 dB 边界近似
-        assert float(np.max(diff)) < 0.15
+        # 分块与整段逐位一致（overlap-save 历史 + lookahead 原始目标尾）。
+        np.testing.assert_array_equal(
+            whole[:, RATE // 4:], stitched[:, RATE // 4:])
+
+    def test_anti_phase_linked_channels_limit(self) -> None:
+        """链接模式取各声道峰值上界：反相输入不得抵消检测（FX-23）。"""
+        t = np.arange(RATE) / RATE
+        tone = (0.99 * np.sin(2 * np.pi * 12000.0 * t + np.pi / 4))
+        pcm = np.stack([tone.astype(np.float32), -tone.astype(np.float32)])
+        assert float(np.max(np.abs(pcm.mean(axis=0)))) == 0.0  # 均值抵消
+        out = _make({"linked": True, "lookahead_ms": 5.0}).process(pcm.copy())
+        ceiling_linear = 10.0 ** (CEILING / 20.0)
+        # 输出样本峰被限制在上限附近（反相不再漏检）。
+        assert float(np.max(np.abs(out))) <= ceiling_linear + 1e-3
+
+    def test_trailing_very_short_blocks_stay_under_ceiling(self) -> None:
+        """信号收尾极短块（1/31 样本）：短块下前视窗含义正确、上限合规。"""
+        pcm = _intersample_peak_tone(1.15, seconds=0.2)
+        fx = _make()
+        chunks = []
+        pos = 0
+        for step in (480, 1024, 31, 7, 1, 1, 257):
+            if pos >= pcm.shape[1]:
+                break
+            chunks.append(fx.process(pcm[:, pos:pos + step].copy()))
+            pos += step
+        stitched = np.concatenate(chunks, axis=1)
+        assert _measure_dbtp(stitched[:, RATE // 10:]) <= CEILING + 0.3
+
+    def test_independent_release_states_do_not_cross_channels(self) -> None:
+        """独立模式：每声道独立 release 状态，安静声道包络不随块衰减。"""
+        t = np.arange(RATE) / RATE
+        left = (1.15 * 0.5 * (np.sin(2 * np.pi * 5000.0 * t)
+                              + np.sin(2 * np.pi * 7000.0 * t))).astype(np.float32)
+        right = (0.05 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        pcm = np.stack([left, right])
+        fx = _make({"linked": False})
+        chunks = [fx.process(pcm[:, s:s + 513].copy())
+                  for s in range(0, pcm.shape[1], 513)]
+        out = np.concatenate(chunks, axis=1)
+        # 分块与整段一致（状态机跨块精确），且安静声道全程不被衰减。
+        fx_whole = _make({"linked": False})
+        whole = fx_whole.process(pcm.copy())
+        np.testing.assert_array_equal(whole[:, RATE:], out[:, RATE:])
+        for start in range(RATE // 4, pcm.shape[1] - 513, 4800):
+            block = out[1, start:start + 4800]
+            assert float(np.max(np.abs(block))) == pytest.approx(
+                0.05, abs=1e-3)
+
+    def test_telemetry_reports_output_peak(self) -> None:
+        pcm = _intersample_peak_tone(1.15)
+        fx = _make()
+        fx.process(pcm.copy())
+        telemetry = fx.collect_telemetry()
+        assert "output_peak_dbfs" in telemetry
+        assert telemetry["output_peak_dbfs"] <= CEILING + 0.5
 
     def test_bypass_bit_exact(self) -> None:
         pcm = _intersample_peak_tone(0.3)
@@ -100,13 +152,15 @@ class TestTruePeakLimiter:
         np.testing.assert_array_equal(out, pcm)
 
     def test_latency_declared_for_pdc(self) -> None:
+        # 2026-11-21 计划 FX-23：新版流式 FIR 有净群延迟 D=10，
+        # 合同更新为 lookahead + D（计划允许「更新合同和基线」）。
         fx = _make({"lookahead_ms": 5.0})
         assert fx.latency_samples() == pytest.approx(
-            5.0 * RATE / 1000.0, abs=4)
+            5.0 * RATE / 1000.0 + 10, abs=1)
         from src.features.edit.core.audio_dsp import EffectChain
         chain = EffectChain(float(RATE))
         chain.set_params([("true_peak_limiter",
-                           {"ceiling_dbtp": CEILING}, True)])
+                           {"ceiling_dbtp": CEILING}, True, "limiter", 5)])
         assert chain.latency_samples() == fx.latency_samples()
 
     def test_tail_and_reset(self) -> None:

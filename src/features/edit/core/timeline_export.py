@@ -436,7 +436,7 @@ def resolve_stem_track_ids(
         if not getattr(t, "is_bus", False)
         and (getattr(t, "stem_group", "") or "") == group
         and len(getattr(t, "clips", ()) or ()) > 0
-        and is_track_renderable(t, has_solo)
+        and is_track_renderable(t, False)
         and (not has_solo or t.track_id in audible_solo)
     )
 
@@ -505,6 +505,8 @@ class TimelineExportConfig:
     # P1-09：显式音频布局（"stereo"/"5.1(side)"/"7.1"…）。设置后是导出声道数
     # 的单一真相（覆盖 audio_channels）；未知布局名在导出入口显式报错。
     audio_channel_layout: str = ""
+    # Final integer PCM quantization only. Floating-point/AAC paths bypass it.
+    audio_dither: Optional[dict] = None
     # v1.6 M-B8：stems 追加音轨声明（空 = 单音轨行为逐字节不变）。
     # 仅 topos MOV 容器生效；编码器不支持时整体降级单轨并记录警告。
     # R04：导出尾音模式——False（默认）= 严格选区（输出长度 = 选区帧数，
@@ -871,6 +873,16 @@ def preflight_audio_export(
             _bad = [d for d in (
                 diag for c in _chains for diag in collect_chain_diagnostics(c)
             ) if d["status"] != "supported"]
+            for d in _bad:
+                if d["effect_type"] != "vst3_hosted":
+                    continue
+                message = f"VST3 ({d['instance_id'][:8]}): {d['reason']}"
+                blockers.append(ExportEffectBlocker(
+                    effect_type=d["effect_type"], code="hosted_effect_unavailable",
+                    message=message,
+                ))
+                blocking.append(message)
+            _bad = [d for d in _bad if d["effect_type"] != "vst3_hosted"]
             if _bad:
                 _msg = (
                     "效果链含 %d 个非完全支持实例（%s）。未获显式降级授权"
@@ -3291,7 +3303,7 @@ class TimelineExporter:
             if audio_pcm is not None and has_audio and not self._cancel_requested:
                 try:
                     self._encoder.write_audio_samples(
-                        audio_pcm, config.audio_sample_rate,
+                        self._quantize_audio_delivery(audio_pcm, config), config.audio_sample_rate,
                     )
                     logger.info("Audio export complete (parallel render)")
                 except Exception as e:
@@ -4118,7 +4130,7 @@ class TimelineExporter:
         if audio_pcm is None:
             return
         try:
-            encoder.write_audio_samples(audio_pcm, config.audio_sample_rate)
+            encoder.write_audio_samples(self._quantize_audio_delivery(audio_pcm, config), config.audio_sample_rate)
             logger.info("Direct TOPOS delivery: audio written")
             # v1.6 M-B8：主混音落轨 0 后，各角色母带串行写追加轨
             self._write_stem_tracks(config, encoder)
@@ -4137,10 +4149,23 @@ class TimelineExporter:
         if output is None or self._encoder is None:
             return
         try:
-            self._encoder.write_audio_samples(output, config.audio_sample_rate)
+            self._encoder.write_audio_samples(
+                self._quantize_audio_delivery(output, config), config.audio_sample_rate)
             logger.info("Audio export complete")
         except Exception as e:
             logger.warning(f"Failed to write audio: {e}")
+
+    @staticmethod
+    def _quantize_audio_delivery(pcm: "np.ndarray", config: TimelineExportConfig,
+                                 codec: Optional[str] = None) -> "np.ndarray":
+        """Quantize once after mix/normalization, immediately before encoding."""
+        depth = {"pcm_s16le": 16, "pcm_s24le": 24}.get(codec or config.audio_codec)
+        settings = getattr(config, "audio_dither", None)
+        if depth is None or settings is None:
+            return pcm
+        from src.features.edit.core.delivery_dither import DitherSettings, DeliveryQuantizer
+        parsed = DitherSettings.from_dict(settings)
+        return DeliveryQuantizer(parsed, depth).apply(pcm)
 
     def _join_audio_render_thread(self) -> None:
         """汇合后台音频渲染线程（正常/取消/异常路径都必须调用，防泄漏）。"""
@@ -4232,9 +4257,12 @@ class TimelineExporter:
         fps = self._get_sequence_fps()
         sample_rate = config.audio_sample_rate
         # P1-09：显式布局是导出声道数的单一真相（空串回落 audio_channels）
-        from src.features.edit.core.channel_layout import resolve_export_channels
+        from src.features.edit.core.channel_layout import (
+            ChannelLayout, SpeakerLayoutError, codec_bed_layout, resolve_export_channels, route_pcm,
+        )
+        from src.features.edit.core.native_mix_layout import adapt_clip_pcm
 
-        channels = int(channels_override) if channels_override else resolve_export_channels(
+        delivery_channels = int(channels_override) if channels_override else resolve_export_channels(
             config.audio_channels, config.audio_channel_layout
         )
         samples_per_frame = int(sample_rate / fps) if fps > 0 else 0
@@ -4272,6 +4300,8 @@ class TimelineExporter:
         # a caller-provided preview cache cannot bypass delivery validation.
         renderer = AudioGraphRenderer(float(sample_rate))
         renderer.configure_from_sequence(audio_sequence)
+        master_layout = renderer.master_layout(delivery_channels)
+        channels = master_layout.channel_count
 
         # H09：Freeze 捕获资产装载（项目注册表 → 各节点 DSP 链；缺资产
         # 逐条诊断，重放退化为当前历史——不静默伪造）
@@ -4406,7 +4436,7 @@ class TimelineExporter:
         audio_tracks = []
         bus_tracks = []
         for track in audio_sequence.audio_tracks:
-            if not is_track_renderable(track, has_solo):
+            if not is_track_renderable(track, False):
                 continue
             # RMA-04: solo 闭包过滤——可见/启用/未静音之外，还要在可听闭包内。
             if has_solo and track.track_id not in audible_solo and not getattr(track, "is_bus", False):
@@ -4567,17 +4597,27 @@ class TimelineExporter:
 
                 # MX-08: 本轨作为侧链检源时按帧缓存输出（供后续被控轨消费；
                 # dict 跨轨共享——见轨循环前的定义）
+                track_layout, native_track = renderer.track_domain(track.track_id, channels)
+                track_channels = track_layout.channel_count
+                edit_in_source = native_track and track_channels != 2
                 _track_node = renderer.get_node(track.track_id)
                 _track_tail_samples = (
                     _track_node.effect_chain.tail_estimate_samples()
                     if (_track_node is not None
                         and _track_node.effect_chain is not None) else 0)
+                # B02 · PDC：链输出尾音之后还要经过边延迟线（串行）——间隙
+                # 零喂预算必须覆盖 链尾音 + 最大出边延迟，否则延迟线持留内容
+                # 在间隙冻结、在下一 clip 起点错位涌出（实时路径由
+                # _advance_pdc_line 对应；导出终点截断同理被覆盖）。
+                _track_tail_samples += renderer.pdc_out_edges_max_delay(
+                    track.track_id)
                 _track_state = {"tail_left": 0}
                 # R02: 单调游标——本轨已通过 _render_and_route 推进到的下一帧。
                 # early flush 与 final drain 共用；drain 从 cursor 起步，禁止
                 # 把已处理旧帧再次喂入有状态节点（时序与写入位置分离缺陷）。
                 _track_state["next_frame"] = feed_start
-                _track_state["last_rendered"] = None                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
+                _track_state["last_rendered"] = None
+                # MX-04: suffix-min 起点（未处理 clip 的最早 timeline_start），
                 # 供提前 flush 的安全边界（clip 列表乱序时也正确）。
                 _clip_starts = [c.timeline_start for c in track.clips]
                 _suffix_min_start = [0] * (len(_clip_starts) + 1)
@@ -4609,7 +4649,7 @@ class TimelineExporter:
                                         0, _track_state["tail_left"] - block_len)
                                     _render_and_route(
                                         fidx,
-                                        np.zeros((channels, block_len),
+                                        np.zeros((track_channels, block_len),
                                                  dtype=np.float32))
                                 # else：间隙且无尾音 → 跳过（游标前进）
                         _track_state["next_frame"] = fidx + 1
@@ -4642,6 +4682,7 @@ class TimelineExporter:
                         track.track_id, summed, fidx,
                         fps=fps,
                         source_channels=int(track_first_src_ch or 2),
+                        pan_already_applied=native_track,
                         sidechain_taps=taps,
                     )
                     _track_state["last_rendered"] = fidx
@@ -4650,43 +4691,72 @@ class TimelineExporter:
                         return  # automation mute
                     node = renderer.get_node(track.track_id)
                     target = node.output_bus_id if node else None
+                    # B02 · PDC：processed 为未延迟节点输出；主路边延迟在此
+                    # 应用（检源缓冲/主路累积消费同一延迟后内容）。
+                    routed = renderer._apply_pdc(track.track_id, processed)
                     actual = min(processed.shape[-1], out_end - out_start)
-                    if target is not None:
+                    if target is not None and renderer.is_known_bus(target):
                         if target not in bus_inputs:
                             bus_inputs[target] = np.zeros(
-                                (channels, feed_total_samples), dtype=np.float32)
-                        bus_inputs[target][:, out_start:out_end] += processed[:channels, :actual]
+                                (renderer._bus_layout_of(target).channel_count, feed_total_samples), dtype=np.float32)
+                        bus_inputs[target][:, out_start:out_end] += route_pcm(
+                            routed[:, :actual], renderer._bus_layout_of(target), track_layout)
                     else:
-                        output[:, out_start:out_end] += processed[:channels, :actual]
+                        if target is not None:
+                            # AUD-15402：未知 bus 目标（bus 已删除而轨路由
+                            # 未清理）——兜底进 master 并告警；不落入永不被
+                            # 消费的孤儿缓冲（整轨静默丢失），与实时/
+                            # route_track_output 语义一致。
+                            logger.warning(
+                                "audio export: track %r routes to unknown "
+                                "bus %r; falling back to master",
+                                track.track_id, target)
+                        output[:, out_start:out_end] += route_pcm(
+                            routed[:, :actual], master_layout, track_layout)
                     # sends（并行；MX-14: pre_fader tap 取 clip 求和块 summed，
-                    # post_fader 取处理后输出；独立 mute 只断开 send）
+                    # post_fader 取处理后输出；独立 mute 只断开 send）。
+                    # B02 · PDC：每条 send 经独立延迟线对齐到目标到达时间。
                     if node is not None:
-                        for send_entry in node.sends:
+                        for send_index, send_entry in enumerate(node.sends):
                             send_bus_id, send_level, send_tap, send_muted = (
                                 unpack_send(send_entry))
                             if send_level <= 0.0 or send_muted:
                                 continue
+                            if not renderer.is_known_bus(send_bus_id):
+                                # AUD-15402：send 指向未注册 bus——跳过并
+                                # 告警（不建孤儿缓冲静默吞内容）。
+                                logger.warning(
+                                    "audio export: track %r send targets "
+                                    "unknown bus %r; send skipped",
+                                    track.track_id, send_bus_id)
+                                continue
                             if send_bus_id not in bus_inputs:
                                 bus_inputs[send_bus_id] = np.zeros(
-                                    (channels, feed_total_samples), dtype=np.float32)
+                                    (renderer._bus_layout_of(send_bus_id).channel_count, feed_total_samples), dtype=np.float32)
                             if send_tap == "pre_fader":
                                 pre_actual = min(summed.shape[-1],
                                                  out_end - out_start)
+                                pre_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    summed[:, :pre_actual])
                                 bus_inputs[send_bus_id][
                                     :, out_start:out_start + pre_actual] += \
-                                    summed[:channels, :pre_actual] * send_level
+                                    route_pcm(pre_delayed, renderer._bus_layout_of(send_bus_id), track_layout) * send_level
                             else:
+                                send_delayed = renderer.apply_send_edge_delay(
+                                    track.track_id, send_index, send_bus_id,
+                                    processed[:, :actual])
                                 bus_inputs[send_bus_id][:, out_start:out_end] += \
-                                    processed[:channels, :actual] * send_level
+                                    route_pcm(send_delayed, renderer._bus_layout_of(send_bus_id), track_layout) * send_level
                     # R02: 检源轨直写单份全长缓冲（不足块宽处保持零填充语义）
                     if track.track_id in export_sc_source_ids:
                         buf = sc_tap_buffers.get(track.track_id)
                         if buf is None:
-                            buf = np.zeros((channels, feed_total_samples),
+                            buf = np.zeros((track_channels, feed_total_samples),
                                            dtype=np.float32)
                             sc_tap_buffers[track.track_id] = buf
                         buf[:, out_start:out_start + actual] += \
-                            processed[:channels, :actual]
+                            routed[:, :actual]
                         sc_written_until[track.track_id] = out_end
                     # MX-07: 内容帧刷新尾音预算
                     _track_state["tail_left"] = _track_tail_samples
@@ -4954,7 +5024,7 @@ class TimelineExporter:
                                             * sample_rate / fps)),
                                         block_len,
                                         sample_rate=int(sample_rate),
-                                        channels=channels,
+                                        channels=track_channels,
                                     )
                                     synthesized_from_base = samples is not None
                                 if samples is None:
@@ -5005,9 +5075,6 @@ class TimelineExporter:
                             # P0：成品合成块跳过源域步骤（已是交付声道宽度的
                             # 最终内容）。
                             if not synthesized_from_base:
-                                from src.features.edit.core.channel_layout import (
-                                    adapt_samples_for_delivery,
-                                )
                                 if samples.ndim == 1:
                                     samples = np.broadcast_to(
                                         samples.reshape(1, -1),
@@ -5017,6 +5084,7 @@ class TimelineExporter:
                                 # downmix 选道（与预览/Stem 同语义）。映射存在但未
                                 # 生效（解码声道数与映射基线不符）时留警告并直通。
                                 _src_layout = getattr(decoder, "source_layout", None)
+                                codec_name = ""
                                 _payload = samples[:, :actual]
                                 _selected = source_patch.select_channels(_payload)
                                 if _selected is not _payload:
@@ -5024,16 +5092,26 @@ class TimelineExporter:
                                     # 选道后的布局是自定义的，不能再声明容器布局
                                     _src_layout = None
                                 elif source_patch.audio_channel_map:
+                                    if native_track:
+                                        raise SpeakerLayoutError(
+                                            f"{clip.clip_id}: source channel patch does not match decoded PCM")
                                     logger.warning(
                                         "clip %s source patch map %s skipped: "
                                         "decoded %d channels",
                                         clip.clip_id, source_patch.audio_channel_map,
                                         _payload.shape[0])
-                                samples = adapt_samples_for_delivery(
-                                    _payload, channels,
-                                    src_layout=_src_layout,
-                                    context=f"clip {clip.clip_id}",
-                                )
+                                if native_track and not source_patch.audio_channel_map:
+                                    name = getattr(decoder, "source_layout_name", "")
+                                    if isinstance(name, str) and name:
+                                        _src_layout = codec_bed_layout(name, _payload.shape[0])
+                                        codec_name = name if name == "5.1(side)" else ""
+                                source_channels = _payload.shape[0]
+                                samples = _payload
+                                if not edit_in_source:
+                                    samples = adapt_clip_pcm(
+                                        samples, track_layout, _src_layout,
+                                        native=native_track, context=f"clip {clip.clip_id}",
+                                        codec_name=codec_name)
 
                                 # P0-3: Clip Editor 处理栈——固定顺序：栈在 clip
                                 # 增益/淡化之前（与实时 mix_samples、Stem 同一
@@ -5051,6 +5129,11 @@ class TimelineExporter:
                                         sample_rate=int(sample_rate),
                                         pre_render_base=_pre_base,
                                     )
+
+                                if edit_in_source:
+                                    samples = adapt_clip_pcm(
+                                        samples, track_layout, _src_layout,
+                                        native=True, context=f"clip {clip.clip_id}", codec_name=codec_name)
 
                             # C3: 片段级增益（clip gain → renderer 节点链之前）
                             _clip_gain_db = float(
@@ -5163,16 +5246,22 @@ class TimelineExporter:
                                     clip_pdc_lines, clip.clip_id,
                                     _rel, samples)
 
+                            if native_track:
+                                samples = renderer.pan_native_clip(
+                                    track.track_id, samples,
+                                    track_channels if synthesized_from_base else source_channels,
+                                    frame_idx, fps)
+
                             # 汇入该轨该帧的求和缓冲（MX-04）
                             frame_buf = pending_frames.get(frame_idx)
                             if frame_buf is None:
                                 frame_buf = np.zeros(
-                                    (channels, out_end - out_start),
+                                    (track_channels, out_end - out_start),
                                     dtype=np.float32,
                                 )
                                 pending_frames[frame_idx] = frame_buf
                             _n = min(samples.shape[-1], frame_buf.shape[-1])
-                            frame_buf[:, :_n] += samples[:channels, :_n].astype(
+                            frame_buf[:, :_n] += samples[:, :_n].astype(
                                 np.float32, copy=False)
                             if track_first_src_ch is None:
                                 track_first_src_ch = int(
@@ -5214,11 +5303,11 @@ class TimelineExporter:
                                     continue
                                 if _c_active:
                                     _tblock = clip_chain.process(
-                                        np.zeros((channels, _tbl),
+                                        np.zeros((track_channels, _tbl),
                                                  dtype=np.float32))
                                 else:
                                     _tblock = np.zeros(
-                                        (channels, _tbl), dtype=np.float32)
+                                        (track_channels, _tbl), dtype=np.float32)
                                 if _crel > 0:
                                     _tblock = apply_pdc_delay_line(
                                         clip_pdc_lines, clip.clip_id,
@@ -5227,15 +5316,15 @@ class TimelineExporter:
                                 if _tfbuf is None or \
                                         _tfbuf.shape[-1] != _tbl:
                                     _tfbuf = np.zeros(
-                                        (channels, _tbl), dtype=np.float32)
+                                        (track_channels, _tbl), dtype=np.float32)
                                     pending_frames[_tf] = _tfbuf
                                     _tn = min(_tblock.shape[-1],
                                               _tfbuf.shape[-1])
-                                    _tfbuf[:, :_tn] += _tblock[:channels, :_tn]
+                                    _tfbuf[:, :_tn] += _tblock[:, :_tn]
 
 
                     except Exception as e:
-                        if isinstance(e, (PreRenderUntrustedError, CompClipAudioError)):
+                        if isinstance(e, (PreRenderUntrustedError, CompClipAudioError, SpeakerLayoutError)):
                             # P0 · 交付保真：预渲染前缀读不到可信 PCM——
                             # 中止导出（报告片段/步骤/原因），不得静默丢效果。
                             raise
@@ -5307,6 +5396,10 @@ class TimelineExporter:
         # 回收；不用 clear() 原地清空——外部观察者持有的 dict 引用会看到数据
         # 被抽走）。
         del _bus_sc_taps, sc_tap_buffers, sc_written_until, bus_inputs
+
+        if channels != delivery_channels:
+            output = route_pcm(output, ChannelLayout.from_channel_count(delivery_channels),
+                               master_layout)
 
         # AM-10 阶段 3.4：离线响度交付。
         # 若指定 loudness_target_lufs，则扫描 master PCM：
@@ -5489,7 +5582,7 @@ class TimelineExporter:
             if pcm is None:
                 continue
             try:
-                write(idx, pcm, config.audio_sample_rate)
+                write(idx, self._quantize_audio_delivery(pcm, config, stem.codec), config.audio_sample_rate)
                 logger.info("Stem 轨已写入：'%s' → 容器追加轨 %d",
                             stem.name or stem.stem_group, idx)
             except Exception as e:

@@ -27,6 +27,14 @@ import numpy as np
 AUDIO_REFERENCE_SAMPLE_RATE = 48000
 
 
+def resample_preroll_start(target_sample: int, source_rate: int, target_rate: int) -> int:
+    """Input sample before the target with the same FIR phase as a full decode."""
+    period = source_rate // math.gcd(source_rate, target_rate)
+    source_sample = target_sample * source_rate // target_rate
+    history = 4096 * max(1, (source_rate + target_rate - 1) // target_rate)
+    return max(0, source_sample - history) // period * period
+
+
 class TimelineSampleClock:
     """帧↔样本的精确有理数时钟（无浮点累积漂移）。"""
 

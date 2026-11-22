@@ -144,7 +144,12 @@ CLASSIC_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("level", "level_db"),
     )),
     "saturation": ("saturation", _same("enabled", "drive")),
-    "imager": ("stereo_imager", _same("enabled", "width", "pan")),
+    "imager": ("stereo_imager", (
+        *_same("enabled", "width", "pan", "mono_maker_on"),
+        Field("mid_gain", "mid_gain_db"), Field("side_gain", "side_gain_db"),
+        Field("output_gain", "output_gain_db"), Field("mono_maker_freq", "mono_maker_hz"),
+        Field("mono_maker_slope", "mono_maker_slope", lambda v: v + "dB", lambda v: v.removesuffix("dB")),
+    )),
     "spatial_panner": ("panner", (
         *_same(
             "enabled", "space_mode", "format", "fb", "elevation", "rotate", "spread",

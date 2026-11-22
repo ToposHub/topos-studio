@@ -5,6 +5,27 @@
 
 ## 已落地
 
+### 2026-11-22 混音 Properties 与片段效果统一
+
+- 新增工程模式专属 `dockAudioProperties`，默认位于右侧，沿用 Edit 的
+  同一个 `EditPropertiesPanel`；进入 Mixer 借用、离开归还，不重复连接信号。
+- 音频布局显示片段增益、采样精度淡入淡出（毫秒输入）、速度及所属轨道
+  音量/声像；基础参数复用既有 timeline commands、轨锁预检与批量宏撤销。
+- Properties 效果列表与 Clip Edit 机架读取同一份 `ClipInstance.effects`，
+  共用添加、旁路、排序、删除命令及按 `(clip_id, effect_id)` 缓存的参数窗口。
+  参数弹窗继续承载完整效果编辑，Properties 提供效果概览和打开入口。
+- 时间线提交及 undo/redo 同步片段和轨道快照；效果结构变化时重建列表，
+  普通基础参数更新保留输入控件。拖放到其他片段时刷新目标片段的 Properties。
+- Audio Effects 保留搜索、分类和拖放入口，出厂布局默认隐藏，可从面板栏或
+  Panels 菜单打开；已有自定义布局保留。旧布局以
+  `mixer_properties_layout_version` 一次性补入 Properties。
+- 定向回归见 `tests/mixer/test_mixer_properties.py`，覆盖共享面板归还、
+  Library / Clip Edit / Properties 效果同步、弹窗实例复用、拖放目标、
+  增益与采样淡化双向更新及历史、轨锁拒绝、轨道参数刷新和布局迁移。
+- 验证：`tests/mixer` 全组与 Edit Properties 布局、关键帧、片段效果弹窗
+  adapter、应用音频混音器初始同步测试共 **429 passed**（Qt offscreen）。
+  原生控件截图另检查右侧宽度、基础参数行和效果打开入口。
+
 ### P0-1 混音页 Media Pool、Effects（b06503db）
 - `dockAudioMediaPool` / `dockAudioEffects` 两个 project-backed Mixer dock，
   创建后默认隐藏、进 Mixer 借用 Edit 活体面板、离场归还。

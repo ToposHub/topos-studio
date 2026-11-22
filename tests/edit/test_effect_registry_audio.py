@@ -61,6 +61,8 @@ _EXPECTED_BASIC_PARAMS = {
     "tremolo_auto_pan": {"rate_hz", "depth"},
     "chorus_flanger": {"rate_hz", "depth_ms", "feedback", "mix"},
     "phaser": {"rate_hz", "stages", "base_hz", "sweep_octaves", "mix"},
+    "exciter": {"ex_crossover_hz", "ex_oversampling", "ex_wet", "ex_output_gain_db"},
+    "subharmonic": {"sh_source_center_hz", "sh_octave1_gain_db", "sh_octave2_gain_db", "sh_mix"},
 }
 
 _ALL_DEFINITIONS = {
@@ -154,6 +156,13 @@ class TestCreateEffectInstanceFullDefaults:
         )
         # 所有 mixer 效果都带 enabled 字段（DSP 旁路标志）
         assert "enabled" in instance.params
+
+    def test_nested_defaults_are_independent_per_effect_instance(self):
+        first = create_effect_instance("strip_eq")
+        second = create_effect_instance("strip_eq")
+        first.params["bands"][0]["gain"] = 11.0
+        assert second.params["bands"][0]["gain"] != 11.0
+        assert create_effect_instance("strip_eq").params["bands"][0]["gain"] != 11.0
 
     def test_reverb_full_defaults(self):
         instance = create_effect_instance("reverb")

@@ -307,6 +307,10 @@
       "track_locked": "The target track is locked"
     },
     "properties": {
+      "audio_clip": "Audio Clip",
+      "clip_gain": "Clip Gain (dB)",
+      "fade_in_ms": "Fade In (ms)",
+      "fade_out_ms": "Fade Out (ms)",
       "blend_mode": "Blend Mode",
       "interpolation": "Interpolation",
       "interp_nearest": "Nearest",

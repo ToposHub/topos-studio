@@ -85,10 +85,10 @@ def test_four_independent_panel_entries_and_optional_editor():
     panels = registry.get_all()
     assert [p.dock_attr for p in panels] == [spec[1] for spec in MIXER_PANEL_SPECS]
     assert all(p.feature_id == "mixer" and p.page_ids == ("Mixer",) for p in panels)
-    # Media Pool / Effects 是 project-backed Mixer 的默认可见面板（P0-1）。
+    # The inspector is visible; the effect library remains available on demand.
     assert [p.panel_id for p in panels if p.default_visible] == [
         "mixer.console", "mixer.viewer", "mixer.timeline",
-        "mixer.media_pool", "mixer.effects",
+        "mixer.media_pool", "mixer.properties",
     ]
     assert registry.get_panels_by_category({"mixer"}, work_mode="image") == {}
 

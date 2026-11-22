@@ -401,18 +401,20 @@ INTERCHANGE_CAPABILITIES: List[InterchangeFormat] = [
     InterchangeFormat(
         name="AAF (Advanced Authoring Format)",
         extension=".aaf",
-        # F6.3：验收门未开——aaf2 依赖未引入工程（新增依赖需显式决策）
-        # 且"真实接收软件导入重建"验收（Pro Tools/Media Composer）在
-        # 本仓环境不可执行。在此之前保持不可用 + 可执行交接建议，
-        # 不以 Stem/CSV 冒充可重建时间线（计划原文）。
+        # B12（2026-11-22）：依赖已引入（pyaaf2 1.7.1，LICENSE 已核实为
+        # MIT——旧注释"BSD-3"有误并已更正），音频子集 adapter 与本地往返
+        # 测试已落地（tests/edit/test_aaf_audio_subset.py）。available 仍
+        # 保持 False：B12 手册"两套外部接收端往返报告"（Pro Tools/Media
+        # Composer 等真实重建验收）未执行，验收门不开——不用本地自读自
+        # 写冒充兼容。
         available=False,
-        license="需 aaf2（BSD-3）或商业 SDK",
+        license="pyaaf2 1.7.1（MIT；锁定版本 LICENSE 已核实）",
         notes="SMPTE 标准，Pro Tools/Media Composer 原生支持。"
-              "F6.3 条件延期：依赖与接收端验收门均未开。当前音频后期"
-              "交接走 Stems（含 routing.json 分轨重建声明）+ CSV Cue "
-              "Sheet（不以 Stem/CSV 冒充可重建"
-              "时间线）；需 AAF 时间线重建时经 FCPXML（DaVinci Resolve 可"
-              "转出 AAF）或外部工具。",
+              "音频子集 v1（CompositionMob/Sound 槽/样本编辑率/SourceClip"
+              " 源窗/间隙/PCM 描述符外部引用）已实现并有本地往返回归；"
+              "不以本地自读自写冒充外部接收端验收——未执行前交接走"
+              " Stems（含 routing.json 分轨重建声明）+ CSV Cue Sheet，"
+              "或经 FCPXML。",
         priority="low",
     ),
     InterchangeFormat(

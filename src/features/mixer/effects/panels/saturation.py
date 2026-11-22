@@ -2345,7 +2345,8 @@ class StudioSaturationWidget(QWidget):
             st["stop_time_ms"],
         )
         if self._drive_key == "drive":
-            self.sat_graph.setWaveShaperDrive(st.get("drive", 0.0))
+            self.sat_graph.setWaveShaperDrive(None if getattr(self, "_production_multiband", False)
+                                              else st.get("drive", 0.0))
 
         for i, card in enumerate(self.band_cards):
             card.syncFromData(st["bands"][i])

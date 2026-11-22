@@ -1809,15 +1809,13 @@ class StudioMultibandCompWidget(QWidget):
     def use_processor_controls(self) -> None:
         self._processor_controls = True
         self.mb_graph.use_processor_controls()
-        for control in (*self._design_toolbar_controls, *self._design_output_controls):
+        for control in (*self._design_toolbar_controls[2:], *self._design_output_controls):
             control.hide()
-        self._presets = {name: state for name, state in self._presets.items() if state["band_count"] == 3}
         with QSignalBlocker(self.preset_combo):
             self.preset_combo.clear()
             self.preset_combo.addItems(list(self._presets))
-        for card in self.band_cards[:3]:
+        for card in self.band_cards:
             card.btn_solo.hide()
-            card.btn_mute.hide()
             card.c_ratio.setRange(1.2, 20.0, "1.2:1", "20:1")
             card.c_attack.setRange(0.7, 1000.0, "0.7", "1000")
             card.c_release.setRange(50.0, 5000.0, "50", "5000")
@@ -1886,8 +1884,6 @@ class StudioMultibandCompWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
-        if self._processor_controls:
-            st["band_count"] = 3
         cnt = st["band_count"]
         xovers = st["crossovers"]
 

@@ -441,7 +441,11 @@ def clip_fx_entries(
                             )
         inst_enabled = bool(getattr(effect, "is_enabled", True))
         dsp_enabled = inst_enabled and bool(params.get("enabled", True))
-        entries.append((effect_type, params, dsp_enabled))
+        # Stable identity and the original version must survive Clip preview,
+        # automation, playback and export. Missing versions retain legacy bucket 0.
+        entries.append((effect_type, params, dsp_enabled,
+                        str(getattr(effect, "effect_id", "") or ""),
+                        int(getattr(effect, "algorithm_version", 0) or 0)))
     return entries
 
 

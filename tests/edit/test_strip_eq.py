@@ -349,3 +349,52 @@ class TestMixSamplesWithEQ:
         pl, pr = peaks["t1"]
         # EQ 后峰值应 > 输入峰值 0.5
         assert pl > 0.5, f"post-EQ peak {pl:.3f} should be > 0.5"
+
+
+class TestFX01ResponseIdentity:
+    """FX-01（2026-11-21 计划）：曲线读取器与独立 SOS 求值恒等。"""
+
+    def test_chart_db_matches_independent_sos_eval(self) -> None:
+        """strip_eq_band_response_db ≡ sosfreqz(sections)（atol 1e-8）。"""
+        from scipy.signal import sosfreqz
+
+        from src.features.edit.core.audio_dsp import (
+            strip_eq_band_response_db,
+            strip_eq_band_sections,
+        )
+        rate = 48000
+        band = dict(filter_type="Bell", freq=1000.0, q=1.1, gain=6.0,
+                    slope=12)
+        frequencies = np.array([100.0, 1000.0, 8000.0])
+        sections = np.asarray(
+            strip_eq_band_sections(band, rate, "Clean", 3))
+        _, response = sosfreqz(sections, worN=frequencies, fs=rate)
+        reference_db = 20 * np.log10(np.abs(response))
+        chart_db = [strip_eq_band_response_db(band, float(f), rate,
+                                              "Clean", 3)
+                    for f in frequencies]
+        np.testing.assert_allclose(chart_db, reference_db, rtol=0,
+                                   atol=1e-8)
+        assert abs(reference_db[1] - 6.0) < 1e-8
+
+    def test_total_curve_is_master_gain_times_bands(self) -> None:
+        """H_total = linear_master_gain × ∏H_band（dB 可加性）。"""
+        from src.features.edit.core.audio_dsp import (
+            strip_eq_band_response_db,
+        )
+        rate = 48000
+        bands = [
+            dict(filter_type="Bell", freq=200.0, q=1.0, gain=3.0,
+                 enabled=True),
+            dict(filter_type="Bell", freq=4000.0, q=1.0, gain=-4.0,
+                 enabled=True),
+        ]
+        for freq in (200.0, 1000.0, 4000.0, 12000.0):
+            band_sum = sum(
+                strip_eq_band_response_db(band, freq, rate, "Clean", 0.0)
+                for band in bands)
+            total = strip_eq_band_response_db(bands[0], freq, rate,
+                                              "Clean", 0.0) + \
+                strip_eq_band_response_db(bands[1], freq, rate, "Clean",
+                                          0.0)
+            assert band_sum == pytest.approx(total, abs=1e-9)

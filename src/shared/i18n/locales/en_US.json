@@ -466,6 +466,19 @@
       }
     },
     "fx": {
+      "vst3": {
+        "title": "VST3 plug-in",
+        "add": "Add VST3 plug-in…",
+        "scan": "Choose VST3 file…",
+        "scan_dir": "Choose VST3 bundle…",
+        "pick": "Select VST3 plug-in",
+        "checking": "Checking plug-in in a separate process…",
+        "help": "Choose an installed stereo, zero-latency VST3 effect.",
+        "mismatch": "The selected bundle differs from the saved plug-in build.",
+        "normalized": "Parameter values use the normalized 0–1 range.",
+        "host_muted": "Host muted this insert",
+        "stereo_only": "Requires a stereo channel"
+      },
       "threshold_dbfs": "Threshold (dBFS)",
       "ratio": "Ratio",
       "frequency": "Frequency",
@@ -966,6 +979,11 @@
     "point_to_point_mode": "Point to Point Mode"
   },
   "mixer": {
+    "layout": {
+      "title": "Channel layouts",
+      "channel": "Track / Bus",
+      "default": "Project default"
+    },
     "track_header": {
       "volume": "Track volume · {db} dB · L/R peaks · double-click for 0 dB",
       "pan": "Stereo balance · {value} · drag to adjust, double-click to center"
@@ -1014,6 +1032,126 @@
     "magenta": "Magenta",
     "automation": {
       "write_protected": "Track automation is write-protected"
+    },
+    "vca": {
+      "title": "VCA groups",
+      "new": "New group",
+      "name": "Name",
+      "gain": "Group gain",
+      "muted": "Mute group",
+      "description": "Members keep their routing. Overlapping group gains multiply.",
+      "members": "Member audio tracks and buses",
+      "delete": "Delete group",
+      "missing": "Some members are offline; applying removes missing members.",
+      "name_required": "Enter a group name.",
+      "apply": "Apply",
+      "close": "Close",
+      "rejected": "VCA change rejected"
+    },
+    "reference": {
+      "title": "Reference Mix A/B",
+      "reference": "Saved reference",
+      "media_pool": "Media Pool audio",
+      "label": "Name",
+      "source_in": "Source in-point (source samples)",
+      "anchor": "Timeline anchor (timeline samples)",
+      "save": "Save reference",
+      "remove": "Remove reference",
+      "bwf": "Use BWF time reference",
+      "register_print": "Register verified Full Mix",
+      "register_print_tip": "Read delivery.json next to the imported WAV.",
+      "print_revision": "Verified print, revision {revision}",
+      "programme": "A · Programme",
+      "audition_reference": "B · Reference",
+      "measure": "Measure 3 s",
+      "match": "Match loudness",
+      "align": "Apply suggested anchor",
+      "close": "Close",
+      "new": "New reference…",
+      "choose_audio": "Choose an audio asset from the Media Pool.",
+      "offline": "Reference media is missing or offline.",
+      "no_engine": "The timeline audio engine is unavailable.",
+      "preparing": "Preparing reference audio…",
+      "rejected": "Could not save the reference.",
+      "ready": "Ready · {rate} Hz · {channels} playback channels",
+      "failed": "Reference operation failed",
+      "measure_pending": "Play the timeline in Programme or SIP to measure three seconds.",
+      "unknown": "Unavailable",
+      "measured": "Measured samples {start}–{end} at {rate} Hz",
+      "measurement": "A {programme} · B {reference} · Match {gain}",
+      "delay": "Reference delay {samples:+d} samples · correlation {confidence:.2f}",
+      "range_error": "Choose an interval covered by the reference.",
+      "transport_error": "Measurement interrupted by playback or device changes.",
+      "measuring": "Measuring loudness and alignment…"
+    },
+    "monitor": {
+      "title": "Control room",
+      "source": "Listen to",
+      "program": "Programme",
+      "pfl": "PFL · Before fader",
+      "afl": "AFL · After fader",
+      "sip": "SIP · Programme solo",
+      "input": "Live input",
+      "channels": "Listen channels",
+      "input_track": "Input patch",
+      "gain": "Monitor level",
+      "mono": "Mono",
+      "dim": "DIM",
+      "mute": "Mute speakers",
+      "device": "Output device",
+      "width": "Device channels",
+      "map_hint": "Automatic stereo, or e.g. 1,2,3,4,5,6",
+      "map": "Speaker outputs",
+      "speaker_order": "Speaker order {order}",
+      "trims_hint": "Optional, e.g. 0,-1.5,0,0,0,0 dB",
+      "trims": "Speaker trims (dB)",
+      "apply": "Apply output patch",
+      "default_device": "System default",
+      "unavailable_device": "Selected device unavailable",
+      "select_input": "Select an input patch",
+      "invalid_patch": "Enter unique speaker outputs within the device width and trims from −24 to 0 dB.",
+      "input_changed": "Input patch changed. Select it again to listen.",
+      "input_rate": "The input and output sample rates must match.",
+      "adr_unavailable": "The ADR monitor return needs an active programme output at the capture sample rate.",
+      "stop_for_patch": "Stop playback before applying a new output patch.",
+      "applied": "Output patch applied.",
+      "output_failed": "Control room output is unavailable. Check the output device and channel patch."
+    },
+    "health": {
+      "title": "Audio engine health",
+      "metric": "Metric",
+      "value": "Measured value",
+      "unknown": "Not measured",
+      "sample_rate": "Sample rate",
+      "buffer_size": "Device block",
+      "render_p50_ms": "Render p50",
+      "render_p95_ms": "Render p95",
+      "render_p99_ms": "Render p99",
+      "render_deadline_ms": "Render block budget",
+      "deadline_miss_count": "Deadline misses in window",
+      "ring_fill_ratio": "Ring fill",
+      "underruns": "Underruns",
+      "overflows": "Overflows",
+      "pdc_total_samples": "PDC",
+      "active_tracks": "Audio tracks",
+      "active_buses": "Buses",
+      "sound_key_active": "Active sound identity"
+    },
+    "clip_editor": {
+      "long_source_view": "Full source waveform · Zoom in for sample detail. Clip Edit audition and processing currently support up to 300 seconds; the full clip range stays intact."
+    },
+    "console": {
+      "solo_safe": "Solo safe"
+    },
+    "routing": {
+      "rejected": "Routing change rejected"
+    },
+    "recovery": {
+      "title": "Recover interrupted recording…",
+      "progress": "Verifying and recovering recorded audio…",
+      "cancel": "Cancel",
+      "failed": "Recording recovery failed",
+      "complete": "Recovered partial recording"
     }
   },
   "mask": {

@@ -1,6 +1,7 @@
 """Parameter translations for the rack effects that already process audio."""
 from __future__ import annotations
 
+from math import log10
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,8 @@ def _fraction(percent: float) -> float:
 
 
 def _feedback_fraction(percent: float) -> Any:
-    # The prototypes allow negative feedback. The processors only accept 0–95%.
-    return _fraction(percent) if 0.0 <= percent <= 95.0 else SKIP
+    # Signed feedback is consumed by both production modulation processors.
+    return _fraction(percent) if -95.0 <= percent <= 95.0 else SKIP
 
 
 def _attack_percent(db: float) -> float:
@@ -53,9 +54,7 @@ def _depth_ms(percent: float) -> float:
 
 
 def _stages(stages: int) -> int:
-    # The active processor uses at most four stages. Snapshots keep larger
-    # legacy values until the user explicitly selects a supported stage count.
-    return max(1, min(4, stages))
+    return max(1, min(12, stages))
 
 
 def _negate(value: float) -> float:
@@ -79,14 +78,16 @@ def _deesser_mode_to_engine(mode: str) -> str:
 
 
 def _tremolo_mode_to_panel(mode: str) -> str:
-    return "Auto-Pan" if mode == "auto_pan" else "Tremolo"
+    return {"auto_pan": "Auto-Pan", "dual": "Dual"}.get(mode, "Tremolo")
 
 
 def _tremolo_mode_to_engine(mode: str) -> Any:
-    return {"Auto-Pan": "auto_pan", "Tremolo": "tremolo"}.get(mode, SKIP)
+    return {"Auto-Pan": "auto_pan", "Tremolo": "tremolo", "Dual": "dual"}.get(mode, SKIP)
 
 
 def _select_wave_file(value: str) -> Any:
+    if not value:
+        return ""
     # The drawing uses synthetic built-ins and sweep filenames. Only a chosen
     # PCM WAV can go through the existing production file loader.
     selected = Path(value)
@@ -114,6 +115,30 @@ _MULTIBAND_FIELDS = (
 )
 
 RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
+    "exciter": ("exciter", (
+        Field("crossovers.0", "ex_crossover_hz"),
+        Field("global_mix", "ex_wet", _percent, _fraction),
+        Field("output_gain", "ex_output_gain_db"),
+        Field("oversampling", "ex_oversampling", lambda v: "2x" if v == 2 else "1x Off",
+              lambda v: 2 if v == "2x" else 1),
+        *(field for i in range(2) for field in (
+            Field(f"bands.{i}.enabled", f"ex_bands.{i}.enabled"),
+            Field(f"bands.{i}.mode", f"ex_bands.{i}.mode", str.title, str.lower),
+            Field(f"bands.{i}.amount", f"ex_bands.{i}.amount", _percent, _fraction),
+            Field(f"bands.{i}.mix", f"ex_bands.{i}.mix", _percent, _fraction),
+        )),
+    )),
+    "subharmonic": ("subharmonic", (
+        Field("source.freq", "sh_source_center_hz"),
+        Field("source.oct1_level", "sh_octave1_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),
+              lambda v: 20.0 * log10(max(v / 100.0, 1e-6))),
+        Field("source.oct2_level", "sh_octave2_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),
+              lambda v: 20.0 * log10(max(v / 100.0, 1e-6))),
+        Field("source.sub_lpf", "sh_sub_lpf_hz"),
+        Field("drive.attack", "sh_attack_ms"), Field("drive.release", "sh_release_ms"),
+        Field("output.mix", "sh_mix", _percent, _fraction),
+        Field("output.trim_db", "sh_output_gain_db"),
+    )),
     "de_esser": ("deesser", (
         Field("freq", "frequency"),
         Field("q", "q"),
@@ -124,6 +149,10 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("release", "release_ms"),
         Field("listen", "listen"),
         Field("mode", "mode", _deesser_mode_to_panel, _deesser_mode_to_engine),
+        Field("filter_shape", "detector_shape", lambda v: "High Shelf" if v == "high_shelf" else "Bandpass",
+              lambda v: "high_shelf" if v == "High Shelf" else "bandpass"),
+        Field("lookahead", "lookahead_ms"),
+        Field("output_gain", "output_gain_db"),
     )),
     "true_peak_limiter": ("true_peak_limiter", (
         Field("ceiling", "ceiling_dbtp"),
@@ -132,7 +161,8 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("engine.linked", "linked"),
     )),
     "dynamic_eq": ("dynamic_eq", (
-        # A production instance is one bell. The fourth slot is the panel's
+        Field("ext_sc_source", "sidechain_source_id"),
+        # A legacy production instance is one bell. The fourth slot is the panel's
         # presence band and remains the stable target even when another is selected.
         Field("bands.3.freq", "frequency"),
         Field("bands.3.q", "q"),
@@ -148,6 +178,11 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
     "bus_comp": ("bus_compressor", (
         Field("topology", "template", _bus_template_to_panel, _bus_template_to_engine),
         Field("sc_hpf", "sc_hpf_hz"),
+        Field("threshold", "threshold_db"), Field("ratio", "ratio"),
+        Field("attack", "attack_ms"),
+        Field("release", "release_ms", lambda v: v / 1000.0, lambda v: v * 1000.0),
+        Field("makeup", "makeup_gain"), Field("mix", "mix"),
+        Field("processor_knee", "knee", lambda v: v * 0.24, lambda v: v / 0.24),
     )),
     "multiband_comp": ("multiband_compressor", (
         Field("crossovers.0", "crossovers.0"),
@@ -168,11 +203,19 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("transient.sustain", "sustain_db", _sustain_percent, _sustain_db),
         Field("transient.attack_ms", "attack_ms"),
         Field("transient.release", "sustain_ms"),
+        Field("transient.mix", "mix", _percent, _fraction), Field("output_gain", "output_gain_db"),
+        Field("sidechain.hpf_freq", "sc_hpf_hz"), Field("sidechain.lpf_freq", "sc_lpf_hz"),
+        Field("sidechain.slope", "sc_filter_slope_db_oct"), Field("sidechain.listen", "sc_listen"),
     )),
     "tremolo_auto_pan": ("tremolo_autopan", (
         Field("mode", "mode", _tremolo_mode_to_panel, _tremolo_mode_to_engine),
         Field("rate_hz", "rate_hz"),
         Field("depth", "depth", _percent, _fraction),
+        Field("sync", "sync"), Field("bpm", "bpm"), Field("sync_div", "sync_div"),
+        Field("shape", "duty_cycle_pct"), Field("smooth", "smooth_ms"),
+        Field("pan_center", "pan_center_pct"), Field("pan_width", "pan_width_pct"),
+        Field("waveform", "waveform", lambda v: v.replace("_", " ").title(),
+              lambda v: v.lower().replace(" ", "_")),
     )),
     "chorus_flanger": ("modulation", (
         Field("chorus.rate", "rate_hz", when=_is_chorus),

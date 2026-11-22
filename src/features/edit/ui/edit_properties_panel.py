@@ -850,6 +850,8 @@ class EditPropertiesPanel(QWidget):
         super().__init__(parent)
         self._updating = False  # 防递归锁
         self._current_clips: List[ClipInstance] = []
+        self._current_tracks: List[Optional[EditTrack]] = []
+        self._audio_workspace = False
         self._fps: float = 24.0
         self._current_frame: int = 0
         # AUD-20000: 播放头帧来源。控制器可经 set_frame_provider 注入回调；
@@ -1683,6 +1685,10 @@ class EditPropertiesPanel(QWidget):
 
         if group == "transform":
             self._emit_transform_param(clip, param_name, value)
+        elif group == "audio_clip":
+            self.clips_param_batch_changed.emit([
+                (member.clip_id, group, param_name, value) for member in self._current_clips
+            ])
         elif group == "crop":
             self._emit_crop_param(clip, param_name, value)
         elif group == "raw":
@@ -1914,6 +1920,11 @@ class EditPropertiesPanel(QWidget):
                 # 发 reset_transform_requested 信号（controller 会批量重置）
                 clip_ids = [c.clip_id for c in self._current_clips]
                 self.reset_transform_requested.emit(clip_ids)
+            elif group == "audio_clip":
+                self.clips_param_batch_changed.emit([
+                    (member.clip_id, group, "reset", None) for member in self._current_clips
+                ])
+                return
             elif group == "solid_color":
                 # AUD-20007: Solid 参数不经 _route_clip_param（直发
                 # generator_params_changed 写 asset metadata），通用分支
@@ -2225,6 +2236,7 @@ class EditPropertiesPanel(QWidget):
             generator_params: Solid 生成器完整参数集（mode/colors/checker/gradient/radial）。
         """
         self._current_clips = [clip]
+        self._current_tracks = [track]
         self._fps = fps
         self._current_transition = None
         self._current_track = track
@@ -2236,6 +2248,7 @@ class EditPropertiesPanel(QWidget):
         self._updating = True
         self._clear_sections()
         self._no_selection_label.setVisible(False)
+        self._title_label.setText(I18N.tr("edit.properties.header", "Properties"))
 
         # 原生参数 section（Transform/Crop/Speed/Opacity）
         # 默认展开 —— 调节片段的 Transform/Opacity 会作用于其下方的
@@ -2248,10 +2261,20 @@ class EditPropertiesPanel(QWidget):
         collapse_native = False
         is_adjustment = media_type == "adjustment"
         is_solid = media_type == "solid"
+        audio_workspace = getattr(self, "_audio_workspace", False)
+        is_audio = media_type == "audio" or (track is not None and track.track_type == "audio")
 
         # 1. Effect sections（置顶！每个特效一个独立可折叠 section）
         #    调节片段的核心就是效果链，正常显示；solid 通常不挂效果。
         self._build_effect_sections(clip)
+        if audio_workspace and is_audio:
+            self._build_clip_audio_properties(clip)
+            self._build_speed_section(clip, collapsed=self._collapsed_for("speed", True))
+            if track is not None:
+                self._build_audio_clip_section(clip, track, collapsed=self._collapsed_for("audio", True))
+            self._updating = False
+            self._update_keyframe_buttons()
+            return
         # 2. 原生参数 sections（默认展开，见上方 collapse_native 说明）
         #    Adjustment 的 Transform/Opacity 作用于下方已合成画面；Crop/Speed
         #    仍是源片段属性，因此只给普通媒体构建 Crop/Speed。
@@ -2308,9 +2331,10 @@ class EditPropertiesPanel(QWidget):
         # INT-13：多选不再被 set_clip 截断为单片段。SelectionContext
         #（_current_clips）保持完整列表，重置/批量命令作用于全部选中；
         # 面板以 primary（第一个）构建控件，多选时标题提示计数。
-        self.set_clip(clips[0], fps, media_type=media_type,
+        self.set_clip(clips[0], fps, track=tracks[0] if tracks else None, media_type=media_type,
                       solid_color=solid_color, generator_params=generator_params)
         self._current_clips = list(clips)  # set_clip 内部置 [primary]，此处恢复完整上下文
+        self._current_tracks = list(tracks) if tracks else [None] * len(clips)
         self._title_label.setText(I18N.tr(
             "edit.properties.header_multi",
             "Properties ({n} clips selected)",
@@ -2622,6 +2646,57 @@ class EditPropertiesPanel(QWidget):
     def set_fps(self, fps: float) -> None:
         self._fps = fps
 
+    def set_audio_workspace(self, enabled: bool) -> None:
+        """Use the same inspector and signals with audio-specific clip sections."""
+        if getattr(self, "_audio_workspace", False) == enabled:
+            return
+        self._audio_workspace = enabled
+        if self._current_clips:
+            self._rebuild_clip_sections()
+
+    def _rebuild_clip_sections(self) -> None:
+        """Retain selection and metadata when the effect chain changes."""
+        self.set_clips(
+            list(self._current_clips), self._fps,
+            tracks=getattr(self, "_current_tracks", None),
+            media_type=self._current_clip_media_type,
+            solid_color=self._current_solid_color,
+            generator_params=self._current_generator_params,
+        )
+
+    def update_clip_tracks(self, tracks: List[Optional[EditTrack]]) -> None:
+        """Refresh the shared track controls without rebuilding active inputs."""
+        self._current_tracks = list(tracks)
+        self._current_track = tracks[0] if tracks else None
+        updating = self._updating
+        self._updating = True
+        try:
+            for track in tracks:
+                if track is None:
+                    continue
+                refs = self._audio_widget_refs.get(track.track_id, {})
+                for key, value in (("volume", track.volume * 100.0), ("pan", track.pan * 100.0)):
+                    if key in refs:
+                        slider, drag = refs[key]
+                        slider.blockSignals(True)
+                        drag.blockSignals(True)
+                        try:
+                            slider.setValue(round(value))
+                            drag.setValue(value)
+                        finally:
+                            slider.blockSignals(False)
+                            drag.blockSignals(False)
+        finally:
+            self._updating = updating
+
+    @staticmethod
+    def _effect_structure(clip: ClipInstance) -> tuple:
+        return tuple(
+            (fx.get("effect_id"), fx.get("effect_type"), fx.get("order", 0), fx.get("is_enabled", True))
+            if isinstance(fx, dict) else (fx.effect_id, fx.effect_type, fx.order, fx.is_enabled)
+            for fx in clip.effects
+        )
+
     def update_clips(self, clips: List[ClipInstance]) -> None:
         """N12/T3-04：按 stable clip_id 批量替换快照并刷新控件显示。
 
@@ -2631,17 +2706,69 @@ class EditPropertiesPanel(QWidget):
         盖刚提交的前一个字段（X→Y 后 X 回原值），控件显示与模型分叉。
         """
         updated_any = False
+        rebuild = False
         for clip in clips:
             if not getattr(clip, "clip_id", None):
                 continue
             for i, existing in enumerate(self._current_clips):
                 if getattr(existing, "clip_id", None) == clip.clip_id:
                     if existing is not clip:
+                        rebuild |= self._effect_structure(existing) != self._effect_structure(clip)
+                        if getattr(self, "_audio_workspace", False):
+                            rebuild |= existing.timeline_duration != clip.timeline_duration
                         self._current_clips[i] = clip
                     updated_any = True
                     break
         if updated_any:
-            self.refresh_clip_widgets_from_snapshots()
+            if rebuild:
+                self._rebuild_clip_sections()
+            else:
+                self.refresh_clip_widgets_from_snapshots()
+                for effect in self._current_clips[0].effects:
+                    effect_id = effect.get("effect_id") if isinstance(effect, dict) else effect.effect_id
+                    params = effect.get("params", {}) if isinstance(effect, dict) else effect.params
+                    section = self._sections.get(f"clip:{self._current_clips[0].clip_id}:effect:{effect_id}")
+                    if section is not None:
+                        section.parameters = dict(params)
+
+    def _audio_clip_display_values(self, clip: ClipInstance) -> Dict[str, Any]:
+        fps = float(self._fps or 24.0)
+        return {
+            "gain_db": clip.audio_gain_db,
+            "fade_in_ms": clip.effective_fade_in_frames(fps) / fps * 1000.0,
+            "fade_out_ms": clip.effective_fade_out_frames(fps) / fps * 1000.0,
+        }
+
+    def _build_clip_audio_properties(self, clip: ClipInstance) -> None:
+        """Expose clip gain/fades through the existing timeline command path."""
+        duration_ms = clip.timeline_duration / float(self._fps or 24.0) * 1000.0
+        definitions = {
+            "gain_db": ParamDef(name="gain_db", ptype="float", min_val=-48.0, max_val=12.0,
+                                step=0.1, decimals=1, default=0.0),
+            **{key: ParamDef(name=key, ptype="float", min_val=0.0, max_val=duration_ms,
+                             step=0.1, decimals=1, default=0.0)
+               for key in ("fade_in_ms", "fade_out_ms")},
+        }
+        values = self._audio_clip_display_values(clip)
+        section = self._add_section(
+            section_id=f"clip:{clip.clip_id}:audio_clip",
+            title=I18N.tr("edit.properties.audio_clip", "Audio Clip"),
+            parameters=values, param_defs=definitions, node_color="#4a6a5a",
+            collapsed=self._collapsed_for("audio_clip", False),
+        )
+        content = section.content_layout()
+        content.addWidget(self._build_info_row(
+            I18N.tr("edit.properties.clip_id", "Clip ID"), clip.clip_id[:16]))
+        content.addWidget(self._build_info_row(
+            I18N.tr("edit.properties.duration", "Duration"), f"{duration_ms / 1000.0:.3f} s"))
+        for key, label in (
+            ("gain_db", I18N.tr("edit.properties.clip_gain", "Clip Gain (dB)")),
+            ("fade_in_ms", I18N.tr("edit.properties.fade_in_ms", "Fade In (ms)")),
+            ("fade_out_ms", I18N.tr("edit.properties.fade_out_ms", "Fade Out (ms)")),
+        ):
+            row = self._build_numeric_row(section, key, values[key], definitions[key])
+            row.findChild(QLabel).setText(label)
+            content.addWidget(row)
 
     @staticmethod
     def _transform_display_values(clip: ClipInstance) -> Dict[str, Any]:
@@ -2706,6 +2833,7 @@ class EditPropertiesPanel(QWidget):
         if not clip_id:
             return
         groups = {
+            "audio_clip": self._audio_clip_display_values(primary),
             "transform": self._transform_display_values(primary),
             "crop": self._crop_display_values(primary),
             "speed": self._speed_display_values(primary),
@@ -4272,8 +4400,14 @@ def _build_effect_sections(self: EditPropertiesPanel, clip: ClipInstance) -> Non
         collapsed = self._collapsed_for(effect_type_key, not is_selected)
 
         def _builder(section, _effect_id=effect_id, _pdefs=param_defs_tuple,
-                     _params=params, _clip=clip):
+                     _params=params, _clip=clip, _effect_type=effect_type):
             cl = section.content_layout()
+            if getattr(self, "_audio_workspace", False):
+                button = QPushButton(I18N.tr("edit.properties.open_effect_panel", "Open effect panel"))
+                button.clicked.connect(lambda: self.effect_open_dialog_requested.emit(
+                    _clip.clip_id, _effect_id, _effect_type))
+                cl.addWidget(button)
+                return
             variant_rows: Dict[str, QWidget] = {}
 
             def update_blur_visibility(value: Any) -> None:

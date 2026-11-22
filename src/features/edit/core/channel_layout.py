@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
 
 import numpy as np
@@ -65,13 +66,7 @@ class ChannelLayout(Enum):
     @property
     def channel_count(self) -> int:
         """该布局的声道数。"""
-        return {
-            ChannelLayout.MONO: 1,
-            ChannelLayout.STEREO: 2,
-            ChannelLayout.SURROUND_5_1: 6,
-            ChannelLayout.SURROUND_7_1: 8,
-            ChannelLayout.QUAD: 4,
-        }[self]
+        return _CHANNELS_BY_LAYOUT[self]
 
     @property
     def channel_labels(self) -> tuple:
@@ -98,15 +93,12 @@ class ChannelLayout(Enum):
     @staticmethod
     def from_channel_count(count: int) -> "ChannelLayout":
         """根据声道数推断布局（1=mono, 2=stereo, 4=quad, 6=5.1, 8=7.1）。未知抛 ValueError。"""
-        mapping = {1: ChannelLayout.MONO, 2: ChannelLayout.STEREO,
-                   4: ChannelLayout.QUAD,
-                   6: ChannelLayout.SURROUND_5_1, 8: ChannelLayout.SURROUND_7_1}
-        if count not in mapping:
+        if count not in _LAYOUT_BY_CHANNELS:
             raise ValueError(
                 f"Unknown channel count {count}: 无法推断 ChannelLayout。"
                 f"支持: 1(mono)/2(stereo)/4(quad)/6(5.1)/8(7.1)，其他需显式指定。"
             )
-        return mapping[count]
+        return _LAYOUT_BY_CHANNELS[count]
 
     @staticmethod
     def from_av_layout_name(name: str) -> "ChannelLayout":
@@ -137,6 +129,16 @@ class ChannelLayout(Enum):
                     f"（7.1.x）不支持，需先显式降混（MX-15 能力矩阵）")
             return ChannelLayout.SURROUND_7_1
         raise ValueError(f"Unsupported PyAV layout: {name!r}")
+
+
+_LAYOUT_BY_CHANNELS = {
+    1: ChannelLayout.MONO,
+    2: ChannelLayout.STEREO,
+    4: ChannelLayout.QUAD,
+    6: ChannelLayout.SURROUND_5_1,
+    8: ChannelLayout.SURROUND_7_1,
+}
+_CHANNELS_BY_LAYOUT = {layout: count for count, layout in _LAYOUT_BY_CHANNELS.items()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -297,6 +299,66 @@ def routing_matrix(
     if dst.channel_count > src.channel_count:
         return upmix_matrix(src, dst)
     return downmix_matrix(src, dst, include_lfe=include_lfe)
+
+
+class SpeakerLayoutError(ValueError):
+    """A source speaker order cannot be rendered by the selected graph."""
+
+
+def codec_bed_layout(name: str, channels: int) -> ChannelLayout:
+    """Resolve only speaker orders the native graph can interpret."""
+    try:
+        layout = ChannelLayout.from_channel_count(channels)
+    except ValueError as exc:
+        raise SpeakerLayoutError(str(exc)) from exc
+    tags = {
+        ChannelLayout.MONO: ("mono", "1c", "1 channels"),
+        ChannelLayout.STEREO: ("stereo", "2c", "2 channels"),
+        ChannelLayout.QUAD: ("quad",),
+        ChannelLayout.SURROUND_5_1: ("5.1", "5.1(side)"),
+        ChannelLayout.SURROUND_7_1: ("7.1",),
+    }
+    if name and name.strip().lower() not in tags[layout]:
+        raise SpeakerLayoutError(f"Unsupported speaker order {name!r}; select a source channel patch")
+    return layout
+
+
+@lru_cache(maxsize=32)
+def _pcm_route_matrix(src: ChannelLayout, dst: ChannelLayout) -> np.ndarray:
+    if src is ChannelLayout.MONO and dst is ChannelLayout.STEREO:
+        return downmix_matrix(src, dst).astype(np.float32)
+    if src is ChannelLayout.QUAD and dst in (ChannelLayout.SURROUND_5_1,
+                                             ChannelLayout.SURROUND_7_1):
+        matrix = np.zeros((dst.channel_count, 4), dtype=np.float32)
+        matrix[0, 0] = matrix[1, 1] = matrix[4, 2] = matrix[5, 3] = 1.0
+        return matrix
+    return routing_matrix(src, dst).astype(np.float32)
+
+
+def codec_routing_matrix(src: ChannelLayout, dst: ChannelLayout,
+                         codec_name: str = "") -> np.ndarray:
+    """Preserve physical side speakers for a labelled 5.1(side) source."""
+    matrix = _pcm_route_matrix(src, dst)
+    if (codec_name == "5.1(side)" and src is ChannelLayout.SURROUND_5_1
+            and dst is ChannelLayout.SURROUND_7_1):
+        return matrix[[0, 1, 2, 3, 6, 7, 4, 5]]
+    return matrix.copy()
+
+
+def route_pcm(samples: np.ndarray, dst: ChannelLayout,
+              src: Optional[ChannelLayout] = None, *, codec_name: str = "") -> np.ndarray:
+    """Route planar PCM at a graph edge with explicit speaker coefficients."""
+    if samples.ndim == 1:
+        samples = samples.reshape(1, -1)
+    if samples.ndim != 2:
+        raise ValueError("Audio routing requires planar PCM")
+    src = src or ChannelLayout.from_channel_count(samples.shape[0])
+    if samples.shape[0] != src.channel_count:
+        raise ValueError(f"PCM width does not match {src.av_layout_name}")
+    if src is dst:
+        return samples
+    matrix = codec_routing_matrix(src, dst, codec_name) if codec_name else _pcm_route_matrix(src, dst)
+    return (matrix @ samples).astype(samples.dtype, copy=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

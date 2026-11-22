@@ -33,6 +33,12 @@ import logging
 from src.features.edit.core.timeline_v2 import TimelineSequence, ClipInstance
 
 from src.features.edit.core.adr_cues import SetAdrCuesCommand
+from src.features.edit.core.commands.mix_layout_command import SetMixLayoutCommand
+from src.features.edit.core.commands.routing_transaction import SetTrackRoutingCommand
+from src.features.edit.core.commands.vca_commands import SetVcaGroupCommand
+from src.features.edit.core.commands.reference_mix_commands import SetReferenceMixCommand
+from src.features.edit.core.audio_comp import FlattenAudioCompCommand
+from src.features.edit.core.dialogue_proposal import ApplyDialogueProposalCommand
 from src.features.edit.core.commands.clip_props_commands import SetDialogueGroupCommand
 from src.features.edit.core.commands.audio_commands import (
     SetTrackAutomationTrimCommand,
@@ -915,6 +921,7 @@ from .audio_commands import (
     ClearAutomationCommand,
     SetAutomationKeyframeInterpolationCommand,
     SetTrackAutomationModeCommand,
+    SetTrackSoloSafeCommand,
     SetTrackVolumeCommand,
     SetTrackPanCommand,
     SetTrackPannerCommand,
@@ -1167,6 +1174,7 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "SetTrackLockCommand": SetTrackLockCommand.from_dict,
     "SetTrackSyncLockCommand": SetTrackSyncLockCommand.from_dict,
     "SetTrackAutomationModeCommand": SetTrackAutomationModeCommand.from_dict,
+    "SetTrackSoloSafeCommand": SetTrackSoloSafeCommand.from_dict,
     "SetTrackVolumeCommand": SetTrackVolumeCommand.from_dict,
     "SetTrackPanCommand": SetTrackPanCommand.from_dict,
     "SetTrackPannerCommand": SetTrackPannerCommand.from_dict,
@@ -1196,6 +1204,12 @@ _MACRO_SUBCOMMAND_TYPES: dict[str, Any] = {
     "AddBusCommand": AddBusCommand.from_dict,
     "RemoveBusCommand": RemoveBusCommand.from_dict,
     "SetTrackOutputBusCommand": SetTrackOutputBusCommand.from_dict,
+    "SetTrackRoutingCommand": SetTrackRoutingCommand.from_dict,
+    "SetMixLayoutCommand": SetMixLayoutCommand.from_dict,
+    "SetVcaGroupCommand": SetVcaGroupCommand.from_dict,
+    "SetReferenceMixCommand": SetReferenceMixCommand.from_dict,
+    "FlattenAudioCompCommand": FlattenAudioCompCommand.from_dict,
+    "ApplyDialogueProposalCommand": ApplyDialogueProposalCommand.from_dict,
     "AddSendCommand": AddSendCommand.from_dict,
     "RemoveSendCommand": RemoveSendCommand.from_dict,
     "UpdateSendCommand": UpdateSendCommand.from_dict,

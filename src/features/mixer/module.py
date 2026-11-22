@@ -19,9 +19,10 @@ MIXER_PANEL_SPECS: tuple[tuple[str, str, str, str], ...] = (
     ("clip_editor", "dock_audio_clip_editor", "clip_editor_panel", "Clip Editor"),
     ("media_pool", "dock_audio_media_pool", "media_pool_panel", "Media Pool"),
     ("effects", "dock_audio_effects", "effects_panel", "Audio Effects"),
+    ("properties", "dock_audio_properties", "properties_panel", "Properties"),
 )
 
-MIXER_PROJECT_ONLY_KEYS: frozenset[str] = frozenset({"media_pool", "effects"})
+MIXER_PROJECT_ONLY_KEYS: frozenset[str] = frozenset({"media_pool", "effects", "properties"})
 
 # Panels 菜单标题 i18n key：console/viewer/media_pool/effects 复用现有 key，
 # 其余走 panel.audio_<key>（locales 已覆盖）。
@@ -30,6 +31,7 @@ MIXER_PANEL_TITLE_KEYS: dict[str, str] = {
     "viewer": "panel.audio_viewer",
     "media_pool": "panel.media_pool",
     "effects": "panel.audio_effects",
+    "properties": "panel.properties",
 }
 
 
@@ -68,7 +70,7 @@ class MixerModule:
                 title_key=title_key,
                 fallback_title=title, feature_id="mixer", category="Mixer",
                 page_ids=("Mixer",), dock_attr=dock_attr, order=order,
-                default_visible=key != "clip_editor", work_mode="video",
+                default_visible=key not in ("clip_editor", "effects"), work_mode="video",
             ))
 
     def register_i18n(self) -> None:

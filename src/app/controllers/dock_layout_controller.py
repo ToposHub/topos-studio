@@ -80,6 +80,7 @@ _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
 # Restore newly introduced Mixer docks on the first visit with an old layout.
 _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY = "mixer_media_docks_layout_version"
 _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION = 2
+_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY = "mixer_properties_layout_version"
 
 # 浮动 dock 标题栏高度（与原生窗口标题栏接近）
 _FLOATING_TITLEBAR_HEIGHT = 28
@@ -1316,7 +1317,7 @@ class DockLayoutMixin:
         """Create independent hosts for the Mixer workspace."""
         for dock_attr in ("dock_audio_console", "dock_audio_viewer",
                           "dock_audio_timeline", "dock_audio_clip_editor",
-                          "dock_audio_media_pool", "dock_audio_effects"):
+                          "dock_audio_media_pool", "dock_audio_effects", "dock_audio_properties"):
             setattr(self, dock_attr, None)
         page = getattr(self, "mixer_page", None)
         if not getattr(self, "_mixer_available", False) or page is None:
@@ -1334,6 +1335,7 @@ class DockLayoutMixin:
             "console": "dockAudioConsole", "viewer": "dockAudioViewer",
             "timeline": "dockAudioTimeline", "clip_editor": "dockAudioClipEditor",
             "media_pool": "dockAudioMediaPool", "effects": "dockAudioEffects",
+            "properties": "dockAudioProperties",
         }
         for key, dock_attr, panel_attr, title in MIXER_PANEL_SPECS:
             if not page.project_backed and key in MIXER_PROJECT_ONLY_KEYS:
@@ -1351,12 +1353,15 @@ class DockLayoutMixin:
                 panel.effect_activated.connect(self._apply_selected_mixer_effect)
             elif page.project_backed:
                 panel = QWidget()
+                if key == "properties":
+                    panel.setMinimumWidth(self.edit_properties_panel.minimumWidth())
                 layout = QVBoxLayout(panel)
                 layout.setContentsMargins(0, 0, 0, 0)
             else:
                 panel = getattr(page, panel_attr)
             dock = factory(dock_title, panel, object_names[key])
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea if key == "properties" else
+                               Qt.DockWidgetArea.TopDockWidgetArea
                                if key in ("console", "viewer",
                                           "media_pool", "effects") else
                                Qt.DockWidgetArea.BottomDockWidgetArea, dock)
@@ -1630,11 +1635,15 @@ class DockLayoutMixin:
             self.edit_viewport.set_program_only(True)
         self.timeline_panel.set_display_mode("mixer")
         self.timeline_panel.get_timeline_view().set_audio_only(True)
+        audio_inspector = getattr(self.edit_properties_panel, "set_audio_workspace", None)
+        if callable(audio_inspector):
+            audio_inspector(True)
         self.audio_mixer_panel.close_effect_editors()
         borrowed: list[tuple[QDockWidget, QWidget]] = [
             (self.dock_audio_console, self.audio_mixer_panel),
             (self.dock_audio_viewer, self.edit_viewport or self.program_viewer_widget),
             (self.dock_audio_timeline, self.timeline_panel),
+            (self.dock_audio_properties, self.edit_properties_panel),
         ]
         media_pool_dock = getattr(self, "dock_audio_media_pool", None)
         media_pool_panel = getattr(self, "media_pool_panel", None)
@@ -1659,11 +1668,15 @@ class DockLayoutMixin:
         if effects_dock is not None:
             effects_dock.widget().pause_panel_windows()
         self.dock_audio_clip_editor.widget().reset()
+        audio_inspector = getattr(self.edit_properties_panel, "set_audio_workspace", None)
+        if callable(audio_inspector):
+            audio_inspector(False)
         self.timeline_panel.get_timeline_view().set_audio_only(False)
         self.timeline_panel.set_display_mode("edit")
         for dock, widget in (
             (self.dock_audio_mixer, self.audio_mixer_panel),
             (self.dock_edit_timeline, self.timeline_panel),
+            (self.dock_properties, self.edit_properties_panel),
         ):
             dock.setWidget(widget)
             widget.show()
@@ -1686,6 +1699,7 @@ class DockLayoutMixin:
         return tuple(dock for attr in (
             "dock_audio_console", "dock_audio_viewer", "dock_audio_timeline",
             "dock_audio_clip_editor", "dock_audio_media_pool", "dock_audio_effects",
+            "dock_audio_properties",
         ) if isinstance((dock := getattr(self, attr, None)), QDockWidget))
 
     def _seed_audio_workspace_layout(self) -> bool:
@@ -1718,13 +1732,19 @@ class DockLayoutMixin:
                 self.splitDockWidget(effects, viewer, Qt.Orientation.Horizontal)
                 self.tabifyDockWidget(effects, media_pool)
                 media_pool.show()
-                effects.show()
-                effects.raise_()
+                effects.hide()
+                media_pool.raise_()
             else:
                 self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
             self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
             for dock in (console, viewer, timeline):
                 dock.show()
+            properties = getattr(self, "dock_audio_properties", None)
+            if isinstance(properties, QDockWidget):
+                self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+                self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, properties)
+                properties.show()
             clip_editor = getattr(self, "dock_audio_clip_editor", None)
             if isinstance(clip_editor, QDockWidget):
                 if project_backed:
@@ -1739,11 +1759,32 @@ class DockLayoutMixin:
                 self.resizeDocks([console, viewer], [620, 440], Qt.Orientation.Horizontal)
             self.resizeDocks([console, timeline], [360, 480] if project_backed else [370, 330],
                              Qt.Orientation.Vertical)
+            if isinstance(properties, QDockWidget):
+                self.resizeDocks([properties], [300], Qt.Orientation.Horizontal)
             self._mixer_default_layout = self.saveState()
             self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
         finally:
             self.restoreState(previous)
         return True
+
+    def _migrate_mixer_properties_layout(self) -> None:
+        """Introduce the shared inspector once without resetting custom layouts."""
+        if (self.current_page != "Mixer"
+                or not getattr(getattr(self, "mixer_page", None), "project_backed", False)
+                or self.config_manager.get(_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY) == 1):
+            return
+        properties = getattr(self, "dock_audio_properties", None)
+        if not isinstance(properties, QDockWidget):
+            return
+        self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, properties)
+        properties.show()
+        self.resizeDocks([properties], [300], Qt.Orientation.Horizontal)
+        self.page_layouts["Mixer"] = self.saveState()
+        self.config_manager.set(_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY, 1, auto_save=False)
+        self._save_current_layout_to_store("Mixer")
+        self.config_manager.save_config()
 
     def _apply_default_composite_layout(self) -> None:
         """Arrange the Composite workspace for its available editing surface."""

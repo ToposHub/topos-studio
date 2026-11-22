@@ -61,13 +61,19 @@ class TestAdaptChannelsExplicitLayout:
         np.testing.assert_allclose(out_guess, out_explicit, atol=1e-6)
 
     def test_unknown_layout_rejected_not_truncated(self):
-        """未知布局（4 声道非标准）→ adapt_channels 抛 ValueError（拒绝，不静默截断）。
+        """未知布局（3 声道）→ adapt_channels 抛 ValueError（拒绝，不静默截断）。
 
         RMA-09: 与模块注释"拒绝未知 mapping"一致，不再回退截断。
         """
-        src = np.full((4, 10), 0.5, dtype=np.float32)  # 4 声道非标准
+        src = np.full((3, 10), 0.5, dtype=np.float32)  # 4ch 已支持 QUAD，3ch 仍未知
         with pytest.raises(ValueError):
-            adapt_channels(src, 2)  # 按数推断 4 → ValueError
+            adapt_channels(src, 2)
+
+    def test_supported_quad_keeps_all_four_channels(self):
+        src = np.eye(4, dtype=np.float32)
+        expected = np.array([[1.0, 0.0, np.sqrt(0.5), 0.0],
+                             [0.0, 1.0, 0.0, np.sqrt(0.5)]], dtype=np.float32)
+        np.testing.assert_allclose(adapt_channels(src, 2), expected, atol=1e-6)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ Stage B unit tests: AudioDecoder leftover sample handling.
 from __future__ import annotations
 
 import sys
+import wave
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.features.edit.core.audio_playback import AudioDecoder
+from src.features.edit.core.clip_pcm import decode_audio_range
 
 TEST_VIDEOS_DIR = Path(__file__).resolve().parents[2] / "tests" / "test_videos"
 
@@ -40,6 +43,109 @@ REAL_VIDEOS = [
     name for name in ["2K_h264.mp4", "2K_H265.mov", "2K_prores422HQ.mov"]
     if (TEST_VIDEOS_DIR / name).exists() and _has_audio(TEST_VIDEOS_DIR / name)
 ]
+
+
+def _write_stereo_44100(path: Path) -> None:
+    rng = np.random.default_rng(123)
+    pcm = rng.integers(-5000, 5000, (44100 * 2 + 83, 2), dtype=np.int16)
+    with wave.open(str(path), "wb") as writer:
+        writer.setparams((2, 2, 44100, 0, "NONE", ""))
+        writer.writeframes(pcm.astype("<i2", copy=False).tobytes())
+
+
+def test_resampled_stream_fills_requests_and_drains_only_at_eof(tmp_path: Path) -> None:
+    path = tmp_path / "source.wav"
+    _write_stereo_44100(path)
+    rate = 48000
+    fps = Fraction(30000, 1001)
+    expected = decode_audio_range(str(path), 0, 3 * rate, rate)
+    assert expected is not None
+    decoder = AudioDecoder()
+    assert decoder.open(path, timeline_fps=float(fps), output_sample_rate=rate)
+    try:
+        parts = []
+        first_sizes = [1, 1601, 1602, 13, 2000, 32768]
+        size = 7001
+        frame = 0
+        while True:
+            request = first_sizes[frame] if frame < len(first_sizes) else size
+            pcm = decoder.decode_samples_for_frame(frame, float(fps), request)
+            if pcm is None:
+                break
+            assert pcm.shape[1] == min(request, expected.shape[1] - sum(
+                part.shape[1] for part in parts))
+            parts.append(pcm)
+            frame += 1
+        np.testing.assert_allclose(np.concatenate(parts, axis=1), expected, atol=1e-7, rtol=0)
+        assert decoder.decode_samples_for_frame(frame + 1, float(fps), size) is None
+
+        # Seek with active lookahead, then rewind without leaking the old FIR tail.
+        for new_frame in (43, 8, 59, 0):
+            start = int(new_frame * rate / fps)
+            count = min(777, expected.shape[1] - start)
+            pcm = decoder.decode_samples_for_frame(new_frame, float(fps), count)
+            np.testing.assert_allclose(pcm, expected[:, start:start + count], atol=1e-7, rtol=0)
+    finally:
+        decoder.close()
+
+
+def test_gapless_mp3_seek_anchors_to_audible_start(tmp_path: Path) -> None:
+    import av
+
+    try:
+        av.codec.Codec("libmp3lame", "w")
+    except av.codec.codec.UnknownCodecError:
+        pytest.skip("FFmpeg build lacks the MP3 encoder")
+    path = tmp_path / "gapless.mp3"
+    source_rate, output_rate = 44100, 48000
+    n = np.arange(source_rate * 2, dtype=np.float64)
+    data = np.ascontiguousarray(np.stack([
+        0.36 * np.sin(n * 0.023 + n * n * 2e-7),
+        0.19 * np.sin(n * 0.049 - n * n * 1e-7),
+    ]), dtype=np.float32)
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("libmp3lame", rate=source_rate)
+        stream.layout = "stereo"
+        for pos in range(0, data.shape[1], 1152):
+            frame = av.AudioFrame.from_ndarray(
+                np.ascontiguousarray(data[:, pos:pos + 1152]), format="fltp", layout="stereo")
+            frame.sample_rate = source_rate
+            frame.pts = pos
+            frame.time_base = Fraction(1, source_rate)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode(None):
+            container.mux(packet)
+    with av.open(str(path)) as container:
+        assert container.streams.audio[0].start_time > 0
+    expected = decode_audio_range(str(path), 0, 2 * output_rate, output_rate)
+    assert expected is not None
+    decoder = AudioDecoder()
+    assert decoder.open(path, timeline_fps=24, output_sample_rate=output_rate)
+    try:
+        for frame_idx in (0, 1, 31, 16, 0):
+            start = frame_idx * 2000
+            actual = decoder.decode_samples_for_frame(frame_idx, 24, 2000)
+            np.testing.assert_allclose(actual, expected[:, start:start + 2000], atol=2e-6, rtol=0)
+    finally:
+        decoder.close()
+
+
+@pytest.mark.parametrize("count", [1, 17, 24])
+def test_resampler_retains_sources_shorter_than_filter_history(tmp_path: Path, count: int) -> None:
+    path = tmp_path / "click.wav"
+    with wave.open(str(path), "wb") as writer:
+        writer.setparams((1, 2, 44100, 0, "NONE", ""))
+        writer.writeframes(np.full(count, 16000, dtype="<i2").tobytes())
+    decoder = AudioDecoder()
+    assert decoder.open(path)
+    try:
+        pcm = decoder.decode_samples_for_frame(0, 24, 2000)
+        assert pcm is not None and pcm.shape == (1, (count * 48000 + 44099) // 44100)
+        assert np.max(np.abs(pcm)) > 0.4
+        assert decoder.decode_samples_for_frame(1, 24, 2000) is None
+    finally:
+        decoder.close()
 
 
 # =============================================================================

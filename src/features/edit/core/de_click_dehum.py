@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -45,7 +46,11 @@ def detect_hum_base(
     返回 50.0 / 60.0 / None（无可信峰）。安静窗 = 短时能量最低分位的
     分析窗（语音活跃段不参与，避免把基频误判成哼声）。
     """
-    mono = pcm.mean(axis=0) if pcm.ndim > 1 else pcm
+    if not _SCIPY:
+        return None
+    # Select by power rather than averaging opposite-polarity channels.
+    mono = (pcm[int(np.argmax(np.sum(pcm.astype(np.float64) ** 2, axis=1)))]
+            if pcm.ndim > 1 else pcm)
     win = int(0.1 * sample_rate)
     if mono.shape[0] < win * 4:
         return None
@@ -81,24 +86,36 @@ def remove_hum(
     auto_detect: bool = True,
     drift_hz: float = 0.6,
     q: float = 30.0,
+    reduction_db: float = 48.0,
+    region: Optional[Tuple[int, int]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
     """窄 notch 移除哼声及谐波（零相位 filtfilt——不引入相位偏移）。
 
     ``base_hz`` 为 None 且 auto_detect 时先检测基频（检测不到按 50）；
     ``drift_hz`` 容差内用实测 PSD 峰跟随频漂（电网 50.02/59.94 等）。
     有用频带 ≤0.5 dB 扰动由窄带高 Q 保证。
+
+    FX-07（2026-11-21 计划）：
+    - ``reduction_db``（0..48）：湿声衰减受限——完全 notch 后与原声
+      按 ``(1−k)·notched + k·original`` 混合（k = 10^(−red/20)），目标
+      频点保留 k 幅度、其余频点增益中性；
+    - ``region=(start, end)``：短选区借**整段**上下文滤波，最后只写回
+      目标区间（半开区间；选区外逐样本与输入一致）。
     """
     if not _SCIPY or pcm is None or pcm.ndim != 2 or pcm.shape[-1] == 0:
         return pcm
-    mono = pcm.mean(axis=0)
+    mono = pcm[int(np.argmax(np.sum(pcm.astype(np.float64) ** 2, axis=1)))]
     if base_hz is None:
         base_hz = detect_hum(pcm, sample_rate) if auto_detect else 50.0
     if base_hz is None:
-        base_hz = 50.0
+        return pcm  # Auto mode must not remove an unconfirmed frequency.
     freqs, psd = welch(mono, fs=sample_rate, nperseg=min(16384, mono.size))
-    out = pcm
+    out = pcm.astype(np.float32)
     nyquist = sample_rate / 2.0
     for harmonic in harmonics:
+        if cancel_check is not None and cancel_check():
+            return pcm
         target = base_hz * harmonic
         if target >= nyquist * 0.95:
             break
@@ -113,8 +130,20 @@ def remove_hum(
             continue
         sos = butter(2, [low, high], btype="bandstop", fs=sample_rate,
                      output="sos")
-        out = sosfiltfilt(sos, out, axis=-1).astype(np.float32)
-    return np.ascontiguousarray(out, dtype=np.float32)
+        try:
+            out = sosfiltfilt(sos, out, axis=-1).astype(np.float32)
+        except ValueError:
+            # 信号短于滤波器填充需求：跳过该谐波（诊断由调用方负责）。
+            continue
+    k = 10.0 ** (float(np.clip(reduction_db, 0.0, 48.0)) / -20.0)
+    wet = (1.0 - k) * out + k * pcm.astype(np.float32)
+    if region is not None:
+        lo = int(max(0, region[0]))
+        hi = int(min(pcm.shape[-1], region[1]))
+        result = pcm.astype(np.float32).copy()
+        result[:, lo:hi] = wet[:, lo:hi]
+        return np.ascontiguousarray(result, dtype=np.float32)
+    return np.ascontiguousarray(wet, dtype=np.float32)
 
 
 # 语义别名（detect_hum_base 的简短名）。
@@ -161,18 +190,22 @@ def detect_clicks(
     abs_res = np.abs(residual).max(axis=0)
 
     win = max(64, int(0.2 * sample_rate))
-    # 滑窗 MAD（中位绝对差的滑窗近似：块中位数）。
+    # 滑窗 MAD（中位绝对差的滑窗近似：块中位数）。数字净音（合成
+    # 斜坡等）MAD→0：加信号尺度下限，避免阈值塌到 0 把全文件连成
+    # 一个超限区（FX-07 修复）。
     mad = np.empty_like(abs_res)
     for start in range(0, abs_res.shape[0], win):
         end = min(abs_res.shape[0], start + win)
         segment = abs_res[start:end]
         med = np.median(segment)
         mad[start:end] = np.median(np.abs(segment - med)) + 1e-12
+    signal_scale = float(np.median(np.abs(pcm))) + 1e-9
+    mad = np.maximum(mad, 1e-4 * signal_scale)
 
     exceed = abs_res > threshold_sigma * mad
     # 宽带包络（10 ms 滑动 |mono| 均值）：鼓点/爆破音的持续宽带事件
     # 显著抬高包络；6 样本点击几乎不动包络——以此 veto 保护辅音与鼓点。
-    mono_abs = np.abs(pcm.mean(axis=0)).astype(np.float64)
+    mono_abs = np.abs(pcm).max(axis=0).astype(np.float64)
     env_win = max(8, int(0.01 * sample_rate))
     env_kernel = np.ones(env_win, dtype=np.float64) / env_win
     broadband_env = np.convolve(mono_abs, env_kernel, mode="same")
@@ -211,23 +244,31 @@ def detect_clicks(
 def _interpolate_repair(
     pcm: np.ndarray, start: int, end: int,
 ) -> np.ndarray:
-    """短区间双侧三次插值（边界钳制；不修改输入）。"""
+    """短区间双侧插值（边界钳制；不修改输入）。
+
+    FX-07 坐标修复：左右上下文取自**严格区间外**（lo 左侧 / hi 右侧
+    同一绝对样本轴），上下文不足时按可用量收缩（窗贴左/贴右合法）；
+    可用上下文不足 4 点时区间置零（保守回退）。
+    """
     out = pcm.copy()
     lo = max(0, start)
     hi = min(pcm.shape[-1], end)
     if hi <= lo:
         return out
-    margin = max(4, hi - lo)
+    gap = hi - lo
+    margin = max(4, gap)
     left = pcm[:, max(0, lo - margin):lo]
     right = pcm[:, hi:min(pcm.shape[-1], hi + margin)]
     for ch in range(pcm.shape[0]):
+        # 绝对样本轴：左上下文 = [lo−L, lo)，右上下文 = [hi, hi+R)。
         src_x = np.concatenate([
-            np.arange(left.shape[-1]), hi - lo + np.arange(right.shape[-1])])
+            np.arange(lo - left.shape[-1], lo),
+            np.arange(hi, hi + right.shape[-1])])
         src_y = np.concatenate([left[ch], right[ch]])
-        if src_x.size < 4:
+        if src_x.size < 2:
             out[ch, lo:hi] = 0.0
             continue
-        dst_x = left.shape[-1] + np.arange(hi - lo)
+        dst_x = np.arange(lo, hi)
         out[ch, lo:hi] = np.interp(dst_x, src_x, src_y)
     return out
 
@@ -238,6 +279,7 @@ def remove_clicks(
     *,
     candidates: Optional[List[ClickCandidate]] = None,
     spectral_fallback_ms: float = 25.0,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Tuple[np.ndarray, List[ClickCandidate]]:
     """移除点击：短区间双侧插值；长缺失转频谱修复。
 
@@ -249,24 +291,36 @@ def remove_clicks(
         candidates = detect_clicks(pcm, sample_rate)
     if not candidates or pcm is None:
         return pcm, []
-    out = pcm
+    out = pcm.copy()
     handled: List[ClickCandidate] = []
     spectral_threshold = int(spectral_fallback_ms * sample_rate / 1000.0)
-    for candidate in candidates:
+    # Merge overlapping windows before taking context from the original input.
+    windows: list[tuple[int, int, list[ClickCandidate]]] = []
+    for candidate in sorted(candidates, key=lambda c: c.position - max(4, c.width)):
         half = max(4, candidate.width)
-        lo = candidate.position - half
-        hi = candidate.position + half
+        lo, hi = max(0, candidate.position - half), min(pcm.shape[-1], candidate.position + half)
+        if windows and lo <= windows[-1][1]:
+            previous_lo, previous_hi, group = windows[-1]
+            windows[-1] = (previous_lo, max(previous_hi, hi), [*group, candidate])
+        else:
+            windows.append((lo, hi, [candidate]))
+    for lo, hi, group in windows:
+        if cancel_check is not None and cancel_check():
+            return pcm, []
+        if hi <= lo or lo == 0 or hi == pcm.shape[-1]:
+            continue  # No bilateral context: preserve audio and omit from handled.
         if hi - lo > spectral_threshold:
             from src.features.edit.core.audio_repair import repair_spectral
-            try:
-                out = repair_spectral(
-                    out, sample_rate, [],
-                    (max(0, lo), min(out.shape[-1], hi)),
-                    amount_db=24.0, mode="attenuate")
-                handled.append(candidate)
-            except Exception:  # noqa: BLE001 - 频谱修复缺席保持原样
-                continue
+            high_hz = sample_rate * 0.45
+            low_hz = min(20.0, high_hz / 2.0)
+            repaired = repair_spectral(
+                pcm, sample_rate,
+                [{"sample": (lo + hi) // 2, "hz": float(np.sqrt(low_hz * high_hz)),
+                  "time_radius": max(1, (hi - lo) // 2),
+                  "bandwidth_oct": float(np.log2(high_hz / low_hz))}],
+                (lo, hi), amount_db=24.0, mode="heal")
         else:
-            out = _interpolate_repair(out, max(0, lo), hi)
-            handled.append(candidate)
+            repaired = _interpolate_repair(pcm, lo, hi)
+        out[:, lo:hi] = repaired[:, lo:hi]
+        handled.extend(group)
     return out, handled

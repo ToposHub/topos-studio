@@ -869,6 +869,51 @@ def test_open_media_path_loads_video_on_edit_page(monkeypatch) -> None:
     assert host.load_video_calls == [("/tmp/a.mp4", {})]
 
 
+def test_mixer_open_media_uses_audio_aware_pool_chooser(monkeypatch) -> None:
+    """Mixer's menu reuses the async importer and its WAV/MP3 file filters."""
+    chooser = Mock()
+    standalone_chooser = Mock(side_effect=AssertionError("standalone chooser"))
+    monkeypatch.setattr(fc.QFileDialog, "getOpenFileName", standalone_chooser)
+    host = make_host(current_page="Mixer")
+    host.media_pool_panel = SimpleNamespace(_on_import_clicked=chooser)
+
+    FileOpsMixin.open_file(host)
+
+    chooser.assert_called_once_with()
+    standalone_chooser.assert_not_called()
+    assert host.load_video_calls == []
+    assert host.load_image_calls == []
+
+
+@pytest.mark.parametrize("path", ["/tmp/a.mp4", "/tmp/a.wav", "/tmp/a.mp3", "/tmp/a.png"])
+def test_mixer_media_paths_enter_existing_project_pool(path: str) -> None:
+    """Opening or dropping Mixer media must not start a standalone grade."""
+    importer = Mock()
+    host = make_host(current_page="Mixer")
+    host.media_pool_panel = SimpleNamespace(_import_files=importer)
+    project = object()
+    host._current_edit_project = project
+
+    FileOpsMixin._open_media_path(host, path)
+
+    importer.assert_called_once_with([path])
+    assert host._current_edit_project is project
+    assert host.load_video_calls == []
+    assert host.load_image_calls == []
+    assert host.open_project_calls == []
+
+
+def test_mixer_missing_pool_does_not_fall_back_to_standalone_grade(caplog) -> None:
+    host = make_host(current_page="Mixer", media_pool_panel=None)
+
+    FileOpsMixin.open_file(host)
+    FileOpsMixin._open_media_path(host, "/tmp/a.mp4")
+
+    assert host.load_video_calls == []
+    assert host.load_image_calls == []
+    assert "Media Pool is unavailable" in caplog.text
+
+
 def test_open_media_path_opens_adjacent_standalone_project(
         tmp_path, monkeypatch) -> None:
     """图像已有自己的邻接 .topos 工程 → 直接打开工程，不新建空会话。"""

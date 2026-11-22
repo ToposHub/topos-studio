@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Collection, Optional, Dict, ClassVar, Literal
 from enum import Enum
@@ -41,12 +42,14 @@ import uuid
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from fractions import Fraction
+    from src.features.edit.core.channel_layout import ChannelLayout
 
 logger = logging.getLogger(__name__)
 
 from src.shared.media.metadata import Rational
 from src.shared.extra_fields import preserves_extras, split_extras
 from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+from src.features.edit.core.reference_mix import ReferenceMixRecord, ReferenceMixRef, decode_reference_mix_record
 # R01：FX schema 版本常量（fx_versioning 只在本模块内 lazy import，无环）
 from src.features.edit.core.fade_curve_spec import is_fade_curve
 from src.features.edit.core.fx_versioning import AUDIO_FX_SCHEMA_VERSION
@@ -3139,16 +3142,37 @@ class SaturationParams:
 
     sigmoid WaveShaper，移植自 audio_pro 的 Saturation。
 
+    FX-14（2026-11-21 计划）：版本化模型 ``model_profile``——缺键读作
+    legacy（旧声音逐样本保留）；``multiband`` 为三段互补分频新模型
+    （audio_effects/saturation.py），仅新建或用户明确升级才启用。
+
     Attributes:
-        drive: 驱动量（0..100，0=无失真直通，100=强过载）
+        drive: 驱动量（0..100，0=无失真直通，100=强过载；legacy）
         enabled: 是否启用（False=旁路直通）
+        model_profile: "legacy" | "multiband"
+        mb_xover_low_hz / mb_xover_high_hz: 互补分频点（20 Hz..0.45·fs）
+        mb_oversampling: 过采样档位（1|2|4；R>1 声明 20 样本延迟）
+        mb_mix: 干湿比（0..1；干声按声明延迟对齐）
+        mb_output_gain_db: 输出增益（dB）
+        mb_bands: 三段 (enabled/model/drive_db/tone_db/bias_pct/level_db)
     """
     drive: float = 0.0
     enabled: bool = True
+    model_profile: str = "legacy"
+    mb_xover_low_hz: float = 250.0
+    mb_xover_high_hz: float = 2500.0
+    mb_oversampling: int = 1
+    mb_mix: float = 1.0
+    mb_output_gain_db: float = 0.0
+    mb_bands: tuple = ()
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.drive <= 100.0):
             raise ValueError(f"drive must be in [0, 100]: {self.drive}")
+        if self.model_profile not in ("legacy", "multiband"):
+            raise ValueError(
+                f"model_profile must be 'legacy'|'multiband': "
+                f"{self.model_profile!r}")
 
     @staticmethod
     def default() -> "SaturationParams":
@@ -3158,13 +3182,183 @@ class SaturationParams:
         return {
             "drive": self.drive,
             "enabled": self.enabled,
+            "model_profile": self.model_profile,
+            "mb_xover_low_hz": self.mb_xover_low_hz,
+            "mb_xover_high_hz": self.mb_xover_high_hz,
+            "mb_oversampling": self.mb_oversampling,
+            "mb_mix": self.mb_mix,
+            "mb_output_gain_db": self.mb_output_gain_db,
+            "mb_bands": list(self.mb_bands),
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        data = dict(band) if isinstance(band, dict) else {}
+        model = str(data.get("model", "tape") or "tape").lower()
+        if model not in ("tape", "tube", "transistor"):
+            model = "tape"
+
+        def _num(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "enabled": bool(data.get("enabled", False)),
+            "model": model,
+            "drive_db": _num("drive_db", 0.0),
+            "tone_db": _num("tone_db", 0.0),
+            "bias_pct": _num("bias_pct", 0.0),
+            "level_db": _num("level_db", 0.0),
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "SaturationParams":
+        profile = str(data.get("model_profile", "legacy") or "legacy")
+        if profile not in ("legacy", "multiband"):
+            profile = "legacy"
+        raw_bands = data.get("mb_bands") or ()
+        bands = tuple(
+            SaturationParams._normalize_band(band)
+            for band in list(raw_bands)[:3])
+        while len(bands) < 3:
+            bands = bands + (SaturationParams._normalize_band({}),)
+        try:
+            oversampling = int(data.get("mb_oversampling", 1))
+        except (TypeError, ValueError):
+            oversampling = 1
         return SaturationParams(
             drive=float(data.get("drive", 0.0)),
             enabled=bool(data.get("enabled", True)),
+            model_profile=profile,
+            mb_xover_low_hz=float(data.get("mb_xover_low_hz", 250.0)),
+            mb_xover_high_hz=float(data.get("mb_xover_high_hz", 2500.0)),
+            mb_oversampling=oversampling if oversampling in (1, 2, 4) else 1,
+            mb_mix=float(data.get("mb_mix", 1.0)),
+            mb_output_gain_db=float(data.get("mb_output_gain_db", 0.0)),
+            mb_bands=bands,
+        )
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class SubharmonicParams:
+    """次谐波发生器（FX-16 · 2026-11-21 计划）：置信度门控八度生成。"""
+    enabled: bool = True
+    sh_source_center_hz: float = 90.0
+    sh_source_bandwidth_hz: float = 60.0
+    sh_octave1_gain_db: float = -6.0
+    sh_octave2_gain_db: float = -12.0
+    sh_sub_lpf_hz: float = 120.0
+    sh_attack_ms: float = 20.0
+    sh_release_ms: float = 150.0
+    sh_mix: float = 0.5
+    sh_output_gain_db: float = 0.0
+
+    @staticmethod
+    def default() -> "SubharmonicParams":
+        return SubharmonicParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "sh_source_center_hz": self.sh_source_center_hz,
+            "sh_source_bandwidth_hz": self.sh_source_bandwidth_hz,
+            "sh_octave1_gain_db": self.sh_octave1_gain_db,
+            "sh_octave2_gain_db": self.sh_octave2_gain_db,
+            "sh_sub_lpf_hz": self.sh_sub_lpf_hz,
+            "sh_attack_ms": self.sh_attack_ms,
+            "sh_release_ms": self.sh_release_ms,
+            "sh_mix": self.sh_mix,
+            "sh_output_gain_db": self.sh_output_gain_db,
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SubharmonicParams":
+        return SubharmonicParams(
+            enabled=bool(data.get("enabled", True)),
+            sh_source_center_hz=float(data.get("sh_source_center_hz", 90.0)),
+            sh_source_bandwidth_hz=float(
+                data.get("sh_source_bandwidth_hz", 60.0)),
+            sh_octave1_gain_db=float(data.get("sh_octave1_gain_db", -6.0)),
+            sh_octave2_gain_db=float(data.get("sh_octave2_gain_db", -12.0)),
+            sh_sub_lpf_hz=float(data.get("sh_sub_lpf_hz", 120.0)),
+            sh_attack_ms=float(data.get("sh_attack_ms", 20.0)),
+            sh_release_ms=float(data.get("sh_release_ms", 150.0)),
+            sh_mix=float(data.get("sh_mix", 0.5)),
+            sh_output_gain_db=float(data.get("sh_output_gain_db", 0.0)),
+        )
+
+
+@dataclass(frozen=True)
+@preserves_param_extras
+class ExciterParams:
+    """激励器（FX-15 · 2026-11-21 计划）：两段谐波支路并回干声。
+
+    首版两段（low/high），每段 Amount 默认 0 → 输出精确干声；
+    Solo 属监听语义（DSP 不消费）。
+    """
+    enabled: bool = True
+    ex_crossover_hz: float = 2000.0
+    ex_bands: tuple = ()
+    ex_oversampling: int = 1
+    ex_wet: float = 1.0
+    ex_output_gain_db: float = 0.0
+
+    @staticmethod
+    def default() -> "ExciterParams":
+        return ExciterParams()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "ex_crossover_hz": self.ex_crossover_hz,
+            "ex_bands": [dict(band) for band in self.ex_bands],
+            "ex_oversampling": self.ex_oversampling,
+            "ex_wet": self.ex_wet,
+            "ex_output_gain_db": self.ex_output_gain_db,
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        data = dict(band) if isinstance(band, dict) else {}
+
+        def _num(key: str, default: float) -> float:
+            try:
+                return float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        mode = str(data.get("mode", "even") or "even")
+        if mode not in ("even", "odd"):
+            mode = "even"
+        return {
+            "enabled": bool(data.get("enabled", False)),
+            "mode": mode,
+            "amount": _num("amount", 0.0),
+            "mix": _num("mix", 1.0),
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ExciterParams":
+        raw = data.get("ex_bands") or ()
+        bands = tuple(ExciterParams._normalize_band(band)
+                      for band in list(raw)[:2]) if isinstance(
+            raw, (list, tuple)) else ()
+        while len(bands) < 2:
+            bands = bands + (ExciterParams._normalize_band({}),)
+        try:
+            oversampling = int(data.get("ex_oversampling", 1))
+        except (TypeError, ValueError):
+            oversampling = 1
+        return ExciterParams(
+            enabled=bool(data.get("enabled", True)),
+            ex_crossover_hz=float(data.get("ex_crossover_hz", 2000.0)),
+            ex_bands=bands,
+            ex_oversampling=oversampling if oversampling in (1, 2) else 1,
+            ex_wet=float(data.get("ex_wet", 1.0)),
+            ex_output_gain_db=float(data.get("ex_output_gain_db", 0.0)),
         )
 
 
@@ -3185,12 +3379,23 @@ class ImagerParams:
     pan: float = 0.0
     width: float = 100.0
     enabled: bool = True
+    # FX-13（2026-11-21 计划）：M/S 独立增益与 Mono Maker。默认全中性
+    # → 走旧快速路径（位精确兼容基准）。
+    mid_gain_db: float = 0.0
+    side_gain_db: float = 0.0
+    output_gain_db: float = 0.0
+    mono_maker_on: bool = False
+    mono_maker_hz: float = 200.0
+    mono_maker_slope: str = "6"  # "6" | "12" dB/oct
 
     def __post_init__(self) -> None:
         if not (-100.0 <= self.pan <= 100.0):
             raise ValueError(f"pan must be in [-100, 100]: {self.pan}")
         if not (0.0 <= self.width <= 200.0):
             raise ValueError(f"width must be in [0, 200]: {self.width}")
+        if self.mono_maker_slope not in ("6", "12"):
+            raise ValueError(
+                f"mono_maker_slope must be '6'|'12': {self.mono_maker_slope!r}")
 
     @staticmethod
     def default() -> "ImagerParams":
@@ -3201,14 +3406,29 @@ class ImagerParams:
             "pan": self.pan,
             "width": self.width,
             "enabled": self.enabled,
+            "mid_gain_db": self.mid_gain_db,
+            "side_gain_db": self.side_gain_db,
+            "output_gain_db": self.output_gain_db,
+            "mono_maker_on": self.mono_maker_on,
+            "mono_maker_hz": self.mono_maker_hz,
+            "mono_maker_slope": self.mono_maker_slope,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ImagerParams":
+        slope = str(data.get("mono_maker_slope", "6") or "6")
+        if slope not in ("6", "12"):
+            slope = "6"
         return ImagerParams(
             pan=float(data.get("pan", 0.0)),
             width=float(data.get("width", 100.0)),
             enabled=bool(data.get("enabled", True)),
+            mid_gain_db=float(data.get("mid_gain_db", 0.0)),
+            side_gain_db=float(data.get("side_gain_db", 0.0)),
+            output_gain_db=float(data.get("output_gain_db", 0.0)),
+            mono_maker_on=bool(data.get("mono_maker_on", False)),
+            mono_maker_hz=float(data.get("mono_maker_hz", 200.0)),
+            mono_maker_slope=slope,
         )
 
 
@@ -3452,10 +3672,14 @@ def _ensure_effect_param_registry() -> dict:
         _EFFECT_PARAM_REGISTRY["bus_comp"] = BusCompParams
         _EFFECT_PARAM_REGISTRY["multiband_comp"] = MultibandCompParams
         _EFFECT_PARAM_REGISTRY["convolution_reverb"] = ConvolutionReverbParams
+        _EFFECT_PARAM_REGISTRY["exciter"] = ExciterParams
+        _EFFECT_PARAM_REGISTRY["subharmonic"] = SubharmonicParams
         _EFFECT_PARAM_REGISTRY["transient_designer"] = TransientDesignerParams
         _EFFECT_PARAM_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanParams
         _EFFECT_PARAM_REGISTRY["chorus_flanger"] = ChorusFlangerParams
         _EFFECT_PARAM_REGISTRY["phaser"] = PhaserParams
+        from src.features.edit.core.hosted_vst3 import EFFECT_TYPE, HostedVst3Params
+        _EFFECT_PARAM_REGISTRY[EFFECT_TYPE] = HostedVst3Params
     return _EFFECT_PARAM_REGISTRY
 
 
@@ -3831,6 +4055,7 @@ def _params_f(key: str, data: dict, default: float) -> float:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class DeEsserParams:
     """De-Esser（齿音消除）：band-pass 检测 + 流式 RMS 包络。"""
     threshold_dbfs: float = -32.0
@@ -3843,25 +4068,51 @@ class DeEsserParams:
     mode: str = "split"  # "wide" | "split"（减法互补）
     listen: bool = False
     enabled: bool = True
+    # Missing keys retain the historical DSP branch. Only an explicitly
+    # configured v2 control opts into the new detector/lookahead contract.
+    detector_shape: str | None = None
+    lookahead_ms: float | None = None
+    output_gain_db: float | None = None
 
     @staticmethod
     def default() -> "DeEsserParams":
         return DeEsserParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "threshold_dbfs": self.threshold_dbfs, "ratio": self.ratio,
             "frequency": self.frequency, "q": self.q,
             "attack_ms": self.attack_ms, "release_ms": self.release_ms,
             "max_reduction_db": self.max_reduction_db, "mode": self.mode,
             "listen": self.listen, "enabled": self.enabled,
         }
+        for key in ("detector_shape", "lookahead_ms", "output_gain_db"):
+            value = getattr(self, key)
+            if value is not None:
+                data[key] = value
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "DeEsserParams":
+        import math
+
         mode = str(data.get("mode", "split") or "split")
         if mode not in ("wide", "split"):
             mode = "split"
+        shape = data.get("detector_shape")
+        if shape is not None and shape not in ("bandpass", "high_shelf"):
+            shape = "bandpass"
+
+        def _optional_number(
+            key: str, default: float, low: float, high: float,
+        ) -> float | None:
+            if data.get(key) is None:
+                return None
+            value = _params_f(key, data, default)
+            if not math.isfinite(value):
+                value = default
+            return min(high, max(low, value))
+
         return DeEsserParams(
             threshold_dbfs=_params_f("threshold_dbfs", data, -32.0),
             ratio=_params_f("ratio", data, 4.0),
@@ -3873,6 +4124,9 @@ class DeEsserParams:
             mode=mode,
             listen=bool(data.get("listen", False)),
             enabled=bool(data.get("enabled", True)),
+            detector_shape=shape,
+            lookahead_ms=_optional_number("lookahead_ms", 0.0, 0.0, 20.0),
+            output_gain_db=_optional_number("output_gain_db", 0.0, -60.0, 24.0),
         )
 
 
@@ -3909,6 +4163,7 @@ class TruePeakLimiterParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class DynamicEqParams:
     """Dynamic EQ：StripEQ Bell × 阈值驱动的动态增益（关闭动态==EQ）。"""
     frequency: float = 3000.0
@@ -3922,6 +4177,10 @@ class DynamicEqParams:
     dynamic_enabled: bool = True
     slope: float = 0.5
     enabled: bool = True
+    # FX-02（2026-11-21 计划）：多段版本。空 = 旧单段路径（v0–v4 原样）。
+    # 每段：frequency_hz/q/static_gain_db/threshold_dbfs/max_cut_db/
+    # max_boost_db/attack_ms/release_ms/enabled；稳定段 ID = 列表序号。
+    bands: tuple = ()
 
     @staticmethod
     def default() -> "DynamicEqParams":
@@ -3935,10 +4194,44 @@ class DynamicEqParams:
             "attack_ms": self.attack_ms, "release_ms": self.release_ms,
             "dynamic_enabled": self.dynamic_enabled, "slope": self.slope,
             "enabled": self.enabled,
+            "bands": [dict(band) for band in self.bands],
+        }
+
+    @staticmethod
+    def _normalize_band(band: Any) -> dict[str, Any]:
+        import copy
+        import math
+
+        data = copy.deepcopy(band) if isinstance(band, dict) else {}
+
+        def _num(key: str, default: float) -> float:
+            try:
+                value = float(data.get(key, default))
+            except (TypeError, ValueError):
+                return default
+            return value if math.isfinite(value) else default
+
+        return {
+            **data,
+            "enabled": bool(data.get("enabled", True)),
+            "dynamic_enabled": bool(data.get("dynamic_enabled", True)),
+            "frequency_hz": _num("frequency_hz", 3000.0),
+            "q": _num("q", 1.4),
+            "static_gain_db": _num("static_gain_db", 0.0),
+            "threshold_dbfs": _num("threshold_dbfs", -30.0),
+            "max_cut_db": _num("max_cut_db", 9.0),
+            "max_boost_db": _num("max_boost_db", 0.0),
+            "attack_ms": _num("attack_ms", 8.0),
+            "release_ms": _num("release_ms", 120.0),
+            "slope": _num("slope", 0.5),
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "DynamicEqParams":
+        raw_bands = data.get("bands") or ()
+        bands = tuple(DynamicEqParams._normalize_band(band)
+                      for band in raw_bands) if isinstance(
+            raw_bands, (list, tuple)) else ()
         return DynamicEqParams(
             frequency=_params_f("frequency", data, 3000.0),
             q=_params_f("q", data, 1.4),
@@ -3951,54 +4244,97 @@ class DynamicEqParams:
             dynamic_enabled=bool(data.get("dynamic_enabled", True)),
             slope=_params_f("slope", data, 0.5),
             enabled=bool(data.get("enabled", True)),
+            bands=bands,
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class BusCompParams:
-    """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。"""
+    """Bus 胶合压缩：CompressorEffect 核心 + 模板 + SC 高通。
+
+    FX-05（2026-11-21 计划）：连续字段（threshold_db/ratio/attack_ms/
+    release_ms/knee/mix/makeup_gain）显式给出时覆盖模板值（旋钮提交
+    与模板选择解耦）；未给出的字段沿用模板。模板的 ``makeup_db`` 旧
+    键在入口归一为 ``makeup_gain``（旧实现静默失效）。
+    """
     template: str = "dx_glue"  # BUS_COMP_TEMPLATES: dx_glue | mx_glue
     sc_hpf_hz: float = 120.0
     enabled: bool = True
+    threshold_db: float | None = None
+    ratio: float | None = None
+    attack_ms: float | None = None
+    release_ms: float | None = None
+    knee: float | None = None
+    mix: float | None = None
+    makeup_gain: float | None = None
 
     @staticmethod
     def default() -> "BusCompParams":
         return BusCompParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "template": self.template, "sc_hpf_hz": self.sc_hpf_hz,
             "enabled": self.enabled,
         }
+        for key in ("threshold_db", "ratio", "attack_ms", "release_ms",
+                    "knee", "mix", "makeup_gain"):
+            value = getattr(self, key)
+            if value is not None:
+                data[key] = value
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "BusCompParams":
         template = str(data.get("template", "dx_glue") or "dx_glue")
         if template not in ("dx_glue", "mx_glue"):
             template = "dx_glue"
+
+        def _opt(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+
         return BusCompParams(
             template=template,
             sc_hpf_hz=_params_f("sc_hpf_hz", data, 120.0),
             enabled=bool(data.get("enabled", True)),
+            threshold_db=_opt("threshold_db"),
+            ratio=_opt("ratio"),
+            attack_ms=_opt("attack_ms"),
+            release_ms=_opt("release_ms"),
+            knee=_opt("knee"),
+            mix=_opt("mix"),
+            makeup_gain=_opt("makeup_gain"),
         )
 
 
-def _default_multiband_bands() -> tuple[dict[str, float], ...]:
+def _default_multiband_bands() -> tuple[dict[str, Any], ...]:
     return (
         {"threshold_db": -20.0, "ratio": 2.0, "release_ms": 220.0, "makeup_db": 0.0},
         {"threshold_db": -24.0, "ratio": 2.5, "release_ms": 150.0, "makeup_db": 0.0},
+        {"threshold_db": -22.0, "ratio": 2.0, "release_ms": 180.0, "makeup_db": 0.0},
         {"threshold_db": -22.0, "ratio": 2.0, "release_ms": 180.0, "makeup_db": 0.0},
     )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class MultibandCompParams:
-    """三段 Multiband 压缩：减法互补分频 + 每段独立包络。"""
+    """多段压缩（FX-04）：减法互补分频 + 每段独立包络。
+
+    2026-11-21 计划：段数 2/3/4（crossovers 升序、长度 = 段数−1，
+    非法交叉点报错）；``makeup_db``（旧默认键）→ ``makeup_gain``
+    （CompressorEffect 读键）的别名在参数入口集中归一。
+    """
     crossover_low: float = 180.0
     crossover_high: float = 4200.0
+    crossover_top: float = 9000.0
     band_low: dict[str, float] | None = None
     band_mid: dict[str, float] | None = None
     band_high: dict[str, float] | None = None
+    band_extra: dict[str, float] | None = None
+    band_count: int = 3
     attack_ms: float = 10.0
     enabled: bool = True
 
@@ -4006,16 +4342,24 @@ class MultibandCompParams:
     def default() -> "MultibandCompParams":
         return MultibandCompParams()
 
-    def _bands(self) -> tuple[dict[str, float], ...]:
+    def _crossovers(self) -> tuple[float, ...]:
+        points = (self.crossover_low, self.crossover_high, self.crossover_top)
+        return tuple(points[:max(1, min(self.band_count, 4) - 1)])
+
+    def _bands(self) -> tuple[dict[str, Any], ...]:
         defaults = _default_multiband_bands()
+        fields = (self.band_low, self.band_mid, self.band_high,
+                  self.band_extra)
+        count = max(2, min(self.band_count, 4))
         return tuple(
-            dict(band) if isinstance(band, dict) else dict(default)
-            for band, default in zip(
-                (self.band_low, self.band_mid, self.band_high), defaults))
+            (dict(band) if isinstance(band, dict) else
+             {("makeup_gain" if key == "makeup_db" else key): value
+              for key, value in default.items()})
+            for band, default in zip(fields[:count], defaults))
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "crossovers": [self.crossover_low, self.crossover_high],
+            "crossovers": list(self._crossovers()),
             "bands": [dict(b) for b in self._bands()],
             "attack_ms": self.attack_ms, "enabled": self.enabled,
         }
@@ -4023,29 +4367,52 @@ class MultibandCompParams:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "MultibandCompParams":
         crossovers = data.get("crossovers")
-        if (not isinstance(crossovers, (list, tuple)) or len(crossovers) != 2):
+        if not isinstance(crossovers, (list, tuple)) or not crossovers:
             crossovers = (180.0, 4200.0)
+        import math
+        if len(crossovers) > 3:
+            raise ValueError("multiband supports at most three crossovers")
+        crossovers = [float(freq) for freq in crossovers]
+        if any(not math.isfinite(freq) or freq <= 0 for freq in crossovers):
+            raise ValueError("multiband crossovers must be finite and positive")
+        for lo, hi in zip(crossovers, crossovers[1:]):
+            if hi <= lo:
+                # 非法交叉点报错（FX-04 计划合同）。
+                raise ValueError(
+                    f"multiband crossovers must strictly ascend: {crossovers}")
+        band_count = len(crossovers) + 1
         bands = data.get("bands")
-        if not isinstance(bands, (list, tuple)) or len(bands) != 3:
+        if not isinstance(bands, (list, tuple)) or len(bands) != band_count:
             bands = _default_multiband_bands()
         band_fields = []
         for band in bands:
-            band_fields.append(dict(band) if isinstance(band, dict) else {})
-        while len(band_fields) < 3:
+            normalized = dict(band) if isinstance(band, dict) else {}
+            # 别名归一（参数入口集中）：makeup_db → makeup_gain。
+            if "makeup_gain" not in normalized and "makeup_db" in normalized:
+                normalized["makeup_gain"] = normalized.pop("makeup_db")
+            band_fields.append(normalized)
+        while len(band_fields) < band_count:
             band_fields.append({})
+        fields = [band_fields[index] if index < len(band_fields) else None
+                  for index in range(4)]
+        if band_count < 4:
+            fields[3] = None
         return MultibandCompParams(
-            crossover_low=_params_f("crossover_low", dict(data),
-                                    float(crossovers[0])),
-            crossover_high=_params_f("crossover_high", dict(data),
-                                     float(crossovers[1])),
-            band_low=band_fields[0], band_mid=band_fields[1],
-            band_high=band_fields[2],
+            crossover_low=float(crossovers[0]),
+            crossover_high=(float(crossovers[1]) if len(crossovers) > 1
+                            else 4200.0),
+            crossover_top=(float(crossovers[2]) if len(crossovers) > 2
+                           else 9000.0),
+            band_low=fields[0], band_mid=fields[1],
+            band_high=fields[2], band_extra=fields[3],
+            band_count=band_count,
             attack_ms=_params_f("attack_ms", data, 10.0),
             enabled=bool(data.get("enabled", True)),
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ConvolutionReverbParams:
     """卷积混响：分区 FFT 卷积；IR 经 ir_path 装载（UI 文件选择/序列化）。"""
     ir_path: str = ""
@@ -4076,71 +4443,120 @@ class ConvolutionReverbParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class TransientDesignerParams:
-    """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。"""
+    """瞬态塑形：dB 域 attack/sustain 量（3dB 膝）。
+
+    FX-17（2026-11-21 计划）：新版前端百分比字段——``db = 0.12 × pct``
+    （±100% → ±12 dB）；给了 pct 键 → DSP 走新版支路（逐声道包络 +
+    反相安全聚合 + mix/output_gain_db），否则旧 dB 音色冻结不动。
+    """
     attack_db: float = 6.0
     sustain_db: float = 0.0
     attack_ms: float = 8.0
     sustain_ms: float = 80.0
     enabled: bool = True
+    attack_pct: float | None = None
+    sustain_pct: float | None = None
+    mix: float = 1.0
+    output_gain_db: float = 0.0
 
     @staticmethod
     def default() -> "TransientDesignerParams":
         return TransientDesignerParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "attack_db": self.attack_db, "sustain_db": self.sustain_db,
             "attack_ms": self.attack_ms, "sustain_ms": self.sustain_ms,
             "enabled": self.enabled,
         }
+        if self.attack_pct is not None:
+            data["attack_pct"] = self.attack_pct
+        if self.sustain_pct is not None:
+            data["sustain_pct"] = self.sustain_pct
+        data["mix"] = self.mix
+        data["output_gain_db"] = self.output_gain_db
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TransientDesignerParams":
+        def _pct(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+
         return TransientDesignerParams(
             attack_db=_params_f("attack_db", data, 6.0),
             sustain_db=_params_f("sustain_db", data, 0.0),
             attack_ms=_params_f("attack_ms", data, 8.0),
             sustain_ms=_params_f("sustain_ms", data, 80.0),
             enabled=bool(data.get("enabled", True)),
+            attack_pct=_pct("attack_pct"),
+            sustain_pct=_pct("sustain_pct"),
+            mix=_params_f("mix", data, 1.0),
+            output_gain_db=_params_f("output_gain_db", data, 0.0),
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class TremoloAutoPanParams:
-    """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。"""
+    """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。
+
+    FX-19（2026-11-21 计划）：``waveform`` 扩展 sine/triangle/square/
+    saw_up/saw_down/random；空/缺省/"sine" → 旧正弦路径（冻结）。
+    """
     mode: str = "tremolo"  # "tremolo" | "auto_pan"
     rate_hz: float = 4.0
     depth: float = 0.7
     shape: str = "sine"
     enabled: bool = True
+    waveform: str = ""
+    random_seed: int = 0
+
+    _WAVEFORMS = ("sine", "triangle", "square", "saw_up", "saw_down",
+                  "random")
 
     @staticmethod
     def default() -> "TremoloAutoPanParams":
         return TremoloAutoPanParams()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "mode": self.mode, "rate_hz": self.rate_hz,
             "depth": self.depth, "shape": self.shape,
             "enabled": self.enabled,
         }
+        if self.waveform:
+            data["waveform"] = self.waveform
+            data["random_seed"] = self.random_seed
+        return data
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "TremoloAutoPanParams":
         mode = str(data.get("mode", "tremolo") or "tremolo")
-        if mode not in ("tremolo", "auto_pan"):
+        if mode not in ("tremolo", "auto_pan", "dual"):
             mode = "tremolo"
+        waveform = str(data.get("waveform", "") or "")
+        if waveform not in ("", *TremoloAutoPanParams._WAVEFORMS):
+            waveform = ""
+        try:
+            seed = int(data.get("random_seed", 0))
+        except (TypeError, ValueError):
+            seed = 0
         return TremoloAutoPanParams(
             mode=mode,
             rate_hz=_params_f("rate_hz", data, 4.0),
             depth=_params_f("depth", data, 0.7),
             shape=str(data.get("shape", "sine") or "sine"),
             enabled=bool(data.get("enabled", True)),
+            waveform=waveform,
+            random_seed=seed,
         )
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class ChorusFlangerParams:
     """Chorus / Flanger：相位连续调制延迟线 + 反馈尾音预算。"""
     mode: str = "chorus"  # "chorus" | "flanger"
@@ -4187,6 +4603,7 @@ class ChorusFlangerParams:
 
 
 @dataclass(frozen=True)
+@preserves_param_extras
 class PhaserParams:
     """Phaser：全通级联 + 相位连续 LFO 扫频。"""
     rate_hz: float = 0.5
@@ -4470,6 +4887,9 @@ class EditTrack:
     # P1-5：自动化写保护——保护后录制入口拒绝采集/切 Write/Touch/Latch
     #（与轨锁同一守卫模式；写入仍可经命令栈显式撤销）。
     automation_write_protected: bool = False
+    # B10：SIP solo-safe——其他轨 solo 时本轨不被监听闭包静音（监听规则
+    # 属声音模型；SetTrackSoloSafeCommand 提交，旧工程默认 False）。
+    solo_safe: bool = False
     # W24: Bus 路由字段
     is_bus: bool = False  # True=该轨是 Bus/Aux 轨（无 clips，只接收 send/routing）
     output_bus_id: Optional[str] = None  # 输出目标 Bus 的 track_id（None=直接输出到 Master）
@@ -4492,6 +4912,7 @@ class EditTrack:
     # the end of the dataclass to preserve legacy positional construction of
     # EditTrack(track_id, name, track_type, index, ...).
     track_role: str = "standard"
+    audio_layout: str = ""  # Empty preserves the legacy track domain.
 
     def __post_init__(self) -> None:
         if not self.track_id:
@@ -4628,6 +5049,7 @@ class EditTrack:
                  automation_mode: Optional[str] = None,
                  automation_trim: Optional[dict] = None,
                  automation_write_protected: bool | None = None,
+                 solo_safe: bool | None = None,
                  bus_layout: str | None = None,
                  is_bus: bool | None = None,
                  output_bus_id: Optional[str] | None = None,
@@ -4680,7 +5102,9 @@ class EditTrack:
                 self.automation_write_protected
                 if automation_write_protected is None else automation_write_protected
             ),
+            solo_safe=self.solo_safe if solo_safe is None else solo_safe,
             bus_layout=self.bus_layout if bus_layout is None else bus_layout,
+            audio_layout=self.audio_layout,
             is_bus=self.is_bus if is_bus is None else is_bus,
             output_bus_id=self.output_bus_id if output_bus_id is None else output_bus_id,
             sends=self.sends if sends is None else sends,
@@ -4966,6 +5390,10 @@ class EditTrack:
         """P1-5：设置自动化写保护。"""
         return self._rebuild(automation_write_protected=bool(protected))
 
+    def with_solo_safe(self, safe: bool) -> EditTrack:
+        """B10：设置 SIP solo-safe（其他轨 solo 时本轨保持可听）。"""
+        return self._rebuild(solo_safe=bool(safe))
+
     def automation_trim_factor(self, param: str) -> float:
         """该参数的 Trim 倍率（1.0 = 无 trim）。"""
         try:
@@ -4993,11 +5421,17 @@ class EditTrack:
         """
         return self._rebuild(caption_metadata=metadata)
 
+    #: Bus 布局允许集（MX-15 能力矩阵：bus_routing 仅 stereo/5.1/7.1）。
+    _BUS_LAYOUT_ALLOWED = ("mono", "stereo", "5.1", "7.1")
+
     def bus_channel_layout(self) -> "ChannelLayout":
         """Bus 的声道布局（非法/未声明回退 stereo；仅 is_bus 有意义）。"""
         from src.features.edit.core.channel_layout import ChannelLayout
+        normalized = str(self.bus_layout or "stereo").strip().lower()
+        if normalized not in self._BUS_LAYOUT_ALLOWED:
+            return ChannelLayout.STEREO
         try:
-            return ChannelLayout.from_av_layout_name(str(self.bus_layout))
+            return ChannelLayout.from_av_layout_name(normalized)
         except ValueError:
             return ChannelLayout.STEREO
 
@@ -5005,7 +5439,11 @@ class EditTrack:
         """P2：设置 Bus 声道布局（"stereo"/"5.1"/"7.1"；非法值拒绝）。"""
         from src.features.edit.core.channel_layout import ChannelLayout
         normalized = str(layout or "stereo").strip().lower()
-        # 显式拒绝高度布局（与 MX-15 能力矩阵一致）
+        # 允许集限制（MX-15 能力矩阵：高度布局与 quad 等显式拒绝）
+        if normalized not in self._BUS_LAYOUT_ALLOWED:
+            raise ValueError(
+                f"unsupported bus layout {layout!r}: allowed "
+                f"{self._BUS_LAYOUT_ALLOWED} (MX-15 capability matrix)")
         ChannelLayout.from_av_layout_name(normalized)
         return self._rebuild(bus_layout=normalized)
 
@@ -5129,8 +5567,10 @@ class EditTrack:
             "automation_mode": self.automation_mode,
             "automation_trim": dict(self.automation_trim),
             "automation_write_protected": self.automation_write_protected,
+            "solo_safe": self.solo_safe,
             "is_bus": self.is_bus,
             "bus_layout": self.bus_layout,
+            **({"audio_layout": self.audio_layout} if self.audio_layout else {}),
             "output_bus_id": self.output_bus_id,
             "sends": [s.to_dict() for s in self.sends],
             "stem_group": self.stem_group,
@@ -5204,8 +5644,10 @@ class EditTrack:
             automation_trim=dict(data.get("automation_trim", {}) or {}),
             automation_write_protected=bool(
                 data.get("automation_write_protected", False)),
+            solo_safe=bool(data.get("solo_safe", False)),
             is_bus=bool(data.get("is_bus", False)),
             bus_layout=str(data.get("bus_layout", "stereo") or "stereo"),
+            audio_layout=str(data.get("audio_layout") or ""),
             output_bus_id=data.get("output_bus_id"),
             sends=sends,
             stem_group=str(data.get("stem_group", "") or ""),
@@ -5220,7 +5662,7 @@ class EditTrack:
             "is_sync_locked", "is_visible", "is_muted", "is_solo", "volume",
             "pan", "panner", "strip_eq", "effect_chain", "color", "automation",
             "automation_mode", "automation_trim",
-            "automation_write_protected", "is_bus", "bus_layout",
+            "automation_write_protected", "solo_safe", "is_bus", "bus_layout", "audio_layout",
             "output_bus_id", "sends",
             "stem_group", "caption_metadata",
         })
@@ -5309,6 +5751,8 @@ def validate_effect_params(effect_type: str, params: dict) -> tuple:
     except Exception:
         return dict(params or {}), [("__all__", "unparsable", "raw kept")]
     cleaned = cleaned_obj.to_dict()
+    if effect_type == "vst3_hosted":
+        cleaned = {**params, **cleaned}
     diags = []
     for key, raw in (params or {}).items():
         if key not in cleaned:
@@ -5561,7 +6005,9 @@ class TimelineSequence:
     # （TAEP §6.2）。直接调用 _rebuild / with_* 不会自动 bump，bump 只发生在
     # 提交边界，避免 preview/模拟产生虚假 revision 噪音。
     revision: int = 0
-    # R28/F-R09：未知字段保留（未来版本写入的序列级字段 roundtrip 不丢）
+    reference_mixes: tuple[ReferenceMixRecord, ...] = ()
+    master_audio_layout: str = ""  # Empty is the legacy mix domain.
+    # R28/F-R09:未知字段保留（未来版本写入的序列级字段 roundtrip 不丢）
     _extra_fields: Dict[str, Any] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -5569,8 +6015,8 @@ class TimelineSequence:
     _KNOWN_SEQUENCE_KEYS = frozenset({
         "timeline_id", "name", "fps", "width", "height", "sample_rate",
         "format_settings", "video_tracks", "audio_tracks", "subtitle_tracks",
-        "caption_graphics", "markers", "range_start", "range_end",
-        "master_volume", "master_muted", "master_automation",
+        "caption_graphics", "markers", "vcas", "reference_mixes", "range_start", "range_end",
+        "master_volume", "master_muted", "master_automation", "master_audio_layout",
         "master_automation_mode", "master_strip_eq", "master_effect_chain",
         "revision", "audio_fx_schema_version",
     })
@@ -5895,10 +6341,13 @@ class TimelineSequence:
             caption_track_graphic_styles=(self.caption_track_graphic_styles if caption_track_graphic_styles is None else caption_track_graphic_styles),
             caption_graphics_extra=dict(self.caption_graphics_extra if caption_graphics_extra is None else caption_graphics_extra),
             markers=self.markers if markers is None else markers,
+            vcas=self.vcas,
+            reference_mixes=self.reference_mixes,
             range_start=self.range_start if range_start is ... else range_start,
             range_end=self.range_end if range_end is ... else range_end,
             master_volume=self.master_volume if master_volume is None else master_volume,
             master_muted=self.master_muted if master_muted is None else master_muted,
+            master_audio_layout=self.master_audio_layout,
             # AUD-19104：未显式更新时深拷贝——派生序列快照不再共享同一批
             # master KeyframeTrack 实例（可变），undo 前后快照互不影响。
             master_automation=(
@@ -6104,8 +6553,13 @@ class TimelineSequence:
             },
             "markers": [m.to_dict() for m in self.markers],
             "vcas": [g.to_dict() for g in self.vcas],
+            **({"reference_mixes": [
+                record.to_dict() if isinstance(record, ReferenceMixRef) else deepcopy(record)
+                for record in self.reference_mixes
+            ]} if self.reference_mixes else {}),
             "range_start": self.range_start, "range_end": self.range_end,
             "master_volume": self.master_volume, "master_muted": self.master_muted,
+            **({"master_audio_layout": self.master_audio_layout} if self.master_audio_layout else {}),
             "master_automation": {k: v.to_dict() for k, v in self.master_automation.items()} if self.master_automation else {},
             "master_automation_mode": self.master_automation_mode,
             "master_strip_eq": self.master_strip_eq.to_dict() if self.master_strip_eq else None,
@@ -6207,9 +6661,13 @@ class TimelineSequence:
             },
             markers=tuple(TimelineMarker.from_dict(m) for m in data.get("markers", [])),
             vcas=tuple(VcaGroup.from_dict(g) for g in data.get("vcas", [])),
+            reference_mixes=tuple(decode_reference_mix_record(item)
+                                  for item in (data.get("reference_mixes") or ())
+                                  if isinstance(item, dict)),
             range_start=data.get("range_start"), range_end=data.get("range_end"),
             master_volume=float(data.get("master_volume", 1.0)),
             master_muted=bool(data.get("master_muted", False)),
+            master_audio_layout=str(data.get("master_audio_layout") or ""),
             master_automation=master_auto,
             master_automation_mode=str(data.get("master_automation_mode", "off") or "off"),
             master_strip_eq=master_eq,

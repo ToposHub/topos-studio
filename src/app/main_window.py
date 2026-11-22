@@ -2263,6 +2263,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             mp.track_show_automation.connect(self._on_mixer_show_automation)
             mp.track_show_routing.connect(self._on_mixer_show_routing)
             mp.track_routing_committed.connect(self._on_mixer_routing_committed)
+            if hasattr(mp, "vca_groups_requested"):
+                mp.vca_groups_requested.connect(self._on_mixer_show_vca_groups)
+                mp.health_requested.connect(self._on_mixer_show_health)
+                mp.control_room_requested.connect(self._on_mixer_show_control_room)
+                mp.reference_mix_requested.connect(self._on_mixer_show_reference_mix)
+                mp.track_solo_safe_requested.connect(self._on_mixer_solo_safe_requested)
+                mp.recover_recording_requested.connect(self._on_mixer_recover_recording)
             if hasattr(mp, "track_output_requested"):
                 mp.track_output_requested.connect(self._on_mixer_output_bus_requested)
                 mp.add_bus_requested.connect(self._on_mixer_add_bus_requested)
@@ -2650,6 +2657,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             clear_recording_inputs = getattr(self, "_clear_mixer_armed_inputs", None)
             if callable(clear_recording_inputs):
                 clear_recording_inputs()
+            cancel_recovery = getattr(self, "_cancel_mixer_recording_recovery", None)
+            if callable(cancel_recovery):
+                cancel_recovery()
 
             mixer_page = getattr(self, "mixer_page", None)
             if mixer_page is not None:
@@ -2787,9 +2797,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         # 2. 音频（EditPage.shutdown_audio_playback 专为关闭路径设计，幂等）
         try:
+            release_monitor = getattr(self, "_release_control_room_capture", None)
+            if callable(release_monitor):
+                release_monitor()
+            reference_dialog = getattr(self, "_mixer_reference_dialog", None)
+            if reference_dialog is not None:
+                reference_dialog.close()
+                reference_dialog.reset_session()
             edit_page = getattr(self, "edit_page", None)
             if edit_page is not None and hasattr(edit_page, "shutdown_audio_playback"):
-                edit_page.shutdown_audio_playback()
+                edit_page.shutdown_audio_playback(resume_background=False)
         except Exception:
             logger.debug("shutdown: audio playback failed", exc_info=True)
 

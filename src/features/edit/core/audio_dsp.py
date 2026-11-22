@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import OrderedDict
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -55,9 +55,11 @@ except ImportError:  # pragma: no cover
 #     从未实现，迁移为 Stereo，声音不变）
 #   - MX-04: 同轨多 clip 先求和、轨 DSP 一次处理（重叠 clip 区间声音改变
 #     ——这是缺陷修复而非回归）
-ALGORITHM_VERSION = 4
+ALGORITHM_VERSION = 5
 
 ALGORITHM_CHANGELOG = {
+    5: "FX-11/18/23：卷积实测延迟、调制读头及反馈状态、逐声道真峰前视修正；"
+       "v0–v4 保持历史内核，显式升级后启用修正版。",
     1: "初始版本（CW-A1）",
     2: "EQ 斜率/Shelf Q、Expander 斜率/Gate 状态机、压缩检测域、Make Up "
        "位置、SC Listen、Panner 矩阵、Reverb 阻尼热更新、Delay 输入矩阵、"
@@ -3083,6 +3085,32 @@ class DelayEffect(AudioEffect):
         self._fade_l_remaining = 0
         self._fade_r_remaining = 0
 
+    def collect_graph_data(self) -> dict:
+        """FX-09：回声图数据源（纯读——不触碰音频线程状态）。
+
+        发布当前采样率、左右读头位置（样本 + ms）、实际反馈、交叉比、
+        高频衰减比、状态版本与尾音预算；图横坐标 ms =
+        1000·delay_samples/sample_rate。旁路时读头仍反映参数目标。
+        """
+        sr = float(self._sample_rate)
+        left_ms = float(self._left_delay)
+        right_ms = float(self._right_delay)
+        return {
+            "sample_rate": sr,
+            "read_head_left_samples": round(left_ms * sr / 1000.0, 2),
+            "read_head_right_samples": round(right_ms * sr / 1000.0, 2),
+            "read_head_left_ms": left_ms,
+            "read_head_right_ms": right_ms,
+            "feedback_left": float(self._left_fb),
+            "feedback_right": float(self._right_fb),
+            "blend": float(self._blend),
+            "high_damping_ratio": float(self._high_ratio),
+            "dry_wet": float(self._dry_wet),
+            "algorithm_version": self._algorithm_version,
+            "tail_estimate_samples": self.tail_estimate_samples(),
+            "state": "bypassed" if not self._enabled else "active",
+        }
+
     def tail_estimate_samples(self) -> int:
         """MX-07：延迟尾音估计——最大延迟 × 反馈衰减到 -60dB 的圈数。
 
@@ -3139,6 +3167,8 @@ class SaturationEffect(AudioEffect):
         self._k: float = 0.0  # 实际波形整形系数
         self._enabled: bool = False
         self._recompute_k()
+        # FX-14：版本化模型分支（缺键 → legacy；multiband 委托新单元）。
+        self._multiband: Optional["object"] = None
 
     def _recompute_k(self) -> None:
         """由 drive（0..100）计算实际 k 系数。"""
@@ -3164,6 +3194,17 @@ class SaturationEffect(AudioEffect):
                                     0.0, 100.0, _SAT_DEFAULT_DRIVE)
         self._enabled = bool(params.get("enabled", True))
         self._recompute_k()
+        # FX-14：multiband 模型按需实例化并转发参数（legacy 不触碰）。
+        if str(params.get("model_profile", "legacy") or "legacy") == \
+                "multiband":
+            if self._multiband is None:
+                from src.features.edit.core.audio_effects.saturation import (
+                    MultibandSaturationEffect,
+                )
+                self._multiband = MultibandSaturationEffect(self._sample_rate)
+            self._multiband.set_params(params, sample_rate=sample_rate)
+        elif self._multiband is not None:
+            self._multiband.set_params({"enabled": False})
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用 sigmoid 谐波失真。
@@ -3174,6 +3215,8 @@ class SaturationEffect(AudioEffect):
         Returns:
             失真后的 samples，同 shape（旁路或 drive=0 时原样返回）。
         """
+        if self._multiband is not None and self._enabled:
+            return self._multiband.process(samples)
         if not self._enabled or self._k <= 1e-9 or \
                 samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
@@ -3189,11 +3232,24 @@ class SaturationEffect(AudioEffect):
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
-        """无状态效果，无需重置。"""
-        pass
+        """legacy 无状态；multiband 分支重置过采样/滤波历史。"""
+        if self._multiband is not None:
+            self._multiband.reset_state()
+
+    def latency_samples(self) -> int:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.latency_samples()
+        return 0
+
+    def tail_estimate_samples(self) -> int:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.tail_estimate_samples()
+        return 0
 
     @property
     def is_active(self) -> bool:
+        if self._multiband is not None and self._enabled:
+            return self._multiband.is_active
         return self._enabled and self._k > 1e-9
 
 
@@ -3242,6 +3298,12 @@ class ImagerEffect(AudioEffect):
         self._pan: float = _IMAGER_DEFAULT_PAN
         self._width: float = _IMAGER_DEFAULT_WIDTH
         self._enabled: bool = False
+        # FX-13：M/S 独立增益 + Mono Maker（默认中性 → 旧快速路径）。
+        self._mid_gain: float = 1.0
+        self._side_gain_db: float = 1.0
+        self._output_gain: float = 1.0
+        self._mono_maker: Optional[dict] = None  # {'sos':…, 'zi':…}
+        self._mono_maker_key: Optional[tuple] = None
         self._recompute_gains()
 
     def _recompute_gains(self) -> None:
@@ -3281,6 +3343,33 @@ class ImagerEffect(AudioEffect):
         self._width = _clamp_finite(params.get("width", _IMAGER_DEFAULT_WIDTH),
                                     0.0, 200.0, _IMAGER_DEFAULT_WIDTH)
         self._enabled = bool(params.get("enabled", True))
+        self._mid_gain = 10.0 ** (_clamp_finite(
+            params.get("mid_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        self._side_gain_db = 10.0 ** (_clamp_finite(
+            params.get("side_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        self._output_gain = 10.0 ** (_clamp_finite(
+            params.get("output_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
+        mono_on = bool(params.get("mono_maker_on", False))
+        mono_hz = _clamp_finite(params.get("mono_maker_hz", 200.0),
+                                20.0, 2000.0, 200.0)
+        mono_slope = str(params.get("mono_maker_slope", "6") or "6")
+        if mono_slope not in ("6", "12"):
+            mono_slope = "6"
+        if mono_on:
+            key = (round(mono_hz, 3), mono_slope,
+                   round(float(self._sample_rate), 3))
+            if key != self._mono_maker_key:
+                from scipy.signal import butter
+                order = 1 if mono_slope == "6" else 2
+                self._mono_maker = {
+                    "sos": butter(order, mono_hz, btype="lowpass",
+                                  fs=self._sample_rate, output="sos"),
+                }
+                self._mono_maker_key = key
+                self._mono_maker["zi"] = None
+        else:
+            self._mono_maker = None
+            self._mono_maker_key = None
         self._recompute_gains()
 
     def process(self, samples: np.ndarray) -> np.ndarray:
@@ -3294,6 +3383,8 @@ class ImagerEffect(AudioEffect):
         """
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
+        if not self._legacy_fast_path():
+            return self._process_extended(samples)
 
         out = samples.astype(np.float64, copy=True)
         channels, n = out.shape
@@ -3321,14 +3412,51 @@ class ImagerEffect(AudioEffect):
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
-        """无状态效果，无需重置。"""
-        pass
+        """Mono Maker 滤波状态清零（seek 语义）；其余无状态。"""
+        if self._mono_maker is not None:
+            self._mono_maker["zi"] = None
+
+    def _legacy_fast_path(self) -> bool:
+        """FX-13 新字段全部中性 → 旧快速路径（位精确兼容基准）。"""
+        return (self._mid_gain == 1.0 and self._side_gain_db == 1.0
+                and self._output_gain == 1.0 and self._mono_maker is None)
+
+    def _process_extended(self, samples: np.ndarray) -> np.ndarray:
+        """FX-13 新路径：M/S 分解 → Mono Maker（衰减低频 Side）→
+        Width×Side 增益 / Mid 增益 → 逆矩阵 → Pan → 输出增益。"""
+        from scipy.signal import sosfilt
+        out = samples.astype(np.float64, copy=True)
+        channels, n = out.shape
+        if channels == 1:
+            out[0] *= (self._pan_l + self._pan_r) * 0.5 * self._output_gain
+            return out.astype(samples.dtype, copy=False)
+        mid = (out[0] + out[1]) * 0.5
+        side = (out[0] - out[1]) * 0.5
+        if self._mono_maker is not None:
+            sos = self._mono_maker["sos"]
+            zi = self._mono_maker.get("zi")
+            expected = (sos.shape[0], 1, 2)
+            if zi is None or zi.shape != expected:
+                zi = np.zeros(expected, dtype=np.float64)
+            low, zi = sosfilt(sos, side[None, :], axis=-1, zi=zi)
+            self._mono_maker["zi"] = zi
+            side = side - low[0]  # 低频 Side 衰减 → 低频 mono
+        mid = mid * self._mid_gain
+        side = side * (self._side_gain * self._side_gain_db)
+        new_l = mid + side
+        new_r = mid - side
+        out[0] = new_l * self._pan_l
+        out[1] = new_r * self._pan_r
+        out[:2] *= self._output_gain
+        return out.astype(samples.dtype, copy=False)
 
     @property
     def is_active(self) -> bool:
-        # 仅当有实际效果时才活跃（pan≠0 或 width≠100）
+        # 仅当有实际效果时才活跃（pan≠0 或 width≠100 或新字段非中性）
         return self._enabled and (
             abs(self._pan) > 0.1 or abs(self._width - 100.0) > 0.1
+            or self._mid_gain != 1.0 or self._side_gain_db != 1.0
+            or self._output_gain != 1.0 or self._mono_maker is not None
         )
 
 
@@ -3601,6 +3729,8 @@ class DynamicsEffect(AudioEffect):
         self._makeup = 0.0
         self._makeup_linear: float = 1.0
         self.last_gr_db = 0.0
+        # FX-03：分段遥测（E/G、C、L 各自非负 GR；检测电平；限幅过冲）。
+        self._last_overshoot_db = -120.0
 
     def set_params(self, params: Optional[dict], sample_rate: Optional[float] = None) -> None:
         """更新三模块参数。子 dict 缺键由各子效果器的默认值承接（容错语义）。"""
@@ -3636,10 +3766,14 @@ class DynamicsEffect(AudioEffect):
             处理后的 (channels, n)（旁路时原样返回）。
         """
         if not self._enabled:
+            self._reset_telemetry()
             return samples
         out = self._eg.process(samples)
         out = self._comp.process(out, sidechain=sidechain)
         out = self._lim.process(out)
+        # FX-03：限幅过冲 = 限幅后（Make Up 前）块峰——过冲表读数。
+        self._last_overshoot_db = float(
+            20.0 * np.log10(max(float(np.max(np.abs(out))), 1e-9)))
         # DY-01: Make Up = post-dynamics 节点（Lim 之后，Comp 旁路不失效）
         if abs(self._makeup_linear - 1.0) > 1e-9:
             out = out * self._makeup_linear
@@ -3655,12 +3789,43 @@ class DynamicsEffect(AudioEffect):
             self.last_gr_db = 0.0
         return out
 
+    def _reset_telemetry(self) -> None:
+        """旁路/关闭清零（FX-03：表计不得沿用旧读数——含子模块 GR）。"""
+        self.last_gr_db = 0.0
+        self._last_overshoot_db = -120.0
+        for sub in (self._eg, self._comp, self._lim):
+            if hasattr(sub, "last_gr_db"):
+                sub.last_gr_db = 0.0
+            if hasattr(sub, "last_detector_db"):
+                sub.last_detector_db = -120.0
+
+    def collect_telemetry(self) -> dict:
+        """FX-03：分段遥测（表计口径 = 块末状态）。
+
+        E/G、C、L 三根表各自取子模块**实际**非负 GR（不用最大值填满
+        三根表）；detector_dbfs 为压缩器检测电平；limiter_overshoot_dbfs
+        为限幅后（Make Up 前）块峰。旁路/关闭全部清零。
+        """
+        return {
+            "eg_gr_db": max(0.0, float(getattr(self._eg, "last_gr_db", 0.0)
+                                       or 0.0)),
+            "comp_gr_db": max(0.0, float(getattr(self._comp, "last_gr_db",
+                                                 0.0) or 0.0)),
+            "lim_gr_db": max(0.0, float(getattr(self._lim, "last_gr_db",
+                                                0.0) or 0.0)),
+            "detector_dbfs": round(float(getattr(self._comp,
+                                                 "last_detector_db", -120.0)
+                                         or -120.0), 3),
+            "limiter_overshoot_dbfs": round(self._last_overshoot_db, 3),
+            "makeup_db": float(self._makeup),
+        }
+
     def reset_state(self) -> None:
         """重置三模块的包络/延迟状态（seek/暂停后调用）。"""
         self._eg.reset_state()
         self._comp.reset_state()
         self._lim.reset_state()
-        self.last_gr_db = 0.0
+        self._reset_telemetry()
 
     @property
     def sc_source(self) -> str:
@@ -3735,7 +3900,56 @@ def _ensure_effect_registry() -> dict:
         _EFFECT_CLASS_REGISTRY["tremolo_auto_pan"] = TremoloAutoPanAdapter
         _EFFECT_CLASS_REGISTRY["chorus_flanger"] = ChorusFlangerAdapter
         _EFFECT_CLASS_REGISTRY["phaser"] = PhaserAdapter
+        # P2（2026-11-21 计划 FX-15）：激励器
+        from src.features.edit.core.audio_effects.exciter import (
+            ExciterEffect,
+        )
+        _EFFECT_CLASS_REGISTRY["exciter"] = ExciterEffect
+        from src.features.edit.core.audio_effects.subharmonic import (
+            SubharmonicEffect,
+        )
+        _EFFECT_CLASS_REGISTRY["subharmonic"] = SubharmonicEffect
+        from src.features.edit.core.hosted_vst3 import EFFECT_TYPE, HostedVst3Effect
+        _EFFECT_CLASS_REGISTRY[EFFECT_TYPE] = HostedVst3Effect
     return _EFFECT_CLASS_REGISTRY
+
+
+class PdcDelayLine:
+    """Fixed storage for one edge; processing work depends on block length."""
+
+    def __init__(self, channels: int, delay: int) -> None:
+        self.buffer = np.zeros((channels, delay), dtype=np.float32)
+        self.cursor = 0
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.buffer.shape
+
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
+        # Diagnostics only. The chronological history is not needed in the
+        # render path, so avoid rolling/copying delay-sized buffers per block.
+        data = self.buffer if dtype is None else self.buffer.astype(dtype, copy=False)
+        return data.copy() if copy else data
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        width = samples.shape[-1]
+        delay = self.buffer.shape[-1]
+        out = np.empty(samples.shape, dtype=np.float32)
+        if width >= delay:
+            first = delay - self.cursor
+            out[:, :first] = self.buffer[:, self.cursor:]
+            out[:, first:delay] = self.buffer[:, :self.cursor]
+            out[:, delay:] = samples[:, :width - delay]
+            self.buffer[:] = samples[:, width - delay:]
+            self.cursor = 0
+        else:
+            first = min(width, delay - self.cursor)
+            out[:, :first] = self.buffer[:, self.cursor:self.cursor + first]
+            out[:, first:] = self.buffer[:, :width - first]
+            self.buffer[:, self.cursor:self.cursor + first] = samples[:, :first]
+            self.buffer[:, :width - first] = samples[:, first:]
+            self.cursor = (self.cursor + width) % delay
+        return out
 
 
 def apply_pdc_delay_line(
@@ -3745,17 +3959,92 @@ def apply_pdc_delay_line(
 
     首块前视为已有 ``delay`` 个零样本的历史——输出从第一块起就对齐
     绝对时间（被推迟的内容由尾音预算延长的 drain 区释放）。``lines``
-    是 {node_id: 尾部缓冲}，调用方负责清空时机（seek/重算）。
+    是 {node_id: PdcDelayLine}，调用方负责清空时机（seek/重算）。
+    固定延迟存储复用；不再每块 concatenate 复制整条长延迟线。
     """
     if delay <= 0 or samples.shape[-1] == 0:
         return samples
     buffered = lines.get(node_id)
-    pending = (buffered if buffered is not None and buffered.shape[-1] > 0
-               else np.zeros((samples.shape[0], delay), dtype=np.float32))
-    combined = np.concatenate([pending, samples], axis=1)
-    out = combined[:, :samples.shape[-1]]
-    lines[node_id] = combined[:, samples.shape[-1]:]
-    return np.ascontiguousarray(out, dtype=np.float32)
+    if not isinstance(buffered, PdcDelayLine) or buffered.shape != (samples.shape[0], delay):
+        ring = PdcDelayLine(samples.shape[0], delay)
+        # Compatibility for already-buffered array state in old host adapters.
+        if isinstance(buffered, np.ndarray) and buffered.shape[0] == samples.shape[0]:
+            count = min(delay, buffered.shape[-1])
+            ring.buffer[:, :count] = buffered[:, :count]
+        lines[node_id] = buffered = ring
+    return buffered.process(samples)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B02 · DAG 边级 PDC 规划（离线渲染与实时混音共用）
+# ─────────────────────────────────────────────────────────────────────────────
+
+MASTER_SINK_ID = "\x00master_sink"
+"""图级汇点保留 ID（非工程轨 ID；规划主 sink = Master 节点）。"""
+
+
+def plan_edge_pdc(
+    latency: dict,
+    edges: list,
+    master_id: str,
+    *,
+    max_edge_delay: int = 0,
+) -> tuple:
+    """按 DAG 边计算延迟补偿计划（主计划 §8）。
+
+    latency: {node_id: 节点固有 DSP 延迟样本}；master_id 必须在表内。
+    edges: [(u, v, edge_key, tap_latency), ...]——u/v 为节点 ID（v 可为
+        master_id）；tap_latency 是该边**取样点**的固有延迟：主路/
+        post_fader tap 取节点链输出 → = latency[u]；pre_fader tap 取其
+        实际内容已携带的延迟（如轨级 clip 链最大延迟）。
+    max_edge_delay: 单边补偿上限（样本；<=0 不限）。超限按上限截断——
+        禁止按用户参数分配无界延迟内存（调用方负责记录诊断）。
+
+    返回 (edge_delay {edge_key: samples}, arrival {node: samples}, total)；
+    total = arrival[master_id] + latency[master_id]（尾音预算消费）。
+
+    算法（Kahn 拓扑序；环/环下游节点由调用方剔除，若仍残留则该子图不
+    规划、不产生延迟线）：
+        arrival[v] = max(arrival[u] + tap_latency(u, v) for u in inputs[v],
+                         default=0)
+        edge_delay[u→v] = max(0, arrival[v] − arrival[u] − tap_latency(u, v))
+    同源多路径在共同下游按最迟到达对齐，每条边独立延迟线。
+    """
+    nodes = set(latency)
+    fwd: dict = {n: [] for n in nodes}   # u → [(v, key, tap)]
+    ins: dict = {n: [] for n in nodes}   # v → [(u, key, tap)]
+    for u, v, edge_key, tap_lat in edges:
+        if u in nodes and v in nodes and u != v:
+            fwd[u].append((v, edge_key, max(0, int(tap_lat))))
+            ins[v].append((u, edge_key, max(0, int(tap_lat))))
+
+    # Kahn 拓扑序
+    indeg = {n: len(ins[n]) for n in nodes}
+    queue = [n for n in nodes if indeg[n] == 0]
+    order: list = []
+    while queue:
+        u = queue.pop()
+        order.append(u)
+        for v, _key, _tap in fwd[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                queue.append(v)
+    resolved = set(order)
+
+    arrival: dict = {}
+    edge_delay: dict = {}
+    for u in order:
+        u_ins = [(iu, key, tap) for iu, key, tap in ins[u] if iu in resolved]
+        arrival[u] = max(((arrival[iu] + tap) for iu, _k, tap in u_ins),
+                         default=0)
+        for iu, key, tap in u_ins:
+            delay = max(0, arrival[u] - arrival[iu] - tap)
+            if max_edge_delay > 0:
+                delay = min(delay, int(max_edge_delay))
+            edge_delay[key] = delay
+
+    total = arrival.get(master_id, 0) + max(0, int(latency.get(master_id, 0)))
+    return edge_delay, arrival, total
 
 
 class EffectChain:
@@ -3773,8 +4062,10 @@ class EffectChain:
     process 支持按 instance_id 的侧链检源透传（压缩器外部检源）。
     """
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *,
+                 realtime_resources: bool = False) -> None:
         self._sample_rate = float(sample_rate)
+        self._realtime_resources = realtime_resources
         # 有序 effect 实例列表 + 每个的 enabled 标志 + instance_id
         self._effects: list = []  # list[AudioEffect]
         self._enabled_flags: list = []  # list[bool]
@@ -3783,10 +4074,23 @@ class EffectChain:
         self._last_entries: Optional[list] = None
         # MX-02: 本块按实例 tap（process 时采样；tap_levels() 读取）
         self._tap_levels: dict = {}
-        # R09: {effect_index: group_post_gain_db}——panel="dynamics" 组的
-        # 组后 Make Up（在该组最后一个成员处理完后应用）。组内压缩器的
-        # makeup_gain 已在 set_params 时清零，增益不在 Limiter 前施加。
+        self._spectrum_taps: dict = {}
         self._group_post_gain_db: dict = {}
+
+    def set_spectrum_metering(self, enabled: bool) -> None:
+        """Subscribe to bounded per-instance PCM windows only while requested."""
+        if not enabled:
+            for tap in self._spectrum_taps.values():
+                tap.clear()
+            self._spectrum_taps.clear()
+            return
+        from src.features.edit.core.audio_effects.spectrum_tap import InstanceSpectrumTap
+        active = set(self._instance_ids) - {""}
+        for iid in set(self._spectrum_taps) - active:
+            self._spectrum_taps.pop(iid).clear()
+        for iid in active:
+            if iid not in self._spectrum_taps:
+                self._spectrum_taps[iid] = InstanceSpectrumTap(self._sample_rate)
 
     def set_params(self, entries: Optional[list], sample_rate: Optional[float] = None) -> None:
         """更新效果器链。
@@ -3798,11 +4102,17 @@ class EffectChain:
             sample_rate: 可选新采样率，变化时重置所有效果器状态。
         """
         if sample_rate is not None and sample_rate != self._sample_rate:
+            self.set_spectrum_metering(False)
             self._sample_rate = float(sample_rate)
 
         self._last_entries = list(entries) if entries else None
 
         if not entries:
+            self.set_spectrum_metering(False)
+            for instance in self._effects:
+                release = getattr(instance, "release_resources", None)
+                if callable(release):
+                    release()
             self._effects = []
             self._enabled_flags = []
             self._instance_ids = []
@@ -3862,6 +4172,10 @@ class EffectChain:
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
+                if self._realtime_resources:
+                    prepare_async = getattr(instance, "enable_async_resources", None)
+                    if callable(prepare_async):
+                        prepare_async()
             inst_params = params
             _post_makeup_db = 0.0
             if (panel == "dynamics" and effect_type == "compressor"
@@ -3876,6 +4190,12 @@ class EffectChain:
                     inst_params["makeup_gain"] = 0.0
             _apply_params_with_version(instance, inst_params, self._sample_rate,
                                        algorithm_version)
+            if effect_type == "vst3_hosted":
+                enabled = bool(enabled and (params or {}).get("enabled", True))
+                if enabled:
+                    instance.prepare()
+                else:
+                    instance.bypass()
             new_effects.append(instance)
             new_flags.append(bool(enabled))
             new_ids.append(instance_id)
@@ -3895,6 +4215,11 @@ class EffectChain:
                 self._group_post_gain_db[j] = \
                     self._group_post_gain_db.get(j, 0.0) + db
 
+        for (old_instance, _flag, _iid), reused in zip(old_pool, used):
+            if not reused:
+                release = getattr(old_instance, "release_resources", None)
+                if callable(release):
+                    release()
         self._effects = new_effects
         self._enabled_flags = new_flags
         self._instance_ids = new_ids
@@ -3912,6 +4237,12 @@ class EffectChain:
                 return bool(installer(capture))
             return False
         return False
+
+    def release_hosted_effects(self) -> None:
+        """Retire hosted processes without changing the channel's effect model."""
+        for instance in self._effects:
+            if instance.effect_type == "vst3_hosted":
+                instance.release_resources()
 
     def process(self, samples: np.ndarray,
                 sidechain_by_id: Optional[dict] = None) -> np.ndarray:
@@ -3934,6 +4265,8 @@ class EffectChain:
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             etype = getattr(inst, "effect_type", "")
             if not (enabled and inst.is_active):
+                if iid in self._spectrum_taps:
+                    self._spectrum_taps[iid].clear()
                 if iid:
                     # MX-02: 旁路实例直通语义（无过期 GR，UI 表归零）
                     self._tap_levels[iid] = {
@@ -3941,18 +4274,24 @@ class EffectChain:
                         "out_db": -100.0, "gr_db": 0.0, "sc_db": -100.0,
                         "bypassed": True,
                     }
+                    if etype == "convolution_reverb":
+                        self._tap_levels[iid]["analysis"] = inst.collect_telemetry()
                 continue
+            spectrum_input = out
             in_peak = float(np.max(np.abs(out))) if out.size else 0.0
             in_db = max(-100.0, 20.0 * float(np.log10(max(in_peak, 1e-9))))
             sc_buf = None
             # DynamicsEffect 内部含压缩器：侧链缓冲透传给其内部 comp
-            if isinstance(inst, (CompressorEffect, DynamicsEffect)) and sidechain_by_id:
-                sc = sidechain_by_id.get(iid) if iid else None
+            if (isinstance(inst, (CompressorEffect, DynamicsEffect))
+                    or etype in {"dynamic_eq", "transient_designer"}):
+                sc = sidechain_by_id.get(iid) if iid and sidechain_by_id else None
                 if sc is not None and isinstance(sc, np.ndarray) and sc.size:
                     sc_buf = sc
                 out = inst.process(out, sidechain=sc)
             else:
                 out = inst.process(out)
+            if iid in self._spectrum_taps:
+                self._spectrum_taps[iid].push(spectrum_input, out)
             out_peak = float(np.max(np.abs(out))) if out.size else 0.0
             out_db = max(-100.0, 20.0 * float(np.log10(max(out_peak, 1e-9))))
             if iid:
@@ -3989,7 +4328,9 @@ class EffectChain:
         未启用/旁路实例也在列（直通语义 + bypassed 标记），消费者可区分
         "真实读数" 与 "旁路归零"。process 未运行过时为空 dict。
         """
-        return self._tap_levels
+        return {iid: (tap | {"spectrum": self._spectrum_taps[iid].snapshot()}
+                      if iid in self._spectrum_taps else dict(tap))
+                for iid, tap in self._tap_levels.items()}
 
     def collect_gain_reduction(self) -> dict:
         """收集链内各实例的块内最大增益衰减（正 dB）。
@@ -4061,6 +4402,8 @@ class EffectChain:
 
     def reset_state(self) -> None:
         """重置所有效果器状态。"""
+        for tap in self._spectrum_taps.values():
+            tap.clear()
         for inst in self._effects:
             inst.reset_state()
 
@@ -4358,6 +4701,39 @@ class MasterLimiter:
     def threshold(self, value: float) -> None:
         self._threshold = max(0.01, float(value))
 
+    def _smooth_gain(self, target: np.ndarray) -> tuple[np.ndarray, float]:
+        if target.size < 128:
+            return _smooth_attack_release(
+                target, self._gain, self._release_coeff, self._attack_coeff)
+        limited = np.flatnonzero(target < 1.0)
+        if limited.size * 4 >= target.size:
+            return _smooth_attack_release(
+                target, self._gain, self._release_coeff, self._attack_coeff)
+
+        # Between peaks the target is exactly unity and the envelope can
+        # only release. Advance those stretches in closed form, retaining
+        # the sample-by-sample attack/release decision at each actual peak.
+        samples = np.arange(target.size)
+        release = np.power(self._release_coeff, np.arange(target.size + 1))
+        if not limited.size:
+            gains = 1.0 + (self._gain - 1.0) * release[1:]
+            return gains, float(gains[-1])
+        positions = np.insert(limited, 0, -1)
+        levels = np.empty(positions.size, dtype=np.float64)
+        levels[0] = level = self._gain
+        gaps = release[np.diff(positions) - 1]
+        for i, (value, gap) in enumerate(zip(target[limited].tolist(), gaps.tolist()), 1):
+            before = 1.0 + (level - 1.0) * gap
+            coeff = self._release_coeff if value > before else self._attack_coeff
+            level = value + (before - value) * coeff
+            levels[i] = level
+
+        preceding = np.zeros(target.size, dtype=np.intp)
+        preceding[limited] = np.arange(1, positions.size)
+        np.maximum.accumulate(preceding, out=preceding)
+        gains = 1.0 + (levels[preceding] - 1.0) * release[samples - positions[preceding]]
+        return gains, float(gains[-1])
+
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用连续状态限幅。
 
@@ -4393,9 +4769,7 @@ class MasterLimiter:
 
         # 增益平滑（attack 下降快、release 上升慢）：分支方向与
         # _smooth_attack_release 的 rise/fall 相反（目标低于增益时衰减）。
-        out_gain, self._gain = _smooth_attack_release(
-            target_gain.astype(np.float64, copy=False), self._gain,
-            self._release_coeff, self._attack_coeff)
+        out_gain, self._gain = self._smooth_gain(target_gain.astype(np.float64, copy=False))
 
         # 应用增益到所有声道
         out = (samples * out_gain).astype(samples.dtype, copy=False)
@@ -4412,3 +4786,91 @@ class MasterLimiter:
             guard = self._threshold / np.maximum(sample_peak, self._threshold)
             out = out * guard
         return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FX-12：环绕声像（ITU BS.775 扬声器方位角 + VBAP 扇区对增益）
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 工程选定扬声器水平角（度；0=正前，负=左）。LFE 不参加水平投影。
+_SURROUND_AZIMUTHS: Dict[int, Dict[str, Optional[float]]] = {
+    6: {"L": -30.0, "R": 30.0, "C": 0.0, "LFE": None,
+        "Ls": -110.0, "Rs": 110.0},
+    8: {"L": -30.0, "R": 30.0, "C": 0.0, "LFE": None,
+        "Ls": -110.0, "Rs": 110.0, "Lss": -90.0, "Rss": 90.0},
+}
+
+
+def surround_speaker_azimuths(channel_count: int) -> Dict[str, Optional[float]]:
+    """布局声道标签 → 水平方位角（LFE 为 None）。未支持的布局返回 {}。"""
+    labels = _SURROUND_AZIMUTHS.get(int(channel_count))
+    return dict(labels) if labels else {}
+
+
+def _pair_gains(left_deg: float, right_deg: float,
+                azimuth_deg: float) -> Tuple[float, float]:
+    """VBAP 扇区对增益：方向向量解非负权重，平方和归一（计划公式）。
+
+    目标方位在扇区外时抛 ``ValueError``（调用方负责角度回绕与退化
+    扇区）；LFE 不进入方向表。
+    """
+    left, right, target = (np.deg2rad(v) for v in
+                           (left_deg, right_deg, azimuth_deg))
+    speakers = np.array([[np.cos(left), np.cos(right)],
+                         [np.sin(left), np.sin(right)]])
+    gains = np.linalg.solve(speakers, [np.cos(target), np.sin(target)])
+    if gains.min() < -1e-9:
+        raise ValueError(
+            f"azimuth {azimuth_deg} outside speaker pair "
+            f"({left_deg}, {right_deg})")
+    gains = np.maximum(gains, 0.0)
+    norm = float(np.linalg.norm(gains))
+    if norm < 1e-9:
+        return 0.0, 0.0
+    return float(gains[0] / norm), float(gains[1] / norm)
+
+
+def surround_panner_gains(channel_count: int, azimuth_deg: float) -> np.ndarray:
+    """mono 源置于 ``azimuth_deg`` 的逐声道增益（顺序 = channel_labels）。
+
+    纯函数（引擎/测试/可视化共用）；LFE 恒 0；目标方位落在扬声器
+    方向本身 → 单声道命中；扇区中点 → 双扬声器等功率（平方和 1）。
+    """
+    table = surround_speaker_azimuths(channel_count)
+    if not table:
+        return np.zeros(int(channel_count), dtype=np.float64)
+    labels = list(table.keys())
+    gains = np.zeros(len(labels), dtype=np.float64)
+    # 候选扬声器（参与水平投影的）按方位角排序，取环绕目标的两邻居。
+    active = [(table[label], index) for index, label in enumerate(labels)
+              if table[label] is not None]
+    active.sort()
+    # 方向精确命中 → 单扬声器。
+    for angle, index in active:
+        if abs(angle - azimuth_deg) < 1e-6:
+            gains[index] = 1.0
+            return gains
+    # 扇区查找：目标在 (angle_i, angle_{i+1}) 内（含 ±180 回绕）。
+    count = len(active)
+    for i in range(count):
+        a0, i0 = active[i]
+        a1, i1 = active[(i + 1) % count]
+        span = a1 - a0
+        wrapped = span < 0
+        if wrapped:
+            span += 360.0
+        rel = (azimuth_deg - a0) % 360.0
+        if 0.0 < rel < span:
+            if wrapped:
+                g0, g1 = _pair_gains(a0, a1 + 360.0, azimuth_deg
+                                     if azimuth_deg >= a0
+                                     else azimuth_deg + 360.0)
+            else:
+                g0, g1 = _pair_gains(a0, a1, azimuth_deg)
+            gains[i0] = g0
+            gains[i1] = g1
+            return gains
+    # 未落入任何扇区（浮点边界）：最近扬声器兜底。
+    nearest = min(active, key=lambda entry: abs(entry[0] - azimuth_deg))
+    gains[nearest[1]] = 1.0
+    return gains

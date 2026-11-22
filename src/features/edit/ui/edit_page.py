@@ -878,6 +878,10 @@ class EditPage(QWidget):
             self._audio_manager.sample_rate_changed.connect(
                 mixer_panel.on_engine_sample_rate
             )
+            output_failed = getattr(self._audio_manager, "control_room_output_failed", None)
+            handle_output_failure = getattr(self._main_window, "_on_mixer_control_room_output_failed", None)
+            if output_failed is not None and callable(handle_output_failure):
+                output_failed.connect(handle_output_failure)
             self._mixer_signals_connected = True
             # W11: LUFS 按需计算——表模式驱动（无 LUFS 表时省掉 K-weighting，
             # 占混音热路径近一半耗时）。先同步当前状态再监听变化。
@@ -1238,7 +1242,7 @@ class EditPage(QWidget):
             except RuntimeError:
                 pass  # The detached view or its scene has already been destroyed.
 
-    def shutdown_audio_playback(self) -> None:
+    def shutdown_audio_playback(self, *, resume_background: bool = True) -> None:
         """Fully stop and release all edit-page audio worker resources.
 
         ``AudioPlaybackManager.stop()`` only joins the live playback thread;
@@ -1252,7 +1256,16 @@ class EditPage(QWidget):
         self._audio_active = False
         self._audio_timeline_signature = None
         self._disconnect_timeline_level_meter()  # W08：停机即断电平订阅
+        # Shutdown may interrupt a scrub before its mouse-release signal (and
+        # may run before an audio device exists). Invalidate queued callbacks
+        # and release global background-work priority in every case.
+        self._scrub_active = False
+        self._pending_scrub_request_frame = None
+        self._scrub_request_timer_pending = False
+        self._scrub_request_timer_token += 1
+        self._background_media_resume_token += 1
         if manager is None:
+            self._finish_background_media_shutdown(resume_background)
             return
 
         try:
@@ -1266,6 +1279,20 @@ class EditPage(QWidget):
             # Shutdown must continue far enough to let the remaining Qt
             # workers be stopped by their owners; never mask window close.
             logger.exception("Failed to clean up edit-page audio playback")
+        finally:
+            self._finish_background_media_shutdown(resume_background)
+
+    def _finish_background_media_shutdown(self, resume_background: bool) -> None:
+        if resume_background:
+            self._set_thumbnail_playback(False)
+            return
+        # Terminal window shutdown must not use set_playback_active(False):
+        # that would start queued decoders while their UI is being destroyed.
+        from src.features.edit.core.audio_waveform import (
+            WaveformExtractor, ClipEffectWaveformRenderer,
+        )
+        WaveformExtractor.instance().shutdown()
+        ClipEffectWaveformRenderer.instance().shutdown()
 
     def start_timeline_audio_playback(self, timeline: Any, start_frame: int) -> bool:
         """Start timeline audio for a transport driven outside the Edit page.
@@ -1462,6 +1489,25 @@ class EditPage(QWidget):
             logger.debug("Audio graph validation skipped: %s", e)
             snap = None
 
+        from src.features.edit.core.native_mix_layout import validate_native_layouts
+
+        try:
+            validate_native_layouts(self._current_timeline, audio_tracks)
+        except ValueError as exc:
+            reason = str(exc)
+            if self._audio_routing_errors != (reason,):
+                logger.warning("Audio layout rejected: %s", reason)
+                host = getattr(self, "_main_window", None)
+                bar = getattr(host, "status_bar", None)
+                if bar is not None:
+                    bar.showMessage(reason, 8000)
+            self._audio_routing_errors = (reason,)
+            self._audio_active = False
+            self._audio_timeline_signature = None
+            if self._audio_manager is not None:
+                self._audio_manager.stop()
+            return
+
         if snap is not None and not snap.is_valid:
             self._audio_routing_errors = tuple(snap.validation_errors)
             logger.warning(
@@ -1578,6 +1624,7 @@ class EditPage(QWidget):
                     solo=track.is_solo,
                     pan=track.pan,
                     enabled=track.is_enabled,
+                    solo_safe=bool(getattr(track, "solo_safe", False)),
                 )
                 try:
                     register_bus = getattr(audio_mgr, "register_bus_track", None)
@@ -1606,6 +1653,7 @@ class EditPage(QWidget):
                 solo=track.is_solo,
                 pan=track.pan,
                 enabled=track.is_enabled,
+                solo_safe=bool(getattr(track, "solo_safe", False)),
             )
 
             registered_any = False
@@ -1717,6 +1765,42 @@ class EditPage(QWidget):
                 logger.debug(f"Audio track registered: {track.track_id} ({track.name})")
 
         # AM-05: master 状态同步到引擎（与 edit_controller 一致，但此处是唯一真相源）。
+        # B03: VCA 覆盖同步——模型 TimelineSequence.vca_factor_for 是唯一
+        # 真相源；实时混音此前没有任何生产调用方下发（仅测试手动 set），
+        # VCA 推子/静音在预览中无声。成员增删/重开/undo 后随图重建刷新。
+        if self._current_timeline is not None:
+            try:
+                set_vca = getattr(audio_mgr, "set_vca_overrides", None)
+                if callable(set_vca):
+                    vca_factors = {
+                        track.track_id: float(
+                            self._current_timeline.vca_factor_for(track.track_id))
+                        for track in audio_tracks
+                    }
+                    set_vca(vca_factors)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_vca_overrides failed: %s", e)
+            # P2: Bus 声道布局同步——引擎 set_bus_layouts 消费（上/下混
+            # 矩阵）。此前图重建路径从不下发（仅被动路径），改布局/重开
+            # 工程后引擎沿用旧布局混音。
+            try:
+                set_layouts = getattr(audio_mgr, "set_bus_layouts", None)
+                if callable(set_layouts):
+                    set_layouts({
+                        track.track_id: str(
+                            getattr(track, "bus_layout", "stereo") or "stereo")
+                        for track in audio_tracks
+                        if getattr(track, "is_bus", False)
+                    })
+                set_programme_layouts = getattr(audio_mgr, "set_programme_layouts", None)
+                if callable(set_programme_layouts):
+                    set_programme_layouts(
+                        {track.track_id: str(getattr(track, "audio_layout", ""))
+                         for track in audio_tracks if not getattr(track, "is_bus", False)},
+                        str(getattr(self._current_timeline, "master_audio_layout", "")),
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_bus_layouts failed: %s", e)
         if self._current_timeline is not None:
             try:
                 audio_mgr.set_master_volume(float(getattr(self._current_timeline, "master_volume", 1.0)))
@@ -1868,6 +1952,14 @@ class EditPage(QWidget):
                 set_auto_mode(track_id, str(getattr(track, "automation_mode", "off") or "off"))
             except Exception as e:  # noqa: BLE001
                 logger.debug("set_track_automation_mode failed for %s: %s", track_id, e)
+        # B03/P1-5: volume trim 同步到引擎（此前仅 edit_controller 的 lane
+        # 被动路径同步；图重建路径漏同步 → 重开工程后 trim 预览失效）。
+        set_trim = getattr(audio_mgr, "set_track_automation_trim", None)
+        if callable(set_trim):
+            try:
+                set_trim(track_id, dict(getattr(track, "automation_trim", {}) or {}))
+            except Exception as e:  # noqa: BLE001
+                logger.debug("set_track_automation_trim failed for %s: %s", track_id, e)
         # 路由（output_bus_id + sends + is_bus；MX-14: send 4 元组带 tap/mute）
         set_routing = getattr(audio_mgr, "set_track_routing", None)
         if callable(set_routing):
@@ -1940,10 +2032,17 @@ class EditPage(QWidget):
             return _sig_value(auto)
 
         def _sends_sig(track: Any) -> Any:
-            """Send 列表签名（target_bus_id + level + enabled）。"""
+            """Send 列表签名（B01：target + level + tap + muted + enabled）。
+
+            tap 决定取样点（pre/post fader 听感不同），muted 独立断开该
+            send 贡献——二者此前遗漏，改字段不触发重同步（审计反例
+            send_tap/send_muted）。
+            """
             sends = getattr(track, "sends", ()) or ()
             return tuple(
                 (getattr(s, "target_bus_id", ""), float(getattr(s, "level", 0.0)),
+                 str(getattr(s, "tap", "post_fader") or "post_fader"),
+                 bool(getattr(s, "muted", False)),
                  bool(getattr(s, "enabled", True)))
                 for s in sends
             )
@@ -2038,6 +2137,9 @@ class EditPage(QWidget):
                     int(getattr(clip, "source_sample_offset", 0) or 0),
                     getattr(clip, "effective_fade_curve_in", None),
                     getattr(clip, "effective_fade_curve_out", None),
+                    # A2：冻结 clip 在注册时被跳过（无声化）——冻结状态
+                    # 变化必须触发重建，否则混音沿用旧图。
+                    getattr(clip, "freeze_source_frame", None),
                     tuple(fx_sig),
                     # P0-3：处理栈变更必须重建引擎（旁路/删除/新增步骤）。
                     steps_signature(getattr(clip, "audio_edit", None)),
@@ -2057,6 +2159,7 @@ class EditPage(QWidget):
                 float(getattr(track, "pan", 0.0) or 0.0),
                 bool(getattr(track, "is_muted", False)),
                 bool(getattr(track, "is_solo", False)),
+                bool(getattr(track, "solo_safe", False)),
                 bool(getattr(track, "is_enabled", True)),
                 # AM-05: 轨道级 EQ / FX / automation 此前完全未纳入签名
                 _strip_eq_sig(track),
@@ -2064,9 +2167,15 @@ class EditPage(QWidget):
                 _automation_sig(track),
                 # AM-07: 自动化模式（off/read/write/touch/latch）影响是否读取曲线
                 str(getattr(track, "automation_mode", "off") or "off"),
+                # B01/P1-5: volume trim 倍率（改变离线/实时听感；此前遗漏
+                # 导致 trim 编辑不触发引擎重同步，审计反例 automation_trim）
+                _sig_value(getattr(track, "automation_trim", {}) or {}),
                 # AM-02/AM-05: 路由字段（is_bus / output_bus_id / sends）
                 is_bus,
                 getattr(track, "output_bus_id", None),
+                # P2: Bus 声道布局（引擎上/下混矩阵；改布局必须重建）
+                str(getattr(track, "bus_layout", "stereo") or "stereo"),
+                str(getattr(track, "audio_layout", "")),
                 _sends_sig(track),
                 # AT: 音频转场（audio:* 实例）变化需重新下发 crossfade 到引擎
                 _audio_transitions_sig(track),
@@ -2092,6 +2201,17 @@ class EditPage(QWidget):
             _sig_value(getattr(timeline, "master_effect_chain", None))
             if timeline is not None else None,
         )
+        # B01: VCA 组（gain/mute/成员变化改变实时听感，审计反例 vca_gain）。
+        # 稳定序（按 vca_id）避免 dict/tuple 顺序扰动。
+        vca_sig = tuple(sorted(
+            (
+                str(getattr(v, "vca_id", "")),
+                float(getattr(v, "gain_db", 0.0)),
+                bool(getattr(v, "muted", False)),
+                tuple(sorted(str(m) for m in getattr(v, "member_track_ids", ()) or ())),
+            )
+            for v in (getattr(timeline, "vcas", ()) or ())
+        ))
 
         return (
             round(float(timeline_fps), 6),
@@ -2100,6 +2220,8 @@ class EditPage(QWidget):
             tuple(track_entries),
             master_auto_sig,
             master_strip_sig,
+            vca_sig,
+            str(getattr(timeline, "master_audio_layout", "")),
         )
 
     # ------------------------------------------------------------------
@@ -2480,6 +2602,7 @@ class EditPage(QWidget):
                     solo=track.is_solo,
                     pan=track.pan,
                     enabled=track.is_enabled,
+                    solo_safe=bool(getattr(track, "solo_safe", False)),
                 )
                 self._audio_manager._mixer.set_track_state(track_id, new_state)
                 logger.debug(f"Audio track state updated: {track_id}")
@@ -2499,6 +2622,10 @@ class EditPage(QWidget):
         """
         self._is_active = True
         logger.info("[EditPage] Entering Edit page")
+
+        activate_monitor = getattr(getattr(self, "_audio_manager", None), "set_control_room_active", None)
+        if callable(activate_monitor):
+            activate_monitor(getattr(getattr(self, "_main_window", None), "current_page", "Edit") in {"Edit", "Mixer"})
 
         # Seeks driven from other pages (Color clip sync) moved only the
         # playback controller while this view was hidden; realign the
@@ -3141,7 +3268,8 @@ class EditPage(QWidget):
     def _set_thumbnail_playback(self, active: bool) -> None:
         """Give playback priority over thumbnail and waveform background work."""
         if self._timeline_panel:
-            tl_view = self._timeline_panel.get_timeline_view()
+            get_view = getattr(self._timeline_panel, "get_timeline_view", None)
+            tl_view = get_view() if callable(get_view) else None
             if tl_view and hasattr(tl_view, 'set_playback_active_for_thumbnails'):
                 tl_view.set_playback_active_for_thumbnails(active)
         # Waveform decoding uses PyAV and can otherwise contend with the video

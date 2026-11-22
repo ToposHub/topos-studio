@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import logging
 import threading
+from copy import deepcopy
 
 # AUD-16807：EffectInstance 顶层导入。effect_instance 只依赖 src.shared，
 # 与本模块无环（模块底部的延迟 import 是历史遗留，只会让单例/缓存的
@@ -297,6 +298,41 @@ CHORUS_FLANGER_EFFECT = EffectDefinition(
     icon="audio_track",
 )
 
+SUBHARMONIC_EFFECT = EffectDefinition(
+    effect_type="subharmonic",
+    name="Subharmonic",
+    category="audio",
+    description="Confidence-gated octave-down generator for bass sources",
+    params_schema={
+        "sh_source_center_hz": _float_schema(90.0, 45.0, 180.0, 1.0,
+                                             "Source Center", "Hz"),
+        "sh_octave1_gain_db": _float_schema(-6.0, -36.0, 0.0, 0.5,
+                                            "Oct 1", "dB"),
+        "sh_octave2_gain_db": _float_schema(-12.0, -36.0, 0.0, 0.5,
+                                            "Oct 2", "dB"),
+        "sh_mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
+    },
+    icon="audio_track",
+)
+
+EXCITER_EFFECT = EffectDefinition(
+    effect_type="exciter",
+    name="Exciter",
+    category="audio",
+    description="Two-band harmonic exciter (even/odd branches mixed "
+                "back into dry)",
+    params_schema={
+        "ex_crossover_hz": _float_schema(2000.0, 100.0, 8000.0, 10.0,
+                                         "Crossover", "Hz"),
+        "ex_oversampling": _float_schema(1.0, 1.0, 2.0, 1.0,
+                                         "Oversampling", "x"),
+        "ex_wet": _float_schema(1.0, 0.0, 1.0, 0.01, "Wet", ""),
+        "ex_output_gain_db": _float_schema(0.0, -24.0, 24.0, 0.1,
+                                           "Output", "dB"),
+    },
+    icon="audio_track",
+)
+
 PHASER_EFFECT = EffectDefinition(
     effect_type="phaser",
     name="Phaser",
@@ -409,7 +445,7 @@ def _get_audio_default_params() -> dict:
                     DeEsserParams, TruePeakLimiterParams, DynamicEqParams,
                     BusCompParams, MultibandCompParams, ConvolutionReverbParams,
                     TransientDesignerParams, TremoloAutoPanParams,
-                    ChorusFlangerParams, PhaserParams,
+                    ChorusFlangerParams, PhaserParams, ExciterParams, SubharmonicParams,
                 )
                 # CW-A1: Expander/Gate 接替 Noise Gate；noise_gate 键保持注册
                 #（旧数据无损承接为 Gate），新增 expander 类型。
@@ -439,6 +475,8 @@ def _get_audio_default_params() -> dict:
                     "tremolo_auto_pan": TremoloAutoPanParams.default().to_dict(),
                     "chorus_flanger": ChorusFlangerParams.default().to_dict(),
                     "phaser": PhaserParams.default().to_dict(),
+                    "exciter": ExciterParams.default().to_dict(),
+                    "subharmonic": SubharmonicParams.default().to_dict(),
                 }
     return _AUDIO_DEFAULT_PARAMS
 
@@ -455,6 +493,8 @@ AUDIO_MIXER_EFFECT_TYPES = frozenset({
     "de_esser", "true_peak_limiter", "dynamic_eq", "bus_comp",
     "multiband_comp", "convolution_reverb", "transient_designer",
     "tremolo_auto_pan", "chorus_flanger", "phaser",
+    # P2（2026-11-21 计划 FX-15/FX-16）：激励器 / 次谐波
+    "exciter", "subharmonic",
 })
 
 
@@ -934,6 +974,17 @@ class EffectRegistry:
         self.register(TREMOLO_AUTO_PAN_EFFECT)
         self.register(CHORUS_FLANGER_EFFECT)
         self.register(PHASER_EFFECT)
+        # P2（2026-11-21 计划 FX-15）：激励器
+        self.register(EXCITER_EFFECT)
+        self.register(SUBHARMONIC_EFFECT)
+        self.register(EffectDefinition(
+            effect_type="vst3_hosted",
+            name="VST3 plug-in",
+            category="audio_hosted",
+            description="Locally registered third-party stereo, zero-latency track insert",
+            params_schema={},
+            icon="audio_track",
+        ))
 
         # Generator category — clip templates (Adjustment Clip / Solid Color).
         # These are dragged from the panel to CREATE a new clip, not attach an
@@ -1171,7 +1222,7 @@ def create_effect_instance(effect_type: str, order: int = 0) -> Optional[EffectI
         if full_defaults:
             return EffectInstance(
                 effect_type=effect_type,
-                params=dict(full_defaults),
+                params=deepcopy(full_defaults),
                 is_enabled=True,
                 order=order,
             )

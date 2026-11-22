@@ -155,12 +155,36 @@
       "timepitch_draft": "Preview · {rate:.1f}% · {pitch:+.1f} st",
       "length_stack_change": "This step changes the clip length. Use timeline Undo to restore the previous edit.",
       "independent_audio": "Independent audio edit (linked video stays put)",
-      "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length."
+      "independent_audio_tip": "Confirm that the linked video should stay in place while the audio changes length.",
+      "de_click": "De-click",
+      "de_hum": "De-hum (automatic)",
+      "pitch_correction": "Pitch correction (C major)",
+      "doubler": "Doubler",
+      "offline_processors": "Selection processing",
+      "processor_preview": "Audition processed",
+      "processor_delta": "Audition difference",
+      "processor_apply": "Apply to stack",
+      "processor_commit": "Apply selection processing",
+      "processor_working": "Processing selection…",
+      "preview_device_unavailable": "Audio output is unavailable"
     },
     "routing": {
       "output": "Output routing",
       "missing_bus": "Missing bus",
-      "add_bus": "Add Bus"
+      "add_bus": "Add Bus",
+      "overview": "Routing overview",
+      "upstream": "Show upstream of",
+      "overview_tip": "Output and enabled, unmuted Sends define upstream membership. Double-click a channel to edit its routing.",
+      "channel": "Channel",
+      "kind": "Type",
+      "sends": "Sends",
+      "edit": "Edit routing…",
+      "all_routes": "All routes",
+      "disabled": "Off",
+      "muted": "Muted",
+      "pre": "Pre",
+      "post": "Post",
+      "close": "Close"
     },
     "recording": {
       "monitor_tip": "Hear the input while recording (takes effect on the next take)",
@@ -189,6 +213,22 @@
       "cancel": "Cancel",
       "apply": "Apply",
       "current_settings": "Current settings"
+    },
+    "console": {
+      "search": "Find channel",
+      "search_tip": "Search names or channel tags · Enter to locate · Esc to clear",
+      "filter": "Channel view",
+      "filter_tip": "Filter the view; audio, routing and recording stay active",
+      "all": "All",
+      "audio": "Audio",
+      "bus": "Buses",
+      "solo": "Solo",
+      "armed": "Armed",
+      "count": "Visible channels / total",
+      "clear_solo": "Clear all Solo",
+      "reset_peaks": "Reset all peak holds and clip indicators",
+      "no_match": "No matching channels",
+      "reset_view": "Reset channel view"
     }
   }
 }

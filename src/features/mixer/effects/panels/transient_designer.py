@@ -1421,7 +1421,7 @@ class TransientShaperCard(QFrame):
             I18N.tr("audio.fx.attack_ms", "Attack Time"), 0.5, 50.0, 8.0, self._accent,
             "0.5", "ms", "50", format_ms, parse_numeric, mode="log",
         )
-        for control in (self.c_punch, self.c_sens, self.c_mix, self.power_sw, self._mode_selector):
+        for control in (self.c_punch, self.c_sens, self.power_sw, self._mode_selector):
             control.hide()
         self._control_body.removeItem(self._timing_row)
         row = self._control_row
@@ -1429,7 +1429,7 @@ class TransientShaperCard(QFrame):
             row.removeWidget(control)
         row.setSpacing(12)
         row.addStretch()
-        for control in (self.c_attack, self.c_attack_time, self.c_sustain, self.c_release):
+        for control in (self.c_attack, self.c_attack_time, self.c_sustain, self.c_release, self.c_mix):
             control.setMaximumWidth(112)
             row.addWidget(control, 1)
         row.addStretch()
@@ -2625,10 +2625,8 @@ class StudioTransientDesignerWidget(QWidget):
     def use_processor_controls(self) -> None:
         self.transient_card.use_processor_controls()
         self.visualizer.use_processor_controls()
-        self.sidechain_card.hide()
         self.output_card.hide()
         self.auto_gain_btn.hide()
-        self.out_fader.setEnabled(False)
 
     def get_state(self) -> dict:
         state = copy.deepcopy(self._current_state())

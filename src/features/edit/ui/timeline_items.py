@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 import logging
 import math
+from bisect import bisect_left, bisect_right
 from collections import OrderedDict
 from typing import Optional, Any
 from enum import Enum
@@ -1083,19 +1084,40 @@ class ClipItem(QGraphicsObject):
             db = min(12.0, above * geo["db_span"] * 0.5)
         return max(-60.0, min(12.0, db))
 
-    def _envelope_node_at(self, pos) -> int | None:
-        """命中最近的包络节点（欧氏距离 ≤ 半径）；无则 None。"""
+    def _envelope_node_at(self, pos: QPointF) -> int | None:
+        """Hit the closest node; equal distances retain the last original index.
+
+        Canonical nodes are fraction-sorted by set_volume_envelope; insertion
+        sorts its temporary list and dragging changes a separate overlay. Only
+        nodes in the horizontal hit-radius interval can qualify. Binary search
+        that interval without building a positions list or caching geometry
+        that becomes stale after a zoom/track-height change.
+        """
         nodes = self._envelope_nodes
         if not nodes:
             return None
         geo = self._envelope_geometry()
         if geo is None:
             return None
-        best, best_dist = None, self.ENVELOPE_NODE_HIT_RADIUS
-        for index, (fraction, gain_db) in enumerate(nodes):
-            x = fraction * geo["width"]
+        px, py = pos.x(), pos.y()
+        width = geo["width"]
+        radius = self.ENVELOPE_NODE_HIT_RADIUS
+        # Search using the very same pixel multiplication as the distance
+        # calculation; dividing the bounds by width can round away an exact
+        # radius-boundary hit at some zoom levels.
+        def pixel_x(point: tuple[float, float]) -> float:
+            return point[0] * width
+        # A few ulps of padding account for cancellation in x ± radius;
+        # the original Euclidean check below still makes the final decision.
+        padding = math.ulp(px) + math.ulp(radius)
+        start = bisect_left(nodes, px - radius - padding, key=pixel_x)
+        end = bisect_right(nodes, px + radius + padding, key=pixel_x)
+        best, best_dist = None, radius
+        for index in range(start, end):
+            fraction, gain_db = nodes[index]
+            x = fraction * width
             y = self._envelope_db_to_y(gain_db, geo)
-            dist = ((pos.x() - x) ** 2 + (pos.y() - y) ** 2) ** 0.5
+            dist = ((px - x) ** 2 + (py - y) ** 2) ** 0.5
             if dist <= best_dist:
                 best, best_dist = index, dist
         return best

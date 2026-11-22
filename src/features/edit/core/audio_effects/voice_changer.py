@@ -750,6 +750,10 @@ class VoiceChangerEffect:
         self._last_conf = 0.0
         self._last_in_rms = 0.0
         self._last_out_rms = 0.0
+        self._last_in_peak = [0.0, 0.0]
+        self._last_out_peak = [0.0, 0.0]
+        self._last_ref_ch_in = 0
+        self._last_ref_ch_out = 0
 
     def set_params(self, params, sample_rate=None, algorithm_version=None):
         from src.features.edit.core.timeline_v2 import VoiceChangerParams
@@ -776,7 +780,10 @@ class VoiceChangerEffect:
         # 遥测（NF-04）：F0 in/out 与电平（30Hz 合并由窗口端负责）。
         # H06：参考声道按能量选择（修前恒用左声道——仅右声道人声报
         # 无声）；分析范围由 pitch_tracking 决定。
-        self._last_in_rms = float(np.sqrt(np.mean(x[0] ** 2))) if n else 0.0
+        self._last_in_peak = [0.0, 0.0]
+        self._last_out_peak = [0.0, 0.0]
+        self._last_ref_ch_in = 0
+        self._last_ref_ch_out = 0
         f0_lo, f0_hi = _F0_RANGES.get(
             str(getattr(p, "pitch_tracking", "vocal")), _F0_RANGES["vocal"])
         ref_ch = 0
@@ -823,9 +830,25 @@ class VoiceChangerEffect:
         gain = float(10.0 ** (float(np.clip(p.output_gain_db, -20.0, 20.0))
                               / 20.0))
         cur = cur * gain
-        self._last_out_rms = float(np.sqrt(np.mean(cur[0] ** 2))) if n else 0.0
-        f0o, _ = _estimate_f0(cur[0], self._sr)
+        # FX-21：输出 F0 参考声道同样按能量挑选（右声道人声不再误读左）。
+        ref_out = 0
+        if cur.shape[0] > 1:
+            e0 = float(np.mean(cur[0, -int(0.05 * self._sr):] ** 2))
+            e1 = float(np.mean(cur[1, -int(0.05 * self._sr):] ** 2))
+            ref_out = 1 if e1 > e0 * 1.5 else 0
+        self._last_ref_ch_in = ref_ch
+        self._last_ref_ch_out = ref_out
+        f0o, _ = _estimate_f0(cur[ref_out], self._sr)
         self._last_f0_out = f0o
+        # 逐声道 RMS / 绝对峰值表计（FX-21：平面 PCM 逐声道读数）。
+        self._last_in_rms = [float(np.sqrt(np.mean(x[ch] ** 2))) if n else 0.0
+                             for ch in range(min(2, x.shape[0]))]
+        self._last_out_rms = [float(np.sqrt(np.mean(cur[ch] ** 2))) if n else 0.0
+                              for ch in range(min(2, cur.shape[0]))]
+        self._last_in_peak = [float(np.max(np.abs(x[ch]))) if n else 0.0
+                              for ch in range(min(2, x.shape[0]))]
+        self._last_out_peak = [float(np.max(np.abs(cur[ch]))) if n else 0.0
+                               for ch in range(min(2, cur.shape[0]))]
         self._samples_processed += n
         return cur.astype(samples.dtype, copy=False)
 
@@ -881,8 +904,16 @@ class VoiceChangerEffect:
             "f0_out_hz": self._last_f0_out,
             "voiced": self._last_f0_in is not None,
             "confidence": round(float(self._last_conf), 3),
+            # FX-21：逐声道 RMS/绝对峰值 + F0 参考声道（能量选择）。
             "in_rms": self._last_in_rms,
             "out_rms": self._last_out_rms,
+            "in_peak": self._last_in_peak,
+            "out_peak": self._last_out_peak,
+            "ref_channel_in": int(getattr(self, "_last_ref_ch_in", 0)),
+            "ref_channel_out": int(getattr(self, "_last_ref_ch_out", 0)),
+            "f0_range_hz": list(_F0_RANGES.get(
+                str(getattr(p, "pitch_tracking", "vocal")
+                    if p else "vocal"), _F0_RANGES["vocal"])),
             "formant_active": bool(p and p.enabled and p.formant_enabled),
             "pitch_active": bool(p and p.enabled and p.pitch_enabled),
             "vocoder_active": bool(p and p.enabled and p.vocoder_enabled),

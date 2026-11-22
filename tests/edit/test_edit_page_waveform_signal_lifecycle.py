@@ -64,3 +64,98 @@ def test_waveform_singleton_survives_emit_without_receivers(qapp) -> None:
     singleton.status_changed.emit("直接槽", 0)
     assert seen[-1] == ("直接槽", 0)
     singleton.status_changed.disconnect(_receive)
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_page_shutdown_releases_scrub_priority_and_resumes_queued_waveforms(qapp, monkeypatch, cleanup_fails: bool) -> None:
+    """Closing/leaving mid-scrub must not permanently pause global decoding."""
+    from types import SimpleNamespace
+    from src.features.edit.core.audio_waveform import ClipEffectWaveformRenderer, WaveformCache, WaveformExtractor
+    from src.features.edit.ui.edit_page import EditPage
+
+    extractor = WaveformExtractor()
+    effects = ClipEffectWaveformRenderer()
+    monkeypatch.setattr(WaveformExtractor, "_instance", extractor)
+    monkeypatch.setattr(ClipEffectWaveformRenderer, "_instance", effects)
+    started: list[tuple[str, str]] = []
+    monkeypatch.setattr(extractor, "_start_worker", lambda asset, path: started.append((asset, path)))
+    page = EditPage()
+    page._scrub_active = True
+    page._pending_scrub_request_frame = 20
+    page._scrub_request_timer_pending = True
+    token = page._background_media_resume_token
+    page._set_thumbnail_playback(True)
+    extractor.request_waveform("shutdown-queued", "/queued.wav")
+    assert extractor._playback_active and effects._playback_active
+    assert not started
+
+    if cleanup_fails:
+        def fail_cleanup() -> None:
+            raise RuntimeError("device disconnected during cleanup")
+        page._audio_manager = SimpleNamespace(cleanup=fail_cleanup)
+    # The no-manager case is intentional: waveform priority is also set by
+    # video-only scrubbing before a device/audio manager exists.
+    page.shutdown_audio_playback()
+    assert not page._scrub_active
+    assert page._pending_scrub_request_frame is None
+    assert not page._scrub_request_timer_pending
+    assert page._background_media_resume_token > token
+    assert not extractor._playback_active and not effects._playback_active
+    assert started == [("shutdown-queued", "/queued.wav")]
+    assert not extractor._queued_requests
+    WaveformCache().clear_pending("shutdown-queued")
+    page.deleteLater()
+
+
+def test_terminal_page_shutdown_cancels_queue_without_starting_decoders(qapp, monkeypatch) -> None:
+    from unittest.mock import Mock
+    from src.features.edit.core.audio_waveform import ClipEffectWaveformRenderer, WaveformCache, WaveformExtractor
+    from src.features.edit.ui.edit_page import EditPage
+
+    extractor = WaveformExtractor()
+    effects = ClipEffectWaveformRenderer()
+    monkeypatch.setattr(WaveformExtractor, "_instance", extractor)
+    monkeypatch.setattr(ClipEffectWaveformRenderer, "_instance", effects)
+    start_source = Mock()
+    monkeypatch.setattr(extractor, "_start_worker", start_source)
+    extractor.set_playback_active(True)
+    effects.set_playback_active(True)
+    extractor.request_waveform("terminal-queued", "/queued.wav")
+    effects.request_effect_waveform("fx-queued", "/queued.wav", 0.0, 1.0, [])
+    page = EditPage()
+    page.shutdown_audio_playback(resume_background=False)
+    assert extractor._shutdown and effects._shutdown
+    assert not extractor._playback_active and not effects._playback_active
+    assert not extractor._queued_requests and not effects._queued
+    assert not WaveformCache().is_pending("terminal-queued")
+    start_source.assert_not_called()
+    # Late requests to these closed owners cannot restart native workers.
+    extractor.request_waveform("late-queued", "/late.wav")
+    effects.request_effect_waveform("late-fx", "/late.wav", 0.0, 1.0, [])
+    assert not extractor._queued_requests and not effects._queued
+    start_source.assert_not_called()
+    page.deleteLater()
+
+
+def test_clip_effect_shutdown_retains_a_worker_that_misses_the_join_budget(qapp) -> None:
+    from unittest.mock import Mock
+    from src.features.edit.core.audio_waveform import (
+        ClipEffectWaveformRenderer, WAVEFORM_CANCEL_WAIT_MS, _retired_waveform_owners,
+    )
+
+    renderer = ClipEffectWaveformRenderer()
+    worker = Mock()
+    worker.isRunning.return_value = True
+    worker.wait.return_value = False
+    renderer._worker = worker
+    renderer.shutdown()
+    worker.requestInterruption.assert_called_once()
+    worker.wait.assert_called_once_with(WAVEFORM_CANCEL_WAIT_MS)
+    assert renderer._worker is None
+    assert renderer._detached_workers[id(worker)] is worker
+    assert renderer in _retired_waveform_owners
+    worker.deleteLater.assert_not_called()
+    renderer._on_worker_finished("finished-fx", worker)
+    assert not renderer._detached_workers
+    assert renderer not in _retired_waveform_owners
+    worker.deleteLater.assert_called_once()

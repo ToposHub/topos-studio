@@ -160,17 +160,56 @@ class _GrainModule:
         }
 
     def install_capture(self, capture: dict) -> bool:
-        """H09：装载捕获资产（确定性重放：历史/锚点/seed 逐一恢复）。"""
+        """H09：装载捕获资产（确定性重放：历史/锚点/seed 逐一恢复）。
+
+        FX-22（2026-11-21 计划）修复：
+        - 回卷环：写入超过一圈后锚点按 ``anchor % cap`` 恢复相位
+          （旧实现 clamp 到 cap → mod 后为 0，读位错一格相位）；
+        - 异采样率：捕获 ``sample_rate`` 与当前不一致时按内容时长
+          重采样历史（保持冻结内容的时长与音高），锚点同比例缩放。
+        """
         hist = capture.get("history")
         if not isinstance(hist, np.ndarray) or hist.ndim != 2:
             return False
-        ch, length = hist.shape[0], hist.shape[1]
-        self._hist = np.zeros((2, self._cap), dtype=np.float64)
-        n = min(length, self._cap)
-        self._hist[0, :n] = hist[0, :n]
-        self._hist[1, :n] = (hist[1, :n] if ch > 1 else hist[0, :n])
-        self._written = min(int(capture.get("anchor", n)), self._cap)
-        self.set_seed(int(capture.get("seed", self._seed)))
+        ch, length = hist.shape
+        if ch not in (1, 2) or length == 0 or not np.isfinite(hist).all():
+            return False
+        try:
+            capture_rate = float(capture.get("sample_rate") or self._sr)
+            anchor = int(capture.get("anchor", length))
+            seed = int(capture.get("seed", self._seed))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not np.isfinite(capture_rate) or capture_rate <= 0 or anchor < 0:
+            return False
+        if abs(capture_rate - self._sr) > 1.0 or length != self._cap:
+            from scipy.signal import resample_poly
+            from math import gcd
+            # Linearize the valid chronological history before changing rate.
+            # Resampling the physical ring creates a splice at the old cursor.
+            valid = min(anchor, length)
+            if valid == 0:
+                return False
+            positions = np.arange(anchor - valid, anchor) % length
+            chronological = hist[:, positions]
+            source_rate = int(round(capture_rate))
+            target_rate = int(round(self._sr))
+            g = gcd(source_rate, target_rate)
+            chronological = resample_poly(chronological, target_rate // g,
+                                           source_rate // g, axis=-1)
+            anchor = int(round(anchor * self._sr / capture_rate))
+            n = min(chronological.shape[-1], self._cap, anchor)
+            prepared = np.zeros((2, self._cap), dtype=np.float64)
+            destination = np.arange(anchor - n, anchor) % self._cap
+            prepared[0, destination] = chronological[0, -n:]
+            prepared[1, destination] = chronological[min(1, ch - 1), -n:]
+        else:
+            prepared = np.zeros((2, self._cap), dtype=np.float64)
+            prepared[0] = hist[0]
+            prepared[1] = hist[min(1, ch - 1)]
+        self._hist = prepared
+        self._written = anchor
+        self.set_seed(seed)
         self._density_phase = 0.0
         self._fb_ring = None
         self._fb_written = 0
@@ -612,6 +651,9 @@ class SpectralManglerEffect:
         self._limiter = _MiniLimiter(self._sr)
         self._routing_fade = 0.0  # 路由切换短淡出保护（事件语义）
         self.last_clip = False
+        self._pre_limiter_peak = 0.0
+        self._output_peak = 0.0
+        self._capture_status = "empty"
         # H07：模块 dry 对齐线（dist 2× 过采样群延迟 31 样本）+ 总 wet 对齐。
         # 逐声道成对——单线双声道会压 2/弹 2（同内容滞后减半、异内容互串）。
         from src.features.edit.core.audio_effects.base import SampleDelayLine
@@ -628,7 +670,9 @@ class SpectralManglerEffect:
 
     def install_freeze_capture(self, capture: dict) -> bool:
         """装载捕获资产（重开工程/选区/Stem 重放的确定性恢复）。"""
-        return self._grain.install_capture(capture)
+        installed = self._grain.install_capture(capture)
+        self._capture_status = "installed" if installed else "failed"
+        return installed
 
     # ── AudioEffect 契约 ──
     def set_params(self, params, sample_rate=None, algorithm_version=None):
@@ -668,9 +712,11 @@ class SpectralManglerEffect:
         wet = mix_aligned(self._aligned_dry(x, p), wet, p.global_mix_pct)
         gain = float(10.0 ** (max(-24.0, min(12.0, p.output_gain_db)) / 20.0))
         wet = wet * gain
+        self._pre_limiter_peak = float(np.max(np.abs(wet))) if wet.size else 0.0
+        self.last_clip = self._pre_limiter_peak >= 1.0
         if p.output_limiter_enabled:
-            self.last_clip = bool(np.max(np.abs(wet)) >= 1.0) if wet.size else False
             wet = self._limiter.process(wet)
+        self._output_peak = float(np.max(np.abs(wet))) if wet.size else 0.0
         self._samples_processed += n
         return wet.astype(samples.dtype, copy=False)
 
@@ -688,6 +734,9 @@ class SpectralManglerEffect:
         self._par_align[1].reset()
         self._samples_processed = 0
         self.last_clip = False
+        self._pre_limiter_peak = 0.0
+        self._output_peak = 0.0
+        self._capture_status = "empty"
 
     def tail_estimate_samples(self) -> int:
         p = self._params
@@ -729,6 +778,11 @@ class SpectralManglerEffect:
             "clip": bool(self.last_clip),
             "limiter_on": bool(p and p.output_limiter_enabled),
             "sample_position": int(self._samples_processed),
+            "active_grains": sum(bool(v.active) for v in self._grain._voices),
+            "dropped_grains": int(self._grain.dropped_events),
+            "capture_status": self._capture_status,
+            "pre_limiter_peak": self._pre_limiter_peak,
+            "output_peak": self._output_peak,
         }
 
     # ── 拓扑（SM-04；H07 dry 对齐）──

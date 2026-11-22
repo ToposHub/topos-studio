@@ -23,6 +23,7 @@ from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.clip_pcm import (
     ClipAudioRenderSpec, ClipPcmProvider, ClipPcmResult, compute_waveform_stats,
     find_zero_crossing, resolve_asset_audio_spec, resolve_clip_audio_spec,
+    ClipWaveformWindow, decode_clip_waveform_window, full_clip_pcm_available,
 )
 from src.features.edit.core.audio_edit import (
     LENGTH_CHANGING_PROCESSORS, OPERATION_LOUDNESS_MATCH, OPERATION_NORMALIZE_PEAK,
@@ -520,6 +521,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     "mixer.clip_editor.step_delete_range", "Delete range"),
                 "spectral_repair": I18N.tr(
                     "mixer.clip_editor.step_repair", "Spectral repair"),
+                "de_click": I18N.tr("mixer.clip_editor.de_click", "De-click"),
+                "de_hum": I18N.tr("mixer.clip_editor.de_hum", "De-hum (automatic)"),
+                "pitch_correction": I18N.tr(
+                    "mixer.clip_editor.pitch_correction", "Pitch correction (C major)"),
+                "doubler": I18N.tr("mixer.clip_editor.doubler", "Doubler"),
             }.get(processor, processor)
             gain_db = params.get("gain_db")
             if processor == "spectral_denoise":
@@ -551,6 +557,9 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                     f"{str(params.get('mode', 'attenuate'))} · "
                     + I18N.tr(
                         "mixer.clip_editor.step_pre_render", "pre-rendered"))
+            elif processor in {"de_click", "de_hum", "pitch_correction", "doubler"}:
+                detail = (f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
+                          + I18N.tr("mixer.clip_editor.step_pre_render", "pre-rendered"))
             else:
                 detail = (
                     f"{params.get('start', 0)}-{params.get('end', 0)} smp · "
@@ -1493,6 +1502,13 @@ class ProjectClipEditor(QWidget):
         self._pcm_callback: Callable[[ClipPcmResult], None] | None = None
         self._native_pcm_worker: ClipPreviewWorker | None = None
         self._native_pcm_serial = 0
+        self._source_detail_worker: ClipPreviewWorker | None = None
+        self._source_detail_key: tuple | None = None
+        self._windowed_waveform_spec: ClipAudioRenderSpec | None = None
+        self._source_detail_timer = QTimer(self)
+        self._source_detail_timer.setSingleShot(True)
+        self._source_detail_timer.setInterval(85)
+        self._source_detail_timer.timeout.connect(self._request_source_detail)
         self._extractor: WaveformExtractor | None = None
         # P0-2：PCM 取样的代际标识与最近一次结果（频谱重算复用）。
         self._pcm_provider: ClipPcmProvider | None = None
@@ -1569,6 +1585,7 @@ class ProjectClipEditor(QWidget):
     def _ensure_panel(self) -> _TimelineClipPanel:
         if self._panel is None:
             self._panel = _TimelineClipPanel()
+            self._panel.canvas.spectralViewportChanged.connect(self._schedule_source_detail)
             status_layout = self._panel._status_layout
             selection_index = status_layout.indexOf(self._panel.sel_info_lbl)
             status_layout.insertWidget(selection_index + 1, self._status, 1)
@@ -1583,6 +1600,7 @@ class ProjectClipEditor(QWidget):
             rack.remove_requested.connect(self.effect_remove_requested.emit)
             self._panel.canvas.populateContextMenu.connect(rack.add_to_context_menu)
             self._panel.canvas.populateContextMenu.connect(self._append_dock_menu_actions)
+            self._panel.canvas.populateContextMenu.connect(self._append_offline_processor_actions)
             self._panel.gain_requested.connect(self._on_gain_requested)
             self._panel.microfade_requested.connect(self._on_microfade_requested)
             self._panel.selection_gain_requested.connect(self._on_selection_gain_requested)
@@ -1811,6 +1829,10 @@ class ProjectClipEditor(QWidget):
 
     def hideEvent(self, event: QHideEvent) -> None:
         self._cancel_analysis()
+        self._source_detail_timer.stop()
+        self._source_detail_key = None
+        if self._source_detail_worker is not None:
+            self._source_detail_worker.cancel()
         if self._panel is not None:
             self._panel._pending_fade = None
             self._panel.canvas.cancel_fade_drag()
@@ -1831,6 +1853,9 @@ class ProjectClipEditor(QWidget):
         if self._native_pcm_worker is not None:
             self._native_pcm_worker.finish()
             self._native_pcm_worker = None
+        if self._source_detail_worker is not None:
+            self._source_detail_worker.finish()
+            self._source_detail_worker = None
         super().closeEvent(event)
 
     def _request_waveform(self) -> None:
@@ -1872,9 +1897,20 @@ class ProjectClipEditor(QWidget):
         if clip is not None and self._timeline is not None:
             source_asset = self._project.assets.get(clip.asset_id) if self._project is not None else None
             return resolve_clip_audio_spec(self._project, self._timeline, clip, source_asset or asset)
-        return resolve_asset_audio_spec(self._project, asset)
+        spec = resolve_asset_audio_spec(self._project, asset)
+        if spec is None:
+            waveform = self._cached_source_waveform()
+            if waveform is not None and waveform.is_complete:
+                spec = resolve_asset_audio_spec(
+                    self._project, asset, duration_seconds=waveform.duration_seconds)
+        return spec
 
     def _cancel_pcm_request(self) -> None:
+        self._source_detail_timer.stop()
+        self._source_detail_key = None
+        self._windowed_waveform_spec = None
+        if self._source_detail_worker is not None:
+            self._source_detail_worker.cancel()
         self._native_pcm_serial += 1
         if self._native_pcm_worker is not None:
             self._native_pcm_worker.cancel()
@@ -1890,6 +1926,19 @@ class ProjectClipEditor(QWidget):
         if spec is None or panel is None or self._pcm_provider is None:
             return
         key = self._pcm_spec_key = spec.cache_key()
+        if not full_clip_pcm_available(spec):
+            # Keep the full logical duration and source envelope. A bounded
+            # display window is not a valid full processing/audition base.
+            self._windowed_waveform_spec = spec
+            self._pcm_load_failed = True
+            message = I18N.tr(
+                "mixer.clip_editor.long_source_view",
+                "Full source waveform · Zoom for sample detail. Clip Edit audition and processing support up to 300 seconds. The full clip extent is preserved.")
+            self._status.setText(message)
+            self._status.setToolTip(message)
+            panel.btn_play.setToolTip(message)
+            self._schedule_source_detail()
+            return
         panel._preview_spec_key = key
         panel._pre_render_plan_for_preview = self._build_preview_plan
         clip, project = self._clip, self._project
@@ -1917,6 +1966,56 @@ class ProjectClipEditor(QWidget):
 
         self._pcm_callback = on_pcm
         self._pcm_provider.request(spec, on_pcm)
+
+    def _schedule_source_detail(self) -> None:
+        if self._windowed_waveform_spec is not None:
+            self._source_detail_timer.start()
+
+    def _request_source_detail(self) -> None:
+        spec, panel, clip = self._windowed_waveform_spec, self._panel, self._clip
+        if spec is None or panel is None or not self.isVisible():
+            return
+        if clip is not None:
+            from src.features.edit.core.audio_retime import needs_retime
+            # A source window cannot evaluate a whole stateful/length-changing
+            # stack. Keep the existing source envelope clearly labelled.
+            if clip.audio_edit or needs_retime(clip):
+                return
+        canvas = panel.canvas
+        scale = spec.sample_count / max(0.01, panel._duration)
+        start = max(0, math.floor(canvas._view_start * scale))
+        end = min(spec.sample_count, math.ceil(canvas._view_end * scale))
+        if end <= start or end - start > 262144:
+            self._source_detail_key = None
+            if self._source_detail_worker is not None:
+                self._source_detail_worker.cancel()
+            return
+        key = (self._native_pcm_serial, spec.cache_key(), start, end)
+        if key == self._source_detail_key:
+            return
+        self._source_detail_key = key
+        if self._source_detail_worker is None:
+            self._source_detail_worker = ClipPreviewWorker()
+            self._source_detail_worker.preview_ready.connect(self._publish_source_detail)
+            self._source_detail_worker.preview_failed.connect(self._source_detail_failed)
+            self.destroyed.connect(self._source_detail_worker.finish)
+        self._source_detail_worker.submit_cancellable(
+            key, lambda cancelled: (key, scale, decode_clip_waveform_window(
+                spec, start, end, cancel_check=cancelled)))
+
+    def _publish_source_detail(self, payload: tuple) -> None:
+        key, scale, detail = payload
+        panel = self._panel
+        if key != self._source_detail_key or panel is None or detail is None:
+            return
+        if not isinstance(detail, ClipWaveformWindow) or detail.spec_key != self._pcm_spec_key:
+            return
+        panel.canvas.setWaveformWindow(detail.pcm, detail.start_sample / scale, scale)
+
+    def _source_detail_failed(self, key: tuple, error: str) -> None:
+        if key == self._source_detail_key:
+            self._source_detail_key = None
+            self._status.setToolTip(error)
 
     def _on_native_pcm_ready(self, payload: tuple) -> None:
         key, rate, pcm = payload
@@ -1970,7 +2069,7 @@ class ProjectClipEditor(QWidget):
         duration = (
             self._clip.timeline_duration / self._fps
             if self._clip is not None and self._fps > 0
-            else pcm.shape[1] / rate
+            else (asset.duration_seconds or pcm.shape[1] / rate)
         )
         panel._duration = max(0.01, duration)
         panel._preview_spec_key = self._pcm_spec_key
@@ -2079,6 +2178,8 @@ class ProjectClipEditor(QWidget):
                 if clip is None else I18N.tr("mixer.clip_editor.source_waveform", "Source waveform · Clip gain and fades are saved to the timeline.")
             )
         self._sync_gain_fade()
+        if clip is None and self._pcm_spec_key is None:
+            self._request_pcm()
 
     def _sync_gain_fade(self) -> None:
         clip, panel = self._clip, self._panel
@@ -2136,6 +2237,86 @@ class ProjectClipEditor(QWidget):
 
     def _target_channels(self) -> tuple[int, ...]:
         return tuple(range(min(2, self._pcm_channel_count())))
+
+    def _append_offline_processor_actions(self, menu: QMenu) -> None:
+        """Expose length-preserving processors through the clip transaction path."""
+        panel = self._panel
+        active = bool(panel is not None and self._clip is not None and not self._locked
+                      and panel._raw_pcm is not None and panel.canvas.project_edits_enabled)
+        processors = (
+            ("de_click", I18N.tr("mixer.clip_editor.de_click", "De-click")),
+            ("de_hum", I18N.tr("mixer.clip_editor.de_hum", "De-hum (automatic)")),
+            ("pitch_correction", I18N.tr("mixer.clip_editor.pitch_correction", "Pitch correction (C major)")),
+            ("doubler", I18N.tr("mixer.clip_editor.doubler", "Doubler")),
+        )
+        root = menu.addMenu(I18N.tr("mixer.clip_editor.offline_processors", "Selection processing"))
+        root.setEnabled(active)
+        for processor_id, label in processors:
+            submenu = root.addMenu(label)
+            for mode, text in (
+                ("preview", I18N.tr("mixer.clip_editor.processor_preview", "Audition processed")),
+                ("delta", I18N.tr("mixer.clip_editor.processor_delta", "Audition difference")),
+                ("apply", I18N.tr("mixer.clip_editor.processor_apply", "Apply to stack")),
+            ):
+                submenu.addAction(text, lambda _checked=False, pid=processor_id, action=mode:
+                                   self._on_offline_processor_requested(pid, action))
+
+    def _on_offline_processor_requested(self, processor_id: str, mode: str) -> None:
+        """Analyze on the cancellable worker; stale previews cannot commit edits."""
+        panel, clip = self._panel, self._clip
+        if (panel is None or clip is None or self._locked or panel._raw_pcm is None
+                or not self._can_append_pre_render()):
+            return
+        selection = panel.canvas.getSelection()[:2]
+        if selection[1] <= selection[0]:
+            panel.set_status_message(I18N.tr(
+                "mixer.clip_editor.selection_required", "Select a time range first"))
+            return
+        from src.features.edit.core.audio_edit import validate_audio_edit
+
+        start, end = self._selection_output_range()
+        selected = panel.canvas._edit_channel
+        channels = ((selected,) if selected >= 0 else tuple(range(self._pcm_channel_count())))
+        options: dict[str, Any] = {}
+        if processor_id == "doubler":
+            options["voices"] = [
+                {"voice_id": "left", "detune_cents": -6.0, "delay_ms": 12.0, "pan_pct": -100.0},
+                {"voice_id": "right", "detune_cents": 6.0, "delay_ms": 19.0, "pan_pct": 100.0},
+            ]
+        step = make_step(processor_id, start, end, channels, **options)
+        candidate = append_step(clip.audio_edit, step)
+        errors = validate_audio_edit(candidate, clip_output_samples=self._output_total_samples(),
+                                     channel_count=self._pcm_channel_count())
+        if errors:
+            self._report_analysis_failure("; ".join(errors))
+            return
+        raw, rate = panel._raw_pcm, panel._pcm_rate
+        previous = copy_audio_edit(clip.audio_edit)
+
+        def compute(cancelled: Callable[[], bool]) -> np.ndarray | None:
+            wet = render_audio_edit_full(raw, candidate, sample_rate=rate, cancel_check=cancelled)
+            if cancelled():
+                return None
+            if mode == "delta":
+                dry = render_audio_edit_full(raw, previous, sample_rate=rate, cancel_check=cancelled)
+                return None if cancelled() else dry - wet
+            return wet
+
+        def current() -> bool:
+            return (not self._locked and panel._raw_pcm is raw
+                    and self._selection_output_range() == (start, end)
+                    and panel.canvas._edit_channel == selected)
+
+        def publish(pcm: np.ndarray) -> None:
+            if mode == "apply":
+                self._commit_audio_edit(candidate, I18N.tr(
+                    "mixer.clip_editor.processor_commit", "Apply selection processing"))
+            elif not panel.start_band_preview(0, pcm):
+                panel.set_status_message(I18N.tr(
+                    "mixer.clip_editor.preview_device_unavailable", "Audio output is unavailable"))
+
+        panel.set_status_message(I18N.tr("mixer.clip_editor.processor_working", "Processing selection…"))
+        self._submit_analysis(compute, publish, current=current)
 
     def _pcm_channel_count(self) -> int:
         if self._panel is not None and self._panel._raw_pcm is not None:
