@@ -38,6 +38,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 
 class MetalPresentError(RuntimeError):
     """The present pass could not be built or a frame could not be presented."""
@@ -206,6 +208,10 @@ class HeldFrame:
     #: A repeated showing of the on-screen frame (resize, zoom, pan) carries
     #: no lease of its own; ``source`` is the record whose texture it draws.
     source: Optional["HeldFrame"] = None
+    #: Travel with the frame: a later submission must not loosen what an
+    #: earlier waiting frame has to satisfy.
+    scrub_token: Optional[int] = None
+    deadline_ns: int = 0
 
     @property
     def is_repeat(self) -> bool:
@@ -403,6 +409,11 @@ class MetalPresentPort:
         self._records: Dict[int, HeldFrame] = {}
         self._next_token = 1
         self._displayed: Optional[HeldFrame] = None
+        # Latest-wins for scrubbing: once a frame with another scrub token (or
+        # a playback frame, token None) was submitted, older waiting frames
+        # of the previous token are stale.
+        self._latest_scrub_token: Optional[int] = None
+        self._has_submission = False
         self._completed: Deque[Tuple[int, Optional[str]]] = deque()
         self._presented_tokens: Deque[int] = deque()
         self.stats: Dict[str, int] = {
@@ -463,17 +474,35 @@ class MetalPresentPort:
         display_rect_px: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         on_presented: Optional[Callable[[Any], None]] = None,
         on_released: Optional[Callable[[Any, str], None]] = None,
+        scrub_token: Any = _UNSET,
+        deadline_ns: int = 0,
     ) -> bool:
-        """Queue one native frame.  ``False``: the queue is full, frame not taken."""
+        """Queue one native frame.  ``False``: the queue is full, frame not taken.
+
+        ``scrub_token`` and ``deadline_ns`` belong to this frame and are fixed
+        at submission: a later frame cannot loosen what a waiting frame has
+        to satisfy.  Unless given, both are read from the descriptor — the
+        producer stores them in ``extra`` (``None`` means playback, not scrub).
+        """
+        extra = getattr(frame, "extra", None)
+        extra = extra if isinstance(extra, dict) else {}
+        if scrub_token is _UNSET:
+            scrub_token = (extra["scrub_token"] if "scrub_token" in extra
+                           else getattr(frame, "scrub_token", None))
+        if deadline_ns == 0:
+            deadline_ns = int(extra.get("deadline_ns") or 0)
         held = HeldFrame(
             frame=frame, rect=tuple(rect), display_rect_px=tuple(display_rect_px),
             on_presented=on_presented, on_released=on_released,
+            scrub_token=scrub_token, deadline_ns=int(deadline_ns or 0),
         )
         with self._lock:
             if len(self._pending) >= self._max_pending:
                 self.stats["dropped_full"] += 1
                 return False
             self._pending.append(held)
+            self._latest_scrub_token = scrub_token
+            self._has_submission = True
             self.stats["submitted"] += 1
         return True
 
@@ -636,13 +665,18 @@ class MetalPresentPort:
         request = self.current_request()
         if request.generation and int(getattr(frame, "generation_id", 0)) != request.generation:
             return "stale_generation"
-        token = getattr(frame, "scrub_token", None)
-        if request.scrub_token is not None and token != request.scrub_token:
+        if request.scrub_token is not None:
+            # Explicitly invalidated by the owner (a newer request exists).
+            if held.scrub_token != request.scrub_token:
+                return "stale_scrub_token"
+        elif self._has_submission and held.scrub_token != self._latest_scrub_token:
+            # A frame with another token — or a playback frame — was submitted
+            # after this one: this one is no longer what the user asked for.
             return "stale_scrub_token"
         size = (int(getattr(frame, "width", 0)), int(getattr(frame, "height", 0)))
         if request.render_size is not None and size != tuple(request.render_size):
             return "stale_render_size"
-        if request.deadline_ns and self._wall_ns() >= int(request.deadline_ns):
+        if held.deadline_ns and self._wall_ns() >= int(held.deadline_ns):
             return "past_deadline"
         return ""
 

@@ -7,7 +7,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import numpy as np
 
@@ -140,6 +140,11 @@ class MetalTimelinePreview:
     def last_gpu_time_ms(self) -> float | None:
         return self._metal.last_gpu_time_ms
 
+    @property
+    def metal_context(self) -> Any:
+        """The MetalComputeContext every preview kernel is dispatched on."""
+        return self._metal
+
     def _allocate(self, size: tuple[int, int]) -> _SharedPreviewSurface:
         import Metal
         import Quartz
@@ -232,41 +237,77 @@ class MetalTimelinePreview:
                 np.asarray([strength], dtype=np.float32)))
         return texture, self._lut_strength[1]
 
-    def render(
-        self, vt_frame: Any, size: tuple[int, int], *, lut: tuple[str, float] | None = None,
-    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
-        """Render into a free IOSurface, leaving ownership of the VT frame to the caller."""
+    def _import_source(self, vt_frame: Any) -> tuple[tuple[Any, Any], GpuFrameRelease] | None:
+        """Import a VT frame's planes; the caller owns the returned lease."""
         if not self._bridge.initialize():
-            reason = self._bridge.last_fallback_reason() or "CVMetalTextureCache is unavailable"
+            reason = self._bridge.last_fallback_reason or "CVMetalTextureCache is unavailable"
             raise RuntimeError(f"Metal preview source import unavailable ({reason})")
-        slot = self._acquire(size)
-        if slot is None:
-            return None
         source = self._bridge.import_pixel_buffer(vt_frame.pixel_buffer, vt_frame.frame_index)
         if source is None:
             # One source could be ineligible for this bridge. Preserve the
             # caller's VT frame so the ordinary GL import can still consume it.
             return None
+        return source
+
+    def _encode(
+        self, y_plane: Any, uv_plane: Any, output: Any, size: tuple[int, int],
+        *, lut: tuple[str, float] | None,
+    ) -> None:
+        """Encode NV12 -> BGRA into ``output``; leaves submitting to the caller."""
+        kernel = self._kernel
+        buffers = None
+        textures = {0: y_plane, 1: uv_plane, 2: output}
+        if lut is not None:
+            textures[3], strength = self._prepare_lut(*lut)
+            buffers = {0: strength}
+            if self._lut_kernel is None:
+                self._lut_kernel = self._metal.compile_kernel("edit_preview_nv12_lut", _NV12_PREVIEW_MSL)
+            kernel = self._lut_kernel
+        self._metal.dispatch(kernel, textures=textures, buffers=buffers, threads=(*size, 1))
+
+    def render(
+        self, vt_frame: Any, size: tuple[int, int], *, lut: tuple[str, float] | None = None,
+    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
+        """Render into a free IOSurface, leaving ownership of the VT frame to the caller."""
+        slot = self._acquire(size)
+        if slot is None:
+            return None
+        source = self._import_source(vt_frame)
+        if source is None:
+            return None
         (y_plane, uv_plane), source_lease = source
         try:
-            kernel = self._kernel
-            buffers = None
-            textures = {
-                0: y_plane.resolved_handle(), 1: uv_plane.resolved_handle(),
-                2: slot.metal_texture,
-            }
-            if lut is not None:
-                textures[3], strength = self._prepare_lut(*lut)
-                buffers = {0: strength}
-                if self._lut_kernel is None:
-                    self._lut_kernel = self._metal.compile_kernel("edit_preview_nv12_lut", _NV12_PREVIEW_MSL)
-                kernel = self._lut_kernel
-            self._metal.dispatch(kernel, textures=textures, buffers=buffers, threads=(*size, 1))
+            self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
+                         slot.metal_texture, size, lut=lut)
             self._metal.finish()
         finally:
             source_lease.release()
         slot.in_use = True
         return slot, GpuFrameRelease(retain_token=slot, release_callback=slot.release_lease)
+
+    def encode_native(
+        self, vt_frame: Any, output: Any, size: tuple[int, int], *,
+        lut: tuple[str, float] | None = None,
+    ) -> Optional[GpuFrameRelease]:
+        """Encode NV12 -> BGRA into ``output`` for the native viewport (plan 2.1).
+
+        Nothing is submitted and nothing is waited for: the caller owns the
+        command buffer (``MetalFrameTransactionPool``) and the returned lease
+        of the VT frame, which must stay alive until the GPU finished reading
+        the planes.  ``None`` when this frame cannot be imported; the caller's
+        VT frame is untouched then.
+        """
+        source = self._import_source(vt_frame)
+        if source is None:
+            return None
+        (y_plane, uv_plane), source_lease = source
+        try:
+            self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
+                         output, size, lut=lut)
+        except Exception:
+            source_lease.release()
+            raise
+        return source_lease
 
     def blit(self, slot: _SharedPreviewSurface, framebuffer: Any) -> None:
         """Flip the IOSurface once into the normal viewer presentation slot."""

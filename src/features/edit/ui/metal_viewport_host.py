@@ -29,7 +29,7 @@ import threading
 from typing import Any, Optional
 
 from PyQt6.QtCore import QEvent, QObject, Qt
-from PyQt6.QtGui import QImage
+from PyQt6.QtGui import QGuiApplication, QImage
 from PyQt6.QtWidgets import QWidget
 
 from src.shared.gpu.metal.present_port import SurfacePublisher, SurfaceState
@@ -165,6 +165,12 @@ class MetalViewportHost(QWidget):
         """``(ok, reason)``: whether this process can host a Metal viewport."""
         if sys.platform != "darwin":
             return False, "not_macos"
+        # ``winId()`` is only an NSView pointer on the Cocoa platform plugin.
+        # Any other plugin (offscreen, minimal …) hands out ids that must never
+        # be dereferenced as AppKit objects.
+        platform = QGuiApplication.platformName() if QGuiApplication.instance() is not None else ""
+        if platform != "cocoa":
+            return False, f"platform_unsupported:{platform or 'no_application'}"
         try:
             import Metal  # noqa: F401
             import Quartz  # noqa: F401

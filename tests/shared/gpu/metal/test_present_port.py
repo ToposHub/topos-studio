@@ -238,8 +238,7 @@ class TestRequestMatching:
     def test_past_deadline_is_retired(self) -> None:
         now = [1_000]
         port, _sink, presenter = _port(wall_ns=lambda: now[0])
-        port.set_request(deadline_ns=2_000)
-        port.submit(_frame(1))
+        port.submit(_frame(1), deadline_ns=2_000)
         now[0] = 2_500
         assert port.poll()[0].reason == "past_deadline"
         assert presenter.calls == []
@@ -251,6 +250,50 @@ class TestRequestMatching:
         port.submit(_frame(1))
         assert port.poll()[0].reason == "stale_surface_unavailable"
         assert presenter.calls == []
+
+
+class TestLatestSubmissionWins:
+    def test_a_newer_scrub_token_retires_waiting_frames_of_the_old_one(self) -> None:
+        port, _sink, presenter = _port(drawables=0)
+        port.submit(_frame(1, token=5))
+        port.submit(_frame(2, token=6))         # queue full afterwards
+        assert port.represent_displayed((0, 0, 1, 1)) is False
+        # Free a drawable: frame 1 is stale now, frame 6's frame is shown.
+        port._sink._free.append(object())
+        outcomes = port.poll()
+        assert [(o.frame.frame, o.event, o.reason) for o in outcomes] == [
+            (1, "released", "stale_scrub_token"), (2, "presented", "")]
+
+    def test_playback_frame_retires_a_waiting_scrub_frame(self) -> None:
+        port, sink, presenter = _port()
+        sink._free = []                         # no drawable for the moment
+        port.submit(_frame(1, token=9))
+        assert port.poll() == []
+        sink._free.append(object())
+        port.submit(_frame(2, token=None))      # playback resumed
+        outcomes = port.poll()
+        assert [(o.frame.frame, o.event, o.reason) for o in outcomes] == [
+            (1, "released", "stale_scrub_token"), (2, "presented", "")]
+
+    def test_a_later_frame_cannot_extend_an_earlier_deadline(self) -> None:
+        now = [0]
+        port, sink, _presenter = _port(wall_ns=lambda: now[0])
+        sink._free = []
+        port.submit(_frame(1), deadline_ns=100)
+        port.poll()
+        port.submit(_frame(2), deadline_ns=10_000)   # a much later deadline
+        sink._free.append(object())
+        now[0] = 500
+        assert [(o.frame.frame, o.event, o.reason) for o in port.poll()] == [
+            (1, "released", "past_deadline"), (2, "presented", "")]
+
+    def test_tokens_are_read_from_the_descriptor_extra(self) -> None:
+        port, _sink, _presenter = _port()
+        frame = SimpleNamespace(frame=1, generation_id=5, width=1920, height=1080,
+                                extra={"scrub_token": 4, "deadline_ns": 7})
+        assert port.submit(frame) is True
+        held = port._pending[0]
+        assert held.scrub_token == 4 and held.deadline_ns == 7
 
 
 class TestBackPressure:
@@ -282,8 +325,7 @@ class TestBackPressure:
         port, sink, _presenter = _port(drawables=1, wall_ns=lambda: now[0])
         port.submit(_frame(1))
         port.poll()
-        port.set_request(deadline_ns=100)
-        port.submit(_frame(2))
+        port.submit(_frame(2), deadline_ns=100)
         port.poll()
         now[0] = 500
         assert [(o.frame.frame, o.reason) for o in port.poll()] == [(2, "past_deadline")]

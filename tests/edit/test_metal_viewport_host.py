@@ -30,11 +30,23 @@ from src.features.edit.ui.metal_viewport_host import MetalViewportHost
 from src.shared.gpu.metal.context import MetalComputeContext
 
 _METAL_OK, _METAL_REASON = MetalComputeContext.availability_reason()
-pytestmark = pytest.mark.skipif(not _METAL_OK, reason=f"needs Metal ({_METAL_REASON})")
+
+
+def _platform(qapp) -> str:
+    return qapp.platformName()
+
+
+def _needs_cocoa(qapp) -> None:
+    """The real-window tests need the Cocoa plugin; offscreen has no NSViews."""
+    if not _METAL_OK:
+        pytest.skip(f"needs Metal ({_METAL_REASON})")
+    if _platform(qapp) != "cocoa":
+        pytest.skip(f"needs the cocoa Qt platform (got {_platform(qapp)})")
 
 
 @pytest.fixture()
 def window(qapp):
+    _needs_cocoa(qapp)
     host = MetalViewportHost()
     host.resize(320, 180)
     host.show()
@@ -51,6 +63,25 @@ def _frame(view) -> tuple:
 
 
 class TestAttach:
+    def test_other_qt_platforms_are_refused_not_crashed(self, qapp) -> None:
+        """``winId()`` is only an NSView pointer under the Cocoa plugin."""
+        if not _METAL_OK:
+            pytest.skip(f"needs Metal ({_METAL_REASON})")
+        host = MetalViewportHost()
+        host.resize(64, 36)
+        host.show()
+        qapp.processEvents()
+        if _platform(qapp) == "cocoa":
+            host.close()
+            pytest.skip("covered by the real-window tests")
+        assert host.attach() is False
+        assert host.failure.startswith("platform_unsupported:")
+        assert host.attached is False and host.layer is None
+        assert MetalViewportHost.supported() == (False, host.failure)
+        # An overlay requested before attaching is simply kept.
+        host.set_overlay_image(QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied))
+        host.close()
+
     def test_attach_creates_a_layer_inside_the_widget(self, window) -> None:
         assert window.attach() is True
         assert window.failure == ""
@@ -76,7 +107,7 @@ class TestAttach:
         assert window.attach() is True
         assert window.layer is layer
 
-    def test_supported_reports_the_platform(self) -> None:
+    def test_supported_reports_the_platform(self, window) -> None:
         ok, reason = MetalViewportHost.supported()
         assert ok is True, reason
 
@@ -148,6 +179,7 @@ class TestOverlay:
         assert window._overlay_layer.contents() in (None, objc.NULL)
 
     def test_overlay_before_attach_is_kept_until_attached(self, qapp) -> None:
+        _needs_cocoa(qapp)
         host = MetalViewportHost()
         image = QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied)
         host.set_overlay_image(image)

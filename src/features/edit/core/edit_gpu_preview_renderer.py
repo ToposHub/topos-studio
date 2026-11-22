@@ -23,7 +23,7 @@ import os
 import numpy as np
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Optional, Tuple, Any
+from typing import Callable, Optional, Tuple, Any
 
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QTimer
 from PyQt6.QtGui import QOpenGLContext, QOffscreenSurface
@@ -44,6 +44,14 @@ from src.features.edit.core.gpu_transition_shaders import (
     GPU_FULL_FRAME_TRANSITION_FRAGMENT_SHADER_SOURCE,
 )
 from src.shared.gpu.gl_backend import GLContextManager
+
+
+def _env_flag(name: str) -> bool:
+    """An opt-in environment switch; only explicit truthy values enable it."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+_NATIVE_STATE_LOCK = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -612,6 +620,11 @@ class EditGpuPreviewRenderer(QThread):
     present_frame_ready = pyqtSignal(object)  # GpuPresentFrame
     # Viewer ack 信号：Viewer 完成 blit 后通知 renderer 释放 slot。
     slot_acked = pyqtSignal(int)  # slot_id
+    # Metal 迁移 2.1 / 2.2：原生 Metal 视口。帧由 CAMetalLayer 呈现时经
+    # native_frame_presented 计入呈现统计；端口拒绝或停止时通知 GUI 回到
+    # GL Viewer。
+    native_frame_presented = pyqtSignal(int)  # frame
+    native_viewport_failed = pyqtSignal(str)  # reason
     render_error = pyqtSignal(int, str)  # frame, error_message
     # 合成快照（1/4 分辨率 QImage）：暂停态 seek/scrub-settle 的帧回填
     # CPU 帧缓存，让"seek 回看刚看过的帧"无需重新解码。只在
@@ -696,6 +709,7 @@ class EditGpuPreviewRenderer(QThread):
         self._composite_tex = None
         self._metal_preview_mode = "off"
         self._metal_preview = None
+        self._init_native_viewport_state()
         # P3.2 GPU 复合结果缓存：(generation, frame) -> 全分辨率合成纹理。
         # 命中时 worker 跳过解码、GPU 直接把缓存纹理 blit 进 present slot
         # （暂停态来回微调 / 重访已合成帧 = 纯拷贝）。generation 变化即失效
@@ -1099,6 +1113,15 @@ class EditGpuPreviewRenderer(QThread):
                     )
                 return
             self._generation_id = target_generation
+            # The native viewport compares against this from now on: a frame
+            # queued before the change is stale even if it is already waiting.
+            native_lock = self.__dict__.get("_native_viewport_lock")
+            native_port = self.__dict__.get("_native_port")
+            if native_lock is not None:
+                with native_lock:
+                    self._native_request_generation = target_generation
+            if native_port is not None:
+                native_port.set_request(generation=target_generation)
             stale_tasks = self._drop_stale_generation_tasks(target_generation)
             for stale_task in stale_tasks:
                 self._release_task_sources(stale_task)
@@ -1380,8 +1403,13 @@ class EditGpuPreviewRenderer(QThread):
 
         # Task loop
         while self._running:
+            self._poll_native_viewport()
+            # With a native frame on the GPU, wake up as soon as it completes
+            # instead of waiting for the next ~60 Hz poll.
+            producer = self.__dict__.get("_native_producer")
+            poll_s = 0.002 if producer is not None and producer.in_flight else 0.016
             try:
-                task = self._queue.get(timeout=0.016)  # ~60Hz poll
+                task = self._queue.get(timeout=poll_s)  # ~60Hz poll
             except queue.Empty:
                 continue
 
@@ -2166,6 +2194,10 @@ class EditGpuPreviewRenderer(QThread):
             if not self._ensure_background_composite_fbo(w, h):
                 self._release_task_sources(task)
                 return
+        elif self._try_native_metal_preview(task, w, h):
+            # Settled on the native path: nothing of this frame goes through
+            # a GL slot.  It is published when its GPU work completes.
+            return
         elif not self._ensure_composite_fbo(
             w, h, generation_id=task.generation_id, frame_index=task.frame
         ):
@@ -2607,19 +2639,25 @@ class EditGpuPreviewRenderer(QThread):
 
         self._publish_composited_frame(task, final_tex, w, h, len(track_textures))
 
-    def _try_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
-        """Try one SDR VideoToolbox clip with an optional single LUT."""
+    def _metal_preview_plan(self, task: EditRenderTask) -> Optional[tuple]:
+        """Whether ``task`` may use the Metal preview: ``(layer, source, lut)``.
+
+        One SDR VideoToolbox clip with an optional single LUT — nothing else
+        on the frame, no transform, crop, effect or transition.  ``lut`` is
+        ``None`` for an ungraded clip; in ``lut`` mode such a clip is not
+        eligible.
+        """
         mode = getattr(self, "_metal_preview_mode", "off")
         if (mode == "off"
                 or getattr(self, "_effect_hdr", False)
                 or task.background or len(task.layers) != 1
                 or task.adjustment_layers or task.transition_jobs):
-            return False
+            return None
         from src.features.edit.core.crop_cpu import crop_is_identity
 
         layer = task.layers[0]
         if layer.get("frame_type") != "vt_pixel_buffer":
-            return False
+            return None
         info = layer.get("track_info", {})
         transform = info.get("transform")
         source = layer.get("vt_pixel_buffer")
@@ -2632,7 +2670,7 @@ class EditGpuPreviewRenderer(QThread):
                 or info.get("opacity", 1.0) != 1.0
                 or info.get("clip_effects") or (transform and not _transform_tuple_is_identity(transform))
                 or not crop_is_identity(info.get("crop"))):
-            return False
+            return None
 
         lut = None
         grade = info.get("preview_grade")
@@ -2642,13 +2680,20 @@ class EditGpuPreviewRenderer(QThread):
 
             graph = grade.get("color_graph")
             if not isinstance(graph, ColorGraphData) or grade.get("chain_extra_params"):
-                return False
+                return None
             lut = serial_lut_only(graph)
             if lut is None:
-                return False
+                return None
         elif mode == "lut":
-            return False
+            return None
+        return layer, source, lut
 
+    def _try_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
+        """Try one SDR VideoToolbox clip with an optional single LUT."""
+        plan = self._metal_preview_plan(task)
+        if plan is None:
+            return False
+        layer, source, lut = plan
         from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
 
         try:
@@ -5570,6 +5615,293 @@ void main() {
         self._current_present_lease = None
         return present
 
+    # ==================== Native Metal viewport (plan 2.1 / 2.2) ====================
+
+    def _ensure_native_viewport_state(self) -> None:
+        """Make the native viewport state exist on a partially built renderer.
+
+        Tests and a few tools create the renderer through ``__new__`` without
+        running ``__init__``; every native-path entry point calls this first so
+        those objects keep working.  The module-level lock keeps two threads
+        from building the state twice.
+        """
+        if "_native_viewport_lock" in self.__dict__:
+            return
+        with _NATIVE_STATE_LOCK:
+            if "_native_viewport_lock" not in self.__dict__:
+                self._init_native_viewport_state()
+
+    def _init_native_viewport_state(self) -> None:
+        """State of the native viewport.  GUI 线程请求 attach，渲染线程在
+        自己的线程上创建呈现端口与原生帧生产器。默认关闭
+        （TOPOS_EDIT_METAL_VIEWPORT=1 显式开启）；任何失败都回到 GL Viewer。
+        """
+        self._native_viewport_opt_in = _env_flag("TOPOS_EDIT_METAL_VIEWPORT")
+        self._native_viewport_lock = threading.Lock()
+        self._native_viewport_request: Optional[tuple] = None
+        self._native_port: Optional[Any] = None        # render thread only
+        self._native_producer: Optional[Any] = None    # render thread only
+        self._native_request_generation: Optional[int] = None
+
+    def native_viewport_opted_in(self) -> bool:
+        """Whether the session asked for the native Metal viewport."""
+        self._ensure_native_viewport_state()
+        return bool(self._native_viewport_opt_in)
+
+    def native_viewport_active(self) -> bool:
+        """Whether the render thread currently presents through a Metal layer."""
+        return self.__dict__.get("_native_port") is not None
+
+    def attach_native_viewport(self, layer: Any, publisher: Any) -> None:
+        """GUI thread: hand an attached CAMetalLayer to the render thread.
+
+        The render thread builds the present port and the native frame
+        producer on its own thread; it reports through
+        ``native_viewport_failed`` if that is refused.
+        """
+        self._ensure_native_viewport_state()
+        with self._native_viewport_lock:
+            self._native_viewport_request = ("attach", layer, publisher)
+
+    def detach_native_viewport(self, timeout_s: float = 2.0) -> bool:
+        """GUI thread: take the layer back once the render thread let go of it.
+
+        Returns ``False`` when the render thread did not confirm in time —
+        the caller must then keep the layer alive and try again later.
+        """
+        self._ensure_native_viewport_state()
+        done = threading.Event()
+        with self._native_viewport_lock:
+            self._native_viewport_request = ("detach", done)
+            port = self._native_port
+        if port is None and not self.is_initialized:
+            # Nothing was ever built and no render thread will pick the
+            # request up: settle it here.
+            with self._native_viewport_lock:
+                self._native_viewport_request = None
+            done.set()
+        return done.wait(timeout=max(0.0, float(timeout_s)))
+
+    def submit_native_present(
+        self,
+        present: Any,
+        *,
+        rect: tuple,
+        display_rect_px: tuple,
+        on_released: Optional[Callable[[Any, str], None]] = None,
+    ) -> bool:
+        """GUI thread: queue a native frame for the viewport.
+
+        ``False``: no viewport is taking frames — the caller returns the
+        frame's lease itself.
+        """
+        self._ensure_native_viewport_state()
+        with self._native_viewport_lock:
+            port = self._native_port
+            if port is None or self._native_viewport_request is not None:
+                return False
+        # The scrub token and the deadline travel inside the descriptor; the
+        # port binds them to this frame so a later frame cannot loosen them.
+        return port.submit(
+            present, rect=tuple(rect), display_rect_px=tuple(display_rect_px),
+            on_presented=self._note_native_frame_presented, on_released=on_released,
+        )
+
+    def represent_native_viewport(self, rect: tuple) -> bool:
+        """GUI thread: show the on-screen frame again (resize, zoom, pan)."""
+        self._ensure_native_viewport_state()
+        with self._native_viewport_lock:
+            port = self._native_port
+        if port is None:
+            return False
+        return port.represent_displayed(tuple(rect))
+
+    def _note_native_frame_presented(self, present: Any) -> None:
+        """Render thread: a native frame was handed to the display."""
+        try:
+            self.native_frame_presented.emit(int(getattr(present, "frame", -1)))
+        except Exception:  # noqa: BLE001 - telemetry must not break presenting
+            logger.debug("native_frame_presented emit failed", exc_info=True)
+
+    def _poll_native_viewport(self) -> None:
+        """Render thread: apply viewport requests, reclaim, publish."""
+        self._ensure_native_viewport_state()
+        with self._native_viewport_lock:
+            request = self._native_viewport_request
+            self._native_viewport_request = None
+        if request is not None:
+            self._apply_native_viewport_request(request)
+        port, producer = self._native_port, self._native_producer
+        if port is not None:
+            try:
+                outcomes = port.poll()
+            except Exception:  # noqa: BLE001 - the GL loop must keep running
+                logger.warning("Edit native viewport poll failed", exc_info=True)
+                outcomes = []
+            for outcome in outcomes:
+                if outcome.event == "released":
+                    self._release_native_frame(outcome.frame, outcome.reason, producer)
+        if producer is not None:
+            published, failed = producer.poll()
+            for item in published:
+                self._emit_native_present(item)
+            for item in failed:
+                self._fail_native_frame(item)
+
+    def _apply_native_viewport_request(self, request: tuple) -> None:
+        """Render thread: build or tear down the native viewport."""
+        kind = request[0]
+        if kind == "attach":
+            _kind, layer, publisher = request
+            if self._native_port is not None:
+                return   # already attached; the first layer stays
+            if (not self._native_viewport_opt_in
+                    or getattr(self, "_metal_preview_mode", "off") == "off"):
+                self.native_viewport_failed.emit("native_viewport_disabled")
+                return
+            try:
+                from src.features.edit.core.native_metal_preview import NativePreviewProducer
+                from src.shared.gpu.metal.present_port import (
+                    CAMetalLayerSink,
+                    MetalPresentPass,
+                    MetalPresentPort,
+                )
+                from src.features.edit.ui.metal_viewport_host import METAL_VIEWPORT_PIXEL_FORMAT
+
+                if self._metal_preview is None:
+                    from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
+                    self._metal_preview = MetalTimelinePreview(self.ctx)
+                present_pass = MetalPresentPass(
+                    self._metal_preview.metal_context, METAL_VIEWPORT_PIXEL_FORMAT)
+                sink = CAMetalLayerSink(layer, METAL_VIEWPORT_PIXEL_FORMAT)
+                self._native_port = MetalPresentPort(sink, present_pass, publisher)
+                self._native_producer = NativePreviewProducer(self._metal_preview)
+            except Exception as error:  # noqa: BLE001 - refusal falls back to GL
+                self._native_port = None
+                self._native_producer = None
+                logger.warning("Edit native viewport unavailable, using OpenGL: %s", error)
+                self.native_viewport_failed.emit(str(error))
+            return
+        if kind == "detach":
+            _kind, done = request
+            port, producer = self._native_port, self._native_producer
+            self._native_port = None
+            self._native_producer = None
+            if port is not None:
+                try:
+                    for outcome in port.shutdown():
+                        if outcome.event == "released":
+                            self._release_native_frame(outcome.frame, "shutdown", producer)
+                finally:
+                    done.set()
+            if producer is not None:
+                try:
+                    producer.shutdown()
+                except Exception:  # noqa: BLE001
+                    logger.warning("Edit native producer shutdown failed", exc_info=True)
+            if port is None:
+                done.set()
+
+    def _emit_native_present(self, item: Any) -> None:
+        """Render thread: a native frame finished on the GPU — publish it."""
+        present, task = item.present, item.task
+        playback_trace(
+            "gpu_renderer.native_preview_frame",
+            frame=task.frame, generation=task.generation_id,
+            slot_id=present.slot_id, gpu_submit_ms=item.gpu_ms,
+        )
+        self.present_frame_ready.emit(present)
+        # The legacy completion signal drives the preview renderer's state
+        # machine; the texture id carries no meaning for a native descriptor.
+        self.frame_ready.emit(
+            int(task.frame), int(task.generation_id), 0,
+            int(present.width), int(present.height),
+        )
+
+    def _shutdown_native_viewport(self) -> None:
+        """Render thread, at exit: release the viewport before Metal goes away."""
+        if "_native_viewport_lock" not in self.__dict__:
+            return
+        port, producer = self._native_port, self._native_producer
+        self._native_port = None
+        self._native_producer = None
+        if port is not None:
+            try:
+                for outcome in port.shutdown():
+                    if outcome.event == "released":
+                        self._release_native_frame(outcome.frame, "shutdown", producer)
+            except Exception:  # noqa: BLE001
+                logger.warning("Edit native viewport shutdown failed", exc_info=True)
+        if producer is not None:
+            try:
+                if not producer.shutdown():
+                    logger.warning(
+                        "Edit native producer: GPU still busy at exit; keeping resources")
+            except Exception:  # noqa: BLE001
+                logger.warning("Edit native producer shutdown failed", exc_info=True)
+
+    def _fail_native_frame(self, item: Any) -> None:
+        """Render thread: a native frame failed — report it and why."""
+        task = item.task
+        producer = self._native_producer
+        error = item.error or "native_preview_failed"
+        playback_trace(
+            "gpu_renderer.native_preview_failed",
+            frame=task.frame, generation=task.generation_id, error=error,
+        )
+        if producer is not None and producer.paused_reason:
+            # New frames take the GL path until the GPU drains; the GUI shows
+            # them in the GL viewer again.
+            self.native_viewport_failed.emit(producer.paused_reason)
+        self._emit_task_render_error(task, error)
+
+    @staticmethod
+    def _release_native_frame(present: Any, reason: str, producer: Any = None) -> None:
+        """Render thread: the viewport is done with a frame — free its slot."""
+        if producer is None:
+            return
+        try:
+            producer.ack(present, reason)
+        except Exception:  # noqa: BLE001 - a slot must never be stranded silently
+            logger.warning("Edit native frame ack failed", exc_info=True)
+
+    def _try_native_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
+        """Take an eligible frame to the native viewport.  ``True``: settled here."""
+        producer = self.__dict__.get("_native_producer")
+        if producer is None or not producer.enabled:
+            return False
+        if (getattr(self, "_effect_hdr", False) or task.background
+                or task.cached_composite or getattr(self, "_snapshot_armed", False)):
+            return False
+        with self._native_viewport_lock:
+            port = self._native_port
+        if port is not None:
+            # Frames of another render size (queued before a viewport resize)
+            # are stale for the viewport.
+            port.set_request(render_size=(int(width), int(height)))
+        plan = self._metal_preview_plan(task)
+        if plan is None:
+            return False
+        layer, source, lut = plan
+        from src.features.edit.core.native_metal_preview import DROPPED, FALLBACK, SUBMITTED
+
+        # Ownership of the VT frame passes to the frame transaction; nothing
+        # else may release it from here on.
+        layer["vt_pixel_buffer"] = None
+        try:
+            outcome = producer.try_render(task, (width, height), source, lut)
+        except Exception:
+            layer["vt_pixel_buffer"] = source   # untouched: the GL path may use it
+            raise
+        if outcome == FALLBACK:
+            layer["vt_pixel_buffer"] = source
+            return False
+        self._task_used_io_surface_source = True
+        self._note_zero_copy_import(source, timeline_frame=task.frame)
+        if outcome == DROPPED:
+            self._emit_task_render_error(task, "native_preview_dropped")
+        return True
+
     def ack_present_slot(
         self, slot_id: int, lease_key: Optional[PresentLeaseKey] = None,
     ) -> None:
@@ -5853,6 +6185,7 @@ void main() {
         self._task_used_io_surface_source = bool(self._previous_gpu_frames)
         self._release_previous_frames()
         self._drain_deferred_gpu_frame_releases(block=True)
+        self._shutdown_native_viewport()
         metal_preview = getattr(self, "_metal_preview", None)
         if metal_preview is not None:
             try:
