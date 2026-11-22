@@ -829,6 +829,20 @@ assert np.allclose(g, [1.0, 10 ** (-12.0 / 20)])
 实时 mix_samples 各跳过点的延迟线推进、punch/comp/replace_region
 数学、VBAP/chna 验证语义、sound_fixtures 往返。
 
+批次8 全量验证（修复提交 ff5c86fe 后）：
+
+- 全量 `tests/`：**45923 通过 / 292 跳过 / 111 失败 + 21 错误**
+  （1:13:04）。全部失败经合并基点（65e33d9b）同检出对拍核实：
+  **零新增**——均为预存基线（effect_registry ×4、wd13g69、
+  h01、channel_layout 等）、原生编解码 SDK 环境态（16bit
+  roundtrip/AAC/raw ×11，基点同败）或顺序敏感抖动（vault
+  watcher/clip affordance gestures 等，隔离重跑两侧均过）。
+- 已知非代码问题：`test_constant_color_picker_stores_scene_
+  linear_values` 在长程全量中会因先前测试污染在 offscreen 取色
+  器事件循环上永久阻塞（隔离 2.85s 通过、文件隔离 26/26 通过；
+  faulthandler 5min 转储定位）。本轮验证以 `--deselect` 规避，
+  根因（跨测试污染）属 color/UI 域，留待该域处理。
+
 ## 20. B10–B20完整实施手册
 
 以下为主计划的组成部分。工时与依赖以§4表及各项现状说明为准。
