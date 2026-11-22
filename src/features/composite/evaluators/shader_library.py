@@ -16,6 +16,7 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+from ..core.layer_style_shaders import LAYER_STYLE_COMPOSITE_FRAGMENT, LAYER_STYLE_MASK_FRAGMENT
 from ..core.shaders import (
     _PASSTHROUGH_VERTEX, _PASSTHROUGH_FRAGMENT,
     _PASSTHROUGH_SUB_FRAGMENT,
@@ -118,7 +119,8 @@ class ShaderLibrary:
         "cs_transform", "reformat", "crop", "fused", "fused_color",
         "clamp", "matte_cleanup", "dissolve", "set_alpha", "luma_keyer", "matte", "normalize",
         "sharpen", "erode_dilate", "chroma_keyer", "difference_keyer", "defocus",
-        "glow_h", "glow_v", "color_correct", "huecorrect", "cornerpin",
+        "glow_h", "glow_v", "layer_style_mask", "layer_style_composite",
+        "color_correct", "huecorrect", "cornerpin",
         "remove_channels",
         "keylight",  # Keylight 1.2-style chroma keyer
         "downsample", "upsample",  # LOD shaders for viewport-based optimization
@@ -212,6 +214,8 @@ class ShaderLibrary:
         "defocus":       (_PASSTHROUGH_VERTEX, _DEFOCUS_FRAGMENT),
         "glow_h":        (_PASSTHROUGH_VERTEX, _GLOW_H_FRAGMENT),
         "glow_v":        (_PASSTHROUGH_VERTEX, _GLOW_V_FRAGMENT),
+        "layer_style_mask": (_PASSTHROUGH_VERTEX, LAYER_STYLE_MASK_FRAGMENT),
+        "layer_style_composite": (_PASSTHROUGH_VERTEX, LAYER_STYLE_COMPOSITE_FRAGMENT),
         "color_correct": (_PASSTHROUGH_VERTEX, _COLOR_CORRECT_FRAGMENT),
         "huecorrect":    (_PASSTHROUGH_VERTEX, _HUECORRECT_FRAGMENT),
         "luma_keyer":    (_PASSTHROUGH_VERTEX, _LUMA_KEYER_FRAGMENT),

@@ -27,7 +27,7 @@ def _rotation_row_y(view, t):
     for i, row in enumerate(rows):
         if row.row_type == "param" and row.param_name == "rotation":
             # row center y = _RULER_H + i*_ROW_H - scroll_y + _ROW_H/2
-            return 30 + i * 24 - view._scroll_y + 12
+            return view.ruler_height() + i * 24 - view._scroll_y + 12
     raise AssertionError("rotation param row not found")
 
 
@@ -163,9 +163,9 @@ def test_range_bar_edge_drag_emits_range(qapp):
     view.range_changed.connect(
         lambda nid, tr: received.append((nid, tr)))
 
-    # Node row is row 0 → y = 30 + 0*24 + 12 = 42
-    # range bar: start frame 0 → x=0, end frame 50 → x=500.
-    # Right edge at x=500; drag to x=600 → frame 60.
+    # Drag the inclusive right edge ten frames into the timeline.
+    row_y = view.ruler_height() + 12
+    edge = fm.frame_to_x(51)
     from PyQt6.QtCore import QPointF, Qt
     from PyQt6.QtGui import QMouseEvent
 
@@ -173,9 +173,9 @@ def test_range_bar_edge_drag_emits_range(qapp):
         return QMouseEvent(typ, QPointF(x, y), Qt.MouseButton.LeftButton,
                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
 
-    view.mousePressEvent(_ev(QMouseEvent.Type.MouseButtonPress, 500.0, 42.0))
-    view.mouseMoveEvent(_ev(QMouseEvent.Type.MouseMove, 600.0, 42.0))
-    view.mouseReleaseEvent(_ev(QMouseEvent.Type.MouseButtonRelease, 600.0, 42.0))
+    view.mousePressEvent(_ev(QMouseEvent.Type.MouseButtonPress, edge, row_y))
+    view.mouseMoveEvent(_ev(QMouseEvent.Type.MouseMove, edge + 100, row_y))
+    view.mouseReleaseEvent(_ev(QMouseEvent.Type.MouseButtonRelease, edge + 100, row_y))
 
     assert received
     nid, tr = received[-1]

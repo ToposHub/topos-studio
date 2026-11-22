@@ -2,7 +2,9 @@
 
 import pytest
 from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QToolBar, QInputDialog, QMenu
 
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.core.node_engine import NodeGraph
@@ -96,8 +98,8 @@ def test_long_media_bar_remains_visible_beyond_composition(qapp) -> None:
     model.set_comp_range(0, 99)
     model.rebuild(graph)
     view = KeyframesTimelineView(model, FrameMapper(pixels_per_frame=4.0))
-    view.set_composition_range(0, 99)
-    view.resize(2200, 200)
+    view.resize(2000, 200)
+    view.set_composition_range(0, 99, display_range=(0, 499))
     assert view.project_range() == (0, 99)
 
     track = model.track_for("node:video")
@@ -106,8 +108,8 @@ def test_long_media_bar_remains_visible_beyond_composition(qapp) -> None:
 
     x0, x1 = view._range_bar_x_bounds(track.range_bar)
     assert x0 == pytest.approx(0.0)
-    assert x1 == pytest.approx(1996.0)  # full source end, frame 499
-    assert view._hit_range_bar(x1, 42) == ("node:video", "right")
+    assert x1 == pytest.approx(2000.0)  # right edge of inclusive frame 499
+    assert view._hit_range_bar(x1 - 1, view.ruler_height() + 12) == ("node:video", "right")
 
     # Trim handles are allowed to reach beyond the comp extent, but never
     # beyond the source. This is what makes a 2911-frame source editable
@@ -231,6 +233,124 @@ def test_layer_fit_includes_the_entire_composition_at_extreme_durations(qapp, fr
     assert mapper.frame_to_x(frames) == pytest.approx(view.width())
 
 
+def test_wide_layer_panel_caps_default_tree_width_and_preserves_user_split(qtbot) -> None:
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_view_mode("layers")
+    panel.resize(1760, 360)
+    panel.show()
+    qtbot.waitUntil(lambda: panel._splitter.sizes()[0] > 0)
+    assert panel._splitter.sizes()[0] == 360
+    assert panel._tree_view._header_height == panel._timeline_view.ruler_height()
+
+    panel._splitter.moveSplitter(500, 1)
+    panel.resize(1820, 360)
+    assert panel._splitter.sizes()[0] > 360
+
+
+def test_layer_header_replaces_top_bar_and_exposes_useful_layer_switches(qtbot) -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    marked = controller.create_generated_layer("solid", "Marked", {})
+    card = controller.create_generated_layer("solid", "Card", {})
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph, selected_layer_id=card)
+    panel.resize(1760, 360)
+    panel.show()
+    assert panel.findChild(QToolBar, "KeyframesToolbar") is None
+    assert panel._header_tools.isVisible()
+    assert panel._header_tools.geometry().left() > panel._time_display.geometry().right()
+    assert panel._header_tools.geometry().bottom() < panel._tree_view._header_height
+
+    panel._search_edit.setText("Card")
+    assert [row.layer_id for row in panel._model.visible_rows() if row.row_type == "layer"] == [card]
+    panel._search_edit.clear()
+
+    tree = panel._tree_view
+
+    def click_switch(layer_id: str, column: str) -> None:
+        index = next(index for index, row in enumerate(panel._model.visible_rows())
+                     if row.row_type == "layer" and row.layer_id == layer_id)
+        left, right = tree._column_geometry()[column]
+        assert right > left
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
+                         pos=QPoint((left + right) // 2,
+                                    tree._header_height + KEYFRAMES_ROW_H * index + KEYFRAMES_ROW_H // 2))
+
+    click_switch(marked, "shy")
+    assert graph.get_layer(marked).shy
+    panel._hide_shy_action.trigger()
+    assert graph.get_layer(marked).enabled
+    assert marked not in {row.layer_id for row in panel._model.visible_rows()}
+    panel._hide_shy_action.trigger()
+    assert marked in {row.layer_id for row in panel._model.visible_rows()}
+    click_switch(marked, "shy")
+    assert not graph.get_layer(marked).shy
+
+    transform = controller.layer_transform_node(card)
+    panel.parameter_changed.connect(graph.set_node_parameter)
+    assert panel._motion_blur_action.isChecked()
+    with qtbot.waitSignal(panel.parameter_changed) as edit:
+        panel._motion_blur_action.trigger()
+    assert edit.args == ["out", "motion_blur_enabled", False]
+    assert not graph.get_node("out").parameters["motion_blur_enabled"]
+    with qtbot.waitSignal(panel.parameter_changed) as edit:
+        click_switch(card, "motion_blur")
+    assert edit.args == [transform.id, "motion_blur", True]
+    assert transform.parameters["motion_blur"]
+    assert not controller.layer_transform_node(marked).parameters["motion_blur"]
+    panel._motion_blur_action.trigger()
+    assert graph.get_node("out").parameters["motion_blur_enabled"]
+    assert transform.parameters["motion_blur"]
+    panel._act_graph_editor.trigger()
+    assert panel._view_mode == "graph"
+    header = panel._header_tools
+    timecode = panel._time_display
+    tree = panel._tree_view
+    view = panel._timeline_view
+    panel._projection_button.click()
+    assert panel.layer_view_mode == "nodes"
+    assert panel._header_tools is header and header.isVisible()
+    assert panel._time_display is timecode
+    assert panel._tree_view is tree and panel._timeline_view is view
+    assert panel._view_mode == "graph"
+    assert panel.findChild(QToolBar, "KeyframesToolbar") is None
+    panel._projection_button.click()
+    assert panel.layer_view_mode == "layers"
+    assert panel._header_tools is header
+
+
+def test_blank_layer_tree_context_menu_can_create_a_layer(qtbot, monkeypatch) -> None:
+    graph = NodeGraph()
+    graph.add_node(OutputNode(node_id="out"))
+    controller = LayerStackController(graph, layer_stack_version=2)
+    controller.ensure_main_stack()
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_layer_stack_controller(controller)
+    panel.set_layer_view_mode("layers")
+    panel.set_node_graph(graph)
+    panel.show()
+
+    def choose_text(menu, _position):
+        new_layer = menu.actions()[0].menu()
+        assert new_layer.isEnabled()
+        new_layer.actions()[0].trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_text)
+    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *_args: ("New title", True))
+    tree = panel._tree_view
+    pos = QPoint(20, tree._header_height + 25)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, tree.mapToGlobal(pos))
+    with qtbot.waitSignal(panel.generated_layer_requested) as created:
+        tree.contextMenuEvent(event)
+    assert created.args == ["text", "New title", {"text": "New title"}, 0]
+
+
 def test_layer_navigator_and_work_area_have_independent_drag_targets(qapp) -> None:
     panel = KeyframesPanel()
     panel.resize(1150, 360)
@@ -296,3 +416,16 @@ def test_layer_one_frame_work_area_still_has_a_body_to_drag(qapp) -> None:
         assert view._hit_workarea(x, view.ruler_height() - 8) == "body"
     finally:
         panel.close()
+
+
+def test_switch_to_layers_publishes_clamped_playhead_once(qtbot) -> None:
+    panel = KeyframesPanel()
+    qtbot.addWidget(panel)
+    panel.set_frame_range(0, 499)
+    panel.set_comp_extent(0, 99)
+    panel.set_current_frame(150)
+
+    with qtbot.waitSignal(panel.current_frame_changed) as seek:
+        panel._projection_button.click()
+    assert seek.args == [99]
+    assert panel._timeline_view._current_frame == 99

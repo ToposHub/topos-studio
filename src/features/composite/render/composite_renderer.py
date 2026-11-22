@@ -33,6 +33,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QOffscreenSurface, QOpenGLContext
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 from src.features.composite.core.graph_snapshot import GraphSnapshot
+from .external_comp_snapshot import ExternalCompSnapshots, has_external_references
 from src.features.composite.nodes.base_node import TextureResult
 from src.features.composite.render.cache_manager import CacheManager
 from src.features.composite.evaluators.graph_evaluator_mixin import GraphEvaluatorMixin
@@ -814,7 +815,8 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
             for ns in snapshot.nodes.values()
         )
 
-        if (not force_refresh and not has_runtime_dynamic_source and gen_same and rev_same and mode_same
+        if (not force_refresh and not has_runtime_dynamic_source
+                and not has_external_references(snapshot) and gen_same and rev_same and mode_same
                 and roi_same and color_tex_same and color_size_same
                 and view_same and proxy_same and quality_same and output_same):
             return
@@ -826,6 +828,21 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
         if hasattr(self, '_ai_compute_manager') and self._ai_compute_manager:
             self._ai_compute_manager.set_latest_request_id(request_id)
 
+        external = getattr(self, "_external_comp_snapshots", None)
+        if external is None:
+            external = self._external_comp_snapshots = ExternalCompSnapshots()
+        has_viewer_override = getattr(request, "viewer_node_id", None) is not None
+        snapshot = external.expand(
+            snapshot, output_name=None if has_viewer_override else current_output_name,
+            output_node_id=current_output_node_id,
+        )
+        diagnostics = snapshot.reference_diagnostics
+        if diagnostics != getattr(self, "_last_reference_diagnostics", ()):
+            self._last_reference_diagnostics = diagnostics
+            if diagnostics:
+                self.error_occurred.emit("\n".join(
+                    f"{issue['code']}: {issue['detail']}" for issue in diagnostics
+                ))
         self._snapshot = snapshot
         self._sync_render_nodes(snapshot)
         self._sync_image_input_nodes(snapshot)
@@ -1180,9 +1197,11 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
             extra_raw = str(ns.parameters.get("exr_extra_channels", "") or "")
             extra_list = ([c.strip() for c in extra_raw.split(",")
                            if c.strip()] if extra_raw else None)
+            psd_layer = ns.parameters.get("psd_layer")
             image_loader.request_decode(nid, file_path,
                                         exr_part=part_raw,
-                                        extra_channels=extra_list)
+                                        extra_channels=extra_list,
+                                        **({"psd_layer": psd_layer} if psd_layer else {}))
 
     def _handle_upload_image(self, data: dict):
         """Upload an image to a node's GPU texture (synchronous path)."""
@@ -1441,7 +1460,8 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
             return
         front_idx = (self.write_idx - 1) % 3
         tex = self.tex_ring[front_idx]
-        if tex is None:
+        front_fbo = self.fbo_ring[front_idx]
+        if tex is None or front_fbo is None:
             return
         w, h = tex.size
         if w <= 0 or h <= 0:
@@ -1449,6 +1469,10 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
 
         t0 = time.monotonic()
         try:
+            # ModernGL restores the current FBO while allocating new ones.
+            # The scope pool can retire its previous FBOs on a size change,
+            # so start from the live output FBO instead of a scope target.
+            front_fbo.use()
             outputs = engine.render_demand(demand, tex)
             # Cross-context visibility for the UI-thread presenter blit.
             self.ctx.finish()

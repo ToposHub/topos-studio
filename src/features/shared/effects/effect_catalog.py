@@ -55,6 +55,7 @@ from src.features.composite.nodes.blur_node import (
 )
 from src.features.composite.nodes.sharpen_node import CHANNEL_MODES as SHARPEN_CHANNEL_MODES, SharpenNode
 from src.features.composite.nodes.glow_node import GlowNode
+from src.features.composite.nodes.layer_style_node import LayerStyleNode
 from src.features.composite.nodes.denoise_node import DenoiseNode
 from src.features.composite.nodes.edge_detect_node import EdgeDetectNode
 from src.features.composite.nodes.erode_dilate_node import ErodeDilateNode
@@ -441,6 +442,25 @@ def _build_glow_spec() -> EffectSpec:
     )
 
 
+def _build_layer_style_spec() -> EffectSpec:
+    from src.features.composite.core.layer_style_shaders import (
+        LAYER_STYLE_COMPOSITE_FRAGMENT, LAYER_STYLE_MASK_FRAGMENT,
+    )
+
+    return EffectSpec(
+        effect_type="layer_style",
+        name="Layer Style",
+        category="stylize",
+        param_defs=tuple(LayerStyleNode.PARAM_DEFS),
+        shader_kind=ShaderKind.SEPARABLE_PASSES,
+        shader_sources=(LAYER_STYLE_MASK_FRAGMENT, LAYER_STYLE_COMPOSITE_FRAGMENT),
+        dispatch_key="layer_style",
+        description="Color overlay, drop shadow and outer glow from the original Alpha.",
+        preview_cost="high",
+        internal=True,  # Composite preview and export share GLSL; Edit export has no CPU fallback.
+    )
+
+
 def _posterize_fragment_source() -> str:
     """Composite Posterize shader（F18 共享核，计划 L）。
 
@@ -755,6 +775,7 @@ class EffectCatalog:
                 _build_erode_dilate_spec(),
                 _build_defocus_spec(),
                 _build_glow_spec(),
+                _build_layer_style_spec(),
                 _build_lib1_posterize_spec(),  # F18（计划 L）：共享核入口
             ):
                 self._register_locked(spec)

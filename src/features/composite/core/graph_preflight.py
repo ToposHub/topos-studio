@@ -217,8 +217,15 @@ def run_preflight_data(graph_data: Optional[dict],
         dst = str(conn.get("dst_node_id", ""))
         if dst in output_ids:
             fed_outputs.add(dst)
+    from .layer_model import EMPTY_LAYER_OUTPUT_PARAM
+
+    blank_outputs = {
+        str(node.get("id")) for node in nodes
+        if node.get("type") == "output"
+        and (node.get("parameters") or {}).get(EMPTY_LAYER_OUTPUT_PARAM)
+    }
     for nid in output_ids:
-        if nid not in fed_outputs:
+        if nid not in fed_outputs and nid not in blank_outputs:
             report.issues.append(PreflightIssue(
                 code="output.no_input", severity=SEVERITY_ERROR,
                 message="输出节点没有输入连接，无法渲染。",

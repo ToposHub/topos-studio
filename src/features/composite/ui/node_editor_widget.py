@@ -19,10 +19,12 @@ from PyQt6.QtWidgets import (
     QInputDialog, )
 from PyQt6.QtCore import Qt, QMimeData, QPointF, QRectF, pyqtSignal, QTimer, QEvent
 from PyQt6.QtGui import (
-    QPainter, QPen, QColor,     QWheelEvent, QMouseEvent, QTransform, QKeySequence, QAction,
+    QPainter, QPen, QColor, QWheelEvent, QMouseEvent, QTransform, QKeySequence,
+    QAction, QActionGroup,
 )
 from typing import TYPE_CHECKING, Any, Dict, Optional, List, Callable
 from collections import deque
+from contextlib import AbstractContextManager, nullcontext
 import logging
 import os
 import threading
@@ -44,11 +46,12 @@ from .sticky_note_item import StickyNoteItem
 from .port_item import PortItem
 from .connection_item import ConnectionItem
 from .preview_connection_item import PreviewConnectionItem
-from .node_search_popup import NodeSearchPopup
+from .node_search_popup import NODE_PALETTE_MIME, NodeSearchPopup
 from .graph_node_search_popup import GraphNodeSearchPopup
 from .node_editor_actions import NodeEditorActions
 from .graph_layout import GraphLayout
 from .graph_navigation import GraphNavigationState
+from src.features.composite.core.layer_model import LAYER_MERGE_OWNER_PARAM
 from src.features.composite.core.node_engine import NodeGraph, NODE_CATEGORIES, get_categories_for_mode
 from src.features.composite.nodes.base_node import Node
 
@@ -203,6 +206,7 @@ class NodeEditorWidget(QGraphicsView):
     node_connected = pyqtSignal(str, str, str, str)  # src_node, src_port, dst_node, dst_port
     node_disconnected = pyqtSignal(str, str, str, str)
     node_double_clicked = pyqtSignal(str)  # node_id
+    reveal_timeline_layer_requested = pyqtSignal(str)
     # B3-1: user asked to enter the group containing this node (double-
     # click / context menu). The page owns the undo record and calls
     # enter_group_view() after applying the command.
@@ -271,7 +275,7 @@ class NodeEditorWidget(QGraphicsView):
 
     MIN_ZOOM = 0.1
     MAX_ZOOM = 5.0
-    PORT_SNAP_DISTANCE = 30.0
+    PORT_SNAP_DISTANCE = 14.0  # Viewport pixels, independent of graph zoom.
 
     # Node thumbnail preview display modes (set from the context menu).
     # The editor owns this value and pushes per-node visibility via
@@ -281,6 +285,7 @@ class NodeEditorWidget(QGraphicsView):
     PREVIEW_ALL = "all"                       # Every node with a thumbnail
     PREVIEW_MODES = (PREVIEW_NONE, PREVIEW_SELECTED_SINGLE, PREVIEW_ALL)
     PREVIEW_CONFIG_KEY = "composite.node_preview_mode"
+    ROUTING_CONFIG_KEY = "composite.node_cable_routing"
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -301,6 +306,7 @@ class NodeEditorWidget(QGraphicsView):
 
         # Node items
         self._node_items: Dict[str, NodeItem] = {}
+        self._cable_routing = "curved"
 
         # Node-preview pipeline: dashed connection from the previewed node to the
         # Output node. None when no node is being previewed. Toggled via
@@ -350,6 +356,22 @@ class NodeEditorWidget(QGraphicsView):
         self._drag_src_node_id: Optional[str] = None
         self._temp_connection: Optional[ConnectionItem] = None
         self._snap_port: Optional[PortItem] = None  # Current snap target during drag
+        self._drag_origin: Optional[QPointF] = None
+        self._dragged_cable: Optional[tuple] = None
+        self._copying_cable = False
+        self._drag_acceptance: dict[tuple[str, str, str, str], bool] = {}
+        self._replaced_cables: list[ConnectionItem] = []
+        self.edit_cables: Optional[Callable[..., bool]] = None
+        # B02: graph generation captured when a cable gesture starts; the
+        # committed edit is rejected if the graph changed underneath.
+        self._cable_gesture_revision: int = -1
+        self._pending_transform_cable: (
+            tuple[tuple[str, str, str, str], int, ConnectionItem] | None
+        ) = None
+        self.can_connect_cable: Optional[Callable[[tuple[str, str, str, str], bool], bool]] = None
+        self.insert_cable_dot: Optional[Callable[[tuple[str, str, str, str], QPointF], bool]] = None
+        self.group_node_creation: Optional[Callable[[], AbstractContextManager[None]]] = None
+        self.timeline_layer_targets: Optional[Callable[[str], list[tuple[str, str]]]] = None
 
         # Rubber band selection state
         self._rubber_band_active = False
@@ -390,6 +412,9 @@ class NodeEditorWidget(QGraphicsView):
 
         # Selected node tracking
         self._selected_node_id: Optional[str] = None
+        self.insert_layer_transform: Optional[
+            Callable[[str, Node, tuple[str, str] | None, QPointF | None], bool | None]
+        ] = None
 
         # P1-12: persistent view bookmarks plus session-only back/forward
         # history.  Locked IDs live in the same project UI metadata as the
@@ -485,6 +510,7 @@ class NodeEditorWidget(QGraphicsView):
             header_color=node.header_color,
             is_dot=is_dot,
             node_type=node.node_type,
+            layer_managed=bool(node.parameters.get(LAYER_MERGE_OWNER_PARAM)),
         )
 
         # Add ports
@@ -543,6 +569,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def remove_node_visual(self, node_id: str) -> None:
         """Remove a visual node item."""
+        pending = self._pending_transform_cable
+        if pending is not None and node_id in pending[0][::2]:
+            self.clear_pending_layer_transform()
         self._locked_node_ids.discard(node_id)
         item = self._node_items.pop(node_id, None)
         if item:
@@ -714,7 +743,7 @@ class NodeEditorWidget(QGraphicsView):
         if not src_port or not dst_port:
             return
 
-        conn = ConnectionItem(src_port, dst_port, data_type)
+        conn = ConnectionItem(src_port, dst_port, data_type, routing=self._current_cable_routing())
         self._scene.addItem(conn)
 
         src_item.connections.append(conn)
@@ -727,8 +756,6 @@ class NodeEditorWidget(QGraphicsView):
 
         # Connect signals for proper data model updates and undo support
         conn.signals().delete_requested.connect(self._on_connection_delete_requested)
-        conn.signals().reconnect_requested.connect(self._on_connection_reconnect_requested)
-        conn.signals().disconnect_requested.connect(self._on_connection_disconnect_requested)
 
         # Start flow animation
         conn.start_flow_animation()
@@ -801,87 +828,15 @@ class NodeEditorWidget(QGraphicsView):
             if (self.is_node_locked(src_nid)
                     or self.is_node_locked(dst_nid)):
                 return
-            # Emit signal for CompositePage to handle with undo support
-            # CompositePage handles both data model update and visual cleanup
-            self.node_disconnected.emit(src_nid, src_pname, dst_nid, dst_pname)
-
-    def _on_connection_disconnect_requested(self, conn: ConnectionItem) -> None:
-        """Handle connection disconnect request (Alt+drag without valid target).
-
-        This is similar to delete, but specifically triggered when user
-        Alt+drags a connection endpoint to an invalid location.
-        """
-        self._on_connection_delete_requested(conn)
-
-    def _on_connection_reconnect_requested(self, conn: ConnectionItem,
-                                            target_port: PortItem,
-                                            dragging_src: bool) -> None:
-        """Handle connection reconnect request from ConnectionItem.
-
-        Emits appropriate disconnect/connect signals for CompositePage
-        to handle with proper undo/redo support and data model updates.
-
-        Args:
-            conn: The connection being modified
-            target_port: The new port to connect to
-            dragging_src: True if dragging the source end, False for destination
-        """
-
-        # Find current connection data
-        conn_data = None
-        for c in self._connection_items:
-            if c[0] is conn:
-                conn_data = c
-                break
-
-        if not conn_data:
-            return
-
-        _, old_src_nid, old_src_pname, old_dst_nid, old_dst_pname = conn_data
-
-        # Reconnecting mutates both the existing edge and one of its
-        # endpoints.  A locked endpoint is read-only even when the drag was
-        # started from the connection curve rather than its port.
-        if (self.is_node_locked(old_src_nid)
-                or self.is_node_locked(old_dst_nid)):
-            return
-
-        # Get target node and port info
-        target_node_item = target_port.parentItem()
-        if not target_node_item:
-            return
-
-        # Find target node ID from node items
-        target_node_id = None
-        for nid, item in self._node_items.items():
-            if item is target_node_item:
-                target_node_id = nid
-                break
-
-        if not target_node_id:
-            return
-
-        if self.is_node_locked(target_node_id):
-            return
-
-        target_port_name = target_port.port_name
-
-        # Determine which connection changes to make
-        if dragging_src:
-            # Reconnecting source: old_src -> target as new src
-            # First disconnect old connection (CompositePage handles visual cleanup)
-            self.node_disconnected.emit(old_src_nid, old_src_pname, old_dst_nid, old_dst_pname)
-            # Then connect with new source (CompositePage handles visual creation)
-            self.node_connected.emit(target_node_id, target_port_name, old_dst_nid, old_dst_pname)
-        else:
-            # Reconnecting destination: target becomes new dst
-            # First disconnect old connection (CompositePage handles visual cleanup)
-            self.node_disconnected.emit(old_src_nid, old_src_pname, old_dst_nid, old_dst_pname)
-            # Then connect with new destination (CompositePage handles visual creation)
-            self.node_connected.emit(old_src_nid, old_src_pname, target_node_id, target_port_name)
+            if self.edit_cables:
+                self.edit_cables(((src_nid, src_pname, dst_nid, dst_pname),), ())
+            else:
+                self.node_disconnected.emit(src_nid, src_pname, dst_nid, dst_pname)
 
     def clear_all(self) -> None:
         """Remove all nodes and connections."""
+        self._clear_cable_drag()
+        self.clear_pending_layer_transform()
         # Stop flow animations before clearing scene to prevent
         # timer callbacks on deleted C++ objects
         for conn_data in self._connection_items:
@@ -927,7 +882,7 @@ class NodeEditorWidget(QGraphicsView):
         """Build visuals from a NodeGraph."""
         self._node_graph = graph
         self._actions = NodeEditorActions(self, graph)
-        self._layout = GraphLayout(graph)
+        self._layout = GraphLayout(graph, self._node_layout_size)
         viewport_state = getattr(graph, "_viewport_state", {}) or {}
         raw_locked = viewport_state.get("locked_node_ids", [])
         self._locked_node_ids = {
@@ -1005,6 +960,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def dragEnterEvent(self, event) -> None:
         """Accept media-pool asset drags and file drops（image/video/3D model）。"""
+        if event.mimeData().hasFormat(NODE_PALETTE_MIME):
+            event.setAccepted(self._palette_drop_type(event.mimeData()) is not None)
+            return
         if self._bootstrap_media_drop_handler is not None:
             event.setAccepted(accepts_layer_media_drop(event.mimeData()))
             return
@@ -1023,6 +981,9 @@ class NodeEditorWidget(QGraphicsView):
 
     def dragMoveEvent(self, event) -> None:
         """Keep accepting during drag move."""
+        if event.mimeData().hasFormat(NODE_PALETTE_MIME):
+            event.setAccepted(self._palette_drop_type(event.mimeData()) is not None)
+            return
         if self._bootstrap_media_drop_handler is not None:
             event.setAccepted(accepts_layer_media_drop(event.mimeData()))
             return
@@ -1066,6 +1027,17 @@ class NodeEditorWidget(QGraphicsView):
         """Send media drops to the workspace host before a composition opens."""
         self._bootstrap_media_drop_handler = handler
 
+    def _palette_drop_type(self, mime: QMimeData) -> str | None:
+        if self._bootstrap_media_drop_handler is not None:
+            return None
+        data = bytes(mime.data(NODE_PALETTE_MIME))
+        if not data.isascii():
+            return None
+        node_type = data.decode("ascii")
+        return node_type if any(node_type == kind and cls is not None
+                                for nodes in self.node_creation_categories().values()
+                                for kind, cls in nodes) else None
+
     def dropEvent(self, event) -> None:
         """Handle dropped files / media-pool assets.
 
@@ -1077,6 +1049,14 @@ class NodeEditorWidget(QGraphicsView):
         创建 asset-backed 节点；未命中再走 URL 文件导入。
         AUD-10502：视频元数据探测移出 UI 线程（见 _schedule_video_metadata_probe）。
         """
+        if event.mimeData().hasFormat(NODE_PALETTE_MIME):
+            node_type = self._palette_drop_type(event.mimeData())
+            if node_type is None:
+                event.ignore()
+                return
+            self._add_new_node(node_type, self.mapToScene(event.position().toPoint()))
+            event.acceptProposedAction()
+            return
         if self._bootstrap_media_drop_handler is not None:
             mime_data = event.mimeData()
             if not accepts_layer_media_drop(mime_data):
@@ -1111,7 +1091,7 @@ class NodeEditorWidget(QGraphicsView):
             ext = os.path.splitext(path)[1].lower()
 
             # 按扩展名路由到对应节点类型
-            if ext in _IMAGE_EXTENSIONS:
+            if ext in _IMAGE_EXTENSIONS or ext == ".psb":
                 node_type = "image_input"
                 params = {"file_path": path}
             elif ext in _VIDEO_EXTENSIONS:
@@ -1218,7 +1198,7 @@ class NodeEditorWidget(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Handle mouse press."""
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and not self._space_held:
             scene_pos = self.mapToScene(event.pos())
 
             # Check for insertion dot click first (Cmd/Ctrl + click on connection midpoint)
@@ -1237,16 +1217,20 @@ class NodeEditorWidget(QGraphicsView):
                 if port_item.direction == "output":
                     self._start_connection_drag(port_item, scene_pos)
                     return
-                elif port_item.direction == "input" and port_item._connected:
-                    # 点击已连输入端口 → 断开重拖（恢复基线行为）。
-                    # 多输入端口的「追加连接」改由从源节点 output 拖到 input 实现
-                    # （点击 input 是断开语义，从 output 拖是追加语义，两者互不冲突）。
-                    self._disconnect_and_drag(port_item, scene_pos)
-                    return
-                elif port_item.direction == "input" and not port_item._connected:
-                    # Reverse drag: drag from empty input port to find an output
+                if port_item._connected and port_item.max_connections == 1:
+                    edge = next((c for c in self._connection_items if c[0].dst_port is port_item), None)
+                    if edge is not None:
+                        self._start_cable_rewire(edge, True, scene_pos, event.modifiers())
+                        return
+                if not port_item.is_at_capacity():
                     self._start_reverse_connection_drag(port_item, scene_pos)
                     return
+
+            cable_end = self._cable_end_at(scene_pos)
+            if cable_end is not None:
+                edge, move_source = cable_end
+                self._start_cable_rewire(edge, move_source, scene_pos, event.modifiers())
+                return
 
             # Check if we clicked on a node
             clicked_item = self.itemAt(event.pos())
@@ -1289,7 +1273,10 @@ class NodeEditorWidget(QGraphicsView):
                 self.selection_cleared.emit()
                 super().mousePressEvent(event)
                 return
-            elif not self._space_held:
+            elif isinstance(clicked_item, ConnectionItem):
+                super().mousePressEvent(event)
+                return
+            else:
                 # Start rubber band selection
                 self._rubber_band_active = True
                 # Box-select must not trigger node previews.
@@ -1332,6 +1319,20 @@ class NodeEditorWidget(QGraphicsView):
 
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                and self._bootstrap_media_drop_handler is None
+                and not self._space_held and not self._dragging_connection
+                and self.itemAt(event.pos()) is None):
+            self._rubber_band_active = False
+            self._rubber_band_start = None
+            self._rubber_band_current_pos = None
+            event.accept()
+            self._show_node_search_popup(self.mapToScene(event.pos()))
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Handle mouse move for connection dragging, port snapping, and rubber band."""
         if self._dragging_connection and self._temp_connection:
@@ -1343,6 +1344,7 @@ class NodeEditorWidget(QGraphicsView):
             # Clear previous snap highlight (port)
             if self._snap_port and self._snap_port is not snap_target:
                 self._snap_port.set_snap_highlight(False)
+            self._highlight_replaced_cables(snap_target)
 
             if self._drag_direction == "forward" and self._drag_src_port:
                 src_pos = self._drag_src_port.get_center_scene_pos()
@@ -1402,14 +1404,14 @@ class NodeEditorWidget(QGraphicsView):
                 # Only update glow if shake hasn't triggered yet
                 self._update_shake_glow()
 
-        # Drop-on-connection proximity detection during node drag (time-throttled)
+        super().mouseMoveEvent(event)
+
+        # Test the node's actual position after Qt has moved it.
         if self._moving_nodes and not self._shake_triggered and not self._shake_disconnecting:
             now = time.time() * 1000
             if now - self._proximity_last_time >= 80:  # Max ~12 checks/sec
                 self._proximity_last_time = now
-                self._detect_connection_proximity()
-
-        super().mouseMoveEvent(event)
+                self._detect_connection_proximity(self.mapToScene(event.pos()))
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """Handle mouse release."""
@@ -1428,6 +1430,8 @@ class NodeEditorWidget(QGraphicsView):
 
         if event.button() == Qt.MouseButton.LeftButton and self._moving_nodes:
             # Check for drop-on-connection insertion before finalizing move
+            if not self._shake_triggered and not self._shake_disconnecting:
+                self._detect_connection_proximity(self.mapToScene(event.pos()))
             if self._drop_insert_connection:
                 self._execute_connection_insertion()
 
@@ -1577,6 +1581,36 @@ class NodeEditorWidget(QGraphicsView):
         self._pan_start = event.position()
         self._pan_start_center = self.mapToScene(self.viewport().rect().center())
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _current_cable_routing(self) -> str:
+        config = getattr(self.window(), "config_manager", None)
+        value = config.get(self.ROUTING_CONFIG_KEY) if config is not None else None
+        return value if value in ConnectionItem.ROUTES else self._cable_routing
+
+    def _set_cable_routing(self, routing: str) -> None:
+        self._cable_routing = routing
+        config = getattr(self.window(), "config_manager", None)
+        if config is not None:
+            config.set(self.ROUTING_CONFIG_KEY, routing)
+        for cable, *_ in self._connection_items:
+            cable.set_routing(routing)
+
+    def _add_cable_routing_menu(self, menu: QMenu) -> None:
+        submenu = menu.addMenu(I18N.tr("composite.node_editor.cable_routing", "Cable Routing"))
+        choices = QActionGroup(submenu)
+        current = self._current_cable_routing()
+        labels = (
+            I18N.tr("composite.node_editor.cable_curved", "Curved"),
+            I18N.tr("composite.node_editor.cable_straight", "Straight"),
+            I18N.tr("composite.node_editor.cable_orthogonal", "Right Angles"),
+        )
+        for routing, label in zip(ConnectionItem.ROUTES, labels):
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(routing == current)
+            choices.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, value=routing: self._set_cable_routing(value))
 
     # ── Node Preview Mode ──
 
@@ -1936,14 +1970,7 @@ class NodeEditorWidget(QGraphicsView):
         """
         # Connection delete
         if action == action_delete_conn and conn_to_delete is not None:
-            if self._connection_touches_locked_node(conn_to_delete):
-                return True
-            if self._actions:
-                for conn_data in self._connection_items:
-                    if conn_data[0] is conn_to_delete:
-                        _, src_nid, src_pname, dst_nid, dst_pname = conn_data
-                        self._actions.disconnect(src_nid, src_pname, dst_nid, dst_pname)
-                        break
+            self._on_connection_delete_requested(conn_to_delete)
             return True
 
         # Node type actions — auto-connect after selected node when right-clicking on a node
@@ -2107,6 +2134,8 @@ class NodeEditorWidget(QGraphicsView):
                 I18N.tr("node_editor.delete_backdrop", "Delete Backdrop"))
             menu.addSeparator()
 
+        menu.addAction(I18N.tr("composite.node_editor.search_add_node", "Find and Add Node…"),
+                       lambda: self._show_node_search_popup(scene_pos))
         # Node category menu
         node_actions = self._build_node_category_menu(menu)
 
@@ -2128,6 +2157,7 @@ class NodeEditorWidget(QGraphicsView):
 
         # Node preview display mode (None / Selected-Single / All)
         preview_actions = self._build_preview_submenu(menu)
+        self._add_cable_routing_menu(menu)
         navigation_data = self._build_navigation_submenu(menu)
 
         # Float/Dock toggle
@@ -2165,6 +2195,17 @@ class NodeEditorWidget(QGraphicsView):
             action_rename_node = menu.addAction(
                 I18N.tr("node_editor.rename_node", "Rename Node"))
             action_rename_node.setEnabled(not target.is_locked)
+            if self.timeline_layer_targets:
+                targets = self.timeline_layer_targets(target.node_id)
+                title = I18N.tr("composite.node_editor.reveal_timeline_layer", "Show in Layer Timeline")
+                if len(targets) == 1:
+                    menu.addAction(title, lambda: self.reveal_timeline_layer_requested.emit(
+                        targets[0][0]))
+                elif targets:
+                    layer_menu = menu.addMenu(title)
+                    for layer_id, name in targets:
+                        layer_menu.addAction(name, lambda _checked=False, value=layer_id:
+                                             self.reveal_timeline_layer_requested.emit(value))
             action_lock_node = menu.addAction(
                 "Unlock Node" if target.is_locked else "Lock Node")
             action_delete_node.setEnabled(not target.is_locked)
@@ -2346,6 +2387,10 @@ class NodeEditorWidget(QGraphicsView):
             return
 
         # First try to delete selected connections
+        selected_cables = tuple(data[1:] for data in self._connection_items if data[0].isSelected())
+        if selected_cables and self.edit_cables:
+            self.edit_cables(selected_cables, ())
+            return
         if self._actions:
             deleted = self._actions.delete_selected_connections()
             if deleted:
@@ -2427,7 +2472,6 @@ class NodeEditorWidget(QGraphicsView):
         # Build key sequence from event
         key = event.key()
         mods = event.modifiers()
-        
         # Handle special keys (Delete/Backspace)
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             key_seq = QKeySequence(Qt.Key.Key_Delete)
@@ -2474,37 +2518,32 @@ class NodeEditorWidget(QGraphicsView):
         """
         return self.mapToScene(self.viewport().rect().center())
 
-    def _show_node_search_popup(self) -> None:
-        """Show node search popup.
+    def node_creation_categories(self) -> dict[str, list[tuple[str, type]]]:
+        from src.shared.feature_flags import get_work_mode
 
-        Note: The on_node_added callback uses _get_view_center_scene_pos()
-        instead of directly calculating position in the lambda. This ensures
-        the position is recalculated each time, not cached when the popup
-        is first created.
-        """
+        config = getattr(self.window(), "config_manager", None)
+        return get_categories_for_mode(get_work_mode(config) == "image")
+
+    def add_node_from_library(self, node_type: str) -> None:
+        self._add_new_node(node_type, self._get_view_center_scene_pos())
+
+    def _show_node_search_popup(self, scene_pos: QPointF | None = None) -> None:
+        """Open the shared node chooser at the requested insertion position."""
         if self._node_search_popup is None:
-            self._node_search_popup = NodeSearchPopup(
-                NODE_CATEGORIES,
-                parent=self,
-                on_node_added=lambda node_type: self._add_new_node(
-                    node_type,
-                    self._get_view_center_scene_pos(),
-                    source_node_id=self._selected_node_id,
-                ),
-            )
-        # Refresh the category map each time so the Add Node menu reflects the
-        # active work mode (image mode hides time-driven nodes).
-        try:
-            from src.shared.feature_flags import get_work_mode
-            cm = getattr(self.window(), "config_manager", None)
-            image_mode = get_work_mode(cm) == "image"
-            self._node_search_popup.set_node_categories(
-                get_categories_for_mode(image_mode)
-            )
-        except Exception:
-            pass
+            self._node_search_popup = NodeSearchPopup(NODE_CATEGORIES, parent=self)
+        popup = self._node_search_popup
+        popup.set_node_categories(self.node_creation_categories())
+        position = self._get_view_center_scene_pos() if scene_pos is None else scene_pos
+        source_id = self._selected_node_id if scene_pos is None else None
 
-        self._node_search_popup.exec()
+        def add_node(node_type: str) -> None:
+            self._add_new_node(node_type, position, source_node_id=source_id)
+
+        popup.node_selected.connect(add_node)
+        try:
+            popup.exec()
+        finally:
+            popup.node_selected.disconnect(add_node)
 
     def _show_graph_node_search_popup(self) -> None:
         """Show graph node search popup for searching existing nodes.
@@ -2705,6 +2744,16 @@ class NodeEditorWidget(QGraphicsView):
 
     def keyPressEvent(self, event) -> None:
         """Handle keyboard shortcuts via ShortcutManager."""
+        if event.key() == Qt.Key.Key_Escape and self._dragging_connection:
+            self._clear_cable_drag()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.pending_layer_transform() is not None:
+            self.clear_pending_layer_transform()
+            event.accept()
+            return
+        if self._dragging_connection:
+            return
         # Check if shortcuts are enabled
         if not self._shortcuts_enabled:
             super().keyPressEvent(event)
@@ -2981,9 +3030,64 @@ class NodeEditorWidget(QGraphicsView):
         for item in self._backdrop_items.values():
             self._refresh_backdrop_containment(item)
 
+    def _capture_cable_gesture_revision(self) -> None:
+        """Record the graph generation at the start of a cable gesture (B02).
+
+        The committed edit carries this revision; a graph that changed while
+        the user was dragging rejects the stale gesture instead of applying
+        it onto an outdated topology.
+        """
+        graph = getattr(self, "_node_graph", None)
+        self._cable_gesture_revision = int(getattr(graph, "generation", -1))
+        self.pending_layer_transform()
+
+    def pending_layer_transform(self) -> tuple[str, str, str, str] | None:
+        """Return the output-first intent while its original graph is current."""
+        if self._pending_transform_cable is None:
+            return None
+        edge, revision, _ = self._pending_transform_cable
+        if self._node_graph is None or self._node_graph.generation != revision:
+            self.clear_pending_layer_transform()
+            return None
+        return edge
+
+    def stage_layer_transform(self, edge: tuple[str, str, str, str], revision: int) -> bool:
+        """Draw an uncommitted cable without claiming either port."""
+        src, output, dst, input_port = edge
+        source = self._node_items.get(src)
+        destination = self._node_items.get(dst)
+        if source is None or destination is None:
+            return False
+        self.clear_pending_layer_transform()
+        cable = ConnectionItem(source.output_ports[output], destination.input_ports[input_port],
+                               routing=self._current_cable_routing())
+        cable.setOpacity(0.45)
+        cable.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        cable.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        self._scene.addItem(cable)
+        source.connections.append(cable)
+        destination.connections.append(cable)
+        self._pending_transform_cable = (edge, revision, cable)
+        cable.update_path()
+        return True
+
+    def clear_pending_layer_transform(self) -> None:
+        """Discard the canvas-only intent."""
+        pending = self._pending_transform_cable
+        if pending is None:
+            return
+        self._pending_transform_cable = None
+        edge, _, cable = pending
+        for node_id in edge[::2]:
+            item = self._node_items.get(node_id)
+            if item is not None and cable in item.connections:
+                item.connections.remove(cable)
+        self._scene.removeItem(cable)
+
     def _start_connection_drag(self, port: PortItem, scene_pos: QPointF) -> None:
         """Start dragging a connection from an output port (forward drag)."""
         self._dragging_connection = True
+        self._capture_cable_gesture_revision()
         self._drag_src_port = port
         self._drag_dst_port = None
         self._drag_direction = "forward"
@@ -2993,8 +3097,10 @@ class NodeEditorWidget(QGraphicsView):
         if isinstance(parent, NodeItem):
             self._drag_src_node_id = parent.node_id
 
-        self._temp_connection = ConnectionItem(data_type=port.data_type)
+        self._temp_connection = ConnectionItem(data_type=port.data_type,
+                                              routing=self._current_cable_routing())
         self._scene.addItem(self._temp_connection)
+        self._drag_origin = scene_pos
 
     def _start_reverse_connection_drag(self, port: PortItem, scene_pos: QPointF) -> None:
         """Start dragging a connection from an empty input port (reverse drag).
@@ -3002,106 +3108,124 @@ class NodeEditorWidget(QGraphicsView):
         The user drags from an input port to find an output port to connect from.
         """
         self._dragging_connection = True
+        self._capture_cable_gesture_revision()
         self._drag_src_port = None
         self._drag_dst_port = port
         self._drag_direction = "reverse"
         self._snap_port = None
         self._drag_src_node_id = None
 
-        self._temp_connection = ConnectionItem(data_type=port.data_type)
+        self._temp_connection = ConnectionItem(data_type=port.data_type,
+                                              routing=self._current_cable_routing())
         self._scene.addItem(self._temp_connection)
+        self._drag_origin = scene_pos
 
-    def _disconnect_and_drag(self, port: PortItem, scene_pos: QPointF) -> None:
-        """Disconnect an input port and start dragging from the source."""
-        parent = port.parentItem()
-        if not isinstance(parent, NodeItem):
+    def _cable_end_at(self, scene_pos: QPointF) -> tuple[tuple, bool] | None:
+        """Find the end of the visible cable under the pointer."""
+        radius = 18 / max(self._current_zoom, 0.01)
+        hit = 6 / max(self._current_zoom, 0.01)
+        area = QRectF(scene_pos.x() - hit, scene_pos.y() - hit, 2 * hit, 2 * hit)
+        candidates = {item for item in self._scene.items(area) if isinstance(item, ConnectionItem)}
+        best = None
+        best_distance = hit
+        for data in self._connection_items:
+            cable = data[0]
+            if cable not in candidates or not cable.isVisible():
+                continue
+            source = (scene_pos - cable.src_port.scenePos()).manhattanLength()
+            destination = (scene_pos - cable.dst_port.scenePos()).manhattanLength()
+            if min(source, destination) > radius:
+                continue
+            _, distance = cable.get_nearest_point_on_path(scene_pos)
+            if distance < best_distance:
+                best = (data, source <= destination)
+                best_distance = distance
+        return best
+
+    def _start_cable_rewire(self, data: tuple, move_source: bool, scene_pos: QPointF,
+                            modifiers: Qt.KeyboardModifier) -> None:
+        cable, src_id, _, dst_id, _ = data
+        if self.is_node_locked(src_id) or self.is_node_locked(dst_id):
             return
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            self._start_connection_drag(cable.src_port, scene_pos)
+            self._copying_cable = True
+            return
+        if move_source:
+            self._start_reverse_connection_drag(cable.dst_port, scene_pos)
+        else:
+            self._start_connection_drag(cable.src_port, scene_pos)
+        self._dragged_cable = data
+        cable.setOpacity(0.35)
 
-        dst_node_id = parent.node_id
-        dst_port_name = port.port_name
+    def _highlight_replaced_cables(self, target: Optional[PortItem]) -> None:
+        input_port = target if self._drag_direction == "forward" else self._drag_dst_port
+        replacement = []
+        if target is not None and input_port is not None and input_port.max_connections == 1:
+            replacement = [data[0] for data in self._connection_items
+                           if data[0].dst_port is input_port and data != self._dragged_cable]
+        if replacement == self._replaced_cables:
+            return
+        for cable in self._replaced_cables:
+            cable.set_snap_highlight(False)
+        for cable in replacement:
+            cable.set_snap_highlight(True, False)
+        self._replaced_cables = replacement
 
-        # Use actions to disconnect, but keep the drag logic
-        if self._actions:
-            src_info = self._actions.disconnect_by_dst(dst_node_id, dst_port_name)
-            if src_info:
-                src_nid, src_pname = src_info
-                src_item = self._node_items.get(src_nid)
-                if src_item:
-                    src_port = src_item.output_ports.get(src_pname)
-                    if src_port:
-                        self._start_connection_drag(src_port, scene_pos)
-                return
-
-    def _finish_connection_drag(self, event: QMouseEvent) -> None:
-        """Finish the connection drag (forward or reverse).
-
-        Handles two cases:
-        1. Normal port connection
-        2. Cancel (no valid target)
-        """
-        # Save snap targets before clearing
-        snap_target_port = self._snap_port
-
-        # Clear port snap highlight
-        if self._snap_port:
+    def _clear_cable_drag(self) -> None:
+        if self._snap_port is not None:
             self._snap_port.set_snap_highlight(False)
-            self._snap_port = None
-
-        if self._temp_connection:
+        self._highlight_replaced_cables(None)
+        if self._dragged_cable is not None:
+            self._dragged_cable[0].setOpacity(1)
+        if self._temp_connection is not None:
             self._scene.removeItem(self._temp_connection)
-            self._temp_connection = None
-
-        # Handle normal port connection
-        if self._drag_direction == "forward" and self._drag_src_port and self._drag_src_node_id:
-            # Prefer the snapped port (what the user saw highlighted) over mouse position
-            target_port = snap_target_port
-            if not target_port:
-                scene_pos = self.mapToScene(event.pos())
-                target_port = self._find_port_at(scene_pos)
-
-            # 类型校验：源端口 data_type 必须与目标匹配，否则拒绝（即使精准命中）。
-            # snap 流程已校验，但 _find_port_at 精确命中路径无校验 → 这里兜底。
-            src_data_type = self._drag_src_port.data_type
-            if (target_port and target_port.direction == "input"
-                    and target_port.data_type == src_data_type):
-                dst_item = target_port.parentItem()
-                src_item = self._drag_src_port.parentItem()
-                if (isinstance(dst_item, NodeItem)
-                        and isinstance(src_item, NodeItem)
-                        and not dst_item.is_locked
-                        and not src_item.is_locked):
-                    self.node_connected.emit(
-                        self._drag_src_node_id, self._drag_src_port.port_name,
-                        dst_item.node_id, target_port.port_name,
-                    )
-
-        elif self._drag_direction == "reverse" and self._drag_dst_port:
-            # Prefer the snapped port over mouse position
-            target_port = snap_target_port
-            if not target_port:
-                scene_pos = self.mapToScene(event.pos())
-                target_port = self._find_port_at(scene_pos)
-
-            # 类型校验：反向拖拽时，目标 output 的 data_type 必须与拉出的 input 匹配。
-            dst_data_type = self._drag_dst_port.data_type
-            if (target_port and target_port.direction == "output"
-                    and target_port.data_type == dst_data_type):
-                src_item = target_port.parentItem()
-                if isinstance(src_item, NodeItem):
-                    dst_item = self._drag_dst_port.parentItem()
-                    if (isinstance(dst_item, NodeItem)
-                            and not src_item.is_locked
-                            and not dst_item.is_locked):
-                        self.node_connected.emit(
-                            src_item.node_id, target_port.port_name,
-                            dst_item.node_id, self._drag_dst_port.port_name,
-                        )
-
         self._dragging_connection = False
         self._drag_src_port = None
         self._drag_dst_port = None
         self._drag_direction = None
         self._drag_src_node_id = None
+        self._drag_origin = None
+        self._snap_port = None
+        self._temp_connection = None
+        self._dragged_cable = None
+        self._copying_cable = False
+        self._drag_acceptance.clear()
+
+    def _finish_connection_drag(self, event: QMouseEvent) -> None:
+        """Commit the link only after a compatible drop, or disconnect on empty space."""
+        if not self.viewport().rect().contains(event.position().toPoint()):
+            self._clear_cable_drag()
+            return
+        scene_pos = self.mapToScene(event.pos())
+        self._drag_acceptance.clear()
+        target = self._find_nearest_valid_port(scene_pos)
+        moved = (self._drag_origin is not None and
+                 (scene_pos - self._drag_origin).manhattanLength() * self._current_zoom >= 5)
+        old = self._dragged_cable[1:] if self._dragged_cable else None
+        copying = self._copying_cable
+        new = None
+        if moved and target is not None:
+            source = self._drag_src_port if self._drag_direction == "forward" else target
+            destination = target if self._drag_direction == "forward" else self._drag_dst_port
+            if source is not None and destination is not None:
+                new = (source.parentItem().node_id, source.port_name,
+                       destination.parentItem().node_id, destination.port_name)
+        empty = (self._find_port_at(scene_pos) is None and
+                 not any(item is not self._temp_connection for item in self.items(event.pos())))
+        self._clear_cable_drag()
+        if not moved or (new is not None and old == new):
+            return
+        if self.edit_cables and (new is not None or (old is not None and empty)):
+            kwargs: dict = {"replace_input": not copying,
+                            "allow_pending_transform": old is None and not copying}
+            if self._cable_gesture_revision >= 0:
+                kwargs["expected_revision"] = self._cable_gesture_revision
+            self.edit_cables((old,) if old else (), (new,) if new else (), **kwargs)
+            self._cable_gesture_revision = -1
+        elif self.edit_cables is None and old is None and new is not None and self._actions:
+            self._actions.connect(*new)
+            self._cable_gesture_revision = -1
 
     def _find_non_overlapping_position(self, x: float, y: float) -> tuple:
         """Adjust (x, y) so the new node doesn't overlap existing nodes.
@@ -3114,7 +3238,7 @@ class NodeEditorWidget(QGraphicsView):
         offset_y = 40  # Vertical offset per overlap attempt
 
         for attempt in range(20):
-            test_rect = QRectF(x, y, node_w, 60)  # Approximate min height
+            test_rect = QRectF(x, y, node_w, GraphLayout.NODE_HEIGHT)
             overlaps = False
             for item in self._node_items.values():
                 if item.sceneBoundingRect().intersects(test_rect):
@@ -3124,6 +3248,13 @@ class NodeEditorWidget(QGraphicsView):
                 return (x, y)
             y += offset_y
         return (x, y)
+
+    def _node_layout_size(self, node_id: str) -> tuple[float, float]:
+        item = self._node_items.get(node_id)
+        if item is None:
+            return GraphLayout.NODE_WIDTH, GraphLayout.NODE_HEIGHT
+        rect = item.rect()
+        return rect.width(), rect.height()
 
     def _add_new_node(self, node_type: str, scene_pos: QPointF,
                       source_node_id: Optional[str] = None) -> None:
@@ -3135,9 +3266,8 @@ class NodeEditorWidget(QGraphicsView):
             Before: source -> downstream
             After:  source -> new_node -> downstream
 
-        The new node is positioned to the right of the source node, and
-        any downstream connections from the source are re-routed through
-        the new node.
+        The new node goes to the right of the selected node. Existing
+        branches remain connected when there is more than one downstream cable.
 
         Args:
             node_type: Type of node to create (e.g., "blur", "grade")
@@ -3160,6 +3290,17 @@ class NodeEditorWidget(QGraphicsView):
             scene_pos.x(), scene_pos.y()
         )
 
+        if node_type == "transform" and source_node_id and self.insert_layer_transform:
+            from src.features.composite.core.node_engine import assign_instance_index
+            from src.features.composite.nodes.transform_node import TransformNode
+
+            transform = TransformNode()
+            transform.position = (pos_x, pos_y)
+            assign_instance_index(transform, self._node_graph)
+            if self.insert_layer_transform(source_node_id, transform, None, None) is not None:
+                self.graph_changed.emit()
+                return
+
         # Use batch mode when auto-connecting to suppress intermediate signals.
         # AUD-10505: save/restore (not blind set/clear) and try/finally — an
         # exception in add_node/_auto_connect_after used to leave _batch_mode
@@ -3175,14 +3316,11 @@ class NodeEditorWidget(QGraphicsView):
             # 可手动添加并连到 scene3d 的 camera_in/lights_in/geometry_in。
             # 拖拽 3D 模型文件仍走 create_3d_scene_with_children（dropEvent 路径），
             # 保留模型导入 + 材质纹理端口能力；v6→v7 迁移路径不受影响。
-            new_node = self._actions.add_node(node_type, pos_x, pos_y)
-
-            # Auto-connect after source node if specified. 3D helper/source nodes
-            # are scene objects in the global 3D Viewer; creating one should not
-            # splice it into the selected 2D/Scene chain implicitly.
-            if (new_node and source_node_id
-                    and getattr(new_node, "node_type", None) not in _VIEWER3D_OBJECT_TYPES):
-                self._auto_connect_after(source_node_id, new_node)
+            group = self.group_node_creation() if source_node_id and self.group_node_creation else nullcontext()
+            with group:
+                new_node = self._actions.add_node(node_type, pos_x, pos_y)
+                if (new_node and source_node_id and new_node.node_type not in _VIEWER3D_OBJECT_TYPES):
+                    self._auto_connect_after(source_node_id, new_node)
         finally:
             if needs_batch:
                 self._batch_mode = False
@@ -3193,15 +3331,13 @@ class NodeEditorWidget(QGraphicsView):
         """Insert new_node after source_node in the connection chain.
 
         Finds compatible ports between source and new_node, then:
-        1. Disconnects source's downstream connections (matching output port)
-        2. Reconnects them through new_node's output
-        3. Connects source output → new_node input
+        Splices a single downstream cable, or adds a branch at a fork.
 
         Args:
             source_node_id: The node to insert after
             new_node: The newly created node to insert
         """
-        if not self._actions or not self._node_graph:
+        if not self._actions or not self._node_graph or self.is_node_locked(source_node_id):
             return
 
         source_node = self._node_graph.get_node(source_node_id)
@@ -3238,25 +3374,16 @@ class NodeEditorWidget(QGraphicsView):
                 new_output_port = port
                 break
 
-        # Reconnect downstream nodes through the new node
-        if new_output_port and downstream_conns:
-            for conn in downstream_conns:
-                # Disconnect: source -> downstream
-                self._actions.disconnect(
-                    conn.src_node_id, conn.src_port_name,
-                    conn.dst_node_id, conn.dst_port_name
-                )
-                # Reconnect: new_node -> downstream
-                self._actions.connect(
-                    new_node.id, new_output_port.name,
-                    conn.dst_node_id, conn.dst_port_name
-                )
-
-        # Connect: source -> new_node
-        self._actions.connect(
-            source_node_id, source_output_port.name,
-            new_node.id, new_input_port.name
-        )
+        # An implicit add may splice a single downstream line. At a
+        # fork it starts a new branch, leaving the existing ones intact.
+        incoming = (source_node_id, source_output_port.name, new_node.id, new_input_port.name)
+        if new_output_port and len(downstream_conns) == 1 and self.edit_cables:
+            edge = downstream_conns[0]
+            original = (edge.src_node_id, edge.src_port_name, edge.dst_node_id, edge.dst_port_name)
+            outgoing = (new_node.id, new_output_port.name, edge.dst_node_id, edge.dst_port_name)
+            if self.edit_cables((original,), (incoming, outgoing)):
+                return
+        self._actions.connect(*incoming)
 
     # ------------------------------------------------------------------
     # Node extraction / disconnect helpers (used by shake & context menu)
@@ -3412,7 +3539,10 @@ class NodeEditorWidget(QGraphicsView):
         """Show or hide insertion dots on all connections."""
         for conn_data in self._connection_items:
             conn_item = conn_data[0]
-            conn_item.set_show_insertion_dot(show)
+            conn_item.set_show_insertion_dot(
+                show and conn_item.data_type == "image"
+                and not self.is_node_locked(conn_data[1]) and not self.is_node_locked(conn_data[3])
+            )
         if not show:
             self._clear_insertion_dot_hover()
 
@@ -3461,7 +3591,10 @@ class NodeEditorWidget(QGraphicsView):
                 # Found a hit — insert Dot node
                 _, src_nid, src_pname, dst_nid, dst_pname = conn_data
                 mid = conn_item.get_midpoint_scene()
-                if self._actions:
+                if self.insert_cable_dot:
+                    if self.insert_cable_dot((src_nid, src_pname, dst_nid, dst_pname), mid):
+                        self.graph_changed.emit()
+                elif self._actions:
                     self._actions.insert_dot_on_connection(
                         src_nid, src_pname, dst_nid, dst_pname,
                         insert_x=mid.x(), insert_y=mid.y(),
@@ -3474,7 +3607,7 @@ class NodeEditorWidget(QGraphicsView):
     # Drop-on-connection helpers
     # ------------------------------------------------------------------
 
-    def _detect_connection_proximity(self) -> None:
+    def _detect_connection_proximity(self, cursor: QPointF | None = None) -> None:
         """During node drag, detect if the node is near a connection line.
 
         Highlights the nearest compatible connection and stores it for
@@ -3497,18 +3630,19 @@ class NodeEditorWidget(QGraphicsView):
 
         # Get the dragged node's center position
         dragged_item = self._node_items.get(dragged_node_id)
-        if not dragged_item:
+        if not dragged_item or dragged_item.pos() == self._move_start_positions[dragged_node_id]:
+            self._clear_connection_highlight()
             return
 
-        node_center = dragged_item.sceneBoundingRect().center()
+        probe = cursor if cursor is not None else dragged_item.sceneBoundingRect().center()
 
         # Early exit: skip scan if node hasn't moved enough since last check
         if self._proximity_last_check_pos is not None:
-            dx = node_center.x() - self._proximity_last_check_pos.x()
-            dy = node_center.y() - self._proximity_last_check_pos.y()
+            dx = probe.x() - self._proximity_last_check_pos.x()
+            dy = probe.y() - self._proximity_last_check_pos.y()
             if dx * dx + dy * dy < 64:  # Less than 8px movement
                 return
-        self._proximity_last_check_pos = QPointF(node_center)
+        self._proximity_last_check_pos = QPointF(probe)
 
         # Find nearest compatible connection
         best_conn_data = None
@@ -3516,11 +3650,13 @@ class NodeEditorWidget(QGraphicsView):
         best_point = None
 
         # Wider tolerance than port snapping for node dropping
-        node_snap_distance = ConnectionItem.SNAP_DISTANCE * 2.5  # ~37.5 pixels
+        node_snap_distance = max(12.0, min(36.0, 20.0 / max(self._current_zoom, 0.01)))
 
         for conn_data in self._connection_items:
             conn_item = conn_data[0]
             _, conn_src_nid, _, conn_dst_nid, _ = conn_data
+            if not conn_item.isVisible():
+                continue
 
             # Skip connections that involve the dragged node (avoid self-insertion)
             if conn_src_nid == dragged_node_id or conn_dst_nid == dragged_node_id:
@@ -3533,11 +3669,11 @@ class NodeEditorWidget(QGraphicsView):
                 -node_snap_distance, -node_snap_distance,
                 node_snap_distance, node_snap_distance
             )
-            if not expanded.contains(node_center):
+            if not expanded.contains(probe):
                 continue
 
             # Expensive: get distance from node center to connection path
-            nearest_point, dist = conn_item.get_nearest_point_on_path(node_center)
+            nearest_point, dist = conn_item.get_nearest_point_on_path(probe)
 
             if dist < node_snap_distance and dist < best_dist:
                 # Check port type compatibility
@@ -3582,14 +3718,18 @@ class NodeEditorWidget(QGraphicsView):
         conn_data_type = conn_item.data_type
 
         node = self._node_graph.get_node(node_id)
-        if not node:
+        if node is None or any(self.is_node_locked(nid) for nid in (node_id, conn_data[1], conn_data[3])):
             return False
 
         # Check if node has a compatible input port
-        has_compatible_input = any(
-            port.data_type == conn_data_type
-            for port in node.inputs
-        )
+        input_port = next((port for port in node.inputs if port.data_type == conn_data_type), None)
+        if input_port is None:
+            return False
+        existing_input = [edge for edge in self._node_graph.get_input_connections(node_id)
+                          if edge.dst_port_name == input_port.name]
+        if existing_input and not any((edge.src_node_id, edge.src_port_name) == conn_data[1:3]
+                                      for edge in existing_input):
+            return False
 
         # Check if node has a compatible output port
         has_compatible_output = any(
@@ -3597,7 +3737,7 @@ class NodeEditorWidget(QGraphicsView):
             for port in node.outputs
         )
 
-        return has_compatible_input and has_compatible_output
+        return has_compatible_output
 
     def _clear_connection_highlight(self) -> None:
         """Clear any active connection drop highlight."""
@@ -3614,15 +3754,7 @@ class NodeEditorWidget(QGraphicsView):
         Before: original_source --[conn]--> original_destination
         After:  original_source --> dragged_node --> original_destination
 
-        Uses batch mode to suppress intermediate graph_changed signals.
-
-        Robustness: this runs inside ``mouseReleaseEvent``. If a
-        disconnect/connect step raised (bad topology, cycle, occupied port),
-        the old code let the exception propagate out of the release handler —
-        skipping the highlight clear and leaving ``_moving_nodes=True``, which
-        stuck the drag and presented as a frozen UI. Now any mutation failure
-        restores the original connection, and the highlight + re-entrancy guard
-        are always cleared in ``finally``, so a bad drop can never freeze the app.
+        Routing and the snapped position are committed together.
         """
         if not self._drop_insert_connection or not self._actions or not self._node_graph:
             self._clear_connection_highlight()
@@ -3670,62 +3802,51 @@ class NodeEditorWidget(QGraphicsView):
             if not new_input_port or not new_output_port:
                 return
 
-            # Batch mode: suppress intermediate graph_changed signals.
-            # setUpdatesEnabled(False) is paired inside try/finally so the view
-            # can never be left with updates disabled after an error.
-            self.setUpdatesEnabled(False)
-            self._batch_mode = True
-            disconnected = False
+            position = self._node_insertion_position(
+                dragged_node_id, new_input_port.name, new_output_port.name,
+            )
+            if dragged_node.node_type == "transform" and self.insert_layer_transform:
+                managed_position = position
+                if position is not None and self._snap_to_grid:
+                    managed_position = QPointF(
+                        round(position.x() / self.GRID_SIZE) * self.GRID_SIZE,
+                        round(position.y() / self.GRID_SIZE) * self.GRID_SIZE,
+                    )
+                result = self.insert_layer_transform(old_src_nid, dragged_node,
+                                                     (old_dst_nid, old_dst_pname), managed_position)
+                if result is not None:
+                    if result:
+                        self._move_start_positions.pop(dragged_node_id)
+                        self.graph_changed.emit()
+                    return
 
-            try:
-                # Disconnect the original connection
-                self._actions.disconnect(old_src_nid, old_src_pname, old_dst_nid, old_dst_pname)
-                disconnected = True
-
-                # Connect: original_source --> dragged_node.input
-                self._actions.connect(old_src_nid, old_src_pname, dragged_node_id, new_input_port.name)
-
-                # Connect: dragged_node.output --> original_destination
-                self._actions.connect(dragged_node_id, new_output_port.name, old_dst_nid, old_dst_pname)
-
-                # Snap the node onto the connection on success only — a failed
-                # insertion leaves the node where the user dropped it.
-                if self._drop_insert_nearest_point:
-                    dragged_item = self._node_items.get(dragged_node_id)
-                    if dragged_item:
-                        insert_pos = self._drop_insert_nearest_point
-                        half_w = dragged_item.rect().width() / 2
-                        half_h = dragged_item.rect().height() / 2
-                        dragged_item.setPos(insert_pos.x() - half_w, insert_pos.y() - half_h)
-            except Exception:
-                # A mutation failed mid-splice. Restore the original connection
-                # (if we had disconnected it) so the graph is never left
-                # half-spliced, then swallow — never freeze the drag.
-                logger.exception(
-                    "Drop-on-connection insertion failed for node %s into "
-                    "%s.%s -> %s.%s; restoring original connection.",
-                    dragged_node_id, old_src_nid, old_src_pname, old_dst_nid, old_dst_pname,
-                )
-                if disconnected:
-                    try:
-                        self._actions.connect(
-                            old_src_nid, old_src_pname, old_dst_nid, old_dst_pname
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to restore original connection %s.%s -> %s.%s "
-                            "after aborted insertion.",
-                            old_src_nid, old_src_pname, old_dst_nid, old_dst_pname,
-                        )
-            finally:
-                self._batch_mode = False
-                self.setUpdatesEnabled(True)
+            original = (old_src_nid, old_src_pname, old_dst_nid, old_dst_pname)
+            incoming = (old_src_nid, old_src_pname, dragged_node_id, new_input_port.name)
+            outgoing = (dragged_node_id, new_output_port.name, old_dst_nid, old_dst_pname)
+            if position is not None and self._snap_to_grid:
+                position = QPointF(round(position.x() / self.GRID_SIZE) * self.GRID_SIZE,
+                                   round(position.y() / self.GRID_SIZE) * self.GRID_SIZE)
+            if self.edit_cables and self.edit_cables(
+                (original,), (incoming, outgoing), moved_node=dragged_node_id, position=position,
+            ):
+                self._move_start_positions.pop(dragged_node_id)
                 self.graph_changed.emit()
         finally:
             self._inserting_node = False
             # Always clear the drop highlight + state on every path, including
             # validation aborts and mutation failures.
             self._clear_connection_highlight()
+
+    def _node_insertion_position(self, node_id: str,
+                                 input_name: str, output_name: str) -> QPointF | None:
+        point = self._drop_insert_nearest_point
+        item = self._node_items.get(node_id)
+        if item is None:
+            return None
+        if point is None:
+            return item.pos()
+        port_y = (item.input_ports[input_name].y() + item.output_ports[output_name].y()) / 2
+        return QPointF(point.x() - item.rect().width() / 2, point.y() - port_y)
 
     def _on_node_double_clicked(self, node_id: str) -> None:
         """Handle node double-click.
@@ -3776,13 +3897,13 @@ class NodeEditorWidget(QGraphicsView):
         self.group_view_changed.emit(str(group_id))
         return True
 
-    def exit_group_view(self) -> bool:
+    def exit_group_view(self, *, update_model: bool = True) -> bool:
         """Leave the deepest group level (breadcrumb back). Applies
         ExitGroupCommand; returns False when not inside a group view."""
         if not self._group_view_stack:
             return False
         group_id = self._group_view_stack.pop()
-        if self._node_graph is not None:
+        if update_model and self._node_graph is not None:
             from src.features.composite.ui.group_commands import ExitGroupCommand
             ExitGroupCommand(graph=self._node_graph,
                              group_id=group_id).redo()
@@ -3797,6 +3918,12 @@ class NodeEditorWidget(QGraphicsView):
             self._group_view_stack[-1] if self._group_view_stack else None)
         return True
 
+    def show_node_in_group_view(self, node_id: str) -> None:
+        """Unwind canvas filters until the requested node can be inspected."""
+        while self._group_filter_ids is not None and node_id not in self._group_filter_ids:
+            if not self.exit_group_view(update_model=False):
+                break
+
     def _group_member_ids(self, group_id: str) -> list:
         if self._node_graph is None:
             return []
@@ -3810,6 +3937,7 @@ class NodeEditorWidget(QGraphicsView):
 
     def _apply_group_filter(self) -> None:
         """Show only the filtered subset (or everything when None)."""
+        self.clear_pending_layer_transform()
         visible = self._group_filter_ids
         for node_id, item in self._node_items.items():
             item.setVisible(visible is None or node_id in visible)
@@ -3844,6 +3972,11 @@ class NodeEditorWidget(QGraphicsView):
                 return widget
             widget = widget.parent()
         return None
+
+    def set_node_bypassed(self, node_id: str, disabled: bool) -> bool:
+        """Set bypass through the same graph action as the canvas."""
+        return (self._actions is not None and not self.is_node_locked(node_id)
+                and self._actions.set_bypass(node_id, disabled))
 
     def _toggle_bypass_selected(self) -> None:
         """Toggle bypass/disable on selected nodes."""
@@ -4533,107 +4666,68 @@ class NodeEditorWidget(QGraphicsView):
         self._snap_to_grid = enabled
 
     def _find_nearest_valid_port(self, scene_pos: QPointF) -> Optional[PortItem]:
-        """Find the nearest valid port for connection snapping.
-
-        Performance: First tries Qt's spatial index for fast lookup at the
-        mouse position, then falls back to distance calculation if needed.
-
-        Returns None if no port is within PORT_SNAP_DISTANCE.
-        """
-        if not self._dragging_connection:
+        """Snap to a port or to an unambiguous node body."""
+        fixed = self._drag_src_port if self._drag_direction == "forward" else self._drag_dst_port
+        if fixed is None:
             return None
+        fixed_node = fixed.parentItem()
+        direction = "input" if fixed.direction == "output" else "output"
 
-        # Determine what direction of port we're looking for
-        if self._drag_direction == "forward":
-            target_direction = "input"
-            source_data_type = self._drag_src_port.data_type if self._drag_src_port else None
-            source_node_id = self._drag_src_node_id
-        elif self._drag_direction == "reverse":
-            target_direction = "output"
-            source_data_type = self._drag_dst_port.data_type if self._drag_dst_port else None
-            source_node_id = None
-            # Get the dst node id for cycle checking
-            dst_parent = self._drag_dst_port.parentItem() if self._drag_dst_port else None
-            source_node_id = dst_parent.node_id if isinstance(dst_parent, NodeItem) else None
-        else:
+        def compatible(port: PortItem) -> bool:
+            node = port.parentItem()
+            if (not isinstance(node, NodeItem) or not node.isVisible() or node.is_locked
+                    or node is fixed_node or port.direction != direction
+                    or port.data_type != fixed.data_type):
+                return False
+            if self.can_connect_cable:
+                source, destination = (fixed, port) if direction == "input" else (port, fixed)
+                edge = (source.parentItem().node_id, source.port_name,
+                        destination.parentItem().node_id, destination.port_name)
+                if self._dragged_cable is None or edge != self._dragged_cable[1:]:
+                    if edge not in self._drag_acceptance:
+                        self._drag_acceptance[edge] = self.can_connect_cable(
+                            edge, self._dragged_cable is None and not self._copying_cable,
+                        )
+                    if not self._drag_acceptance[edge]:
+                        return False
+            if direction == "input" and port.is_at_capacity():
+                return not self._copying_cable and port.max_connections == 1 and all(
+                    not cable.src_port.parentItem().is_locked
+                    for cable in node.connections if cable.dst_port is port
+                )
+            return True
+
+        direct = self._find_port_at(scene_pos)
+        if direct is not None:
+            return direct if compatible(direct) else None
+
+        radius = self.PORT_SNAP_DISTANCE / max(self._current_zoom, 0.01)
+        area = QRectF(scene_pos.x() - radius, scene_pos.y() - radius, 2 * radius, 2 * radius)
+        ranked = []
+        for port in self._scene.items(area):
+            if not isinstance(port, PortItem) or not compatible(port):
+                continue
+            offset = scene_pos - port.scenePos()
+            # Tight vertical tolerance keeps adjacent Merge sockets distinct.
+            if abs(offset.y()) <= min(radius, NodeItem.PORT_ROW_HEIGHT / 2):
+                distance = offset.x() ** 2 + offset.y() ** 2
+                if distance <= radius ** 2:
+                    ranked.append((distance, port))
+        if ranked:
+            return min(ranked, key=lambda pair: pair[0])[1]
+
+        scene_port = self._scene_auto_match_port(scene_pos, fixed.data_type)
+        if scene_port is not None and compatible(scene_port):
+            return scene_port
+        node = self._find_node_at(scene_pos)
+        if node is None:
             return None
-
-        # Performance: First try fast lookup at exact position using Qt's spatial index
-        items_at_pos = self._scene.items(scene_pos)
-        for item in items_at_pos:
-            port = None
-            if isinstance(item, PortItem):
-                port = item
-            elif isinstance(item.parentItem(), PortItem):
-                port = item.parentItem()
-
-            if port and port.direction == target_direction:
-                # Check validity
-                parent = port.parentItem()
-                if isinstance(parent, NodeItem):
-                    # Skip self-connection
-                    if parent.node_id == source_node_id:
-                        continue
-                    # Check data type
-                    if source_data_type and port.data_type != source_data_type:
-                        continue
-                    # 多输入：输入端口满载（达 max_connections）才跳过，
-                    # 否则仍可继续连接（如 Scene3D 的 scene 端口支持多输入）。
-                    if target_direction == "input" and port.is_at_capacity():
-                        continue
-                    return port
-
-        # Fallback: distance-based search for ports near but not at the position
-        # Use squared distance to avoid sqrt in comparisons
-        best_port = None
-        best_dist_sq = self.PORT_SNAP_DISTANCE ** 2
-
-        # Performance: Filter to viewport only to avoid O(n) on large node graphs
-        viewport_rect = self.mapToScene(self.viewport().rect()).boundingRect()
-
-        for nid, node_item in self._node_items.items():
-            # Skip off-screen nodes for performance
-            if not viewport_rect.intersects(node_item.sceneBoundingRect()):
-                continue
-            # Skip the node we're dragging from (for forward drag)
-            if self._drag_direction == "forward" and nid == self._drag_src_node_id:
-                continue
-            # Skip the destination node (for reverse drag)
-            if self._drag_direction == "reverse" and nid == source_node_id:
-                continue
-
-            ports = (node_item.input_ports if target_direction == "input"
-                     else node_item.output_ports)
-
-            for pname, port in ports.items():
-                if port.direction != target_direction:
-                    continue
-
-                # Check data type compatibility
-                if source_data_type and port.data_type != source_data_type:
-                    continue
-
-                # For input ports in forward drag, skip only if at capacity (multi-input aware)
-                if target_direction == "input" and port.is_at_capacity():
-                    continue
-
-                port_pos = port.get_center_scene_pos()
-                # Use squared distance for comparison (avoids sqrt)
-                dist_sq = (scene_pos.x() - port_pos.x()) ** 2 + \
-                          (scene_pos.y() - port_pos.y()) ** 2
-
-                if dist_sq < best_dist_sq:
-                    best_dist_sq = dist_sq
-                    best_port = port
-
-        # ── 节点级自动匹配（仅 3D 场景节点）──
-        # 端口级吸附失败（best_port 仍为 None）时，若鼠标落在节点主体上，
-        # 按源/目标节点类型自动选择匹配端口。复用现有 snap 高亮机制——
-        # 拖 Camera3D 掠过 Scene3D 主体时，camera_in 端口会自动亮绿环。
-        if best_port is None:
-            best_port = self._scene_auto_match_port(scene_pos, source_data_type)
-
-        return best_port
+        ports = node.input_ports if direction == "input" else node.output_ports
+        matching = [port for port in ports.values()
+                    if port.direction == direction and port.data_type == fixed.data_type]
+        if len(matching) == 1 and compatible(matching[0]):
+            return matching[0]
+        return None
 
     def _scene_auto_match_port(self, scene_pos: QPointF,
                                source_data_type) -> Optional[PortItem]:

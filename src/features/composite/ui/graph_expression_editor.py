@@ -21,15 +21,19 @@ signal payload. No expression evaluation happens here.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFocusEvent, QKeyEvent
+from PyQt6.QtGui import QFocusEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QToolButton,
+    QCompleter, QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QToolButton,
     QVBoxLayout, QWidget,
 )
 
+from src.features.composite.utils.expression_parser import (
+    RUNTIME_FUNCTION_NAMES, SAFE_MATH_FUNCTIONS,
+)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 
@@ -45,18 +49,101 @@ class _CommitTextEdit(QPlainTextEdit):
 
     committed = pyqtSignal(bool)
 
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._functions = (set(RUNTIME_FUNCTION_NAMES) |
+                           {name for name, value in SAFE_MATH_FUNCTIONS.items()
+                            if callable(value)})
+        names = set(SAFE_MATH_FUNCTIONS) | self._functions | {
+            "frame", "time", "fps", "value", "width", "height",
+        }
+        self._completer = QCompleter(sorted(names), self)
+        self._completer.setWidget(self)
+        self._completer.setMaxVisibleItems(9)
+        self._completer.activated[str].connect(self._insert_completion)
+
+    def _completion_word(self) -> tuple[str, str]:
+        cursor = self.textCursor()
+        text = cursor.block().text()
+        before = text[:cursor.positionInBlock()]
+        after = text[cursor.positionInBlock():]
+        prefix = re.search(r"[A-Za-z_][A-Za-z_0-9]*$", before)
+        suffix = re.match(r"[A-Za-z_0-9]*", after)
+        return prefix.group() if prefix else "", suffix.group() if suffix else ""
+
+    def show_symbols(self, *, all_symbols: bool = False) -> None:
+        prefix, _ = self._completion_word()
+        self._completer.setCompletionPrefix("" if all_symbols else prefix)
+        popup = self._completer.popup()
+        if self._completer.completionCount() == 0:
+            popup.hide()
+            return
+        rect = self.cursorRect()
+        rect.setWidth(popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width() + 12)
+        popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
+        self._completer.complete(rect)
+
+    def _insert_completion(self, name: str) -> None:
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            prefix, suffix = self._completion_word()
+            cursor.movePosition(QTextCursor.MoveOperation.Left, n=len(prefix))
+            cursor.movePosition(QTextCursor.MoveOperation.Right,
+                                QTextCursor.MoveMode.KeepAnchor, len(prefix) + len(suffix))
+        next_char = self.document().characterAt(cursor.selectionEnd())
+        add_arguments = name in self._functions and next_char != "("
+        cursor.insertText(name + ("()" if add_arguments else ""))
+        if add_arguments:
+            cursor.movePosition(QTextCursor.MoveOperation.Left)
+        self.setTextCursor(cursor)
+
+    def hide_symbols(self) -> None:
+        self._completer.popup().hide()
+
     def focusOutEvent(self, event: QFocusEvent) -> None:
         super().focusOutEvent(event)
-        self.committed.emit(False)  # implicit (focus-out): dedupe applies
+        if event.reason() != Qt.FocusReason.PopupFocusReason:
+            self.committed.emit(False)  # implicit (focus-out): dedupe applies
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and
-                event.modifiers() & (Qt.KeyboardModifier.ControlModifier |
-                                     Qt.KeyboardModifier.MetaModifier)):
+        key = event.key()
+        command = event.modifiers() & (Qt.KeyboardModifier.ControlModifier |
+                                       Qt.KeyboardModifier.MetaModifier)
+        enter = key in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if command and key == Qt.Key.Key_Space:
+            self.show_symbols()
+            event.accept()
+            return
+        if command and enter:
+            self.hide_symbols()
             self.committed.emit(True)  # explicit: always commits
             event.accept()
             return
+        popup = self._completer.popup()
+        if popup.isVisible():
+            index = popup.currentIndex()
+            if enter or key == Qt.Key.Key_Tab:
+                if index.isValid():
+                    self._insert_completion(str(index.data()))
+                popup.hide()
+                event.accept()
+                return
+            if key == Qt.Key.Key_Escape:
+                popup.hide()
+                event.accept()
+                return
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                model = self._completer.completionModel()
+                direction = -1 if key == Qt.Key.Key_Up else 1
+                row = (index.row() + direction) % model.rowCount()
+                index = model.index(row, 0)
+                popup.setCurrentIndex(index)
+                popup.scrollTo(index)
+                event.accept()
+                return
         super().keyPressEvent(event)
+        if popup.isVisible():
+            self.show_symbols()
 
 
 class GraphExpressionEditor(QWidget):
@@ -176,6 +263,18 @@ class GraphExpressionEditor(QWidget):
             f"}}")
         self._text_edit.committed.connect(self._on_committed)
         layout.addWidget(self._text_edit)
+        self._symbols_button = QToolButton(self)
+        symbols = I18N.tr("composite.expression.symbols", "Expression Symbols")
+        self._symbols_button.setText("ƒx")
+        self._symbols_button.setToolTip(symbols)
+        self._symbols_button.setAccessibleName(symbols)
+        self._symbols_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._symbols_button.clicked.connect(self._show_expression_symbols)
+        header.insertWidget(header.indexOf(self._enabled_button), self._symbols_button)
+
+    def _show_expression_symbols(self) -> None:
+        self._text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._text_edit.show_symbols(all_symbols=True)
 
     # ── public API ──
 
@@ -189,6 +288,7 @@ class GraphExpressionEditor(QWidget):
         that only the primary property is editable."""
         self._guard = True
         try:
+            self._text_edit.hide_symbols()
             self._node_id = node_id
             self._param_name = param_name
             self._expression_enabled = bool(expression_enabled)
@@ -203,6 +303,7 @@ class GraphExpressionEditor(QWidget):
             # when the param has none).
             self._text_edit.setPlainText(expression or "")
             self._text_edit.setEnabled(True)
+            self._symbols_button.setEnabled(True)
             self._refresh_enabled_button(bool(expression),
                                          self._expression_enabled)
             self.show_error(None)  # clear any prior error
@@ -224,6 +325,7 @@ class GraphExpressionEditor(QWidget):
         """Show the empty-state (no param selected)."""
         self._guard = True
         try:
+            self._text_edit.hide_symbols()
             self._node_id = None
             self._param_name = None
             self._expression_enabled = True
@@ -232,6 +334,7 @@ class GraphExpressionEditor(QWidget):
                 "Select a parameter to edit its expression"))
             self._text_edit.setPlainText("")
             self._text_edit.setEnabled(False)
+            self._symbols_button.setEnabled(False)
             self._refresh_enabled_button(False, True)
             self._hint_label.setVisible(False)
             self.show_error(None)

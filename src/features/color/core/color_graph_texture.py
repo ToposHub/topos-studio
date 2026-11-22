@@ -7,13 +7,18 @@ import uuid
 
 import numpy as np
 
+from src.features.color.core.cache_manager import CacheTier, LRUCache
 from src.features.color.core.color_graph_compiler import compile_graph
 from src.features.color.core.color_graph_executor import ColorGraphExecutor
 from src.features.color.core.color_graph_param_source import graph_node_layer_provider
 from src.features.color.core.color_graph_snapshot import freeze_graph
 from src.features.color.core.shader_compiler import ShaderPipeline
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX
+from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
 from src.shared.gpu.framebuffer_scope import preserve_framebuffer, temporary_framebuffer
+
+
+_LUT_CACHE_BYTES = 32 * 1024 * 1024
 
 
 def graph_texture_fallback_reason(graph: Any, frame: int) -> str | None:
@@ -50,11 +55,16 @@ class ColorGraphTextureRenderer:
         self.pipeline = ShaderPipeline(ctx)
         self.executor = ColorGraphExecutor(ctx, self.pipeline, node_cache_budget_bytes=0)
         self.plan_cache: dict = {}
-        self._request: str | None = None
         self._resources: list[Any] = []
         self._vaos: dict[int, Any] = {}
         self._programs: dict[str, Any] = {}
-        self._outputs: dict[str, tuple[Any, Any]] = {}
+        self._outputs: dict[str, tuple[str, Any]] = {}
+        self._normalized_source: Any = None
+        # This renderer and its cache are used only on the owning GL thread.
+        self._lut_textures: LRUCache[Any] = LRUCache(
+            16, CacheTier.GPU_TEXTURE, max_bytes=_LUT_CACHE_BYTES,
+            on_evict=lambda texture: texture.release(),
+        )
         quad = np.array([-1,-1,0,0, 1,-1,1,0, -1,1,0,1, 1,1,1,1], dtype="f4")
         self._vbo = ctx.buffer(quad.tobytes())
 
@@ -88,12 +98,14 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
                 fragment_shader=fragment if fragment is not None else path.read_text())
         return self._programs[name]
 
-    def _texture(self, size: tuple[int, int], components: int, data: Any = None) -> Any:
+    def _texture(self, size: tuple[int, int], components: int, data: Any = None,
+                 *, transient: bool = True) -> Any:
         tex = self.ctx.texture(size, components, data=data, dtype="f4")
         import moderngl
         tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         tex.repeat_x = tex.repeat_y = False
-        self._resources.append(tex)
+        if transient:
+            self._resources.append(tex)
         return tex
 
     def _matte(self, layer: Mapping[str, Any], source: Any) -> Any:
@@ -144,6 +156,34 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             self._draw(prog)
         return combined
 
+    def _lut_texture(self, reference: str) -> Any:
+        import moderngl
+
+        # Resolve before looking up the cache so project switches, missing
+        # resources and edits to external LUT files still take effect.
+        path = Path(resolve_lut_path(reference)).absolute()
+        info = path.stat()
+        key = (path, info.st_dev, info.st_ino, info.st_size,
+               info.st_mtime_ns, info.st_ctime_ns)
+        texture = self._lut_textures.get(key)
+        if texture is not None:
+            return texture
+
+        lut = resample_to_unit_domain(load_lut(str(path)))
+        data = np.ascontiguousarray(lut.table, dtype="f4")
+        texture = self.ctx.texture3d((lut.size,) * 3, 3, data, dtype="f4")
+        try:
+            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            texture.repeat_x = texture.repeat_y = texture.repeat_z = False
+        except Exception:
+            texture.release()
+            raise
+        if data.nbytes <= _LUT_CACHE_BYTES:
+            self._lut_textures.put(key, texture, estimated_bytes=data.nbytes)
+        else:
+            self._resources.append(texture)
+        return texture
+
     def _aux(self, prog: Any, layer: Mapping[str, Any]) -> None:
         hsl_default = np.ones((6, 256), dtype="f4")
         hsl_default[1] = 0.0
@@ -166,14 +206,7 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             tex.use(unit)
             prog[uniform].value = unit
         if "u_lut_tex" in prog and layer.get("active_lut_path"):
-            from src.shared.color.lut_loader import load_lut, resample_to_unit_domain
-            lut = resample_to_unit_domain(load_lut(layer["active_lut_path"]))
-            tex = self.ctx.texture3d((lut.size,)*3, 3, np.ascontiguousarray(lut.table,dtype="f4").tobytes(),dtype="f4")
-            self._resources.append(tex)
-            import moderngl
-            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            tex.repeat_x = tex.repeat_y = tex.repeat_z = False
-            tex.use(4)
+            self._lut_texture(layer["active_lut_path"]).use(4)
             prog["u_lut_tex"].value = 4
         if "u_warper_tex" in prog and layer.get("warper_params") is not None:
             array = np.ascontiguousarray(layer["warper_params"], dtype="f4")
@@ -191,11 +224,19 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
     def _render(self, source: Any, graph: Any, frame: int, *,
                 output_key: str, integer_source: bool) -> Any:
         self._release_frame()
+        if output_key not in self._outputs and len(self._outputs) >= 64:
+            raise RuntimeError("Too many simultaneous Color graph outputs")
         reason = graph_texture_fallback_reason(graph, frame)
         if reason is not None:
             raise RuntimeError(reason)
         if integer_source:
-            normalized = self._texture(source.size, 4)
+            normalized = self._normalized_source
+            if normalized is None or normalized.size != source.size:
+                if normalized is not None:
+                    normalized.release()
+                self._normalized_source = None
+                normalized = self._texture(source.size, 4, transient=False)
+                self._normalized_source = normalized
             with temporary_framebuffer(self.ctx, [normalized]):
                 self.ctx.viewport = (0, 0, *source.size)
                 prog = self._program("normalize_u16")
@@ -203,44 +244,51 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
                 prog["u_input_tex"].value = 0
                 self._draw(prog)
             source = normalized
-        self._request = str(uuid.uuid4())
+        request = str(uuid.uuid4())
         # Frame belongs to parameter evaluation and executor cache identity,
         # not the structural plan: playback must reuse the same compiled plan.
         snapshot = freeze_graph(graph, session_id="timeline-gl", source_frame=0)
         plan = compile_graph(snapshot, size=source.size, cache=self.plan_cache)
+        provider = graph_node_layer_provider(snapshot.graph, frame=frame)
+        simple = False
+        if len(plan.passes) == 3 and plan.passes[1].op == "corrector":
+            layer = provider(plan.passes[1].node_id) or {}
+            effects = layer.get("effects_params") or {}
+            simple = bool(
+                layer.get("active_lut_path")
+                and not layer.get("plugins")
+                and not effects.get("enabled")
+                and not effects.get("blur_enabled")
+                and not layer.get("mask_shapes")
+                and not (layer.get("qualifier_params") or {}).get("enabled")
+                and not plan.passes[1].key_pipeline
+            )
         result = self.executor.execute_plan(
-            plan, source, request_id=self._request, source_size=source.size,
-            layer_param_provider=graph_node_layer_provider(snapshot.graph, frame=frame),
+            plan, source, request_id=request, source_size=source.size,
+            layer_param_provider=provider,
             render_quad=self._draw, bind_aux=self._aux, matte_provider=self._matte,
-            dtype="f4", cache_context=(frame,))
+            dtype="f4", cache_context=(frame,), fold_single_corrector_io=simple)
         if not result.published:
             raise RuntimeError(result.diagnostic_message or "Color graph GL execution failed")
-        # Callers may retain two transition sources or several track outputs.
-        # Keep a separate owned copy, never expose an executor scratch lease.
-        target = self._outputs.get(output_key)
-        if target is not None and target[0].size != source.size:
-            target[1].release()
-            target[0].release()
-            target = None
-        if target is None:
-            if output_key not in self._outputs and len(self._outputs) >= 64:
-                raise RuntimeError("Too many simultaneous Color graph outputs")
-            tex = self.ctx.texture(source.size, 4, dtype="f4")
-            import moderngl
-            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            tex.repeat_x = tex.repeat_y = False
-            target = (tex, self.ctx.framebuffer([tex]))
-            self._outputs[output_key] = target
-        with temporary_framebuffer(self.ctx, [result.output_texture]) as read_fbo:
-            self.ctx.copy_framebuffer(target[1], read_fbo)
+        # Hold the executor's published lease for each output key. An
+        # unsuccessful frame leaves the previous output available.
+        texture = result.output_texture
+        try:
+            texture.repeat_x = texture.repeat_y = False
+        except Exception:
+            self.executor.release_revision(request)
+            raise
+        previous = self._outputs.get(output_key)
+        self._outputs[output_key] = (request, texture)
+        if previous is not None:
+            old_request, old_texture = previous
+            old_texture.repeat_x = old_texture.repeat_y = True
+            self.executor.release_revision(old_request)
         if len(self.plan_cache) > 16:
             self.plan_cache.clear()
-        return target[0]
+        return texture
 
     def _release_frame(self) -> None:
-        if self._request is not None:
-            self.executor.release_revision(self._request)
-            self._request = None
         for resource in reversed(self._resources):
             resource.release()
         self._resources.clear()
@@ -254,11 +302,14 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
 
     def _release(self) -> None:
         self._release_frame()
-        self.executor.release_pool()
-        for tex, fbo in self._outputs.values():
-            fbo.release()
-            tex.release()
+        if self._normalized_source is not None:
+            self._normalized_source.release()
+            self._normalized_source = None
+        self._lut_textures.clear()
+        for request, _ in self._outputs.values():
+            self.executor.release_revision(request)
         self._outputs.clear()
+        self.executor.release_pool()
         for vao in self._vaos.values():
             vao.release()
         for program in self._programs.values():

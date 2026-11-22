@@ -34,7 +34,6 @@ from src.shared.keyframe import Keyframe, KeyframeTrack
 
 CLIP_FRAMES = 100
 CLIP_FPS = 24.0
-_RULER_H = 30
 _ROW_H = 24
 PPF = 10.0   # 1 frame = 10 px → 8 px snap tol ≈ 0.8 frame → rounds to 1
 
@@ -64,6 +63,9 @@ def panel(qapp):
     p = KeyframesPanel()
     p.resize(1000, 300)
     p.set_node_graph(g)
+    for row in list(p._model.rows):
+        if "translate_x" in row.component_params:
+            p._toggle_dimensions(row.row_id)
     p.set_frame_range(0, CLIP_FRAMES - 1, fps=CLIP_FPS)
     p._frame_mapper.set_zoom(PPF)
     p._frame_mapper.set_scroll(0.0)
@@ -200,11 +202,11 @@ class TestEndToEndDragSnap:
         row_id = f"param:{t1_id}:translate_x"
         track = panel._model.track_for(row_id)
         track.keyframes[0].selected = True
-        y = _RULER_H + _ROW_H // 2  # node-row y (param row is one below)
+        y = panel._timeline_view.ruler_height() + _ROW_H // 2  # node-row y (param row is one below)
         # Find the param row's y.
         for i, row in enumerate(panel._model.visible_rows()):
             if row.row_id == row_id:
-                y = _RULER_H + i * _ROW_H + _ROW_H // 2
+                y = panel._timeline_view.ruler_height() + i * _ROW_H + _ROW_H // 2
                 break
         # Press at frame 20 (x=200), drag to frame 25 (x=250).
         _press_drag_release(view, 200, y, 250)
@@ -220,10 +222,10 @@ class TestEndToEndDragSnap:
         row_id = f"param:{t1_id}:translate_x"
         track = panel._model.track_for(row_id)
         track.keyframes[0].selected = True
-        y = _RULER_H + _ROW_H + _ROW_H // 2  # param row (second row)
+        y = panel._timeline_view.ruler_height() + _ROW_H + _ROW_H // 2  # param row (second row)
         for i, row in enumerate(panel._model.visible_rows()):
             if row.row_id == row_id:
-                y = _RULER_H + i * _ROW_H + _ROW_H // 2
+                y = panel._timeline_view.ruler_height() + i * _ROW_H + _ROW_H // 2
                 break
         # Drag to frame 29 (x=290) — within tolerance of t2's frame 30.
         _press_drag_release(view, 200, y, 290)

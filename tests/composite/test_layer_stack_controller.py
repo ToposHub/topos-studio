@@ -819,5 +819,269 @@ class TestLegacyProjection(unittest.TestCase):
         self.assertIn((merge_id, "result", output_id, "image"), connections)
 
 
+class TestStableLayerRoles(unittest.TestCase):
+    """B01: stable per-layer transform role and the built-in transform contract.
+
+    The layer's main Transform is a registered role (``transform_node_id``),
+    not an inference from the chain head.  Effects may sit above or below the
+    Transform (e.g. Constant → Transform → Blur → Merge A) without breaking
+    effect insertion, removal, hotkeys, parenting or duplication.
+    """
+
+    def _controller(self):
+        graph = NodeGraph()
+        graph.add_node(OutputNode(node_id="out"))
+        undo = UndoStack()
+        controller = LayerStackController(graph, undo, layer_stack_version=2)
+        controller.ensure_main_stack("out")
+        return graph, undo, controller
+
+    def _media_layer(self, controller, name):
+        source = ConstantNode(node_id=f"src_{name}")
+        controller.graph.add_node(source)
+        return controller.add_media_layer(name, source.id), source.id
+
+    def _adopt_effect_root(self, graph, controller, layer_id, effect_id):
+        """Wire ``effect_id`` above the layer root and adopt it (cable flow)."""
+        from src.features.composite.core.layer_stack_compiler import _output_port_of
+
+        merge = controller.layer_merge_node(layer_id)
+        layer = graph.get_layer(layer_id)
+        root_port = _output_port_of(graph, layer.root_node_id)
+        graph.disconnect(layer.root_node_id, root_port,
+                         merge.id, MERGE_PORT_FOREGROUND)
+        assert graph.connect(layer.root_node_id, root_port,
+                             effect_id, "image")
+        assert graph.connect(effect_id, "result", merge.id, MERGE_PORT_FOREGROUND)
+        assert controller.adopt_wired_layer_effect(
+            layer_id, effect_id, "result", (merge.id, MERGE_PORT_FOREGROUND))
+
+    def test_media_drop_registers_stable_transform_role(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        layer = graph.get_layer(layer_id)
+        root = graph.get_node(layer.root_node_id)
+        self.assertEqual(root.node_type, "transform")
+        self.assertEqual(layer.transform_node_id, root.id)
+
+        roles = controller.layer_roles(layer_id)
+        self.assertEqual(roles.source, source_id)
+        self.assertEqual(roles.transform, root.id)
+        self.assertEqual(roles.effects, ())
+        self.assertEqual(roles.foreground, (root.id, "result"))
+        self.assertEqual(roles.managed_merge,
+                         controller.layer_merge_node(layer_id).id)
+        self.assertFalse(roles.transform_missing)
+        self.assertFalse(roles.transform_ambiguous)
+
+    def test_blur_after_transform_keeps_transform_identity(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        transform_id = graph.get_layer(layer_id).transform_node_id
+        blur = BlurNode(node_id="blur_after")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, layer_id, blur.id)
+        layer = graph.get_layer(layer_id)
+        self.assertEqual(layer.root_node_id, blur.id)
+
+        roles = controller.layer_roles(layer_id)
+        self.assertEqual(roles.transform, transform_id)
+        self.assertEqual(roles.effects, (blur.id,))
+        self.assertEqual(roles.foreground, (blur.id, "result"))
+
+        # Adding an effect must splice ahead of the layer Transform, never
+        # wrap a second Transform above the Blur root.
+        effect_id = controller.add_layer_effect(layer_id, "blur")
+        self.assertIsNotNone(effect_id)
+        self.assertEqual([n.id for n in graph.nodes.values()
+                          if n.node_type == "transform"], [transform_id])
+        roles = controller.layer_roles(layer_id)
+        self.assertEqual(roles.effects, (effect_id, blur.id))
+        self.assertEqual(roles.transform, transform_id)
+
+        # The stable Transform is never offered as a removable effect.
+        self.assertNotIn(transform_id, controller.layer_effect_ids(layer_id))
+        self.assertTrue(controller.remove_layer_effect(layer_id, effect_id))
+        self.assertFalse(controller.remove_layer_effect(layer_id, transform_id))
+        self.assertIsNotNone(graph.get_node(transform_id))
+
+    def test_legacy_chain_backfills_unique_transform(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        layer = graph.get_layer(layer_id)
+        transform_id = layer.root_node_id
+        # Simulate a project saved before the stable role field existed.
+        layer.transform_node_id = None
+
+        roles = controller.layer_roles(layer_id)
+        self.assertEqual(roles.transform, transform_id)
+        # A unique candidate is written back as the stable reference.
+        self.assertEqual(graph.get_layer(layer_id).transform_node_id,
+                         transform_id)
+        self.assertFalse(roles.transform_ambiguous)
+
+    def test_legacy_two_transforms_below_effect_root_is_ambiguous(self):
+        graph, undo, controller = self._controller()
+        source = ConstantNode(node_id="src_amb")
+        graph.add_node(source)
+        t1, t2 = TransformNode(node_id="t1"), TransformNode(node_id="t2")
+        blur = BlurNode(node_id="b_amb")
+        for node in (t1, t2, blur):
+            graph.add_node(node)
+        graph.connect(source.id, "result", t1.id, "image")
+        graph.connect(t1.id, "result", t2.id, "image")
+        graph.connect(t2.id, "result", blur.id, "image")
+        layer_id = controller.add_media_layer("Ambiguous", source.id,
+                                              root_node_id=blur.id)
+        layer = graph.get_layer(layer_id)
+        self.assertIsNone(layer.transform_node_id)
+
+        roles = controller.layer_roles(layer_id)
+        self.assertIsNone(roles.transform)
+        self.assertTrue(roles.transform_ambiguous)
+        # Ambiguity must not silently pick a candidate.
+        self.assertIsNone(graph.get_layer(layer_id).transform_node_id)
+
+    def test_transform_removal_enters_identifiable_missing_state(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        transform_id = graph.get_layer(layer_id).transform_node_id
+        self.assertTrue(controller.remove_layer_root_node(layer_id))
+        layer = graph.get_layer(layer_id)
+        self.assertEqual(layer.root_node_id, source_id)
+
+        roles = controller.layer_roles(layer_id)
+        self.assertIsNone(roles.transform)
+        self.assertTrue(roles.transform_missing)
+        # The stale reference survives serialization as a repairable state.
+        reloaded = NodeGraph.from_dict(graph.to_dict())
+        self.assertEqual(reloaded.get_layer(layer_id).transform_node_id,
+                         transform_id)
+
+        # Re-attaching a wired transform claims the role again.
+        merge = controller.layer_merge_node(layer_id)
+        graph.disconnect(source_id, "result", merge.id, MERGE_PORT_FOREGROUND)
+        repaired = TransformNode(node_id="t_repair")
+        graph.add_node(repaired)
+        assert graph.connect(source_id, "result", repaired.id, "image")
+        assert graph.connect(repaired.id, "result", merge.id,
+                             MERGE_PORT_FOREGROUND)
+        self.assertTrue(controller.adopt_wired_layer_transform(
+            layer_id, repaired.id, (merge.id, MERGE_PORT_FOREGROUND)))
+        roles = controller.layer_roles(layer_id)
+        self.assertEqual(roles.transform, repaired.id)
+        self.assertFalse(roles.transform_missing)
+
+    def test_parenting_resolves_transform_role_not_effect_root(self):
+        graph, undo, controller = self._controller()
+        child_id, _ = self._media_layer(controller, "Child")
+        parent_id, _ = self._media_layer(controller, "Parent")
+        blur = BlurNode(node_id="blur_child")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, child_id, blur.id)
+
+        child = graph.get_layer(child_id)
+        self.assertFalse(getattr(graph.get_node(child.root_node_id),
+                                 "supports_parent_transform", False))
+        self.assertTrue(controller.set_layer_parent(child_id, parent_id))
+
+        child_transform = graph.get_node(child.transform_node_id)
+        parent_transform_id = graph.get_layer(parent_id).transform_node_id
+        self.assertEqual(child_transform.parent_id, parent_transform_id)
+        # Clearing the parent also resolves through the transform role.
+        self.assertTrue(controller.set_layer_parent(child_id, None))
+        self.assertIsNone(graph.get_node(child.transform_node_id).parent_id)
+
+    def test_duplicate_remaps_transform_role(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        blur = BlurNode(node_id="blur_dup")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, layer_id, blur.id)
+        original_transform = graph.get_layer(layer_id).transform_node_id
+
+        clone_id = controller.duplicate_layer(layer_id)
+        self.assertIsNotNone(clone_id)
+        clone = graph.get_layer(clone_id)
+        self.assertNotEqual(clone.transform_node_id, original_transform)
+        self.assertEqual(graph.get_node(clone.root_node_id).node_type, "blur")
+        self.assertEqual(graph.get_node(clone.transform_node_id).node_type,
+                         "transform")
+
+        # Editing the clone's transform leaves the original untouched.
+        graph.get_node(clone.transform_node_id).set_parameter("translate_x", 99.0)
+        self.assertEqual(graph.get_node(original_transform)
+                         .parameters["translate_x"], 0.0)
+        roles = controller.layer_roles(clone_id)
+        self.assertEqual(roles.transform, clone.transform_node_id)
+
+    def test_shared_source_layers_keep_independent_roles(self):
+        graph, undo, controller = self._controller()
+        source = ConstantNode(node_id="shared_src")
+        graph.add_node(source)
+        first = controller.add_media_layer("One", source.id)
+        second = controller.add_media_layer("Two", source.id)
+        t1 = graph.get_layer(first).transform_node_id
+        t2 = graph.get_layer(second).transform_node_id
+        self.assertNotEqual(t1, t2)
+
+        graph.get_node(t1).set_parameter("translate_x", 123.0)
+        self.assertEqual(graph.get_node(t2).parameters["translate_x"], 0.0)
+        roles = controller.layer_roles(second)
+        self.assertEqual(roles.transform, t2)
+        self.assertEqual(roles.source, source.id)
+
+    def test_locked_layer_keeps_transform_protected(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        transform_id = graph.get_layer(layer_id).transform_node_id
+        blur = BlurNode(node_id="blur_lock")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, layer_id, blur.id)
+        self.assertTrue(controller.set_layer_locked(layer_id, True))
+
+        self.assertFalse(controller.can_add_layer_effect(layer_id))
+        self.assertIsNone(controller.add_layer_effect(layer_id, "blur"))
+        self.assertFalse(controller.remove_layer_effect(layer_id, transform_id))
+
+    def test_transform_role_round_trips_through_serialization(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        blur = BlurNode(node_id="blur_ser")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, layer_id, blur.id)
+        layer = graph.get_layer(layer_id)
+
+        reloaded = NodeGraph.from_dict(graph.to_dict())
+        restored = reloaded.get_layer(layer_id)
+        self.assertEqual(restored.root_node_id, layer.root_node_id)
+        self.assertEqual(restored.transform_node_id, layer.transform_node_id)
+        self.assertEqual(restored.source_node_id, source_id)
+
+    def test_transform_node_resolution_for_hotkeys(self):
+        graph, undo, controller = self._controller()
+        layer_id, source_id = self._media_layer(controller, "A")
+        blur = BlurNode(node_id="blur_hotkey")
+        graph.add_node(blur)
+        self._adopt_effect_root(graph, controller, layer_id, blur.id)
+
+        node = controller.layer_transform_node(layer_id)
+        self.assertIsNotNone(node)
+        self.assertEqual(node.id, graph.get_layer(layer_id).transform_node_id)
+        # The hotkey path must not "repair" a layer that already owns a
+        # live transform role.
+        self.assertFalse(controller.can_prepare_layer_transform(layer_id))
+
+
+def test_choose_legacy_transform_requires_unique_candidate():
+    from src.features.composite.core.layer_provenance import (
+        choose_legacy_transform,
+    )
+    assert choose_legacy_transform(("a", "b", "c"), frozenset({"b"})) == "b"
+    assert choose_legacy_transform(("a", "b"), frozenset({"a", "b"})) is None
+    assert choose_legacy_transform(("a",), frozenset({"z"})) is None
+    assert choose_legacy_transform((), frozenset({"a"})) is None
+
+
 if __name__ == "__main__":
     unittest.main()

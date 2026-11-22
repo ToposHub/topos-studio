@@ -121,6 +121,7 @@ class CompositeGraphData:
     source_refs: Dict[str, Any] = field(default_factory=dict)
     fps: float = 24.0
     duration_frames: int = 0
+    markers: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """验证数据有效性"""
@@ -153,6 +154,7 @@ class CompositeGraphData:
         groups: Optional[Dict[str, Any]] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
+        markers: Optional[List[Dict[str, Any]]] = None,
     ) -> CompositeGraphData:
         """派生新实例（全部 with_* 的统一重建入口，AUD-16304）。
 
@@ -193,6 +195,7 @@ class CompositeGraphData:
             source_refs=copy.deepcopy(self.source_refs),
             fps=self.fps,
             duration_frames=self.duration_frames,
+            markers=copy.deepcopy(self.markers if markers is None else markers),
         )
 
     def with_name(self, name: str) -> CompositeGraphData:
@@ -236,6 +239,7 @@ class CompositeGraphData:
         backdrops: Optional[Dict[str, Any]] = None,
         sticky_notes: Optional[Dict[str, Any]] = None,
         groups: Optional[Dict[str, Any]] = None,
+        markers: Optional[List[Dict[str, Any]]] = None,
     ) -> CompositeGraphData:
         """
         创建新实例，更新完整的图数据（从 NodeGraph.to_dict()）。
@@ -262,6 +266,7 @@ class CompositeGraphData:
             backdrops=backdrops,
             sticky_notes=sticky_notes,
             groups=groups,
+            markers=markers,
         )
 
     # ==================== 序列化 ====================
@@ -312,6 +317,8 @@ class CompositeGraphData:
             d["fps"] = self.fps
         if self.duration_frames != 0:
             d["duration_frames"] = self.duration_frames
+        if self.markers:
+            d["markers"] = copy.deepcopy(self.markers)
         return d
 
     @staticmethod
@@ -388,6 +395,7 @@ class CompositeGraphData:
             source_refs=source_refs,
             fps=_field_or_default(data, "fps", 24.0),
             duration_frames=_field_or_default(data, "duration_frames", 0),
+            markers=copy.deepcopy(_field_or_default(data, "markers", [])),
         )
 
     @staticmethod
@@ -738,6 +746,7 @@ class CompositeGraphData:
             source_refs=node_graph_dict.get("source_refs", {}),
             fps=node_graph_dict.get("fps", 24.0),
             duration_frames=node_graph_dict.get("duration_frames", 0),
+            markers=copy.deepcopy(_field_or_default(node_graph_dict, "markers", [])),
         )
 
     def to_node_graph_dict(self) -> Dict[str, Any]:
@@ -757,6 +766,7 @@ class CompositeGraphData:
             "backdrops": self.backdrops,
             "sticky_notes": self.sticky_notes,
             "groups": self.groups,
+            "markers": copy.deepcopy(self.markers),
         }
 
     # ==================== 辅助方法 ====================

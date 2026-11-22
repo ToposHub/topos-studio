@@ -114,15 +114,16 @@ class TestRowIdScheme:
 
 
 class TestTimelineRowAdapter:
-    def test_adapter_preserves_legacy_row_count_and_ids(self):
+    def test_adapter_preserves_projected_rows_and_parent_ids(self):
         g, t, b = _graph_two_nodes_animated()
         m = KeyframesModel()
         m.rebuild(g)
         legacy_rows = m.rows
         trows = build_timeline_rows(m)
 
-        # 1:1 today: every legacy row maps to a TimelineRow, same id/order.
-        assert [r.row_id for r in trows] == [r.row_id for r in legacy_rows]
+        assert [(r.row_id, r.parent_row_id) for r in trows] == [
+            (r.row_id, r.parent_row_id) for r in legacy_rows]
+        assert any(r.row_type == "group" for r in trows)
 
     def test_adapter_node_row_fields(self):
         g, t, b = _graph_two_nodes_animated()

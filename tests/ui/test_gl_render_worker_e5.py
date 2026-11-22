@@ -13,11 +13,40 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from PyQt6.QtGui import QSurfaceFormat  # noqa: E402
+from pytestqt.qtbot import QtBot  # noqa: E402
+
 from src.shared.playback.gl_render_worker import (  # noqa: E402
     GLVideoRenderWorker, _RenderThread,
 )
 from src.shared.playback.gl_video_canvas import GLVideoCanvas  # noqa: E402
 from src.shared.playback.yuv_frame import YuvFrame  # noqa: E402
+
+
+def test_video_canvas_uses_compatible_window_surface_format(qtbot: QtBot) -> None:
+    previous = QSurfaceFormat.defaultFormat()
+    host_format = QSurfaceFormat(previous)
+    host_format.setVersion(4, 5)
+    host_format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    host_format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    host_format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
+    host_format.setRedBufferSize(8)
+    host_format.setGreenBufferSize(8)
+    host_format.setBlueBufferSize(8)
+    host_format.setAlphaBufferSize(8)
+    host_format.setDepthBufferSize(24)
+    host_format.setStencilBufferSize(8)
+    host_format.setSamples(4)
+    QSurfaceFormat.setDefaultFormat(host_format)
+    try:
+        canvas = GLVideoCanvas()
+        qtbot.addWidget(canvas)
+        expected = QSurfaceFormat(host_format)
+        expected.setSamples(0)
+        assert canvas.format() == expected
+        assert QSurfaceFormat.defaultFormat() == host_format
+    finally:
+        QSurfaceFormat.setDefaultFormat(previous)
 
 
 def _yuv_frame(color: str, w: int = 8, h: int = 6) -> YuvFrame:
@@ -126,10 +155,10 @@ def test_gui_present_paints_front(qtbot, gl_canvas):
     if worker is None or not worker.alive:
         pytest.skip("渲染线程不可用")
     worker.submit_size(canvas._size_cache or (120, 90))
-    canvas.set_image(_yuv_frame("red", w=8, h=6))   # 生产线径：set_image 入队
-    _wait_rendered(qtbot, worker)
-    canvas.update()
-    qtbot.wait(80)
+    qtbot.wait(80)  # 先排空显示窗口首次产生的交换事件
+    with qtbot.waitSignal(canvas.frameSwapped, timeout=8000):
+        canvas.set_image(_yuv_frame("red", w=8, h=6))
+    assert worker.rendered_frames == 1
     image = canvas.grabFramebuffer()
     assert not image.isNull()
     center = image.pixelColor(image.width() // 2, image.height() // 2)

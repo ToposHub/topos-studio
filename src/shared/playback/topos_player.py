@@ -6,14 +6,14 @@ Topos Video Codec 原生播放器（应用级共享播放核心）。
 
 - 全 intra：任意帧独立解码，进度条拖动零寻址延迟；
 - 解码线程后台预取（环形缓冲 6 帧 + 背压）；有音轨时以 QAudioSink
-  播放位置为主时钟，无音轨时按源 fps 严格按序显示；
+  播放位置为主时钟，无音轨时用单调时钟；
 - 播放用 auto2k 档（显示尺寸优先），快照/封面走全尺寸；
 - 快照原生全尺寸直出（不依赖 ffmpeg CLI）；
 - 片段导出走自编译 FFmpeg（libtopos 解码 → ProRes 422 HQ 交付格式）；
 - 信息面板（编解码/分辨率/帧率/位深/色彩/码率）、设为封面、点击暂停。
 
 [ARCH-2] UI 骨架/解码线程生命周期/快照/封面统一在 base_player.BasePlayer，
-本文件保留：ToposMovieSession 解码会话 + 严格按序的帧消费 + 片段截取面板。
+本文件保留：ToposMovieSession 解码会话、播放时钟与片段截取面板。
 """
 from __future__ import annotations
 
@@ -110,6 +110,8 @@ class ToposMovieSession(DecoderBackend):
     """
 
     _PREVIEW_PLANES_BUDGET = 96 * 1024 * 1024
+
+    independent_frames = True
 
     def __init__(self, path: str, slice_workers: int = 0, *, prefetch: bool = False) -> None:
         ToposCodec, ToposMovieFile, ToposDecoder = _load_binding()
@@ -397,6 +399,9 @@ class ToposPlayer(BasePlayer):
 
     def __init__(self, parent=None):
         self._at_eof = False
+        self._audio = None
+        self._clock_position = 0.0
+        self._clock_started_at: float | None = None
         super().__init__(parent)
 
     def _open_session(self, path: str):
@@ -480,6 +485,7 @@ class ToposPlayer(BasePlayer):
             audio.pause()
         self._at_eof = True
         _icons.set_play_icon(self.btn_play, playing=False)
+        self._wake_ui()
 
     def toggle_play(self) -> None:
         # 片尾按播放 → 从头重播（与 libav _on_play_state_changed 行为对齐）
@@ -490,14 +496,11 @@ class ToposPlayer(BasePlayer):
 
     def _on_seek_requested(self, target: int) -> None:
         self._at_eof = False
-        audio = getattr(self, '_audio', None)
-        if audio is not None and self._session is not None:
-            audio.seek(target / max(1e-6, self._session.fps))
-
-    def _ui_interval(self, session) -> int:
-        if getattr(self, '_audio', None) is not None:
-            return 16
-        return super()._ui_interval(session)
+        if self._session is not None:
+            self._clock_position = target / self._session.fps
+            self._clock_started_at = None
+            if self._audio is not None:
+                self._audio.seek(self._clock_position)
 
     def _teardown_output(self) -> None:
         audio, self._audio = getattr(self, '_audio', None), None
@@ -509,6 +512,8 @@ class ToposPlayer(BasePlayer):
 
     def _configure_session(self, session) -> None:
         self._at_eof = False
+        self._clock_position = 0.0
+        self._clock_started_at = None
         self.lbl_badge.setText(
             f"TOPOS · {session.width}×{session.height} · "
             f"{session.fps:.0f}fps · {session.info.bit_depth}-bit")
@@ -550,99 +555,52 @@ class ToposPlayer(BasePlayer):
             self._on_audio_failed('音频输出初始化失败')
 
     def _on_audio_failed(self, message: str) -> None:
+        sender = self.sender()
+        if sender is not None and sender is not self._audio:
+            return
         self._audio = None
         self.lbl_vol.setVisible(False)
         self.slider_vol.setVisible(False)
-        if self._session is not None:
-            self._ui_timer.setInterval(
-                max(4, int(1000 / max(1e-6, self._session.fps))))
         self._toast(message)
 
     def _on_play_state_changed(self) -> None:
-        audio = getattr(self, '_audio', None)
-        if audio is None:
-            return
         if self._playing:
-            audio.resume()
+            if self._frame_to_present is None:
+                self._clock_started_at = time.monotonic()
+            if self._audio is not None:
+                self._audio.resume()
         else:
-            audio.pause()
+            self._clock_started_at = None
+            if self._session is not None and self._frame_to_present is None:
+                self._clock_position = max(0, self._shown_index) / self._session.fps
+            if self._audio is not None:
+                self._audio.pause()
 
     def _on_volume_changed(self, value: int) -> None:
         audio = getattr(self, '_audio', None)
         if audio is not None:
             audio.set_volume(value / 100.0)
 
-    # ---------- 帧消费：严格按序（显示速度 = 源 fps，解码由背压钳制） ----------
-
     def _poll_ring(self) -> None:
-        audio = getattr(self, '_audio', None)
-        if audio is not None and self._playing and self._session is not None:
-            pos = audio.position()
-            if pos is not None:
-                # 帧门控以音频播放位置为准；解码前端只保留目标帧及之后的
-                # 少量未来帧，落后帧直接丢弃（视频追音频，不拖慢音频）。
-                fps = max(1e-6, self._session.fps)
-                target = min(self._session.frame_count - 1,
-                             max(0, int(pos * fps)))
-                pick = None
-                with self._ring_lock:
-                    while self._ring:
-                        self._pending.append(self._ring.popleft())
-                    while self._pending:
-                        idx, img = self._pending[0]
-                        if idx <= self._shown_index:
-                            self._pending.popleft()
-                        elif idx <= target:
-                            pick = self._pending.popleft()
-                        else:
-                            break
-                    self._ring_space.notify()
-                if pick is not None:
-                    self._show_frame(pick)
-                self.lbl_pos.setText(_fmt_time(pos))
-                self.slider.blockSignals(True)
-                self.slider.setValue(target)
-                self.slider.blockSignals(False)
-                self._maybe_publish_eof()  # [E3] 音频排空 + 末帧呈现后才收尾
-                return
-        # 无音频或音频尚未起播：沿用严格的逐帧时钟。
-        pick = None
-        with self._ring_lock:
-            while self._ring:
-                self._pending.append(self._ring.popleft())
-            while self._pending:
-                idx = self._pending[0][0]
-                if idx <= self._shown_index:      # seek 重置后的过期帧
-                    self._pending.popleft()
-                elif idx == self._shown_index + 1:
-                    pick = self._pending.popleft()
-                    break
-                else:
-                    # seek 竞态残留（解码前沿越过 shown+1）→ 跳显首帧
-                    pick = self._pending.popleft()
-                    break
-            self._ring_space.notify()
-        if pick is None:
-            self._maybe_publish_eof()  # [E3] 无帧可显也查：末帧已显+音频排空即收尾
+        session = self._session
+        if session is None:
             return
-        self._show_frame(pick)
+        now = time.monotonic()
+        position = self._clock_position
+        if self._playing:
+            audio = self._audio
+            audio_position = audio.position() if audio is not None and not audio.drained() else None
+            if audio_position is not None:
+                position = self._clock_position = audio_position
+                self._clock_started_at = now
+            elif self._clock_started_at is not None:
+                position += now - self._clock_started_at
+        frame = self._take_due_frame(int(position * session.fps + 1e-6))
+        if frame is not None:
+            if self._playing and self._clock_started_at is None:
+                self._clock_started_at = now
+            self._show_frame(frame)
         self._maybe_publish_eof()
-
-    def _show_frame(self, pick) -> None:
-        idx, img = pick
-        self._shown_index = idx
-        self.canvas.set_image(img)
-        self.slider.blockSignals(True)
-        self.slider.setValue(idx)
-        self.slider.blockSignals(False)
-        if self._session:
-            self.lbl_pos.setText(_fmt_time(idx / self._session.fps))
-
-    def _on_seek_jump(self) -> None:
-        # seek 后丢弃过期帧——否则满 ring 会让目标帧永远进不了队列
-        with self._ring_lock:
-            self._ring.clear()
-            self._ring_space.notify()
 
     def _handle_key(self, key) -> bool:
         from PyQt6.QtCore import Qt as _Qt

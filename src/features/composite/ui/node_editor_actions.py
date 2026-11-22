@@ -556,6 +556,12 @@ class NodeEditorActions:
             True if the connection was created (the page handler runs
             synchronously on emit, so the model already reflects the result)
         """
+        edit_cables = getattr(self._editor, "edit_cables", None)
+        if callable(edit_cables):
+            return edit_cables(
+                (), ((src_node_id, src_port, dst_node_id, dst_port),),
+                replace_input=True, allow_pending_transform=True)
+
         # Duplicate request guard: an exact quad already in the model must
         # not be re-submitted — the page's multi-input append path has no
         # exact dedupe and would append a second copy.
@@ -619,6 +625,9 @@ class NodeEditorActions:
             and conn.dst_port_name == dst_port
             for conn in getattr(self._graph, "connections", []))
         if in_model:
+            edit_cables = getattr(self._editor, "edit_cables", None)
+            if callable(edit_cables):
+                return edit_cables(((src_node_id, src_port, dst_node_id, dst_port),), ())
             self._editor.node_disconnected.emit(src_node_id, src_port, dst_node_id, dst_port)
             if not self._editor._batch_mode:
                 self._editor.graph_changed.emit()
@@ -659,6 +668,9 @@ class NodeEditorActions:
         for conn_data in list(self._editor._connection_items):
             conn_item, sn, sp, dn, dp = conn_data
             if dn == dst_node_id and dp == dst_port:
+                edit_cables = getattr(self._editor, "edit_cables", None)
+                if callable(edit_cables):
+                    return (sn, sp) if edit_cables(((sn, sp, dn, dp),), ()) else None
                 self._editor.node_disconnected.emit(sn, sp, dn, dp)
                 if not self._editor._batch_mode:
                     self._editor.graph_changed.emit()
@@ -684,6 +696,11 @@ class NodeEditorActions:
         Returns:
             True if reconnected successfully
         """
+        edit_cables = getattr(self._editor, "edit_cables", None)
+        if callable(edit_cables):
+            return edit_cables(((old_src_node, old_src_port, dst_node, dst_port),),
+                               ((new_src_node, new_src_port, dst_node, dst_port),),
+                               replace_input=True)
         # Disconnect old
         self.disconnect(old_src_node, old_src_port, dst_node, dst_port)
         # Connect new
@@ -1547,7 +1564,7 @@ class NodeEditorActions:
             新创建的节点 ID 列表
         """
         from src.features.composite.utils.preset_manager import PresetManager
-        from src.features.composite.core.node_engine import NODE_REGISTRY
+        from src.features.composite.core.node_engine import Connection, NODE_REGISTRY
 
         # 获取 PresetManager 实例
         preset_manager = getattr(self._editor, '_preset_manager', None)
@@ -1582,15 +1599,9 @@ class NodeEditorActions:
         ref_x = min(p[0] for p in positions)
         ref_y = min(p[1] for p in positions)
 
-        # 清除当前选择
-        if select_loaded:
-            for item in self._editor._node_items.values():
-                item.set_selected(False)
-
         # 创建节点
         idx_to_new_id: Dict[int, str] = {}
-        new_ids: List[str] = []
-        pasted_data: List[dict] = []
+        new_nodes: List[Node] = []
 
         for i, node_data in enumerate(nodes_template):
             node_cls = NODE_REGISTRY.get(node_data.get("type"))
@@ -1612,45 +1623,45 @@ class NodeEditorActions:
 
             # 创建节点
             new_node = node_cls.from_dict(node_data_copy)
-            self._graph.add_node(new_node)
-            self._editor.add_node_visual(new_node)
-
             idx_to_new_id[i] = new_id
-            new_ids.append(new_node.id)
-            pasted_data.append(node_data_copy)
+            new_nodes.append(new_node)
 
-            # 选中新节点
-            if select_loaded:
-                item = self._editor._node_items.get(new_id)
-                if item:
-                    item.set_selected(True)
-
-        # U-16：与 paste_nodes 同一静默装配事务（见该方法注释；测试桩
-        # 编辑器可能没有该信号，防御性获取）。
-        if pasted_data:
-            emit_pasting = getattr(self._editor, "nodes_pasting", None)
-            if emit_pasting is not None:
-                emit_pasting.emit(pasted_data)
-
-        # 恢复内部连接
+        cables: List[Connection] = []
+        seen_cables: set[tuple[str, str, str, str]] = set()
         for conn in connections_template:
-            src_idx = conn.get("src_idx")
-            dst_idx = conn.get("dst_idx")
-            src_port = conn.get("src_port")
-            dst_port = conn.get("dst_port")
-
-            if src_idx is not None and dst_idx is not None:
-                src_id = idx_to_new_id.get(src_idx)
-                dst_id = idx_to_new_id.get(dst_idx)
-                if src_id and dst_id:
-                    self.connect(src_id, src_port, dst_id, dst_port)
-
-        # 发送信号
-        if pasted_data:
-            self._editor.nodes_pasted.emit(pasted_data)
+            if not isinstance(conn, dict):
+                return []
+            src_idx, dst_idx = conn.get("src_idx"), conn.get("dst_idx")
+            if type(src_idx) is not int or type(dst_idx) is not int:
+                return []
+            src_id, dst_id = idx_to_new_id.get(src_idx), idx_to_new_id.get(dst_idx)
+            if src_id is None or dst_id is None:
+                return []
+            endpoints = (src_id, str(conn.get("src_port") or ""),
+                         dst_id, str(conn.get("dst_port") or ""))
+            if endpoints not in seen_cables:
+                cables.append(Connection(*endpoints))
+                seen_cables.add(endpoints)
+        result = self._graph.insert_subgraph(tuple(new_nodes), tuple(cables))
+        if not result.ok:
+            logger.warning("Preset %r could not be inserted (%s)", name, result.primary_code)
+            return []
+        if select_loaded:
+            for item in self._editor._node_items.values():
+                item.set_selected(False)
+        for node in new_nodes:
+            self._editor.add_node_visual(node)
+            if select_loaded:
+                self._editor._node_items[node.id].set_selected(True)
+        for edge in cables:
+            source = self._graph.get_node(edge.src_node_id)
+            self._editor.add_connection_visual(
+                edge.src_node_id, edge.src_port_name, edge.dst_node_id, edge.dst_port_name,
+                source.get_output_port(edge.src_port_name).data_type)
+        if new_nodes:
+            self._editor.nodes_pasted.emit([node.to_dict() for node in new_nodes])
             self._editor.graph_changed.emit()
-
-        return new_ids
+        return [node.id for node in new_nodes]
 
     @staticmethod
     def _safe_preset_position(value: Any, label: str = "node") -> List[float]:

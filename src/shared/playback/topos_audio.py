@@ -292,7 +292,7 @@ class ToposAudioPipeline(QObject):
 
     failed = pyqtSignal(str)
 
-    def __init__(self, source: _AudioSource, parent=None) -> None:
+    def __init__(self, source: _AudioSource, parent=None, *, start_seconds: float = 0.0) -> None:
         super().__init__(parent)
         self._source = source
         self._lock = threading.Condition()
@@ -300,7 +300,8 @@ class ToposAudioPipeline(QObject):
         self._paused = False
         self._seek_to: Optional[float] = None
         self._volume = 1.0
-        self._position = 0.0
+        self._position: float | None = None
+        self._initial_position = max(0.0, start_seconds)
         # [E3] 排空状态（音频线程写、GUI 线程读，_lock 保护）：
         # EOF 收尾要等"音源读完 + 待写清空 + sink 缓冲放完"三者同时成立
         self._source_done = False
@@ -341,6 +342,8 @@ class ToposAudioPipeline(QObject):
     def seek(self, seconds: float) -> None:
         with self._lock:
             self._seek_to = max(0.0, float(seconds))
+            self._position = self._seek_to
+            self._source_done = False
             self._lock.notify()
 
     def set_volume(self, value: float) -> None:
@@ -374,7 +377,11 @@ class ToposAudioPipeline(QObject):
         fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
         device = QMediaDevices.defaultAudioOutput()
         if device.isNull():
+            with self._lock:
+                self._source_done = True
             self.failed.emit('没有可用的音频输出设备')
+            self._release()
+            self._source.close()
             return
         try:
             sink = _make_sink(device, fmt)
@@ -384,11 +391,11 @@ class ToposAudioPipeline(QObject):
             if io is None:
                 self.failed.emit('音频输出启动失败')
                 return
-            self._source.seek(0.0)
-            base = 0.0
-            decoded_end = 0.0
+            self._source.seek(self._initial_position)
+            base = self._initial_position
+            decoded_end = base
             pending = bytearray()
-            pending_t = 0.0
+            pending_t = base
             suspended = False
             # 预先填半秒缓冲，避免起播瞬间欠载。
             while len(pending) < int(_AUDIO_AHEAD_CAP * OUT_BYTES_PER_SEC):
@@ -412,7 +419,6 @@ class ToposAudioPipeline(QObject):
                         pass
                     self._source.seek(seek_target)
                     base = seek_target
-                    self._position = seek_target
                     decoded_end = seek_target
                     pending.clear()
                     pending_t = seek_target
@@ -443,8 +449,8 @@ class ToposAudioPipeline(QObject):
                     suspended = False
                 clock = base + sink.processedUSecs() / 1_000_000.0
                 with self._lock:
-                    self._position = min(max(clock, base),
-                                        max(base, self._source.duration))
+                    if self._seek_to is None and clock > base:
+                        self._position = min(clock, max(base, self._source.duration))
                 # 解码前置（限幅防积压）
                 if len(pending) < int(_AUDIO_AHEAD_CAP * OUT_BYTES_PER_SEC):
                     data = self._source.read(4096)
@@ -489,12 +495,20 @@ class ToposAudioPipeline(QObject):
             logger.exception('Topos 音频线程异常')
             self.failed.emit('Topos 音频线程异常，已关闭音频')
         finally:
+            with self._lock:
+                self._source_done = True
+                self._pending_len = self._sink_backlog = 0
             try:
                 if sink is not None:
                     sink.stop()
             except Exception:
                 pass
             self._source.close()
+            self._release()
+
+    def _release(self) -> None:
+        from .audio_arbiter import shared_arbiter
+        shared_arbiter().release(self._arbiter_owner)
 
 
 __all__ = ['ToposAudioPipeline', 'make_audio_source', 'OUT_RATE',

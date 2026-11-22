@@ -23,6 +23,13 @@ class PrecompNode(Node):
     PARAM_DEFS = [
         ParamDef("child_stack_id", "str", ""),
         ParamDef("precomp_name", "str", "Precomp"),
+        ParamDef("ref_project_id", "str", "", hidden=True),
+        ParamDef("ref_comp_id", "str", "", hidden=True),
+        ParamDef("ref_relative_path", "str", "", hidden=True),
+        ParamDef("ref_revision_fingerprint", "str", "", hidden=True),
+        ParamDef("ref_update_policy", "option", "pinned", labels=["pinned", "follow"],
+                 hidden=True),
+        ParamDef("ref_output_name", "str", "display", hidden=True),
         # Nested compositions share the parent playhead by default. These
         # optional controls are consumed by core.time_remap so a precomp's
         # child sources, cache keys, preview and export all agree.
@@ -36,13 +43,6 @@ class PrecompNode(Node):
         super().__init__(node_id)
         self.inputs = [Port("image", "input", "image")]
         self.outputs = [Port("result", "output", "image")]
-        self.parameters = {
-            "child_stack_id": "",
-            "precomp_name": "Precomp",
-            "frame_offset": 0,
-            "speed": 1.0,
-            "hold_frame": -1,
-        }
 
     def compute_output_bbox(self, input_bboxes: Dict[str, Any],
                             params: Dict[str, Any]) -> Any:

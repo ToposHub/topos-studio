@@ -33,12 +33,12 @@ def _run_decode_loop(frame_count: int, max_decodes: int = 64):
     import time as _time
 
     targets, finishes = [], []
+    session = SimpleNamespace(frame_count=frame_count)
     state = SimpleNamespace(
         _cond=threading.Condition(), _ring_lock=threading.Lock(),
         _ring_space=None, _running=True, _playing=True, _seek_target=None,
-        _next_index=0, _ring=[], RING_SIZE=4096,   # 测试无 UI 消费者，避免背压卡死
+        _next_index=0, _decode_floor=0, _session=session, _ring=[], RING_SIZE=4096,   # 测试无 UI 消费者，避免背压卡死
         _decode_exhausted=False, _eof_published=False,
-        _on_seek_jump=lambda: None,
         _on_playback_finished=lambda: finishes.append(True),
         _audio_drained=lambda: True,
         _on_decode_error=lambda: None, _on_decode_stop=lambda: None,
@@ -54,7 +54,7 @@ def _run_decode_loop(frame_count: int, max_decodes: int = 64):
     state._decode_frame = decode
     thread = threading.Thread(
         target=BasePlayer._decode_loop,
-        args=(state, SimpleNamespace(frame_count=frame_count)))
+        args=(state, session))
     thread.start()
     deadline = _time.monotonic() + 5
     while not state._decode_exhausted and _time.monotonic() < deadline:
@@ -93,33 +93,33 @@ def test_fr18_long_session_last_frame_then_exhausts():
     assert state._decode_exhausted
 
 
-def _presentation_state(frame_count: int, *, shown=-1, pending=(), audio=True):
+def _presentation_state(frame_count: int, *, shown=-1, frames=(), audio=True):
     """呈现完成判定所需的假状态（_maybe_publish_eof/_request_seek 只读这些字段）。"""
     state = SimpleNamespace(
         _cond=threading.Condition(),
         _ring_lock=threading.Lock(),
         _session=SimpleNamespace(frame_count=frame_count),
         _shown_index=shown,
-        _ring=[],
-        _pending=list(pending),
+        _ring=list(frames),
         _decode_exhausted=True,
         _eof_published=False,
         _playing=True,
     )
     state._audio_drained = (lambda: True) if audio else (lambda: False)
     state._on_playback_finished = lambda: setattr(state, 'finished', True)
+    state._ring_space = threading.Condition(state._ring_lock)
     state.finished = False
     return state
 
 
 def test_e3_eof_published_only_after_presentation_completes():
     # 末帧未呈现 → 不发布（FUP-07：2 帧会话 shown=-1、队列 [0,1] 的实况）
-    state = _presentation_state(2, shown=-1, pending=[(0, object()), (1, object())])
+    state = _presentation_state(2, shown=-1, frames=[(0, object()), (1, object())])
     BasePlayer._maybe_publish_eof(state)
     assert not state.finished and state._playing
 
     # 队列还有未呈现帧 → 不发布
-    state = _presentation_state(2, shown=0, pending=[(1, object())])
+    state = _presentation_state(2, shown=0, frames=[(1, object())])
     BasePlayer._maybe_publish_eof(state)
     assert not state.finished
 
@@ -362,6 +362,7 @@ def _yuv_session_with_frame(frame):
     session._iter = iter([frame])
     session._next_idx = 0
     session.fps = 24
+    session._stream = SimpleNamespace(start_time=0, time_base=Fraction(1, 24))
     session.sar = None
     return session
 
@@ -493,3 +494,20 @@ def test_fr21_refresh_size_cache_ignores_invalid_dims(qtbot):
     qtbot.addWidget(canvas)
     canvas.refresh_size_cache()          # 未布局时 0×0 → None，不产出假尺寸
     assert canvas.display_size() in (None,) or canvas.display_size()[0] > 0
+
+
+def test_libav_alpha_preview_keeps_transparent_pixels() -> None:
+    import numpy as np
+    from src.shared.playback.base_player import _frame_to_qimage
+
+    pixels = np.zeros((8, 18, 4), dtype=np.uint8)
+    pixels[:, :, 0] = 255
+    pixels[4:, :, 3] = 255
+    frame = av.VideoFrame.from_ndarray(pixels, format='rgba')
+    frame.pts, frame.time_base = 0, Fraction(1, 24)
+    session = _yuv_session_with_frame(frame)
+    session.rotation_quarters = 0
+
+    image = _frame_to_qimage(session.frame_rgba(0, size=(18, 8)))
+    assert image.pixelColor(4, 2).alpha() == 0
+    assert image.pixelColor(4, 6).getRgb() == (255, 0, 0, 255)

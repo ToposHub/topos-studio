@@ -37,6 +37,8 @@ from .layer_model import (
     Layer,
     LayerStack,
     LAYER_BLEND_MODE_TO_NODE,
+    LAYER_TYPE_AUDIO,
+    EMPTY_LAYER_OUTPUT_PARAM,
     LAYER_MERGE_MATTE_PARAM,
     LAYER_MERGE_OWNER_PARAM,
 )
@@ -228,6 +230,8 @@ class LayerStackCompiler:
         ordered_layers: List[Layer] = []
         for layer_id in stack.layer_ids:
             layer = layers.get(layer_id)
+            if layer is not None and layer.layer_type == LAYER_TYPE_AUDIO:
+                continue
             if layer is None or self.graph.get_node(layer.root_node_id) is None:
                 result.warnings.append(f"Layer {layer_id!r} has no root node; skipped.")
                 continue
@@ -314,7 +318,8 @@ class LayerStackCompiler:
             has_matte = False
             matte = layers.get(layer.track_matte_layer_id)
             if layer.track_matte_layer_id:
-                if matte is not None and self.graph.get_node(matte.root_node_id) is not None:
+                if (matte is not None and matte.layer_type != LAYER_TYPE_AUDIO
+                        and self.graph.get_node(matte.root_node_id) is not None):
                     has_matte = True
                     intended.append((matte.root_node_id, _output_port_of(
                         self.graph, matte.root_node_id, role="matte"), merge_id, "mask"))
@@ -323,6 +328,10 @@ class LayerStackCompiler:
             _project_param(node, LAYER_MERGE_MATTE_PARAM, has_matte, result, merge_id)
             _project_param(node, "blend_mode", LAYER_BLEND_MODE_TO_NODE.get(layer.blend_mode, "over"),
                            result, merge_id)
+            source = self.graph.get_node(layer.source_node_id)
+            psd_srgb = bool(source and getattr(source, "parameters", {}).get("psd_layer"))
+            if psd_srgb or (node and node.parameters.get("psd_srgb")):
+                _project_param(node, "psd_srgb", psd_srgb, result, merge_id)
             _project_param(node, "mask_channel", layer.track_matte_mode, result, merge_id)
             _project_param(node, "mask_invert", bool(layer.track_matte_invert), result, merge_id)
             background_id = merge_id
@@ -333,6 +342,12 @@ class LayerStackCompiler:
         if background_id is not None and stack.output_node_id:
             intended.append((background_id, MERGE_OUTPUT_PORT, stack.output_node_id,
                              OUTPUT_INPUT_PORT))
+        if stack.output_node_id and any(
+                lid in layers and layers[lid].layer_type == LAYER_TYPE_AUDIO
+                for lid in stack.layer_ids):
+            output = self.graph.get_node(stack.output_node_id)
+            _project_param(output, EMPTY_LAYER_OUTPUT_PARAM, background_id is None,
+                           result, stack.output_node_id)
         topology = TopologicalSorter()
         for edge in self.graph.connections:
             key = (edge.src_node_id, edge.src_port_name, edge.dst_node_id, edge.dst_port_name)
@@ -389,10 +404,10 @@ class LayerStackCompiler:
                 f"Layer {layer_id!r} is referenced by the stack but not "
                 f"present in the layer map; skipped.")
             return False
-        if not layer.enabled:
+        if not layer.enabled or layer.layer_type == LAYER_TYPE_AUDIO:
             return False
         # Solo handling: if any layer is soloed, non-solo layers drop out.
-        any_solo = any(l.solo for l in layers.values())
+        any_solo = any(l.solo and l.layer_type != LAYER_TYPE_AUDIO for l in layers.values())
         if any_solo and not layer.solo:
             return False
         return True
@@ -802,16 +817,32 @@ class LayerStackCompiler:
                 self._project_root_opacity(layer, result)
             self._project_layer_parent(layer, layers, result)
 
+    def _parent_projection_node(self, layer: Layer):
+        """The node that carries this layer's parenting transform.
+
+        B01: parenting binds the registered main Transform; the chain head
+        may be an effect without parent support.  Layers without a live
+        registered Transform keep the legacy chain-head projection.
+        """
+        registered = getattr(layer, "transform_node_id", None)
+        if registered:
+            node = self.graph.get_node(registered)
+            if node is not None:
+                return node
+        return self.graph.get_node(layer.root_node_id)
+
     def _project_layer_parent(self, layer: Layer, layers: Dict[str, Layer],
                               result: CompileResult) -> None:
-        root = self.graph.get_node(layer.root_node_id)
-        if root is None or not getattr(root, "supports_parent_transform", False):
+        node = self._parent_projection_node(layer)
+        if node is None or not getattr(node, "supports_parent_transform", False):
             return
         parent_layer = layers.get(layer.parent_layer_id) if layer.parent_layer_id else None
-        parent_id = parent_layer.root_node_id if parent_layer is not None else None
-        if getattr(root, "parent_id", None) != parent_id:
+        parent_node = self._parent_projection_node(parent_layer) \
+            if parent_layer is not None else None
+        parent_id = parent_node.id if parent_node is not None else None
+        if getattr(node, "parent_id", None) != parent_id:
             result.changes.append(CompileChange(
-                kind="connect", src_node_id=layer.root_node_id, dst_node_id=layer.root_node_id,
+                kind="connect", src_node_id=node.id, dst_node_id=node.id,
                 src_port_name="__parent__", dst_port_name=parent_id or ""))
 
     def _project_root_opacity(self, layer: Layer,

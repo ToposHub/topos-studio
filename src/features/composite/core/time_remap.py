@@ -396,6 +396,7 @@ def compute_layer_frame_gates(layer_stacks: Iterable[object],
 def empty_managed_layer_outputs(
     stacks: Iterable[Any], get_layer: Callable[[str], Any], connections: Iterable[Any],
     gates: dict[str, tuple[int | None, int | None]], frame: int,
+    inactive_inputs: dict[str, frozenset[str]] | None = None,
 ) -> set[str]:
     """Identify deliberate empty frames in compositor-owned v2 output wiring."""
     managed_stacks = [stack for stack in stacks if stack.managed and stack.output_node_id
@@ -423,7 +424,8 @@ def empty_managed_layer_outputs(
             merges.remove(source)
             foreground = inputs.get((source, "A"))
             gate = gates.get(foreground) if foreground is not None else None
-            if gate is None or gate_active(gate, frame):
+            foreground_hidden = "A" in (inactive_inputs or {}).get(source, ())
+            if not foreground_hidden and (gate is None or gate_active(gate, frame)):
                 break
             source = inputs.get((source, "B"))
             if source is None:

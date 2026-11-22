@@ -148,13 +148,14 @@ def test_layer_video_range_drag_uses_composition_frames_and_one_undo(qapp) -> No
     view.show()
     view.range_changed.connect(page._on_keyframes_panel_time_range_changed)
     row_id = f"layer:{layer_id}"
+    row_y = view.ruler_height() + 12
 
     def drag(start_frame: int, end_frame: int) -> None:
         button = Qt.MouseButton.LeftButton
         none = Qt.MouseButton.NoButton
         modifier = Qt.KeyboardModifier.NoModifier
-        start = QPointF(start_frame * 5, 42)
-        end = QPointF(end_frame * 5, 42)
+        start = QPointF(start_frame * 5, row_y)
+        end = QPointF(end_frame * 5, row_y)
         assert view._hit_range_bar(start.x(), start.y()) is not None
         view.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress,
                                          start, start, button, button, modifier))
@@ -183,7 +184,9 @@ def test_layer_video_range_drag_uses_composition_frames_and_one_undo(qapp) -> No
     drag(119, 35)
     assert (layer.in_frame, layer.out_frame) == (35, 35)
     assert video.parameters["source_out"] == 15
-    assert view._hit_range_bar(176.5, 42) == (row_id, None)
+    track = model.track_for(row_id)
+    left, right = view._range_bar_x_bounds(track.range_bar)
+    assert view._hit_range_bar((left + right) / 2, row_y) == (row_id, None)
 
     saved = NodeGraph.from_dict(graph.to_dict())
     assert saved.snapshot(frame_number=34).layer_frame_gates[layer.root_node_id] == (35, 35)

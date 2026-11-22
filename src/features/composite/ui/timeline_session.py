@@ -129,6 +129,10 @@ class ColumnModel:
         at spec min) widths.
         """
         spec_by_name = {s.name: s for s in timeline_layout.LEFT_COLUMNS}
+        if ({cfg.name for cfg in self.configs} == spec_by_name.keys()
+                and all(cfg.width == 0 and cfg.visible == spec_by_name[cfg.name].visible_by_default
+                        for cfg in self.configs)):
+            return timeline_layout.left_column_widths(total_width)
         widths: Dict[str, int] = {}
         fixed_total = 0
         for cfg in self.configs:

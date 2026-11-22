@@ -9,7 +9,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -17,15 +17,17 @@ import pytest
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QMenu, QWidget
 
 from src.features.composite.core.node_engine import NodeGraph
+from src.features.composite.core.layer_model import BOTTOM_UP_LAYER_STACK_VERSION
 from src.features.composite.core.layer_stack_controller import LayerStackController
 from src.features.composite.nodes.transform_node import TransformNode
 from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.constant_node import ConstantNode
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.keyframes_panel import KeyframesPanel
+from src.features.composite.ui.node_properties_panel import NodePropertiesPanel
 from src.features.composite.ui.keyframes_model import (
     KeyframesModel, CompositeTimelineState)
 
@@ -132,7 +134,8 @@ def test_timeline_side_maps_media_drop_to_layer_insert(qapp):
 
 @pytest.mark.parametrize("surface", ["_tree_view", "_timeline_view"])
 @pytest.mark.parametrize("extension, accepted", [("png", True), ("mov", True),
-                                                 ("obj", True), ("wav", False)])
+                                                 ("obj", True), ("psb", True),
+                                                 ("wav", False)])
 def test_empty_layer_canvas_accepts_supported_local_drops(
     qtbot, surface: str, extension: str, accepted: bool,
 ) -> None:
@@ -147,7 +150,7 @@ def test_empty_layer_canvas_accepts_supported_local_drops(
 
     canvas = getattr(panel, surface)
     assert canvas.isEnabled() and canvas.acceptDrops()
-    assert not panel._toolbar.isEnabled()
+    assert not panel._header_tools.isEnabled()
     assert panel.findChild(QWidget, "KeyframesEmptyStateOverlay") is None
     if surface == "_timeline_view":
         QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=QPoint(150, 24))
@@ -237,6 +240,264 @@ def test_node_transform_delete_keeps_material_layer_and_source(qapp):
     page.undo()
     assert g.get_node(second_root) is not None
     assert g.get_layer(second_layer).root_node_id == second_root
+    page.redo()
+    page._node_editor._add_new_node("transform", QPointF(100, 100), second.id)
+    new_root = g.get_layer(second_layer).root_node_id
+    assert new_root not in (second.id, second_root)
+    assert (new_root, "result", merge_id, "A") in page._graph_cable_keys()
+
+
+@pytest.mark.parametrize("method", ["menu", "toolbar", "drop", "input_first", "output_first"])
+def test_reinserting_transform_restores_layer_controls(qapp, method):
+    page = CompositePage()
+    panel = KeyframesPanel()
+    properties = NodePropertiesPanel()
+    page.set_properties_panel(properties)
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    editor = page._node_editor
+    page._evaluate_graph = MagicMock()
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="source"))
+    side = TransformNode(node_id="side")
+    graph.add_node(side)
+    layer_id = controller.add_media_layer("Footage", "source")
+    original_id = graph.get_layer(layer_id).root_node_id
+    merge = controller.layer_merge_node(layer_id)
+    graph.connect("source", "result", side.id, "image")
+    editor.build_from_graph(graph)
+    page.set_keyframes_panel(panel)
+    panel.set_view_mode("layers")
+    try:
+        assert controller.main_stack().version == BOTTOM_UP_LAYER_STACK_VERSION
+        assert editor._actions.delete_node(original_id)
+        assert graph.get_layer(layer_id).root_node_id == "source"
+
+        if method == "menu":
+            editor._add_new_node("transform", QPointF(100, 100), "source")
+        elif method == "toolbar":
+            editor.select_node("source")
+            page._add_node_by_type(TransformNode, (100, 100))
+        else:
+            node = editor._actions.add_node("transform", 100, 100)
+            assert node is not None
+            if method == "drop":
+                editor._move_start_positions = {node.id: QPointF(100, 100)}
+                editor._drop_insert_nearest_point = QPointF(100, 200)
+                editor._drop_insert_connection = next(
+                    value for value in editor._connection_items if value[3:] == (merge.id, "A"))
+                editor._execute_connection_insertion()
+                assert not editor._move_start_positions
+            else:
+                cables = [("source", "result", node.id, "image"),
+                          (node.id, "result", merge.id, "A")]
+                if method == "output_first":
+                    cables.reverse()
+                assert editor._actions.connect(*cables[0])
+                assert graph.get_layer(layer_id).root_node_id == "source"
+                assert editor._actions.connect(*cables[1])
+
+        root_id = graph.get_layer(layer_id).root_node_id
+        assert root_id not in ("source", side.id, original_id)
+        assert ("source", "result", side.id, "image") in page._graph_cable_keys()
+        assert (root_id, "result", merge.id, "A") in page._graph_cable_keys()
+        assert any(row.layer_id == layer_id and row.node_id == root_id
+                   and row.param_name == "translate_x" for row in panel._model.rows)
+
+        page.undo()
+        assert graph.get_layer(layer_id).root_node_id == "source"
+        assert not any(row.layer_id == layer_id and row.node_id == root_id
+                       for row in panel._model.rows)
+        if method in {"menu", "toolbar"}:
+            assert graph.get_node(root_id) is None
+        page.redo()
+        assert graph.get_layer(layer_id).root_node_id == root_id
+
+        panel.parameter_changed.emit(root_id, "translate_x", 123.0)
+        page._commit_pending_edit_transactions()
+        assert graph.get_node(root_id).parameters["translate_x"] == 123.0
+        page.load_composite_data(page.get_composite_data())
+        assert page.node_graph.get_layer(layer_id).source_node_id == "source"
+        assert page.node_graph.get_layer(layer_id).root_node_id == root_id
+        assert page.node_graph.get_node(root_id).parameters["translate_x"] == 123.0
+        assert any(row.layer_id == layer_id and row.node_id == root_id
+                   and row.param_name == "translate_x" for row in panel._model.rows)
+    finally:
+        page.close()
+        panel.close()
+        properties.close()
+
+
+def test_effect_chain_head_keeps_transform_role_in_layers_view(qapp):
+    """B01: with an effect above the layer Transform, the Layers view keeps
+    transform semantics and the role survives a save/reload round-trip."""
+    from src.features.composite.nodes.blur_node import BlurNode
+    from src.features.composite.core.layer_stack_compiler import MERGE_PORT_FOREGROUND
+
+    page = CompositePage()
+    panel = KeyframesPanel()
+    properties = NodePropertiesPanel()
+    page.set_properties_panel(properties)
+    graph = page.node_graph
+    controller = page._layer_stack_controller
+    editor = page._node_editor
+    page._evaluate_graph = MagicMock()
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="source"))
+    blur = BlurNode(node_id="blur_above")
+    graph.add_node(blur)
+    layer_id = controller.add_media_layer("Footage", "source")
+    layer = graph.get_layer(layer_id)
+    transform_id = layer.transform_node_id
+    merge = controller.layer_merge_node(layer_id)
+    assert transform_id is not None and transform_id != layer.source_node_id
+    graph.add_node(ConstantNode(node_id="parent_source"))
+    parent_id = controller.add_media_layer("Parent", "parent_source")
+    parent_transform = controller.layer_transform_node(parent_id)
+    assert controller.set_layer_parent(layer_id, parent_id)
+
+    graph.disconnect(transform_id, "result", merge.id, MERGE_PORT_FOREGROUND)
+    assert graph.connect(transform_id, "result", blur.id, "image")
+    assert graph.connect(blur.id, "result", merge.id, MERGE_PORT_FOREGROUND)
+    assert controller.adopt_wired_layer_effect(
+        layer_id, blur.id, "result", (merge.id, MERGE_PORT_FOREGROUND))
+    editor.build_from_graph(graph)
+    page.set_keyframes_panel(panel)
+    panel.set_view_mode("layers")
+    try:
+        assert graph.get_layer(layer_id).root_node_id == blur.id
+        # The Layers view shows the registered Transform's params under the
+        # transform group, not the Blur chain head's.
+        assert controller.layer_transform_node(layer_id).id == transform_id
+        assert graph.get_node(transform_id).parent_id == parent_transform.id
+        with patch.object(page, "_viewer", MagicMock()) as viewer:
+            panel._on_layer_selected(layer_id)
+            viewer.set_selected_node.assert_called_once_with(transform_id)
+        assert page._last_selected_node_id == transform_id
+        menu = QMenu(panel)
+        panel._populate_layer_parent_menu(menu, graph.get_layer(parent_id),
+                                          controller.layers_map(), [parent_id, layer_id])
+        assert any(action.text() == "Footage" for action in menu.actions())
+        assert any(row.layer_id == layer_id and row.node_id == transform_id
+                   and row.param_name == "translate_x"
+                   for row in panel._model.rows)
+        # Adding an effect through the panel splices ahead of the Transform
+        # instead of wrapping the Blur in a second Transform.
+        effect_id = controller.add_layer_effect(layer_id, "blur")
+        assert effect_id is not None
+        assert {n.id for n in graph.nodes.values()
+                if n.node_type == "transform"} == {transform_id, parent_transform.id}
+
+        page.load_composite_data(page.get_composite_data())
+        restored = page.node_graph.get_layer(layer_id)
+        assert restored.root_node_id == blur.id
+        assert restored.transform_node_id == transform_id
+        assert page._layer_stack_controller.layer_transform_node(
+            layer_id).id == transform_id
+    finally:
+        page.close()
+        panel.close()
+        properties.close()
+
+
+def test_composition_marker_ruler_drag_save_and_switch(qapp, tmp_path):
+    from src.shared.project.composition_merge import merge_composition_record
+    from src.shared.project.topos_project import ToposProject
+    from src.shared.project.topos_project_io import ToposProjectIO
+
+    page = CompositePage()
+    panel = KeyframesPanel()
+    page._evaluate_graph = MagicMock()
+    page.set_keyframes_panel(panel)
+    page.load_composite_data({"composite_id": "first", "nodes": [],
+                              "duration_frames": 60})
+    panel.set_view_mode("layers")
+    panel.resize(850, 300)
+    panel.show()
+    qapp.processEvents()
+    changes = []
+    page.composite_graph_changed.connect(lambda cid, data: changes.append((cid, data)))
+    controller = page._layer_stack_controller
+    view = panel._timeline_view
+    try:
+        marker_id = controller.add_marker(10, "Impact", duration=4)
+        assert panel._graph_view.markers()[0]["name"] == "Impact"
+        start_x = round(panel._frame_mapper.frame_to_x(10))
+        end_x = round(panel._frame_mapper.frame_to_x(20))
+        QTest.mousePress(view, Qt.MouseButton.LeftButton, pos=QPoint(start_x, 30))
+        QTest.mouseMove(view, QPoint(end_x, 30))
+        assert controller.markers()[0].frame == 10
+        QTest.mouseRelease(view, Qt.MouseButton.LeftButton, pos=QPoint(end_x, 30))
+        assert controller.markers()[0].frame == 20
+        page.undo()
+        assert panel._graph_view.markers()[0]["frame"] == 10
+        page.redo()
+        assert panel._graph_view.markers()[0]["frame"] == 20
+        assert len(changes) == 4
+        saved = merge_composition_record({"name": "First"}, changes[-1][1], "first")
+        assert controller.remove_marker(marker_id)
+        removed = merge_composition_record(saved, changes[-1][1], "first")
+        assert removed["markers"] == []
+        archive = str(tmp_path / "markers.topos")
+        project = ToposProject(project_id="marker-review", name="Marker review",
+                               project_mode="composite_shot")
+        assert ToposProjectIO.save(project, archive, full_compositions_data={"first": saved})
+        _, reopened = ToposProjectIO.load(archive)
+        page.load_composite_data(reopened["compositions"]["first"])
+        assert [(item.marker_id, item.frame) for item in controller.markers()] == [(marker_id, 20)]
+        page.load_composite_data({"composite_id": "second", "nodes": [],
+                                  "duration_frames": 60})
+        assert controller.markers() == []
+        assert panel._graph_view.markers() == []
+    finally:
+        page.close()
+        panel.close()
+
+
+@pytest.mark.parametrize("reason", ["other_layer", "locked", "managed_conflict"])
+def test_refused_transform_drop_preserves_existing_cables(qapp, reason):
+    page = CompositePage()
+    page._evaluate_graph = MagicMock()
+    graph = page.node_graph
+    editor = page._node_editor
+    controller = page._layer_stack_controller
+    graph.clear()
+    graph.add_node(OutputNode(node_id="out"))
+    graph.add_node(ConstantNode(node_id="first"))
+    graph.add_node(ConstantNode(node_id="second"))
+    first_layer = controller.add_media_layer("First", "first")
+    second_layer = controller.add_media_layer("Second", "second")
+    root_id = graph.get_layer(second_layer).root_node_id
+    merge_id = controller.layer_merge_node(second_layer).id
+    if reason == "other_layer":
+        transform_id = graph.get_layer(first_layer).root_node_id
+    else:
+        transform_id = "candidate"
+        graph.add_node(TransformNode(node_id=transform_id))
+        if reason == "locked":
+            assert controller.set_layer_locked(second_layer, True)
+        else:
+            graph.connect("first", "result", "out", "image")  # Conflict beyond the target wire.
+    editor.build_from_graph(graph)
+    try:
+        edges = page._graph_cable_keys()
+        editor._move_start_positions = {transform_id: QPointF(100, 100)}
+        editor._drop_insert_connection = next(
+            value for value in editor._connection_items if value[3:] == (merge_id, "A"))
+        editor._execute_connection_insertion()
+        assert editor._drop_insert_connection is None
+        assert page._graph_cable_keys() == edges
+        assert graph.get_layer(second_layer).root_node_id == root_id
+        if reason == "locked":
+            nodes = set(graph.nodes)
+            editor._add_new_node("transform", QPointF(100, 100), root_id)
+            assert set(graph.nodes) == nodes
+            assert not editor._actions.connect(transform_id, "result", merge_id, "A")
+            assert page._graph_cable_keys() == edges
+    finally:
+        page.close()
 
 
 # ── timeline state ──────────────────────────────────────────────────────

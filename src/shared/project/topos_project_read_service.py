@@ -66,6 +66,19 @@ class ToposProjectReadService:
     返回强类型 ToposProjectBundle 而非弱类型 dict。
     """
 
+    def load_composites(
+        self, topos_path: str, *, revision: str = "",
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Read a package's graph and resource data without activating it."""
+        from .topos_project_io import ToposProjectIO
+
+        project, data = ToposProjectIO.load(
+            topos_path, composite_only=True, cache_revision=revision,
+        )
+        if project is None or data is None:
+            return None
+        return project.project_id, data
+
     def load(self, topos_path: str) -> ToposProjectBundle | None:
         """
         统一读取 .topos 工程包。

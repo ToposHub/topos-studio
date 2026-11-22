@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QToolButton, QDialog, QDialogButtonBox,
     QPlainTextEdit
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF, QSize, QSignalBlocker
 from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QFontMetrics,
     QShortcut, QKeySequence, QLinearGradient, QMouseEvent,
@@ -34,6 +34,8 @@ from typing import Callable, Dict, Any, Optional, List, Tuple
 import os
 
 from .keyframe_editor import KeyframeEditorWidget
+from .scale_link import ScaleLinkState
+from .timeline_icons import PROPERTY_KEYFRAME_GLYPH, PROPERTY_KEYFRAME_STYLE
 from src.shared.assets.icon_manager import get_icon, IconColors, make_link_button
 from src.shared.i18n.i18n import I18N, tr, tr_or_none
 from src.shared.ui.widgets import ToggleSwitch
@@ -1078,9 +1080,22 @@ class NodeSectionWidget(QFrame):
         self._triple_sliders = []
         self._skip_params.clear()
         self._hidden_params.clear()
+        self._external_comp_picker = None
 
         if not self.parameters:
             return
+
+        if self.node_type == "precomp":
+            from .external_comp_picker import ExternalCompPicker
+
+            self._external_comp_picker = ExternalCompPicker(
+                self.parameters,
+                lambda ref: self._parent_panel._on_param_changed(
+                    "external_comp_ref", ref, self.node_id),
+                parent=self,
+            )
+            self._content_layout.addWidget(self._external_comp_picker)
+            self._skip_params.add("external_comp_ref")
 
         # Dispatch to node-type-specific custom UI builders.
         if self.node_type == "constant":
@@ -1302,9 +1317,15 @@ class NodeSectionWidget(QFrame):
             self._build_parameters()
         else:
             # Incremental update
+            picker = getattr(self, "_external_comp_picker", None)
+            if picker is not None:
+                picker.refresh(self.parameters)
             for key, value in self.parameters.items():
                 if key in self._param_widgets:
                     self._parent_panel._update_section_param_value(key, value, self._param_widgets)
+            self._parent_panel._sync_video_trim_editor(self)
+            if "pivot_mode" in self.parameters:
+                self._parent_panel._refresh_pivot_display(self._param_widgets)
 
     def set_enabled(self, enabled: bool) -> None:
         """Update enabled state without re-emitting signal."""
@@ -2875,23 +2896,12 @@ class NodePropertiesPanel(QWidget):
 
     def _make_keyframe_button(self, key: str, pdef) -> QToolButton:
         kf_btn = _KeyframeToolButton()
-        kf_btn.setText("◆")
+        kf_btn.setText(PROPERTY_KEYFRAME_GLYPH)
         kf_btn.setToolTip(I18N.tr(
             "node_props.kf_btn_tooltip",
             "左键：切换关键帧\nAlt+左键：编辑表达式\n右键：曲线编辑器"))
         kf_btn.setFixedSize(20, 20)
-        kf_btn.setStyleSheet("""
-            QToolButton {
-                background-color: transparent; border: 1px solid #555;
-                font-size: 10px; padding: 1px; color: #999; border-radius: 2px;
-            }
-            QToolButton:hover {
-                background-color: #555; color: #cc6600; border-color: #cc6600;
-            }
-            QToolButton:checked {
-                background-color: #ff5555; color: #fff; border-color: #ff5555;
-            }
-        """)
+        kf_btn.setStyleSheet(PROPERTY_KEYFRAME_STYLE)
         # AE 语义：红色（checked）仅表示**当前播放帧**上有关键帧，而不是
         # 参数存在任意关键帧。无绑定的 NodeGraph 时退回旧行为（任意关键帧）。
         if self._node_graph is not None:
@@ -3317,13 +3327,33 @@ class NodePropertiesPanel(QWidget):
         # (aspect ratio lock, off by default). Placed left of the value boxes.
         # 统一小锁图标：锁定=橙 / 解锁=灰（见 icon_manager.make_link_button）。
         chain = None
-        if base in ("scale", "size", "radius"):
+        scale_state = getattr(self, "_scale_link_state", None)
+        scale_node_id = self._current_node_id
+        shared_scale = (scale_state if base == "scale" and scale_node_id
+                        and (x_key, y_key) == ("scale_x", "scale_y") else None)
+        if shared_scale is not None:
+            chain = shared_scale.make_button(scale_node_id)
+        elif base in ("scale", "size", "radius"):
             chain = make_link_button(
                 initial_linked=(base in ("scale", "radius")),  # linked ON by default
                 tooltip=("Link X and Y" if base in ("scale", "radius")
                          else "Link width and height aspect ratio"),
             )
+        if chain is not None:
             h.addWidget(chain)
+
+        def uses_shared_scale() -> bool:
+            return shared_scale is not None and chain.isChecked()
+
+        def start_scale_edit() -> None:
+            if uses_shared_scale():
+                shared_scale.edit_started.emit(scale_node_id)
+
+        def finish_axis_edit(key: str, pdef: Any, control: DragValue) -> None:
+            if uses_shared_scale():
+                shared_scale.edit_finished.emit(scale_node_id)
+            else:
+                self._autokey_if_animated(key, control.value(), pdef, scale_node_id)
 
         def axis_marker(letter: str) -> QLabel:
             m = QLabel(letter)
@@ -3426,6 +3456,9 @@ class NodePropertiesPanel(QWidget):
                     slider.blockSignals(True)
                     slider.setValue(self._value_to_slider(v, info))
                     slider.blockSignals(False)
+                if uses_shared_scale():
+                    shared_scale.value_changed.emit(scale_node_id, float(v))
+                    return
                 self._on_param_changed(key, v, n)
                 if chain is not None and chain.isChecked():
                     peer_val = compute_peer_value(v, this_is_x)
@@ -3439,6 +3472,9 @@ class NodePropertiesPanel(QWidget):
                 drag.blockSignals(True)
                 drag.setValue(fv)
                 drag.blockSignals(False)
+                if uses_shared_scale():
+                    shared_scale.value_changed.emit(scale_node_id, float(fv))
+                    return
                 self._on_param_changed(key, fv, n)
                 if chain is not None and chain.isChecked():
                     peer_val = compute_peer_value(fv, this_is_x)
@@ -3456,20 +3492,16 @@ class NodePropertiesPanel(QWidget):
 
         # P3: auto-key on commit for each axis. No-op unless the axis already
         # has a keyframe track, so static pairs are unaffected.
-        drag_x.interaction_ended.connect(
-            lambda k=x_key, d=drag_x, pd=pdef_x, n=self._current_node_id:
-            self._autokey_if_animated(k, d.value(), pd, n))
-        drag_y.interaction_ended.connect(
-            lambda k=y_key, d=drag_y, pd=pdef_y, n=self._current_node_id:
-            self._autokey_if_animated(k, d.value(), pd, n))
-        if slider_x is not None:
-            slider_x.sliderReleased.connect(
-                lambda k=x_key, d=drag_x, pd=pdef_x, n=self._current_node_id:
-                self._autokey_if_animated(k, d.value(), pd, n))
-        if slider_y is not None:
-            slider_y.sliderReleased.connect(
-                lambda k=y_key, d=drag_y, pd=pdef_y, n=self._current_node_id:
-                self._autokey_if_animated(k, d.value(), pd, n))
+        for key, pdef, drag, slider in ((x_key, pdef_x, drag_x, slider_x),
+                                        (y_key, pdef_y, drag_y, slider_y)):
+            finish = lambda k=key, pd=pdef, d=drag: finish_axis_edit(k, pd, d)
+            if shared_scale is not None:
+                drag.interaction_started.connect(start_scale_edit)
+            drag.interaction_ended.connect(finish)
+            if slider is not None:
+                if shared_scale is not None:
+                    slider.sliderPressed.connect(start_scale_edit)
+                slider.sliderReleased.connect(finish)
 
         # One shared keyframe button for the pair (AE-style). Stored under both
         # axes so the refresh path + state update reach it from either key.
@@ -3746,23 +3778,12 @@ class NodePropertiesPanel(QWidget):
         """One keyframe ◆ button shared by an X/Y/Z triple (mirrors
         _make_pair_keyframe_button for 3 axes)."""
         btn = _KeyframeToolButton()
-        btn.setText("◆")
+        btn.setText(PROPERTY_KEYFRAME_GLYPH)
         btn.setToolTip(I18N.tr(
             "node_props.kf_btn_tooltip_xyz",
             "左键：切换三轴关键帧\nAlt+左键：编辑 X 表达式\n右键：曲线编辑器"))
         btn.setFixedSize(20, 20)
-        btn.setStyleSheet("""
-            QToolButton {
-                background-color: transparent; border: 1px solid #555;
-                font-size: 10px; padding: 1px; color: #999; border-radius: 2px;
-            }
-            QToolButton:hover {
-                background-color: #555; color: #cc6600; border-color: #cc6600;
-            }
-            QToolButton:checked {
-                background-color: #ff5555; color: #fff; border-color: #ff5555;
-            }
-        """)
+        btn.setStyleSheet(PROPERTY_KEYFRAME_STYLE)
         # AE 语义：红色仅表示当前播放帧上有关键帧（任一轴）。
         if self._node_graph is not None:
             has_kf = (self._param_has_keyframe_at_frame(x_key)
@@ -4144,34 +4165,71 @@ class NodePropertiesPanel(QWidget):
             update_fn = widget_info.get('update')
             if update_fn:
                 update_fn(value)
-        elif widget_type == 'trim_range':
-            trim_editor = widget_info['widget']
-            start, end = trim_editor.values()
-            maximum = int(widget_info.get('maximum', 1))
-            if key == 'source_in':
-                start = int(value)
-            elif key == 'source_out':
-                end = maximum if int(value) < 0 else int(value)
-            elif key == 'total_frames':
-                maximum = max(0, int(value) - 1)
-                widget_info['maximum'] = maximum
-                trim_editor.set_bounds(0, maximum)
-                start, end = trim_editor.values()
-                section_params = None
-                for candidate in self._sections.values():
-                    if candidate._param_widgets is param_widgets:
-                        section_params = candidate.parameters
-                        break
-                raw_out = ((section_params or {}).get('source_out', -1)
-                           if section_params is not None else -1)
-                end = maximum if int(raw_out) < 0 else int(raw_out)
-            trim_editor.set_values(start, end)
 
         # pivot_mode 是语义型 combo：center 时旋转中心 = 图像中心，pivot_x/y
         # 参数不参与计算。切换它必须联动刷新 pivot 行的显示值与可编辑态，
         # 否则面板会停在旧值（如 center 时的中心值，或 custom 时的参数值）。
         if key == "pivot_mode":
             self._refresh_pivot_display(param_widgets, value)
+
+    @staticmethod
+    def _sync_video_trim_editor(section: "NodeSectionWidget") -> None:
+        """Refresh the aggregate trim control from authoritative source values."""
+        info = section._param_widgets.get("trim_range")
+        if info is None:
+            return
+        params = section.parameters
+        try:
+            start = max(0, int(params.get("source_in", 0) or 0))
+            raw_end = int(params.get("source_out", -1))
+            maximum = max(0, int(params.get("total_frames", 0) or 0) - 1, start, raw_end)
+        except (TypeError, ValueError):
+            return
+        editor = info["widget"]
+        with QSignalBlocker(editor):
+            if maximum != info["maximum"]:
+                info["maximum"] = maximum
+                editor.set_bounds(0, maximum)
+            editor.set_values(start, maximum if raw_end < 0 else raw_end)
+
+    def sync_node_enabled(self, node_id: str, enabled: bool) -> None:
+        """Mirror a bypass edit in the corresponding live property section."""
+        section = self._sections.get(node_id)
+        if section is not None:
+            section.set_enabled(enabled)
+
+    def sync_base_parameter_values(self, node_id: str, values: Dict[str, Any]) -> None:
+        """Mirror changed base values into a visible node section in place."""
+        section = self._sections.get(node_id)
+        if section is None or section._is_torn_down:
+            return
+        node = self._get_live_node(node_id)
+        changed = {key: value for key, value in values.items()
+                   if key not in section.parameters or section.parameters[key] != value}
+        section.parameters.update(values)
+        if self._current_node_id == node_id:
+            self._current_parameters.update(values)
+        widgets = section._param_widgets
+        for key, value in changed.items():
+            if node is None or not node.is_param_animated(key):
+                self._update_section_param_value(key, value, widgets)
+        if changed.keys() & {"source_in", "source_out", "total_frames"}:
+            self._sync_video_trim_editor(section)
+        if section.node_type == "constant" and "mode" in changed:
+            self._handle_constant_mode_change(values["mode"], node_id)
+        if section.node_type == "blur" and changed.keys() & {"blur_type", "motion_source"}:
+            self._handle_blur_type_change(section.parameters["blur_type"], node_id)
+        if "keyer_mode" in changed:
+            self._handle_keyer_mode_change(values["keyer_mode"], node_id)
+        if section.node_type == "text" and changed.keys() & {"outline_enable", "shadow_enable", "pivot_mode"}:
+            self._handle_text_state_change(node_id)
+        if changed.keys() & {"pivot_mode", "pivot_x", "pivot_y"}:
+            if node is None:
+                self._refresh_pivot_display(section._param_widgets)
+            else:
+                self.sync_animated_values(node_id, self._current_frame,
+                                          ["pivot_mode", "pivot_x", "pivot_y"],
+                                          refresh_buttons=False)
 
     def _refresh_pivot_display(self, param_widgets: Dict,
                                pivot_mode: Any = None,
@@ -4994,9 +5052,8 @@ class NodePropertiesPanel(QWidget):
             # The Properties value controls must show the same sampled value
             # as Keyframes while the playhead moves. Keep this incremental so
             # scrubbing does not rebuild the whole Properties panel.
-            if self._current_node_id:
-                self.sync_animated_values(self._current_node_id,
-                                          self._current_frame)
+            for node_id in self._sections:
+                self.sync_animated_values(node_id, self._current_frame, refresh_buttons=False)
 
     def _close_active_kf_dialog(self) -> None:
         """A2: forget the currently-tracked keyframe editor dialog.
@@ -5191,6 +5248,9 @@ class NodePropertiesPanel(QWidget):
             param_name,
             keyframes
         )
+
+    def set_scale_link_state(self, state: ScaleLinkState) -> None:
+        self._scale_link_state = state
 
     def set_node_graph(self, node_graph: Any) -> None:
         """Inject the NodeGraph so ◆ buttons can read/write per-node tracks.
@@ -5528,7 +5588,8 @@ class NodePropertiesPanel(QWidget):
         return any(self._param_has_keyframe_at_frame(k, node_id) for k in keys)
 
     def sync_animated_values(self, node_id: str, frame: int,
-                             param_names: Optional[List[str]] = None) -> None:
+                             param_names: Optional[List[str]] = None, *,
+                             refresh_buttons: bool = True) -> None:
         """Mirror current-frame animated values into existing controls.
 
         ``Node.parameters`` intentionally stores the non-animated/base value;
@@ -5546,46 +5607,18 @@ class NodePropertiesPanel(QWidget):
         param_widgets = getattr(section, "_param_widgets", {})
         names = (list(param_names) if param_names is not None
                  else list(getattr(node, "keyframe_tracks", {}).keys()))
-        from src.shared.keyframe import keyframe_track_from_dict
-        sampled: Dict[str, Any] = {}
-        for param_name in names:
-            data = getattr(node, "keyframe_tracks", {}).get(param_name)
-            if not isinstance(data, dict) or not data.get("keyframes"):
-                continue
-            try:
-                pdef = node.get_param_defs().get(param_name)
-                value_type = getattr(pdef, "ptype", "") or data.get(
-                    "value_type", "scalar")
-                track = keyframe_track_from_dict({
-                    "param_name": param_name,
-                    "keyframes": data.get("keyframes", []),
-                    "value_type": value_type,
-                    "min_val": data.get("min_val", 0.0),
-                    "max_val": data.get("max_val", 1.0),
-                    "pre_extrap": data.get("pre_extrap", "constant"),
-                    "post_extrap": data.get("post_extrap", "constant"),
-                })
-                base = getattr(node, "parameters", {}).get(param_name, 0.0)
-                value = track.get_value_float(
-                    float(frame), default=base)
-                if pdef is not None and getattr(pdef, "ptype", "") == "int":
-                    value = int(round(value))
-            except (TypeError, ValueError, AttributeError, KeyError):
-                continue
-
-            # AUD-10706: the sampled value is a *display* overlay only. It must
-            # NOT be written back into ``section.parameters`` /
-            # ``_current_parameters`` — those snapshots feed preset saving
-            # (_collect_current_values starts from section.parameters) and
-            # section rebuilds; writing playhead samples here would bake the
-            # "current frame" interpolation into presets and rebuilds instead
-            # of the node's authoritative base parameters.
-            sampled[param_name] = value
-            self._update_section_param_value(param_name, value,
-                                              param_widgets)
-
-        self._refresh_pivot_display(param_widgets, overrides=sampled)
-        self.refresh_keyframe_button_states()
+        # Playhead samples are display-only. Presets and rebuilds retain
+        # authored base values in section.parameters / _current_parameters.
+        sampled = {name: node.parameter_value_at_frame(name, frame)
+                   for name in names if node.is_param_animated(name) or name in node.parameters}
+        for name, value in sampled.items():
+            self._update_section_param_value(name, value, param_widgets)
+        if sampled.keys() & {"pivot_mode", "pivot_x", "pivot_y"}:
+            pivot = {name: node.parameter_value_at_frame(name, frame, 0.0)
+                     for name in ("pivot_x", "pivot_y")}
+            self._refresh_pivot_display(param_widgets, overrides=pivot)
+        if refresh_buttons:
+            self.refresh_keyframe_button_states()
 
     def refresh_keyframe_button_states(self) -> None:
         """Recompute the red state of every visible ◆ button.
@@ -5898,23 +5931,12 @@ class NodePropertiesPanel(QWidget):
         has a single stopwatch). Checked if either axis is animated; opening the
         editor mirrors the track to both axes."""
         btn = _KeyframeToolButton()
-        btn.setText("◆")
+        btn.setText(PROPERTY_KEYFRAME_GLYPH)
         btn.setToolTip(I18N.tr(
             "node_props.kf_btn_tooltip_xy",
             "左键：切换 X/Y 关键帧\nAlt+左键：编辑 X 表达式\n右键：曲线编辑器"))
         btn.setFixedSize(20, 20)
-        btn.setStyleSheet("""
-            QToolButton {
-                background-color: transparent; border: 1px solid #555;
-                font-size: 10px; padding: 1px; color: #999; border-radius: 2px;
-            }
-            QToolButton:hover {
-                background-color: #555; color: #cc6600; border-color: #cc6600;
-            }
-            QToolButton:checked {
-                background-color: #ff5555; color: #fff; border-color: #ff5555;
-            }
-        """)
+        btn.setStyleSheet(PROPERTY_KEYFRAME_STYLE)
         # AE 语义：红色仅表示当前播放帧上有关键帧（任一轴）。
         if self._node_graph is not None:
             has_kf = (self._param_has_keyframe_at_frame(x_key)
@@ -5971,23 +5993,12 @@ class NodePropertiesPanel(QWidget):
         regular numeric rows and the Keyframes panel.
         """
         btn = _KeyframeToolButton()
-        btn.setText("◆")
+        btn.setText(PROPERTY_KEYFRAME_GLYPH)
         btn.setToolTip(I18N.tr(
             "node_props.kf_btn_tooltip_multi",
             "左键：切换多通道关键帧\nAlt+左键：编辑表达式\n右键：曲线编辑器"))
         btn.setFixedSize(20, 20)
-        btn.setStyleSheet("""
-            QToolButton {
-                background-color: transparent; border: 1px solid #555;
-                font-size: 10px; padding: 1px; color: #999; border-radius: 2px;
-            }
-            QToolButton:hover {
-                background-color: #555; color: #cc6600; border-color: #cc6600;
-            }
-            QToolButton:checked {
-                background-color: #ff5555; color: #fff; border-color: #ff5555;
-            }
-        """)
+        btn.setStyleSheet(PROPERTY_KEYFRAME_STYLE)
         has_kf = any(self._param_has_keyframe_at_frame(key) for key in keys) \
             if self._node_graph is not None else any(
                 pdef and getattr(pdef, 'animated', False)

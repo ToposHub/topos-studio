@@ -364,6 +364,7 @@ class ColorGraphExecutor:
         matte_provider: Callable[[Mapping[str, Any], Any], Any] | None = None,
         dtype: str = "f2",
         cache_context: tuple = (),
+        fold_single_corrector_io: bool = False,
     ) -> GraphExecutionResult:
         """执行 plan；source pass 消费 ``source_texture``（租借不持有）。
 
@@ -409,6 +410,24 @@ class ColorGraphExecutor:
 
         leases: list[_Lease] = []
         node_outputs: dict[str, Any] = {}
+        passes = plan.passes
+        if (
+            fold_single_corrector_io
+            and tuple(p.op for p in passes) == ("source", "corrector", "output")
+            and tuple(
+                (port, ref.node_id, ref.port)
+                for port, ref in passes[1].inputs if ref is not None
+            ) == (("image", passes[0].node_id, "image"),)
+            and tuple(
+                (port, ref.node_id, ref.port)
+                for port, ref in passes[2].inputs if ref is not None
+            ) == (("image", passes[1].node_id, "image"),)
+        ):
+            # The host can borrow the original image for a pixel-local
+            # corrector. Publish that pass directly instead of copying both
+            # ends of the graph into full-size float textures.
+            node_outputs[passes[0].node_id] = source_texture
+            passes = passes[1:2]
         # N02：key 通道——corrector 家族的 matte 产物按 (node_id, port) 键控
         # （与图像输出分离；key_mixer/alpha_output/outside/parallel key 槽
         # 从此解析真实 matte，不再有常白/图像 R 通道替代）。
@@ -452,7 +471,7 @@ class ColorGraphExecutor:
             executed = 0
             cache_events: list[tuple] = []
             pass_ids = {p.node_id for p in plan.passes}
-            for render_pass in plan.passes:
+            for render_pass in passes:
                 if cancel(request_id):
                     raise GraphExecutionCancelled(
                         request_id, render_pass.index)
@@ -460,7 +479,8 @@ class ColorGraphExecutor:
                 # N06：查缓存（Off/不eligible 跳过；命中直接作为本 pass
                 # 输出——不执行、不 lease，纹理所有权在缓存）
                 cached = None
-                if render_pass.node_id not in key_producer_ids:
+                if (render_pass.index != passes[-1].index
+                        and render_pass.node_id not in key_producer_ids):
                     cached = self._node_cache_lookup(
                         render_pass, width, height, cache_context,
                         cache_events)
@@ -481,7 +501,7 @@ class ColorGraphExecutor:
                 # 从租约表移除，liveness/失败退栈不再触碰该纹理）。
                 # 最终 pass 的输出归发布租约持有（release_revision 释放）
                 # ——不入缓存。
-                if (render_pass.index != plan.passes[-1].index
+                if (render_pass.index != passes[-1].index
                         and render_pass.node_id not in key_producer_ids
                         and self._node_cache_store(
                             render_pass, out_tex, width, height,
@@ -493,7 +513,7 @@ class ColorGraphExecutor:
                 # liveness：release_after == 当前 index 的中间纹理归还
                 due = [l for l in leases
                        if l.release_after == render_pass.index
-                       and l.node_id != plan.passes[-1].node_id]
+                       and l.node_id != passes[-1].node_id]
                 for due_lease in due:
                     leases.remove(due_lease)
                     _release_lease(due_lease)
@@ -505,7 +525,7 @@ class ColorGraphExecutor:
                 self._release_texture(tex)
             deferred_releases.clear()
 
-            final = plan.passes[-1]
+            final = passes[-1]
             output_texture = node_outputs[final.node_id]
             result = GraphExecutionResult(
                 request_id=request_id,
@@ -514,7 +534,7 @@ class ColorGraphExecutor:
                 output_size=(width, height),
                 graph_revision=0,
                 executed_passes=executed,
-                released_textures=len(plan.passes) - 1,
+                released_textures=len(passes) - 1,
                 cache_events=tuple(cache_events))
             previous = self._published.get(request_id)
             if previous is not None and previous is not result:
@@ -650,9 +670,8 @@ class ColorGraphExecutor:
             has_windows = bool(
                 isinstance(layer, Mapping) and layer.get("mask_shapes"))
             if matte is None:
-                # 白 matte 常量缓存（随 release_pool 释放），不逐 pass 建毁
-                # ——spec：无 key 语义 = 全效果（blend matte 语义）
-                matte = self._white_matte(width, height)
+                # The Corrector samples the constant matte with normalized UVs.
+                matte = self._white_matte(1, 1)
             elif qualifier_on or has_windows or external_key is not None:
                 # N02：key_out 产物（qualifier/window/外部 key 至少其一；
                 # 宿主 provider 纹理不 lease，执行器中间体入 lease）

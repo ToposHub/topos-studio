@@ -13,10 +13,11 @@ Features:
 from typing import Optional, Dict, List, Tuple, Callable
 
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QSettings,
+    Qt, pyqtSignal, QSettings, QMimeData,
 )
 from PyQt6.QtGui import (
-    QFont, )
+    QFont, QDrag,
+)
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem,
     QLabel, QTabWidget, QWidget, QSizePolicy,
@@ -102,6 +103,24 @@ NODE_ALIASES: Dict[str, str] = {
 }
 
 
+NODE_PALETTE_MIME = "application/x-topos-composite-node"
+
+
+class _DraggableNodeList(QListWidget):
+    node_dropped = pyqtSignal(str)
+
+    def startDrag(self, supportedActions: Qt.DropAction) -> None:
+        item = self.currentItem()
+        node_type = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if isinstance(node_type, str):
+            mime = QMimeData()
+            mime.setData(NODE_PALETTE_MIME, node_type.encode("utf-8"))
+            drag = QDrag(self)
+            drag.setMimeData(mime)
+            if drag.exec(Qt.DropAction.CopyAction) == Qt.DropAction.CopyAction:
+                self.node_dropped.emit(node_type)
+
+
 class NodeSearchPopup(QDialog):
     """Modal popup for searching and adding nodes to the graph."""
 
@@ -113,10 +132,13 @@ class NodeSearchPopup(QDialog):
         node_categories: Dict[str, List[Tuple[str, type]]],
         parent: Optional[QWidget] = None,
         on_node_added: Optional[Callable[[str], None]] = None,
+        *,
+        embedded: bool = False,
     ) -> None:
         super().__init__(parent)
         self._node_categories = node_categories
         self._on_node_added = on_node_added
+        self._embedded = embedded
 
         # State
         self._recent_nodes: List[str] = self._load_recent_nodes()
@@ -142,23 +164,24 @@ class NodeSearchPopup(QDialog):
         # Guard: _populate_tabs touches UI widgets that only exist after
         # _setup_ui. Ignore calls that arrive before the dialog is built.
         if hasattr(self, "_all_list"):
+            self._favorites = self._load_favorites()
+            self._recent_nodes = self._load_recent_nodes()
             self._populate_tabs()
+            self._on_search_changed(self._search_input.text())
 
     # ── UI Setup ────────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
         """Build the popup UI."""
         self.setWindowTitle(I18N.tr("node_search.add_node", "Add Node"))
-        self.setFixedWidth(480)
-        self.setFixedHeight(520)
-        self.setModal(True)
-
-        # Window flags: tool popup style
-        self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Popup
-        )
+        if self._embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
+            self.setMaximumWidth(300)
+        else:
+            self.setFixedSize(480, 520)
+            self.setModal(True)
+            self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
+                                | Qt.WindowType.Popup)
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -190,12 +213,16 @@ class NodeSearchPopup(QDialog):
         self._favorites_tab = QWidget()
         self._recent_tab = QWidget()
 
-        self._all_list = QListWidget()
-        self._favorites_list = QListWidget()
-        self._recent_list = QListWidget()
+        list_type = _DraggableNodeList if self._embedded else QListWidget
+        self._all_list = list_type()
+        self._favorites_list = list_type()
+        self._recent_list = list_type()
 
         # Setup list widgets
         for lst in (self._all_list, self._favorites_list, self._recent_list):
+            lst.setDragEnabled(self._embedded)
+            if isinstance(lst, _DraggableNodeList):
+                lst.node_dropped.connect(self._track_recent_node)
             lst.setFont(QFont("Segoe UI", 10))
             lst.setUniformItemSizes(True)
             lst.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -204,25 +231,21 @@ class NodeSearchPopup(QDialog):
             lst.itemDoubleClicked.connect(self._on_item_activated)
 
         # Layout for each tab
-        for tab, list_widget, label_text in [
-            (self._all_tab, self._all_list, "All Nodes"),
-            (self._favorites_tab, self._favorites_list, "Favorites"),
-            (self._recent_tab, self._recent_list, "Recent"),
+        for tab, list_widget in [
+            (self._all_tab, self._all_list),
+            (self._favorites_tab, self._favorites_list),
+            (self._recent_tab, self._recent_list),
         ]:
             tab_layout = QVBoxLayout(tab)
             tab_layout.setContentsMargins(8, 4, 8, 8)
             tab_layout.setSpacing(4)
 
-            tab_label = QLabel(label_text)
-            tab_label.setFont(QFont("Segoe UI", 8))
-            tab_label.setStyleSheet("color: #888; padding: 4px 0;")
-            tab_layout.addWidget(tab_label)
             tab_layout.addWidget(list_widget)
 
         # Add tabs
-        self._tab_widget.addTab(self._all_tab, "All")
-        self._tab_widget.addTab(self._favorites_tab, "★")
-        self._tab_widget.addTab(self._recent_tab, "Recent")
+        self._tab_widget.addTab(self._all_tab, I18N.tr("composite.node_editor.palette_all", "All"))
+        self._tab_widget.addTab(self._favorites_tab, I18N.tr("composite.node_editor.palette_favorites", "Favorites"))
+        self._tab_widget.addTab(self._recent_tab, I18N.tr("composite.node_editor.palette_recent", "Recent"))
 
         main_layout.addWidget(self._tab_widget)
 
@@ -232,6 +255,8 @@ class NodeSearchPopup(QDialog):
         bottom_layout.setSpacing(12)
 
         help_label = QLabel(
+            I18N.tr("composite.node_editor.palette_help", "Drag a node onto the graph.")
+            if self._embedded else
             I18N.tr(
                 "node_search.help",
                 "↑↓ Navigate  •  Enter Add  •  Tab Switch  •  Esc Close"))
@@ -546,6 +571,12 @@ class NodeSearchPopup(QDialog):
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab switching."""
+        if index == 1:
+            self._favorites = self._load_favorites()
+            self._populate_favorites_tab()
+        elif index == 2:
+            self._recent_nodes = self._load_recent_nodes()
+            self._populate_recent_tab()
         # Apply current filter to new tab
         if self._current_filter:
             lists = [self._all_list, self._favorites_list, self._recent_list]
@@ -590,7 +621,8 @@ class NodeSearchPopup(QDialog):
         if self._on_node_added:
             self._on_node_added(node_type)
 
-        self.accept()
+        if not self._embedded:
+            self.accept()
 
     # ── Keyboard handling ───────────────────────────────────────────────────
 
@@ -600,7 +632,10 @@ class NodeSearchPopup(QDialog):
 
         # Escape: close
         if key == Qt.Key.Key_Escape:
-            self.reject()
+            if not self._embedded:
+                self.reject()
+            else:
+                event.ignore()
             return
 
         # Enter/Return: confirm selection
@@ -646,11 +681,14 @@ class NodeSearchPopup(QDialog):
                     self._toggle_favorite(node_type)
                     # Refresh UI
                     self._populate_favorites_tab()
+                    if self._current_filter:
+                        self._filter_list(self._favorites_list, self._current_filter)
 
     # ── Favorites management ────────────────────────────────────────────────
 
     def _toggle_favorite(self, node_type: str) -> None:
         """Toggle a node type in favorites."""
+        self._favorites = self._load_favorites()
         if node_type in self._favorites:
             self._favorites.remove(node_type)
         else:
@@ -674,12 +712,17 @@ class NodeSearchPopup(QDialog):
 
     def _track_recent_node(self, node_type: str) -> None:
         """Track a node as recently used."""
+        self._recent_nodes = self._load_recent_nodes()
         if node_type in self._recent_nodes:
             self._recent_nodes.remove(node_type)
         self._recent_nodes.insert(0, node_type)
         # Keep only last 20
         self._recent_nodes = self._recent_nodes[:20]
         self._save_recent_nodes()
+        if self._tab_widget.currentWidget() is self._recent_tab:
+            self._populate_recent_tab()
+            if self._current_filter:
+                self._filter_list(self._recent_list, self._current_filter)
 
     def _load_recent_nodes(self) -> List[str]:
         """Load recent nodes from settings."""

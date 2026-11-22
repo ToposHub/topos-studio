@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 from PIL import Image
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QUrl, QRectF
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QPushButton, QHBoxLayout, QSlider, QLabel, QWidget, QLineEdit
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QPushButton, QHBoxLayout, QSlider, QLabel, QWidget, QLineEdit, QSizePolicy
 from PyQt6.QtGui import QCursor, QFont, QPainter, QImage, QDesktopServices
 from .base_player import _fmt_time, utils_get_tool_path
 from .thumb_cache import thumbnail_path
@@ -120,7 +120,12 @@ class UltimatePlayer(QFrame):
             w.installEventFilter(self)
         self.hide_cursor_timer = QTimer(self)
         self.hide_cursor_timer.setInterval(3000)
+        self.hide_cursor_timer.setSingleShot(True)
         self.hide_cursor_timer.timeout.connect(self.hide_ui)
+        self._startup_timer = QTimer(self)
+        self._startup_timer.setSingleShot(True)
+        self._startup_timer.setInterval(1500)
+        self._startup_timer.timeout.connect(self._check_playback_started)
         self.ui_visible = True
 
         # 播放失败（无法解码 / 无效媒体）只在本界面报错，绝不转交系统播放器
@@ -140,12 +145,15 @@ class UltimatePlayer(QFrame):
         # 顶部工具栏
         self.header_container = QFrame(self); self.header_container.setObjectName("FixedHeader")
         self.header_layout = QHBoxLayout(self.header_container); self.header_layout.setContentsMargins(20, 0, 20, 0)
-        self.lbl_title = QLabel("Video Player"); self.lbl_title.setObjectName("Title"); self.header_layout.addWidget(self.lbl_title); self.header_layout.addSpacing(15)
+        self.lbl_title = QLabel("Video Player")
+        self.lbl_title.setObjectName("Title")
+        self.lbl_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.header_layout.addWidget(self.lbl_title, 1)
         self.meta_badge_container = QWidget(); self.meta_layout = QHBoxLayout(self.meta_badge_container); self.meta_layout.setContentsMargins(0,0,0,0); self.meta_layout.setSpacing(5)
         # 容器是普通 QWidget，会被宿主全局 QWidget{background:#27272b} 垫成
         # 一条灰带；内联透明压掉（文字标签自身已透明）
         self.meta_badge_container.setStyleSheet("background: transparent;")
-        self.header_layout.addWidget(self.meta_badge_container); self.header_layout.addStretch()
+        self.header_layout.addWidget(self.meta_badge_container)
         from . import icons as _icons
         self.btn_cover = _icons.make_tool_button(self, "fa5s.image", "设为封面", "🖼")
         self.btn_cover.clicked.connect(self.set_as_cover)
@@ -164,6 +172,8 @@ class UltimatePlayer(QFrame):
         self.btn_play = self.create_btn("", "播放/暂停", self.toggle_play); self.btn_play.setFixedSize(30, 30)
         _icons.set_play_icon(self.btn_play, playing=False)
         self.lbl_curr = QLabel("00:00"); self.slider = QSlider(Qt.Orientation.Horizontal); self.slider.setRange(0, 1000)
+        self.slider.setMinimumWidth(1)
+        self.slider.actionTriggered.connect(self._on_slider_action)
         self.slider.sliderPressed.connect(self.on_slider_pressed); self.slider.sliderReleased.connect(self.on_slider_released); self.slider.sliderMoved.connect(self.on_slider_moved); self.is_seeking = False
         self.lbl_total = QLabel("00:00"); self.slider_vol = QSlider(Qt.Orientation.Horizontal); self.slider_vol.setRange(0, 100); self.slider_vol.setValue(80); self.slider_vol.setFixedWidth(60)
         self.slider_vol.valueChanged.connect(lambda v: self.audio_output.setVolume(v / 100.0))
@@ -173,7 +183,9 @@ class UltimatePlayer(QFrame):
             self.lbl_vol.setPixmap(_vol.pixmap(13, 13))
         else:
             self.lbl_vol.setText("🔊")
-        for w in [self.btn_play, self.lbl_curr, self.slider, self.lbl_total, self.lbl_vol, self.slider_vol]: self.ctrl_layout.addWidget(w)
+        for widget in (self.btn_play, self.lbl_curr, self.slider, self.lbl_total,
+                       self.lbl_vol, self.slider_vol):
+            self.ctrl_layout.addWidget(widget, 1 if widget is self.slider else 0)
         # 视频剪切面板
         self.clip_panel = QFrame(self); self.clip_panel.setObjectName("FloatingPanel"); self.clip_panel.hide()
         self.clip_layout = QHBoxLayout(self.clip_panel); self.clip_layout.setContentsMargins(15, 5, 15, 5)
@@ -187,7 +199,8 @@ class UltimatePlayer(QFrame):
         self.video_frame.setGeometry(0, 0, w, h)
         self.header_container.setGeometry(0, 0, w, 50)
         self.header_container.raise_()
-        ctrl_w = min(w - 120, 1600)  # 加长播放条，拖拽进度更好用
+        ctrl_w = max(1, min(w - 16, max(560, min(int(w * 0.7), 1200))))
+        self.meta_badge_container.setVisible(w >= 580)
         self.controls_container.setGeometry((w - ctrl_w)//2, h - 70, ctrl_w, 50)
         self.controls_container.raise_()
         clip_w = 400
@@ -204,38 +217,40 @@ class UltimatePlayer(QFrame):
         btn.setFont(font)
         return btn
 
-    def play_video(self, path):
-        # Standardize path to NFC immediately
+    def play_video(self, path: str) -> None:
+        self._startup_timer.stop()
+        self.mediaplayer.stop()
+        self.video_frame.clear()
         self.current_path = unicodedata.normalize("NFC", path)
         self.duration = 0
         self._error_handled = False
-        self._at_eof = False  # [E3] 新源重置片尾状态
+        self._at_eof = False
+        self.is_seeking = False
+        self._toast_gen = getattr(self, '_toast_gen', 0) + 1
+        self.slider.setValue(0)
+        self.lbl_curr.setText("00:00")
         self.lbl_total.setText("00:00")
         self.lbl_title.setStyleSheet("")
-        self.mediaplayer.setSource(QUrl.fromLocalFile(self.current_path))
-        self.mediaplayer.play()
-
-        self.is_playing = True
-        self.show()
-        self.raise_()
-        self.setFocus()
-        self.timer.start()
-        self.hide_cursor_timer.start()
-        self.lbl_title.setText(os.path.basename(path))
-        # [U10] 真实标题记账（同 base_player._toast 修法，见其注释）
         self._real_title = os.path.basename(path)
+        self.lbl_title.setText(self._real_title)
+        self.lbl_title.setToolTip(self._real_title)
         self.clear_badges()
         self.clip_panel.hide()
         self.is_clipping_mode = False
-        from . import icons as _icons; _icons.set_play_icon(self.btn_play, playing=True)
-        self.resizeEvent(None)
-        # 兜底检测：部分后端解码失败不发错误信号，超时仍未开播则在本界面报错
-        QTimer.singleShot(1500, lambda: self._check_playback_started(self.current_path))
+        self.mediaplayer.setSource(QUrl.fromLocalFile(self.current_path))
+        if self._error_handled:
+            return
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self._wake_ui()
+        self.timer.start()
+        self._startup_timer.start()
+        self.mediaplayer.play()
 
-    def _check_playback_started(self, original_path):
-        # PyQt6 槽内未捕获异常会 abort 整个进程，这里必须自行兜住
+    def _check_playback_started(self) -> None:
         try:
-            if self._error_handled or self.current_path != original_path:
+            if self._error_handled or not self.current_path:
                 return
             status = self.mediaplayer.mediaStatus()
             # play() 已调用 1.5s 仍未开播：加载级失败（Loaded+Stopped+0ms = 播放未生效）
@@ -279,13 +294,14 @@ class UltimatePlayer(QFrame):
 
     def _on_video_frame(self, frame):
         img = frame.toImage()
-        if not img.isNull():
+        if self.current_path and not img.isNull():
             self.video_frame.setFrame(img)
 
     def _on_playback_state(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             from . import icons as _icons; _icons.set_play_icon(self.btn_play, playing=True)
             self.is_playing = True
+            self._wake_ui()
         elif state == QMediaPlayer.PlaybackState.PausedState:
             from . import icons as _icons; _icons.set_play_icon(self.btn_play, playing=False)
             self._wake_ui()
@@ -339,7 +355,10 @@ class UltimatePlayer(QFrame):
 
     def stop(self):
         was_visible = self.isVisible()
+        self.current_path = ""
+        self._startup_timer.stop()
         self.mediaplayer.stop()
+        self.mediaplayer.setSource(QUrl())
         self.timer.stop()
         self.video_frame.clear()
         # [BUG-P2-31] 此前未停 hide_cursor_timer：关闭后每 3s 触发 hide_ui
@@ -536,13 +555,21 @@ class UltimatePlayer(QFrame):
             self.slider.setValue(int(curr_ms / duration * 1000))
 
     def on_slider_pressed(self): self.is_seeking = True
-    def on_slider_released(self):
+    def _on_slider_action(self, action: int) -> None:
+        if action != QSlider.SliderAction.SliderMove.value:
+            self._seek_from_slider()
+
+    def _seek_from_slider(self) -> None:
         duration = self.mediaplayer.duration()
         if duration > 0:
-            pos = self.slider.value() / 1000.0
-            self.mediaplayer.setPosition(int(pos * duration))
-        self._at_eof = False  # [E3] seek 清除片尾状态：片尾回跳后继续播
+            position = self.slider.sliderPosition() / self.slider.maximum()
+            self.mediaplayer.setPosition(int(position * duration))
+            self._at_eof = False
+
+    def on_slider_released(self) -> None:
+        self._seek_from_slider()
         self.is_seeking = False
+
     def on_slider_moved(self, val):
         duration = self.mediaplayer.duration()
         if duration > 0:

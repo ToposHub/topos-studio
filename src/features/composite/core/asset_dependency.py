@@ -621,7 +621,7 @@ def _iter_node_paths(
     parameters: Mapping[str, Any],
 ) -> Iterable[Tuple[str, str, str, Any, bool]]:
     """Yield ``parameter, role, purpose, path, required`` tuples."""
-    if node_type in {"video_frame", "image_input"}:
+    if node_type in {"video_frame", "image_input", "audio_source"}:
         yield ("file_path", ROLE_MEDIA, "媒体源", parameters.get("file_path", ""), True)
 
     if node_type == "model3d" and bool(parameters.get("use_imported_model", False)):

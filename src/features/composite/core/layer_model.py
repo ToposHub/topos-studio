@@ -28,7 +28,7 @@ Design rules (from the plan, §1.2 / §3):
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional
 
 # ── Layer type constants (§3.3) ─────────────────────────────────────────────
@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 # existing values.  New layer types may be appended.
 
 LAYER_TYPE_MEDIA = "media"
+LAYER_TYPE_AUDIO = "audio"
 LAYER_TYPE_TEXT = "text"
 LAYER_TYPE_SHAPE = "shape"
 LAYER_TYPE_ADJUSTMENT = "adjustment"
@@ -47,6 +48,7 @@ LAYER_TYPE_3D = "3d"
 
 ALL_LAYER_TYPES = frozenset({
     LAYER_TYPE_MEDIA,
+    LAYER_TYPE_AUDIO,
     LAYER_TYPE_TEXT,
     LAYER_TYPE_SHAPE,
     LAYER_TYPE_ADJUSTMENT,
@@ -118,6 +120,16 @@ class Layer:
     name: str
     root_node_id: str
     source_node_id: Optional[str] = None
+    # B01 stable layer roles: the layer's main Transform node.  This is a
+    # registered role, not an inference from the chain head — effects may sit
+    # above or below the Transform without changing which node owns
+    # translate/scale/pivot.  A stale id whose node no longer exists marks an
+    # identifiable, repairable "transform missing" state (deleted main
+    # Transform); re-attaching a wired Transform claims the role again.
+    transform_node_id: Optional[str] = None
+    # B05 per-layer audio definition; None keeps the pre-audio behavior
+    # (image merges never gain an audio track from old projects).
+    audio: Optional[Any] = None
 
     # ── Layer state (AE parity) ──
     enabled: bool = True
@@ -148,19 +160,23 @@ class Layer:
     # (plan §3.3 ``external``); the compiler must not rewrite its nodes.
     managed: bool = True
     collapsed: bool = True
+    _extra_fields: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dict for project persistence.
 
-        Field order is stable and human-readable; new optional fields may be
-        appended without breaking older readers (``from_dict`` ignores
-        unknown keys).
+        Preserve extension fields through ordinary layer edits.
         """
         return {
+            **copy.deepcopy(self._extra_fields),
             "layer_id": self.layer_id,
             "name": self.name,
             "root_node_id": self.root_node_id,
             "source_node_id": self.source_node_id,
+            "transform_node_id": self.transform_node_id,
+            "audio": (self.audio.to_dict()
+                      if getattr(self.audio, "to_dict", None) is not None
+                      else None),
             "enabled": self.enabled,
             "solo": self.solo,
             "locked": self.locked,
@@ -183,9 +199,7 @@ class Layer:
     def from_dict(cls, data: Dict[str, Any]) -> "Layer":
         """Deserialize a layer, tolerating missing/extra keys (forward/backward compat).
 
-        Unknown keys are ignored.  Missing keys fall back to the dataclass
-        defaults so that older projects (saved before a field existed) load
-        without error — matching the lenient style of ``Node.from_dict``.
+        Missing keys use the dataclass defaults. Unknown keys round-trip.
         """
         try:
             opacity = float(data.get("opacity", 1.0))
@@ -206,6 +220,8 @@ class Layer:
             name=data.get("name", "Layer"),
             root_node_id=data["root_node_id"],
             source_node_id=data.get("source_node_id"),
+            transform_node_id=data.get("transform_node_id"),
+            audio=_parse_layer_audio(data.get("audio")),
             enabled=data.get("enabled", True),
             solo=data.get("solo", False),
             locked=data.get("locked", False),
@@ -222,6 +238,7 @@ class Layer:
             layer_type=data.get("layer_type", LAYER_TYPE_MEDIA),
             managed=data.get("managed", True),
             collapsed=data.get("collapsed", True),
+            _extra_fields=_extensions(cls, data),
         )
 
 
@@ -246,9 +263,11 @@ class LayerStack:
     # are surfaced in the UI but the compiler must not touch the graph.
     managed: bool = True
     version: int = LEGACY_LAYER_STACK_VERSION
+    _extra_fields: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            **copy.deepcopy(self._extra_fields),
             "stack_id": self.stack_id,
             "name": self.name,
             "output_node_id": self.output_node_id,
@@ -270,7 +289,13 @@ class LayerStack:
             enabled=data.get("enabled", True),
             managed=data.get("managed", True),
             version=_safe_int(data.get("version"), LEGACY_LAYER_STACK_VERSION),
+            _extra_fields=_extensions(cls, data),
         )
+
+
+def _extensions(model: type[Layer] | type[LayerStack], data: Dict[str, Any]) -> Dict[str, Any]:
+    known = {item.name for item in fields(model)} - {"_extra_fields"}
+    return {key: copy.deepcopy(value) for key, value in data.items() if key not in known}
 
 
 def _safe_int(value: Any, default: int) -> int:
@@ -279,6 +304,14 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_layer_audio(raw: Any) -> Optional[Any]:
+    """Parse the optional per-layer audio block (B05); None keeps old behavior."""
+    if raw is None:
+        return None
+    from .comp_audio import LayerAudio
+    return LayerAudio.from_dict(raw)
 
 
 # ── LayerMap: convenience container used by the controller / compiler ──────

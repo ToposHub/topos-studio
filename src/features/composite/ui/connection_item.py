@@ -1,14 +1,14 @@
 """
-Connection Item - Bezier curve connection between two node ports.
-
-NUKE-style curved connection lines with flow animation and hover effects.
+Connection geometry, flow animation and hit testing for node graph cables.
 """
 
-from PyQt6.QtWidgets import QGraphicsPathItem, QGraphicsItem, QGraphicsSceneMouseEvent
+from math import hypot
+
+from PyQt6.QtWidgets import QGraphicsPathItem, QGraphicsItem
 from PyQt6.QtCore import QPointF, Qt, QTimer, QObject, pyqtSignal
 from PyQt6.QtGui import (
     QPainterPath, QPen, QColor, QPainter, QBrush,
-    QPainterPathStroker, QKeyEvent
+    QPainterPathStroker, QKeyEvent, QPolygonF
 )
 
 
@@ -126,18 +126,12 @@ class _ConnectionSignals(QObject):
     # Signal for connection deletion request (needs undo support)
     delete_requested = pyqtSignal(object)  # ConnectionItem
 
-    # Signal for connection reconnection request
-    reconnect_requested = pyqtSignal(object, object, bool)  # ConnectionItem, new_port, dragging_src
-
-    # Signal for connection disconnect request (Alt+drag without reconnection)
-    disconnect_requested = pyqtSignal(object)  # ConnectionItem
-
 
 class ConnectionItem(QGraphicsPathItem):
     """
     Visual connection between two port items.
 
-    Draws a smooth cubic Bezier curve from source port to destination port.
+    Draws a cable from source port to destination port.
     Features:
     - Flow animation (dashed line moving along the curve)
     - Hover glow effect
@@ -153,11 +147,16 @@ class ConnectionItem(QGraphicsPathItem):
         "scene": QColor(0, 180, 216, 200),       # Cyan (3D scene data flow)
     }
 
-    def __init__(self, src_port=None, dst_port=None, data_type="image") -> None:
+    ROUTES = ("curved", "straight", "orthogonal")
+
+    def __init__(self, src_port=None, dst_port=None, data_type="image", *,
+                 routing: str = "curved") -> None:
         super().__init__()
         self.src_port = src_port  # PortItem
         self.dst_port = dst_port  # PortItem
         self.data_type = data_type
+        self._routing = routing
+        self._segments: list[QPointF] | None = None
 
         # Signal emitter for notifying NodeEditorWidget of operations
         # (QGraphicsItem cannot directly define PyQt signals)
@@ -180,16 +179,6 @@ class ConnectionItem(QGraphicsPathItem):
         # Drag validity state (used during connection dragging)
         self._drag_valid = True
 
-        # Reconnection state
-        self._is_reconnecting = False
-        self._reconnect_port: QGraphicsItem | None = None  # Port being dragged to
-        self._reconnect_src: bool = True  # True if dragging source end
-
-        # Disconnect state (Alt+drag to disconnect)
-        self._is_disconnecting = False
-        self._disconnect_src: bool = True  # True if disconnecting source end
-        self._disconnect_temp_pos: QPointF | None = None  # Temp position during disconnect drag
-        
         # Snap highlight state (for connection insertion detection)
         self._snap_highlighted: bool = False
         self._snap_valid: bool = True
@@ -218,7 +207,6 @@ class ConnectionItem(QGraphicsPathItem):
 
         Use this to connect to signals for operation notifications:
             conn.signals().delete_requested.connect(handler)
-            conn.signals().reconnect_requested.connect(handler)
         """
         return self._signals
 
@@ -255,30 +243,41 @@ class ConnectionItem(QGraphicsPathItem):
         self._simplified_draw = enabled
         self.update()
 
+    def set_routing(self, routing: str) -> None:
+        if routing in self.ROUTES and routing != self._routing:
+            self._routing = routing
+            self.update_path()
+
     def update_path(self) -> None:
-        """Recalculate the Bezier curve path."""
-        if self.src_port is None or self.dst_port is None:
-            return
+        """Recalculate the path from the current port positions."""
+        if self.src_port is not None and self.dst_port is not None:
+            self.set_temp_endpoints(self.src_port.get_center_scene_pos(),
+                                    self.dst_port.get_center_scene_pos())
 
-        src_pos = self.src_port.get_center_scene_pos()
-        dst_pos = self.dst_port.get_center_scene_pos()
-
-        path = self._create_bezier_path(src_pos, dst_pos)
-        self.setPath(path)
-
-    def _create_bezier_path(self, src: QPointF, dst: QPointF) -> QPainterPath:
-        """Create a smooth Bezier curve between two points."""
-        path = QPainterPath()
-        path.moveTo(src)
-
-        # Calculate control points for a smooth horizontal S-curve
-        dx = abs(dst.x() - src.x())
-        offset = max(dx * 0.5, 60)
-
-        ctrl1 = QPointF(src.x() + offset, src.y())
-        ctrl2 = QPointF(dst.x() - offset, dst.y())
-
-        path.cubicTo(ctrl1, ctrl2, dst)
+    def _create_path(self, src: QPointF, dst: QPointF) -> QPainterPath:
+        path = QPainterPath(src)
+        if self._routing == "straight":
+            path.lineTo(dst)
+        elif self._routing == "orthogonal":
+            if src.x() <= dst.x():
+                middle_x = (src.x() + dst.x()) / 2
+                path.lineTo(middle_x, src.y())
+                path.lineTo(middle_x, dst.y())
+            else:
+                # Keep both ends facing their ports, even on a leftward link.
+                middle_y = (src.y() + dst.y()) / 2
+                if abs(src.y() - dst.y()) < 24:
+                    middle_y = min(src.y(), dst.y()) - 24
+                source_x, target_x = src.x() + 24, dst.x() - 24
+                path.lineTo(source_x, src.y())
+                path.lineTo(source_x, middle_y)
+                path.lineTo(target_x, middle_y)
+                path.lineTo(target_x, dst.y())
+            path.lineTo(dst)
+        else:
+            offset = max(abs(dst.x() - src.x()) * 0.5, 60)
+            path.cubicTo(QPointF(src.x() + offset, src.y()),
+                         QPointF(dst.x() - offset, dst.y()), dst)
         return path
 
     def paint(self, painter, option, widget=None) -> None:
@@ -339,30 +338,11 @@ class ConnectionItem(QGraphicsPathItem):
         if not self._drag_valid:
             main_color = QColor(255, 60, 60, 180)
 
-        # Visual feedback for disconnect mode
-        if self._is_disconnecting:
-            # Draw dashed red line during disconnect drag
-            main_color = QColor(255, 80, 80, 220)
-            main_pen = QPen(main_color, 3.0)
-            main_pen.setCosmetic(True)
-            main_pen.setStyle(Qt.PenStyle.DashLine)
-            main_pen.setDashPattern([6, 4])
-        else:
-            main_pen = QPen(main_color, 3.0)
-            main_pen.setCosmetic(True)
+        main_pen = QPen(main_color, 3.0)
+        main_pen.setCosmetic(True)
         painter.setPen(main_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self.path())
-
-        # Draw reconnecting endpoint highlight
-        if self._is_reconnecting and (self.src_port or self.dst_port):
-            endpoint = self.dst_port.get_center_scene_pos() if self._reconnect_src else self.src_port.get_center_scene_pos()
-            highlight_color = QColor(255, 255, 255, 180)
-            highlight_pen = QPen(highlight_color, 8)
-            highlight_pen.setCosmetic(True)
-            painter.setPen(highlight_pen)
-            painter.setBrush(QBrush(highlight_color))
-            painter.drawEllipse(endpoint, 8, 8)
 
         # Draw flow animation overlay (dashed bright line)
         if self._flow_enabled:
@@ -373,6 +353,10 @@ class ConnectionItem(QGraphicsPathItem):
             flow_pen.setDashPattern([4, 8])
             painter.setPen(flow_pen)
             painter.drawPath(self.path())
+
+        # The arrow shows the data direction on bends and loop-back layouts.
+        if not self._show_insertion_dot:
+            self._draw_direction_arrow(painter, main_color)
 
         # Draw insertion dot at midpoint (shown when Cmd/Ctrl is held)
         if self._show_insertion_dot:
@@ -406,6 +390,20 @@ class ConnectionItem(QGraphicsPathItem):
                     QPointF(local_mid.x(), local_mid.y() - 3),
                     QPointF(local_mid.x(), local_mid.y() + 3)
                 )
+
+    def _draw_direction_arrow(self, painter: QPainter, color: QColor) -> None:
+        path = self.path()
+        tip = path.pointAtPercent(0.72)
+        tangent = tip - path.pointAtPercent(0.69)
+        length = hypot(tangent.x(), tangent.y())
+        if length < 1.0:
+            return
+        direction = tangent / length
+        base = tip - direction * 8
+        cross = QPointF(-direction.y(), direction.x()) * 3.5
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawPolygon(QPolygonF([tip, base + cross, base - cross]))
 
     def hoverEnterEvent(self, event) -> None:
         self._hovered = True
@@ -489,137 +487,8 @@ class ConnectionItem(QGraphicsPathItem):
 
     def set_temp_endpoints(self, src: QPointF, dst: QPointF) -> None:
         """Temporarily draw from src to dst (used during connection dragging)."""
-        path = self._create_bezier_path(src, dst)
-        self.setPath(path)
-
-    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse press to start reconnection or disconnect drag.
-
-        Normal drag: Reconnect to another port.
-        Alt+drag: Disconnect (cancel connection, optionally reconnect to another port).
-        """
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Check if clicking near an endpoint
-            click_pos = event.scenePos()
-            src_pos = self.src_port.get_center_scene_pos() if self.src_port else QPointF()
-            dst_pos = self.dst_port.get_center_scene_pos() if self.dst_port else QPointF()
-
-            threshold = 15.0
-            dist_src = (click_pos - src_pos).manhattanLength()
-            dist_dst = (click_pos - dst_pos).manhattanLength()
-
-            # Determine which end is being dragged
-            dragging_src = dist_src < threshold and dist_src <= dist_dst
-            dragging_dst = dist_dst < threshold
-
-            if dragging_src or dragging_dst:
-                # Check for Alt/Option key (disconnect mode)
-                modifiers = event.modifiers()
-                if modifiers & Qt.KeyboardModifier.AltModifier:
-                    # Alt+drag: Disconnect mode
-                    self._is_disconnecting = True
-                    self._disconnect_src = dragging_src
-                    self._disconnect_temp_pos = click_pos
-                    self._is_reconnecting = False
-                else:
-                    # Normal drag: Reconnect mode
-                    self._is_reconnecting = True
-                    self._reconnect_src = dragging_src
-                    self._reconnect_port = None
-                    self._is_disconnecting = False
-
-                # Store the fixed endpoint position for visual update
-                self.update()
-                event.accept()
-                return
-
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse move during reconnection or disconnect drag."""
-        if self._is_disconnecting:
-            # Update path to show disconnect drag
-            mouse_pos = event.scenePos()
-            self._disconnect_temp_pos = mouse_pos
-
-            # Draw from fixed endpoint to mouse position
-            if self._disconnect_src:
-                # Dragging source end, keep destination fixed
-                dst_pos = self.dst_port.get_center_scene_pos() if self.dst_port else QPointF()
-                path = self._create_bezier_path(mouse_pos, dst_pos)
-            else:
-                # Dragging destination end, keep source fixed
-                src_pos = self.src_port.get_center_scene_pos() if self.src_port else QPointF()
-                path = self._create_bezier_path(src_pos, mouse_pos)
-            self.setPath(path)
-            self.update()
-            event.accept()
-        elif self._is_reconnecting:
-            # Update path to follow mouse
-            mouse_pos = event.scenePos()
-            if self._reconnect_src:
-                dst_pos = self.dst_port.get_center_scene_pos() if self.dst_port else QPointF()
-                path = self._create_bezier_path(mouse_pos, dst_pos)
-            else:
-                src_pos = self.src_port.get_center_scene_pos() if self.src_port else QPointF()
-                path = self._create_bezier_path(src_pos, mouse_pos)
-            self.setPath(path)
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Handle mouse release to complete reconnection or disconnect."""
-        if self._is_disconnecting:
-            # Alt+drag disconnect mode
-            release_pos = event.scenePos()
-
-            # Find port under mouse
-            scene = self.scene()
-            target_port = None
-            if scene:
-                items = scene.items(release_pos)
-                for item in items:
-                    if hasattr(item, 'port_name') and hasattr(item, 'direction'):
-                        target_port = item
-                        break
-
-            if target_port and self._can_reconnect(target_port):
-                # Valid reconnection target - reconnect to new port
-                self._perform_reconnection(target_port)
-            else:
-                # No valid target - disconnect completely
-                self._disconnect_and_remove()
-
-            # Reset disconnect state
-            self._is_disconnecting = False
-            self._disconnect_temp_pos = None
-            event.accept()
-        elif self._is_reconnecting:
-            release_pos = event.scenePos()
-
-            # Find port under mouse
-            scene = self.scene()
-            if scene:
-                items = scene.items(release_pos)
-                target_port = None
-                for item in items:
-                    # Check if it's a PortItem (need to import to check type)
-                    if hasattr(item, 'port_name') and hasattr(item, 'direction'):
-                        target_port = item
-                        break
-
-                if target_port and self._can_reconnect(target_port):
-                    # Perform reconnection
-                    self._perform_reconnection(target_port)
-
-            # Reset reconnect state
-            self._is_reconnecting = False
-            self._reconnect_port = None
-            self.update_path()
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
+        self._segments = None
+        self.setPath(self._create_path(src, dst))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle key press for deletion."""
@@ -632,148 +501,6 @@ class ConnectionItem(QGraphicsPathItem):
         else:
             super().keyPressEvent(event)
 
-    def _can_reconnect(self, target_port) -> bool:
-        """Check if reconnection is valid (no self-loops, type match, no cycle)."""
-        from .port_item import PortItem
-        
-        if not isinstance(target_port, PortItem):
-            return False
-
-        # Get the node that owns this connection
-        if not self.src_port or not self.dst_port:
-            return False
-        
-        src_node = self.src_port.parentItem()
-        dst_node = self.dst_port.parentItem()
-        target_node = target_port.parentItem()
-
-        # No self-loops (connecting port to same node)
-        # Determine which end is being dragged (support both reconnect and disconnect mode)
-        dragging_src = self._reconnect_src if self._is_reconnecting else self._disconnect_src
-
-        if dragging_src:
-            # Dragging source end - check target is not on same node as destination
-            if target_node == dst_node:
-                return False
-        else:
-            # Dragging destination end - check target is not on same node as source
-            if target_node == src_node:
-                return False
-
-        # Type check
-        if target_port.data_type != self.data_type:
-            return False
-
-        # Direction check (must connect output to input)
-        if dragging_src:
-            # New source must be output
-            if target_port.direction != "output":
-                return False
-        else:
-            # New destination must be input
-            if target_port.direction != "input":
-                return False
-
-        # Cycle detection
-        if self._would_create_cycle(target_port):
-            return False
-
-        return True
-
-    def _would_create_cycle(self, new_port) -> bool:
-        """Check if connecting to new_port would create a cycle in the graph."""
-        from .port_item import PortItem
-
-        if not isinstance(new_port, PortItem):
-            return False
-
-        # Determine which node would be the new source/destination.
-        # AUD-9801: derive the dragged end exactly like _can_reconnect /
-        # _perform_reconnection — Alt+disconnect drags only update
-        # _disconnect_src, so reading _reconnect_src alone would reverse
-        # the cycle direction for that mode.
-        dragging_src = self._reconnect_src if self._is_reconnecting else self._disconnect_src
-        if dragging_src:
-            # new_port becomes the new source
-            potential_src_port = new_port
-            potential_dst_port = self.dst_port
-        else:
-            # new_port becomes the new destination
-            potential_src_port = self.src_port
-            potential_dst_port = new_port
-
-        if not potential_src_port or not potential_dst_port:
-            return False
-
-        src_node = potential_src_port.parentItem()
-        dst_node = potential_dst_port.parentItem()
-
-        # AUD-9800: PortItem no longer keeps per-port ``_connections``
-        # lists (only a ``connection_count`` int), so the old DFS never
-        # expanded a single neighbour and always returned False — the UI
-        # cycle guard was dead. Build the node adjacency from the scene's
-        # live ConnectionItems instead (one pass; the DFS below then stays
-        # linear in the number of connections).
-        outgoing: dict = {}
-        scene = self.scene()
-        if scene is not None:
-            for item in scene.items():
-                if not isinstance(item, ConnectionItem):
-                    continue
-                conn_src = getattr(item, "src_port", None)
-                conn_dst = getattr(item, "dst_port", None)
-                if conn_src is None or conn_dst is None:
-                    continue
-                conn_src_node = conn_src.parentItem()
-                conn_dst_node = conn_dst.parentItem()
-                if conn_src_node is None or conn_dst_node is None:
-                    continue
-                outgoing.setdefault(conn_src_node, []).append(conn_dst_node)
-
-        # DFS from dst_node to see if we can reach src_node
-        # (which would mean adding this connection creates a cycle)
-        visited = set()
-        stack = [dst_node]
-
-        while stack:
-            current_node = stack.pop()
-            if current_node in visited:
-                continue
-            visited.add(current_node)
-
-            if current_node is src_node:
-                return True  # Found path back to source - cycle!
-
-            # Explore all outgoing connections from this node
-            stack.extend(outgoing.get(current_node, ()))
-
-        return False
-
-    def _perform_reconnection(self, target_port) -> None:
-        """Request reconnection to a new port.
-
-        Emits reconnect_requested signal to notify NodeEditorWidget,
-        which handles the operation through the data model with undo support.
-
-        This method only updates visual state; the actual connection changes
-        are handled by NodeEditorWidget in response to the signal.
-
-        Args:
-            target_port: The new port to reconnect to (PortItem)
-        """
-        from .port_item import PortItem
-
-        if not isinstance(target_port, PortItem):
-            return
-
-        # Determine which end is being dragged (support both reconnect and disconnect mode)
-        dragging_src = self._reconnect_src if self._is_reconnecting else self._disconnect_src
-
-        # Emit signal for NodeEditorWidget to handle proper reconnection
-        # with data model updates and undo/redo support
-        self._signals.reconnect_requested.emit(self, target_port, dragging_src)
-
-
     def _delete_connection(self) -> None:
         """Request deletion of this connection.
 
@@ -785,17 +512,6 @@ class ConnectionItem(QGraphicsPathItem):
         undo/redo tracking and data model synchronization.
         """
         self._signals.delete_requested.emit(self)
-
-    def _disconnect_and_remove(self) -> None:
-        """Request disconnect without reconnection (Alt+drag disconnect).
-
-        Emits disconnect_requested signal to notify NodeEditorWidget,
-        which handles the operation through the data model with undo support.
-
-        This is triggered when Alt+dragging a connection endpoint to an
-        invalid location, meaning the connection should be completely removed.
-        """
-        self._signals.disconnect_requested.emit(self)
 
     # ── Connection Snap Detection ──
 
@@ -821,138 +537,37 @@ class ConnectionItem(QGraphicsPathItem):
             self.setZValue(-1 if not self._hovered else 1)
         self.update()
 
+    def _nearest_on_path(self, scene_pos: QPointF) -> tuple[QPointF, float, float]:
+        """Project onto the painted path and return point, distance and progress."""
+        if self._segments is None:
+            polylines = self.path().toSubpathPolygons()
+            self._segments = list(polylines[0]) if polylines else []
+        target = self.mapFromScene(scene_pos)
+        best, distance, progress, travelled = target, float("inf"), 0.0, 0.0
+        for start, end in zip(self._segments, self._segments[1:]):
+            segment = end - start
+            length_squared = QPointF.dotProduct(segment, segment)
+            if length_squared == 0:
+                continue
+            fraction = QPointF.dotProduct(target - start, segment) / length_squared
+            fraction = max(0.0, min(1.0, fraction))
+            point = start + segment * fraction
+            gap = target - point
+            length = length_squared ** 0.5
+            candidate_distance = hypot(gap.x(), gap.y())
+            if candidate_distance < distance:
+                best, distance = point, candidate_distance
+                progress = travelled + length * fraction
+            travelled += length
+        return self.mapToScene(best), distance, progress / travelled if travelled else 0.5
+
     def get_nearest_point_on_path(self, scene_pos: QPointF) -> tuple[QPointF, float]:
-        """Find the nearest point on this connection's Bezier curve.
-
-        Uses recursive subdivision to approximate the nearest point.
-        Returns both the point and the distance to it.
-
-        Args:
-            scene_pos: The point to find nearest point on curve
-
-        Returns:
-            (nearest_point, distance) tuple
-        """
-        if self.src_port is None or self.dst_port is None:
-            return (scene_pos, float('inf'))
-
-        src_pos = self.src_port.get_center_scene_pos()
-        dst_pos = self.dst_port.get_center_scene_pos()
-
-        # Calculate control points for the Bezier curve
-        dx = abs(dst_pos.x() - src_pos.x())
-        offset = max(dx * 0.5, 60)
-
-        ctrl1 = QPointF(src_pos.x() + offset, src_pos.y())
-        ctrl2 = QPointF(dst_pos.x() - offset, dst_pos.y())
-
-        # Recursive subdivision to find nearest point
-        # Depth 6 (64 samples) is sufficient for proximity detection;
-        # depth 10 (1024 samples) is overkill and causes lag during fast drag.
-        nearest_point, nearest_dist = self._find_nearest_on_cubic_bezier(
-            src_pos, ctrl1, ctrl2, dst_pos, scene_pos, 6
-        )
-
-        return (nearest_point, nearest_dist)
-
-    def _find_nearest_on_cubic_bezier(
-        self,
-        p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF,
-        target: QPointF,
-        depth: int
-    ) -> tuple[QPointF, float]:
-        """Find nearest point on cubic Bezier curve using recursive subdivision.
-
-        Args:
-            p0, p1, p2, p3: Bezier curve control points
-            target: Point to find nearest point to
-            depth: Recursion depth (controls precision)
-
-        Returns:
-            (nearest_point, distance) tuple
-        """
-        if depth <= 0:
-            # At max depth, just sample endpoints and midpoint
-            mid_t = 0.5
-            mid_point = self._eval_cubic_bezier(p0, p1, p2, p3, mid_t)
-
-            dist_start = self._point_distance(p0, target)
-            dist_mid = self._point_distance(mid_point, target)
-            dist_end = self._point_distance(p3, target)
-
-            if dist_start <= dist_mid and dist_start <= dist_end:
-                return (p0, dist_start)
-            elif dist_mid <= dist_end:
-                return (mid_point, dist_mid)
-            else:
-                return (p3, dist_end)
-
-        # Subdivide at t=0.5 using de Casteljau's algorithm
-        mid01 = self._midpoint(p0, p1)
-        mid12 = self._midpoint(p1, p2)
-        mid23 = self._midpoint(p2, p3)
-        mid012 = self._midpoint(mid01, mid12)
-        mid123 = self._midpoint(mid12, mid23)
-        mid_point = self._midpoint(mid012, mid123)
-
-        # Check distances at key points to decide which half to recurse
-        dist_start = self._point_distance(p0, target)
-        dist_mid = self._point_distance(mid_point, target)
-        dist_end = self._point_distance(p3, target)
-
-        # If we're close enough at midpoint, return it
-        if dist_mid < self.SNAP_DISTANCE:
-            return (mid_point, dist_mid)
-
-        # Recurse on the closer half
-        if dist_start < dist_end:
-            return self._find_nearest_on_cubic_bezier(
-                p0, mid01, mid012, mid_point, target, depth - 1
-            )
-        else:
-            return self._find_nearest_on_cubic_bezier(
-                mid_point, mid123, mid23, p3, target, depth - 1
-            )
-
-    def _eval_cubic_bezier(
-        self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float
-    ) -> QPointF:
-        """Evaluate cubic Bezier curve at parameter t."""
-        u = 1 - t
-        u2 = u * u
-        u3 = u2 * u
-        t2 = t * t
-        t3 = t2 * t
-
-        x = u3 * p0.x() + 3 * u2 * t * p1.x() + 3 * u * t2 * p2.x() + t3 * p3.x()
-        y = u3 * p0.y() + 3 * u2 * t * p1.y() + 3 * u * t2 * p2.y() + t3 * p3.y()
-
-        return QPointF(x, y)
-
-    def _midpoint(self, p1: QPointF, p2: QPointF) -> QPointF:
-        """Calculate midpoint between two points."""
-        return QPointF((p1.x() + p2.x()) / 2, (p1.y() + p2.y()) / 2)
-
-    def _point_distance(self, p1: QPointF, p2: QPointF) -> float:
-        """Calculate Euclidean distance between two points."""
-        dx = p1.x() - p2.x()
-        dy = p1.y() - p2.y()
-        return (dx * dx + dy * dy) ** 0.5
+        point, distance, _ = self._nearest_on_path(scene_pos)
+        return point, distance
 
     def get_midpoint_scene(self) -> QPointF:
-        """Get the scene-coordinate midpoint of this connection's Bezier curve."""
-        if self.src_port is None or self.dst_port is None:
-            return QPointF(0, 0)
-
-        src_pos = self.src_port.get_center_scene_pos()
-        dst_pos = self.dst_port.get_center_scene_pos()
-
-        dx = abs(dst_pos.x() - src_pos.x())
-        offset = max(dx * 0.5, 60)
-        ctrl1 = QPointF(src_pos.x() + offset, src_pos.y())
-        ctrl2 = QPointF(dst_pos.x() - offset, dst_pos.y())
-
-        return self._eval_cubic_bezier(src_pos, ctrl1, ctrl2, dst_pos, 0.5)
+        path = self.path()
+        return self.mapToScene(path.pointAtPercent(path.percentAtLength(path.length() / 2)))
 
     def set_show_insertion_dot(self, show: bool) -> None:
         """Show or hide the insertion dot at the midpoint."""
@@ -971,30 +586,5 @@ class ConnectionItem(QGraphicsPathItem):
         return dx * dx + dy * dy < r * r
 
     def get_insert_t_value(self, scene_pos: QPointF) -> float:
-        """Get the approximate t value (0-1) where to insert a Dot node.
-
-        This is useful for determining which end of the connection
-        the insert point is closer to.
-
-        Args:
-            scene_pos: Position where user wants to insert
-
-        Returns:
-            t value approximating position along curve (0 = source, 1 = destination)
-        """
-        if self.src_port is None or self.dst_port is None:
-            return 0.5
-
-        src_pos = self.src_port.get_center_scene_pos()
-        dst_pos = self.dst_port.get_center_scene_pos()
-
-        nearest_point, _ = self.get_nearest_point_on_path(scene_pos)
-
-        # Approximate t by comparing distances to endpoints
-        dist_to_src = self._point_distance(nearest_point, src_pos)
-        total_dist = self._point_distance(src_pos, dst_pos)
-
-        if total_dist < 1.0:
-            return 0.5
-
-        return dist_to_src / total_dist
+        """Return the nearest point's fractional distance along the cable."""
+        return self._nearest_on_path(scene_pos)[2]

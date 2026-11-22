@@ -10,7 +10,9 @@ read-only so callers do not mistake them for user-authored effects.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+
+from .layer_model import Layer
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,44 @@ class NodeProvenance:
     managed: bool
     read_only: bool = False
     origin: str = "layer"  # layer | generated | manual
+
+
+@dataclass(frozen=True)
+class LayerRoles:
+    """Stable role contract for one layer's managed image chain (B01).
+
+    ``transform`` is the layer's registered main Transform (never a second
+    copy of the values); ``effects`` lists every other node on the chain in
+    upstream→downstream order (the chain head included when it is an
+    effect); ``foreground`` is the final image feed ``(node_id, port)``
+    that plugs into the managed Merge / Output chain.
+    """
+
+    source: Optional[str]
+    transform: Optional[str]
+    effects: Tuple[str, ...]
+    foreground: Tuple[str, str]
+    managed_merge: Optional[str]
+    # The registered transform role points at a node that no longer exists
+    # (deleted main Transform) — an identifiable, repairable state.
+    transform_missing: bool = False
+    # A legacy chain without a registered role offered several transform
+    # candidates; no stable reference was written.
+    transform_ambiguous: bool = False
+
+
+def choose_legacy_transform(
+        main_chain: Tuple[str, ...],
+        transform_ids: "frozenset[str]") -> Optional[str]:
+    """Pick the unique legacy Transform on an explicit image main chain.
+
+    Legacy projects predating the stable role field identified the layer
+    Transform implicitly.  Only a chain with exactly one Transform node
+    yields a stable reference; ambiguous chains stay unresolved so callers
+    can surface a repair diagnostic instead of guessing.
+    """
+    candidates = [node_id for node_id in main_chain if node_id in transform_ids]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 @dataclass(frozen=True)
@@ -49,6 +89,44 @@ class LayerProvenanceResolver:
 
     def __init__(self, graph: Any) -> None:
         self.graph = graph
+
+    def main_image_chains(self, layers: Iterable[Layer]) -> Iterator[tuple[Layer, list[str]]]:
+        """Walk each layer's image chain from its root towards its source."""
+        owners: dict[str, set[str]] = {}
+        for layer in self.graph.get_all_layers():
+            for node_id in (layer.root_node_id, layer.source_node_id,
+                            getattr(layer, "transform_node_id", None)):
+                if node_id:
+                    owners.setdefault(node_id, set()).add(layer.layer_id)
+        inputs = {(edge.dst_node_id, edge.dst_port_name): edge.src_node_id
+                  for edge in self.graph.connections}
+        for layer in layers:
+            chain = [layer.root_node_id]
+            own_layer = {layer.layer_id}
+            while layer.source_node_id and chain[-1] != layer.source_node_id:
+                node = self.graph.get_node(chain[-1])
+                if node is None or getattr(node, "node_type", "") in self._BOUNDARY_TYPES:
+                    break
+                port = next((port for port in node.inputs if port.data_type == "image"), None)
+                previous_id = inputs.get((node.id, port.name)) if port is not None else None
+                if (not previous_id or previous_id in chain
+                        or owners.get(previous_id, own_layer) != own_layer):
+                    break
+                chain.append(previous_id)
+            yield layer, chain
+
+    def main_transform(self, layer: Layer, chain: list[str]) -> tuple[str | None, bool, bool]:
+        """Return the main Transform ID and missing/ambiguous role indicators."""
+        registered = getattr(layer, "transform_node_id", None)
+        if registered:
+            node = self.graph.get_node(registered)
+            if node is not None and node.node_type == "transform" and registered in chain:
+                return registered, False, False
+            return None, True, False
+        candidates = frozenset(node_id for node_id in chain
+                               if getattr(self.graph.get_node(node_id), "node_type", "") == "transform")
+        candidate = choose_legacy_transform(tuple(chain), candidates)
+        return candidate, False, candidate is None and bool(candidates)
 
     def for_layer(self, layer_id: str,
                   stack_id: Optional[str] = None) -> Optional[LayerProvenance]:
@@ -126,6 +204,10 @@ class LayerProvenanceResolver:
                     role = "source"
                 elif target == provenance.root_node_id:
                     role = "root"
+                elif target == getattr(layer, "transform_node_id", None):
+                    # B01: a registered main Transform that is not the chain
+                    # head used to be misreported as a plain effect.
+                    role = "transform"
                 else:
                     role = "effect"
                 result.append(NodeProvenance(

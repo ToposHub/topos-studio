@@ -40,3 +40,12 @@ def test_pts_to_frame_rounds_nearby_timestamp_to_expected_frame() -> None:
     source = _source_with_ntsc_timebase()
 
     assert source._pts_to_frame(10009) == 10
+
+
+def test_seek_accounts_for_a_nonzero_first_pts() -> None:
+    source = _source_with_ntsc_timebase()
+    source._video_stream.start_time = 6_006
+
+    assert source._frame_to_pts(0) == 6_006
+    assert source._frame_to_pts(10) == 16_016
+    assert source._pts_to_frame(16_016) == 10

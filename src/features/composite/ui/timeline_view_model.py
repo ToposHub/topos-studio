@@ -47,6 +47,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # Row id prefixes — centralised so every caller spells them identically.
 ROW_NODE = "node"
+ROW_LAYER = "layer"
 ROW_GROUP = "group"
 ROW_PARAM = "param"
 ROW_CHANNEL = "channel"
@@ -90,6 +91,8 @@ def parse_row_id(row_id: str) -> Dict[str, Any]:
         return {"row_type": "unknown", "row_id": row_id}
     prefix, _, rest = row_id.partition(":")
     parts = rest.split(":") if rest else []
+    if prefix == ROW_LAYER and len(parts) == 1:
+        return {"row_type": ROW_LAYER, "layer_id": parts[0]}
     if prefix == ROW_NODE and len(parts) >= 1:
         return {"row_type": ROW_NODE, "node_id": parts[0]}
     if prefix == ROW_GROUP and len(parts) >= 2:
@@ -240,80 +243,29 @@ class TimelineViewState:
 
 
 def build_timeline_rows(model: Any) -> List[TimelineRow]:
-    """Project a legacy :class:`KeyframesModel` into unified TimelineRows.
-
-    The mapping is 1:1 today (node row → node row, param row → parameter
-    row); group/channel/expression rows are reserved for P3 but the
-    dataclass already supports them. The legacy ``row_id`` strings are
-    reused verbatim so existing view + undo code keeps working.
-
-    ``model`` is typed as Any to avoid importing the model module here
-    (which would create a cycle when the model later imports this module).
-    """
+    """Project timeline rows and their hierarchy while preserving row IDs."""
     out: List[TimelineRow] = []
-    # Map node_id → its node TimelineRow, so param rows can resolve
-    # parent_row_id without re-scanning.
-    node_row_by_id: Dict[str, TimelineRow] = {}
-
-    legacy_rows = list(getattr(model, "rows", []))
-    for lrow in legacy_rows:
-        row_type = getattr(lrow, "row_type", None)
-        node_id = getattr(lrow, "node_id", "")
-        color = getattr(lrow, "node_color", "#555555")
-        label = getattr(lrow, "label", "")
-        locked = bool(getattr(lrow, "locked", False))
-        expanded = bool(getattr(lrow, "expanded", True))
-        visible = bool(getattr(lrow, "visible", True))
-        selected = bool(getattr(lrow, "selected", False))
-
-        if row_type == "node":
-            track = model.track_for(getattr(lrow, "row_id", "")) \
-                if hasattr(model, "track_for") else None
-            range_bar = getattr(track, "range_bar", None) if track else None
-            node_row = TimelineRow(
-                row_id=getattr(lrow, "row_id", make_node_row_id(node_id)),
-                node_id=node_id,
-                row_type=ROW_NODE,
-                display_name=label,
-                depth=0,
-                parent_row_id=None,
-                color=color,
-                locked=locked,
-                visible=visible,
-                expanded=expanded,
-                is_animated=range_bar is not None,  # has a layer/range bar
-                selected=selected,
-            )
-            out.append(node_row)
-            node_row_by_id[node_id] = node_row
-        elif row_type == "param":
-            param_name = getattr(lrow, "param_name", None) or ""
-            row_id = getattr(lrow, "row_id",
-                             make_param_row_id(node_id, param_name))
-            track = model.track_for(row_id) if hasattr(model, "track_for") \
-                else None
-            kfs = list(getattr(track, "keyframes", [])) if track else []
-            parent = node_row_by_id.get(node_id)
-            prow = TimelineRow(
-                row_id=row_id,
-                node_id=node_id,
-                row_type=ROW_PARAM,
-                display_name=label,
-                depth=(parent.depth + 1) if parent else 1,
-                parent_row_id=parent.row_id if parent else None,
-                parameter_name=param_name,
-                color=getattr(track, "color", color) if track else color,
-                locked=locked,
-                visible=visible,
-                expanded=True,
-                is_animated=bool(kfs),
-                has_expression=False,  # populated when expressions land (P5)
-                selected=selected,
-                current_value=(kfs[-1].value if kfs else None),
-            )
-            out.append(prow)
-        # Future row types (group/channel/expression) are emitted by P3+
-        # code paths; the legacy model does not produce them yet.
+    for row in model.rows:
+        track = model.track_for(row.row_id)
+        keyframes = track.keyframes if track is not None else ()
+        range_bar = track.range_bar if track is not None else None
+        out.append(TimelineRow(
+            row_id=row.row_id,
+            node_id=row.node_id,
+            row_type=row.row_type,
+            display_name=row.label,
+            depth=row.depth,
+            parent_row_id=row.parent_row_id,
+            parameter_name=row.param_name,
+            group_name=row.label if row.row_type == ROW_GROUP else None,
+            color=track.color if row.row_type == ROW_PARAM and track is not None else row.node_color,
+            locked=row.locked,
+            visible=row.visible,
+            expanded=row.expanded,
+            is_animated=bool(keyframes) or range_bar is not None,
+            selected=row.selected,
+            current_value=keyframes[-1].value if keyframes else None,
+        ))
     return out
 
 

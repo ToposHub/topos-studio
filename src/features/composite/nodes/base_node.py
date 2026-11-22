@@ -813,6 +813,22 @@ class Node:
         track = self.keyframe_tracks.get(param_name)
         return bool(track and track.get("keyframes"))
 
+    def parameter_value_at_frame(self, param_name: str, frame: float,
+                                 default: Any = None) -> Any:
+        """Sample an editable local value before expressions or parenting."""
+        base = self.parameters.get(param_name, default)
+        if not self.is_param_animated(param_name):
+            return base
+        track = self.compiled_eval_tracks().get(param_name)
+        if track is None:
+            return base
+        try:
+            value = track.get_value_float(float(frame), default=base)
+            pdef = self.get_param_defs().get(param_name)
+            return int(round(value)) if pdef is not None and pdef.ptype == "int" else value
+        except (TypeError, ValueError, KeyError, AttributeError):
+            return base
+
     def effective_header_color(self) -> str:
         """Resolve the header color: user override if set, else the class default."""
         return self.custom_header_color or self.header_color

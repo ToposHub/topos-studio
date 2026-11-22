@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from ..media.source import MediaSource
     from ..media.proxy import PlaybackProxyState, ProxyConfig, DiskProxyInfo
     from ..media.proxy_generator import ProxyProgress
+    from ..media.presentation_time import PresentationIndex
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class ClipSession:
     playback_mode: str = 'preview'  # 'preview', 'paused', 'export'
     defer_memory_proxy: bool = False
     memory_proxy_pending: bool = False
+    presentation_index: Optional[PresentationIndex] = field(default=None, repr=False)
     # macOS VT 零拷贝源（可选）。解码线程产出"延迟 GL 导入"的 GpuDecodedFrame，
     # 由渲染线程绑定外部纹理；不可用时保持 None，全部走 CPU 源。
     vt_source: Optional[Any] = None
@@ -288,7 +290,7 @@ class ClipSession:
             - PROXY: 使用 get_active_proxy_source()
             - AUTO: 根据 playback_mode 决定
         """
-        if quality == FrameQuality.MASTER:
+        if quality == FrameQuality.MASTER or self.presentation_index is not None:
             return self.master_source
 
         if quality == FrameQuality.PROXY:
@@ -384,6 +386,8 @@ class ClipSession:
         低分辨率帧（缓存桶错位）。这里按 get_source_for_quality 实际
         选择的源决定桶：master 源 → MASTER；代理源（或无源）→ PROXY。
         """
+        if self.presentation_index is not None:
+            return FrameQuality.MASTER
         if quality != FrameQuality.AUTO:
             return quality
         source = self.get_source_for_quality(quality)
@@ -750,6 +754,8 @@ class VideoFrameProviderService:
         path: str,
         share_by_path: bool = True,
         defer_memory_proxy: bool = False,
+        *,
+        presentation_index: Optional[PresentationIndex] = None,
     ) -> str:
         """
         打开视频剪辑。
@@ -788,7 +794,11 @@ class VideoFrameProviderService:
             with self._lock:
                 # 检查是否已有剪辑
                 if share_by_path and path in self._path_to_clips:
-                    existing_clip_ids = self._path_to_clips[path]
+                    existing_clip_ids = [
+                        candidate for candidate in self._path_to_clips[path]
+                        if (previous := self._clips.get(candidate)) is not None
+                        and previous.presentation_index is presentation_index
+                    ]
                     if existing_clip_ids:
                         shared_clip_id = existing_clip_ids[0]
                         existing_session = self._clips.get(shared_clip_id)
@@ -821,6 +831,7 @@ class VideoFrameProviderService:
             max_proxy_cache=self._max_proxy_cache,
             max_master_cache=self._max_master_cache,
             defer_memory_proxy=defer_memory_proxy,
+            presentation_index=presentation_index,
         )
 
         # 注册会话（此时 open_event 未置位：并发共享调用方会等待打开完成）
@@ -957,7 +968,11 @@ class VideoFrameProviderService:
             with self._lock:
                 # 检查是否已有剪辑
                 if path in self._path_to_clips:
-                    existing_clip_ids = self._path_to_clips[path]
+                    existing_clip_ids = [
+                        candidate for candidate in self._path_to_clips[path]
+                        if (previous := self._clips.get(candidate)) is not None
+                        and previous.presentation_index is None
+                    ]
                     if existing_clip_ids:
                         shared_clip_id = existing_clip_ids[0]
                         existing_session = self._clips.get(shared_clip_id)
@@ -1079,6 +1094,8 @@ class VideoFrameProviderService:
                 logger.warning(f"Clip not found: {clip_id}")
                 return False
 
+            if session.presentation_index is not None:
+                return False
             session.disk_proxy_info = disk_proxy_info
 
         # 处理状态变化
@@ -2056,6 +2073,17 @@ class VideoFrameProviderService:
 
         session.master_source = master_source
         session.metadata = metadata
+        if session.presentation_index is not None:
+            configure_index = getattr(master_source, "set_presentation_index", None)
+            if not callable(configure_index):
+                from ..media.source import MediaOpenError
+
+                raise MediaOpenError("Decoder does not support timestamp indexing.", source_path=path)
+            configure_index(session.presentation_index)
+            session.metadata = master_source.probe()
+            session.is_open = True
+            session.open_error = None
+            return
 
         # ========================================
         # 磁盘代理优先读取（专业 NLE 优化）

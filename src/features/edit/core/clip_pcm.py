@@ -371,6 +371,7 @@ def decode_audio_range(
     *,
     cancel_check: Optional[Callable[[], bool]] = None,
     channel_map: Optional[tuple] = None,
+    stream_index: int | None = None,
 ) -> Optional[np.ndarray]:
     """Decode a half-open range as planar float32, clipped to available audio.
 
@@ -391,7 +392,8 @@ def decode_audio_range(
 
     try:
         with av.open(path) as container:
-            stream = next(iter(container.streams.audio), None)
+            stream = next((item for item in container.streams.audio
+                           if stream_index is None or item.index == stream_index), None)
             if stream is None:
                 return None
             frames, decoded_start = _decode_window_frames(container, stream, start_sample, sample_rate)

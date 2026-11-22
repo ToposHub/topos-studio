@@ -339,55 +339,43 @@ class TestPanelGraphIntegration:
         p._graph_view.hide()
 
 
-# ── T110 panel integration: graph type combo ──────────────────────────
+def _graph_type_actions(panel):
+    panel._populate_header_menu()
+    return {
+        child.data(): child
+        for action in panel._header_menu.actions()
+        if action.menu() is not None and action.menu().objectName() == "KeyframesGraphTypeMenu"
+        for child in action.menu().actions()
+    }
 
 
-class TestPanelGraphTypeCombo:
-    """The footer's Graph Type combo (T110) — visible only in graph mode,
-    pushes Auto/Value/Speed to the graph view."""
-
-    def test_combo_hidden_in_timeline_mode(self, panel):
+class TestPanelGraphTypeMenu:
+    def test_graph_type_is_unavailable_in_timeline_mode(self, panel):
         assert panel.view_mode == "timeline"
-        assert panel._graph_type_combo.isVisible() is False
+        assert not _graph_type_actions(panel)
 
-    def test_combo_visible_in_graph_mode(self, panel):
+    def test_graph_mode_exposes_auto_value_and_speed(self, panel):
         panel.set_view_mode("graph")
-        # The combo's visibility *policy* is on (isVisible() needs the
-        # panel shown, which doesn't happen under offscreen). Test the
-        # policy instead.
-        assert panel._graph_type_combo.isVisibleTo(panel) is True or \
-            panel._graph_type_combo.isHidden() is False
+        options = _graph_type_actions(panel)
+        assert set(options) == {"auto", "value", "speed"}
+        assert options["auto"].isChecked()
 
-    def test_combo_default_auto(self, panel):
-        assert panel._graph_type_combo.currentIndex() == 0  # Auto
-
-    def test_combo_speed_pushes_to_graph_view(self, panel, graph):
-        node = graph.nodes[next(iter(graph.nodes))]
+    @pytest.mark.parametrize("mode", ["value", "speed"])
+    def test_graph_type_action_updates_view(self, panel, graph, mode):
+        node = next(iter(graph.nodes.values()))
         panel._on_param_selected(node.id, "rotation")
         panel.set_view_mode("graph")
-        panel._graph_type_combo.setCurrentIndex(2)  # Speed
-        assert panel._graph_view._viewport.graph_type == "speed"
+        _graph_type_actions(panel)[mode].trigger()
+        assert panel._graph_view._viewport.graph_type == mode
 
-    def test_combo_value_pushes_to_graph_view(self, panel, graph):
-        node = graph.nodes[next(iter(graph.nodes))]
+    def test_auto_resolves_per_series(self, panel, graph):
+        node = next(iter(graph.nodes.values()))
         panel._on_param_selected(node.id, "rotation")
         panel.set_view_mode("graph")
-        panel._graph_type_combo.setCurrentIndex(1)  # Value
-        assert panel._graph_view._viewport.graph_type == "value"
-
-    def test_combo_auto_resolves_per_series(self, panel, graph):
-        node = graph.nodes[next(iter(graph.nodes))]
-        panel._on_param_selected(node.id, "rotation")
-        panel.set_view_mode("graph")
-        # Switch to Value first (index 1) then back to Auto (index 0) so the
-        # currentIndexChanged signal fires (it doesn't fire when the index
-        # is unchanged from the default).
-        panel._graph_type_combo.setCurrentIndex(1)
-        panel._graph_type_combo.setCurrentIndex(0)  # Auto
+        _graph_type_actions(panel)["speed"].trigger()
+        _graph_type_actions(panel)["auto"].trigger()
         assert panel._graph_view._viewport.graph_type == "auto"
-        # Per-series type follows the auto decision (rotation = value).
-        for s in panel._graph_view._series:
-            assert s.graph_type == "value"
+        assert all(series.graph_type == "value" for series in panel._graph_view._series)
 
 
 # ── T113: Graph selection → shared model back-sync ────────────────────
@@ -462,25 +450,19 @@ class TestGraphSelectionBackSync:
 
 
 class TestGraphInfoSummary:
-    """The footer's Graph Info label (T122) — shows property/frame/value/
-    speed/interpolation for the selected keyframe, or a count when many."""
+    """The header menu shows details for the selected graph keyframes."""
 
-    def test_label_hidden_in_timeline_mode(self, panel):
+    def test_summary_absent_in_timeline_mode(self, panel):
         assert panel.view_mode == "timeline"
-        assert panel._graph_info_label.isHidden() is True or \
-            panel._graph_info_label.isVisible() is False
+        panel._populate_header_menu()
+        assert panel._graph_info_action not in panel._header_menu.actions()
 
-    def test_label_shown_in_graph_mode(self, panel):
-        panel.set_view_mode("graph")
-        # Visibility policy on (actual isVisible needs the panel shown).
-        assert panel._graph_info_label.isHidden() is False
-
-    def test_label_empty_when_nothing_selected(self, panel, graph):
-        node = graph.nodes[next(iter(graph.nodes))]
+    def test_summary_hidden_when_nothing_selected(self, panel, graph):
+        node = next(iter(graph.nodes.values()))
         panel._on_param_selected(node.id, "rotation")
         panel.set_view_mode("graph")
-        # Nothing selected → empty label.
-        assert panel._graph_info_label.text() == ""
+        panel._populate_header_menu()
+        assert not panel._graph_info_action.isVisible()
 
     def test_label_shows_single_keyframe_detail(self, panel, graph):
         node = graph.nodes[next(iter(graph.nodes))]
@@ -489,7 +471,10 @@ class TestGraphInfoSummary:
         s = panel._graph_view._series[0]
         s.points[1].selected = True  # frame 25, value 25.0 (graph fixture)
         panel._update_graph_info()
-        text = panel._graph_info_label.text()
+        panel._populate_header_menu()
+        assert panel._graph_info_action in panel._header_menu.actions()
+        assert panel._graph_info_action.isVisible()
+        text = panel._graph_info_action.text()
         assert "Rotation" in text
         assert "f25" in text
         assert "v25" in text
@@ -503,7 +488,7 @@ class TestGraphInfoSummary:
         s.points[0].selected = True
         s.points[1].selected = True
         panel._update_graph_info()
-        text = panel._graph_info_label.text()
+        text = panel._graph_info_action.text()
         assert "2 selected" in text
 
     def test_label_updates_on_selection_click(self, panel, graph, qapp):
@@ -526,6 +511,6 @@ class TestGraphInfoSummary:
                          Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
                          Qt.KeyboardModifier.NoModifier)
         panel._graph_view.mousePressEvent(ev)
-        text = panel._graph_info_label.text()
+        text = panel._graph_info_action.text()
         assert "f25" in text or "f" in text  # selected keyframe shown
         panel.hide()

@@ -121,6 +121,9 @@ def test_managed_layer_gaps_render_transparent_in_preview_and_export(qapp, _gl_a
                 result = renderer.render_comp_clip_frame(data, timeline_frame=frame, quality=mode)
                 assert result is not None and result.shape[:2] == (24, 32)
                 assert bool(np.any(result)) is covered
+                if covered:
+                    expected_channel = 2 if frame == 3 else 0
+                    assert np.argmax(result[0, 0]) == expected_channel
                 if not covered:
                     engine = renderer._get_export_renderer()
                     snapshot = renderer._build_snapshot(data, frame)
@@ -132,6 +135,93 @@ def test_managed_layer_gaps_render_transparent_in_preview_and_export(qapp, _gl_a
             assert renderer.render_comp_clip_frame(free_graph, quality=mode) is None
         finally:
             renderer.cleanup()
+
+
+def test_vfr_layer_split_preserves_presentation_time_after_reopen(
+    qapp, _gl_available, monkeypatch, tmp_path,
+) -> None:
+    from fractions import Fraction
+
+    from src.features.composite.core.layer_stack_controller import LayerStackController
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.nodes.output_node import OutputNode
+    from src.features.composite.nodes.video_frame_node import VideoFrameNode
+    from src.features.composite.render.composite_frame_renderer import CompositeFrameRenderer
+    from src.features.composite.ui.timeline_commands import apply_video_range_edit
+    from src.shared.media.presentation_time import request_presentation_index
+
+    av = pytest.importorskip("av")
+    movie = str(tmp_path / "pts-splits.mkv")
+    time_base = Fraction(1, 1000)
+    colors = ((255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255))
+    with av.open(movie, "w") as container:
+        stream = container.add_stream("ffv1", rate=25)
+        stream.width = stream.height = 16
+        stream.pix_fmt = "bgr0"
+        stream.time_base = stream.codec_context.time_base = time_base
+        for pts, color in zip((2000, 2040, 2160, 2200), colors):
+            raster = np.full((16, 16, 3), color, dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(raster, format="rgb24")
+            frame.pts, frame.time_base = pts, time_base
+            container.mux(stream.encode(frame))
+        container.mux(stream.encode())
+
+    future = request_presentation_index(movie)
+    assert request_presentation_index(movie) is future
+    index = future.result(timeout=10)
+    assert index.is_variable and index.pts == (2000, 2040, 2160, 2200)
+    stat = os.stat(movie)
+    os.utime(movie, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    next_version = request_presentation_index(movie)
+    assert next_version is not future
+    assert next_version.result(timeout=10).pts == index.pts
+
+    monkeypatch.setenv("TOPOS_HEADLESS_GL", "1")
+    graph = NodeGraph()
+    graph.fps = 25
+    graph.duration_frames = 6
+    output = OutputNode(node_id="out")
+    graph.add_node(output)
+    for name, value in {"format_mode": "custom", "width": 16, "height": 16}.items():
+        output.set_parameter(name, value)
+    video = VideoFrameNode(node_id="video")
+    graph.add_node(video)
+    for name, value in {"file_path": movie, "asset_id": "shared-video", "fps": 25,
+                        "total_frames": 4, "video_width": 16, "video_height": 16}.items():
+        video.set_parameter(name, value)
+    controller = LayerStackController(graph, layer_stack_version=2)
+    left = controller.add_media_layer("VFR", video.id)
+    assert controller.video_layer_timing(left, (0, 0)).window_duration(3) == 6
+
+    trim_graph = NodeGraph.from_dict(graph.to_dict())
+    trim_layer = trim_graph.get_layer(left)
+    trim = apply_video_range_edit(trim_graph.get_node(trim_layer.root_node_id),
+                                 trim_graph, {left: trim_layer},
+                                 {"edit": "trim_in", "comp_start": 2, "comp_end": 5},
+                                 previous_bounds=(0, 5))
+    assert trim["after"] == {"source_in": 1}
+    assert trim["source_timing"]["source_time_origin"] == "2/25"
+
+    right = controller.edit_layer_source_time(left, "split", 2, (0, 5))
+    assert isinstance(right, str)
+    reopened = NodeGraph.from_dict(graph.to_dict())
+    right_source = reopened.get_node(reopened.get_layer(right).source_node_id)
+    assert right_source.parameters["asset_id"] == video.parameters["asset_id"]
+    assert right_source.time_range["source_time_origin"] == "2/25"
+
+    data = reopened.to_dict()
+    renderer = CompositeFrameRenderer()
+    try:
+        for mode in ("preview", "export"):
+            for frame, ordinal in ((4, 2), (0, 0), (3, 1), (5, 3), (1, 1), (2, 1)):
+                result = renderer.render_comp_clip_frame(data, timeline_frame=frame, quality=mode)
+                assert result is not None
+                bgr = result[8, 8]
+                if mode == "preview":
+                    bgr = bgr.astype(np.float32) / 255.0
+                assert bgr == pytest.approx(np.array(colors[ordinal][::-1]) / 255, abs=0.01)
+    finally:
+        renderer.cleanup()
 
 
 def _render(config_values=None):

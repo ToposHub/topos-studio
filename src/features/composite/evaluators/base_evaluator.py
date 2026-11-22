@@ -600,6 +600,8 @@ class BaseEvaluatorMixin:
         plan: RenderPlan = self._scheduler.plan(
             snapshot, render_mode, viewer_roi, force_lod=force_lod,
             viewer_node_id=viewer_node_id)  # AUD-8412 接线（wd7-g39）
+        if viewer_roi is not None and hasattr(self, "_active_viewer_roi"):
+            self._active_viewer_roi = viewer_roi if plan.roi_enabled else None
 
         # M08.1c：烘焙陈旧徽标——plan 审计结果（预览/导出同一数据源）
         # 推到 UI；按签名去重防每帧刷屏。
@@ -691,7 +693,7 @@ class BaseEvaluatorMixin:
                 continue
 
             # ── Dirty-skip: Skip non-dirty nodes entirely ──
-            if node_id not in dirty_set:
+            if tile_context is None and node_id not in dirty_set:
                 cached_outputs = self._get_cached_outputs_for_node(node_id, snapshot)
                 if cached_outputs is not None:
                     cache[node_id] = cached_outputs
@@ -702,7 +704,7 @@ class BaseEvaluatorMixin:
                     cache_key = self._node_cache_keys.get(node_id)
                     if cache_key:
                         cache_mgr.pin(cache_key)
-                    if is_output_node_type(np.node_type):
+                    if is_output_node_type(np.node_type) and _is_selected_output(ns):
                         output_result = cached_outputs.get("display")
                     continue
 
@@ -775,7 +777,10 @@ class BaseEvaluatorMixin:
 
             # Gather inputs
             input_textures: Dict[str, TextureResult] = {}
+            inactive_inputs = snapshot.inactive_layer_inputs.get(node_id, ())
             for conn in snapshot.get_input_connections(node_id):
+                if conn.dst_port_name in inactive_inputs:
+                    continue
                 src_outputs = cache.get(conn.src_node_id, {})
                 if conn.src_port_name in src_outputs:
                     input_textures[conn.dst_port_name] = src_outputs[conn.src_port_name]
@@ -802,7 +807,7 @@ class BaseEvaluatorMixin:
             # Compute cache key
             ns = snapshot.nodes[node_id]
             bypass_persistent_cache = node_id in dynamic_cache_bypass_nodes
-            node_roi = np.output_roi if np.output_roi and not np.output_roi.is_empty else None
+            node_roi = tile_context.padded_roi if tile_context is not None else np.output_roi
             # Scene 消费节点（Scene3D）：收集上游 scene payload 签名进 cache key，
             # 这样 Deformer3D/Model3D 参数变化 → payload signature 变 → cache miss
             # → 重渲染。修复 scene→scene 链路参数变化无反应的 bug。
@@ -828,6 +833,7 @@ class BaseEvaluatorMixin:
                 snapshot_color_id=snapshot.color_texture_id,
                 snapshot_color_rev=snapshot.color_revision,
                 roi=node_roi,
+                output_format=tile_context.output_format if tile_context is not None else None,
                 lod_level=lod_level,
                 scene_input_sig=scene_input_sig,
                 # P0-2: include frame_number ONLY for frame-dependent nodes so
@@ -949,8 +955,11 @@ class BaseEvaluatorMixin:
                     for port_name in list(outputs.keys()):
                         tex_result = outputs[port_name]
                         if isinstance(tex_result, TextureResult) and tex_result.is_valid:
+                            window = crop_rect.intersection(tex_result.effective_bbox())
+                            if window.is_empty:
+                                continue
                             outputs[port_name] = self._crop_to_tile_roi(
-                                tex_result, crop_rect)
+                                tex_result, window)
 
                 # ── IDT (Input Device Transform): decode sRGB source
                 # outputs to scene-linear so every downstream effect and
@@ -1046,6 +1055,7 @@ class BaseEvaluatorMixin:
                         self._node_cache_keys[node_id] = cache_key
                 else:
                     cache[node_id] = outputs
+                    self._node_cache_keys.pop(node_id, None)
 
                 node_ms = (time.perf_counter() - node_start) * 1000.0
                 if perf:
@@ -1062,6 +1072,7 @@ class BaseEvaluatorMixin:
                                  node_id, np.action, e)
                 self._release_failed_node_textures(active_textures_before)
                 cache[node_id] = {}
+                self._node_cache_keys.pop(node_id, None)
 
         # Record diagnostics
         plan.eval_time_ms = (time.perf_counter() - eval_start) * 1000.0
@@ -1803,8 +1814,20 @@ class BaseEvaluatorMixin:
                 # getattr-based readers keep working on the bare fallback.
                 eval_ctx = getattr(self, '_eval_ctx', None)
                 ctx_arg = eval_ctx if eval_ctx is not None else self.ctx
-                return node.evaluate(input_textures, ctx_arg, self.fb_manager,
-                                     self._resource_pool, render_mode=render_mode)
+                external_frames = getattr(
+                    getattr(self, "_snapshot", None), "external_node_frames", {},
+                )
+                effect_frame = external_frames.get(ns.node_id)
+                if eval_ctx is None or effect_frame is None:
+                    return node.evaluate(input_textures, ctx_arg, self.fb_manager,
+                                         self._resource_pool, render_mode=render_mode)
+                old_frame = eval_ctx.frame_number
+                eval_ctx.frame_number = effect_frame
+                try:
+                    return node.evaluate(input_textures, ctx_arg, self.fb_manager,
+                                         self._resource_pool, render_mode=render_mode)
+                finally:
+                    eval_ctx.frame_number = old_frame
             # Phase 2 F2-02: Node creation failed — shouldn't happen if registered in NODE_REGISTRY
             logger.warning(f"Failed to create ephemeral node for type '{ns.node_type}'")
             return {}
@@ -1925,9 +1948,14 @@ class BaseEvaluatorMixin:
         self._bind_external_texture(tex.texture_id)
         prog['u_texture'].value = 0
         prog['u_src_resolution'].value = (float(src_w), float(src_h))
-        prog['u_crop_rect'].value = (float(tile_roi.x), float(tile_roi.y),
-                                     float(tw), float(th))
-        prog['u_outside'].value = 0
+        bounds = tex.effective_bbox()
+        packed_window = bounds.width == src_w and bounds.height == src_h
+        offset_x = bounds.x if packed_window else 0
+        offset_y = bounds.y if packed_window else 0
+        prog['u_crop_rect'].value = (
+            float(tile_roi.x - offset_x), float(tile_roi.y - offset_y), float(tw), float(th),
+        )
+        prog['u_outside'].value = 1
         self._render_quad(prog)
         # P1-6: the source is a pooled texture that may be released while
         # this tile is still being composited — never leave unit 0 bound.
@@ -2283,6 +2311,8 @@ class BaseEvaluatorMixin:
             return self._apply_defocus(effect_input, effect_params, w, h)
         elif effect_type == "glow":
             return self._apply_glow(effect_input, effect_params, w, h)
+        elif effect_type == "layer_style":
+            return self._apply_layer_style(effect_input, effect_params, w, h)
         elif effect_type == "cornerpin":
             return self._apply_cornerpin(effect_input, effect_params, w, h)
         elif effect_type == "lut3d":
@@ -2465,6 +2495,7 @@ class BaseEvaluatorMixin:
                                         alpha_policy, alpha_clamp,
                                         mix, mask_channel, mask_invert,
                                         layer_composite=effect_params.get("layer_composite", False),
+                                        psd_srgb=effect_params.get("psd_srgb", False),
                                         transparent_background=effect_params.get(
                                             "transparent_background", False))
 
@@ -2478,6 +2509,7 @@ class BaseEvaluatorMixin:
                            mask_channel: int = 0,
                            mask_invert: bool = False, *,
                            layer_composite: bool = False,
+                           psd_srgb: bool = False,
                            transparent_background: bool = False) -> dict:
         """Apply GPU merge/blend operation.
 
@@ -2647,6 +2679,7 @@ class BaseEvaluatorMixin:
         self._set_uniform_if_present(prog, 'u_mask_channel', int(mask_channel))
         self._set_uniform_if_present(prog, 'u_mask_invert', bool(mask_invert))
         self._set_uniform_if_present(prog, 'u_layer_composite', layer_composite)
+        self._set_uniform_if_present(prog, 'u_psd_srgb', psd_srgb)
         self._set_uniform_if_present(prog, 'u_transparent_background', transparent_background)
         self._set_uniform_if_present(
             prog, 'u_mask_straight', has_mask and input_mask.alpha_premultiplied is False)

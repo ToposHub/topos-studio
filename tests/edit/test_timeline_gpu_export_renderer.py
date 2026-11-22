@@ -394,10 +394,10 @@ def test_gpu_single_layer_zero_blend_uses_planar_fast_path(
     assert len(requests) == 1
 
 
-def test_gpu_packed_rgb24_uses_bgr_renderer_input(
+def test_gpu_packed_rgb24_keeps_decoder_channel_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """FFmpeg master RGB24 frames must reach GPU packed rendering as BGR."""
+    """OpenGL uploads the decoder's original RGB24 frame without a host copy."""
     import src.features.edit.core.timeline_gpu_export_renderer as renderer_module
 
     rgb = np.empty((64, 96, 3), dtype=np.uint8)
@@ -428,7 +428,7 @@ def test_gpu_packed_rgb24_uses_bgr_renderer_input(
         crop=(), track_index=0,
         clip=SimpleNamespace(effects=(), color_stack_id=None),
     )
-    received: list[np.ndarray] = []
+    received: list[Any] = []
 
     class _FakeRenderer:
         failed = False
@@ -438,9 +438,9 @@ def test_gpu_packed_rgb24_uses_bgr_renderer_input(
             raise AssertionError("packed input must use render_packed_bgr")
 
         def render_packed_bgr(
-            self, frame_bgr: np.ndarray, *args: Any, **kwargs: Any,
+            self, frame: Any, *args: Any, **kwargs: Any,
         ) -> np.ndarray:
-            received.append(frame_bgr)
+            received.append(frame)
             return np.zeros((64, 96, 3), dtype=np.uint8)
 
         def render_layer_stack(self, *args: Any, **kwargs: Any) -> None:
@@ -456,8 +456,8 @@ def test_gpu_packed_rgb24_uses_bgr_renderer_input(
     assert result is not None
     assert len(requests) == 1
     assert len(received) == 1
-    assert received[0].flags.c_contiguous
-    np.testing.assert_array_equal(received[0][0, 0], (20, 80, 240))
+    assert isinstance(received[0], renderer_module.GpuRgbSource)
+    assert received[0].data is rgb
     assert "c1" not in exporter._gpu_ineligible_clip_ids
 
 
@@ -719,6 +719,35 @@ def test_pipeline_releases_gpu_renderer_on_producer_thread():
     assert released_threads[0] != threading.get_ident(), (
         "GPU 渲染器不得在导出（消费）线程释放"
     )
+
+
+def test_packed_export_read_ahead_stops_at_cut() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    exporter = _make_exporter()
+    first = SimpleNamespace(clip_id="a", source_frame=25)
+    next_layer = SimpleNamespace(clip_id="a", source_frame=26)
+    after_cut = SimpleNamespace(clip_id="b", source_frame=275)
+    sequence = [first, next_layer, after_cut]
+    exporter._render_plan = SimpleNamespace(get_frame_plan=lambda i: SimpleNamespace(
+        layers=(sequence[i],), transitions=(),
+    ))
+    requests = []
+
+    def prefetch(clip_id: str, start: int, end: int, quality: str) -> None:
+        requests.append((clip_id, start, end, quality))
+
+    exporter._frame_provider = SimpleNamespace(prefetch=prefetch)
+    exporter._open_clips = {"a": "provider-a"}
+    exporter._export_read_ahead_pending = None
+    exporter._export_read_ahead_end = 3
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        exporter._export_read_ahead = worker
+        exporter._prefetch_next_export_frame(first, 0, "a")
+        exporter._export_read_ahead_pending.result()
+        exporter._prefetch_next_export_frame(next_layer, 1, "a")
+        assert exporter._export_read_ahead_pending is None
+    assert requests == [("provider-a", 26, 26, "master")]
 
 
 # ---------------------------------------------------------------------------

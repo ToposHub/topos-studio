@@ -1,0 +1,20 @@
+[
+  {
+    "file": "4K_H264.mov",
+    "frames": 400,
+    "wall_s": 1.3498424199933652,
+    "fps": 296.3308857947775,
+    "hardware_acceleration": false,
+    "threads": 8,
+    "scope": "Sequential decode first 400 source frames to null"
+  },
+  {
+    "file": "4K_DNxHR HQX 10bit.mov",
+    "frames": 400,
+    "wall_s": 3.1935833700117655,
+    "fps": 125.25115322056752,
+    "hardware_acceleration": false,
+    "threads": 8,
+    "scope": "Sequential decode first 400 source frames to null"
+  }
+]

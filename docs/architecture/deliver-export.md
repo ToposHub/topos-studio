@@ -267,6 +267,13 @@ fallback 根因（first-wins）；`full_gpu` 唯一判据是必经阶段（decod
 encode_submit）全部 GPU/硬件词表、encode 为硬件编码器、零像素 upload/
 download——CPU 编码面绝不虚报 GPU。
 
+Edit 与 Deliver 的 OpenGL 调色共用 `ColorGraphTextureRenderer`。`LUT`
+纹理按解析后的文件身份缓存，缓存淘汰和关闭均在属主 GL 线程释放。
+图输出的纹理租约保留到同一输出键再次发布，允许转场两侧独立持有。
+只有满足条件的单 Corrector 图会省略输入和输出两次同尺寸复制。
+OpenGL 直接上传 FFmpeg 的 RGB8 帧，并可在当前帧渲染期间预取同一剪辑的
+下一帧。停止时等待预取完成后再关闭媒体会话。
+
 ### 3.3 Topos 直通交付（T-P1-10 快路径）
 
 单一 TOPOS clip → TOPOS 输出时，`build_direct_topos_delivery_plan` 严格
@@ -278,6 +285,11 @@ RAW→RAW（`topos_cfa*` 源）透传源 TRWM as-shot 元数据。帧循环按�
 DIRECT_PIPELINE=1/0` 强制覆盖。telemetry 标记 `delivery_path=topos_direct_
 planar_cpu_encode`（诚实标注 CPU 编码面）。取消统一 `encoder.abort()`，
 不留目标文件或 `.topos-tmp` 残留。
+
+同一支逐帧对齐的 DNxHR HQX 10-bit MOV 素材可以按剪辑区间直接复用压缩包。
+条件包括原分辨率、原帧率、限幅 BT.709、无音轨交付及无像素改动。每个包的
+类型与源时间戳均在写出前检查，输出重新编号并在封装成功后原子发布。
+不符合条件则走现有渲染和编码，成功复用的遥测记录为 `dnxhr_packet_copy`。
 
 ### 3.4 音频与字幕
 

@@ -92,6 +92,7 @@ class LayerStackValidator:
         self._check_output(stack, report)
         self._check_merge_ports(stack, report)
         self._check_layer_fields(stack, layers, report)
+        self._check_shared_source_ranges(stack, layers, report)
         self._check_acyclic_chain(stack, layers, report)
         return report
 
@@ -334,6 +335,36 @@ class LayerStackValidator:
                     message=(f"Layer {lid!r} in_frame {layer.in_frame} > "
                              f"out_frame {layer.out_frame}."),
                     layer_id=lid, stack_id=stack.stack_id))
+
+    def _check_shared_source_ranges(self, stack: LayerStack,
+                                    layers: Dict[str, Layer],
+                                    report: ValidationReport) -> None:
+        """B03: one read node cannot serve two layers at different times.
+
+        Frame overrides and layer gates intersect on the shared source, so
+        both layers lose frames.  The conflict is surfaced (warning) so the
+        host can offer an independent read node per layer — same asset id,
+        shared decode cache.
+        """
+        claims: Dict[str, List[Layer]] = {}
+        for lid in stack.layer_ids:
+            layer = layers.get(lid)
+            if layer is None or not layer.source_node_id:
+                continue
+            claims.setdefault(layer.source_node_id, []).append(layer)
+        for source_id, claimed in claims.items():
+            if len(claimed) < 2:
+                continue
+            ranges = {(layer.in_frame, layer.out_frame) for layer in claimed}
+            if len(ranges) <= 1:
+                continue
+            names = ", ".join(repr(layer.layer_id) for layer in claimed)
+            report.issues.append(ValidationIssue(
+                severity=SEVERITY_WARNING, code="shared_source_range",
+                message=(f"Source node {source_id!r} is claimed by layers "
+                         f"{names} with different time ranges; give each "
+                         f"layer its own read node over the same asset."),
+                node_id=source_id, stack_id=stack.stack_id))
 
     def _check_acyclic_chain(self, stack: LayerStack,
                              layers: Dict[str, Layer],

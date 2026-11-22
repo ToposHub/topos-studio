@@ -97,6 +97,7 @@ from enum import Enum, auto
 from typing import Optional, Dict, Tuple, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from src.shared.media.presentation_time import PresentationIndex
     from src.shared.media.frame import DecodedFrame
     from src.shared.video.frame_provider_service import (
         VideoFrameProviderService,
@@ -360,6 +361,7 @@ class VideoContext:
         # 异步帧就绪回调：VideoFrameNode 后台解码完成当前帧后通过它通知
         # 页面重新求值（合成页注册 Qt 信号 emit，跨线程经队列连接回到 UI 线程）。
         self._frame_ready_handler: Optional[Callable[[], None]] = None
+        self._presentation_revision = 0
 
         logger.debug("VideoContext initialized")
 
@@ -367,6 +369,17 @@ class VideoContext:
         """注册/注销异步帧就绪回调（合成页在初始化时注册）。"""
         with self._lock:
             self._frame_ready_handler = handler
+
+    @property
+    def presentation_revision(self) -> int:
+        with self._lock:
+            return self._presentation_revision
+
+    def notify_presentation_index_ready(self) -> None:
+        """Invalidate source-range projection as well as the current frame."""
+        with self._lock:
+            self._presentation_revision += 1
+        self.notify_frame_ready()
 
     def clear_frame_ready_handler(self, handler: Callable[[], None]) -> None:
         """注销帧就绪回调（仅当仍指向 handler 时）。
@@ -426,7 +439,9 @@ class VideoContext:
     def open_clip(
         self,
         path: str,
-        node_id: str
+        node_id: str,
+        *,
+        presentation_index: Optional[PresentationIndex] = None,
     ) -> str:
         """
         打开视频剪辑（节点调用）。
@@ -441,7 +456,8 @@ class VideoContext:
         Note:
             多个节点引用同一文件共享 clip_id
         """
-        clip_id = self._service.open_clip(path)
+        clip_id = (self._service.open_clip(path, presentation_index=presentation_index)
+                   if presentation_index is not None else self._service.open_clip(path))
 
         with self._lock:
             self._node_clips[node_id] = clip_id

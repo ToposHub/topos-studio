@@ -1,23 +1,23 @@
 {
- "commit": "4be53aac93f1d16ca0ef5b3795cefec02bbf3f6c",
+ "commit": "7c59acae57644adb79aa10364be31a6e7bc151e7",
  "video": "2K_h264.mp4",
  "frames": 5,
  "gpu_path_ms_per_frame": [
-  417.57,
-  115.14,
-  128.49,
-  156.71,
-  153.31
+  408.03,
+  147.35,
+  136.35,
+  163.78,
+  151.88
  ],
  "cpu_path_ms_per_frame": [
-  542.17,
-  250.99,
-  237.87,
-  264.34,
-  292.58
+  528.24,
+  276.82,
+  243.8,
+  256.68,
+  261.2
  ],
- "gpu_path_p50_ms": 153.31,
- "cpu_path_p50_ms": 264.34,
+ "gpu_path_p50_ms": 151.88,
+ "cpu_path_p50_ms": 261.2,
  "fullframe_rgba_readbacks_gpu_path": 0,
  "path_agreement": {
   "worst_abs_code_diff": 0,

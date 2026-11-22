@@ -26,7 +26,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytest
 
 from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QFocusEvent, QKeyEvent
+from PyQt6.QtGui import QFocusEvent, QKeyEvent, QTextCursor
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from src.features.composite.ui.graph_expression_editor import (
@@ -42,6 +43,23 @@ def editor(qapp):
     e = GraphExpressionEditor()
     e.resize(400, 120)
     return e
+
+
+def test_symbol_completion_replaces_word_without_early_commit(editor, qapp):
+    editor.set_target("n1", "rotation", expression="wig")
+    editor.show()
+    field = editor._text_edit
+    field.setFocus()
+    field.moveCursor(QTextCursor.MoveOperation.End)
+    commits = []
+    editor.expression_committed.connect(lambda *args: commits.append(args))
+    QTest.keyClick(field, Qt.Key.Key_Space, Qt.KeyboardModifier.ControlModifier)
+    assert field._completer.completionPrefix() == "wig"
+    assert field._completer.currentCompletion() == "wiggle"
+    QTest.keyClick(field, Qt.Key.Key_Return)
+    assert editor.current_text() == "wiggle()"
+    assert field.textCursor().position() == len("wiggle(")
+    assert commits == []
 
 
 # ── target binding ────────────────────────────────────────────────────

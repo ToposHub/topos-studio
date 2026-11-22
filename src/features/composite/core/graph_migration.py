@@ -75,7 +75,7 @@ import copy
 from typing import Any, Dict, List
 
 # Current schema version — bump this when adding new fields/nodes
-COMPOSITE_SCHEMA_VERSION = 11
+COMPOSITE_SCHEMA_VERSION = 12
 
 
 # ── Per-node parameter defaults for v2 ──
@@ -874,6 +874,28 @@ def migrate_v10_to_v11(graph_data: dict) -> dict:
     return graph_data
 
 
+def migrate_v11_to_v12(graph_data: dict) -> dict:
+    """Migrate v11 → v12: composition-owned ``markers`` (B04).
+
+    Additive: pre-v12 graphs carry no ``markers`` key and load as an empty
+    marker map.  The step only normalises the shape — malformed entries are
+    dropped and duplicate ids keep the first occurrence — so a corrupt file
+    cannot break project load.
+    """
+    graph_data = copy.deepcopy(graph_data)
+
+    raw = graph_data.get("markers")
+    if raw is None:
+        return graph_data
+    from src.features.composite.core.composite_markers import parse_markers
+    markers = parse_markers(raw)
+    if markers:
+        graph_data["markers"] = [m.to_dict() for m in markers.values()]
+    else:
+        graph_data.pop("markers", None)
+    return graph_data
+
+
 # ── Migration chain ──
 
 _MIGRATIONS = {
@@ -887,6 +909,7 @@ _MIGRATIONS = {
     8: migrate_v8_to_v9,
     9: migrate_v9_to_v10,
     10: migrate_v10_to_v11,
+    11: migrate_v11_to_v12,
 }
 
 

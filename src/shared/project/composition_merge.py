@@ -35,6 +35,7 @@ GRAPH_OWNED_KEYS: tuple[str, ...] = (
     "duration_frames",
     "layers",
     "layer_stacks",
+    "markers",
 )
 
 

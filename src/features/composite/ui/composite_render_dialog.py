@@ -136,6 +136,7 @@ class CompositeRenderDialog(QDialog):
         fps: float = 24.0,
         available_render_passes: Optional[tuple[str, ...]] = None,
         parallel_frames_default: int = 2,
+        has_composition_audio: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(
@@ -144,6 +145,7 @@ class CompositeRenderDialog(QDialog):
         self.setMinimumWidth(540)
 
         self._mode = mode
+        self._has_composition_audio = has_composition_audio
         self._default_dir = default_dir or os.path.expanduser("~")
         self._default_name = default_name
         self._width, self._height = resolution
@@ -402,6 +404,12 @@ class CompositeRenderDialog(QDialog):
         apply_combo_dropdown_style(self.sequence_format_combo)
         seq_row.addWidget(self.sequence_format_combo, 1)
         self._seqfmt_row_holder = self._wrap_row(seq_row, layout)
+        self._sequence_audio_note = QLabel(I18N.tr(
+            "composite.render_output.sequence_audio_note",
+            "Image sequences contain frames only. Choose Video File to include audio.",
+        ))
+        self._sequence_audio_note.setWordWrap(True)
+        layout.addWidget(self._sequence_audio_note)
 
         # Wire radio toggle
         self.radio_video.toggled.connect(self._on_video_type_changed)
@@ -584,6 +592,7 @@ class CompositeRenderDialog(QDialog):
         self._update_video_quality_visibility()
         # Image-sequence-only rows
         self._seqfmt_row_holder.setVisible(not is_video)
+        self._sequence_audio_note.setVisible(not is_video and self._has_composition_audio)
 
     def _codec_supports_crf(self, codec_key: str) -> bool:
         for key, _label, _ext, supports_crf in _VIDEO_CODECS:

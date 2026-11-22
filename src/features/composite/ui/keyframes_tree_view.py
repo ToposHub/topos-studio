@@ -25,10 +25,10 @@ import sys
 from typing import Callable, Dict, Optional, Tuple
 
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF, QRectF, QEvent, QSignalBlocker
-from PyQt6.QtGui import QColor, QDropEvent, QPainter, QPen
+from PyQt6.QtGui import QColor, QDropEvent, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMenu, QPushButton, QSpinBox, QWidget,
+    QMenu, QPushButton, QSpinBox, QToolButton, QWidget,
 )
 
 from src.features.composite.core.media_drop_payload import accepts_layer_media_drop
@@ -38,28 +38,13 @@ from src.shared.ui.style_sheet import C
 from . import timeline_layout
 from . import timeline_icons
 from .keyframes_model import KEYFRAMES_ROW_H, KeyframesModel, KeyframesRow
+from .scale_link import ScaleLinkState
 
 logger = logging.getLogger(__name__)
 
 
 _ROW_H = KEYFRAMES_ROW_H
 _KEYFRAME_EDITOR_H = 34
-# Header column labels (plan §16.4 — short caps so they fit 22 px columns).
-# Hidden when the column's resolved width is too small to read the glyph.
-_HEADER_LABELS: Dict[str, str] = {
-    "eye": "",
-    "solo": "",
-    "lock": "",
-    "shy": "",
-    "label": "",
-    "index": "#",
-    "name": "Name",
-    "keyframe": "",
-    "value": "Value",
-    "bind": "",
-    "expr": "",
-}
-
 
 class _BindingDragOverlay(QWidget):
     """Top-most, mouse-transparent layer for AE pick-whip feedback.
@@ -94,6 +79,10 @@ class KeyframesTreeView(QWidget):
     layer_selected = pyqtSignal(str)
     layer_disclosure_requested = pyqtSignal(str)
     layer_menu_requested = pyqtSignal(str, QPoint)
+    dimension_toggle_requested = pyqtSignal(str)
+    layer_shy_changed = pyqtSignal(str, bool)
+    layer_motion_blur_changed = pyqtSignal(str, bool)
+    empty_layer_menu_requested = pyqtSignal(QPoint)
     layer_name_edited = pyqtSignal(str, str)
     layer_parent_menu_requested = pyqtSignal(str, QPoint)
     # Emitted when the user clicks a param row.
@@ -161,7 +150,7 @@ class KeyframesTreeView(QWidget):
         # Standalone tree users can keep the default zero-height header.
         self._header_height = max(0, int(header_height))
         self._header_time_display: Optional[QWidget] = None
-        self._header_range_label: Optional[QWidget] = None
+        self._header_tools: Optional[QWidget] = None
         # P5/T49: optional provider (node_id, param_name) -> ExpressionStatus.
         # The host (KeyframesPanel) installs this so the tree can paint the
         # 4-state expression marker without holding a reference to the graph.
@@ -195,6 +184,9 @@ class KeyframesTreeView(QWidget):
         self._value_control_provider: Optional[
             Callable[[str, str], Optional[Dict[str, object]]]] = None
         self._value_controls: Dict[Tuple[str, str], DragValue] = {}
+        self._value_left_by_row: dict[tuple[str | None, str], int] = {}
+        self._scale_link_state = ScaleLinkState(self)
+        self._scale_buttons: dict[str, QToolButton] = {}
         # Keep enough room for the AE switch strip plus a readable Name
         # column. The compact resolver still handles standalone 180–239 px
         # test widgets without painting outside their bounds.
@@ -324,42 +316,24 @@ class KeyframesTreeView(QWidget):
         self._position_header_time_display()
         self.refresh()
 
-    def set_header_range_label(self, label: Optional[QWidget]) -> None:
-        """Place the compact Frames/In-Out summary beside the time display."""
-        if self._header_range_label is not None:
-            self._header_range_label.hide()
-        self._header_range_label = label
-        if label is not None:
-            label.setParent(self)
-            label.show()
+    def set_header_tools(self, tools: QWidget) -> None:
+        """Place the timeline controls beside the time readout."""
+        self._header_tools = tools
         self._position_header_time_display()
-        self.update()
 
     def _position_header_time_display(self) -> None:
         display = self._header_time_display
         if display is None or not self._header_height:
             return
-        geom = self._column_geometry()
-        if self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
-            display.setGeometry(4, 0, min(264, max(0, self.width() - 8)), self._header_height)
-            display.show()
-            return
-        name_x0, _ = geom.get("name", (0, 0))
-        _, value_x1 = geom.get("value", (name_x0, name_x0))
-        span_width = max(0, value_x1 - name_x0)
-        display_width = min(display.width(), max(0, span_width - 8))
-        if display_width <= 0:
-            display.hide()
-            return
-        x = name_x0 + max(4, (span_width - display_width) // 2)
-        display.setGeometry(x, 0, display_width, self._header_height)
+        width = max(0, self.width() - 8)
+        tools = self._header_tools
+        if tools is not None:
+            width = min(width, timeline_layout.LAYER_HEADER_TIMECODE_WIDTH)
+            tools_x = 4 + width
+            tools.setGeometry(tools_x, 0, max(0, self.width() - tools_x - 4),
+                              self._header_height - 1)
+        display.setGeometry(4, 0, width, self._header_height - 1)
         display.show()
-        label = self._header_range_label
-        if label is not None:
-            label_x = x + display_width + 2
-            label_width = max(0, name_x0 + span_width - label_x - 4)
-            label.setGeometry(label_x, 0, label_width, self._header_height)
-            label.setVisible(label_width >= 24)
 
     def open_keyframe_editor(self, node_id: str, param_name: str,
                              frame: int, value: float,
@@ -494,6 +468,32 @@ class KeyframesTreeView(QWidget):
         self._position_layer_name_editor()
         self.update()
 
+    def sync_parameter_values(self, node_id: str, param_names: tuple[str, ...]) -> None:
+        """Refresh existing controls, reflowing the row when a value needs more space."""
+        if "pivot_mode" in param_names:
+            self._sync_value_controls()
+            self.update()
+            return
+        provider = self._value_control_provider
+        if provider is not None:
+            for param_name in param_names:
+                control = self._value_controls.get((node_id, param_name))
+                if control is None:
+                    continue
+                meta = provider(node_id, param_name)
+                if meta is not None:
+                    factor, _ = self._value_units(param_name)
+                    slot_width = control.width() + 6
+                    text_width = self._numeric_slot_width(param_name, meta)
+                    previous_width = self._numeric_slot_width(
+                        param_name, dict(meta, value=control.value() / factor))
+                    if text_width > slot_width or previous_width >= slot_width > text_width:
+                        self._sync_value_controls()
+                        break
+                    with QSignalBlocker(control):
+                        control.setValue(float(meta["value"]) * factor)
+        self.update()
+
     def set_vertical_scroll(self, value: int) -> None:
         if value != self._scroll_y:
             self._scroll_y = value
@@ -609,17 +609,23 @@ class KeyframesTreeView(QWidget):
     def _sync_value_controls(self) -> None:
         """Create and place shared DragValue controls over visible rows."""
         provider = self._value_control_provider
+        self._value_left_by_row.clear()
         if provider is None:
+            for button in self._scale_buttons.values():
+                button.hide()
             for control in self._value_controls.values():
                 control.hide()
             self._binding_drag_overlay.raise_()
             return
 
         visible_keys: set[Tuple[str, str]] = set()
+        visible_scale_links: set[str] = set()
         geom = self._column_geometry()
         value_x0, value_x1 = geom.get("value", (0, 0))
         cell_w = value_x1 - value_x0
         if cell_w < 16:
+            for button in self._scale_buttons.values():
+                button.hide()
             for control in self._value_controls.values():
                 control.hide()
             self._binding_drag_overlay.raise_()
@@ -632,8 +638,15 @@ class KeyframesTreeView(QWidget):
             params = (row.param_name,) if row.param_name else ()
             if row.row_type == "group" and not row.expanded and cell_w >= 68:
                 params = row.component_params
-            for i, param_name in enumerate(params):
-                slot_width = cell_w // len(params)
+            if not params:
+                continue
+            scale = (row.node_id not in visible_scale_links
+                     and (params == ("scale_x", "scale_y")
+                          or (row.param_name in ("scale_x", "scale_y")
+                              and self._model.dimension_group(row) is not None)))
+            cells = []
+            right = geom["bind"][1] if len(params) > 1 else value_x1
+            for param_name in params:
                 key = (row.node_id, param_name)
                 if key in visible_keys:
                     continue
@@ -641,9 +654,30 @@ class KeyframesTreeView(QWidget):
                     meta = provider(*key)
                 except (AttributeError, KeyError, TypeError, ValueError):
                     continue
-                if self._place_value_control(key, meta, value_x0 + i * slot_width,
-                                             y, slot_width, row.locked):
+                if meta is not None:
+                    minimum = max(44, cell_w) if len(params) == 1 else 44
+                    cells.append((key, meta, max(minimum, self._numeric_slot_width(param_name, meta))))
+            if not cells:
+                continue
+            left = right - sum(width for _, _, width in cells) - (20 if scale else 0)
+            self._value_left_by_row[(row.layer_id, row.row_id)] = left
+            x = left
+            if scale:
+                visible_scale_links.add(row.node_id)
+                button = self._scale_buttons.get(row.node_id)
+                if button is None:
+                    button = self._scale_link_state.make_button(row.node_id)
+                    button.setParent(self)
+                    button.setObjectName("KeyframesScaleLink")
+                    self._scale_buttons[row.node_id] = button
+                button.move(x, y + (_ROW_H - button.height()) // 2)
+                button.setEnabled(not row.locked)
+                button.show()
+                x += 20
+            for key, meta, width in cells:
+                if self._place_value_control(key, meta, x, y, width, row.locked):
                     visible_keys.add(key)
+                x += width
 
         # AUD-10305: rows that scrolled out of view used to keep their
         # DragValue child alive forever — controls accumulated without bound
@@ -654,9 +688,36 @@ class KeyframesTreeView(QWidget):
             control = self._value_controls.pop(key)
             control.hide()
             control.deleteLater()
+        for node_id in self._scale_buttons.keys() - visible_scale_links:
+            button = self._scale_buttons.pop(node_id)
+            button.hide()
+            button.deleteLater()
         # New value controls are shown after the overlay was constructed;
         # restore the intended stacking order after every sync.
         self._binding_drag_overlay.raise_()
+
+    def set_scale_link_state(self, state: ScaleLinkState) -> None:
+        self._scale_link_state = state
+        for button in self._scale_buttons.values():
+            button.hide()
+            button.deleteLater()
+        self._scale_buttons.clear()
+        self._sync_value_controls()
+
+    def scale_is_linked(self, node_id: str) -> bool:
+        """The proportional edit applies to the combined scale row."""
+        button = self._scale_buttons.get(node_id)
+        return button is not None and not button.isHidden() and button.isChecked()
+
+    def _numeric_slot_width(self, param_name: str, meta: Dict[str, object]) -> int:
+        factor, suffix = self._value_units(param_name)
+        decimals = 1 if factor != 1.0 else int(meta.get("decimals", 2))
+        number = float(meta.get("value", 0.0)) * factor
+        font = self.font()
+        font.setPixelSize(11)
+        font.setBold(False)
+        metrics = QFontMetrics(font)
+        return metrics.horizontalAdvance(f"{number:.{decimals}f}{suffix}") + 12
 
     def _place_value_control(self, key: Tuple[str, str], meta: Optional[Dict[str, object]],
                              x: int, y: int, width: int, locked: bool) -> bool:
@@ -698,15 +759,13 @@ class KeyframesTreeView(QWidget):
             control.setValue(value)
         cell_width = max(1, width - 6)
         control.setAccessibleName(key[1])
-        control.setEnabled(not locked)
+        control.setEnabled(not locked and not bool(meta.get("read_only")))
         control.setFixedValueWidth(cell_width)
         control.setGeometry(x + 3, y, cell_width, _ROW_H)
         control.show()
         return True
 
     def _value_units(self, param_name: str) -> Tuple[float, str]:
-        if self._model.view_mode != KeyframesModel.VIEW_MODE_LAYERS:
-            return 1.0, ""
         if param_name in ("scale_x", "scale_y", "opacity"):
             return 100.0, "%"
         return 1.0, "°" if param_name == "rotation" else ""
@@ -716,11 +775,11 @@ class KeyframesTreeView(QWidget):
         """Render Keyframes values as AE-style text instead of input wells."""
         control._value_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        control._value_label.setStyleSheet(
-            f"QLabel {{ color: {timeline_layout.resolve_token('text_label')};"
-            " font-size: 10px; font-weight: normal;"
-            " background: transparent; border: none; padding: 0px; }"
-            f"QLabel:hover {{ color: {timeline_layout.resolve_token('text_primary')}; }}")
+        css = "font-size: 10px; font-weight: normal; background: transparent; border: none; padding: 0px;"
+        normal = f"QLabel {{ color: {timeline_layout.resolve_token('text_label')}; {css} }}"
+        active = f"QLabel {{ color: {timeline_layout.resolve_token('text_primary')}; {css} }}"
+        disabled = f"QLabel {{ color: {timeline_layout.resolve_token('text_hint')}; {css} }}"
+        control.set_value_styles(normal, active, disabled)
         control._edit.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         control._edit.setStyleSheet(
@@ -763,14 +822,26 @@ class KeyframesTreeView(QWidget):
         ``timeline_layout.LEFT_COLUMNS``. Cached for one paint cycle; callers
         must not retain it across resizes.
         """
-        widths = timeline_layout.left_column_widths(
-            max(0, self.width()), layers_mode=self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS)
-        geom: Dict[str, Tuple[int, int]] = {}
-        x = 0
-        for col in timeline_layout.LEFT_COLUMNS:
-            w = widths[col.name]
-            geom[col.name] = (x, x + w)
-            x += w
+        return {name: (left, right) for name, left, right in timeline_layout.column_x_offsets(
+            self.width())}
+
+    def _row_geometry(self, row: KeyframesRow,
+                      columns: Dict[str, Tuple[int, int]]) -> Dict[str, Tuple[int, int]]:
+        """Allocate each row's name and controls within the shared columns."""
+        if not row.depth:
+            if row.row_type == "node":
+                return {**columns, "name": (columns["name"][0], columns["bind"][0])}
+            return columns
+        geom = dict(columns)
+        left = 23
+        right = geom["value"][0]
+        right = min(right, self._value_left_by_row.get((row.layer_id, row.row_id), right))
+        if row.row_type == "param" or row.component_params:
+            left += self._row_indent(row)
+            key_end = min(left + 20, right)
+            geom["keyframe"] = (min(left, key_end), key_end)
+            left = key_end
+        geom["name"] = (left, right)
         return geom
 
     # ── painting ──
@@ -790,7 +861,7 @@ class KeyframesTreeView(QWidget):
         # when the host reserved a header band (the panel always does; the
         # standalone tree in unit tests can pass header_height=0).
         if self._header_height:
-            self._draw_header(p, geom)
+            self._draw_header(p)
 
         rows = self._model.visible_rows()
         if not rows:
@@ -802,7 +873,7 @@ class KeyframesTreeView(QWidget):
             y = self._header_height + i * _ROW_H - self._scroll_y
             if y + _ROW_H < 0 or y > h:
                 continue
-            self._draw_row(p, row, y, w, geom)
+            self._draw_row(p, row, y, w, self._row_geometry(row, geom))
 
         # AE-style media-drop insertion line (plan §5.2).  Drawn last so it
         # sits above row content; harmless no-op when no drop is in flight.
@@ -868,41 +939,10 @@ class KeyframesTreeView(QWidget):
             overlay.raise_()
         overlay.update()
 
-    def _draw_header(self, p: QPainter,
-                     geom: Dict[str, Tuple[int, int]]) -> None:
-        """Paint the column-header band above the rows (plan §16.4)."""
+    def _draw_header(self, p: QPainter) -> None:
         h = self._header_height
         w = self.width()
-        p.fillRect(0, 0, w, h, QColor(timeline_layout.resolve_token(
-            "header_bg")))
-        # Per-column labels. Skip the toggle columns (eye/solo/lock/shy/label/
-        # expr) — those have no text header in AE; their meaning is conveyed
-        # by the glyphs painted on each row. Name/Value/Index get short caps.
-        p.setPen(QPen(QColor(timeline_layout.resolve_token("text_hint"))))
-        font = p.font()
-        font.setPointSize(8)
-        font.setBold(False)
-        p.setFont(font)
-        layers_mode = self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
-        replaceable_headers = {"name"} if layers_mode else {"name", "value"}
-        for name, label in _HEADER_LABELS.items():
-            if self._header_time_display is not None and name in replaceable_headers:
-                continue
-            if not label or name not in geom:
-                continue
-            x0, x1 = geom[name]
-            if (layers_mode and self._header_time_display is not None
-                    and x0 < self._header_time_display.geometry().right()):
-                continue
-            if x1 - x0 < 16:
-                continue  # column too narrow for a header glyph
-            if name in ("name", "value"):
-                label = I18N.tr(f"keyframes.col_{name}", label)
-            p.drawText(QRectF(x0, 0, x1 - x0, h),
-                       Qt.AlignmentFlag.AlignVCenter
-                       | Qt.AlignmentFlag.AlignHCenter
-                       | Qt.TextFlag.TextSingleLine,
-                       label)
+        p.fillRect(0, 0, w, h, QColor(C.TIMELINE_TIMECODE_BG))
         p.setPen(QPen(QColor(timeline_layout.resolve_token("grid_minor"))))
         p.drawLine(0, h - 1, w, h - 1)
 
@@ -911,8 +951,7 @@ class KeyframesTreeView(QWidget):
         rect_h = _ROW_H
         # Selection / hover background spans the full row (plan §3.4 — the
         # whole row carries the selection highlight, not just the name cell).
-        layers_mode = self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
-        if layers_mode and row.row_type == "group" and not row.component_params:
+        if row.row_type == "group" and not row.component_params:
             p.fillRect(0, y, w, rect_h, QColor(C.BG_ACTIVE))
         elif row.row_type in ("node", "layer"):
             p.fillRect(0, y, w, rect_h,
@@ -920,8 +959,7 @@ class KeyframesTreeView(QWidget):
         if row.selected:
             p.fillRect(0, y, w, rect_h,
                        QColor(timeline_layout.resolve_token("timeline_bg")))
-            if layers_mode:
-                p.fillRect(0, y, 2, rect_h, QColor(C.ORANGE))
+            p.fillRect(0, y, 2, rect_h, QColor(C.ORANGE))
         elif self._hover_row == id(row):
             p.fillRect(0, y, w, rect_h,
                        QColor(timeline_layout.resolve_token("grid_minor")))
@@ -937,21 +975,26 @@ class KeyframesTreeView(QWidget):
         # AE layer switches belong to the layer row, not every child
         # property. Repeating them on Translate X/Y/Scale/etc. made the old
         # panel look like the name text was colliding with a second layer.
-        if row.row_type == "layer" or (not layers_mode and row.row_type == "node"):
+        if row.row_type == "layer" or (row.row_type == "node" and not row.depth):
             self._draw_eye(p, geom, y, getattr(row, "layer_enabled", True))
             self._draw_solo(p, geom, y, getattr(row, "layer_solo", False))
             self._draw_lock(p, geom, y, row.locked)
-            self._draw_shy(p, geom, y, getattr(row, "layer_shy", False))
+            if row.row_type == "layer":
+                self._draw_layer_switch(p, geom["shy"], y, "shy", row.layer_shy,
+                                        not row.locked)
+                self._draw_layer_switch(p, geom["motion_blur"], y, "motion_blur",
+                                        bool(row.layer_motion_blur),
+                                        row.layer_motion_blur is not None and not row.locked)
 
             # Label column = node color swatch. Params inherit the node
             # color through their timeline track and need no second swatch.
             self._draw_color_swatch(p, geom, y, row.node_color)
-        if row.row_type == "layer":
+        if row.display_index is not None:
             x0, x1 = geom["index"]
             if x1 > x0:
                 p.setPen(QColor(timeline_layout.resolve_token("text_secondary")))
                 p.drawText(QRectF(x0, y, x1 - x0, rect_h), Qt.AlignmentFlag.AlignCenter,
-                           str(row.layer_index or ""))
+                           str(row.display_index or ""))
 
         # Name column: expand arrow (nodes) + label. Params indent inside the
         # name cell so they read as children (plan §3.3 "node params indent
@@ -1020,22 +1063,19 @@ class KeyframesTreeView(QWidget):
         # AUD-10307: 此处 solo 恒为 True（上方已提前返回），死分支收敛。
         timeline_icons.draw_icon(p, "solo", rect, "checked")
 
-    def _draw_shy(self, p: QPainter,
-                  geom: Dict[str, Tuple[int, int]],
-                  y: int, shy: bool) -> None:
-        x0, x1 = geom.get("shy", (0, 0))
-        if x1 - x0 < 16:
+    def _draw_layer_switch(self, p: QPainter, span: Tuple[int, int], y: int,
+                           icon: str, active: bool, enabled: bool) -> None:
+        x0, x1 = span
+        if x1 - x0 < 14:
             return
-        cx = (x0 + x1) / 2
-        cy = y + _ROW_H / 2
-        icon_w = min(x1 - x0 - 4, _ROW_H - 6)
-        rect = QRectF(cx - icon_w / 2, cy - icon_w / 2, icon_w, icon_w)
-        if not shy:
-            return
-        # Shy ("hide unanimated in filters") is a distinct glyph so it isn't
-        # confused with eye (visibility).
-        # AUD-10307: 此处 shy 恒为 True（上方已提前返回），死分支收敛。
-        timeline_icons.draw_icon(p, "collapse", rect, "checked")
+        size = min(14, x1 - x0 - 2)
+        rect = QRectF((x0 + x1 - size) / 2, y + (_ROW_H - size) / 2, size, size)
+        state = "disabled" if not enabled else "checked" if active else "normal"
+        p.save()
+        if not active or not enabled:
+            p.setOpacity(.6)
+        timeline_icons.draw_icon(p, icon, rect, state)
+        p.restore()
 
     def _draw_lock(self, p: QPainter,
                    geom: Dict[str, Tuple[int, int]],
@@ -1081,7 +1121,8 @@ class KeyframesTreeView(QWidget):
 
         # Expand arrow for node/layer rows stays inside the Name cell. It must never
         # be drawn at a legacy fixed x because the switch strip is resizable.
-        if row.row_type in ("node", "layer", "group"):
+        inline = row.row_type == "param" or bool(row.component_params)
+        if row.row_type in ("node", "layer", "group") and not inline:
             glyph = "disclosure_down" if row.expanded else "disclosure_right"
             start = x0 + 4 + self._row_indent(row)
             if start + 12 <= x1:
@@ -1089,7 +1130,7 @@ class KeyframesTreeView(QWidget):
 
         # Indent within the resolved Name cell. All text is clipped/elided to
         # the cell's right edge, so it can never run into Value or Expr.
-        label_x = x0 + 22 + self._row_indent(row)
+        label_x = x0 + 3 if inline else x0 + 22 + self._row_indent(row)
         if row.row_type in ("node", "group"):
             text_token = "text_secondary"
             font_pt = 10 if row.row_type == "group" or not row.depth else 9
@@ -1133,8 +1174,7 @@ class KeyframesTreeView(QWidget):
                        relation_badge)
 
     def _row_indent(self, row) -> int:
-        step = 12 if self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS else 14
-        return max(0, int(getattr(row, "depth", 0))) * step
+        return max(0, int(getattr(row, "depth", 0))) * 8
 
     def _draw_value(self, p: QPainter,
                     geom: Dict[str, Tuple[int, int]],
@@ -1176,7 +1216,6 @@ class KeyframesTreeView(QWidget):
         x0, x1 = geom.get("keyframe", (0, 0))
         if x1 - x0 < 16:
             return
-        animated = False
         at_current = False
         provider = self._keyframe_status_provider
         if provider is not None:
@@ -1184,30 +1223,17 @@ class KeyframesTreeView(QWidget):
                 params = row.component_params or (row.param_name,)
                 status = [provider(row.node_id, param) for param in params]
                 if all(isinstance(item, dict) for item in status):
-                    animated = any(item.get("animated") for item in status)
-                    at_current = all(item.get("at_current") for item in status)
+                    at_current = any(item.get("at_current") for item in status)
                 elif len(status) == 1 and isinstance(status[0], tuple):
-                    animated, at_current = map(bool, status[0][:2])
+                    at_current = bool(status[0][1])
             except (AttributeError, IndexError, TypeError, ValueError):
                 pass
         icon_size = min(16.0, max(0.0, x1 - x0 - 4.0))
         rect = QRectF((x0 + x1 - icon_size) / 2.0,
                       y + (_ROW_H - icon_size) / 2.0,
                       icon_size, icon_size)
-        if self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS:
-            icon = "property_animation"
-            state = ("disabled" if row.locked else "selected" if at_current else
-                     "checked" if animated else "normal")
-        elif at_current:
-            icon, state = "diamond", "selected"
-        elif animated:
-            # An animated property away from the playhead remains a distinct
-            # blue filled diamond; the orange selected diamond is reserved for
-            # the keyframe exactly under the playhead.
-            icon, state = "diamond", "checked"
-        else:
-            icon, state = "diamond_plus", "normal"
-        timeline_icons.draw_icon(p, icon, rect, state)
+        timeline_icons.draw_property_keyframe(p, rect, at_current=at_current,
+                                              enabled=not row.locked)
 
     def _draw_binding_control(self, p: QPainter,
                               geom: Dict[str, Tuple[int, int]],
@@ -1231,7 +1257,7 @@ class KeyframesTreeView(QWidget):
         rect = QRectF((x0 + x1 - icon_size) / 2.0,
                       y + (_ROW_H - icon_size) / 2.0,
                       icon_size, icon_size)
-        timeline_icons.draw_icon(p, "link", rect,
+        timeline_icons.draw_icon(p, "pick_whip", rect,
                                  "checked" if bound else "normal")
 
     def _layer_parent_visible(self, row: KeyframesRow) -> bool:
@@ -1387,8 +1413,14 @@ class KeyframesTreeView(QWidget):
         row = rows[idx] if 0 <= idx < len(rows) else None
         new_hover = id(row) if row is not None else -1
         tooltip = row.relation_tooltip if row is not None else ""
+        geom = self._row_geometry(row, self._column_geometry()) if row is not None else {}
+        if row is not None and row.row_type == "layer":
+            if self._hit_column(geom, "shy", float(pos.x())):
+                tooltip = I18N.tr("keyframes.mark_layer_shy", "Mark layer to hide")
+            elif self._hit_column(geom, "motion_blur", float(pos.x())):
+                tooltip = I18N.tr("keyframes.layer_motion_blur", "Layer motion blur")
         if row is not None and self._disclosure_hit(
-                row, self._column_geometry()["name"], float(pos.x()), recursive=True):
+                row, geom["name"], float(pos.x()), recursive=True):
             modifier = "Cmd" if sys.platform == "darwin" else "Ctrl"
             hint = I18N.tr(
                 "keyframes.recursive_disclosure",
@@ -1403,7 +1435,7 @@ class KeyframesTreeView(QWidget):
 
     def _disclosure_hit(self, row: KeyframesRow, name_span: Tuple[int, int], x: float,
                         *, recursive: bool = False) -> bool:
-        if row.row_type not in ("node", "layer", "group"):
+        if row.component_params or row.row_type not in ("node", "layer", "group"):
             return False
         x0, x1 = name_span
         if recursive and row.layer_id is None:
@@ -1428,7 +1460,7 @@ class KeyframesTreeView(QWidget):
 
         # Start a potential reorder only from the body of a Layer row. The
         # toggle columns below must retain their independent click behavior.
-        geom = self._column_geometry()
+        geom = self._row_geometry(row, self._column_geometry())
         # Qt reports Command as ControlModifier on macOS, and Control
         # as ControlModifier on the other desktop platforms.
         recursive = (row.layer_id is not None
@@ -1448,6 +1480,14 @@ class KeyframesTreeView(QWidget):
             return
 
         if row.row_type == "layer" and row.layer_id:
+            if self._hit_column(geom, "shy", x):
+                if not row.locked:
+                    self.layer_shy_changed.emit(row.layer_id, not row.layer_shy)
+                return
+            if self._hit_column(geom, "motion_blur", x):
+                if row.layer_motion_blur is not None and not row.locked:
+                    self.layer_motion_blur_changed.emit(row.layer_id, not row.layer_motion_blur)
+                return
             if self._layer_parent_visible(row) and self._hit_column(geom, "value", x):
                 if row.layer_managed and not row.locked:
                     bottom = (idx + 1) * _ROW_H + self._header_height - self._scroll_y
@@ -1465,9 +1505,10 @@ class KeyframesTreeView(QWidget):
         # AUD-10301: write the model's real field (``layer_enabled``).
         # The old code assigned a transient ``row.eye`` attribute that no
         # paint path or model rebuild ever read back.
-        has_switches = (row.row_type == "layer" or (row.row_type == "node"
-                        and self._model.view_mode == KeyframesModel.VIEW_MODE_NODES))
+        has_switches = row.row_type in ("node", "layer") and not row.depth
         if has_switches and self._hit_column(geom, "eye", x):
+            if row.locked and row.row_type == "node":
+                return
             new_val = not getattr(row, "layer_enabled", True)
             row.layer_enabled = new_val
             self.eye_changed.emit(row.node_id, new_val)
@@ -1490,6 +1531,8 @@ class KeyframesTreeView(QWidget):
         # is strictly the resolved Lock cell, so an Eye click can never also
         # toggle the lock because the two hit regions overlap.
         if has_switches and self._hit_column(geom, "lock", x):
+            if row.inherited_lock:
+                return
             row.locked = not row.locked
             self.lock_changed.emit(row.node_id, row.locked)
             self.update()
@@ -1740,9 +1783,19 @@ class KeyframesTreeView(QWidget):
         idx = self.row_at(int(event.pos().y()))
         rows = self._model.visible_rows()
         if not (0 <= idx < len(rows)):
+            if (self._model.view_mode == KeyframesModel.VIEW_MODE_LAYERS
+                    and event.pos().y() >= self._header_height):
+                self.empty_layer_menu_requested.emit(event.globalPos())
+                event.accept()
             return
         row = rows[idx]
         menu = QMenu(self)
+        vector = self._model.dimension_group(row)
+        if vector is not None:
+            label = (I18N.tr("keyframes.combine_dimensions", "Combine Dimensions")
+                     if vector.expanded else
+                     I18N.tr("keyframes.separate_dimensions", "Separate Dimensions"))
+            menu.addAction(label, lambda: self.dimension_toggle_requested.emit(vector.row_id))
         if row.row_type == "node":
             attach = menu.addAction(I18N.tr("keyframes.add_to_active_layer", "Add to Active Layer"))
             promote = menu.addAction(I18N.tr("keyframes.promote_to_layer", "Promote to Layer"))
@@ -1767,6 +1820,8 @@ class KeyframesTreeView(QWidget):
             return
         if row.row_type == "layer" and row.layer_id:
             self.layer_menu_requested.emit(row.layer_id, event.globalPos())
+        elif vector is not None:
+            menu.exec(event.globalPos())
 
     @staticmethod
     def _hit_column(geom: Dict[str, Tuple[int, int]],
@@ -1838,8 +1893,8 @@ class KeyframesTreeView(QWidget):
         row = rows[row_index]
         if row.row_type != "layer":
             return None, -1
-        # row.layer_index is 1-based foreground-first.
-        idx = max(0, (row.layer_index or 1) - 1)
+        # row.display_index is 1-based foreground-first.
+        idx = max(0, (row.display_index or 1) - 1)
         if not before:
             idx += 1
         return row.layer_id, idx

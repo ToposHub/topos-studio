@@ -39,6 +39,7 @@ import numpy as np
 
 from src.features.composite.core.graph_snapshot import GraphSnapshot
 from src.features.composite.core.node_engine import NodeGraph
+from .external_comp_snapshot import ExternalCompSnapshots
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 # 本身；渲染器实现（节点求值、shader、采样、混合语义）变化而图不变时，
 # 同键会命中旧实现渲染的缓存帧。任何改变像素输出的渲染器实现变更都
 # 必须递增此版本（导出帧级缓存 SegmentRenderKey.renderer_version 消费）。
-COMPOSITE_GRAPH_RENDERER_VERSION = "comp-graph-render-v1"
+COMPOSITE_GRAPH_RENDERER_VERSION = "comp-graph-render-v2"
 
 
 def _preview_render_mode():
@@ -89,6 +90,7 @@ class CompositeFrameRenderer:
         """
         # Internal CompositeExportRenderer (lazy-initialized)
         self._export_renderer: Any = None
+        self._external_export_snapshot: ExternalCompSnapshots | None = None
         self._config_manager = config_manager
         # T-P1-60：最近一次 render_comp_clip_frame 的节点级结构化诊断。
         self.last_diagnostics: list = []
@@ -672,6 +674,11 @@ class CompositeFrameRenderer:
         except Exception as e:
             logger.debug(f"Provider video session cleanup error: {e}")
 
+    def set_external_export_snapshot(self, references: ExternalCompSnapshots) -> None:
+        self._external_export_snapshot = references
+        if self._export_renderer is not None:
+            self._export_renderer.set_external_export_snapshot(references)
+
     def _get_export_renderer(self) -> Any:
         """Lazy-initialize and return the internal CompositeExportRenderer.
 
@@ -683,6 +690,8 @@ class CompositeFrameRenderer:
                 CompositeExportRenderer,
             )
             self._export_renderer = CompositeExportRenderer()
+            if self._external_export_snapshot is not None:
+                self._export_renderer.set_external_export_snapshot(self._external_export_snapshot)
             # Preview drives this renderer frame-by-frame on the worker's
             # shared GL context: keep shaders/resource pool alive across
             # frames instead of rebuilding them per frame.

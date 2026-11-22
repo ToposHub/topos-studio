@@ -82,12 +82,14 @@ class ImageDecodeWorker(QThread):
         on_failed: Optional[Callable[[str, str], None]] = None,
         exr_part: str = "",
         extra_channels: Optional[list] = None,
+        psd_layer: Optional[dict] = None,
     ) -> None:
         super().__init__(parent)
         self.file_path = file_path
         self.request_id = request_id
         self.exr_part = exr_part or ""
         self.extra_channels = list(extra_channels) if extra_channels else None
+        self.psd_layer = psd_layer
         self._cancelled = False
         self._on_completed = on_completed
         self._on_failed = on_failed
@@ -110,7 +112,8 @@ class ImageDecodeWorker(QThread):
             result = decode_image_file(
                 self.file_path,
                 exr_part=self.exr_part,
-                extra_channels=self.extra_channels)
+                extra_channels=self.extra_channels,
+                **({"psd_layer": self.psd_layer} if self.psd_layer else {}))
             if self._cancelled:
                 return
             if result is not None:
@@ -131,6 +134,7 @@ class ImageDecodeWorker(QThread):
 def decode_image_file(file_path: str,
                       exr_part: str = "",
                       extra_channels: Optional[list] = None,
+                      psd_layer: Optional[dict] = None,
                       ) -> Optional[DecodedImage]:
     """Decode an image file to a float32 numpy array.
 
@@ -138,15 +142,39 @@ def decode_image_file(file_path: str,
     - Standard via cv2: JPEG, PNG 8/16-bit, TIFF 8/16-bit, BMP, DPX
     - HDR via cv2: .hdr (Radiance HDR)
     - EXR via OpenEXR (float16 / float32) with optional alpha channel
+    - Flattened PSD/PSB via psd-tools, with straight alpha
     - 16-bit PNG / TIFF preserved with proper normalisation
 
     Returns DecodedImage or None if file cannot be read.
     """
+    if psd_layer is not None and not isinstance(psd_layer, dict):
+        raise ValueError("Invalid PSD layer reference")
     if not file_path or not os.path.isfile(file_path):
         return None
 
     mtime = os.path.getmtime(file_path)
     lower_path = file_path.lower()
+
+    if lower_path.endswith((".psd", ".psb")):
+        from .psd_import import read_psd_canvas_layer_rgba, read_psd_document_rgba
+
+        if psd_layer:
+            pixels, depth = read_psd_canvas_layer_rgba(file_path, psd_layer)
+        else:
+            try:
+                pixels, depth = read_psd_document_rgba(file_path)
+            except (OSError, RuntimeError, ValueError) as error:
+                logger.warning("Cannot decode Photoshop image %r: %s", file_path, error)
+                return None
+        height, width = pixels.shape[:2]
+        return DecodedImage(
+            file_path=file_path, data=np.ascontiguousarray(pixels, dtype=np.float32),
+            width=width, height=height, components=4, mtime=mtime,
+            color_space_hint="srgb", bit_depth=f"uint{depth}", has_alpha=True,
+        )
+
+    if psd_layer:
+        raise ValueError("A PSD layer reference requires a PSD/PSB source")
 
     # ── EXR via OpenEXR (preferred) ──
     if lower_path.endswith(".exr"):
@@ -676,7 +704,8 @@ class ImageLoader(QObject):
 
     def request_decode(self, node_id: str, file_path: str,
                        exr_part: str = "",
-                       extra_channels: Optional[list] = None) -> None:
+                       extra_channels: Optional[list] = None,
+                       psd_layer: Optional[dict] = None) -> None:
         """Request async image decode for a node.
 
         Cancels any in-progress decode for the same node_id.
@@ -691,6 +720,10 @@ class ImageLoader(QObject):
             # would linger in _cancelled_workers until some unrelated
             # delivery.  Prune on every request/cancel entry point.
             self._cleanup_finished_workers_unlocked()
+            current = self._active_workers.get(node_id)
+            if (psd_layer and current is not None and current.file_path == file_path
+                    and current.psd_layer == psd_layer and current.isRunning()):
+                return
             # Cancel existing worker for this node
             self._cancel_worker_unlocked(node_id)
 
@@ -705,6 +738,7 @@ class ImageLoader(QObject):
                 request_id,
                 exr_part=exr_part,
                 extra_channels=extra_channels,
+                **({"psd_layer": psd_layer} if psd_layer else {}),
             )
             # Identity-based freshness: the callback carries the worker so
             # delivery can be matched against the ACTIVE worker object —

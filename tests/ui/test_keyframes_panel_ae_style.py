@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytest
 
 from PyQt6.QtCore import QPoint, QPointF, Qt, QEvent
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
+from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QMenu
 
@@ -70,7 +70,7 @@ def _mouse(view, etype, x, y, button, buttons=Qt.MouseButton.NoButton):
         else view.mouseReleaseEvent(ev)
 
 
-def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp):
+def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp, monkeypatch):
     graph = NodeGraph()
     graph.add_node(OutputNode(node_id="out"))
     controller = LayerStackController(graph, layer_stack_version=2)
@@ -99,6 +99,15 @@ def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp):
         y_control = tree._value_controls[(node_id, "scale_y")]
         assert x_control.value() == y_control.value() == 100.0
         assert x_control.geometry().right() < y_control.geometry().left()
+        assert x_control.y() == y_control.y()
+        assert {row.component_params for row in model.visible_rows() if row.component_params} >= {
+            ("pivot_x", "pivot_y"), ("translate_x", "translate_y"), ("scale_x", "scale_y"),
+        }
+        lock = tree._scale_buttons[node_id]
+        assert lock.isChecked()
+        assert lock.geometry().right() < x_control.geometry().left()
+        lock.click()
+        assert not lock.isChecked()
         panel.parameter_changed.connect(lambda _nid, name, value: node.set_parameter(name, value))
         x_control.setValue(125.0)
         assert node.parameters["scale_x"] == 1.25
@@ -106,16 +115,33 @@ def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp):
         calls = []
         panel.track_changed.connect(lambda _nid, name, keyframes: calls.append((name, keyframes)))
         pair_y = layer_y + model.visible_rows().index(pair) * KEYFRAMES_ROW_H
+        pair_cols = tree._row_geometry(pair, cols)
+        assert pair_cols["keyframe"][1] == pair_cols["name"][0] < cols["name"][0]
         QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
-                         pos=QPoint(cols["keyframe"][0] + 8, pair_y))
+                         pos=QPoint(pair_cols["keyframe"][0] + 8, pair_y))
         assert [(name, keyframes[0]["value"]) for name, keyframes in calls] == [
             ("scale_x", 1.25), ("scale_y", 1.0)]
 
-        QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
-                         pos=QPoint(cols["name"][0] + 50, pair_y))
-        assert pair.expanded
+        pair_pos = QPoint(pair_cols["name"][0] + 8, pair_y)
+        QTest.mouseClick(tree, Qt.MouseButton.LeftButton, pos=pair_pos)
+        assert not pair.expanded
+
+        def toggle_from_context_menu(pos):
+            tree.contextMenuEvent(QContextMenuEvent(
+                QContextMenuEvent.Reason.Mouse, pos, tree.mapToGlobal(pos)))
+
+        def select_first_action(menu, _pos):
+            action = menu.actions()[0]
+            action.trigger()
+            return action
+
+        monkeypatch.setattr(QMenu, "exec", select_first_action)
+        before_split = graph.to_dict()
+        toggle_from_context_menu(pair_pos)
+        assert graph.to_dict() == before_split
         assert [row.param_name for row in model.visible_rows() if row.parent_row_id == pair.row_id] == [
             "scale_x", "scale_y"]
+        assert not any(row.row_id == pair.row_id for row in model.visible_rows())
 
         scale_track = KeyframeTrack(param_name="scale_x", min_val=0.01, max_val=100.0)
         scale_track.add_keyframe(Keyframe(0, 1.25))
@@ -128,15 +154,19 @@ def test_layer_group_values_and_keyframes_use_the_live_axis_tracks(qapp):
         assert calls[-1][0] == "scale_x"
         assert [keyframe["frame"] for keyframe in calls[-1][1]] == [0, 5, 10]
 
+        x_row = next(row for row in model.visible_rows() if row.param_name == "scale_x")
+        x_y = layer_y + model.visible_rows().index(x_row) * KEYFRAMES_ROW_H
+        before_combine = graph.to_dict()
+        toggle_from_context_menu(QPoint(tree._row_geometry(x_row, cols)["name"][0] + 8, x_y))
+        assert graph.to_dict() == before_combine
         pair = next(row for row in model.visible_rows() if row.row_id == pair.row_id)
-        model.set_row_expanded(pair.row_id, False)
         rail = panel._timeline_view
         pair_y = layer_y + model.visible_rows().index(pair) * KEYFRAMES_ROW_H
         marker_x = round(panel._frame_mapper.frame_to_x(10))
         seeks = []
         panel.current_frame_changed.connect(seeks.append)
         QTest.mouseClick(rail, Qt.MouseButton.LeftButton, pos=QPoint(marker_x, pair_y))
-        assert pair.expanded
+        assert not pair.expanded
         assert seeks == [10]
     finally:
         panel.close()
@@ -170,17 +200,19 @@ def test_recursive_disclosure_expands_only_the_clicked_layer_branch(qapp):
                          Qt.KeyboardModifier.ControlModifier, name_click)
         assert not root.expanded and not disclosures
         disclosure_click = QPoint(name_x + 8, heading_y)
-        QTest.mouseMove(tree, disclosure_click)
+        tree.mouseMoveEvent(QMouseEvent(
+            QEvent.Type.MouseMove, QPointF(disclosure_click),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
         assert "Cmd" in tree.toolTip() or "Ctrl" in tree.toolTip()
         QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
                          Qt.KeyboardModifier.ControlModifier, disclosure_click)
         assert root.expanded and not sibling.expanded
         assert disclosures == [layer_id]
         assert all(row.expanded for row in model.visible_rows()
-                   if row.layer_id == layer_id and row.row_type == "group")
-        assert {"scale_x", "scale_y"} <= {
-            row.param_name for row in model.visible_rows() if row.layer_id == layer_id
-        }
+                   if row.layer_id == layer_id and row.row_type == "group" and not row.component_params)
+        assert any(row.component_params == ("scale_x", "scale_y") and not row.expanded
+                   for row in model.visible_rows() if row.layer_id == layer_id)
+        assert not any(row.param_name == "scale_x" for row in model.visible_rows())
 
         QTest.mouseClick(tree, Qt.MouseButton.LeftButton,
                          Qt.KeyboardModifier.ControlModifier, disclosure_click)
@@ -370,14 +402,39 @@ def test_layer_keyboard_editing_respects_focus_and_edit_target(layer_shortcuts_p
     assert deleted_layers == [layer_id]
 
 
-def test_layer_time_ruler_aligns_time_labels_to_seconds(layer_shortcuts_panel):
+def test_layer_time_ruler_adapts_to_zoom(layer_shortcuts_panel):
     panel, _, _, _, _ = layer_shortcuts_panel
     view = panel._timeline_view
-    view.set_display("time", 25.0)
-    panel._frame_mapper.set_zoom(2.0)
-    assert view._tick_steps() == (25, 50)
-    assert view._ruler_label(50) == "00:02"
-    assert view._ruler_label(55) == "00:02+05f"
+    mapper = panel._frame_mapper
+    assert view._display_mode() == "time"
+    mapper.set_scroll(0)
+    mapper.set_zoom(1.5)
+    labels = [(x, text) for x, text in view._ruler_ticks(200) if text]
+    assert labels == [(0, "00s"), (75, "02s")]
+
+    mapper.set_zoom(48)
+    labels = [(x, text) for x, text in view._ruler_ticks(140) if text]
+    assert labels == [(0, "00f"), (48, "01f"), (96, "02f")]
+
+
+def test_layer_time_ruler_uses_actual_fps_and_supports_negative_frames(layer_shortcuts_panel):
+    panel, _, _, _, _ = layer_shortcuts_panel
+    view = panel._timeline_view
+    mapper = panel._frame_mapper
+    fps = 24000 / 1001
+    view.set_display("time", fps)
+    view.set_composition_range(59000, 92000)
+    mapper.set_zoom(0.06)
+    mapper.set_scroll(-59000 * mapper.pixels_per_frame)
+    labels = [(x, text) for x, text in view._ruler_ticks(300) if text]
+    assert labels[0][1] == "42:00"
+    assert labels[0][0] == pytest.approx(mapper.frame_to_x(42 * 60 * fps))
+
+    view.set_composition_range(-2, 10)
+    mapper.set_zoom(48)
+    mapper.set_scroll(96)
+    labels = [(x, text) for x, text in view._ruler_ticks(120) if text]
+    assert labels == [(0, "−02f"), (48, "−01f"), (96, "00f")]
 
 
 def test_option_shortcut_keys_the_text_layer_transform_through_filters(layer_shortcuts_panel):
@@ -470,6 +527,8 @@ def test_wheel_zoom_clamped_for_frame_precision(panel):
 
 def test_shift_wheel_pans_horizontally(panel):
     view = panel._timeline_view
+    panel._frame_mapper.set_zoom(20.0)
+    panel._frame_mapper.set_scroll(-200.0)
     before = panel._frame_mapper.scroll_offset
     _wheel_at(view, 100, 100, delta=120,
               mods=Qt.KeyboardModifier.ShiftModifier)
@@ -491,6 +550,8 @@ def test_alt_wheel_bubbles_for_vertical_scroll(panel):
 
 def test_middle_button_drag_pans(panel):
     view = panel._timeline_view
+    panel._frame_mapper.set_zoom(20.0)
+    panel._frame_mapper.set_scroll(-200.0)
     before = panel._frame_mapper.scroll_offset
     _mouse(view, QEvent.Type.MouseButtonPress, 300, 100,
            Qt.MouseButton.MiddleButton, Qt.MouseButton.MiddleButton)
@@ -585,12 +646,13 @@ def test_workarea_band_drag_updates_range(panel):
     ranges: list[tuple[int, int]] = []
     panel.play_range_changed.connect(lambda i, o: ranges.append((i, o)))
 
+    y = view.ruler_height() - 10
     x_out = fm.frame_to_x(61)  # end+1 边缘
-    _mouse(view, QEvent.Type.MouseButtonPress, x_out, 2,
+    _mouse(view, QEvent.Type.MouseButtonPress, x_out, y,
            Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
-    _mouse(view, QEvent.Type.MouseMove, fm.frame_to_x(71), 2,
+    _mouse(view, QEvent.Type.MouseMove, fm.frame_to_x(72), y,
            Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
-    _mouse(view, QEvent.Type.MouseButtonRelease, fm.frame_to_x(71), 2,
+    _mouse(view, QEvent.Type.MouseButtonRelease, fm.frame_to_x(72), y,
            Qt.MouseButton.LeftButton)
 
     assert panel.effective_play_range() == (20, 71)
@@ -773,7 +835,9 @@ def test_timecode_mode_widens_tick_spacing(panel):
     _m1, major_frame = view._tick_steps()
     view.set_display("timecode", CLIP_FPS)
     _m2, major_tc = view._tick_steps()
-    assert major_tc >= major_frame
+    assert major_tc * fm.pixels_per_frame >= 78
+    assert major_frame * fm.pixels_per_frame >= 56
+    assert major_tc % CLIP_FPS == 0
 
 
 def test_context_menu_switch_syncs_footer_combo(panel):
@@ -797,10 +861,15 @@ def test_footer_combo_switches_ruler_mode(panel):
     assert view._ruler_label(48) == "48"
 
 
-def test_paint_draws_grid_before_rows(panel):
-    """网格必须在图层条之前绘制（画在图层下方，不再叠在上面）。"""
-    import inspect
-    src = inspect.getsource(panel._timeline_view.paintEvent)
-    gi = src.index("_draw_grid")
-    ri = src.index("_draw_row")
-    assert gi < ri, "_draw_grid 必须出现在 _draw_row 之前"
+def test_layer_ruler_ticks_do_not_continue_into_the_tracks(layer_shortcuts_panel):
+    panel, _, _, _, _ = layer_shortcuts_panel
+    view = panel._timeline_view
+    mapper = panel._frame_mapper
+    mapper.set_zoom(view.width() / 100)
+    mapper.set_scroll(0)
+    tick_x = next(round(x) for x, label in view._ruler_ticks(view.width()) if label and x > 12)
+    image = view.grab().toImage()
+    ratio = image.devicePixelRatio()
+    y = view.height() - 12
+    assert image.pixelColor(round(tick_x * ratio), round(y * ratio)) == image.pixelColor(
+        round((tick_x + 4) * ratio), round(y * ratio))

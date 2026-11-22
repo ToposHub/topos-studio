@@ -127,11 +127,12 @@ def test_tree_click_selects_node(qapp):
     tree.resize(232, 400)
     received = []
     tree.node_selected.connect(received.append)
-    # Click on the node row (row 0) label area (x > lock+expand cols).
+    # Click the node label beyond the disclosure control.
+    x = tree._column_geometry()["name"][0] + 24
     from PyQt6.QtCore import QPointF, Qt
     from PyQt6.QtGui import QMouseEvent
     ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress,
-                     QPointF(80.0, 12.0), Qt.MouseButton.LeftButton,
+                     QPointF(x, 12.0), Qt.MouseButton.LeftButton,
                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     tree.mousePressEvent(ev)
     assert t.id in received

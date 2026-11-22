@@ -32,7 +32,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterable
+
+if TYPE_CHECKING:
+    from src.features.composite.render.external_comp_snapshot import ExternalArchiveLink
 
 __all__ = [
     "DependencyRef",
@@ -48,6 +52,7 @@ _RESOLUTION_OFFLINE_FLAGGED = "offline_flagged"
 _RESOLUTION_MISSING = "missing"
 _RESOLUTION_HASH_MISMATCH = "hash_mismatch"
 _RESOLUTION_DANGLING = "dangling_ref"
+_RESOLUTION_EXTERNAL_COMP = "external_composition"
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,7 @@ class DependencyReport:
 
     refs: tuple[DependencyRef, ...] = ()
     embedded_bytes: int = 0
+    external_archives: tuple[ExternalArchiveLink, ...] = ()
 
     def by_kind(self, kind: str) -> tuple[DependencyRef, ...]:
         return tuple(r for r in self.refs if r.object_kind == kind)
@@ -88,7 +94,8 @@ class DependencyReport:
     @property
     def has_partial(self) -> bool:
         return any(
-            r.resolution == _RESOLUTION_OFFLINE_FLAGGED for r in self.refs)
+            r.resolution in (_RESOLUTION_OFFLINE_FLAGGED, _RESOLUTION_EXTERNAL_COMP)
+            for r in self.refs)
 
 
 def _iter_asset_ids_in_sequences(sequences: Iterable[Any]):
@@ -113,6 +120,7 @@ def collect_dependencies(
     full_data: dict[str, Any] | None = None,
     timeline_sequences: Iterable[Any] | None = None,
     color_stacks: Iterable[Any] | None = None,
+    project_archive_path: str = "",
 ) -> DependencyReport:
     """推导依赖闭包并逐条判定。
 
@@ -221,7 +229,85 @@ def collect_dependencies(
                 object_kind="lut", object_id=str(stack_id),
                 reference=str(lut_path), resolution=_RESOLUTION_MISSING))
 
-    return DependencyReport(refs=tuple(refs), embedded_bytes=embedded_bytes)
+    archive_links: tuple[ExternalArchiveLink, ...] = ()
+    compositions = data.get("compositions")
+    if isinstance(compositions, dict):
+        external_refs, archive_links = _external_composition_dependencies(
+            compositions, project_archive_path, resolver,
+        )
+        refs.extend(external_refs)
+
+    return DependencyReport(tuple(refs), embedded_bytes, archive_links)
+
+
+def _external_composition_dependencies(
+    compositions: dict[str, Any], project_archive_path: str, resource_resolver: Any,
+) -> tuple[list[DependencyRef], tuple[ExternalArchiveLink, ...]]:
+    from dataclasses import replace
+    from src.features.composite.core.external_comp_refs import (
+        REF_MISSING_FILE, REF_REVISION_MISMATCH, read_comp_ref,
+    )
+    from src.features.composite.core.node_engine import NodeGraph
+    from src.features.composite.render.external_comp_snapshot import ExternalCompSnapshots
+
+    references: dict[str, DependencyRef] = {}
+    archive_links: list[ExternalArchiveLink] = []
+    session = ExternalCompSnapshots(freeze=True)
+    for comp_id, graph_data in compositions.items():
+        if not isinstance(graph_data, dict):
+            continue
+        registered = {}
+        for node in graph_data.get("nodes", []):
+            if not isinstance(node, dict) or node.get("type") != "precomp" or node.get("disabled"):
+                continue
+            params = node.get("parameters")
+            if not isinstance(params, dict):
+                continue
+            node_id = str(node.get("id", ""))
+            object_id = f"{comp_id}/{node_id}"
+            try:
+                ref = read_comp_ref(params)
+            except ValueError as exc:
+                references[object_id] = DependencyRef(
+                    "external_comp", object_id, "", _RESOLUTION_DANGLING, str(exc),
+                )
+                continue
+            if ref is None:
+                continue
+            registered[node_id] = ref.relative_path
+            references[object_id] = DependencyRef(
+                "external_comp", object_id, ref.relative_path, _RESOLUTION_EXTERNAL_COMP,
+                "交接时保留外部合成工程及其素材的相对目录结构",
+            )
+        if not registered or not project_archive_path:
+            continue
+        snapshot = replace(
+            NodeGraph.from_dict(graph_data).snapshot(),
+            project_archive_path=str(Path(project_archive_path).absolute()),
+            external_archive_resolver=resource_resolver,
+        )
+        expanded, graph_links = session.inspect_archive_links(snapshot)
+        archive_links.extend(graph_links)
+        for root_node_id in registered:
+            links = [link for link in graph_links if link.root_node_id == root_node_id]
+            if links and all(link.embedded and link.portable for link in links):
+                object_id = f"{comp_id}/{root_node_id}"
+                references[object_id] = replace(
+                    references[object_id], resolution=_RESOLUTION_EMBEDDED, detail="",
+                )
+        for diagnostic in expanded.reference_diagnostics:
+            node_id = diagnostic["node_id"]
+            object_id = f"{comp_id}/{node_id}"
+            root_id = node_id.split("/ref/", 1)[0]
+            resolution = {
+                REF_MISSING_FILE: _RESOLUTION_MISSING,
+                REF_REVISION_MISMATCH: _RESOLUTION_HASH_MISMATCH,
+            }.get(diagnostic["code"], _RESOLUTION_DANGLING)
+            references[object_id] = DependencyRef(
+                "external_comp", object_id, registered.get(root_id, ""),
+                resolution, f"{diagnostic['code']}: {diagnostic['detail']}",
+            )
+    return list(references.values()), tuple(archive_links)
 
 
 def portability_preflight(

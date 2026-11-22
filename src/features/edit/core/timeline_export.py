@@ -206,6 +206,7 @@ class _ManifestSnapshot:
     preflight_result: Any
     loudness_report: Any
     effect_export_skips: Tuple[str, ...]
+    output_path: str
     stage_telemetry: Optional[Dict[str, Any]] = None
 
 
@@ -1980,6 +1981,8 @@ def expand_sequence_audio_for_render(
     EditPage 音频同步走同一个 ``flatten_nested_audio_tracks``。
     """
     from src.features.edit.core.nested_sequence import flatten_nested_audio_tracks
+    from src.features.edit.core.comp_clip_pcm import with_comp_clip_audio
+    from dataclasses import replace as _dc_replace
 
     resolver = sequence_resolver if callable(sequence_resolver) else None
     asset_lookup = (
@@ -1987,14 +1990,21 @@ def expand_sequence_audio_for_render(
         if project is not None and getattr(project, "assets", None) is not None
         else None
     )
+    def resolve_child(timeline_id: str) -> Optional["TimelineSequence"]:
+        child = resolver(timeline_id)
+        if child is None:
+            return None
+        original = tuple(child.audio_tracks or ())
+        tracks = with_comp_clip_audio(child, original, project)
+        return child if tracks == original else _dc_replace(child, audio_tracks=tracks)
+
     expanded = flatten_nested_audio_tracks(
-        sequence, resolver, asset_lookup, strict=strict,
+        sequence, resolve_child if resolver is not None else None, asset_lookup, strict=strict,
         diagnostics=diagnostics, frame_range=frame_range,
     )
+    expanded = with_comp_clip_audio(sequence, tuple(expanded), project)
     if expanded == tuple(sequence.audio_tracks or ()):
         return sequence
-    from dataclasses import replace as _dc_replace
-
     return _dc_replace(sequence, audio_tracks=expanded)
 
 
@@ -2708,6 +2718,11 @@ class TimelineExporter:
         # state concurrently with the render thread.
         self._metal_prefetch_executor: Optional[ThreadPoolExecutor] = None
         self._metal_prefetch_futures: Dict[Tuple[str, int], Future[Any]] = {}
+        # Host read-ahead is confined to the render producer. It joins the
+        # decode worker before releasing its per-clip source sessions.
+        self._export_read_ahead: Optional[ThreadPoolExecutor] = None
+        self._export_read_ahead_pending: Optional[Future[Any]] = None
+        self._export_read_ahead_end = 0
         self._metal_prefetch_enabled = str(
             os.getenv("TOPOS_EXPORT_METAL_PREFETCH", "1") or "1"
         ).strip().lower() not in ("0", "false", "off", "no")
@@ -2896,8 +2911,7 @@ class TimelineExporter:
         # setdefault：__new__ 直构的 exporter（单测桩）没有 __init__ 布下
         # 的属性时也不崩。
         self.__dict__.setdefault("_effect_export_skips", []).clear()
-        self.__dict__.setdefault(
-            "_delivery_finalized", threading.Event()).clear()
+        self._delivery_finalized = threading.Event()
 
         # Individual clips uses exactly the same render, audio and subtitle
         # pipeline as a normal delivery.  It merely expands the timeline into
@@ -3100,6 +3114,12 @@ class TimelineExporter:
 
             # 创建编码器配置
             encoder_config = self._create_encoder_config(config)
+
+            if config.codec == ExportCodec.DNXHR_HQX:
+                outcome = self._try_copy_dnxhr_hqx(
+                    config, encoder_config, start_frame, end_frame)
+                if outcome is not None:
+                    return outcome
 
             # T-P1-10：TOPOS identity 直通快路径——严格 eligibility 判定，
             # 任一不满足立刻走普通 render path 并记录原因。
@@ -3373,25 +3393,17 @@ class TimelineExporter:
         ``_last_preflight_result`` / ``_last_qc_report``，直接读 self 会把
         clip N+1 的状态嵌进 clip N 的交付审计 sidecar。
         """
-        state = manifest_state if manifest_state is not None \
-            else self._snapshot_manifest_state()
         try:
             from src.features.edit.core.export_manifest import (
                 build_export_manifest,
                 manifest_path_for,
                 write_manifest_file,
             )
-            # R16（第七轮审计）：图像序列的 output 快照目标必须是实际帧
-            # 目录——基路径不是输出文件（单文件哈希只会报不存在）。
-            output_path = config.output_path
+            state = manifest_state if manifest_state is not None \
+                else self._snapshot_manifest_state(config)
             codec_value = str(
                 getattr(getattr(config, "codec", None), "value",
                         getattr(config, "codec", "")) or "").lower()
-            if codec_value in ("png_sequence", "tiff_sequence"):
-                seq_info = getattr(
-                    getattr(self, "_encoder", None), "sequence_info", None)
-                if callable(seq_info):
-                    output_path = seq_info().get("directory") or output_path
             manifest = build_export_manifest(
                 state.project,
                 state.sequence,
@@ -3399,8 +3411,9 @@ class TimelineExporter:
                 qc_report=state.qc_report,
                 preflight_result=state.preflight_result,
                 loudness_report=state.loudness_report,
-                output_path=output_path,
+                output_path=state.output_path,
                 hash_assets=hash_assets,
+                hash_output=hash_assets,
                 stage_telemetry=state.stage_telemetry,
                 effect_export_skips=state.effect_export_skips,
                 probe_media=hash_assets and codec_value not in (
@@ -3414,12 +3427,17 @@ class TimelineExporter:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Export manifest write failed: %s", exc)
 
-    def _snapshot_manifest_state(self) -> "_ManifestSnapshot":
+    def _snapshot_manifest_state(self, config: TimelineExportConfig) -> "_ManifestSnapshot":
         """在调用线程一次性捕获 manifest 所需的全部可变导出状态。
 
         ``_export_telemetry`` 快照同样在此捕获（后台线程读 self 属性时
         individual-clips 可能已重建 telemetry 实例）。
         """
+        output_path = config.output_path
+        if config.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE):
+            seq_info = getattr(getattr(self, "_encoder", None), "sequence_info", None)
+            if callable(seq_info):
+                output_path = seq_info().get("directory") or output_path
         return _ManifestSnapshot(
             project=self._project,
             sequence=self._sequence,
@@ -3428,6 +3446,7 @@ class TimelineExporter:
             loudness_report=getattr(self, "_last_loudness_report", None),
             effect_export_skips=tuple(
                 self.__dict__.get("_effect_export_skips", ()) or ()),
+            output_path=output_path,
             stage_telemetry=self.export_stage_telemetry_snapshot,
         )
 
@@ -3448,22 +3467,31 @@ class TimelineExporter:
         ② cheap 侧写同样纳入 ``_manifest_lock``，与持锁全量写互斥，连续
         两次导出同一路径时不会出现锁外写与持锁写交错。
         """
-        # 在导出线程捕获快照（cheap 写与后台全量写共用）。
-        manifest_state = self._snapshot_manifest_state()
+        # Capture this job's event. A later export can create a new one before
+        # this job's background worker gets a chance to run.
+        delivery_finalized = self._delivery_finalized
+        output_path = os.path.abspath(config.output_path)
+        pending = self.__dict__.setdefault("_pending_manifest_jobs", {})
+        try:
+            manifest_state = self._snapshot_manifest_state(config)
+        except Exception as error:
+            logger.warning("Export manifest snapshot failed: %s", error)
+            return
         # Emit a cheap, immediately available sidecar first.  This preserves
         # the manifest contract even when a CLI process exits before a daemon
         # thread can finish scanning a multi-GB source.
         with self._manifest_lock:
+            pending[output_path] = delivery_finalized
             self._write_success_manifest(
                 config, hash_assets=False, manifest_state=manifest_state)
 
         def write_in_background() -> None:
             try:
+                delivery_finalized.wait(timeout=300.0)
                 with self._manifest_lock:
-                    # T-P1-70：先等交付定稿（native muxer 收尾），否则 media
-                    # probe 会读到未定稿容器。上限 5 分钟防悬挂（超时后 probe
-                    # 失败会如实记录，不伪造）。
-                    self._delivery_finalized.wait(timeout=300.0)
+                    if pending.get(output_path) is not delivery_finalized:
+                        return  # This path has a newer delivery's sidecar.
+                    pending.pop(output_path)
                     self._write_success_manifest(
                         config, hash_assets=True, manifest_state=manifest_state)
             finally:
@@ -4182,6 +4210,9 @@ class TimelineExporter:
 
         try:
             from src.features.edit.core.audio_playback import AudioDecoder
+            from src.features.edit.core.comp_clip_pcm import (
+                CompClipAudioError, CompClipPCMSource, comp_clip_audio_graph,
+            )
             from src.features.edit.core.timeline_render_plan import is_track_renderable
             import numpy as np
         except ImportError:
@@ -4717,8 +4748,9 @@ class TimelineExporter:
                             continue
 
                         # P1-14: 导出取源走项目代理策略（默认强制 master 原片）
+                        comp_audio_graph = comp_clip_audio_graph(self._project, clip.asset_id)
                         asset_path = export_source_path(self._project, asset)
-                        if not asset_path:
+                        if not asset_path and comp_audio_graph is None:
                             continue
                         # F2.10/M03（S05）：外录绑定——音频消费切到 WAV 源。
                         # 1x 直读按偏移折算源帧；retime/保调片段同样使用
@@ -4764,7 +4796,12 @@ class TimelineExporter:
                         if _decoder_key not in decoders:
                             decoder = AudioDecoder()
                             # 传入 timeline_fps 与 output_sample_rate，保证音视频同步
-                            decoder.open(asset_path, timeline_fps=fps, output_sample_rate=sample_rate)
+                            if comp_audio_graph is not None:
+                                decoder.open_pcm(CompClipPCMSource(comp_audio_graph, self._project, sample_rate,
+                                                                  strict=True),
+                                                 timeline_fps=fps, output_sample_rate=sample_rate)
+                            else:
+                                decoder.open(asset_path, timeline_fps=fps, output_sample_rate=sample_rate)
                             decoders[_decoder_key] = decoder
                         else:
                             decoder = decoders[_decoder_key]
@@ -5222,7 +5259,7 @@ class TimelineExporter:
 
 
                     except Exception as e:
-                        if isinstance(e, PreRenderUntrustedError):
+                        if isinstance(e, (PreRenderUntrustedError, CompClipAudioError)):
                             # P0 · 交付保真：预渲染前缀读不到可信 PCM——
                             # 中止导出（报告片段/步骤/原因），不得静默丢效果。
                             raise
@@ -6855,16 +6892,22 @@ class TimelineExporter:
 
         def produce() -> None:
             try:
-                for fi in range(start_frame, end_frame):
-                    if stop.is_set() or self._cancel_requested:
-                        break
-                    if not self._wait_if_paused():
-                        break
-                    if not enqueue((fi, self._render_frame(fi, config))):
-                        break
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="export-read-ahead") as prefetch:
+                    self._export_read_ahead = prefetch
+                    self._export_read_ahead_end = end_frame
+                    self._export_read_ahead_pending = None
+                    for fi in range(start_frame, end_frame):
+                        if stop.is_set() or self._cancel_requested:
+                            break
+                        if not self._wait_if_paused():
+                            break
+                        if not enqueue((fi, self._render_frame(fi, config))):
+                            break
             except Exception as e:  # noqa: BLE001 —— 消费侧重抛，串行同语义
                 producer_error.append(e)
             finally:
+                self._export_read_ahead = None
+                self._export_read_ahead_pending = None
                 # P0-GPU-1: GPU 合成 context 由本生产者线程创建，
                 # 必须在创建线程释放（standalone context 线程亲和）
                 self._release_gpu_export_renderer()
@@ -6991,36 +7034,118 @@ class TimelineExporter:
         divisor = gcd(num, den)
         return num // divisor, den // divisor
 
-    def _try_render_planar_passthrough(
+    def _try_copy_dnxhr_hqx(
+        self,
+        config: TimelineExportConfig,
+        encoder_config: "FFmpegEncoderConfig",
+        start_frame: int,
+        end_frame: int,
+    ) -> Optional[ExportOutcome]:
+        """Deliver exact cuts of a matching HQX master as source packets."""
+        from fractions import Fraction
+
+        from src.features.edit.core.dnxhr_packet_copy import (
+            DnxhrPacketCopyUnsupported,
+            copy_dnxhr_hqx_mov,
+        )
+        from src.shared.export.video_encoder import ColorMetadataConfig
+
+        if (
+            start_frame >= end_frame
+            or self._render_plan is None
+            or self._project is None
+            or os.path.splitext(config.output_path)[1].lower() != ".mov"
+            or encoder_config.codec != "dnxhr"
+            or encoder_config.pix_fmt != "yuv422p10le"
+            or encoder_config.profile != "hqx"
+            or encoder_config.has_alpha
+            or encoder_config.color_metadata != ColorMetadataConfig.sdr()
+            or (encoder_config.width, encoder_config.height)
+            != self._get_sequence_resolution()
+            or self._rational_pair(encoder_config.fps)
+            != self._rational_pair(self._sequence.fps)
+            or (
+                config.include_audio
+                and any(track.clips for track in self._audio_render_sequence.audio_tracks)
+            )
+            or self._delivery_guide_burns_in()
+            or getattr(self._gpu_encode_surface_provider, "handles_timeline_video", False)
+        ):
+            return None
+
+        runs: list[tuple[int, int]] = []
+        asset_id = None
+        source = None
+        for frame_idx in range(start_frame, end_frame):
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+            plan = self._render_plan.get_frame_plan(frame_idx)
+            identity = self._identity_delivery_layer(plan, frame_idx, config)
+            if identity is None:
+                return None
+            layer, source_frame, _ = identity
+            if asset_id is None:
+                asset_id = layer.asset_id
+                asset = self._project.get_asset_by_id(asset_id)
+                if asset is None or getattr(asset, "media_type", None) != "video":
+                    return None
+                metadata = getattr(asset, "metadata", None) or {}
+                if isinstance(metadata, dict):
+                    codec = str(metadata.get("codec") or metadata.get("codec_name") or "").lower()
+                    if codec and codec not in ("dnxhd", "dnxhr"):
+                        return None
+                source = export_source_path(self._project, asset)
+                if not source or os.path.splitext(source)[1].lower() != ".mov":
+                    return None
+            if layer.asset_id != asset_id:
+                return None
+            if runs and source_frame == sum(runs[-1]):
+                first, count = runs[-1]
+                runs[-1] = first, count + 1
+            else:
+                runs.append((source_frame, 1))
+
+        rate = self._rational_pair(encoder_config.fps)
+        if source is None or rate is None:
+            return None
+
+        def progress(frames: int) -> None:
+            self._current_frame = frames
+            self._notify_progress()
+
+        started = time.perf_counter()
+        try:
+            complete = copy_dnxhr_hqx_mov(
+                source, config.output_path, runs, width=encoder_config.width,
+                height=encoder_config.height, fps=Fraction(*rate),
+                continue_export=lambda: not self._cancel_requested and self._wait_if_paused(),
+                progress=progress,
+            )
+        except DnxhrPacketCopyUnsupported as error:
+            logger.info("DNxHR packet copy ineligible: %s", error)
+            self._current_frame = 0
+            return None
+        if not complete:
+            return ExportOutcome.user_cancelled()
+
+        path = "dnxhr_packet_copy"
+        if self._export_telemetry is not None:
+            self._export_telemetry.set_delivery_path(path)
+            self._export_telemetry.record_stage_sample(
+                "mux", path, wall_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        self._write_success_manifest_async(config)
+        return ExportOutcome(success=True, delivery_path=path)
+
+    def _identity_delivery_layer(
         self,
         frame_plan: Any,
         frame_idx: int,
         config: TimelineExportConfig,
-    ) -> Optional[Any]:
-        """Return a planar delivery frame when timeline semantics are identity.
-
-        The encoder already accepts validated YUV planes for the target
-        formats in :func:`_passthrough_specs_for` (TOPOS yuv422p10le, and
-        since the 2026-09-15 export-speed plan, FFmpeg h264/hevc yuv420p;
-        since 2026-09-17 also 10-bit sources downconverted to the 8-bit
-        tier in the YUV domain). 8-bit 4:2:0 SDR delivery may also resize
-        the source Y/U/V planes directly when the only timeline operation
-        is the requested output scaling. This fail-closed gate keeps every
-        other edit on the normal compositor.
-        """
-        import numpy as np
-
-        # An explicit native surface bridge must receive the Metal-rendered
-        # CVPixelBuffer, never the older host-visible planar passthrough. The
-        # latter is still valid for the ordinary FFmpeg/Topos encoders.
-        if getattr(
-            getattr(self, "_gpu_encode_surface_provider", None),
-            "handles_timeline_video",
-            False,
-        ):
-            return None
-        if getattr(self, "_export_has_alpha", False):
-            return None
+        *,
+        allow_scalar_delivery: bool = False,
+    ) -> Optional[Tuple["ClipLayerInfo", int, float]]:
+        """Allow passthrough only when this frame needs no pixel processing."""
         if bool(getattr(config, "burn_subtitles", False)):
             # burn_subtitles 默认为 True（惰性语义：有字幕才烧）。直通
             # 排除条件与 _burn_in_subtitles 的实际改帧判据逐帧一致——
@@ -7031,29 +7156,6 @@ class TimelineExporter:
                     return None
             except Exception:
                 return None
-
-        encoder = getattr(self, "_encoder", None)
-        encoder_config = getattr(encoder, "_config", None)
-        spec_candidates = _passthrough_specs_for(encoder_config)
-        if not spec_candidates:
-            return None
-        if not getattr(self, "_use_high_precision_export", False):
-            # 高精度关闭时只保留非高精度规格（帧级按 pixel_format 精选
-            # 之前先按精度过滤，避免无谓解码）。
-            spec_candidates = tuple(
-                spec for spec in spec_candidates
-                if not spec.requires_high_precision)
-            if not spec_candidates:
-                return None
-        try:
-            output_siting = int(getattr(
-                getattr(encoder, "_movie_cfg", None), "chroma_siting", 0))
-        except (TypeError, ValueError, OverflowError):
-            return None
-        # Current TOPOS 4:2:2 export uses a co-sited horizontal chroma phase.
-        # Reject other target phases before opening/reading the source frame.
-        if output_siting not in (0, 2):
-            return None
 
         layers = tuple(getattr(frame_plan, "layers", ()) or ())
         if (not getattr(frame_plan, "has_content", False)
@@ -7083,11 +7185,7 @@ class TimelineExporter:
         if not math.isfinite(opacity):
             return None
         opacity = max(0.0, min(1.0, opacity))
-        # 解码前先用候选集的乐观标量交付标志做排除（帧级规格在解码后
-        # 按 pixel_format 精选；下方交付段有 scalar_delivery 一致性守卫）。
-        supports_scalar_delivery = any(
-            spec.scalar_delivery for spec in spec_candidates)
-        if not supports_scalar_delivery and (
+        if not allow_scalar_delivery and (
                 animated_params
                 or float(getattr(clip, "opacity", 1.0)) != 1.0
                 or opacity != 1.0
@@ -7100,7 +7198,7 @@ class TimelineExporter:
                 or getattr(clip, "render_cache_id", None)
                 or getattr(clip, "raw", None) is not None
                 or getattr(clip, "freeze_source_frame", None) is not None
-                or (supports_scalar_delivery
+                or (allow_scalar_delivery
                     and any(str(name) != "opacity"
                             for name in animated_params))
                 or blend_name != "normal"
@@ -7139,6 +7237,84 @@ class TimelineExporter:
                 or self._get_clip_video_denoise(layer) is not None):
             return None
 
+        return layer, expected_source_frame, opacity
+
+    def _delivery_guide_burns_in(self) -> bool:
+        settings = dict(getattr(self._sequence, "format_settings", {}) or {})
+        guide = settings.get("program_guide")
+        if isinstance(guide, dict) and guide.get("type") == "aspect_ratio":
+            guide_params = guide.get("params", {})
+            if (isinstance(guide_params, dict)
+                    and bool(guide_params.get("fill_black", False))
+                    and bool(guide_params.get("burn_in", False))):
+                return True
+        return False
+
+    def _try_render_planar_passthrough(
+        self,
+        frame_plan: Any,
+        frame_idx: int,
+        config: TimelineExportConfig,
+    ) -> Optional[Any]:
+        """Return a planar delivery frame when timeline semantics are identity.
+
+        The encoder already accepts validated YUV planes for the target
+        formats in :func:`_passthrough_specs_for` (TOPOS yuv422p10le, and
+        since the 2026-09-15 export-speed plan, FFmpeg h264/hevc yuv420p;
+        since 2026-09-17 also 10-bit sources downconverted to the 8-bit
+        tier in the YUV domain). 8-bit 4:2:0 SDR delivery may also resize
+        the source Y/U/V planes directly when the only timeline operation
+        is the requested output scaling. This fail-closed gate keeps every
+        other edit on the normal compositor.
+        """
+        import numpy as np
+
+        # An explicit native surface bridge must receive the Metal-rendered
+        # CVPixelBuffer, never the older host-visible planar passthrough. The
+        # latter is still valid for the ordinary FFmpeg/Topos encoders.
+        if getattr(
+            getattr(self, "_gpu_encode_surface_provider", None),
+            "handles_timeline_video",
+            False,
+        ):
+            return None
+        if getattr(self, "_export_has_alpha", False):
+            return None
+        encoder = getattr(self, "_encoder", None)
+        encoder_config = getattr(encoder, "_config", None)
+        spec_candidates = _passthrough_specs_for(encoder_config)
+        if not spec_candidates:
+            return None
+        if not getattr(self, "_use_high_precision_export", False):
+            # 高精度关闭时只保留非高精度规格（帧级按 pixel_format 精选
+            # 之前先按精度过滤，避免无谓解码）。
+            spec_candidates = tuple(
+                spec for spec in spec_candidates
+                if not spec.requires_high_precision)
+            if not spec_candidates:
+                return None
+        try:
+            output_siting = int(getattr(
+                getattr(encoder, "_movie_cfg", None), "chroma_siting", 0))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        # Current TOPOS 4:2:2 export uses a co-sited horizontal chroma phase.
+        # Reject other target phases before opening/reading the source frame.
+        if output_siting not in (0, 2):
+            return None
+
+        # Candidate specs can optionally deliver opacity and resize in YUV.
+        # The decoded frame must still match one of those specs below.
+        supports_scalar_delivery = any(
+            spec.scalar_delivery for spec in spec_candidates)
+        identity_layer = self._identity_delivery_layer(
+            frame_plan, frame_idx, config,
+            allow_scalar_delivery=supports_scalar_delivery,
+        )
+        if identity_layer is None:
+            return None
+        layer, expected_source_frame, opacity = identity_layer
+
         asset = self._project.get_asset_by_id(layer.asset_id) \
             if self._project is not None else None
         if asset is None or str(getattr(asset, "media_type", "")) != "video":
@@ -7163,14 +7339,8 @@ class TimelineExporter:
 
         # The separate matte pass changes pixels after compositing; bypass it
         # only when the active program guide is not configured to burn in.
-        settings = dict(getattr(self._sequence, "format_settings", {}) or {})
-        guide = settings.get("program_guide")
-        if isinstance(guide, dict) and guide.get("type") == "aspect_ratio":
-            guide_params = guide.get("params", {})
-            if (isinstance(guide_params, dict)
-                    and bool(guide_params.get("fill_black", False))
-                    and bool(guide_params.get("burn_in", False))):
-                return None
+        if self._delivery_guide_burns_in():
+            return None
 
         source_path = export_source_path(self._project, asset)
         if not source_path:
@@ -8660,7 +8830,7 @@ class TimelineExporter:
                 is_user_transition_spatial,
             )
             from src.features.edit.core.timeline_gpu_export_renderer import (
-                GpuWipeElement, GpuYuv420Output, GpuYuv422P10Output,
+                GpuRgbSource, GpuWipeElement, GpuYuv420Output, GpuYuv422P10Output,
             )
 
             if self._project is None:
@@ -8823,12 +8993,7 @@ class TimelineExporter:
                 media_type = str(getattr(asset, "media_type", "") or "")
                 if media_type not in ("video", "image"):
                     return None
-                effective_path = getattr(asset, "effective_path", None)
-                asset_path = (
-                    effective_path
-                    if isinstance(effective_path, str) and effective_path
-                    else str(getattr(asset, "path", "") or "")
-                )
+                asset_path = export_source_path(self._project, asset)
                 if not asset_path:
                     return None
                 source_key = (
@@ -8840,6 +9005,29 @@ class TimelineExporter:
                     return resolved_source_cache[source_key]
                 if media_type == "video":
                     layer_session_key = self._layer_session_key(layer)
+                    metadata = getattr(asset, "metadata", None) or {}
+                    prefer_native_planes = (
+                        graphics_backend == "opengl"
+                        and getattr(self, "_use_high_precision_export", False)
+                        and isinstance(metadata, dict)
+                        and str(metadata.get("codec") or "").lower() == "dnxhd"
+                        and asset_path == str(getattr(asset, "path", "") or "")
+                        and not metadata.get("rotation")
+                        and not metadata.get("has_alpha")
+                        and metadata.get("pixel_format") in self._GPU_CHROMA_DIV_BY_FORMAT
+                        and self._pixel_format_is_high_depth(metadata["pixel_format"])
+                    )
+                    if prefer_native_planes:
+                        # The RGB48 provider would immediately be discarded
+                        # in favor of these same source planes below.
+                        decoded_hd = self._request_high_depth_decoded_frame(
+                            asset_path, int(layer.source_frame), layer.asset_id,
+                            session_key=layer_session_key,
+                        )
+                        if decoded_hd is not None:
+                            source = self._gpu_planar_source_from_decoded(decoded_hd)
+                            if source is not None:
+                                return source
                     if graphics_backend == "metal":
                         decoded = self._request_video_metal_frame(
                             asset_path, int(layer.source_frame), layer.asset_id,
@@ -8856,7 +9044,7 @@ class TimelineExporter:
                         resolved_source_cache[source_key] = decoded
                         return decoded
                     source = self._gpu_planar_source_from_decoded(decoded)
-                    if source is None and \
+                    if source is None and not prefer_native_planes and \
                             getattr(self, "_use_high_precision_export",
                                     False) \
                             and self._decoded_frame_is_high_depth(decoded):
@@ -8891,14 +9079,12 @@ class TimelineExporter:
                             and packed is not None and packed.ndim == 3 \
                             and packed.shape[2] == 3 \
                             and packed.dtype == np.uint8:
-                        # VideoFrameProviderService's normal FFmpeg master
-                        # decoder emits packed ``rgb24`` frames. The GPU
-                        # renderer's packed path expects BGR because its
-                        # texture swizzle restores RGB before grading. Accept
-                        # both valid layouts and adapt RGB once here instead
-                        # of silently routing every ordinary H.264 clip to
-                        # the much slower CPU grade/composite path.
                         if packed_format == "rgb24":
+                            if graphics_backend == "opengl":
+                                if output_yuv420p:
+                                    self._prefetch_next_export_frame(
+                                        layer, frame_idx, layer_session_key)
+                                return GpuRgbSource(packed)
                             packed = np.ascontiguousarray(packed[..., ::-1])
                         if graphics_backend == "metal":
                             resolved_source_cache[source_key] = packed
@@ -9133,7 +9319,7 @@ class TimelineExporter:
             # whose stored blend mode is non-normal.
             if (single_layer is not None and not has_active_dip
                     and effect_params is None and not single_geometry_active):
-                if isinstance(source, np.ndarray):
+                if isinstance(source, (np.ndarray, GpuRgbSource)):
                     render = renderer.render_packed_bgr
                 elif graphics_backend == "metal" and id(source) in metal_gpu_frames:
                     render = renderer.render_metal_texture_frame
@@ -11590,6 +11776,40 @@ class TimelineExporter:
                 wall_ms=(time.perf_counter() - decode_started) * 1000.0)
             self._record_gpu_fallback("metal_frame_request_error")
             return None
+
+    def _prefetch_next_export_frame(
+        self, layer: "ClipLayerInfo", frame_idx: int, session_key: str,
+    ) -> None:
+        """Overlap one sequential master decode with the current GL frame."""
+        worker = getattr(self, "_export_read_ahead", None)
+        prefetch = getattr(self._frame_provider, "prefetch", None)
+        next_idx = frame_idx + 1
+        if (worker is None or not callable(prefetch)
+                or next_idx >= self._export_read_ahead_end
+                or self._render_plan is None):
+            return
+        pending = self._export_read_ahead_pending
+        if pending is not None:
+            if not pending.done():
+                return
+            try:
+                pending.result()
+            except Exception as error:
+                logger.debug("Export read-ahead failed: %s", error)
+            self._export_read_ahead_pending = None
+        next_plan = self._render_plan.get_frame_plan(next_idx)
+        if len(next_plan.layers) != 1 or next_plan.transitions:
+            return
+        next_layer = next_plan.layers[0]
+        if (next_layer.clip_id != layer.clip_id
+                or next_layer.source_frame != layer.source_frame + 1):
+            return
+        source_frame = int(next_layer.source_frame)
+        clip_id = self._open_clips.get(session_key)
+        if clip_id is not None:
+            self._export_read_ahead_pending = worker.submit(
+                prefetch, clip_id, source_frame, source_frame, "master",
+            )
 
     def _wait_for_metal_prefetch(self, clip_id: str) -> None:
         """Join queued read-ahead for this clip before issuing its next read."""

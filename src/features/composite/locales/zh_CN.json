@@ -1,4 +1,33 @@
 {
+  "composite": {
+    "node_editor": {
+      "foreground": "A 前景",
+      "background": "B 背景",
+      "mask": "Mask 遮罩",
+      "layer_managed": "由图层时间线管理",
+      "cable_routing": "连线样式",
+      "cable_curved": "曲线",
+      "cable_straight": "直线",
+      "cable_orthogonal": "直角",
+      "search_add_node": "搜索并添加节点…",
+      "reveal_timeline_layer": "在图层时间线中显示",
+      "palette": "节点库",
+      "palette_all": "全部",
+      "palette_favorites": "收藏",
+      "palette_recent": "最近",
+      "palette_help": "将节点拖到画布上创建。"
+    },
+    "layer_timeline": {
+      "reveal_node": "在节点图中显示",
+      "timing": "图层时间",
+      "goto_in": "跳到入点",
+      "goto_out": "跳到出点",
+      "set_work_area": "按图层范围设置工作区"
+    },
+    "expression": {
+      "symbols": "表达式函数与变量"
+    }
+  },
   "nodes": {
     "blur": {
       "title": "模糊",

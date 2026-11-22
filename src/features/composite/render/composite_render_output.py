@@ -43,6 +43,8 @@ from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
+from .external_comp_snapshot import ExternalCompSnapshots
+
 if TYPE_CHECKING:
     from src.features.composite.core.graph_snapshot import GraphSnapshot
     from src.shared.media.metadata import Rational
@@ -92,6 +94,7 @@ def _pack_encoded_rgb(frame_enc: np.ndarray, high_depth: bool):
 # Node types that make a composite time-dependent ("video"). The presence of
 # any of these (or any keyframed parameter) classifies the graph as a video.
 _TIME_DEPENDENT_NODE_TYPES = frozenset({
+    "audio_source",
     "video_frame",
     "timeline_clip_input",
     "time_offset",
@@ -305,6 +308,7 @@ class RenderOutputResult:
     # 且一帧完整帧都没写；partial = 已写部分帧后取消/失败（成果可用于
     # 续传但不得报告成功）；failed = 0 成功帧或渲染错误。
     status: str = STATUS_COMPLETE
+    audio_state: str = "silent"
 
 
 # ── Orchestration ─────────────────────────────────────────────────────
@@ -318,6 +322,7 @@ class CompositeRenderOutput:
 
     def __init__(self, config_manager: Any = None) -> None:
         self._frame_renderer: Any = None  # CompositeFrameRenderer (lazy)
+        self._external_export_snapshot = ExternalCompSnapshots(freeze=True)
         # config_manager selects the color engine (builtin vs OCIO) for every
         # transform in the render path. If None, get_color_provider() defaults
         # to OCIO (legacy behaviour). Passed in from the controller so the
@@ -513,40 +518,104 @@ class CompositeRenderOutput:
             preset=preset,
             color_metadata=color_metadata,
         )
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+
+        from src.features.composite.core.composition_pcm import (
+            SAMPLE_RATE, render_composition_pcm,
+        )
+
+        audio = render_composition_pcm(
+            graph_data, start_frame, end_frame, fps=fps, project=edit_project,
+            cancel_check=is_cancelled,
+        )
+        if is_cancelled is not None and is_cancelled():
+            return RenderOutputResult(success=False, error="EXPORT_CANCELLED",
+                                      status=RenderOutputResult.STATUS_CANCELLED)
+        if audio.state not in ("silent", "ok"):
+            return RenderOutputResult(
+                success=False, error=f"Composition audio: {audio.state} ({audio.detail})",
+                status=RenderOutputResult.STATUS_FAILED, audio_state=audio.state,
+            )
+        destination = output_path
+        scratch = None
+        if audio.samples is not None:
+            suffix = Path(destination).suffix.lower()
+            audio_codec = {".mov": "pcm_s24le", ".webm": "libopus"}.get(suffix, "aac")
+            scratch = TemporaryDirectory(prefix=".topos-render-", dir=Path(destination).parent)
+            output_path = str(Path(scratch.name) / Path(destination).name)
         encoder = FFmpegVideoEncoder(output_path, enc_config)
 
         try:
             encoder.open()
+            if audio.samples is not None:
+                encoder.add_audio_stream(codec=audio_codec, sample_rate=SAMPLE_RATE, channels=2)
         except Exception as e:
             logger.error(f"Video encoder open failed: {e}")
-            return RenderOutputResult(success=False, error=str(e))
+            if scratch is not None:
+                try:
+                    encoder.close()
+                finally:
+                    scratch.cleanup()
+            return RenderOutputResult(success=False, error=str(e),
+                                      status=RenderOutputResult.STATUS_FAILED)
+
+        def write_audio(frame_count: int) -> None:
+            if audio.samples is None:
+                return
+            from src.features.composite.core.comp_audio import sample_boundary
+
+            origin = sample_boundary(start_frame, fps, SAMPLE_RATE)
+            left = sample_boundary(start_frame + frame_count - 1, fps, SAMPLE_RATE) - origin
+            right = sample_boundary(start_frame + frame_count, fps, SAMPLE_RATE) - origin
+            encoder.write_audio_samples(audio.samples[:, left:right], sample_rate=SAMPLE_RATE)
+
+        def finalize(result: RenderOutputResult) -> RenderOutputResult:
+            result.audio_state = audio.state
+            if scratch is not None:
+                if result.success:
+                    os.replace(output_path, destination)
+                    result.output_path = destination
+                elif result.status == RenderOutputResult.STATUS_PARTIAL:
+                    result.output_path = ""
+            return result
 
         written = 0
         parallel_n = self._resolve_parallel_frames(parallel_frames)
         if parallel_n >= 2:
-            stage = self._run_parallel_video_stage(
-                graph_data=graph_data,
-                encoder=encoder,
-                frames=list(range(start_frame, end_frame + 1)),
-                start_frame=start_frame,
-                fps=fps,
-                is_hdr=is_hdr,
-                output_descriptor=output_descriptor,
-                edit_project=edit_project,
-                timeline_sequences=timeline_sequences,
-                comp_clip=comp_clip,
-                render_pass=render_pass,
-                worker_count=parallel_n,
-                is_cancelled=is_cancelled,
-                progress_cb=progress_cb,
-                frame_width=width,
-                frame_height=height,
-                output_path=output_path,
-                high_depth_input=high_depth_input,
-                rgb_output_descriptor=rgb_output_descriptor,
-            )
-            if stage is not None:
-                return stage
+            stage = None
+            try:
+                stage = self._run_parallel_video_stage(
+                    graph_data=graph_data,
+                    encoder=encoder,
+                    frames=list(range(start_frame, end_frame + 1)),
+                    start_frame=start_frame,
+                    fps=fps,
+                    is_hdr=is_hdr,
+                    output_descriptor=output_descriptor,
+                    edit_project=edit_project,
+                    timeline_sequences=timeline_sequences,
+                    comp_clip=comp_clip,
+                    render_pass=render_pass,
+                    worker_count=parallel_n,
+                    is_cancelled=is_cancelled,
+                    progress_cb=progress_cb,
+                    frame_width=width,
+                    frame_height=height,
+                    output_path=output_path,
+                    high_depth_input=high_depth_input,
+                    rgb_output_descriptor=rgb_output_descriptor,
+                    on_frame_encoded=write_audio if scratch is not None else None,
+                )
+                if stage is not None:
+                    return finalize(stage)
+            except BaseException:
+                if scratch is not None:
+                    scratch.cleanup()
+                raise
+            finally:
+                if scratch is not None and stage is not None:
+                    scratch.cleanup()
         try:
             # AUD-81004: frames that render None are substituted with the
             # previous encoded frame (black placeholder for the first frame)
@@ -594,6 +663,7 @@ class CompositeRenderOutput:
                     )
                     encoder.encode_frame(decoded)
                     written += 1
+                    write_audio(written)
                     if progress_cb is not None:
                         progress_cb(written, total)
                     continue
@@ -630,6 +700,7 @@ class CompositeRenderOutput:
                 )
                 encoder.encode_frame(decoded)
                 written += 1
+                write_audio(written)
                 if progress_cb is not None:
                     progress_cb(written, total)
 
@@ -657,7 +728,7 @@ class CompositeRenderOutput:
             if status in (RenderOutputResult.STATUS_CANCELLED,
                           RenderOutputResult.STATUS_FAILED):
                 self._safe_remove(output_path)
-            return RenderOutputResult(
+            return finalize(RenderOutputResult(
                 success=success,
                 output_path=output_path if success else "",
                 frames_written=written,
@@ -666,7 +737,7 @@ class CompositeRenderOutput:
                         RenderOutputResult.STATUS_FAILED else "")),
                 frames_dropped=dropped,
                 status=status,
-            )
+            ))
         except Exception as e:
             logger.exception("Video render failed")
             try:
@@ -680,6 +751,8 @@ class CompositeRenderOutput:
                                       status=RenderOutputResult.STATUS_FAILED)
         finally:
             self._cleanup_frame_renderer()
+            if scratch is not None:
+                scratch.cleanup()
 
     # ── Image sequence ───────────────────────────────────────────────
 
@@ -969,6 +1042,7 @@ class CompositeRenderOutput:
             CompositeFrameRenderer)
 
         renderer = CompositeFrameRenderer(config_manager=self._config_manager)
+        renderer.set_external_export_snapshot(self._external_export_snapshot)
         try:
             renderer.warm_up()
         except Exception:
@@ -1062,6 +1136,7 @@ class CompositeRenderOutput:
         output_path: str = "",
         high_depth_input: bool = False,
         rgb_output_descriptor=None,
+        on_frame_encoded: Callable[[int], None] | None = None,
     ):
         """Render+convert frames in parallel, encode in order.
 
@@ -1162,6 +1237,8 @@ class CompositeRenderOutput:
             )
             encoder.encode_frame(decoded)
             written += 1
+            if on_frame_encoded is not None:
+                on_frame_encoded(written)
 
         try:
             render_frames_parallel(
@@ -1401,9 +1478,11 @@ class CompositeRenderOutput:
             self._frame_renderer = CompositeFrameRenderer(
                 config_manager=self._config_manager
             )
+            self._frame_renderer.set_external_export_snapshot(self._external_export_snapshot)
         return self._frame_renderer
 
     def _cleanup_frame_renderer(self) -> None:
+        self._external_export_snapshot = ExternalCompSnapshots(freeze=True)
         if self._frame_renderer is not None:
             try:
                 self._frame_renderer.cleanup()

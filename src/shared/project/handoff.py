@@ -14,14 +14,17 @@ file_members）→ 生产 save（含 backing/取消检查/原子晋升）→ 复
 
 字体/LUT 等非素材资源：调用方（UI/07B）经 *extra_resources* 显式添加
 （kind=font/lut/...）；自动发现系统字体文件不在本层职责内。
+可完整审计、已经携带渲染素材的外部合成包作为资源按原始字节内嵌。
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+import tempfile
+from contextlib import nullcontext
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from .archive_backing import ArchiveBackingStore
 from .dependency_audit import (
@@ -32,7 +35,11 @@ from .dependency_audit import (
 from .resource_resolver import ResourceIndex, make_resource_entry
 from .topos_project_io import ToposProjectIO
 
+if TYPE_CHECKING:
+    from src.features.composite.render.external_comp_snapshot import ExternalArchiveLink
+
 logger = logging.getLogger(__name__)
+_MAX_EXTRA_COMPOSITION_ARCHIVE_BYTES = 256 * 1024 * 1024
 
 __all__ = ["HandoffResource", "HandoffResult", "export_handoff_package"]
 
@@ -84,7 +91,7 @@ def export_handoff_package(
         return HandoffResult(
             False, dest_path, "partial", detail="打包前已取消")
 
-    project, full_data = ToposProjectIO.load(source_path)
+    project, full_data = ToposProjectIO.load(source_path, activate_resources=False)
     if project is None or full_data is None:
         return HandoffResult(
             False, dest_path, "blocked",
@@ -102,6 +109,7 @@ def export_handoff_package(
         assets=full_data.get("assets") or {},
         full_data=full_data,
         timeline_sequences=sequences_map.values(),
+        project_archive_path=source_path,
     )
     verdict, summary, problems = portability_preflight(report)
     if verdict == "blocked":
@@ -110,6 +118,25 @@ def export_handoff_package(
             problems=tuple(packaging_summary(report)["issues"]),
             detail="依赖审计未通过（blocked）——不产出会误导的交接包；"
                    "请先修复问题清单")
+    new_archives = _handoff_external_archives(report.external_archives)
+    external_needing_copy = any(not ref.portable for ref in report.by_kind("external_comp"))
+    if external_needing_copy and new_archives is None and (
+        os.path.dirname(os.path.abspath(source_path))
+        != os.path.dirname(os.path.abspath(dest_path))
+    ):
+        destination_report = collect_dependencies(
+            full_data={
+                "compositions": full_data.get("compositions"),
+                "resource_resolver": full_data.get("resource_resolver"),
+            },
+            project_archive_path=dest_path,
+        )
+        if destination_report.has_blocking:
+            return HandoffResult(
+                False, dest_path, "blocked",
+                problems=tuple(packaging_summary(destination_report)["issues"]),
+                detail="目标目录缺少外部合成引用，请先按相对路径放置依赖工程",
+            )
 
     # ---- 内嵌外部在线素材（内容寻址） ----
     # 已有内嵌资源随 backing 流式携带（来源包 preserved members），此处
@@ -177,30 +204,42 @@ def export_handoff_package(
                 "path_original", payload.get("path", ""))
             payload["path"] = payload["path_original"]
 
-    success = ToposProjectIO.save(
-        project, dest_path,
-        full_assets_data=full_assets_data,
-        full_bins_data={
-            bin_id: EditProjectSerializer._bin_to_dict(b)
-            for bin_id, b in edit_project.bins.items()
-        },
-        full_timelines_data={
-            timeline_id: EditProjectSerializer._timeline_ref_to_dict(t)
-            for timeline_id, t in edit_project.timelines.items()
-        },
-        timeline_sequences_data=dict(sequences_map),
-        resources_data=resources.to_dict(),
-        resource_files=resource_files,
-        backing_store=backing,
-        should_cancel=should_cancel,
+    staging_context = (
+        tempfile.TemporaryDirectory(prefix="topos-linked-archives-") if new_archives
+        else nullcontext("")
     )
+    with staging_context as staging:
+        if new_archives:
+            try:
+                _stage_external_archives(new_archives, resources, resource_files, staging, _cancel)
+            except (OSError, ValueError) as exc:
+                return HandoffResult(
+                    False, dest_path, "partial", summary=summary, detail=str(exc),
+                )
+        success = ToposProjectIO.save(
+            project, dest_path,
+            full_assets_data=full_assets_data,
+            full_bins_data={
+                bin_id: EditProjectSerializer._bin_to_dict(b)
+                for bin_id, b in edit_project.bins.items()
+            },
+            full_timelines_data={
+                timeline_id: EditProjectSerializer._timeline_ref_to_dict(t)
+                for timeline_id, t in edit_project.timelines.items()
+            },
+            timeline_sequences_data=dict(sequences_map),
+            resources_data=resources.to_dict(),
+            resource_files=resource_files,
+            backing_store=backing,
+            should_cancel=should_cancel,
+        )
     if not success:
         return HandoffResult(
             False, dest_path, verdict, summary=summary,
             detail="保存失败（取消/磁盘/来源不可读）；目标未改动")
 
     # ---- 复核：重开 + 审计 full ----
-    verify_project, verify_data = ToposProjectIO.load(dest_path)
+    verify_project, verify_data = ToposProjectIO.load(dest_path, activate_resources=False)
     if verify_project is None:
         return HandoffResult(
             False, dest_path, verdict, summary=summary,
@@ -210,6 +249,7 @@ def export_handoff_package(
         full_data=verify_data,
         timeline_sequences=(verify_data.get("timeline_sequences")
                             or {}).values(),
+        project_archive_path=dest_path,
     )
     verify_verdict, verify_summary, verify_problems = \
         portability_preflight(verify_report)
@@ -219,6 +259,73 @@ def export_handoff_package(
         embedded_asset_ids=tuple(sorted(set(embedded))),
         problems=tuple(packaging_summary(verify_report)["issues"]),
     )
+
+
+def _handoff_external_archives(
+    links: Iterable[ExternalArchiveLink],
+) -> dict[str, list[ExternalArchiveLink]] | None:
+    """Choose portable archive payloads without collecting separate media."""
+    archives: dict[str, list[ExternalArchiveLink]] = {}
+    size = 0
+    for link in links:
+        if not link.portable:
+            return None
+        if link.embedded:
+            continue
+        if link.archive_revision not in archives:
+            try:
+                size += os.path.getsize(link.local_path)
+            except OSError:
+                return None
+            if size > _MAX_EXTRA_COMPOSITION_ARCHIVE_BYTES:
+                return None
+        archives.setdefault(link.archive_revision, []).append(link)
+    return archives
+
+
+def _stage_external_archives(
+    archives: dict[str, list[ExternalArchiveLink]], resources: ResourceIndex,
+    resource_files: dict[str, str], staging: str, cancelled: Callable[[], bool],
+) -> None:
+    from src.features.composite.render.external_comp_snapshot import EXTERNAL_ARCHIVE_ROLE
+
+    remaining = _MAX_EXTRA_COMPOSITION_ARCHIVE_BYTES
+    for revision, links in archives.items():
+        if cancelled():
+            raise ValueError("已取消")
+        local_path = links[0].local_path
+        staged_path = os.path.join(staging, f"{revision}.topos")
+        # Freeze the exact original bytes. Atomic project saves can replace
+        # the source archive after the dependency audit has completed.
+        with open(local_path, "rb") as source, open(staged_path, "wb") as staged:
+            while chunk := source.read(1024 * 1024):
+                remaining -= len(chunk)
+                if remaining < 0:
+                    raise ValueError("外部合成工程超出交接包自动内嵌大小上限")
+                if cancelled():
+                    raise ValueError("已取消")
+                staged.write(chunk)
+        resource_id = f"external-comp-{revision}"
+        entry = make_resource_entry(
+            staged_path, resource_id=resource_id, kind="other",
+            roles=(EXTERNAL_ARCHIVE_ROLE,), original_filename=os.path.basename(local_path),
+        )
+        if entry.sha256 != revision:
+            raise ValueError("外部合成工程在打包前已更新，请重新生成交接包")
+        existing = resources.entries.get(resource_id)
+        old_edges = existing.metadata.get("reference_edges", []) if existing is not None else []
+        old_edges = old_edges if isinstance(old_edges, list) else []
+        edges = {tuple(edge) for edge in old_edges if isinstance(edge, list) and len(edge) == 2
+                 and all(isinstance(value, str) for value in edge)}
+        edges.update((link.parent_revision, link.relative_path) for link in links)
+        resources.entries[resource_id] = replace(
+            entry,
+            metadata={
+                **(existing.metadata if existing is not None else {}),
+                "reference_edges": [list(edge) for edge in sorted(edges)],
+            },
+        )
+        resource_files[entry.archive_path] = staged_path
 
 
 def _index_entries(full_data: dict[str, Any]) -> dict[str, Any]:

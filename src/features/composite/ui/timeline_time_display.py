@@ -28,10 +28,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QBoxLayout, QLabel, QLineEdit, QMenu, QSizePolicy, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMenu, QVBoxLayout, QWidget,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -44,6 +44,8 @@ from . import timeline_layout
 # controls.
 _FIXED_WIDTH_PX = 108
 _COMPACT_WIDTH_PX = 96
+_LAYER_TIMECODE_PX = 14
+_LAYER_DETAILS_PX = 10
 
 
 class TimelineTimeDisplay(QWidget):
@@ -69,7 +71,7 @@ class TimelineTimeDisplay(QWidget):
         self._current_frame = 0
         self._editing = False
         self._compact = bool(compact)
-        self._single_line = False
+        self._layer_header = False
         self._menu_display_mode = "frame"
         # AUD-11110: Qt emits editingFinished immediately after returnPressed
         # when Enter commits the edit. This flag marks "a commit attempt is
@@ -90,35 +92,33 @@ class TimelineTimeDisplay(QWidget):
         self._fps = fps
         self._refresh_labels()
 
-    def set_single_line(self, enabled: bool) -> None:
-        """Use the Edit timeline presentation for the Layer header."""
-        if enabled == self._single_line:
+    def set_layer_header(self, enabled: bool) -> None:
+        """Group the layer timecode and frame count in a compact left column."""
+        if enabled == self._layer_header:
             return
         self._exit_edit()
-        self._single_line = enabled
+        self._layer_header = enabled
         layout = self.layout()
-        layout.setDirection(QBoxLayout.Direction.LeftToRight if enabled else QBoxLayout.Direction.TopToBottom)
-        layout.setSpacing(8 if enabled else 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                            if enabled else Qt.AlignmentFlag(0))
         layout.setContentsMargins(6, 0 if self._compact or enabled else 2,
                                   6, 0 if self._compact or enabled else 2)
         if enabled:
             self.setMinimumWidth(0)
             self.setMaximumWidth(16777215)
             font = timeline_timecode_font()
+            font.setPixelSize(_LAYER_TIMECODE_PX)
             details = QFont(font)
-            details.setPixelSize(11)
+            details.setPixelSize(_LAYER_DETAILS_PX)
+            details.setWeight(QFont.Weight.Normal)
             self._top_label.setFont(font)
-            self._top_label.setMinimumWidth(self._top_label.fontMetrics().horizontalAdvance("88:88:88:88"))
             self._bottom_label.setFont(details)
             self._edit.setFont(font)
         else:
             self.setFixedWidth(_COMPACT_WIDTH_PX if self._compact else _FIXED_WIDTH_PX)
-            self._top_label.setMinimumWidth(0)
             self._top_label.setFont(self._legacy_main_font)
             self._bottom_label.setFont(self._legacy_details_font)
             self._edit.setFont(self._legacy_edit_font)
-        self._bottom_label.setSizePolicy(QSizePolicy.Policy.Ignored if enabled else QSizePolicy.Policy.Preferred,
-                                         QSizePolicy.Policy.Preferred)
         self.setStyleSheet(self._stylesheet())
         self._refresh_labels()
 
@@ -164,6 +164,7 @@ class TimelineTimeDisplay(QWidget):
 
         # Top line: large blue timecode/seconds/frame.
         self._top_label = QLabel(self)
+        self._top_label.setObjectName("TimelineTimecode")
         f = QFont(self._top_label.font())
         f.setPointSize(9 if self._compact else 10)
         f.setBold(True)
@@ -188,6 +189,7 @@ class TimelineTimeDisplay(QWidget):
 
         # Edit overlay: hidden until the user clicks. Sits over the labels.
         self._edit = QLineEdit(self)
+        self._edit.setObjectName("TimelineTimecodeEdit")
         self._legacy_edit_font = self._edit.font()
         self._edit.setFrame(False)
         self._edit.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -199,13 +201,19 @@ class TimelineTimeDisplay(QWidget):
     def _stylesheet(self) -> str:
         blue = timeline_layout.resolve_token("accent_blue")
         error = timeline_layout.resolve_token("error")
-        bg = C.TIMELINE_TIMECODE_BG if self._single_line else timeline_layout.resolve_token("header_bg")
-        text = C.TIMELINE_TIMECODE_TEXT if self._single_line else blue
-        details = C.TEXT_LABEL if self._single_line else blue
+        bg = C.TIMELINE_TIMECODE_BG if self._layer_header else timeline_layout.resolve_token("header_bg")
+        text = C.TIMELINE_TIMECODE_TEXT if self._layer_header else blue
+        details = C.TEXT_LABEL if self._layer_header else blue
+        surface = "transparent" if self._layer_header else bg
+        layer_typography = (
+            "QLabel#TimelineTimecode, QLineEdit#TimelineTimecodeEdit "
+            f"{{ font-size: {_LAYER_TIMECODE_PX}px; font-weight: 500; }}"
+            f"QLabel#TimelineFrameDetails {{ font-size: {_LAYER_DETAILS_PX}px; font-weight: 400; }}"
+        ) if self._layer_header else ""
         return (
-            f"QWidget#TimelineTimeDisplay {{ background-color: {bg};"
+            f"QWidget#TimelineTimeDisplay {{ background-color: {surface};"
             f" border: 1px solid transparent; border-radius: 2px; }}"
-            f"QLabel {{ color: {text}; border: none; }}"
+            f"QLabel {{ color: {text}; background: transparent; border: none; }}"
             f"QLabel#TimelineFrameDetails {{ color: {details}; }}"
             f"QLineEdit {{ background-color: {bg}; color: {text};"
             f" border: 1px solid {blue}; border-radius: 2px;"
@@ -215,6 +223,7 @@ class TimelineTimeDisplay(QWidget):
             # selector must be an attribute selector (objectName "#invalid"
             # never matched and the red border never showed).
             f"QLineEdit[invalid=\"true\"] {{ border: 1px solid {error}; }}"
+            f"{layer_typography}"
         )
 
     # ── label rendering ──
@@ -235,7 +244,7 @@ class TimelineTimeDisplay(QWidget):
     def _format_bottom(self, frame: int) -> str:
         # Always show raw frame + fps on the bottom line (plan §16.3 B1).
         fps_str = f"{self._fps:g}"
-        if self._single_line:
+        if self._layer_header:
             return f"{frame:d} · {fps_str} fps"
         return f"{frame:d} ({fps_str})"
 
@@ -246,7 +255,7 @@ class TimelineTimeDisplay(QWidget):
         undefined for negative frames, and the panel doesn't use them.
         """
         f = max(0, int(frame))
-        if self._single_line:
+        if self._layer_header:
             total_seconds, ff = divmod(f, max(1, round(self._fps)))
             minutes, ss = divmod(total_seconds, 60)
             hh, mm = divmod(minutes, 60)
@@ -260,14 +269,25 @@ class TimelineTimeDisplay(QWidget):
 
     # ── click-to-edit ──
 
-    def mouseDoubleClickEvent(self, _event) -> None:
-        self._enter_edit()
+    def _readout_rect(self) -> QRect:
+        if not self._layer_header:
+            return self.rect().adjusted(2, 2, -2, -2)
+        return (self._top_label.geometry().united(self._bottom_label.geometry())
+                .adjusted(-4, -3, 4, 3).intersected(self.rect()))
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if not self._layer_header or self._readout_rect().contains(event.position().toPoint()):
+            self._enter_edit()
 
     def contextMenuEvent(self, event) -> None:
         """Offer display-unit choices without adding another footer row."""
+        if self._layer_header and not self._readout_rect().contains(event.pos()):
+            event.ignore()
+            return
         menu = QMenu(self)
         choices = (
-            ("time", I18N.tr("keyframes.unit_time", "Time")),
+            ("time", I18N.tr("keyframes.ruler_automatic", "Automatic") if self._layer_header
+             else I18N.tr("keyframes.unit_time", "Time")),
             ("frame", I18N.tr("keyframes.unit_frame", "Frames")),
             ("seconds", I18N.tr("keyframes.unit_seconds", "Seconds")),
             ("timecode", I18N.tr("keyframes.unit_timecode", "Timecode")),
@@ -288,7 +308,8 @@ class TimelineTimeDisplay(QWidget):
     def mousePressEvent(self, event) -> None:
         # Single click also enters edit (AE enters on single-click of the
         # time readout). Keep double-click too for discoverability.
-        if event.button() == Qt.MouseButton.LeftButton:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and (not self._layer_header or self._readout_rect().contains(event.position().toPoint()))):
             self._enter_edit()
         super().mousePressEvent(event)
 
@@ -302,7 +323,7 @@ class TimelineTimeDisplay(QWidget):
         self._edit.setText(self._format_top(self._current_frame))
         self._edit.selectAll()
         self._edit.setProperty("invalid", False)
-        self._edit.setGeometry(self.rect().adjusted(2, 2, -2, -2))
+        self._edit.setGeometry(self._readout_rect())
         self._edit.show()
         self._edit.setFocus(Qt.FocusReason.OtherFocusReason)
 

@@ -4,7 +4,9 @@
 提供节点整理、对齐、分布等功能。
 """
 
-from typing import List, Dict, Set, Tuple, TYPE_CHECKING
+from typing import Callable, List, Dict, Set, Tuple, TYPE_CHECKING
+
+from .node_item import NodeItem
 
 if TYPE_CHECKING:
     from src.features.composite.core.node_engine import NodeGraph, Node
@@ -14,18 +16,20 @@ class GraphLayout:
     """节点图排布管理器。"""
 
     # 排布参数
-    NODE_WIDTH = 180      # 节点宽度
+    NODE_WIDTH = NodeItem.NODE_WIDTH
     NODE_HEIGHT = 100     # 节点高度（估算）
     HORIZONTAL_GAP = 60   # 水平间距
     VERTICAL_GAP = 40     # 垂直间距
 
-    def __init__(self, graph: "NodeGraph") -> None:
+    def __init__(self, graph: "NodeGraph",
+                 node_size: Callable[[str], Tuple[float, float]] | None = None) -> None:
         """初始化排布管理器。
 
         Args:
             graph: NodeGraph 数据模型
         """
         self._graph = graph
+        self._node_size = node_size or (lambda _: (self.NODE_WIDTH, self.NODE_HEIGHT))
 
     def auto_layout(self, nodes: List["Node"]) -> Dict[str, Tuple[float, float]]:
         """
@@ -69,19 +73,20 @@ class GraphLayout:
         )
 
         x = start_x
-        for layer_idx, layer in enumerate(layers):
+        for layer in layers:
             # 每层节点按 y 坐标排序（保持上下顺序）
             layer.sort(key=lambda n: n.position[1])
 
             # 计算起始 y（居中对齐）
             y = start_y
 
-            for node_idx, node in enumerate(layer):
+            sizes = {node.id: self._node_size(node.id) for node in layer}
+            for node in layer:
                 new_positions[node.id] = (x, y)
-                y += self.NODE_HEIGHT + self.VERTICAL_GAP
+                y += sizes[node.id][1] + self.VERTICAL_GAP
 
             # 下一层的 x 位置
-            x += self.NODE_WIDTH + self.HORIZONTAL_GAP
+            x += max(width for width, _ in sizes.values()) + self.HORIZONTAL_GAP
 
         return new_positions
 
@@ -270,23 +275,24 @@ class GraphLayout:
 
         for node in sorted_nodes:
             x, y = node.position
+            width, height = self._node_size(node.id)
 
             # 检查是否有重叠
             node_rect = (
                 x, y,
-                x + self.NODE_WIDTH,
-                y + self.NODE_HEIGHT
+                x + width,
+                y + height
             )
 
             # 尝试找到一个不重叠的位置
             attempts = 0
             while self._has_overlap(node_rect, occupied_regions):
                 # 向下偏移
-                y += self.NODE_HEIGHT + self.VERTICAL_GAP
+                y += height + self.VERTICAL_GAP
                 node_rect = (
                     x, y,
-                    x + self.NODE_WIDTH,
-                    y + self.NODE_HEIGHT
+                    x + width,
+                    y + height
                 )
                 attempts += 1
                 if attempts > 50:  # 防止无限循环

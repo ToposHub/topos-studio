@@ -28,11 +28,10 @@ from PyQt6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
 
 from . import icons as _icons
 from .frame_geometry import fit_aspect_size as _fit_aspect_size
-from .base_player import (BasePlayer, DecoderBackend, _fmt_time,
-                          _frame_to_qimage)
+from .base_player import BasePlayer, DecoderBackend, _frame_to_qimage
 
 _MEZZANINE_CODECS = {'prores', 'dnxhd'}
-_SLOW_UHD_CODECS = {'hevc', 'h265'}  # Qt 软解 4K HEVC 只有 ~17fps
+_SLOW_UHD_CODECS = {'hevc', 'h265'}
 
 # —— 音频（二期）：统一重采样 48kHz 立体声 s16 推给 QAudioSink ——
 _AUDIO_RATE = 48000
@@ -52,9 +51,6 @@ class _AudioPipeline:
     def __init__(self, path: str, clock_fn):
         self._path = path
         self._clock_fn = clock_fn
-        self.audio_codec = ''
-        self.audio_rate = 0
-        self.audio_layout = ''
         self._container = None
         self._stream = None
         self._resampler = None
@@ -75,20 +71,6 @@ class _AudioPipeline:
         self._sink_backlog = 0
 
     # -- 线程安全接口（GUI 线程调用） --
-
-    def probe(self) -> bool:
-        """是否存在可用音轨（只读元数据，不启动线程）。"""
-        try:
-            with av.open(self._path) as c:
-                if not c.streams.audio:
-                    return False
-                st = c.streams.audio[0]
-                self.audio_codec = st.codec_context.name or '?'
-                self.audio_rate = int(st.rate or 48000)
-                self.audio_layout = st.layout.name
-                return True
-        except Exception:
-            return False
 
     def start(self) -> None:
         from .audio_arbiter import shared_arbiter
@@ -178,9 +160,14 @@ class _AudioPipeline:
                     try: self._sink.setVolume(self._volume)
                     except Exception: pass
             self._io = self._sink.start()
+            if self._io is None:
+                raise RuntimeError('无法启动音频输出')
         except Exception:
-            import traceback
-            traceback.print_exc()
+            logger.warning('无法启动 Libav 音频输出', exc_info=True)
+            with self._slock:
+                self._source_eof = True
+            if self._container is not None:
+                self._container.close()
             return
         pend = bytearray()
         pend_t0 = 0.0
@@ -289,6 +276,9 @@ class _AudioPipeline:
             import traceback
             traceback.print_exc()
         finally:
+            with self._slock:
+                self._source_eof = True
+                self._pend_len = self._sink_backlog = 0
             try:
                 if self._sink is not None:
                     self._sink.stop()
@@ -301,41 +291,34 @@ class _AudioPipeline:
                 pass
 
 
-_mezzanine_cache: dict = {}
+_mezzanine_cache: dict[tuple[str, float | None], tuple[bool, str]] = {}
 _MEZZANINE_CACHE_MAX = 512
 
 
-def _compute_mezzanine(path: str) -> bool:
-    # [E7] 路由决策的打开也有界：异常源挂起不得阻塞 GUI 的路由询问
+def _probe_playback_stream(path: str) -> tuple[bool, str]:
     try:
-        c = _av_open_with_timeout(path)
-    except Exception:
-        return False
+        container = _av_open_with_timeout(path, header_only=True)
+    except (OSError, ValueError, TimeoutError):
+        return False, ''
     try:
-        st = c.streams.video[0]
-        name = (st.codec_context.name or '').lower()
-        if name in _MEZZANINE_CODECS:
-            return True
-        return (name in _SLOW_UHD_CODECS
-                and (st.codec_context.width or 0) >= 3840)
-    except Exception:
-        return False
+        if not container.streams.video:
+            return False, ''
+        codec = container.streams.video[0].codec_context
+        if codec is None:
+            return False, ''
+        name = (codec.name or '').lower()
+        decodable, reason = raw_capability(codec.codec_tag, name)
+        stream = container.streams.video[0]
+        uhd = (codec.width or 0) >= 3840
+        constant_rate_h264 = (name == 'h264' and stream.average_rate is not None
+                              and stream.average_rate == stream.base_rate)
+        return (not decodable or name in _MEZZANINE_CODECS or
+                (uhd and (name in _SLOW_UHD_CODECS or constant_rate_h264))), reason
     finally:
-        try:
-            c.close()
-        except Exception:
-            pass
+        container.close()
 
 
-def is_mezzanine(path: str) -> bool:
-    """按编码判定路由：ProRes/DNxHR 及 4K+ HEVC 走 LibavPlayer 多线程解码。
-
-    Qt 单线程软解 4K HEVC 只有 ~17fps（顿挫），PyAV 多线程实测满帧
-    且音画同步，故 4K+ HEVC 一并路由到本播放器。
-
-    [BUG-P2-30] 缓存键含源文件 mtime：此前 lru_cache(path) 让原位重编码
-    （同一文件换成普通编码）后的路由结果永不更新。
-    """
+def _playback_stream_info(path: str) -> tuple[bool, str]:
     try:
         mtime = os.path.getmtime(path)
     except OSError:
@@ -344,11 +327,16 @@ def is_mezzanine(path: str) -> bool:
     hit = _mezzanine_cache.get(key)
     if hit is not None:
         return hit
-    result = _compute_mezzanine(path)
+    result = _probe_playback_stream(path)
     if len(_mezzanine_cache) >= _MEZZANINE_CACHE_MAX:
         _mezzanine_cache.clear()
     _mezzanine_cache[key] = result
     return result
+
+
+def is_mezzanine(path: str) -> bool:
+    """ProRes、DNxHR、4K H.264/HEVC 和需提示缺少解码器的 RAW 路由到 Libav。"""
+    return _playback_stream_info(path)[0]
 
 
 # [E7] RAW 家族按四字符码（codec tag）识别——FFmpeg 按 tag 判定解码器
@@ -377,12 +365,13 @@ def raw_capability(codec_tag: str, codec_name: str) -> tuple[bool, str]:
         return False, (f'ProRes RAW（{codec_tag.strip()}）无解码后端：'
                        'SDK 未接入，不支持预览')
     if tag in _UNDECODABLE_TAGS or name in _UNDECODABLE_CODECS:
-        return False, (f'{codec_tag.strip() or codec_name} 无解码后端：'
+        label = 'ProRes RAW' if name == 'prores_raw' else (tag or name).upper()
+        return False, (f'{label} 无解码后端：'
                        'SDK 未接入，不支持预览')
     return True, ''
 
 
-def _av_open_with_timeout(path: str, timeout: float = 5.0):
+def _av_open_with_timeout(path: str, timeout: float = 5.0, *, header_only: bool = False):
     """[E7] 有界 ``av.open``：异常源挂起时按超时失败收尾，不无限等待。
 
     打开线程 daemon 化（有界泄漏纪律）：杀不死的卡死打开留给 OS 回收，
@@ -392,7 +381,12 @@ def _av_open_with_timeout(path: str, timeout: float = 5.0):
 
     def _open() -> None:
         try:
-            box['ctx'] = av.open(path)
+            if header_only:
+                box['ctx'] = av.open(path, options={
+                    'probesize': '32768', 'analyzeduration': '1',
+                }, timeout=timeout)
+            else:
+                box['ctx'] = av.open(path)
         except BaseException as exc:  # noqa: BLE001 - 原样转递给调用方
             box['error'] = exc
 
@@ -421,7 +415,7 @@ class _LibavSession(DecoderBackend):
             # 必须 close container，否则每次误开都泄漏 native demuxer + 句柄
             self._stream = self._container.streams.video[0]
             self._stream.thread_type = 'FRAME'
-            self._stream.thread_count = 0  # 0 = 自动多线程
+            self._stream.thread_count = 0
             self.fps = float(self._stream.average_rate or 25)
             dur = None
             if self._stream.duration:
@@ -444,6 +438,15 @@ class _LibavSession(DecoderBackend):
             self.frame_count = int(fc) if fc else max(1, int(self.duration_sec * self.fps))
             vs = self._stream.codec_context
             self.codec_name = (vs.name or '?').lower()
+            if self.codec_name == 'dnxhd' and vs.width >= 3840:
+                # 4K DNxHR 的帧体积大，限制同时解码的帧降低内存带宽竞争。
+                self._stream.thread_count = 4
+            self.audio_info = None
+            if self._container.streams.audio:
+                audio = self._container.streams.audio[0]
+                if audio.codec_context is not None:
+                    self.audio_info = (audio.codec_context.name or '?', audio.rate,
+                                       audio.layout.name if audio.layout is not None else '')
             # [E7] RAW 能力按真实后端报告：ProRes RAW/BRAW/R3D 在当前
             # PyAV/FFmpeg 构建无解码器——metadata 开得了（~0.5s）但首帧
             # 35s+ 挂起（FUP-07 实测 8K ProRes RAW）。打开时按 codec tag
@@ -455,8 +458,12 @@ class _LibavSession(DecoderBackend):
                 raise UndecodableRawError(reason)
             self.width, self.height = vs.width, vs.height
             self.pix_fmt = str(vs.pix_fmt)
-            self.bit_depth = (getattr(vs, 'bits_per_raw_sample', 0)
-                              or getattr(vs, 'bits_per_coded_sample', 0) or 8)
+            pixel_format = vs.format
+            self.has_alpha = bool(pixel_format and any(
+                component.is_alpha for component in pixel_format.components))
+            self.bit_depth = max(
+                (component.bits for component in pixel_format.components),
+                default=8) if pixel_format else (getattr(vs, 'bits_per_raw_sample', 0) or 8)
             # [FR-20] VideoFrame 不暴露 SAR；等比解码尺寸需要源 SAR，
             # 打开时从 CodecContext 记录一次（Fraction 或 None）
             self.sar = getattr(vs, 'sample_aspect_ratio', None)
@@ -513,7 +520,8 @@ class _LibavSession(DecoderBackend):
 
     def _pts_of(self, index: int) -> int:
         tb = float(self._stream.time_base)
-        return int(max(0.0, index / self.fps - 0.08 / max(1.0, self.fps)) / tb)
+        offset = self._stream.start_time or 0
+        return offset + int(max(0.0, index / self.fps - 0.08 / max(1.0, self.fps)) / tb)
 
     def _idx_of(self, frame) -> int:
         t = frame.time
@@ -521,7 +529,8 @@ class _LibavSession(DecoderBackend):
             # [BUG-P3-60] seek 后 _next_idx 可能是 None：此前原样返回，
             # 后续 idx >= index 比较即 TypeError，陷入 0.05s 退避死循环
             return max(0, self._next_idx or 0)
-        return max(0, int(round(t * self.fps)))
+        offset = (self._stream.start_time or 0) * self._stream.time_base
+        return max(0, int(round((t - float(offset)) * self.fps)))
 
     # -- 随机访问解码（顺序命中时不 seek，享受多线程吞吐） --
 
@@ -538,6 +547,14 @@ class _LibavSession(DecoderBackend):
         # [E4] 显示旋转在 RGB 路径落地（YUV/GPU 路径不支持旋转，播放器
         # 侧已按 rotation_quarters 回退 RGB）
         return rotate_rgb_quarters(rgb, self.rotation_quarters)
+
+    def frame_rgba(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
+        from .frame_geometry import rotate_rgb_quarters
+
+        with self._lock:
+            frame = self._decode_frame_locked(index, size, pixel_format='rgba')
+            rgba = np.ascontiguousarray(frame.to_ndarray())
+        return rotate_rgb_quarters(rgba, self.rotation_quarters)
 
     def frame_yuv(self, index: int, size=None):
         """解码第 index 帧 → ``YuvFrame``（GPU 预览路径）。
@@ -569,13 +586,14 @@ class _LibavSession(DecoderBackend):
             if subsampling == '444':
                 siting = 1
             return YuvFrame(
-                y=planes[0].copy(), u=planes[1].copy(), v=planes[2].copy(),
+                y=planes[0], u=planes[1], v=planes[2],
                 bit_depth=depth, subsampling=subsampling,
                 matrix=matrix, color_range=full_range, chroma_siting=siting,
                 pixel_format='gbr' if 'gbr' in fmt else subsampling,
                 source_width=int(frame.width), source_height=int(frame.height))
 
-    def _decode_frame_locked(self, index: int, size=None):
+    def _decode_frame_locked(self, index: int, size: tuple[int, int] | None = None,
+                             *, pixel_format: str | None = None) -> av.VideoFrame:
         need_seek = self._iter is None or self._next_idx != index
         if need_seek:
             self._container.seek(self._pts_of(index), stream=self._stream,
@@ -601,9 +619,8 @@ class _LibavSession(DecoderBackend):
                                     getattr(self, 'sar', None),
                                     rotation_quarters=getattr(
                                         self, 'rotation_quarters', 0))
-            frame = frame.reformat(width=w, height=h,
-                                   format=frame.format.name)
-        return frame
+            return frame.reformat(width=w, height=h, format=pixel_format or frame.format.name)
+        return frame.reformat(format=pixel_format) if pixel_format else frame
 
     def close(self):
         try:
@@ -623,7 +640,7 @@ def _plane_to_ndarray(plane, dtype) -> np.ndarray:
         raw = raw.reshape(height, row_values)[:, :width]
     else:
         raw = raw.reshape(height, width)
-    return np.ascontiguousarray(raw)
+    return raw.copy(order='C')
 
 
 class LibavPlayer(BasePlayer):
@@ -648,7 +665,13 @@ class LibavPlayer(BasePlayer):
 
     # ---------- 会话 / 输出接线 ----------
 
-    def _open_session(self, path: str):
+    def _open_session(self, path: str) -> DecoderBackend:
+        extension = os.path.splitext(path)[1].lower().lstrip('.')
+        decodable, reason = raw_capability(extension, '')
+        if decodable:
+            _, reason = _playback_stream_info(path)
+        if reason:
+            raise UndecodableRawError(reason)
         return _LibavSession(path)
 
     def _open_failed_prefix(self) -> str:
@@ -657,14 +680,15 @@ class LibavPlayer(BasePlayer):
     def _configure_session(self, session) -> None:
         # 二期：音频管线（有音轨才启动，无音轨自动退化为无声墙钟）
         self._audio = _AudioPipeline(self._current_path, self._master_clock)
-        self._audio_active = self._audio.probe()
+        self._audio_active = session.audio_info is not None
+        self._audio.pause()
         # [U10] 新管线继承滑杆音量：管线启动时 _volume=None → sink 默认 1.0，
         # 上一文件调到 20% 后换文件会以 100% 播放直到用户再动滑杆
         try:
             self._audio.set_volume(self.slider_vol.value() / 100.0)
         except Exception:
             pass
-        self._reset_clock(0.0, playing=True)
+        self._reset_clock(0.0, playing=False)
         self.lbl_badge.setText(
             f"{session.codec_name.upper()} · {session.width}×{session.height} · "
             f"{session.fps:.0f}fps · {session.bit_depth}-bit · "
@@ -695,20 +719,18 @@ class LibavPlayer(BasePlayer):
         return base
 
     def _on_play_state_changed(self) -> None:
-        a = self._audio
+        audio = self._audio
         if self._playing:
-            if self._session is not None and \
-                    self._master_clock() >= self._session.duration_sec - 0.02:
-                self._request_seek(0)  # 已在片尾按播放 → 从头再来
-            else:
+            if self._eof_published:
+                self._request_seek(0)
+            elif self._frame_to_present is None:
                 self._t_mark = time.monotonic()
-            if a is not None:
-                a.resume()
+                if audio is not None:
+                    audio.resume()
         else:
-            self._t_base = self._master_clock()
-            self._t_mark = None
-            if a is not None:
-                a.pause()
+            self._reset_clock(self._master_clock(), playing=False)
+            if audio is not None:
+                audio.pause()
 
     def _teardown_output(self) -> None:
         if self._audio is not None:
@@ -733,12 +755,12 @@ class LibavPlayer(BasePlayer):
         return self._audio.drained()
 
     def _on_playback_finished(self) -> None:
-        # [E3] 末帧已实际呈现且音频已排空（GUI 线程）：音频暂停
-        # （时钟继续走，重新播放时从头再来）
+        self._reset_clock(self._master_clock(), playing=False)
         a = self._audio
         if a is not None:
             a.pause()
         _icons.set_play_icon(self.btn_play, playing=False)
+        self._wake_ui()
 
     def _on_decode_stopped_ui(self) -> None:
         # 解码提前停止（截断/时长高估）的 GUI 收尾：与自然播完区分（E3）
@@ -751,6 +773,8 @@ class LibavPlayer(BasePlayer):
     def _decode_frame(self, session, target: int):
         canvas = self.canvas
         size = canvas.display_size()
+        if getattr(session, 'has_alpha', False):
+            return _frame_to_qimage(session.frame_rgba(target, size=size))
         # [E4] YUV/GPU 上传路径不支持旋转：有显示旋转时直接走 RGB 路径
         # （frame_rgb 内完成旋转）
         if getattr(canvas, 'gpu_active', False) and \
@@ -783,43 +807,23 @@ class LibavPlayer(BasePlayer):
     def _on_seek_requested(self, target: int) -> None:
         fps = self._session.fps if self._session else 25.0
         t = max(0.0, target / fps)
-        self._t_base = t
-        self._t_mark = time.monotonic() if self._playing else None
-        a = self._audio
-        if a is not None:
-            a.seek(t)
+        self._reset_clock(t, playing=False)
+        if self._audio is not None:
+            self._audio.pause()
+            self._audio.seek(t)
 
     def _poll_ring(self) -> None:
         if self._session is None:
             return
-        t = self._master_clock()
-        fps = self._session.fps
-        pick = None
-        with self._ring_lock:
-            while self._ring:
-                self._pending.append(self._ring.popleft())
-            # 时钟门控：只显示 pts ≤ 主时钟的最新一帧；过期序号丢弃；
-            # 同一 tick 积压多帧时丢旧显新（解码偶发卡顿后的追赶）
-            while self._pending:
-                idx = self._pending[0][0]
-                if idx <= self._shown_index:
-                    self._pending.popleft()
-                elif idx / fps <= t + 1e-6:
-                    pick = self._pending.popleft()
-                else:
-                    break
-            self._ring_space.notify()
-        if pick is None:
-            self._maybe_publish_eof()  # [E3] 无帧可显也查：音频排空后才收尾
-            return
-        idx, img = pick
-        self._shown_index = idx
-        self.canvas.set_image(img)
-        self.slider.blockSignals(True)
-        self.slider.setValue(idx)
-        self.slider.blockSignals(False)
-        self.lbl_pos.setText(_fmt_time(min(t, self._session.duration_sec)))
-        self._maybe_publish_eof()  # [E3] 末帧呈现 + 音频排空后才收尾
+        target = int(self._master_clock() * self._session.fps + 1e-6)
+        frame = self._take_due_frame(target)
+        if frame is not None:
+            self._show_frame(frame)
+            if self._playing and self._t_mark is None:
+                self._t_mark = time.monotonic()
+                if self._audio is not None:
+                    self._audio.resume()
+        self._maybe_publish_eof()
 
     def _handle_key(self, key) -> bool:
         from PyQt6.QtCore import Qt as _Qt
@@ -835,10 +839,9 @@ class LibavPlayer(BasePlayer):
 
     def _info_html(self) -> str:
         s = self._session
-        a = self._audio
-        if a is not None and a.audio_rate:
-            audio_line = (f"音频: {a.audio_codec} {a.audio_rate}Hz "
-                          f"{a.audio_layout} → 48kHz 立体声（QAudioSink）<br>")
+        if s.audio_info is not None:
+            codec, rate, layout = s.audio_info
+            audio_line = f"音频: {codec} {rate}Hz {layout} → 48kHz 立体声（QAudioSink）<br>"
         else:
             audio_line = "音频: 无<br>"
         return (f"<b>{os.path.basename(self._current_path)}</b><br>"

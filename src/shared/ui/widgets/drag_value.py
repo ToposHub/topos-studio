@@ -95,6 +95,9 @@ class DragValue(QWidget):
         self._single_step = 10.0 ** (-self._decimals) if self._decimals > 0 else 1.0
         self._block_signals = False
         self._stretchable = stretchable
+        self._normal_value_style = DRAG_VALUE_NORMAL_STYLE
+        self._active_value_style = DRAG_VALUE_ACTIVE_STYLE
+        self._disabled_value_style = DRAG_VALUE_DISABLED_STYLE
 
         # 拖拽状态
         self._dragging = False           # 鼠标左键已按下（潜在的拖拽）
@@ -129,7 +132,7 @@ class DragValue(QWidget):
         self._value_label = QLabel()
         self._value_label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-        self._value_label.setStyleSheet(DRAG_VALUE_NORMAL_STYLE)
+        self._value_label.setStyleSheet(self._normal_value_style)
         self._value_label.setMinimumWidth(50 if compact else 60)
         if self._stretchable:
             self._value_label.setSizePolicy(
@@ -187,9 +190,9 @@ class DragValue(QWidget):
         super().changeEvent(event)
         if event.type() == QEvent.Type.EnabledChange and not self._editing:
             if self.isEnabled():
-                self._value_label.setStyleSheet(DRAG_VALUE_NORMAL_STYLE)
+                self._value_label.setStyleSheet(self._normal_value_style)
             else:
-                self._value_label.setStyleSheet(DRAG_VALUE_DISABLED_STYLE)
+                self._value_label.setStyleSheet(self._disabled_value_style)
 
     def setMixedValue(self, mixed: bool) -> None:
         """Display a multi-selection value without emitting an edit."""
@@ -250,6 +253,13 @@ class DragValue(QWidget):
         self._edit.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
+    def set_value_styles(self, normal: str, active: str, disabled: str) -> None:
+        """Keep a host's value styling through edit and drag transitions."""
+        self._normal_value_style = normal
+        self._active_value_style = active
+        self._disabled_value_style = disabled
+        self._value_label.setStyleSheet(normal if self.isEnabled() else disabled)
+
     def setDecimals(self, d: int):
         self._decimals = int(d)
         self._single_step = 10.0 ** (-self._decimals) if self._decimals > 0 else 1.0
@@ -277,7 +287,7 @@ class DragValue(QWidget):
         self._dragging = False
         self._drag_engaged = False
         self._editing = True
-        self._value_label.setStyleSheet(DRAG_VALUE_ACTIVE_STYLE)
+        self._value_label.setStyleSheet(self._active_value_style)
         self._value_label.hide()
         self._edit.setText(f"{self._value:.{self._decimals}f}")
         self._rebuild_validator()
@@ -291,7 +301,7 @@ class DragValue(QWidget):
         self._editing = False
         self._edit.hide()
         self._value_label.show()
-        self._value_label.setStyleSheet(DRAG_VALUE_NORMAL_STYLE)
+        self._value_label.setStyleSheet(self._normal_value_style)
         # 移除全局事件过滤器
         app = QApplication.instance()
         if app:
@@ -368,7 +378,7 @@ class DragValue(QWidget):
             self._drag_engaged = False
             self._drag_start_x = event.position().x()
             self._drag_start_value = self._value
-            self._value_label.setStyleSheet(DRAG_VALUE_ACTIVE_STYLE)
+            self._value_label.setStyleSheet(self._active_value_style)
             event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -391,7 +401,7 @@ class DragValue(QWidget):
             self._dragging = False
             self._drag_engaged = False
             if not self._editing:
-                self._value_label.setStyleSheet(DRAG_VALUE_NORMAL_STYLE)
+                self._value_label.setStyleSheet(self._normal_value_style)
             if was_engaged:
                 self.interaction_ended.emit()
             event.accept()

@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
 
-from PyQt6.QtCore import QPointF, Qt, QEvent
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QPoint, QPointF, Qt, QEvent
+from PyQt6.QtGui import QContextMenuEvent, QMouseEvent
+from PyQt6.QtWidgets import QMenu
 
 from src.features.composite.core.node_engine import NodeGraph
 from src.features.composite.nodes.transform_node import TransformNode
@@ -34,7 +35,6 @@ from src.shared.keyframe import Keyframe, KeyframeTrack
 
 CLIP_FRAMES = 100
 CLIP_FPS = 24.0
-_RULER_H = 30
 _ROW_H = 24
 PPF = 10.0
 
@@ -56,6 +56,9 @@ def panel(qapp):
     p = KeyframesPanel()
     p.resize(1000, 300)
     p.set_node_graph(g)
+    for row in list(p._model.rows):
+        if "translate_x" in row.component_params:
+            p._toggle_dimensions(row.row_id)
     p.set_frame_range(0, CLIP_FRAMES - 1, fps=CLIP_FPS)
     p._frame_mapper.set_zoom(PPF)
     p._frame_mapper.set_scroll(0.0)
@@ -65,7 +68,7 @@ def panel(qapp):
 def _param_row_y(panel, node_id, param="translate_x"):
     for i, row in enumerate(panel._model.visible_rows()):
         if row.row_id == f"param:{node_id}:{param}":
-            return _RULER_H + i * _ROW_H + _ROW_H // 2
+            return panel._timeline_view.ruler_height() + i * _ROW_H + _ROW_H // 2
     raise AssertionError("param row not found")
 
 
@@ -116,6 +119,28 @@ def test_alt_drag_copies_keyframe(panel):
     frames = sorted(kf.frame for kf in track.keyframes)
     # Original at 20 + copy at 25 + untouched keyframe at 50.
     assert frames == [20, 25, 50]
+
+
+def test_alt_drag_onto_occupied_frame_commits_nothing(panel):
+    node_id = panel._model.rows[0].node_id
+    track = panel._model.track_for(f"param:{node_id}:translate_x")
+    commits = []
+    panel._timeline_view.track_changed.connect(lambda *args: commits.append(args))
+    _drag(panel._timeline_view, 200, _param_row_y(panel, node_id), 500,
+          mods=Qt.KeyboardModifier.AltModifier)
+    assert [point.frame for point in track.keyframes] == [20, 50]
+    assert not commits
+
+
+def test_context_menu_selects_the_clicked_keyframe(panel, monkeypatch):
+    node_id = panel._model.rows[0].node_id
+    row_id = f"param:{node_id}:translate_x"
+    view = panel._timeline_view
+    panel._model.track_for(row_id).keyframes[0].selected = True
+    monkeypatch.setattr(QMenu, "exec", lambda *_: None)
+    point = QPoint(500, _param_row_y(panel, node_id))
+    view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, point))
+    assert view.selected_keyframes() == [(row_id, 50)]
 
 
 def test_alt_drag_preserves_value_and_interp(panel):

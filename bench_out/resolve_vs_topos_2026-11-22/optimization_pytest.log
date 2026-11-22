@@ -1,0 +1,19 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+PyQt6 6.11.0 -- Qt runtime 6.11.2 -- Qt compiled 6.11.0
+rootdir: /Users/heng/Documents/vscode/topos-studio
+configfile: pytest.ini
+plugins: qt-4.5.0
+collected 192 items
+
+tests/color/test_color_graph_texture.py .....................            [ 10%]
+tests/color/test_lut_loader.py ....................                      [ 21%]
+tests/edit/test_timeline_gpu_export_renderer.py ........................ [ 33%]
+.............................                                            [ 48%]
+tests/edit/test_timeline_export_planar_passthrough.py .................. [ 58%]
+.....................................                                    [ 77%]
+tests/edit/test_dnxhr_packet_copy.py .....                               [ 80%]
+tests/edit/test_export_manifest.py .........................             [ 93%]
+tests/edit/test_export_outcome.py .............                          [100%]
+
+============================= 192 passed in 11.56s =============================

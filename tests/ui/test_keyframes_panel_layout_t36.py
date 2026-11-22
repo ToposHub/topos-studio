@@ -161,29 +161,21 @@ class TestSplitterResize:
         panel.hide()
 
 
-# ── toolbar + footer render at all widths ──────────────────────────────
-
-
-class TestToolbarFooterRender:
-    """The toolbar (T27) and footer (T34) paint their own sub-widgets; make
-    sure they render too, not just the central splitter."""
-
+class TestTimelineHeaderRender:
     @pytest.mark.parametrize("w", [800, 1200, 1920])
-    def test_toolbar_renders(self, panel, qapp, w):
-        panel.resize(w, 300)
-        toolbar = panel.findChild(type(panel).__bases__[0],  # noqa: F841
-                                  "KeyframesToolbar")
-        # The toolbar is a QToolBar; find it by object name.
+    @pytest.mark.parametrize("mode", ["nodes", "layers"])
+    def test_shared_header_renders(self, panel, qapp, w, mode):
         from PyQt6.QtWidgets import QToolBar
-        tb = panel.findChild(QToolBar, "KeyframesToolbar")
-        assert tb is not None
-        tb.repaint()
-        qapp.processEvents()
 
-    @pytest.mark.parametrize("w", [800, 1200, 1920])
-    def test_footer_renders_with_time_display(self, panel, qapp, w):
-        """The footer must contain the T25 time display and render it."""
+        panel.set_layer_view_mode(mode)
         panel.resize(w, 300)
-        assert hasattr(panel, "_time_display")
-        panel._time_display.repaint()
-        qapp.processEvents()
+        panel.show()
+        try:
+            qapp.processEvents()
+            assert panel.findChild(QToolBar, "KeyframesToolbar") is None
+            assert panel._header_tools.isVisible()
+            assert panel._time_display.isVisible()
+            assert not panel._tree_view.grab().isNull()
+            assert panel._tree_view._header_height == panel._timeline_view.ruler_height()
+        finally:
+            panel.hide()

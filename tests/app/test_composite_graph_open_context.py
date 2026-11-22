@@ -194,7 +194,7 @@ def test_initial_drop_does_not_publish_a_partial_composition(qapp, monkeypatch) 
     page.reset_to_empty_workspace()
     try:
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile("/tmp/notes.txt"), QUrl.fromLocalFile("/tmp/voice.wav")])
+        mime.setUrls([QUrl.fromLocalFile("/tmp/notes.txt"), QUrl.fromLocalFile("/tmp/unsupported.zip")])
         assert not page._handle_initial_media_drop(mime)
         mime.setUrls([QUrl.fromLocalFile("/tmp/source.mov"), QUrl.fromLocalFile("/tmp/card.png")])
         add_layer = page._add_dropped_media_layer
@@ -211,6 +211,129 @@ def test_initial_drop_does_not_publish_a_partial_composition(qapp, monkeypatch) 
         assert host.switched_page is None
     finally:
         page.close()
+
+
+def test_audio_drop_creates_registered_layer_and_waveform(qtbot, tmp_path) -> None:
+    import wave
+
+    path = tmp_path / "voice.wav"
+    with wave.open(str(path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(48000)
+        writer.writeframes(b"\x11\x11" * 4800)
+    project, timeline, _ = _project_with_timeline_clip()
+    host = _Controller(project, timeline, playhead=0)
+    page = CompositePage()
+    panel = KeyframesPanel()
+    qtbot.addWidget(page)
+    qtbot.addWidget(panel)
+    host.composite_page = page
+    page.set_edit_project(project)
+    page.set_keyframes_panel(panel)
+    page.set_initial_media_drop_handler(host._create_comp_clip_from_media_drop)
+    page.reset_to_empty_workspace()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    assert page._handle_initial_media_drop(mime)
+    qtbot.waitUntil(page.has_active_composition)
+    saved = host._current_edit_project.compositions[host._current_composite_id]
+    asset = host._current_edit_project.get_asset_by_path(str(path))
+    assert asset is not None
+    layer = next(layer for layer in saved["layers"].values() if layer["layer_type"] == "audio")
+    assert layer["audio"]["asset_id"] == asset.asset_id
+    assert saved["duration_frames"] == 3
+    qtbot.waitUntil(lambda: layer["layer_id"] in getattr(panel._timeline_view, "_audio_waveforms", {}))
+    panel._on_row_eye_changed(layer["root_node_id"], False)
+    assert page.node_graph.get_layer(layer["layer_id"]).audio.mute
+    page.undo()
+    assert not page.node_graph.get_layer(layer["layer_id"]).audio.mute
+    page.undo()
+    assert not any(item.audio for item in page.node_graph.get_all_layers())
+    page.redo()
+    assert any(item.audio for item in page.node_graph.get_all_layers())
+
+
+def test_photoshop_drop_adds_separate_layers_in_one_transaction(qtbot, tmp_path) -> None:
+    psd_tools = pytest.importorskip("psd_tools")
+    from PIL import Image
+    from psd_tools.api.layers import PixelLayer
+
+    original = tmp_path / "original"
+    original.mkdir()
+    source = original / "stack.psd"
+    document = psd_tools.PSDImage.new("RGBA", (8, 8))
+    PixelLayer.frompil(Image.new("RGBA", (2, 2), (255, 0, 0, 128)), document,
+                       name="Same name", left=-1, top=2)
+    hidden = PixelLayer.frompil(Image.new("RGBA", (2, 2), (0, 255, 0, 255)), document,
+                                name="Same name", left=4, top=4)
+    hidden.visible = False
+    document.save(source)
+    project, timeline, _ = _project_with_timeline_clip()
+    host = _Controller(project, timeline, playhead=0)
+    page = CompositePage()
+    qtbot.addWidget(page)
+    host.composite_page = page
+    page.set_initial_media_drop_handler(host._create_comp_clip_from_media_drop)
+    page.reset_to_empty_workspace()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(source))])
+
+    assert page._handle_initial_media_drop(mime)
+    qtbot.waitUntil(page.has_active_composition)
+    graph = page.node_graph
+    stack = graph.get_main_layer_stack()
+    imported = [graph.get_layer(layer_id) for layer_id in stack.layer_ids[:2]]
+    assert [layer.name for layer in imported] == ["Same name", "Same name"]
+    assert [layer.enabled for layer in imported] == [False, True]
+    sources = [graph.get_node(layer.source_node_id) for layer in imported]
+    assert len({tuple(node.parameters["psd_layer"]["selector"]) for node in sources}) == 2
+    asset = host._current_edit_project.get_asset_by_path(str(source))
+    assert {node.parameters["asset_id"] for node in sources} == {asset.asset_id}
+    page.undo()
+    assert not any(node.node_type == "image_input" for node in page.node_graph.nodes.values())
+    page.redo()
+    assert len([node for node in page.node_graph.nodes.values() if node.node_type == "image_input"]) == 2
+
+    from src.shared.project.topos_project import ToposProject
+    from src.shared.project.topos_project_io import ToposProjectIO
+
+    graph_id = host._current_composite_id
+    archive = original / "stack.topos"
+    package = ToposProject.create_single_asset("PSD", str(source), "image")
+    assert ToposProjectIO.save(package, str(archive), full_compositions_data={graph_id: graph.to_dict()})
+    moved = tmp_path / "moved"
+    original.rename(moved)
+    _, modules = ToposProjectIO.load(str(moved / archive.name), load_full_data=True)
+    assert modules is not None
+    reopened = modules["compositions"][graph_id]
+    restored = [node["parameters"] for node in reopened["nodes"] if node["type"] == "image_input"]
+    assert {node["file_path"] for node in restored} == {str(moved / source.name)}
+    assert {tuple(node["psd_layer"]["selector"]) for node in restored} == {
+        tuple(node.parameters["psd_layer"]["selector"]) for node in sources
+    }
+
+
+def test_corrupt_photoshop_drop_leaves_initial_composition_unpublished(qtbot, tmp_path) -> None:
+    pytest.importorskip("psd_tools")
+    corrupt = tmp_path / "broken.psd"
+    corrupt.write_bytes(b"truncated")
+    project, timeline, _ = _project_with_timeline_clip()
+    host = _Controller(project, timeline, playhead=0)
+    page = CompositePage()
+    qtbot.addWidget(page)
+    host.composite_page = page
+    page.set_initial_media_drop_handler(host._create_comp_clip_from_media_drop)
+    page.reset_to_empty_workspace()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/card.png"), QUrl.fromLocalFile(str(corrupt))])
+    messages = []
+    page.status_message.connect(messages.append)
+
+    assert page._handle_initial_media_drop(mime)
+    qtbot.waitUntil(lambda: bool(messages))
+    assert not page.has_active_composition()
+    assert host._current_edit_project is project
 
 
 def test_timeline_context_uses_live_clip_range_and_timeline_format() -> None:

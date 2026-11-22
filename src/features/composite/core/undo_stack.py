@@ -854,7 +854,7 @@ class UndoStack(QObject):
     MERGE_WINDOW_MS = 500  # Default merge window
 
     # Action types that are always kept during compression
-    KEEP_TYPES = ["add_node", "remove_node", "connect", "disconnect", "group"]
+    KEEP_TYPES = ["add_node", "remove_node", "connect", "disconnect", "connect_replace", "group"]
 
     def __init__(self, parent=None, persistence_path: str = None) -> None:
         super().__init__(parent)

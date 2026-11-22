@@ -1,4 +1,33 @@
 {
+  "composite": {
+    "node_editor": {
+      "foreground": "A Foreground",
+      "background": "B Background",
+      "mask": "Mask",
+      "layer_managed": "Managed by the layer stack",
+      "cable_routing": "Cable Routing",
+      "cable_curved": "Curved",
+      "cable_straight": "Straight",
+      "cable_orthogonal": "Right Angles",
+      "search_add_node": "Find and Add Node…",
+      "reveal_timeline_layer": "Show in Layer Timeline",
+      "palette": "Node Library",
+      "palette_all": "All",
+      "palette_favorites": "Favorites",
+      "palette_recent": "Recent",
+      "palette_help": "Drag a node onto the graph."
+    },
+    "layer_timeline": {
+      "reveal_node": "Show in Node Graph",
+      "timing": "Layer Timing",
+      "goto_in": "Go to In Point",
+      "goto_out": "Go to Out Point",
+      "set_work_area": "Set Work Area to Layer"
+    },
+    "expression": {
+      "symbols": "Expression Symbols"
+    }
+  },
   "nodes": {
     "blur": {
       "title": "Blur",

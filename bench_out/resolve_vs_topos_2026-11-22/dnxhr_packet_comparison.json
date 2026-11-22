@@ -1,0 +1,7 @@
+{
+  "app": "Resolve",
+  "case": "DNxHR HQX original cut export",
+  "compared_packets": 400,
+  "identical_to_trimmed_source_packets": 400,
+  "exact_trimmed_packet_copy": true
+}

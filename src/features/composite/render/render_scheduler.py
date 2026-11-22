@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from ..core.graph_snapshot import GraphSnapshot
 from ..core.node_capabilities import (
+    get_node_capability,
     is_output_node_type,
     is_placeholder_node_type,
     is_source_node_type,
@@ -412,6 +413,7 @@ class RenderPlan:
     # ── Tiling configuration (v3 - auto-detect large images) ──
 
     needs_tiling: bool = False  # Whether tile rendering is required
+    tile_blocker: str = ""      # First incompatible node type when large enough to tile
     tile_size: int = 1024  # Recommended tile size for tiling
     estimated_padding: int = 0  # Padding needed for spatial effects
     estimated_memory_mb: float = 0.0  # Estimated GPU memory for full-frame
@@ -544,6 +546,7 @@ class RenderScheduler:
         self._prev_inputs: Dict[str, Dict[str, str]] = {}
         self._prev_time_ranges: Dict[str, Optional[Dict[str, Any]]] = {}
         self._prev_layer_gates: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+        self._prev_inactive_layer_inputs: Dict[str, frozenset[str]] = {}
         self._prev_topology_revision: int = -1
         self._prev_color_revision: int = -1
         # P0-2: previous snapshot frame_number. When the playhead moves, only
@@ -708,9 +711,15 @@ class RenderScheduler:
         # like a first plan — otherwise the evaluator's dirty-skip would
         # replay outputs cached under the previous ROI (or full frame), and
         # the viewer would keep showing the old region.
+        regional_blocker = next((
+            np.node_type
+            for node_id, np in node_plans.items()
+            if not self._supports_regional_sampling(snapshot.nodes[node_id], np)
+        ), "")
         effective_roi_key: Optional[tuple] = None
         if (viewer_roi is not None and not viewer_roi.is_empty
-                and render_mode == RenderMode.PREVIEW and force_lod == 0):
+                and render_mode == RenderMode.PREVIEW and force_lod == 0
+                and not regional_blocker):
             effective_roi_key = (viewer_roi.x, viewer_roi.y,
                                  viewer_roi.width, viewer_roi.height)
         if effective_roi_key != self._prev_roi_key:
@@ -721,9 +730,7 @@ class RenderScheduler:
         # ── ROI propagation (if viewer_roi specified) ──
         # Proxy quality (force_lod) evaluates at reduced resolution where a
         # full-res ROI rect would crop the wrong area — ROI stays off there.
-        roi_enabled = (viewer_roi is not None
-                       and render_mode == RenderMode.PREVIEW
-                       and force_lod == 0)
+        roi_enabled = effective_roi_key is not None
         if roi_enabled:
             self._propagate_roi(snapshot, node_plans, viewer_roi,
                                 viewer_node_id=viewer_node_id)
@@ -772,7 +779,8 @@ class RenderScheduler:
             max_parallelism=max_parallelism,
             viewer_roi=viewer_roi,
             roi_enabled=roi_enabled,
-            needs_tiling=needs_tiling,
+            needs_tiling=needs_tiling and not regional_blocker,
+            tile_blocker=regional_blocker if needs_tiling else "",
             tile_size=tile_size,
             estimated_padding=estimated_padding,
             estimated_memory_mb=estimated_memory_mb,
@@ -893,6 +901,35 @@ class RenderScheduler:
         w = snapshot.color_width or 1920
         h = snapshot.color_height or 1080
         return max(1, w), max(1, h)
+
+    @staticmethod
+    def _supports_regional_sampling(ns: "NodeSnapshot", plan: NodePlan) -> bool:
+        if ns.disabled or plan.action in {"source", "output", "passthrough"}:
+            return True
+        cap = get_node_capability(ns.node_type)
+        if cap is None or cap.roi_policy not in {"identity", "expand", "merge_union", "passthrough"}:
+            return False
+        if ns.node_type == "blur":
+            # Wrap samples the opposite canvas edge. Directional blur's UV
+            # normalization and velocity vectors are specific to the full frame.
+            params = ns.parameters
+            if (params.get("edge_policy") == "wrap"
+                    or params.get("blur_type") in {"motion", "directional"}):
+                return False
+            from ..nodes.blur_node import BlurNode
+            from .compute_shader_manager import COMPUTE_THRESHOLD_RADIUS
+
+            # The compute formulation for large radii uses a different
+            # kernel. Keep its source canvas intact on all render paths.
+            all_channels = (
+                all(params.get(f"channel_{name}", True) for name in "rgb")
+                and params.get("channel_a", params.get("process_alpha", True))
+            )
+            if (all_channels and params.get("blur_type", "box") in {"box", "gaussian"}
+                    and params.get("mix", 1.0) == 1.0
+                    and max(BlurNode._get_effective_radius(params)) > COMPUTE_THRESHOLD_RADIUS):
+                return False
+        return True
 
     def _compute_total_padding(self, snapshot: GraphSnapshot,
                                node_plans: Dict[str, NodePlan]) -> int:
@@ -1257,7 +1294,9 @@ class RenderScheduler:
         frame_gates = snapshot.layer_frame_gates
         for node_id, ns in snapshot.nodes.items():
             if (ns.time_range != self._prev_time_ranges.get(node_id)
-                    or frame_gates.get(node_id) != self._prev_layer_gates.get(node_id)):
+                    or frame_gates.get(node_id) != self._prev_layer_gates.get(node_id)
+                    or snapshot.inactive_layer_inputs.get(node_id)
+                    != self._prev_inactive_layer_inputs.get(node_id)):
                 dirty.add(node_id)
 
         # 4. Input connection changes (only when topology changed)
@@ -1370,6 +1409,7 @@ class RenderScheduler:
                                   for node_id, node in snapshot.nodes.items()
                                   if node.time_range is not None}
         self._prev_layer_gates = dict(snapshot.layer_frame_gates)
+        self._prev_inactive_layer_inputs = dict(snapshot.inactive_layer_inputs)
         # P0-2: remember the frame so the next plan can detect playhead moves.
         self._prev_frame_number = snapshot.frame_number
 
@@ -1385,6 +1425,7 @@ class RenderScheduler:
         self._prev_inputs.clear()
         self._prev_time_ranges.clear()
         self._prev_layer_gates.clear()
+        self._prev_inactive_layer_inputs.clear()
         self._prev_topology_revision = -1
         self._prev_color_revision = -1
         # Clear port-level revision tracking
@@ -1412,6 +1453,7 @@ class RenderScheduler:
         self._prev_inputs = {k: dict(v) for k, v in source_scheduler._prev_inputs.items()}
         self._prev_time_ranges = dict(source_scheduler._prev_time_ranges)
         self._prev_layer_gates = dict(source_scheduler._prev_layer_gates)
+        self._prev_inactive_layer_inputs = dict(source_scheduler._prev_inactive_layer_inputs)
         self._prev_topology_revision = source_scheduler._prev_topology_revision
         self._prev_color_revision = source_scheduler._prev_color_revision
         # Copy port-level revision tracking

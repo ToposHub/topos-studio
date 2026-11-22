@@ -81,3 +81,6 @@ pyobjc-framework-CoreMedia; platform_system == "Darwin"
 pyobjc-framework-Quartz; platform_system == "Darwin"
 pyobjc-framework-IOSurface; platform_system == "Darwin"
 pyobjc-framework-Metal>=12.1,<13; platform_system == "Darwin"
+
+# ── 分层 PSD/PSB 解码 (composite 导入, B07) ────────────────────────────
+psd-tools==1.27.0

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -133,7 +134,7 @@ def test_av_open_timeout_fails_fast(monkeypatch):
 
 
 def test_mezzanine_route_bounded_on_hanging_open(monkeypatch):
-    def _hanging_open(path, timeout=5.0):
+    def _hanging_open(path, timeout=5.0, *, header_only=False):
         raise TimeoutError('打开超时（>5s）')
 
     monkeypatch.setattr(lp, "_av_open_with_timeout", _hanging_open)
@@ -160,3 +161,18 @@ def test_rotation_probe_timeout_returns_unrotated():
     assert session._probe_rotation(timeout=0.3) == 0
     assert time.monotonic() - start < 2
     release.set()
+
+
+def test_playback_routes_prores_raw_mov_to_capability_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.shared.playback.player_host import decide_route
+
+    clip = tmp_path / 'camera.mov'
+    codec = SimpleNamespace(name='prores_raw', codec_tag='aprh', width=8192)
+    stream = SimpleNamespace(codec_context=codec)
+    container = SimpleNamespace(streams=SimpleNamespace(video=[stream]), close=lambda: None)
+    monkeypatch.setattr(lp, '_av_open_with_timeout', lambda path, **kwargs: container)
+
+    assert decide_route(str(clip)) == 'libav'
+    assert 'ProRes RAW' in lp._playback_stream_info(str(clip))[1]

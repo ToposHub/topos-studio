@@ -4,9 +4,9 @@
 自动隐藏、进度条、快照/封面、解码线程生命周期在此统一；两家差异经钩子注入：
 
 - 解码会话：_open_session() 返回 DecoderBackend 实现（TPIC 原生或 PyAV 多线程）；
-- 帧消费策略：_poll_ring 由子类实现（topos 严格按序；libav 主时钟门控），
+- 帧消费策略：_poll_ring 由子类实现（Topos/Libav 共用按时钟选帧的逻辑），
   并在每 tick 末尾调 _maybe_publish_eof（E3：EOF 由呈现完成发布）；
-- 解码线程差异：_decode_frame / _on_seek_jump / 解码异常钩子；
+- 解码线程差异：_decode_frame / 解码异常钩子；
 - EOF 语义（E3/FUP-07）：producer 耗尽只置 _decode_exhausted（解码侧事实）；
   _maybe_publish_eof 判定"末帧已呈现 + 队列已清 + _audio_drained"后才
   _on_playback_finished（GUI 线程恰好一次）——用户暂停/seek 与之分离；
@@ -29,7 +29,7 @@ from collections import deque
 from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
-                             QSlider, QVBoxLayout, QWidget)
+                             QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from . import icons as _icons
 
@@ -68,9 +68,11 @@ def _fmt_time(sec: float) -> str:
     return f'{sec // 60:02d}:{sec % 60:02d}'
 
 
-def _frame_to_qimage(rgb) -> QImage:
-    h, w, _ = rgb.shape
-    img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+def _frame_to_qimage(pixels) -> QImage:
+    h, w, channels = pixels.shape
+    image_format = (QImage.Format.Format_RGBA8888 if channels == 4
+                    else QImage.Format.Format_RGB888)
+    img = QImage(pixels.data, w, h, channels * w, image_format)
     return img.copy()  # 脱离 numpy 缓冲生命周期
 
 
@@ -103,7 +105,7 @@ class _VideoCanvas(QWidget):
         self._image: QImage | None = None
         self.setStyleSheet('background: #000;')
 
-    def set_image(self, image: QImage) -> None:
+    def set_image(self, image: QImage | None) -> None:
         self._image = image
         self.update()
 
@@ -170,6 +172,7 @@ class DecoderBackend(ABC):
     fps: float
     frame_count: int
     duration_sec: float
+    independent_frames = False
 
     @abstractmethod
     def frame_rgb(self, index: int, size=None):
@@ -210,13 +213,14 @@ class BasePlayer(QFrame):
         self._ring: deque = deque(maxlen=self.RING_SIZE)
         self._ring_lock = threading.Lock()
         self._ring_space = threading.Condition(self._ring_lock)
-        self._pending: deque = deque()
         self._cond = threading.Condition()
         self._running = False
         self._playing = False
         self._seek_target: int | None = None
         self._next_index = 0
+        self._decode_floor = 0
         self._shown_index = -1
+        self._frame_to_present: int | None = None
         # [E3/FUP-07] EOF 语义分层：producer 耗尽（解码侧事实）与播放完成
         # （末帧实际呈现 + 音频排空）分开标记——只有后者才发布收尾
         self._decode_exhausted = False
@@ -227,6 +231,7 @@ class BasePlayer(QFrame):
         self.toast_requested.connect(self._toast)
 
         self._ui_timer = QTimer(self)
+        self._ui_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._ui_timer.setInterval(40)
         self._ui_timer.timeout.connect(self._poll_ring)
         self._thread: threading.Thread | None = None
@@ -251,6 +256,7 @@ class BasePlayer(QFrame):
         hl.setContentsMargins(16, 0, 16, 0)
         self.lbl_title = QLabel(self.PLAYER_TITLE)
         self.lbl_title.setObjectName('ToposTitle')
+        self.lbl_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.lbl_badge = QLabel(self.BADGE_TEXT)
         self.lbl_badge.setProperty('class', 'ToposMetaBadge')
         self.lbl_badge.setStyleSheet(
@@ -261,8 +267,7 @@ class BasePlayer(QFrame):
         btn_close = _icons.make_tool_button(self, 'fa5s.times', '关闭 (Esc)', '✕', color=_icons.WHITE)
         btn_close.clicked.connect(self.stop)
         hl.addWidget(self.lbl_badge)
-        hl.addWidget(self.lbl_title)
-        hl.addStretch(1)
+        hl.addWidget(self.lbl_title, 1)
         hl.addWidget(btn_info)
         self._populate_header_buttons(hl)
         hl.addWidget(btn_close)
@@ -283,7 +288,8 @@ class BasePlayer(QFrame):
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.sliderReleased.connect(self._on_slider_seek)
-        self.slider.sliderPressed.connect(self._on_slider_scrub)
+        self.slider.setMinimumWidth(1)
+        self.slider.actionTriggered.connect(self._on_slider_action)
         self.lbl_pos = QLabel('00:00')
         self.lbl_total = QLabel('00:00')
         cl.addWidget(btn_prev)
@@ -389,15 +395,19 @@ class BasePlayer(QFrame):
         self._session = session
         self._current_path = path
         self._ring.clear()
-        self._pending.clear()  # 上一文件的残留帧会堵死新文件的显示队列
         self._shown_index = -1
+        self._frame_to_present = 0
         self._next_index = 0
-        self._seek_target = None
+        self._decode_floor = 0
+        self._seek_target = 0
         self._decode_exhausted = False   # [E3] 新会话重置 EOF 分层状态
         self._eof_published = False
         self.slider.setRange(0, session.frame_count - 1)
+        self.slider.setValue(0)
+        self.lbl_pos.setText('00:00')
         self.lbl_total.setText(_fmt_time(session.duration_sec))
         self.lbl_title.setText(os.path.basename(path))
+        self.lbl_title.setToolTip(os.path.basename(path))
         # [U10] 真实标题记账：_toast 的 orig 捕获法在两次叠加 toast 时会把
         # 上一条 toast 文案当"原标题"还原（标题永久残留"正在截取..."等）
         self._real_title = os.path.basename(path)
@@ -443,11 +453,13 @@ class BasePlayer(QFrame):
     def stop_decoder(self) -> None:
         with self._cond:
             self._running = False
+            self._playing = False
             self._cond.notify()
+        self.canvas.set_image(None)
         self._teardown_output()
         with self._ring_lock:
             self._ring.clear()
-            self._pending.clear()
+            self._ring_space.notify_all()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=self.JOIN_TIMEOUT)
             if self._thread.is_alive():
@@ -519,7 +531,7 @@ class BasePlayer(QFrame):
 
     def _ui_interval(self, session: DecoderBackend) -> int:
         """UI 消费定时器间隔（ms）。"""
-        return max(4, int(1000 / session.fps))
+        return max(4, int(500 / session.fps))
 
     def _after_decoder_started(self) -> None:
         """解码线程启动后的收尾（libav：启动音频管线）。"""
@@ -536,13 +548,12 @@ class BasePlayer(QFrame):
     def _reset_stream_state(self) -> None:
         """stop_decoder 收尾的状态复位；子类可追加（libav：_t_mark）。"""
         self._shown_index = -1
+        self._frame_to_present = None
         self._next_index = 0
+        self._decode_floor = 0
         self._seek_target = None
         self._decode_exhausted = False
         self._eof_published = False
-
-    def _on_seek_jump(self) -> None:
-        """解码线程消费到 seek 请求时（丢弃过期帧等）。"""
 
     def _audio_drained(self) -> bool:
         """[E3] 音频排空判定；子类覆写（有音轨按管线排空状态，无轨恒 True）。"""
@@ -650,42 +661,46 @@ class BasePlayer(QFrame):
             with self._cond:
                 # [E3] producer 耗尽后泊车：呈现侧还没消费完（或音频还在
                 # 排空），不能继续解码也不能退出——等 seek（重播/回跳）或停
-                while self._running and self._seek_target is None and \
-                        (not self._playing or self._decode_exhausted):
+                while self._running and self._session is session and \
+                        self._seek_target is None and (not self._playing or self._decode_exhausted):
                     self._cond.wait(timeout=0.2)
-                if not self._running:
+                if not self._running or self._session is not session:
                     return
                 target = self._seek_target
-                seek_jump = target is not None
                 if target is None:
                     target = self._next_index
+                    floor = self._decode_floor
+                    if floor - target >= self.RING_SIZE:
+                        target = floor
                 self._seek_target = None
-            if seek_jump:
-                self._on_seek_jump()
             if target >= session.frame_count:
                 # [E3/FUP-07] producer 耗尽只是解码侧事实：此刻帧可能还在
-                # ring/pending 未呈现、音频可能还在排空。不在此停播/发
+                # ring 未呈现、音频可能还在排空。不在此停播/发
                 # EOF——只做标记，由呈现侧 _maybe_publish_eof 在末帧实际
                 # 呈现且音频排空后发布播放完成（恰好一次）。
                 # 条件写（锁内）：seek 恰在此刻到达时不标记，回顶部消费 seek。
                 with self._cond:
-                    if self._seek_target is None:
+                    if self._session is session and self._seek_target is None:
                         self._decode_exhausted = True
                 continue
             try:
                 img = self._decode_frame(session, target)
             except StopIteration:
-                self._on_decode_stop()
+                if self._session is session and self._running:
+                    self._on_decode_stop()
                 continue
             except Exception:
-                self._on_decode_error()
+                if self._session is session and self._running:
+                    self._on_decode_error()
                 continue
             # 背压：ring 满（UI 未消费）则挂起；有 seek 请求则丢弃本帧
             with self._ring_lock:
-                while self._running and len(self._ring) >= self.RING_SIZE \
-                        and self._seek_target is None:
+                while self._running and self._session is session and \
+                        len(self._ring) >= self.RING_SIZE and self._seek_target is None:
                     self._ring_space.wait(timeout=0.05)
-                if not self._running or self._seek_target is not None:
+                if not self._running or self._session is not session:
+                    return
+                if self._seek_target is not None:
                     continue
                 self._ring.append((target, img))
                 self._ring_space.notify()
@@ -694,18 +709,48 @@ class BasePlayer(QFrame):
                 # 之后 _next_index == frame_count，下一轮进入 EOF 哨兵分支
                 # 只标记一次耗尽。此前 `target+1 < frame_count` 把末帧
                 # 永远留在 _next_index——2 帧会话读成 0,1,1,1…，EOF 永不触发。
-                if self._seek_target is None:
+                if self._session is session and self._seek_target is None:
                     self._next_index = target + 1
 
     def _poll_ring(self) -> None:
-        """UI 消费钩子：由子类实现（topos 严格按序 / libav 时钟门控）。"""
+        """UI 消费钩子：由子类实现（Topos/Libav 时钟门控）。"""
         raise NotImplementedError
+
+    def _take_due_frame(self, target: int) -> tuple[int, object] | None:
+        """从有界队列取当前帧。暂停时只呈现首帧或用户请求的一帧。"""
+        requested = self._frame_to_present
+        if not self._playing and requested is None:
+            return None
+        if requested is not None:
+            target = requested
+        elif getattr(self._session, 'independent_frames', False):
+            # 可独立解码的帧落后较多时，工作线程可跳过过期素材。
+            self._decode_floor = min(target, self._session.frame_count - 1)
+        frame = None
+        with self._ring_lock:
+            while self._ring and self._ring[0][0] <= target:
+                candidate = self._ring.popleft()
+                if candidate[0] > self._shown_index:
+                    frame = candidate
+            self._ring_space.notify()
+        if frame is not None:
+            self._frame_to_present = None
+        return frame
+
+    def _show_frame(self, frame: tuple[int, object]) -> None:
+        index, image = frame
+        self._shown_index = index
+        self.canvas.set_image(image)
+        if not self.slider.isSliderDown():
+            self.slider.setValue(index)
+        if self._session is not None:
+            self.lbl_pos.setText(_fmt_time(index / self._session.fps))
 
     def _maybe_publish_eof(self) -> None:
         """[E3/FUP-07] 呈现完成判定（GUI 线程，由 _poll_ring 每 tick 调用）。
 
         发布条件全部成立才收尾：producer 耗尽 + 末帧已实际呈现 +
-        ring/pending 已清 + 音频已排空（有音轨时）。此前哨兵一到这里就
+        ring 已清 + 音频已排空（有音轨时）。此前哨兵一到这里就
         `_playing=False` 并发 EOF——2 帧会话在 `shown_index=-1`、队列仍
         `[0,1]` 时就宣布播完（FUP-07 实测）。
         """
@@ -715,7 +760,7 @@ class BasePlayer(QFrame):
             return
         if self._shown_index < self._session.frame_count - 1:
             return  # 末帧还没呈现（0 帧会话 frame_count-1 == -1 == shown 初值）
-        if self._ring or self._pending:
+        if self._ring:
             return  # 已解码但未呈现的帧还在队列里
         if not self._audio_drained():
             return  # 音频缓冲还没排空（有声素材的收尾要等声音放完）
@@ -730,21 +775,20 @@ class BasePlayer(QFrame):
     def _request_seek(self, target: int) -> None:
         self._on_seek_requested(target)
         with self._cond:
-            self._seek_target = target
-            # [E3] seek 重置 EOF 分层状态：重播/回跳后继续解码与发布资格
-            self._decode_exhausted = False
-            self._eof_published = False
+            with self._ring_lock:
+                self._ring.clear()
+                self._seek_target = target
+                self._decode_floor = target
+                self._shown_index = target - 1
+                self._frame_to_present = target
+                self._decode_exhausted = False
+                self._eof_published = False
+                self._ring_space.notify_all()
             self._cond.notify()
-        # 显示基准重置到目标前一帧（下一帧恰好是 target）。
-        # pending 与 ring 都在本（UI）线程清空——与 _poll_ring 无竞争；
-        # 解码线程醒来后按 seek 目标重新产出。
-        self._shown_index = target - 1
-        with self._ring_lock:
-            self._ring.clear()
-            self._pending.clear()
 
-    def _on_slider_scrub(self) -> None:
-        pass  # 拖动中不处理，松手后一次性 seek
+    def _on_slider_action(self, action: int) -> None:
+        if self._session is not None and action != QSlider.SliderAction.SliderMove.value:
+            self._request_seek(self.slider.sliderPosition())
 
     def _on_slider_seek(self) -> None:
         if self._session is None:
@@ -785,11 +829,18 @@ class BasePlayer(QFrame):
         self.setCursor(Qt.CursorShape.BlankCursor)
 
     def _relayout(self) -> None:
-        self._header.setGeometry(0, 0, self.width(), 44)
-        # 播放条拉长到播放器宽度的七成（560~1200px），拖拽进度更好用
-        target = max(560, min(int(self.width() * 0.7), 1200))
+        width = self.width()
+        self._header.setGeometry(0, 0, width, 44)
+        self.lbl_badge.setVisible(width >= 580)
+        preferred_width = min(max(560, int(width * 0.7)), 1200)
+        target = max(1, min(width - 16, preferred_width))
         self._controls.setFixedWidth(target)
-        self._controls.move((self.width() - target) // 2,
+        compact = target < 400
+        margin = 8 if compact else 16
+        self._controls.layout().setContentsMargins(margin, 6, margin, 6)
+        self._controls.layout().setSpacing(4 if compact else -1)
+        self.slider_vol.setFixedWidth(40 if compact else 64)
+        self._controls.move((width - target) // 2,
                             self.height() - self._controls.height() - 24)
         if self.info_panel.isVisible():
             self.info_panel.move(16, 56)

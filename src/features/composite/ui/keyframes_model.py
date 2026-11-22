@@ -20,14 +20,19 @@ Design (per docs/composite_davinci_keyframes_tool_plan_2026-06-28.md §5):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field, replace
+from fractions import Fraction
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.features.composite.core.layer_model import (
+    LAYER_TYPE_AUDIO,
     BOTTOM_UP_LAYER_STACK_VERSION, LAYER_MERGE_OWNER_PARAM,
     LAYER_TYPE_3D, LAYER_TYPE_SOLID, LAYER_TYPE_TEXT, LEGACY_LAYER_STACK_VERSION,
 )
+from src.features.composite.core.layer_time import LayerTiming, layer_timing_from_video
 from src.shared.i18n.i18n import I18N
+
+from .timeline_layout import RULER_HEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Both views use the same row geometry. Keeping these values in one place is
 # important: the tree side has to reserve the ruler's header row or its first
 # item will be painted on top of the timeline ruler.
-KEYFRAMES_RULER_H = 30
+KEYFRAMES_RULER_H = RULER_HEIGHT
 KEYFRAMES_ROW_H = 24
 
 _LAYER_GROUPS = (
@@ -59,12 +64,6 @@ _TRANSFORM_SAMPLING = frozenset({
 _LAYER_PROPERTY_LABELS = {
     "rotation": ("keyframes.property_rotation", "Rotation"),
     "opacity": ("keyframes.property_opacity", "Opacity"),
-    "pivot_x": ("keyframes.property_x", "X"),
-    "pivot_y": ("keyframes.property_y", "Y"),
-    "translate_x": ("keyframes.property_x", "X"),
-    "translate_y": ("keyframes.property_y", "Y"),
-    "scale_x": ("keyframes.property_x", "X"),
-    "scale_y": ("keyframes.property_y", "Y"),
 }
 _MASK_NODE_TYPES = frozenset({"mask", "matte", "mask_merge", "roto_shape"})
 _MEDIA_NODE_TYPES = frozenset({"image_input", "video_frame", "timeline_clip_input"})
@@ -142,6 +141,9 @@ class KeyframesTrackVisual:
     # Source frames are independent of the bar's composition frame numbers.
     source_total: int = 0
     source_in: int = 0
+    source_step: Fraction = Fraction(1)
+    source_phase: Fraction = Fraction(0)
+    media_timing: LayerTiming | None = None
     layer_managed: bool = True
 
 
@@ -159,18 +161,17 @@ class KeyframesRow:
     selected: bool = False
     visible: bool = True
     node_color: str = "#555555"
-    # Parent group row in the layer projection.  Node-mode rows leave this
-    # empty; layer-mode effect/parameter rows use it so collapsing a Layer
-    # hides the complete referenced node chain without duplicating state.
+    # Projected parent heading; collapsing it hides its descendants.
     parent_row_id: Optional[str] = None
     # ── Layer-mode fields (AE/Nuke hybrid, plan §6.2) ──
-    # All projected descendants carry the owning layer ID. Only the layer
-    # heading shows the 1-based index (top layer = 1).
+    # Only rows projected from a layer carry an owning layer ID. Root
+    # headings display their 1-based index in either projection.
     layer_id: Optional[str] = None
-    layer_index: Optional[int] = None
+    display_index: Optional[int] = None
     layer_enabled: bool = True        # AE eye toggle state
     layer_solo: bool = False
     layer_shy: bool = False
+    layer_motion_blur: Optional[bool] = None
     layer_blended: bool = True        # False for layers w/o owning merge
     layer_managed: bool = True
     layer_type: str = "media"
@@ -181,6 +182,7 @@ class KeyframesRow:
     parent_layer_name: str = ""
     # A grouped value edits these independent parameters on node_id.
     component_params: tuple[str, ...] = ()
+    inherited_lock: bool = False
 
 
 # ── Frame <-> pixel mapping (§P2.5) ─────────────────────────────────────
@@ -253,9 +255,10 @@ class KeyframesModel:
     def __init__(self) -> None:
         self._rows: List[KeyframesRow] = []
         self._tracks: Dict[str, KeyframesTrackVisual] = {}
-        self._expanded: set = set()         # node_ids expanded
+        self._collapsed_nodes: set[str] = set()
         self._layer_expansion: dict[str, bool] = {}
         self._layer_row_expansion: dict[str, bool] = {}
+        self._split_dimensions: set[tuple[str, tuple[str, ...]]] = set()
         self._layer_property_focus: dict[str, frozenset[str]] = {}
         self._focused_layer_expansion: dict[str, dict[str, bool]] = {}
         self._filter: str = "all"           # all | animated | modified | expression | selected
@@ -267,6 +270,7 @@ class KeyframesModel:
         # AE/Nuke hybrid view mode (plan §6.1).  "nodes" = legacy behaviour;
         # "layers" = AE layer stack with one row per layer.
         self._view_mode: str = "nodes"
+        self._hide_shy_layers = False
 
     # ── view mode (AE/Nuke hybrid, plan §6.1) ──
 
@@ -281,8 +285,12 @@ class KeyframesModel:
         if mode in (self.VIEW_MODE_NODES, self.VIEW_MODE_LAYERS):
             self._view_mode = mode
 
+    def set_hide_shy_layers(self, hide: bool) -> None:
+        self._hide_shy_layers = hide
+
     def rebuild_layers(self, controller: Any,
-                       selected_layer_id: Optional[str] = None) -> None:
+                       selected_layer_id: Optional[str] = None, *,
+                       selected_properties: frozenset[str] = frozenset()) -> None:
         """Regenerate rows from a :class:`LayerStackController`.
 
         Layer order matches the stack. Property groups organize the live
@@ -298,6 +306,7 @@ class KeyframesModel:
             return
         legacy_stack = getattr(stack, "version", LEGACY_LAYER_STACK_VERSION) < BOTTOM_UP_LAYER_STACK_VERSION
         layers_map = controller.layers_map()
+        blur_states = controller.layer_motion_blur_states(layers_map.values())
         self._layer_property_focus = {layer_id: focus for layer_id, focus
                                       in self._layer_property_focus.items()
                                       if layer_id in layers_map}
@@ -380,7 +389,10 @@ class KeyframesModel:
             if layer is None:
                 continue
             display_idx += 1
+            if self._hide_shy_layers and layer.shy:
+                continue
             relation = relation_view(layer_id)
+            audio = layer.audio if layer.layer_type == LAYER_TYPE_AUDIO else None
             node = controller.graph.get_node(layer.root_node_id)
             if node is None:
                 # Stale layer — still show it (broken state) so the UI can
@@ -396,9 +408,9 @@ class KeyframesModel:
                     selected=(layer_id == selected_layer_id),
                     node_color=layer.label_color or "#555555",
                     layer_id=layer_id,
-                    layer_index=display_idx,
-                    layer_enabled=layer.enabled,
-                    layer_solo=layer.solo,
+                    display_index=display_idx,
+                    layer_enabled=not audio.mute if audio is not None else layer.enabled,
+                    layer_solo=audio.solo if audio is not None else layer.solo,
                     layer_shy=layer.shy,
                     layer_blended=layer_id in merge_owner_index,
                     layer_managed=layer.managed,
@@ -421,10 +433,11 @@ class KeyframesModel:
                 selected=(layer_id == selected_layer_id),
                 node_color=color,
                 layer_id=layer_id,
-                layer_index=display_idx,
-                layer_enabled=layer.enabled,
-                layer_solo=layer.solo,
+                display_index=display_idx,
+                layer_enabled=not audio.mute if audio is not None else layer.enabled,
+                layer_solo=audio.solo if audio is not None else layer.solo,
                 layer_shy=layer.shy,
+                layer_motion_blur=blur_states.get(layer_id),
                 layer_blended=layer_id in merge_owner_index,
                 layer_managed=layer.managed,
                 layer_type=layer.layer_type,
@@ -442,12 +455,13 @@ class KeyframesModel:
                                  layer.source_node_id, exc_info=True)
                     source_node = None
             self._tracks[layer_row.row_id] = self._build_node_track(
-                node, color, source_node=source_node, layer=layer)
+                node, color, source_node=source_node, layer=layer,
+                comp_fps=getattr(controller.graph, "fps", 0))
             merge_for_layer = getattr(controller, "layer_merge_node", None)
             merge = merge_for_layer(layer_id) if callable(merge_for_layer) else None
             self._append_layer_groups(layer_row, layer, node, merge,
                                       self._layer_effect_nodes(controller, layer))
-        self._filter_layer_rows()
+        self._filter_projected_rows(selected_properties)
         self._project_layer_property_focus(controller.graph)
 
     def focus_layer_properties(self, layer_ids: list[str], token: str, *,
@@ -500,8 +514,15 @@ class KeyframesModel:
             layer_row_id = f"layer:{row.layer_id}"
             transform_row_id = f"{layer_row_id}:group:transform"
             layer_root = headings[layer_row_id].node_id
-            transform_property = (row.node_id == layer_root or
-                                  (row.param_name == "opacity" and row.parent_row_id == transform_row_id))
+            focus_layer = graph.get_layer(row.layer_id) \
+                if callable(getattr(graph, "get_layer", None)) else None
+            layer_transform = getattr(focus_layer, "transform_node_id", None)
+            # B01: transform properties live on the registered main
+            # Transform, which may differ from the chain head.
+            transform_property = (row.node_id == layer_root
+                                  or row.node_id == layer_transform
+                                  or (row.param_name == "opacity"
+                                      and row.parent_row_id == transform_row_id))
             if not effects and not self._matches_layer_property_focus(
                     graph, row, tokens, transform_property=transform_property):
                 continue
@@ -581,9 +602,9 @@ class KeyframesModel:
                 self._append_transform_params(group_row, root, root_params)
             else:
                 for name, pdef in root_params:
-                    self._append_layer_param(group_row, root, name, pdef)
+                    self._append_param(group_row, root, name, pdef)
             if merge_opacity is not None:
-                self._append_layer_param(group_row, merge, *merge_opacity)
+                self._append_param(group_row, merge, *merge_opacity)
             for node, params in nodes:
                 row_id = f"{layer_row.row_id}:node:{node.id}"
                 node_row = KeyframesRow(
@@ -600,14 +621,21 @@ class KeyframesModel:
                     track.range_bar = None
                 track.row_id = row_id
                 self._tracks[row_id] = track
-                for name, pdef in params:
-                    self._append_layer_param(node_row, node, name, pdef)
+                if group == "transform":
+                    self._append_transform_params(node_row, node, params)
+                else:
+                    for name, pdef in params:
+                        self._append_param(node_row, node, name, pdef)
 
     @staticmethod
     def _layer_node_group(node: Any, layer: Any) -> str:
         node_type = getattr(node, "node_type", "")
         if node_type in _MASK_NODE_TYPES:
             return "masks"
+        if node.id == getattr(layer, "transform_node_id", None):
+            # B01: the registered main Transform belongs to the transform
+            # group even when it is not the chain head.
+            return "transform"
         if node_type == "transform" or node_type == "transform3d":
             return "transform"
         if (node.id == layer.source_node_id or node_type in _MEDIA_NODE_TYPES
@@ -626,6 +654,9 @@ class KeyframesModel:
             locked=parent.locked, node_color=parent.node_color, parent_row_id=parent.row_id,
             layer_id=parent.layer_id, component_params=components,
         )
+        if components:
+            row.expanded = (node_id, components) in self._split_dimensions
+            row.visible = not row.expanded
         self._rows.append(row)
         return row
 
@@ -642,38 +673,44 @@ class KeyframesModel:
                 pair_parent = self._append_property_group(parent, node.id, group, title,
                                                           components=pair)
             for name in names:
-                self._append_layer_param(pair_parent, node, name, remaining.pop(name))
+                self._append_param(pair_parent, node, name, remaining.pop(name))
         for name in _TRANSFORM_PRIORITY:
             if name in remaining:
-                self._append_layer_param(parent, node, name, remaining.pop(name))
+                self._append_param(parent, node, name, remaining.pop(name))
         for name, pdef in remaining.items():
-            self._append_layer_param(parent, node, name, pdef)
+            self._append_param(parent, node, name, pdef)
 
-    def _append_layer_param(self, parent: KeyframesRow, node: Any,
-                            name: str, pdef: Any) -> None:
+    def _append_param(self, parent: KeyframesRow, node: Any,
+                      name: str, pdef: Any) -> None:
         label = self._param_label(node, name, pdef)
         translated = _LAYER_PROPERTY_LABELS.get(name)
-        if translated and (name in ("rotation", "opacity") or parent.component_params):
+        if parent.component_params:
+            axis = name.rsplit("_", 1)[-1].upper()
+            label = f"{parent.label} {axis}"
+        elif translated:
             label = I18N.tr(*translated)
         row = KeyframesRow(
             row_id=f"param:{node.id}:{name}", node_id=node.id, param_name=name,
             label=label, row_type="param",
-            depth=parent.depth + 1, locked=parent.locked, node_color=parent.node_color,
+            depth=parent.depth + (0 if parent.component_params else 1),
+            locked=parent.locked, node_color=parent.node_color,
             parent_row_id=parent.row_id, layer_id=parent.layer_id,
         )
         self._rows.append(row)
         self._tracks[row.row_id] = self._build_param_track(node, name, row.node_color)
 
-    def _filter_layer_rows(self) -> None:
+    def _filter_projected_rows(self, selected_properties: frozenset[str]) -> None:
         query = self._text_filter.strip().casefold()
+        selected_only = self._filter == "selected"
         filters_properties = self._filter in ("animated", "modified", "expression")
-        if not query and not filters_properties:
+        if not query and not filters_properties and not selected_only:
             return
         headings = {row.row_id: row for row in self._rows if row.row_type != "param"}
         text_matches: Dict[str, bool] = {}
         retained_headings: set[str] = set()
         visible_parents: set[str] = set()
         retained_params: set[tuple[str, Optional[str]]] = set()
+        selected_headings: set[str] = set()
         for row in self._rows:
             matches = not query or query in row.label.casefold()
             if row.param_name is not None:
@@ -681,6 +718,12 @@ class KeyframesModel:
             elif row.row_type == "group":
                 matches = matches or query in row.row_id.rsplit(":", 1)[-1]
             matches = matches or text_matches.get(row.parent_row_id or "", False)
+            if selected_only:
+                selected = (row.selected or row.row_id in selected_properties
+                            or row.parent_row_id in selected_headings)
+                if selected and row.row_type != "param":
+                    selected_headings.add(row.row_id)
+                matches = matches and selected
             if row.row_type != "param":
                 text_matches[row.row_id] = matches
                 if filters_properties or not matches:
@@ -699,7 +742,7 @@ class KeyframesModel:
         self._rows = [row for row in self._rows if row.row_id in retained_headings
                       or (row.row_id, row.parent_row_id) in retained_params]
         for row in self._rows:
-            if row.row_id in visible_parents:
+            if row.row_id in visible_parents and not row.component_params:
                 row.expanded = True
         retained_ids = {row.row_id for row in self._rows}
         self._tracks = {row_id: track for row_id, track in self._tracks.items()
@@ -806,7 +849,9 @@ class KeyframesModel:
     # ── rebuild from graph ──
 
     def rebuild(self, node_graph: Any,
-                selected_node_id: Optional[str] = None) -> None:
+                selected_node_id: Optional[str] = None, *,
+                selected_properties: frozenset[str] = frozenset(),
+                layer_lock: Optional[Callable[[str], bool]] = None) -> None:
         """Regenerate rows + tracks from ``node_graph``.
 
         Node ordering follows the graph's editor position (top-to-bottom,
@@ -816,73 +861,33 @@ class KeyframesModel:
         self._tracks.clear()
         self._selected_node_id = selected_node_id
 
-        nodes = self._ordered_nodes(node_graph)
-        for node in nodes:
-            color = self._node_color(node)
+        viewport = getattr(node_graph, "_viewport_state", {})
+        locked_ids = viewport.get("locked_node_ids", ()) if isinstance(viewport, dict) else ()
+        locked_nodes = {str(node_id) for node_id in locked_ids} if isinstance(locked_ids, (list, tuple, set)) else set()
+        for index, node in enumerate(self._ordered_nodes(node_graph), start=1):
             node_id = node.id
-            node_label = self._node_label(node)
-            query = self._text_filter.strip().casefold()
             params = self._filtered_params(node)
-            if query and query not in node_label.casefold():
-                params = self._filtered_params(node, query=query)
-                if not params:
-                    continue
-            if (self._filter in ("animated", "modified", "expression")
-                    and not params):
+            if self._filter in ("animated", "modified", "expression") and not params:
                 continue
-            if self._filter == "selected":
-                has_selected_track = any(
-                    any(bool(getattr(kf, "selected", False))
-                        for kf in getattr(track, "keyframes", []))
-                    for track in getattr(node, "keyframe_tracks", {}).values()
-                )
-                if node_id != selected_node_id and not has_selected_track:
-                    continue
-            expanded = (node_id in self._expanded) if self._expanded else True
+            color = self._node_color(node)
+            inherited_lock = layer_lock is not None and layer_lock(node_id) is True
             node_row = KeyframesRow(
-                row_id=f"node:{node_id}",
-                node_id=node_id,
-                param_name=None,
-                label=node_label,
-                row_type="node",
-                depth=0,
-                expanded=expanded,
-                selected=(node_id == selected_node_id),
-                node_color=color,
+                row_id=f"node:{node_id}", node_id=node_id, param_name=None,
+                label=self._node_label(node), row_type="node", depth=0,
+                expanded=node_id not in self._collapsed_nodes,
+                selected=node_id == selected_node_id, node_color=color,
+                locked=inherited_lock or node_id in locked_nodes, inherited_lock=inherited_lock,
+                layer_enabled=not getattr(node, "disabled", False),
+                display_index=index,
             )
             self._rows.append(node_row)
-
-            # node-level range bar + track visuals
             self._tracks[node_row.row_id] = self._build_node_track(node, color)
-
-            # child parameter rows (only animatable + existing tracks)
-            for pname, pdef in params:
-                animatable = bool(getattr(pdef, "is_animatable", lambda: False)())
-                has_track = self._has_param_track(node, pname, pdef)
-                if self._filter == "selected":
-                    tracks = self._tracks_for_param(node, pname, pdef)
-                    if not any(
-                            bool(getattr(kf, "selected", False))
-                            for track in tracks
-                            for kf in getattr(track, "keyframes", [])):
-                        continue
-                if not animatable and not has_track:
-                    continue
-                param_row = KeyframesRow(
-                    row_id=f"param:{node_id}:{pname}",
-                    node_id=node_id,
-                    param_name=pname,
-                    label=self._param_label(node, pname, pdef),
-                    row_type="param",
-                    depth=1,
-                    expanded=True,
-                    selected=False,
-                    visible=expanded,
-                    node_color=color,
-                )
-                self._rows.append(param_row)
-                self._tracks[param_row.row_id] = self._build_param_track(
-                    node, pname, color)
+            if getattr(node, "supports_parent_transform", False):
+                self._append_transform_params(node_row, node, params)
+            else:
+                for name, pdef in params:
+                    self._append_param(node_row, node, name, pdef)
+        self._filter_projected_rows(selected_properties)
 
     # ── accessors ──
 
@@ -937,19 +942,19 @@ class KeyframesModel:
             for row in layer_rows:
                 self._set_projected_expansion(row, expanded)
             return
-        if expanded:
-            self._expanded.add(node_id)
-        else:
-            self._expanded.discard(node_id)
         for row in self._rows:
             if row.row_type == "node" and row.node_id == node_id:
-                row.expanded = expanded
-            elif row.row_type == "param" and row.node_id == node_id and row.layer_id is None:
-                row.visible = expanded
+                self._set_projected_expansion(row, expanded)
+                break
 
     def _set_projected_expansion(self, row: KeyframesRow, expanded: bool) -> None:
         row.expanded = expanded
-        if row.layer_id is not None and row.layer_id in self._layer_property_focus:
+        if row.row_type == "node" and row.layer_id is None:
+            if expanded:
+                self._collapsed_nodes.discard(row.node_id)
+            else:
+                self._collapsed_nodes.add(row.node_id)
+        elif row.layer_id is not None and row.layer_id in self._layer_property_focus:
             self._focused_layer_expansion.setdefault(row.layer_id, {})[row.row_id] = expanded
         elif row.row_type == "layer" and row.layer_id is not None:
             self._layer_expansion[row.layer_id] = expanded
@@ -960,18 +965,16 @@ class KeyframesModel:
                          recursive: bool = False) -> bool:
         """Expand a heading by its view identity, optionally including descendants."""
         row = next((item for item in self._rows if item.row_id == row_id), None)
-        if row is None or row.row_type not in ("node", "layer", "group"):
+        if row is None or row.component_params or row.row_type not in ("node", "layer", "group"):
             return False
-        if row.layer_id is None:
-            self.set_expanded(row.node_id, expanded)
-            return True
         self._set_projected_expansion(row, expanded)
         if recursive:
             # The layer projection emits parents before descendants, including
             # rows currently hidden by collapsed headings.
             headings = {row_id}
             for child in self._rows:
-                if child.parent_row_id in headings and child.row_type != "param":
+                if (child.parent_row_id in headings and child.row_type != "param"
+                        and not child.component_params):
                     self._set_projected_expansion(child, expanded)
                     headings.add(child.row_id)
         return True
@@ -984,30 +987,39 @@ class KeyframesModel:
         if not candidates:
             return False
         row = next((item for item in candidates if item.layer_id == layer_id), candidates[0])
-        if row.layer_id is None and row.row_type == "param":
-            self.set_expanded(row.node_id, True)
-            return True
         headings = {item.row_id: item for item in self._rows if item.row_type != "param"}
         parent_id = row.parent_row_id
         while parent_id:
             parent = headings[parent_id]
-            self._set_projected_expansion(parent, True)
+            if not parent.component_params:
+                self._set_projected_expansion(parent, True)
             parent_id = parent.parent_row_id
         return True
 
     def expand_all(self, expanded: bool = True) -> None:
         for row in self._rows:
-            if row.layer_id is not None:
-                if row.row_type != "param":
-                    self._set_projected_expansion(row, expanded)
-            elif row.row_type == "node":
-                row.expanded = expanded
-                if expanded:
-                    self._expanded.add(row.node_id)
-                else:
-                    self._expanded.discard(row.node_id)
-            elif row.row_type == "param":
-                row.visible = expanded
+            if row.row_type != "param" and not row.component_params:
+                self._set_projected_expansion(row, expanded)
+
+    def dimension_group(self, row: KeyframesRow) -> Optional[KeyframesRow]:
+        """Find the vector summary for a combined row or one of its axes."""
+        if row.component_params:
+            return row
+        if row.row_type != "param" or row.parent_row_id is None:
+            return None
+        return next((group for group in self._rows
+                     if group.row_id == row.parent_row_id and group.component_params), None)
+
+    def toggle_dimensions(self, row_id: str) -> None:
+        """Toggle vector presentation without altering the component tracks."""
+        row = next((row for row in self._rows if row.row_id == row_id and row.component_params), None)
+        if row is None:
+            return
+        key = (row.node_id, row.component_params)
+        if key in self._split_dimensions:
+            self._split_dimensions.remove(key)
+        else:
+            self._split_dimensions.add(key)
 
     def set_filter(self, mode: str) -> None:
         """Set the property filter used by both node and layer projections.
@@ -1105,23 +1117,12 @@ class KeyframesModel:
             return self._is_modified_param(node, param_name, pdef, has_track)
         if mode == "expression":
             return self._has_expression(node, param_name)
-        if mode == "selected":
-            return any(
-                bool(getattr(kf, "selected", False))
-                for track in self._tracks_for_param(node, param_name, pdef)
-                for kf in getattr(track, "keyframes", [])
-            )
         return True
 
-    def _filtered_params(self, node: Any, query: str = "") -> List[Tuple[str, Any]]:
+    def _filtered_params(self, node: Any) -> List[Tuple[str, Any]]:
         """Return animatable/legacy parameters matching current filters."""
         result = []
-        node_label = self._node_label(node).casefold()
         for pname, pdef in self._animatable_params(node):
-            if query and query not in node_label and not (
-                    query in self._param_label(node, pname, pdef).casefold()
-                    or query in pname.casefold()):
-                continue
             animatable = bool(getattr(
                 pdef, "is_animatable", lambda: False)())
             has_track = self._has_param_track(node, pname, pdef)
@@ -1273,7 +1274,7 @@ class KeyframesModel:
 
     def _build_node_track(self, node: Any, color: str,
                           source_node: Any = None,
-                          layer: Any = None) -> KeyframesTrackVisual:
+                          layer: Any = None, comp_fps: Any = 0) -> KeyframesTrackVisual:
         tr = getattr(node, "time_range", None)
         range_bar: Optional[TimeRangeBar] = None
         label = layer.name if layer is not None else self._node_label(node)
@@ -1283,6 +1284,17 @@ class KeyframesModel:
         source_total = self._media_total_frames(media_node)
         source_in = 0
         source_out = source_total - 1
+        media_timing = None
+        if layer is not None and getattr(media_node, "node_type", "") == "video_frame":
+            from src.shared.media.presentation_time import ready_presentation_index
+
+            media_range = getattr(media_node, "time_range", None) or {}
+            params = media_node.parameters
+            index = ready_presentation_index(str(params.get("file_path") or ""))
+            if index is not None:
+                source_total = len(index.pts)
+                source_out = source_total - 1
+            media_timing = layer_timing_from_video((0, 0), params, media_range, comp_fps, index)
         if source_total:
             try:
                 source_in = max(0, min(source_out, int(
@@ -1307,7 +1319,9 @@ class KeyframesModel:
             # Video media shows its full source length instead, so material
             # longer than the composition stays visible and trimmable.
             if source_total > 0:
-                cs, ce = 0, source_out - source_in
+                duration = (media_timing.window_duration(source_out) if media_timing is not None
+                            else source_out - source_in + 1)
+                cs, ce = 0, duration - 1
             else:
                 cs, ce = self._comp_range
             if ce >= cs:
@@ -1324,10 +1338,15 @@ class KeyframesModel:
             range_bar = TimeRangeBar(
                 start_frame=start, end_frame=max(start, end),
                 label=layer.name, color=color)
+        if media_timing is not None and range_bar is not None:
+            media_timing = replace(media_timing, in_frame=range_bar.start_frame,
+                                   out_frame=range_bar.end_frame)
         return KeyframesTrackVisual(
             row_id=f"node:{node.id}",
             range_bar=range_bar, color=color, node_color=color,
-            source_total=source_total, source_in=source_in,
+            source_total=source_total, source_in=source_in, media_timing=media_timing,
+            source_step=media_timing.source_step if media_timing else Fraction(1),
+            source_phase=media_timing.source_phase if media_timing else Fraction(0),
             layer_managed=layer is None or layer.managed)
 
     def _build_param_track(self, node: Any, param_name: str,
