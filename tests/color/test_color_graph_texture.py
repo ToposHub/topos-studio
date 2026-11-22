@@ -1,4 +1,7 @@
 """Real GL pixels for the shared Edit/Deliver graph execution path."""
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -30,6 +33,76 @@ def ctx():
     context = moderngl.create_standalone_context(require=330)
     yield context
     context.release()
+
+
+def _constant_cube(path: Path, value: float) -> None:
+    path.write_text("LUT_3D_SIZE 2\n" + f"{value} {value} {value}\n" * 8)
+
+
+def test_lut_texture_reuse_follows_file_replacement_and_deletion(ctx: Any, tmp_path: Path) -> None:
+    path = tmp_path / "look.cube"
+    _constant_cube(path, 0.1)
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        first = renderer._lut_texture(str(path))
+        assert renderer._lut_texture(str(path)) is first
+        replacement = tmp_path / "replacement.cube"
+        _constant_cube(replacement, 0.9)
+        replacement.replace(path)
+        next_texture = renderer._lut_texture(str(path))
+        assert next_texture is not first
+        np.testing.assert_allclose(np.frombuffer(next_texture.read(), "f4"), 0.9)
+        path.unlink()
+        with pytest.raises(FileNotFoundError):
+            renderer._lut_texture(str(path))
+    finally:
+        renderer.release()
+    from moderngl import InvalidObject
+    assert isinstance(first.mglo, InvalidObject)
+    assert isinstance(next_texture.mglo, InvalidObject)
+
+
+@pytest.mark.parametrize("blur", [False, True])
+def test_lut_pass_folding_preserves_pixels_and_gates_spatial_effects(
+    ctx: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blur: bool,
+) -> None:
+    path = tmp_path / "look.cube"
+    _constant_cube(path, 0.3)
+    layer = _neutral_layer("LUT")
+    layer.active_lut_path = str(path)
+    if blur:
+        layer.effects_params["blur_enabled"] = True
+    graph = migrate_legacy_stack(_stack_with_layers([layer]))
+    rgb = np.linspace(-0.1, 1.2, 8 * 12 * 3, dtype="f4").reshape(8, 12, 3)
+    source = ctx.texture((12, 8), 3, rgb, dtype="f4")
+    source.repeat_x = source.repeat_y = False
+    renderer = ColorGraphTextureRenderer(ctx)
+    execute = renderer.executor.execute_plan
+    counts = []
+
+    def track_passes(*args: Any, **kwargs: Any) -> Any:
+        result = execute(*args, **kwargs)
+        counts.append(result.executed_passes)
+        return result
+
+    try:
+        monkeypatch.setattr(renderer.executor, "execute_plan", track_passes)
+        folded = renderer.render(source, graph, 0, output_key="folded")
+
+        def reference(*args: Any, **kwargs: Any) -> Any:
+            return execute(*args, **{**kwargs, "fold_single_corrector_io": False})
+
+        monkeypatch.setattr(renderer.executor, "execute_plan", reference)
+        full = renderer.render(source, graph, 0, output_key="full")
+        assert counts == [3 if blur else 1]
+        np.testing.assert_allclose(
+            np.frombuffer(folded.read(), "f4"),
+            np.frombuffer(full.read(), "f4"),
+            atol=1e-6,
+        )
+    finally:
+        renderer.release()
+        source.release()
 
 
 @pytest.mark.parametrize("matte", [False, True])
@@ -242,6 +315,22 @@ def test_deliver_runs_the_same_graph_instead_of_flattened_grade(dtype):
         renderer.release()
 
 
+def test_packed_rgb_and_bgr_share_upload_without_channel_or_row_shift() -> None:
+    from src.features.edit.core.timeline_gpu_export_renderer import (
+        GpuRgbSource, TimelineGpuExportRenderer,
+    )
+
+    rgb = np.arange(6 * 5 * 3, dtype=np.uint8).reshape(6, 5, 3)
+    bgr = np.ascontiguousarray(rgb[..., ::-1])
+    renderer = TimelineGpuExportRenderer()
+    try:
+        for source in (bgr, GpuRgbSource(rgb), bgr):
+            rendered = renderer.render_packed_bgr(source, None, 5, 6, 1.0)
+            np.testing.assert_array_equal(rendered, bgr)
+    finally:
+        renderer.release()
+
+
 def test_graph_failure_does_not_publish_and_renderer_can_recover(ctx):
     from dataclasses import replace
     from src.shared.project.color_graph import freeze_params
@@ -335,7 +424,7 @@ def test_deliver_releases_uploaded_source_when_graph_renderer_init_fails(monkeyp
         monkeypatch.setattr(renderer._ctx, "texture", tracked_texture)
         monkeypatch.setattr(color_graph_texture, "ColorGraphTextureRenderer", fail_init)
         with pytest.raises(RuntimeError, match="initialization failed"):
-            renderer._prepare_layer_texture(np.full((4, 4, 3), 64, np.uint8),
+            renderer._prepare_layer_texture(np.full((4, 4, 3), 16384, np.uint16),
                 {"color_graph": animated_graph(), "source_frame": 10}, False)
         assert released and all(item["released"] for item in released)
     finally:

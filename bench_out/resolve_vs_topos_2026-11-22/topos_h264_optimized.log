@@ -1,0 +1,19 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+START Topos_h264_LUT_to_h264_3
+2026-11-22 17:04:38.216 Python[75880:5180037] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+[h264_videotoolbox @ 0x7fb6527c0d00] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7fb6527c0d00] Color range not set for yuv420p. Using MPEG range.
+[h264_videotoolbox @ 0x7fb663053c40] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7fb663053c40] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+progress Topos_h264_LUT_to_h264_3 50 400 6.23
+progress Topos_h264_LUT_to_h264_3 100 400 9.64
+progress Topos_h264_LUT_to_h264_3 150 400 13.1
+progress Topos_h264_LUT_to_h264_3 200 400 16.57
+progress Topos_h264_LUT_to_h264_3 250 400 20.19
+progress Topos_h264_LUT_to_h264_3 300 400 23.52
+progress Topos_h264_LUT_to_h264_3 350 400 26.9
+progress Topos_h264_LUT_to_h264_3 400 400 30.51
+END Topos_h264_LUT_to_h264_3 31.054 True

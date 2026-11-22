@@ -1,0 +1,582 @@
+[
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "728268800",
+    "codec_name": "dnxhd",
+    "profile": "DNXHR HQX",
+    "pix_fmt": "yuv422p10le",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Resolve_dnxhr_LUT_to_dnxhr_1.mov",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 1456540675,
+    "encoder": "Avid DNxHR HQX 10-bit",
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 9.1596,
+        "mae_to_calculated_grade": 0.9786
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 9.2892,
+        "mae_to_calculated_grade": 1.0047
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 8.9543,
+        "mae_to_calculated_grade": 1.0721
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 8.1558,
+        "mae_to_calculated_grade": 1.0236
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 7.4859,
+        "mae_to_calculated_grade": 1.2009
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.3534,
+        "mae_to_calculated_grade": 1.2965
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "728268800",
+    "codec_name": "dnxhd",
+    "profile": "DNXHR HQX",
+    "pix_fmt": "yuv422p10le",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Resolve_dnxhr_Original_to_dnxhr_1.mov",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 1456540675,
+    "encoder": "Avid DNxHR HQX 10-bit",
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 9.275
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 9.6205
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 9.2518
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 8.4052
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 7.8584
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 0.0,
+        "mae_to_calculated_grade": 8.0129
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "25711508",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Resolve_h264_LUT_to_h264_1.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 51426423,
+    "encoder": "H.264",
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 7.6476,
+        "mae_to_calculated_grade": 0.966
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 7.6608,
+        "mae_to_calculated_grade": 0.9185
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 8.4147,
+        "mae_to_calculated_grade": 0.9516
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 8.0378,
+        "mae_to_calculated_grade": 0.9366
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 8.1735,
+        "mae_to_calculated_grade": 0.9352
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.9073,
+        "mae_to_calculated_grade": 1.0081
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "25711508",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Resolve_h264_LUT_to_h264_2.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 51426423,
+    "encoder": "H.264",
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 7.6476,
+        "mae_to_calculated_grade": 0.966
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 7.6608,
+        "mae_to_calculated_grade": 0.9185
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 8.4147,
+        "mae_to_calculated_grade": 0.9516
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 8.0378,
+        "mae_to_calculated_grade": 0.9366
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 8.1735,
+        "mae_to_calculated_grade": 0.9352
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.9073,
+        "mae_to_calculated_grade": 1.0081
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "21714460",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Resolve_h264_Original_to_h264_1.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 43432299,
+    "encoder": "H.264",
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 0.1556,
+        "mae_to_calculated_grade": 7.2557
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 0.0425,
+        "mae_to_calculated_grade": 7.2446
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 0.0972,
+        "mae_to_calculated_grade": 8.3039
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 0.046,
+        "mae_to_calculated_grade": 7.7989
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 0.0593,
+        "mae_to_calculated_grade": 7.8911
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 0.0619,
+        "mae_to_calculated_grade": 7.9032
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "728268800",
+    "codec_name": "dnxhd",
+    "profile": "DNXHR HQX",
+    "pix_fmt": "yuv422p10le",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Topos_dnxhr_LUT_to_dnxhr_1.mov",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 1456539990,
+    "encoder": null,
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 9.197,
+        "mae_to_calculated_grade": 1.1359
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 9.3173,
+        "mae_to_calculated_grade": 1.1213
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 9.0991,
+        "mae_to_calculated_grade": 1.2218
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 8.1488,
+        "mae_to_calculated_grade": 1.1407
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 7.4356,
+        "mae_to_calculated_grade": 1.3497
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.228,
+        "mae_to_calculated_grade": 1.4325
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "728268800",
+    "codec_name": "dnxhd",
+    "profile": "DNXHR HQX",
+    "pix_fmt": "yuv422p10le",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Topos_dnxhr_Original_to_dnxhr_1.mov",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 1456539990,
+    "encoder": null,
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 0.4323,
+        "mae_to_calculated_grade": 9.285
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 0.3054,
+        "mae_to_calculated_grade": 9.6166
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 0.4297,
+        "mae_to_calculated_grade": 9.1676
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 0.4154,
+        "mae_to_calculated_grade": 8.4693
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 0.3981,
+        "mae_to_calculated_grade": 7.9442
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 0.3324,
+        "mae_to_calculated_grade": 8.1693
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "29792052",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Topos_h264_LUT_to_h264_1.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 59587382,
+    "encoder": null,
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 7.1704,
+        "mae_to_calculated_grade": 1.2296
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 7.1267,
+        "mae_to_calculated_grade": 1.1961
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 8.0908,
+        "mae_to_calculated_grade": 1.2318
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 7.5834,
+        "mae_to_calculated_grade": 1.2173
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 7.6916,
+        "mae_to_calculated_grade": 1.1968
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.811,
+        "mae_to_calculated_grade": 1.1146
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "29792052",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Topos_h264_LUT_to_h264_2.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 59587382,
+    "encoder": null,
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 7.1704,
+        "mae_to_calculated_grade": 1.2296
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 7.1267,
+        "mae_to_calculated_grade": 1.1961
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 8.0908,
+        "mae_to_calculated_grade": 1.2318
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 7.5834,
+        "mae_to_calculated_grade": 1.2173
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 7.6916,
+        "mae_to_calculated_grade": 1.1968
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 7.811,
+        "mae_to_calculated_grade": 1.1146
+      }
+    ],
+    "format_ok": true
+  },
+  {
+    "width": 3840,
+    "height": 2160,
+    "avg_frame_rate": "25/1",
+    "duration": "16.000000",
+    "bit_rate": "21838140",
+    "codec_name": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "color_range": "tv",
+    "color_space": "bt709",
+    "color_transfer": "bt709",
+    "color_primaries": "bt709",
+    "path": "Topos_h264_Original_to_h264_1.mp4",
+    "decoded_frames": 400,
+    "audio_streams": 0,
+    "size_bytes": 43679406,
+    "encoder": null,
+    "samples": [
+      {
+        "timeline_frame": 0,
+        "source_frame": 25,
+        "mae_to_source": 0.1643,
+        "mae_to_calculated_grade": 7.2546
+      },
+      {
+        "timeline_frame": 60,
+        "source_frame": 85,
+        "mae_to_source": 0.043,
+        "mae_to_calculated_grade": 7.2445
+      },
+      {
+        "timeline_frame": 199,
+        "source_frame": 224,
+        "mae_to_source": 0.0978,
+        "mae_to_calculated_grade": 8.3047
+      },
+      {
+        "timeline_frame": 200,
+        "source_frame": 275,
+        "mae_to_source": 0.0455,
+        "mae_to_calculated_grade": 7.7984
+      },
+      {
+        "timeline_frame": 270,
+        "source_frame": 345,
+        "mae_to_source": 0.0601,
+        "mae_to_calculated_grade": 7.8907
+      },
+      {
+        "timeline_frame": 399,
+        "source_frame": 474,
+        "mae_to_source": 0.0609,
+        "mae_to_calculated_grade": 7.9028
+      }
+    ],
+    "format_ok": true
+  }
+]

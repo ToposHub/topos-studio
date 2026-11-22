@@ -1,0 +1,15 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+START Topos_dnxhr_Original_to_dnxhr_1
+2026-11-22 16:54:50.209 Python[72761:5149546] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+progress Topos_dnxhr_Original_to_dnxhr_1 50 400 19.95
+progress Topos_dnxhr_Original_to_dnxhr_1 100 400 39.24
+progress Topos_dnxhr_Original_to_dnxhr_1 150 400 59.12
+progress Topos_dnxhr_Original_to_dnxhr_1 200 400 79.21
+progress Topos_dnxhr_Original_to_dnxhr_1 250 400 98.79
+progress Topos_dnxhr_Original_to_dnxhr_1 300 400 117.97
+progress Topos_dnxhr_Original_to_dnxhr_1 350 400 137.24
+progress Topos_dnxhr_Original_to_dnxhr_1 400 400 156.55
+END Topos_dnxhr_Original_to_dnxhr_1 159.84 True

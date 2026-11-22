@@ -1,0 +1,1088 @@
+{
+  "metadata": {
+    "date_local": "2026-11-22",
+    "timezone": "Asia/Shanghai",
+    "git_head": "ce9259b1c1afedc6cd3b336c7cee8cfecb37d134",
+    "main_worktree_has_preexisting_changes": true,
+    "resolve_version": "Studio 21.2.0.6",
+    "macOS": "15.3.1",
+    "CPU": "Intel Core i9-9900K",
+    "GPU": "AMD Radeon RX 6900 XT 16 GB",
+    "RAM_GiB": 32,
+    "geometry": [
+      3840,
+      2160
+    ],
+    "timeline_fps": 25,
+    "timeline_frames": 400,
+    "audio": false,
+    "source_ranges_end_exclusive": [
+      [
+        25,
+        225
+      ],
+      [
+        275,
+        475
+      ]
+    ],
+    "lut": "Topos_Resolve_AB_33.cube",
+    "sources": {
+      "h264": "4K_H264.mov",
+      "dnxhr": "4K_DNxHR HQX 10bit.mov"
+    },
+    "resolve_render_cache": "none",
+    "resolve_optimized_media": false,
+    "resolve_proxy": false,
+    "topos_render_cache": "off",
+    "topos_viewer_budget_actual_decode_target": [
+      1792,
+      1008
+    ],
+    "topos_viewer_quality_requested": "Full",
+    "topos_adaptive_quality": false,
+    "topos_export_graphics": "opengl",
+    "h264_target_bps": 50000000
+  },
+  "resolve_playback": {
+    "page": "Edit",
+    "timebase": 25,
+    "timed_transport_start": "01:00:00:00",
+    "runs": [
+      {
+        "source": "h264",
+        "graded": false,
+        "duration_s": 10.209,
+        "end_tc": "01:00:09:19",
+        "playhead_advanced_frames": 244,
+        "playhead_frames_per_wall_s": 23.90047996865511
+      },
+      {
+        "source": "h264",
+        "graded": true,
+        "duration_s": 10.211,
+        "end_tc": "01:00:10:05",
+        "viewer_readout_fps": 25,
+        "readout_tc": "01:00:12:08",
+        "playhead_advanced_frames": 255,
+        "playhead_frames_per_wall_s": 24.97306825971991
+      },
+      {
+        "source": "dnxhr",
+        "graded": false,
+        "duration_s": 10.208,
+        "end_tc": "01:00:10:04",
+        "playhead_advanced_frames": 254,
+        "playhead_frames_per_wall_s": 24.88244514106583
+      },
+      {
+        "source": "dnxhr",
+        "graded": true,
+        "duration_s": 10.215,
+        "end_tc": "01:00:10:09",
+        "viewer_readout_fps": 25,
+        "readout_tc": "01:00:13:09",
+        "playhead_advanced_frames": 259,
+        "playhead_frames_per_wall_s": 25.354870288790995
+      }
+    ],
+    "notes": "Transport wall measured between dispatch of Space shortcuts; stopped playhead read from the Resolve API. Viewer FPS is a separate screenshot sample. Resolve does not expose cumulative viewer presents over these trials."
+  },
+  "topos_playback": [
+    {
+      "source": "h264",
+      "graded": false,
+      "repeat": 1,
+      "wall_s": 15.945,
+      "timeline_frames": 400,
+      "unique_presented": 359,
+      "unobserved_timeline_frames": 41,
+      "viewer_present_fps": 22.514,
+      "present_gap_p95_ms": 58.953,
+      "decode_paths": {
+        "macos_vt_zero_copy": 360
+      },
+      "render_paths": {
+        "gpu_composite": 360
+      }
+    },
+    {
+      "source": "h264",
+      "graded": true,
+      "repeat": 1,
+      "wall_s": 17.771,
+      "timeline_frames": 400,
+      "unique_presented": 110,
+      "unobserved_timeline_frames": 290,
+      "viewer_present_fps": 6.19,
+      "present_gap_p95_ms": 322.663,
+      "decode_paths": {
+        "macos_vt_zero_copy": 116
+      },
+      "render_paths": {
+        "gpu_composite": 116
+      }
+    },
+    {
+      "source": "dnxhr",
+      "graded": false,
+      "repeat": 1,
+      "wall_s": 17.022,
+      "timeline_frames": 400,
+      "unique_presented": 277,
+      "unobserved_timeline_frames": 123,
+      "viewer_present_fps": 16.273,
+      "present_gap_p95_ms": 134.378,
+      "decode_paths": {
+        "ffmpeg_planar_gpu_upload": 277,
+        "gpu": 1
+      },
+      "render_paths": {
+        "gpu_composite": 278
+      }
+    },
+    {
+      "source": "dnxhr",
+      "graded": true,
+      "repeat": 1,
+      "wall_s": 27.004,
+      "timeline_frames": 400,
+      "unique_presented": 109,
+      "unobserved_timeline_frames": 291,
+      "viewer_present_fps": 4.036,
+      "present_gap_p95_ms": 399.136,
+      "decode_paths": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 108
+      },
+      "render_paths": {
+        "gpu_composite": 109
+      }
+    },
+    {
+      "source": "h264",
+      "graded": false,
+      "repeat": 2,
+      "wall_s": 15.997,
+      "timeline_frames": 400,
+      "unique_presented": 334,
+      "unobserved_timeline_frames": 66,
+      "viewer_present_fps": 20.879,
+      "present_gap_p95_ms": 66.988,
+      "decode_paths": {
+        "gpu": 1,
+        "macos_vt_zero_copy": 333
+      },
+      "render_paths": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 333
+      }
+    },
+    {
+      "source": "h264",
+      "graded": true,
+      "repeat": 2,
+      "wall_s": 17.281,
+      "timeline_frames": 400,
+      "unique_presented": 106,
+      "unobserved_timeline_frames": 294,
+      "viewer_present_fps": 6.134,
+      "present_gap_p95_ms": 313.858,
+      "decode_paths": {
+        "macos_vt_zero_copy": 127,
+        "gpu": 6
+      },
+      "render_paths": {
+        "gpu_composite": 133
+      }
+    },
+    {
+      "source": "dnxhr",
+      "graded": false,
+      "repeat": 2,
+      "wall_s": 16.172,
+      "timeline_frames": 400,
+      "unique_presented": 334,
+      "unobserved_timeline_frames": 66,
+      "viewer_present_fps": 20.653,
+      "present_gap_p95_ms": 76.271,
+      "decode_paths": {
+        "ffmpeg_planar_gpu_upload": 334
+      },
+      "render_paths": {
+        "gpu_composite": 334
+      }
+    },
+    {
+      "source": "dnxhr",
+      "graded": true,
+      "repeat": 2,
+      "wall_s": 22.789,
+      "timeline_frames": 400,
+      "unique_presented": 107,
+      "unobserved_timeline_frames": 293,
+      "viewer_present_fps": 4.695,
+      "present_gap_p95_ms": 330.803,
+      "decode_paths": {
+        "gpu": 3,
+        "ffmpeg_planar_gpu_upload": 109
+      },
+      "render_paths": {
+        "gpu_composite": 112
+      }
+    }
+  ],
+  "resolve_exports": [
+    {
+      "source": "h264",
+      "graded": true,
+      "codec": "h264",
+      "repeat": 1,
+      "wall_s": 6.933935362001648,
+      "file": "Resolve_h264_LUT_to_h264_1.mp4",
+      "status": {
+        "JobStatus": "Complete",
+        "CompletionPercentage": 100,
+        "TimeTakenToRenderInMs": 6810
+      },
+      "fps": 57.68729864313738
+    },
+    {
+      "source": "dnxhr",
+      "graded": true,
+      "codec": "dnxhr",
+      "repeat": 1,
+      "wall_s": 10.208059985016007,
+      "file": "Resolve_dnxhr_LUT_to_dnxhr_1.mov",
+      "status": {
+        "JobStatus": "Complete",
+        "CompletionPercentage": 100,
+        "TimeTakenToRenderInMs": 10083
+      },
+      "fps": 39.18472271784684
+    },
+    {
+      "source": "h264",
+      "graded": true,
+      "codec": "h264",
+      "repeat": 2,
+      "wall_s": 6.823533774993848,
+      "file": "Resolve_h264_LUT_to_h264_2.mp4",
+      "status": {
+        "JobStatus": "Complete",
+        "CompletionPercentage": 100,
+        "TimeTakenToRenderInMs": 6698
+      },
+      "fps": 58.62065217085566
+    },
+    {
+      "source": "h264",
+      "graded": false,
+      "codec": "h264",
+      "repeat": 1,
+      "wall_s": 6.797471005003899,
+      "file": "Resolve_h264_Original_to_h264_1.mp4",
+      "status": {
+        "JobStatus": "Complete",
+        "CompletionPercentage": 100,
+        "TimeTakenToRenderInMs": 6661
+      },
+      "fps": 58.84541467047722
+    },
+    {
+      "source": "dnxhr",
+      "graded": false,
+      "codec": "dnxhr",
+      "repeat": 1,
+      "wall_s": 1.3145998590043746,
+      "file": "Resolve_dnxhr_Original_to_dnxhr_1.mov",
+      "status": {
+        "JobStatus": "Complete",
+        "CompletionPercentage": 100,
+        "TimeTakenToRenderInMs": 1186
+      },
+      "fps": 304.27509729306075
+    }
+  ],
+  "topos_exports": [
+    {
+      "source": "dnxhr",
+      "graded": true,
+      "codec": "dnxhr",
+      "repeat": 1,
+      "wall_s": 86.46232681901893,
+      "file": "Topos_dnxhr_LUT_to_dnxhr_1.mov",
+      "success": true,
+      "fps": 4.6262923369766735,
+      "stages": {
+        "decode": {
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 61.56050899880938,
+          "wall_p95_ms": 79.50942200841382
+        },
+        "render": {
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 193.8590999925509,
+          "wall_p95_ms": 237.25518502760679
+        },
+        "encode_submit": {
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null
+        },
+        "encode": {
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 56.35120699298568,
+          "wall_p95_ms": 183.36377199739218
+        },
+        "mux": {
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 64.89276498905383,
+          "wall_p95_ms": 64.89276498905383
+        }
+      },
+      "fallback_root_cause": "cpu_encoder_surface_path"
+    },
+    {
+      "source": "h264",
+      "graded": true,
+      "codec": "h264",
+      "repeat": 2,
+      "wall_s": 149.58589122400736,
+      "file": "Topos_h264_LUT_to_h264_2.mp4",
+      "success": true,
+      "fps": 2.6740489810031174,
+      "stages": {
+        "decode": {
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 9.296190983150154,
+          "wall_p95_ms": 12.146097986260429
+        },
+        "render": {
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 357.4788020050619,
+          "wall_p95_ms": 403.4210089885164
+        },
+        "encode_submit": {
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null
+        },
+        "encode": {
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 4.389299021568149,
+          "wall_p95_ms": 9.755078004673123
+        },
+        "mux": {
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 102.23235699231736,
+          "wall_p95_ms": 102.23235699231736
+        }
+      },
+      "fallback_root_cause": "cpu_encoder_surface_path"
+    },
+    {
+      "source": "h264",
+      "graded": false,
+      "codec": "h264",
+      "repeat": 1,
+      "wall_s": 6.8031841320043895,
+      "file": "Topos_h264_Original_to_h264_1.mp4",
+      "success": true,
+      "fps": 58.7959979090188,
+      "stages": {
+        "render": {
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 3.3152160176541656,
+          "wall_p95_ms": 5.84165399777703
+        },
+        "encode_submit": {
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null
+        },
+        "encode": {
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 12.788551015546545,
+          "wall_p95_ms": 13.692367996554822
+        },
+        "mux": {
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 94.37104599783197,
+          "wall_p95_ms": 94.37104599783197
+        }
+      },
+      "fallback_root_cause": "cpu_encoder_surface_path"
+    },
+    {
+      "source": "dnxhr",
+      "graded": false,
+      "codec": "dnxhr",
+      "repeat": 1,
+      "wall_s": 159.84027565902215,
+      "file": "Topos_dnxhr_Original_to_dnxhr_1.mov",
+      "success": true,
+      "fps": 2.502498186710441,
+      "stages": {
+        "decode": {
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 44.97083701426163,
+          "wall_p95_ms": 56.66936299530789
+        },
+        "render": {
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 389.9935270019341,
+          "wall_p95_ms": 409.2195369885303
+        },
+        "encode_submit": {
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null
+        },
+        "encode": {
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 50.52578399772756,
+          "wall_p95_ms": 83.84690299862996
+        },
+        "mux": {
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 79.89235501736403,
+          "wall_p95_ms": 79.89235501736403
+        }
+      },
+      "fallback_root_cause": "adaptive_policy:cpu_preferred_single_layer_trivial_composite"
+    }
+  ],
+  "export_verification": [
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "728268800",
+      "codec_name": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Resolve_dnxhr_LUT_to_dnxhr_1.mov",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 1456540675,
+      "encoder": "Avid DNxHR HQX 10-bit",
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 9.1596,
+          "mae_to_calculated_grade": 0.9786
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 9.2892,
+          "mae_to_calculated_grade": 1.0047
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.9543,
+          "mae_to_calculated_grade": 1.0721
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.1558,
+          "mae_to_calculated_grade": 1.0236
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.4859,
+          "mae_to_calculated_grade": 1.2009
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.3534,
+          "mae_to_calculated_grade": 1.2965
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "728268800",
+      "codec_name": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Resolve_dnxhr_Original_to_dnxhr_1.mov",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 1456540675,
+      "encoder": "Avid DNxHR HQX 10-bit",
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 9.275
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 9.6205
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 9.2518
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 8.4052
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 7.8584
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 0.0,
+          "mae_to_calculated_grade": 8.0129
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "25711508",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Resolve_h264_LUT_to_h264_1.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 51426423,
+      "encoder": "H.264",
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.6476,
+          "mae_to_calculated_grade": 0.966
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.6608,
+          "mae_to_calculated_grade": 0.9185
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.4147,
+          "mae_to_calculated_grade": 0.9516
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.0378,
+          "mae_to_calculated_grade": 0.9366
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 8.1735,
+          "mae_to_calculated_grade": 0.9352
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.9073,
+          "mae_to_calculated_grade": 1.0081
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "25711508",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Resolve_h264_LUT_to_h264_2.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 51426423,
+      "encoder": "H.264",
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.6476,
+          "mae_to_calculated_grade": 0.966
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.6608,
+          "mae_to_calculated_grade": 0.9185
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.4147,
+          "mae_to_calculated_grade": 0.9516
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.0378,
+          "mae_to_calculated_grade": 0.9366
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 8.1735,
+          "mae_to_calculated_grade": 0.9352
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.9073,
+          "mae_to_calculated_grade": 1.0081
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "21714460",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Resolve_h264_Original_to_h264_1.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 43432299,
+      "encoder": "H.264",
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 0.1556,
+          "mae_to_calculated_grade": 7.2557
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 0.0425,
+          "mae_to_calculated_grade": 7.2446
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 0.0972,
+          "mae_to_calculated_grade": 8.3039
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 0.046,
+          "mae_to_calculated_grade": 7.7989
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 0.0593,
+          "mae_to_calculated_grade": 7.8911
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 0.0619,
+          "mae_to_calculated_grade": 7.9032
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "728268800",
+      "codec_name": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_dnxhr_LUT_to_dnxhr_1.mov",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 1456539990,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 9.197,
+          "mae_to_calculated_grade": 1.1359
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 9.3173,
+          "mae_to_calculated_grade": 1.1213
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 9.0991,
+          "mae_to_calculated_grade": 1.2218
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.1488,
+          "mae_to_calculated_grade": 1.1407
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.4356,
+          "mae_to_calculated_grade": 1.3497
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.228,
+          "mae_to_calculated_grade": 1.4325
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "728268800",
+      "codec_name": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_dnxhr_Original_to_dnxhr_1.mov",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 1456539990,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 0.4323,
+          "mae_to_calculated_grade": 9.285
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 0.3054,
+          "mae_to_calculated_grade": 9.6166
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 0.4297,
+          "mae_to_calculated_grade": 9.1676
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 0.4154,
+          "mae_to_calculated_grade": 8.4693
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 0.3981,
+          "mae_to_calculated_grade": 7.9442
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 0.3324,
+          "mae_to_calculated_grade": 8.1693
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "29792052",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_h264_LUT_to_h264_1.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 59587382,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.1704,
+          "mae_to_calculated_grade": 1.2296
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.1267,
+          "mae_to_calculated_grade": 1.1961
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.0908,
+          "mae_to_calculated_grade": 1.2318
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 7.5834,
+          "mae_to_calculated_grade": 1.2173
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.6916,
+          "mae_to_calculated_grade": 1.1968
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.811,
+          "mae_to_calculated_grade": 1.1146
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "29792052",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_h264_LUT_to_h264_2.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 59587382,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.1704,
+          "mae_to_calculated_grade": 1.2296
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.1267,
+          "mae_to_calculated_grade": 1.1961
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.0908,
+          "mae_to_calculated_grade": 1.2318
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 7.5834,
+          "mae_to_calculated_grade": 1.2173
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.6916,
+          "mae_to_calculated_grade": 1.1968
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.811,
+          "mae_to_calculated_grade": 1.1146
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "21838140",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_h264_Original_to_h264_1.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 43679406,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 0.1643,
+          "mae_to_calculated_grade": 7.2546
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 0.043,
+          "mae_to_calculated_grade": 7.2445
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 0.0978,
+          "mae_to_calculated_grade": 8.3047
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 0.0455,
+          "mae_to_calculated_grade": 7.7984
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 0.0601,
+          "mae_to_calculated_grade": 7.8907
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 0.0609,
+          "mae_to_calculated_grade": 7.9028
+        }
+      ],
+      "format_ok": true
+    }
+  ],
+  "excluded_trials": {
+    "resolve_playback_initial": "No valid presentation count and initial attempts did not have clean start/stop.",
+    "topos_h264_LUT_to_h264_1": "Pilot overlapping Resolve UI activity. The output is available and verified."
+  },
+  "dnxhr_packet_comparison": {
+    "app": "Resolve",
+    "case": "DNxHR HQX original cut export",
+    "compared_packets": 400,
+    "identical_to_trimmed_source_packets": 400,
+    "exact_trimmed_packet_copy": true
+  },
+  "cpu_decode_reference": [
+    {
+      "file": "4K_H264.mov",
+      "frames": 400,
+      "wall_s": 1.3498424199933652,
+      "fps": 296.3308857947775,
+      "hardware_acceleration": false,
+      "threads": 8,
+      "scope": "Sequential decode first 400 source frames to null"
+    },
+    {
+      "file": "4K_DNxHR HQX 10bit.mov",
+      "frames": 400,
+      "wall_s": 3.1935833700117655,
+      "fps": 125.25115322056752,
+      "hardware_acceleration": false,
+      "threads": 8,
+      "scope": "Sequential decode first 400 source frames to null"
+    }
+  ]
+}

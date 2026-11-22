@@ -238,6 +238,7 @@ void main() {
 _FRAG_YUV420_LUMA_SRC = """
 #version 330
 uniform sampler2D u_rgb_tex;
+uniform bool u_quantize_rgb;
 in vec2 v_texcoord;
 out vec4 f_color;
 float half_even(float v) {
@@ -249,6 +250,7 @@ float half_even(float v) {
 }
 void main() {
     vec3 rgb = texelFetch(u_rgb_tex, ivec2(gl_FragCoord.xy), 0).rgb;
+    if (u_quantize_rgb) rgb = roundEven(clamp(rgb, 0.0, 1.0) * 255.0) / 255.0;
     float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
     float code = clamp(16.0 + 219.0 * y, 16.0, 235.0);
     f_color = vec4(half_even(code) / 255.0, 0.0, 0.0, 1.0);
@@ -258,6 +260,7 @@ void main() {
 _FRAG_YUV420_CHROMA_SRC = """
 #version 330
 uniform sampler2D u_rgb_tex;
+uniform bool u_quantize_rgb;
 in vec2 v_texcoord;
 out vec4 f_color;
 float half_even(float v) {
@@ -268,7 +271,8 @@ float half_even(float v) {
     return fl + mod(fl, 2.0);
 }
 vec3 fetch_rgb(ivec2 p, ivec2 size) {
-    return texelFetch(u_rgb_tex, clamp(p, ivec2(0), size - ivec2(1)), 0).rgb;
+    vec3 rgb = texelFetch(u_rgb_tex, clamp(p, ivec2(0), size - ivec2(1)), 0).rgb;
+    return u_quantize_rgb ? roundEven(clamp(rgb, 0.0, 1.0) * 255.0) / 255.0 : rgb;
 }
 void main() {
     ivec2 size = textureSize(u_rgb_tex, 0);
@@ -286,6 +290,7 @@ void main() {
     f_color = vec4(u / 255.0, v / 255.0, 0.0, 1.0);
 }
 """
+
 
 # Common export case fast path: an ungraded 8-bit BT.709 4:2:0 source can be
 # resized directly in the Y/U/V domains.  The previous path rendered the
@@ -705,6 +710,13 @@ def grade_params_to_uniforms(grading_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class GpuRgbSource:
+    """Packed RGB8 from a decoder, in the original channel order."""
+
+    data: np.ndarray
+
+
+@dataclass(frozen=True)
 class GpuYuvSource:
     """planar YUV 源描述（系数在 CPU 侧按 _planes_to_bgr_float 同一
     公式预计算，GPU 只做采样/矩阵/量化）。
@@ -800,6 +812,7 @@ class TimelineGpuExportRenderer:
         self._tex_u_u8 = None
         self._tex_v_u8 = None
         self._tex_packed = None
+        self._packed_rgb = False
         self._tex_mid: Tuple[Any, Any] = (None, None)  # RGB8 源分辨率 ping-pong
         self._fbo_mid: Tuple[Any, Any] = (None, None)
         self._tex_out = None
@@ -1059,7 +1072,7 @@ class TimelineGpuExportRenderer:
         return True
 
     def _convert_rgb_fbo_to_yuv420p(
-        self, rgb_tex: Any, width: int, height: int,
+        self, rgb_tex: Any, width: int, height: int, *, quantize_rgb: bool = False,
     ) -> Optional[GpuYuv420Output]:
         """Run BT.709 limited-range conversion and read back only Y/U/V."""
         if not self._ensure_yuv420_output_fbos(width, height):
@@ -1072,20 +1085,21 @@ class TimelineGpuExportRenderer:
         rgb_tex.use(0)
         luma = self._prog_yuv420_luma
         luma["u_rgb_tex"].value = 0
+        luma["u_quantize_rgb"].value = quantize_rgb
         self._fbo_y_out.use()
         self._vao["yuv420_luma"].render(mode=moderngl.TRIANGLE_STRIP)
 
         rgb_tex.use(0)
         chroma = self._prog_yuv420_chroma
         chroma["u_rgb_tex"].value = 0
+        chroma["u_quantize_rgb"].value = quantize_rgb
         self._fbo_uv_out.use()
         self._vao["yuv420_chroma"].render(mode=moderngl.TRIANGLE_STRIP)
 
-        y_data = self._fbo_y_out.read(components=1, dtype="f1", alignment=1)
-        uv_data = self._fbo_uv_out.read(components=2, dtype="f1", alignment=1)
-        y = np.frombuffer(y_data, dtype=np.uint8).reshape(height, width).copy()
-        uv = np.frombuffer(uv_data, dtype=np.uint8).reshape(
-            height // 2, width // 2, 2)
+        y = np.empty((height, width), dtype=np.uint8)
+        uv = np.empty((height // 2, width // 2, 2), dtype=np.uint8)
+        self._fbo_y_out.read_into(y, components=1, dtype="f1", alignment=1)
+        self._fbo_uv_out.read_into(uv, components=2, dtype="f1", alignment=1)
         return GpuYuv420Output((y, uv[..., 0].copy(), uv[..., 1].copy()))
 
     @staticmethod
@@ -1474,6 +1488,25 @@ class TimelineGpuExportRenderer:
             current = out_tex
         return current
 
+    def _upload_packed_8bit(self, source: np.ndarray | GpuRgbSource) -> Any:
+        rgb = isinstance(source, GpuRgbSource)
+        data = source.data if rgb else source
+        height, width = data.shape[:2]
+        tex = self._tex_packed
+        if tex is None or tex.size != (width, height):
+            if tex is not None:
+                tex.release()
+            tex = self._ctx.texture((width, height), 3, dtype="f1")
+            tex.filter = (self._ctx.LINEAR, self._ctx.LINEAR)
+            tex.repeat_x = tex.repeat_y = False
+            self._tex_packed = tex
+            self._packed_rgb = True  # Newly created textures use identity swizzle.
+        if self._packed_rgb != rgb:
+            tex.swizzle = "RGB" if rgb else "BGR"
+            self._packed_rgb = rgb
+        tex.write(np.ascontiguousarray(data[..., :3]), alignment=1)
+        return tex
+
     def _prepare_layer_texture(
         self,
         source: Any,
@@ -1501,7 +1534,10 @@ class TimelineGpuExportRenderer:
             # Packed input can arrive at higher precision than the legacy u8
             # uploader. Normalize it before upload, preserving signed HDR floats.
             raw_tex = None
-            if isinstance(source, np.ndarray):
+            if isinstance(source, GpuRgbSource) or (
+                    isinstance(source, np.ndarray) and source.dtype == np.uint8):
+                prepared = (self._upload_packed_8bit(source), False)
+            elif isinstance(source, np.ndarray):
                 scale = float(np.iinfo(source.dtype).max) if np.issubdtype(source.dtype, np.integer) else 1.0
                 rgb = np.ascontiguousarray(source[..., :3][..., ::-1], dtype="f4") / scale
                 raw_tex = self._ctx.texture((rgb.shape[1], rgb.shape[0]), 3, rgb.tobytes(), dtype="f4")
@@ -1670,22 +1706,12 @@ class TimelineGpuExportRenderer:
                     return None
             return result_tex, False
 
-        # 打包 BGR u8（图片层/打包解码帧）
-        height, width = source.shape[:2]
-        self._ensure_rgb_fbo_pair(width, height)
-        tex = self._tex_packed
-        if tex is None or tex.size != (width, height):
-            if tex is not None:
-                tex.release()
-            tex = self._ctx.texture((width, height), 3, dtype="f1")
-            tex.filter = (self._ctx.LINEAR, self._ctx.LINEAR)
-            tex.repeat_x = tex.repeat_y = False
-            # 存储字节序 BGR，采样经 swizzle 还原为 RGB
-            tex.swizzle = "BGR"
-            self._tex_packed = tex
-        tex.write(np.ascontiguousarray(source[..., :3]))
+        # 打包 u8（图片层/打包解码帧）
+        tex = self._upload_packed_8bit(source)
+        width, height = tex.size
         result_tex = tex
         if grade_uniforms:
+            self._ensure_rgb_fbo_pair(width, height)
             gprog = self._prog_grade
             saved_main = grade_uniforms
             _grade_pass(tex, gprog, self._fbo_mid[0])
@@ -1765,7 +1791,7 @@ class TimelineGpuExportRenderer:
 
     def render_packed_bgr(
         self,
-        frame_bgr_u8: np.ndarray,
+        frame_bgr_u8: np.ndarray | GpuRgbSource,
         grade_uniforms: Optional[Dict[str, Any]],
         out_width: int,
         out_height: int,
@@ -2130,6 +2156,10 @@ class TimelineGpuExportRenderer:
 
         if self._prog_scale_rgb is None:
             return None
+        if source_tex.size == (out_width, out_height) and opacity == 1.0:
+            self.frames_rendered += 1
+            return self._convert_rgb_fbo_to_yuv420p(
+                source_tex, out_width, out_height, quantize_rgb=source_tex.dtype != "f1")
         self._ensure_out_fbo(out_width, out_height)
         source_tex.use(0)
         prog = self._prog_scale_rgb

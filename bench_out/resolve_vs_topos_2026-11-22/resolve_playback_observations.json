@@ -1,0 +1,12 @@
+{
+  "page": "Edit",
+  "timebase": 25,
+  "timed_transport_start": "01:00:00:00",
+  "runs": [
+    {"source":"h264","graded":false,"duration_s":10.209,"end_tc":"01:00:09:19"},
+    {"source":"h264","graded":true,"duration_s":10.211,"end_tc":"01:00:10:05","viewer_readout_fps":25,"readout_tc":"01:00:12:08"},
+    {"source":"dnxhr","graded":false,"duration_s":10.208,"end_tc":"01:00:10:04"},
+    {"source":"dnxhr","graded":true,"duration_s":10.215,"end_tc":"01:00:10:09","viewer_readout_fps":25,"readout_tc":"01:00:13:09"}
+  ],
+  "notes": "Transport wall measured between dispatch of Space shortcuts; stopped playhead read from the Resolve API. Viewer FPS is a separate screenshot sample. Resolve does not expose cumulative viewer presents over these trials."
+}

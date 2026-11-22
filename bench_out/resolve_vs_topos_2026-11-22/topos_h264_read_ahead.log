@@ -1,0 +1,28 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+START Topos_h264_LUT_to_h264_8
+2026-11-22 17:19:29.917 Python[80632:5264052] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+[h264_videotoolbox @ 0x7f9a3009e280] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7f9a3009e280] Color range not set for yuv420p. Using MPEG range.
+[h264_videotoolbox @ 0x7f99c6fbcc00] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7f99c6fbcc00] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+progress Topos_h264_LUT_to_h264_8 50 400 3.76
+progress Topos_h264_LUT_to_h264_8 100 400 5.28
+progress Topos_h264_LUT_to_h264_8 150 400 6.86
+progress Topos_h264_LUT_to_h264_8 200 400 8.29
+progress Topos_h264_LUT_to_h264_8 250 400 9.88
+progress Topos_h264_LUT_to_h264_8 300 400 11.25
+progress Topos_h264_LUT_to_h264_8 350 400 12.63
+Exception in thread export-render-pipeline:
+Traceback (most recent call last):
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+progress Topos_h264_LUT_to_h264_8 400 400 14.01
+    self.run()
+  File "/usr/local/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/heng/Documents/vscode/topos-studio/src/features/edit/core/timeline_export.py", line 6848, in produce
+    prefetch.shutdown(wait=True, cancel_futures=True)
+    ^^^^^^^^
+NameError: name 'prefetch' is not defined

@@ -1,0 +1,4 @@
+/.topos_cache/
+/topos_runtime/
+/*.topos.lock
+/*.topos-partial

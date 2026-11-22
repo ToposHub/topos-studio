@@ -136,12 +136,14 @@ class GLVideoCanvas(QOpenGLWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        fmt = QSurfaceFormat()
+        # Qt composites the widget's FBO in the window's share group. On
+        # macOS, requesting an incompatible format can leave that texture
+        # unshared even while the video renders correctly in its own context.
+        fmt = QSurfaceFormat(QSurfaceFormat.defaultFormat())
         fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
-        fmt.setVersion(3, 3)
-        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-        fmt.setDepthBufferSize(0)
-        fmt.setStencilBufferSize(0)
+        if (fmt.majorVersion(), fmt.minorVersion()) < (3, 3):
+            fmt.setVersion(3, 3)
+            fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
         fmt.setSamples(0)
         self.setFormat(fmt)
 

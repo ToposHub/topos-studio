@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -173,9 +174,12 @@ class TestBuildManifest:
         sequence, project, output = setup
         manifest = build_export_manifest(
             project, sequence, output_path=output, hash_assets=False,
+            hash_output=False,
         )
         assert manifest["assets"][0]["file_size"] == len(b"source" * 50)
         assert manifest["assets"][0]["sha256"] is None
+        assert manifest["output"]["size"] == len(b"delivered" * 10)
+        assert manifest["output"]["sha256"] is None
         assert any("延后" in warning for warning in manifest["asset_warnings"])
 
     def test_capability_snapshot_attached(self, setup):
@@ -301,6 +305,39 @@ class TestWriteManifestFile:
             side_effect=OSError("disk full"),
         ):
             exporter._write_success_manifest(config)  # 不抛异常
+
+
+def test_new_delivery_supersedes_background_sidecar_for_same_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    from src.features.edit.core.timeline_export import (
+        TimelineExportConfig, TimelineExporter, wait_for_manifest_writers,
+    )
+
+    exporter = TimelineExporter.__new__(TimelineExporter)
+    exporter._manifest_lock = threading.Lock()
+    first = threading.Event()
+    second = threading.Event()
+    config = TimelineExportConfig(output_path=str(tmp_path / "out.mov"))
+    writes = []
+    monkeypatch.setattr(
+        exporter, "_snapshot_manifest_state", lambda _config: exporter._delivery_finalized)
+
+    def write(_config: TimelineExportConfig, *, hash_assets: bool, manifest_state: threading.Event) -> None:
+        writes.append((manifest_state, hash_assets))
+
+    monkeypatch.setattr(exporter, "_write_success_manifest", write)
+    try:
+        exporter._delivery_finalized = first
+        exporter._write_success_manifest_async(config)
+        exporter._delivery_finalized = second
+        exporter._write_success_manifest_async(config)
+    finally:
+        first.set()
+        second.set()
+    assert wait_for_manifest_writers(timeout=5)
+    assert writes == [(first, False), (second, False), (second, True)]
 
 
 class TestManifestOutputProbeAndDegradations:

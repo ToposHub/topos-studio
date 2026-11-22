@@ -1,0 +1,26 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+START Topos_h264_LUT_to_h264_1
+2026-11-22 16:37:33.952 Python[71284:5070533] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+[h264_videotoolbox @ 0x7fc7d0f0f880] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7fc7d0f0f880] Color range not set for yuv420p. Using MPEG range.
+[h264_videotoolbox @ 0x7fc791d593c0] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+[h264_videotoolbox @ 0x7fc791d593c0] PrioritizeEncodingSpeedOverQuality property is not supported on this device. Ignoring.
+progress Topos_h264_LUT_to_h264_1 50 400 19.44
+progress Topos_h264_LUT_to_h264_1 100 400 37.18
+progress Topos_h264_LUT_to_h264_1 150 400 55.87
+progress Topos_h264_LUT_to_h264_1 200 400 74.7
+progress Topos_h264_LUT_to_h264_1 250 400 93.63
+progress Topos_h264_LUT_to_h264_1 300 400 112.47
+progress Topos_h264_LUT_to_h264_1 350 400 131.54
+progress Topos_h264_LUT_to_h264_1 400 400 150.66
+Traceback (most recent call last):
+  File "/Users/heng/Documents/vscode/topos-studio/bench_out/resolve_vs_topos_2026-11-22/topos_bench.py", line 113, in <lambda>
+    worker.export_complete.connect(lambda success: finished(success, str(path), ""))
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/heng/Documents/vscode/topos-studio/bench_out/resolve_vs_topos_2026-11-22/topos_bench.py", line 107, in finished
+    'stage_telemetry':exporter.export_stage_telemetry_snapshot(),
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: 'dict' object is not callable

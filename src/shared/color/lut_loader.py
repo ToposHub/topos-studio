@@ -184,14 +184,9 @@ def parse_3dl(text: str, source_path: Optional[str] = None) -> LoadedLut:
                      source_path=source_path)
 
 
-def load_lut(path: str) -> LoadedLut:
-    """按扩展名（及内容探测）加载 LUT 文件。
+def resolve_lut_path(path: str) -> str:
+    """Return the current local file for a LUT path or project resource URI."""
 
-    DESK-02B：*path* 也可以是 ``topos-res://`` 逻辑资源引用（手机交接
-    包内嵌 LUT）。解析顺序：①当前工程资源解析器（SHA-256 校验）；
-    ②当前会话新导入的已验证暂存副本；③外部路径直读。URI 均不可用时
-    抛出 FileNotFoundError。
-    """
     if isinstance(path, str) and path.startswith("topos-res://"):
         from src.shared.project.resource_resolver import (
             resolve_project_reference,
@@ -205,7 +200,13 @@ def load_lut(path: str) -> LoadedLut:
         if local is None:
             raise FileNotFoundError(
                 f"工程内嵌 LUT 不可用（无打开的工程或资源缺失）: {path}")
-        path = local
+        return local
+    return path
+
+
+def load_lut(path: str) -> LoadedLut:
+    """Parse a LUT file or a verified ``topos-res://`` project resource."""
+    path = resolve_lut_path(path)
     ext = os.path.splitext(path)[1].lower()
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         text = f.read()

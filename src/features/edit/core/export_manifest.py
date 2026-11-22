@@ -204,7 +204,7 @@ def _config_snapshot(config: Any) -> Dict[str, Any]:
     return snapshot
 
 
-def _output_snapshot(output_path: Optional[str]) -> Dict[str, Any]:
+def _output_snapshot(output_path: Optional[str], *, hash_files: bool = True) -> Dict[str, Any]:
     if not output_path:
         return {"path": output_path or "", "present": False}
     if os.path.isdir(output_path):
@@ -224,7 +224,7 @@ def _output_snapshot(output_path: Optional[str]) -> Dict[str, Any]:
                 entries.append({
                     "name": name,
                     "size": os.stat(path).st_size,
-                    "sha256": _sha256_file(path),
+                    "sha256": _sha256_file(path) if hash_files else None,
                     "frame": int(m.group(2)),
                 })
             except OSError as exc:
@@ -246,7 +246,7 @@ def _output_snapshot(output_path: Optional[str]) -> Dict[str, Any]:
         return {"path": output_path, "present": False}
     try:
         stat = os.stat(output_path)
-        digest = _sha256_file(output_path)
+        digest = _sha256_file(output_path) if hash_files else None
     except OSError as exc:
         # 文件存在但 stat/hash 失败（并发删除/权限）：在场但不可校验。
         logger.warning("Manifest output hash failed: %s", exc)
@@ -378,6 +378,7 @@ def build_export_manifest(
     capabilities: Optional[Any] = None,
     output_path: Optional[str] = None,
     hash_assets: bool = True,
+    hash_output: bool = True,
     stage_telemetry: Optional[Dict[str, Any]] = None,
     effect_export_skips: Optional[Tuple[str, ...]] = None,
     probe_media: bool = True,
@@ -392,6 +393,8 @@ def build_export_manifest(
         hash_assets: 是否在本次调用中同步扫描源素材 SHA-256。正常审计
             保持 True；导出完成通知前可设 False，先落 metadata manifest，
             再由后台任务原子替换为完整哈希版本。
+        hash_output: 是否同步扫描输出 SHA-256。快速侧写 False 时记录大小，
+            哈希由完整侧写补齐。
         stage_telemetry: T-P1-70 步骤 4——统一阶段 telemetry 快照
             （``ExportTelemetryRecorder.snapshot().to_dict()``），含
             full_gpu 判定、blockers、fallback 根因与阶段统计。
@@ -449,7 +452,7 @@ def build_export_manifest(
         }
     if loudness_report is not None and hasattr(loudness_report, "to_dict"):
         manifest["loudness"] = loudness_report.to_dict()
-    manifest["output"] = _output_snapshot(output_path)
+    manifest["output"] = _output_snapshot(output_path, hash_files=hash_output)
     # T-P1-70 步骤 3/4/5：统一 probe、GPU trail、降级清单入 manifest。
     output_probe = (
         probe_output_media(output_path)
