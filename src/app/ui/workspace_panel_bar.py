@@ -241,7 +241,7 @@ class WorkspacePanelBar(QToolBar):
               "dock_multicam", "dock_ai_edit_assistant",
               peers=("dock_adr_take_sheet",), right=True)
         group("Color", "circles-three", I18N.tr("workspace.color_resources", "Color Resources"),
-              "dock_presets", "dock_lut", "dock_plugin",
+              "dock_presets", "dock_lut", "dock_plugin", "dock_grade_sets",
               peers=("dock_library", "dock_files"))
         group("Color", "stack", "", "dock_layers", right=True)
         if self._mode != "image":
@@ -295,9 +295,11 @@ class WorkspacePanelBar(QToolBar):
     def _build_color_tools_menu(self) -> tuple[QDockWidget, ...]:
         docks = self._docks(
             "dock_grading", "dock_curves", "dock_masks", "dock_qualifier",
-            "dock_tracker", "dock_warper", "dock_mixer", "dock_raw", "dock_denoise",
+            "dock_warper", "dock_mixer", "dock_raw", "dock_denoise",
             "dock_effects", "dock_grain",
         )
+        if self._mode != "image":
+            docks += self._docks("dock_tracker")
         if self._mode != "video":
             docks += self._docks("dock_deblur", "dock_crop")
         for dock in docks:

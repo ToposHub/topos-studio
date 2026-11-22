@@ -278,6 +278,43 @@ class LutResourceSession:
             results.append(LutImportResult(path, "imported", entry=entry))
         return results
 
+    def adopt_staged_luts(self, source: "LutResourceSession", references: Iterable[str]) -> dict[str, str]:
+        """Register already-validated clipboard LUTs, atomically, without decoding files.
+
+        Each session owns its own link so clearing the clipboard cannot affect
+        a grade that has already been pasted. Both staging roots use the app's
+        temporary filesystem.
+        """
+        staged: dict[str, tuple[ResourceEntry, str]] = {}
+        for reference in set(references):
+            path = source.staged_path(reference)
+            entry = next((item for item in source.lut_entries() if item.uri == reference), None)
+            if path is None or entry is None:
+                raise FileNotFoundError(reference)
+            staged[reference] = (entry, path)
+
+        with self._lock:
+            os.makedirs(self._staging_root, exist_ok=True)
+            added: dict[str, tuple[ResourceEntry, str]] = {}
+            adopted: dict[str, str] = {}
+            try:
+                for reference, (entry, path) in staged.items():
+                    existing = self._by_sha(entry.sha256)
+                    entry = existing or entry
+                    if entry.archive_path not in self._staged_sources:
+                        target = os.path.join(self._staging_root, os.path.basename(path))
+                        os.link(path, target)
+                        added[reference] = (entry, target)
+                    adopted[reference] = entry.uri
+            except OSError:
+                for _, target in added.values():
+                    os.unlink(target)
+                raise
+            for entry, target in added.values():
+                self._entries[entry.resource_id] = entry
+                self._staged_sources[entry.archive_path] = target
+            return adopted
+
     def _by_sha(self, sha256_hex: str) -> ResourceEntry | None:
         for entry in self._entries.values():
             if entry.sha256 == sha256_hex:

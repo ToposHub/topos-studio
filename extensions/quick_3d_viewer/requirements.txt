@@ -1,0 +1,7 @@
+PyQt6
+numpy
+trimesh
+Pillow
+PyOpenGL
+# Optional, required for .fbx:
+# assimp-py

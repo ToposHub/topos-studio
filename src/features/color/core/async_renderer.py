@@ -164,6 +164,7 @@ class AsyncRenderer(QThread):
     color_output_ready = pyqtSignal(int, int, int)  # ColorOutput: (texture_id, width, height)
     monitor_color_output_ready = pyqtSignal(int, int, int)  # DeckLink monitor output only
     scope_snapshot_ready = pyqtSignal(object)  # BGR float32 scope image (CPU fallback)
+    grade_set_preview_ready = pyqtSignal(int, object)  # source epoch, RGB uint8
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     
     def __init__(self, main_context: QOpenGLContext) -> None:
@@ -1067,7 +1068,10 @@ class AsyncRenderer(QThread):
         elif cmd_type == RenderCommand.RENDER_COLOR_OUTPUT:
             self._do_render_color_output(data)
         elif cmd_type == RenderCommand.RENDER_SCOPE:
-            self._do_render_scope_snapshot(data)
+            if isinstance(data, dict) and "grade_set_source_epoch" in data:
+                self._do_grade_set_preview(data["grade_set_source_epoch"])
+            else:
+                self._do_render_scope_snapshot(data)
         elif cmd_type == RenderCommand.RENDER_GPU_SCOPE:
             self._do_render_gpu_scope(data)
         elif cmd_type == RenderCommand.UPLOAD_IMAGE:
@@ -1639,6 +1643,26 @@ class AsyncRenderer(QThread):
         """重置渲染统计计数器（每帧开始时调用）"""
         self._temp_texture_alloc_count = 0
         self._finish_call_count = 0
+
+    def _do_grade_set_preview(self, source_epoch: int) -> None:
+        """Render and read back a small full image on the renderer thread."""
+        params = self._last_scope_render_params
+        if (not params or params.get('source_epoch') != source_epoch
+                or self.video_playback_active or not self.pyramid_textures):
+            return
+        try:
+            self._scope_color_output_revision = -1
+            if not self._do_render_color_output(dict(
+                    params, max_proxy_dim=192, color_output_target='scope')):
+                return
+            fbo = self._scope_color_output_fbo
+            width, height = fbo.size
+            pixels = fbo.read(components=3, alignment=1, dtype='f4')
+            rgb = np.frombuffer(pixels, dtype=np.float32).reshape(height, width, 3)
+            preview = np.ascontiguousarray((np.clip(rgb[::-1], 0.0, 1.0) * 255).astype(np.uint8))
+            self.grade_set_preview_ready.emit(source_epoch, preview)
+        except (AttributeError, RuntimeError, ValueError, moderngl.Error):
+            logger.debug("Grade set preview failed", exc_info=True)
 
     def _do_render_scope_snapshot(self, data: Dict[str, Any] | None) -> None:
         """Read a reduced copy of the published front texture on the render thread.

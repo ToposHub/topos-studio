@@ -400,8 +400,8 @@ class MenuToolbarMixin:
         self._register_module_panels()
 
         # Panels submenu — built from PanelRegistry
-        panels_menu = window_menu.addMenu(I18N.tr("menu.panels", "Panels"))
-        self._build_panels_menu(panels_menu)
+        self._window_panels_menu = window_menu.addMenu(I18N.tr("menu.panels", "Panels"))
+        self._build_panels_menu(self._window_panels_menu)
 
         # Layout actions
         window_menu.addAction(I18N.tr("action.reset_layout", "Reset to Default"), self.reset_layout_to_default)
@@ -513,6 +513,9 @@ class MenuToolbarMixin:
 
     def _create_color_node_menu(self, edit_menu: QMenu) -> dict[str, QAction]:
         """Mount node commands without changing legacy layers or render state."""
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+            return self._create_image_layer_menu(edit_menu)
         from src.features.color.ui.node_editor_state import NodeKind
 
         self.menu_layer = edit_menu.addMenu(I18N.tr("color_nodes.nodes", "&Nodes"))
@@ -570,6 +573,44 @@ class MenuToolbarMixin:
         edit_menu.aboutToShow.connect(self._refresh_color_node_history_actions)
         return actions
 
+    def _create_image_layer_menu(self, edit_menu: QMenu) -> dict[str, QAction]:
+        """Image commands operate on the same LayerPanel/engine stack as its UI."""
+        self.menu_layer = edit_menu.addMenu(I18N.tr("panel.layers", "Layers"))
+        self.menu_layer.setObjectName("ColorLayersMenu")
+        callbacks = {
+            "add_layer_act": ("new_layer", "Add Layer", self.on_layer_added),
+            "del_layer_act": ("delete_layer", "Delete Layer", lambda: self.on_layer_removed(self.engine.active_layer_index)),
+            "rename_layer_act": ("rename_layer", "Rename Layer…", self.rename_current_layer),
+            "toggle_vis_act": ("toggle_visibility", "Show/Hide Layer", self.toggle_current_layer_visibility),
+            "disable_all_act": ("hide_all", "Hide All Layers", self.disable_all_layers),
+            "reset_layer_act": ("reset_layer", "Reset Layer", lambda: self.on_layer_reset(self.engine.active_layer_index)),
+            "copy_layer_act": ("copy_layer", "Copy Layer", lambda: self.on_layer_copy()),
+            "paste_layer_act": ("paste_layer", "Paste Layer", lambda: self.on_layer_paste()),
+            "duplicate_layer_act": ("duplicate_layer", "Duplicate Layer", lambda: self.on_layer_duplicate()),
+        }
+        actions: dict[str, QAction] = {}
+        for name, (key, fallback, callback) in callbacks.items():
+            action = QAction(I18N.tr(f"action.{key}", fallback), self)
+            action.setObjectName(f"layer.{key}")
+            action.triggered.connect(lambda _checked=False, fn=callback: fn())
+            self.menu_layer.addAction(action)
+            actions[name] = action
+        self._image_layer_menu_actions = actions
+        self._color_node_menu_actions = {}
+        self.menu_layer.aboutToShow.connect(self._refresh_image_layer_menu)
+        self._refresh_image_layer_menu()
+        return actions
+
+    def _refresh_image_layer_menu(self) -> None:
+        engine = self.engine
+        loaded = getattr(engine, "img_full_original", None) is not None
+        active = engine.get_active_layer() if loaded else None
+        for name, action in self._image_layer_menu_actions.items():
+            action.setEnabled(loaded and (name == "add_layer_act" or active is not None))
+        delete = self._image_layer_menu_actions.get("del_layer_act")
+        if delete is not None:
+            delete.setEnabled(loaded and len(engine.layers) > 1)
+
     def _refresh_color_node_menu(self) -> None:
         """Refresh menu availability without replacing the registered actions."""
         from src.features.color.ui.node_editor_items import ConnectionItem
@@ -598,6 +639,9 @@ class MenuToolbarMixin:
 
     def _register_color_node_shortcuts(self, actions: dict[str, QAction]) -> None:
         """Register visible node actions with explicitly local shortcut scope."""
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+            return  # Layer buttons/menu retain normal text and canvas shortcuts.
         for name, action_id, label, shortcut in self._COLOR_NODE_ACTIONS:
             action = actions.get(name)
             if action is not None:
@@ -781,6 +825,9 @@ class MenuToolbarMixin:
 
     def disable_all_layers(self) -> None:
         """关闭所有图层的可见性。"""
+        if not any(layer.visible for layer in self.engine.layers):
+            return
+        self._push_layer_history()
         for i, layer in enumerate(self.engine.layers):
             layer.visible = False
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
@@ -1121,8 +1168,8 @@ class MenuToolbarMixin:
 
     def _is_video_work_mode(self) -> bool:
         """Return whether the video project manager belongs in this UI."""
-        from src.shared.feature_flags import get_work_mode
-        return get_work_mode(getattr(self, "config_manager", None)) == "video"
+        from src.shared.feature_flags import get_workspace_work_mode
+        return get_workspace_work_mode(getattr(self, "config_manager", None)) == "video"
 
     def _show_project_manager(self, startup: bool = False) -> None:
         """Show the video-mode Project Manager.
@@ -2614,17 +2661,24 @@ class MenuToolbarMixin:
         # menu when the opposite mode is active.
         work_mode = None
         try:
-            from src.shared.feature_flags import get_work_mode
-            work_mode = get_work_mode(getattr(self, "config_manager", None))
+            from src.shared.feature_flags import get_workspace_work_mode
+            work_mode = get_workspace_work_mode(getattr(self, "config_manager", None))
         except Exception:
             pass
 
         grouped = registry.get_panels_by_category(enabled_features, work_mode)
         first_category = True
+        seen_actions: set[QAction] = set()
 
         for category in registry.get_categories(enabled_features, work_mode):
             descriptors = grouped[category]
-            if not descriptors:
+            actions = []
+            for desc in descriptors:
+                action = self._get_panel_toggle_action(desc)
+                if action is not None and action not in seen_actions:
+                    seen_actions.add(action)
+                    actions.append(action)
+            if not actions:
                 continue
 
             if not first_category:
@@ -2635,19 +2689,15 @@ class MenuToolbarMixin:
             # If multiple categories, use submenus
             if len(registry.get_categories(enabled_features, work_mode)) <= 2:
                 # Flat list for small menus
-                for desc in descriptors:
-                    action = self._get_panel_toggle_action(desc)
-                    if action:
-                        panels_menu.addAction(action)
+                for action in actions:
+                    panels_menu.addAction(action)
             else:
                 # Grouped submenus
                 cat_menu = panels_menu.addMenu(
                     I18N.tr(f"menu.panels.{category.lower()}", category)
                 )
-                for desc in descriptors:
-                    action = self._get_panel_toggle_action(desc)
-                    if action:
-                        cat_menu.addAction(action)
+                for action in actions:
+                    cat_menu.addAction(action)
 
     def _get_panel_toggle_action(self, descriptor):
         """Get the toggleViewAction for a panel descriptor's dock widget.

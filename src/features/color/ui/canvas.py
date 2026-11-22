@@ -5,10 +5,11 @@ from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import (IconColors,
     icon_jump_start, icon_step_back, icon_play, icon_pause,
     icon_step_forward, icon_jump_end, icon_loop)
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, pyqtSlot, QPoint, QPointF, QLineF, QTimer, QSize
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, pyqtSlot, QPoint, QPointF, QLineF, QTimer, QSize, QMimeData
 from PyQt6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QColor, QBrush, QPainterPath,
     QTransform, QPainterPathStroker, QKeySequence, QPolygonF, QResizeEvent,
+    QDragEnterEvent, QDragMoveEvent, QDropEvent,
 )
 from typing import Any, List, Tuple, Optional
 from src.features.color.ui.gl_viewport import GLCanvasViewport
@@ -3935,6 +3936,8 @@ class SAMPointItem(QGraphicsItem):
 
 
 class Canvas(QGraphicsView):
+    file_open_requested = pyqtSignal(str)
+    photos_dropped = pyqtSignal(list)
     scopes_requested = pyqtSignal()
     stroke_finished = pyqtSignal(list, tuple, int)
     mask_shape_changed = pyqtSignal(str, dict)
@@ -3969,11 +3972,69 @@ class Canvas(QGraphicsView):
     tracker_feature_selected = pyqtSignal(int)
     tracker_feature_inserted = pyqtSignal(float, float)
 
+    @staticmethod
+    def _dropped_media_path(mime: QMimeData) -> str | None:
+        """Accept one local image/project; decoding stays in the host service."""
+        if not mime.hasUrls():
+            return None
+        urls = mime.urls()
+        if len(urls) != 1 or not urls[0].isLocalFile():
+            return None
+        path = urls[0].toLocalFile()
+        from src.shared.media.format_registry import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+        if path and os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | {".topos"}:
+            return path
+        return None
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        self._accept_media_drag(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self._accept_media_drag(event)
+
+    def _accept_media_drag(self, event: QDragMoveEvent) -> None:
+        if self._dropped_photos(event.mimeData()):
+            self._accept_photo_copy(event)
+        elif self._dropped_media_path(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    @staticmethod
+    def _accept_photo_copy(event: QDropEvent) -> bool:
+        if not event.possibleActions() & Qt.DropAction.CopyAction:
+            event.ignore()
+            return False
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        return True
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        photos = self._dropped_photos(event.mimeData())
+        if photos:
+            if self._accept_photo_copy(event):
+                self.photos_dropped.emit(photos)
+            return
+        path = self._dropped_media_path(event.mimeData())
+        if path is None:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.file_open_requested.emit(path)
+
+    def _dropped_photos(self, mime: QMimeData) -> list[str]:
+        if not self.grade_set_import_enabled:
+            return []
+        from src.shared.media.format_registry import is_image
+        paths = [url.toLocalFile() for url in mime.urls()]
+        return paths if all(is_image(path) for path in paths) else []
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.engine = None
         self.active_shape_id = None
-        self.setAcceptDrops(False)
+        self.grade_set_import_enabled = False
+        self.setAcceptDrops(True)
         
         # Remove frame border
         self.setFrameStyle(QGraphicsView.Shape.NoFrame)

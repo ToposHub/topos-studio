@@ -7,13 +7,15 @@ import posixpath
 import sys
 from typing import Any
 
-from PyQt6.QtCore import QModelIndex, QSignalBlocker, QStorageInfo, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QItemSelectionModel, QModelIndex, QPoint, QRect, QSignalBlocker, QStorageInfo, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QHideEvent, QIcon, QKeyEvent, QKeySequence, QShowEvent, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QAbstractItemView, QStyle, QTreeView, QWidget
 import qtawesome as qta
 
 from src.features.files.contracts import normalize_path
+from src.shared.assets.icon_manager import get_icon
 from src.shared.i18n.i18n import I18N
+from src.shared.media.format_registry import is_image
 from src.shared.ui.style_sheet import C
 
 
@@ -55,10 +57,13 @@ class HomeDirectoryTree(QTreeView):
     tree_path_removed = pyqtSignal(str)
     tree_root_removed = pyqtSignal(str)
     volumes_requested = pyqtSignal()
+    grade_set_requested = pyqtSignal(int)
+    grade_set_images_dropped = pyqtSignal(int, list)
     PATH_ROLE = int(Qt.ItemDataRole.UserRole)
     BRANCH_ROLE = PATH_ROLE + 1
     LIBRARY_ROLE = PATH_ROLE + 2
     LOADED_ROLE = PATH_ROLE + 3
+    GRADE_SET_ROLE = PATH_ROLE + 4
 
     def __init__(
         self, home: str, visible_entry: Callable[[dict[str, Any]], bool],
@@ -75,6 +80,8 @@ class HomeDirectoryTree(QTreeView):
         self._volumes: dict[str, MountedVolume] = {}
         self._volume_roots: dict[str, QStandardItem] = {}
         self._library_roots: dict[str, QStandardItem] = {}
+        self._library_group: QStandardItem | None = None
+        self._grade_set_group: QStandardItem | None = None
         self.item_model = QStandardItemModel(self)
         self.setModel(self.item_model)
         self.setHeaderHidden(True)
@@ -82,17 +89,11 @@ class HomeDirectoryTree(QTreeView):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setUniformRowHeights(True)
         self._folder_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
-        self._library_icon = library_icon()
+        self._library_icon = get_icon("fa5s.database")
         self.home_item = self._make_item(I18N.tr("files.native.home_root", "Home"), self.home,
                                          QStyle.StandardPixmap.SP_DirHomeIcon, branch="home")
         self.item_model.appendRow(self.home_item)
-        self._folders_heading = QStandardItem(I18N.tr("files.native.folders_heading", "文件夹"))
-        self._folders_heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        self._folders_heading.setForeground(QColor(C.TEXT_DIM))
-        font = self.font()
-        font.setPixelSize(11)
-        font.setBold(True)
-        self._folders_heading.setFont(font)
+        self._folders_heading = self._location_heading(I18N.tr("files.native.folders_heading", "文件夹"))
         self._volume_group = QStandardItem(I18N.tr("files.native.volumes_heading", "磁盘"))
         self._volume_group.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._volume_poll = QTimer(self)
@@ -100,6 +101,94 @@ class HomeDirectoryTree(QTreeView):
         self._volume_poll.timeout.connect(self.volumes_requested)
         self.expanded.connect(self._expanded)
         self.clicked.connect(self._navigate)
+
+    def _location_heading(self, title: str) -> QStandardItem:
+        item = QStandardItem(title)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setForeground(QColor(C.TEXT_DIM))
+        font = self.font()
+        font.setPixelSize(11)
+        font.setBold(True)
+        item.setFont(font)
+        return item
+
+    def enable_grade_sets(self) -> None:
+        """Use matching sidebar groups in the image Library workspace."""
+        if self._grade_set_group is not None:
+            return
+        self._library_group = self._location_heading(I18N.tr("files.native.libraries_heading", "素材库"))
+        self._library_group.setIcon(self._library_icon)
+        self._grade_set_group = self._location_heading(I18N.tr("grade_sets.title", "调色集"))
+        self._grade_set_icon = library_icon()
+        self._grade_set_group.setIcon(self._grade_set_icon)
+        for _ in self._library_roots:
+            self._library_group.appendRow(self.item_model.takeRow(0))
+        if self._folders_heading.index().isValid():
+            self.item_model.takeRow(self._folders_heading.row())
+        self.item_model.insertRow(0, self._library_group)
+        self.item_model.insertRow(1, self._grade_set_group)
+        self._volume_group.setFont(self._library_group.font())
+        self._volume_group.setForeground(self._library_group.foreground())
+        self._volume_group.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon))
+        if not self._volume_group.index().isValid():
+            self.item_model.insertRow(self.home_item.row(), self._volume_group)
+            self.setExpanded(self._volume_group.index(), True)
+        self.setExpanded(self._library_group.index(), True)
+        self.setExpanded(self._grade_set_group.index(), True)
+        self.collapsed.connect(self._grade_set_group_collapsed)
+
+    def set_grade_sets(self, rows: tuple[tuple[int, str, int], ...]) -> None:
+        group = self._grade_set_group
+        if group is None:
+            return
+        previous_ids = tuple(group.child(row).data(self.GRADE_SET_ROLE) for row in range(group.rowCount()))
+        if previous_ids != tuple(collection_id for collection_id, _, _ in rows):
+            group.removeRows(0, group.rowCount())
+            for collection_id, _, _ in rows:
+                item = QStandardItem(self._grade_set_icon, "")
+                item.setEditable(False)
+                item.setData(collection_id, self.GRADE_SET_ROLE)
+                group.appendRow(item)
+        for row, (_, name, count) in enumerate(rows):
+            item = group.child(row)
+            item.setText(f"{name}  ·  {count}")
+            item.setToolTip(name)
+
+    def is_grade_set_group(self, index: QModelIndex) -> bool:
+        return self._grade_set_group is not None and self._grade_set_group.index() == index
+
+    def _grade_set_group_collapsed(self, index: QModelIndex) -> None:
+        if self.is_grade_set_group(index) and self.currentIndex().parent() == index:
+            self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+
+    def select_grade_set(self, collection_id: int | None) -> bool:
+        group = self._grade_set_group
+        if collection_id is None or group is None:
+            return False
+        for row in range(group.rowCount()):
+            item = group.child(row)
+            if item.data(self.GRADE_SET_ROLE) == collection_id:
+                self._reveal_target = None
+                if self.isExpanded(group.index()):
+                    self.setCurrentIndex(item.index())
+                return True
+        return False
+
+    def reference_drop_target(self, pos: QPoint, paths: list[str]) -> tuple[QRect, Callable[[], None] | None] | None:
+        if self._grade_set_group is None:
+            return None
+        index = self.indexAt(pos)
+        collection_id = index.data(self.GRADE_SET_ROLE)
+        if collection_id is None and not self.is_grade_set_group(index):
+            return None
+        images = [path for path in paths if is_image(path)]
+        if not images:
+            return None
+        rect = self.visualRect(index)
+        rect.setWidth(self.viewport().width() - rect.left())
+        if collection_id is None:
+            return rect, None  # Allow hover expansion of the section while dragging.
+        return rect, lambda: self.grade_set_images_dropped.emit(collection_id, images)
 
     def _make_item(self, name: str, path: str,
                    icon: QStyle.StandardPixmap | None = None, *,
@@ -126,11 +215,12 @@ class HomeDirectoryTree(QTreeView):
 
     def set_libraries(self, entries: list[dict[str, str]]) -> None:
         registered = {entry["library_id"]: entry for entry in entries}
+        parent = self._library_group if self._library_group is not None else self.item_model.invisibleRootItem()
         for library_id, item in tuple(self._library_roots.items()):
             entry = registered.get(library_id)
             if entry is None or item.data(self.PATH_ROLE) != normalize_path(entry["path"]):
                 self._forget_item(item)
-                self.item_model.removeRow(item.row())
+                parent.removeRow(item.row())
                 del self._library_roots[library_id]
 
         for row, (library_id, entry) in enumerate(registered.items()):
@@ -139,9 +229,11 @@ class HomeDirectoryTree(QTreeView):
                 item = self._make_item(entry["name"], normalize_path(entry["path"]),
                                        branch=f"library:{library_id}", library_id=library_id, library_root=True)
                 self._library_roots[library_id] = item
-                self.item_model.insertRow(row, item)
+                parent.insertRow(row, item)
             else:
                 item.setText(entry["name"])
+        if self._library_group is not None:
+            return
         heading_visible = self._folders_heading.index().isValid()
         if self._library_roots and not heading_visible:
             self.item_model.insertRow(len(self._library_roots), self._folders_heading)
@@ -194,7 +286,7 @@ class HomeDirectoryTree(QTreeView):
         if visible and not group_attached:
             self.item_model.insertRow(self.home_item.row(), self._volume_group)
             self.setExpanded(self._volume_group.index(), True)
-        elif not visible and group_attached:
+        elif not visible and group_attached and self._library_group is None:
             self.item_model.takeRow(self._volume_group.row())
         for path in changed & visible.keys():
             for item in (*self._nodes.get(path, {}).values(), *self._library_roots.values()):
@@ -248,6 +340,8 @@ class HomeDirectoryTree(QTreeView):
             self._active_branch = item.data(self.BRANCH_ROLE)
             self._request_children(item)
             self.directory_requested.emit(path)
+        elif item is not None and (collection_id := item.data(self.GRADE_SET_ROLE)) is not None:
+            self.grade_set_requested.emit(collection_id)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.matches(QKeySequence.StandardKey.Paste):
@@ -331,7 +425,13 @@ class HomeDirectoryTree(QTreeView):
             return
         root, branch, current = match
         current_path = root
-        if current.parent() is self._volume_group:
+        group = current.parent()
+        if (self._library_group is not None and group in (self._library_group, self._volume_group)
+                and not self.isExpanded(group.index())):
+            self._reveal_target = None
+            self.setCurrentIndex(QModelIndex())
+            return
+        if group is self._volume_group:
             self.setExpanded(self._volume_group.index(), True)
         relative = path[len(root):].strip("/")
         parts = relative.split("/") if relative else []

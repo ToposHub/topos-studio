@@ -30,7 +30,11 @@ def test_native_host_loads_real_service_without_browser_or_server(qtbot, monkeyp
         assert panel.content_stack.currentWidget() is panel._native_panel
         assert panel._native_transport._facade is not None
         assert panel._native_panel.model.entries[0].name == "item.txt"
-        qtbot.waitUntil(lambda: len(panel._files_plugins._infos) == 10, timeout=8000)
+        qtbot.waitUntil(lambda: {"apps.topos_word", "apps.quick_3d_viewer"} <= {
+            info.plugin_id for info in panel._files_plugins._infos}, timeout=8000)
+        apps = [info for info in panel._files_plugins._infos if info.source == "local_app"]
+        assert len(apps) == 2 and all(info.can_launch and not info.runtime_loaded for info in apps)
+        assert panel._files_plugins._app_runtime is None  # Discovery never starts an application.
     finally:
         panel.shutdown()
         panel.shutdown()

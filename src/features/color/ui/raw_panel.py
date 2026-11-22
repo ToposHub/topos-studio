@@ -370,7 +370,7 @@ class RawPanel(QWidget):
         
         return params
 
-    def reset_all(self) -> None:
+    def reset_all(self, *, emit: bool = True) -> None:
         """Resets all RAW parameters to their default values with robust signal management."""
         self.blockSignals(True)
         
@@ -425,6 +425,13 @@ class RawPanel(QWidget):
         
         # 4. Synchronize UI visibility
         self.update_wb_visibility()
+        self.container.setEnabled(self.enable_cb.isChecked())
+        if not emit:
+            self.update_timer.stop()
+            self.interaction_timer.stop()
+            self._pending_update = False
+            self._is_interacting = False
+            return
         self.on_enable_toggled(self.enable_cb.isChecked())
         
         # 5. CRITICAL: Force interaction state to False and notify engine

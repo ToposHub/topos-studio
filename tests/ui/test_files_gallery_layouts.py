@@ -33,6 +33,23 @@ def test_adaptive_fills_rows_without_stretching_short_last_row() -> None:
     assert last.height() <= 180 + 56
 
 
+def test_adaptive_can_fill_a_nearly_complete_final_row() -> None:
+    cells, _ = gallery_rectangles([2 / 3] * 5, 546, 118, "adaptive", adaptive_tail_scale=1.25)
+    assert all(cell.top() == cells[0].top() for cell in cells)
+    assert cells[-1].right() == 537
+    assert max(cell.width() for cell in cells) - min(cell.width() for cell in cells) <= 1
+
+    cells, _ = gallery_rectangles([2 / 3], 546, 118, "adaptive", adaptive_tail_scale=1.25)
+    assert cells[0].height() == 118 + 56
+
+
+def test_adaptive_rounding_keeps_narrow_rows_inside_right_margin() -> None:
+    cells, _ = gallery_rectangles([0.25, 0.25, 8.0, 1.0], 93, 46, "adaptive")
+    same_row = [cell for cell in cells if cell.top() == cells[0].top()]
+    assert same_row[-1].right() == 84
+    assert all(cell.width() > 12 for cell in same_row)
+
+
 def _view(qtbot: QtBot, count: int = 32) -> tuple[FilesGalleryView, FilesEntryModel]:
     model = FilesEntryModel()
     model.set_entries([

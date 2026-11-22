@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,15 +35,19 @@ def cut_token(mime: QMimeData | None) -> str:
 
 
 class FileDropTarget(QObject):
-    """Highlight the filesystem landing area without dropping into Qt's model."""
+    """Handle file and reference drops without dropping into Qt's model."""
 
-    def __init__(self, view: QAbstractItemView, *,
-                 destination_at: Callable[[QPoint], tuple[str, QRect] | None],
-                 transfer: Callable[[str, list[str], str], None], expand_folders: bool = False) -> None:
+    def __init__(
+        self, view: QAbstractItemView, *,
+        destination_at: Callable[[QPoint], tuple[str, QRect] | None],
+        transfer: Callable[[str, list[str], str], None], expand_folders: bool = False,
+        reference_at: Callable[[QPoint, list[str]], tuple[QRect, Callable[[], None] | None] | None] | None = None,
+    ) -> None:
         super().__init__(view)
         self._view = view
         self._destination_at = destination_at
         self._transfer = transfer
+        self._reference_at = reference_at
         self._tree = view if expand_folders and isinstance(view, QTreeView) else None
         self._hovered = QPersistentModelIndex()
         self._expand_timer = QTimer(self, interval=550, singleShot=True)
@@ -83,7 +88,14 @@ class FileDropTarget(QObject):
                   and event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         position = event.position().toPoint()
         target = self._destination_at(position)
-        if target is None:
+        reference = self._reference_at(position, paths) if target is None and self._reference_at is not None else None
+        if target is not None:
+            destination, rect = target
+            on_drop = partial(self._transfer, "move" if moving else "copy", paths, destination)
+        elif reference is not None:
+            rect, on_drop = reference
+            moving = False
+        else:
             self._clear_hover()
             if event.type() == QEvent.Type.DragEnter:
                 event.setDropAction(Qt.DropAction.CopyAction)
@@ -95,10 +107,12 @@ class FileDropTarget(QObject):
         # Shift move when both ends of the drag belong to the workspace.
         event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
-        destination, rect = target
         if event.type() == QEvent.Type.Drop:
             self._clear_hover()
-            self._transfer("move" if moving else "copy", paths, destination)
+            if on_drop is None:
+                event.ignore()
+            else:
+                on_drop()
         else:
             self._outline.setGeometry(rect.intersected(self._view.viewport().rect()))
             self._move_label.move(max(2, self._outline.width() - self._move_label.width() - 3), 2)

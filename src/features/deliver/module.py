@@ -46,8 +46,11 @@ class DeliverModule:
     feature_id = "deliver"
     
     def __init__(self):
+        from src.shared.feature_flags import uses_image_layer_workflow
+
         self._page: Optional[Any] = None
         self._available: bool = False
+        self._image_workflow = uses_image_layer_workflow()
 
         try:
             # Import the new video batch workspace (which itself imports the
@@ -79,6 +82,11 @@ class DeliverModule:
         Returns:
             List containing Deliver page descriptor
         """
+        from src.shared.feature_flags import uses_image_layer_workflow
+
+        # Menu/shortcut registration has no context argument. Freeze this
+        # launcher choice here; a Preferences change takes effect at restart.
+        self._image_workflow = uses_image_layer_workflow(context.config_manager)
         if not self.is_available():
             return []
         
@@ -161,6 +169,17 @@ class DeliverModule:
             feature_id="deliver",
             shortcut_id="deliver.export",
         ))
+        if self._image_workflow:
+            action_registry.register(MenuActionDescriptor(
+                action_id="deliver.export.batch",
+                menu_path="Deliver",
+                label=I18N.tr("export.batch_export", "Batch Export"),
+                callback_name="on_export_settings",
+                order=100,
+                feature_id="deliver",
+                shortcut_id="deliver.export.batch",
+            ))
+            return
         action_registry.register(MenuActionDescriptor(
             action_id="deliver.export.current_source",
             menu_path="Deliver",
@@ -257,6 +276,15 @@ class DeliverModule:
             "Ctrl+E",
             feature_id="deliver",
         )
+        if self._image_workflow:
+            shortcut_manager.register(
+                "deliver.export.batch",
+                I18N.tr("export.batch_export", "Batch Export"),
+                "Deliver",
+                "Ctrl+Shift+E",
+                feature_id="deliver",
+            )
+            return
         shortcut_manager.register(
             "deliver.export.current_source",
             I18N.tr("action.export_current_source", "Export Current Source"),
@@ -310,14 +338,15 @@ class DeliverModule:
 
         panel_registry.register(PanelDescriptor(
             panel_id="deliver.export",
-            title_key="panel.deliver_export",
-            fallback_title="Export",
+            title_key="export.batch_export",
+            fallback_title="Batch Export",
             feature_id="deliver",
             category="Deliver",
             page_ids=("Deliver",),
             dock_attr="dock_export",
             order=100,
             default_visible=True,
+            work_mode="image",
         ))
 
         # The video queue is embedded in the Deliver workspace by default.

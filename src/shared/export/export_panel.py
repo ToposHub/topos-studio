@@ -618,8 +618,9 @@ class ExportPanel(QWidget):
     #: 内部模式名全集（currentData 兜底校验用）。
     _NAMING_MODE_IDS = frozenset(_NAMING_MODE_KEY_TO_ID.values())
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, *, image_mode: bool = False) -> None:
         super().__init__(parent)
+        self._image_mode = image_mode
         self.default_dir = ""
         self.default_name = "untitled"
         self.orig_w, self.orig_h = 0, 0
@@ -825,14 +826,15 @@ class ExportPanel(QWidget):
         output_layout.addLayout(path_row)
 
         # Composite 应用选项（ToggleSwitch 药丸开关，默认开启）
-        composite_row = QHBoxLayout()
+        self.composite_options = QWidget()
+        composite_row = QHBoxLayout(self.composite_options)
         composite_row.setContentsMargins(0, 2, 0, 2)
         composite_row.setSpacing(4)
         composite_label = _make_param_label(I18N.tr("export.apply_composite", "应用 Composite 合成"))
         composite_row.addWidget(composite_label)
         composite_row.addStretch()
         # 用 ToggleSwitch 替代 QCheckBox，但保留 apply_composite_check 名称以维持契约
-        self.apply_composite_check = ToggleSwitch(checked=True)
+        self.apply_composite_check = ToggleSwitch(checked=not self._image_mode)
         self.apply_composite_check.setToolTip(
             I18N.tr(
                 "export.apply_composite_tip",
@@ -840,7 +842,8 @@ class ExportPanel(QWidget):
             )
         )
         composite_row.addWidget(self.apply_composite_check)
-        output_layout.addLayout(composite_row)
+        output_layout.addWidget(self.composite_options)
+        self.composite_options.setVisible(not self._image_mode)
 
         self.main_layout.addWidget(output_section)
 
@@ -1184,7 +1187,7 @@ class ExportPanel(QWidget):
         # path_input 恢复到面板初始化时的默认目录（可能是空串）
         self.path_input.setText(self.default_dir)
         # apply_composite 默认开启（ToggleSwitch.setChecked 不发 toggled，但默认值就是 True）
-        self.apply_composite_check.setChecked(True)
+        self.apply_composite_check.setChecked(not self._image_mode)
 
     def _reset_naming_section(self) -> None:
         """Naming section 重置：模式/prefix/suffix/seq_digits/custom 恢复默认。"""
@@ -1438,7 +1441,7 @@ class ExportPanel(QWidget):
             "custom_pattern": self.custom_pattern_input.text(),
             # 单文件导出也尊重 composite 开关（与批量导出一致）。
             # perform_panel_export 据此决定是否套用当前 composite 图。
-            "apply_composite": self.apply_composite_check.isChecked(),
+            "apply_composite": not self._image_mode and self.apply_composite_check.isChecked(),
         }
 
         # AUD-33103：resize 取缓存属性并校验，不再解析显示标签文本
@@ -1506,7 +1509,7 @@ class ExportPanel(QWidget):
             # seq_digits_spin 现在是 DragValue（float），强转 int
             "seq_digits": int(round(self.seq_digits_spin.value())),
             "custom_pattern": self.custom_pattern_input.text(),
-            "apply_composite": self.apply_composite_check.isChecked(),
+            "apply_composite": not self._image_mode and self.apply_composite_check.isChecked(),
         }
 
         # AUD-33103：resize 取缓存属性并校验，不再解析显示标签文本

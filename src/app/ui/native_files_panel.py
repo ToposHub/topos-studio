@@ -5,6 +5,7 @@ import math
 import os
 import unicodedata
 from collections import OrderedDict
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -23,12 +24,13 @@ from PyQt6.QtWidgets import (
 )
 
 from src.app.ui.add_library_dialog import AddLibraryDialog
+from src.shared.assets.icon_manager import IconColors, icon_new_folder
 from src.shared.i18n.i18n import I18N
 from src.shared.media.format_registry import get_media_type
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.app.ui.native_files_gallery import FilesCardDelegate, FilesListDelegate
-from src.app.ui.native_files_gallery_view import FilesGalleryView
+from src.app.ui.native_files_gallery_view import GALLERY_ENTRY_ROLE, FilesGalleryView
 from src.app.ui.native_files_locations import HomeDirectoryTree
 from src.app.ui.native_files_transfer import DRAG_SOURCE_PROPERTY, FileDropTarget, cut_token, local_file_paths, mark_cut
 from src.shared.ui.panel_splitter import PanelSplitter
@@ -66,7 +68,7 @@ def _kind_label(kind: str) -> str:
 
 class FilesEntryModel(QAbstractTableModel):
     """Presentation snapshot, never a second source of filesystem truth."""
-    ENTRY_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+    ENTRY_ROLE = GALLERY_ENTRY_ROLE
     HEADERS = ("名称", "类型", "大小", "修改日期", "评分", "尺寸", "扩展名")
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -293,6 +295,7 @@ class NativeFilesPanel(QWidget):
     media_pool_import_requested = pyqtSignal(list)
     legacy_requested = pyqtSignal()
     plugins_requested = pyqtSignal()
+    file_actions_requested = pyqtSignal(object, list)  # menu, frozen file paths
     ai_library_requested = pyqtSignal()
     scoped_ai_library_requested = pyqtSignal(str, object)
     plugin_center_requested = pyqtSignal()
@@ -308,6 +311,7 @@ class NativeFilesPanel(QWidget):
     directory_more_requested = pyqtSignal(str, int)  # D3：目录分页续页
     collections_requested = pyqtSignal()
     collection_requested = pyqtSignal(int, str)
+    selection_actions_requested = pyqtSignal(QMenu, list)
     # D2：集合写入 + 回收站（意图经 transport，写入全部走 B/C 服务）
     collection_create_requested = pyqtSignal(str, list)
     collection_rename_requested = pyqtSignal(int, str)
@@ -613,20 +617,20 @@ class NativeFilesPanel(QWidget):
         side_layout = QVBoxLayout(self.sidebar)
         side_layout.setContentsMargins(8, 8, 8, 6)
         side_layout.setSpacing(4)
-        library_heading = QLabel(_tr("libraries_heading", "素材库"))
-        library_heading.setObjectName("filesSidebarHeading")
-        library_heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        library_header = QHBoxLayout()
-        library_header.setSpacing(2)
-        library_header.addWidget(library_heading, 1)
+        self._library_heading = QLabel(_tr("libraries_heading", "素材库"))
+        self._library_heading.setObjectName("filesSidebarHeading")
+        self._library_heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._library_header = QHBoxLayout()
+        self._library_header.setSpacing(2)
+        self._library_header.addWidget(self._library_heading, 1)
         ai_button = self._button("AI", I18N.tr("files.ai_library.open", "AI 素材库…"),
                                  lambda _checked=False: self.ai_library_requested.emit())
         add_library_button = self._button("+", _tr("add_library", "添加素材库…"), self.open_add_library)
         for button in (ai_button, add_library_button):
             button.setProperty("filesFavoriteAction", True)
             button.setFixedSize(26, 24)
-            library_header.addWidget(button)
-        side_layout.addLayout(library_header)
+            self._library_header.addWidget(button)
+        side_layout.addLayout(self._library_header)
         self.locations = HomeDirectoryTree(self.home_path, self._is_visible_entry, self.sidebar)
         self.locations.setMinimumWidth(112)
         self.locations.setAccessibleName(_tr("locations", "位置"))
@@ -636,7 +640,7 @@ class NativeFilesPanel(QWidget):
         self.locations.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.locations.customContextMenuRequested.connect(self._show_library_menu)
         FileDropTarget(self.locations, destination_at=self._sidebar_drop_target, transfer=self._queue_file_transfer,
-                       expand_folders=True)
+                       expand_folders=True, reference_at=self.locations.reference_drop_target)
         side_layout.addWidget(self.locations, 1)
         content = QWidget(self.splitter)
         content_layout = QVBoxLayout(content)
@@ -1373,6 +1377,17 @@ class NativeFilesPanel(QWidget):
         if path:
             self.locations.refresh(path)
             self.directory_requested.emit(path)
+
+    def invalidate_external_files(self, paths: list[str]) -> None:
+        """Drop only confirmed changed files from the browser's image caches."""
+        for path in paths:
+            self._images.pop(path, None)
+            self._deferred_thumbnails.pop(path, None)
+            self._thumbnail_failed.discard(path)
+            self._thumbnail_pending.discard(path)
+            self._thumbnail_attempts.pop(path, None)
+            self._stop_thumbnail_timer(path)
+        self.icon_view.viewport().update()
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, _tr("choose", "选择文件夹"), self.current_path or QDir.homePath())
@@ -2301,7 +2316,8 @@ class NativeFilesPanel(QWidget):
             n=int(payload.get("total") or len(entries))))
         self.pages.setEnabled(True)
         self.message.setVisible(not entries)
-        self.locations.reveal("")
+        if not self.locations.select_grade_set(self._view_location["collection_id"]):
+            self.locations.reveal("")
 
     # -- 悬停胶片条（F14） -------------------------------------------------
     def hover_index(self, index: QModelIndex) -> None:
@@ -2389,6 +2405,18 @@ class NativeFilesPanel(QWidget):
     # -- 常用位置 / 索引（F11 / B10） -------------------------------------
     def request_libraries(self) -> None:
         self.libraries_requested.emit()
+
+    def enable_grade_set_locations(self, create: Callable[[], None]) -> None:
+        self.locations.enable_grade_sets()
+        self._library_heading.hide()
+        self._library_header.insertStretch(0, 1)
+        tooltip = I18N.tr("grade_sets.new", "新建调色集…")
+        button = self._button("", tooltip, create)
+        button.setObjectName("newGradeSet")
+        button.setIcon(icon_new_folder(IconColors.BLUE))
+        button.setProperty("filesFavoriteAction", True)
+        button.setFixedSize(26, 24)
+        self._library_header.addWidget(button)
 
     def show_libraries(self, items: list[Any]) -> None:
         libraries = []
@@ -2667,8 +2695,11 @@ class NativeFilesPanel(QWidget):
         if selected:
             if len(selected) == 1:
                 menu.addAction(_tr("open", "打开"), self.activate_current)
+                if not selected[0].is_dir:
+                    self.file_actions_requested.emit(menu, [selected[0].path])
             files = [row for row in selected if not row.is_dir]
             if files:
+                self.selection_actions_requested.emit(menu, [row.path for row in files])
                 media_paths = [row.path for row in files if get_media_type(row.path) in
                                ("video", "image", "audio", "subtitle")]
                 add_to_pool = menu.addAction(_tr("add_to_media_pool", "添加到媒体池"),

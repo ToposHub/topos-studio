@@ -1001,11 +1001,12 @@ class PageManagementMixin:
                 if self._edit_available and self.edit_page is not None:
                     self.edit_page.on_enter()
 
-                # For Color Image source, set current image path
-                if self.engine.img_full_original is not None:
-                    h, w = self.engine.img_full_original.shape[:2]
-                    self.export_panel.set_original_size(w, h)
-                    self.export_panel.set_default_path(self.current_file_path)
+            # Image Batch Export has no video DeliverWorkspace. Its resize
+            # controls still need the current source dimensions and path.
+            if self._deliver_available and self.engine.img_full_original is not None:
+                h, w = self.engine.img_full_original.shape[:2]
+                self.export_panel.set_original_size(w, h)
+                self.export_panel.set_default_path(self.current_file_path)
             return
 
     def _prepare_empty_composite_workspace(self) -> None:
@@ -3237,8 +3238,8 @@ class PageManagementMixin:
             ValueError: 如果传入的是视频文件路径
         """
         # Guard: reject video files — videos must go through timeline clip flow
-        from src.shared.media.format_registry import is_video as _is_video_file
-        if _is_video_file(path):
+        from src.shared.media.format_registry import is_image as _is_image_file, is_video as _is_video_file
+        if _is_video_file(path) and not _is_image_file(path):
             logger.warning(f"_create_standalone_image_color_session: rejected video file: {path}")
             raise ValueError(
                 "Video files cannot be graded as standalone assets. "

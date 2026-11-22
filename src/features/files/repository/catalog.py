@@ -20,7 +20,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from src.features.files.repository.locator import FilesDataLocator
 
@@ -640,14 +640,47 @@ class FilesCatalog:
 
     # ------------------------------------------------------------ 集合
 
-    def create_collection(self, library_id: str, name: str, color: int = 0) -> int:
+    def collection_id_for_name(self, library_id: str, name: str) -> int | None:
+        with self._read() as cursor:
+            row = cursor.execute(
+                "SELECT id FROM collections WHERE library_id = ? AND name = ?",
+                (library_id, name),
+            ).fetchone()
+        return int(row[0]) if row is not None else None
+
+    def ensure_collection(self, library_id: str, name: str) -> int:
+        """Return a stable collection ID, even when another process creates it."""
+        existing = self.collection_id_for_name(library_id, name)
+        if existing is not None:
+            return existing
+        with self._write() as cursor:
+            cursor.execute(
+                "INSERT INTO collections (library_id, name, created_at) VALUES (?, ?, ?)"
+                " ON CONFLICT(library_id, name) DO NOTHING",
+                (library_id, name, time.time()),
+            )
+            row = cursor.execute(
+                "SELECT id FROM collections WHERE library_id = ? AND name = ?",
+                (library_id, name),
+            ).fetchone()
+            return int(row[0])
+
+    def create_collection(self, library_id: str, name: str, color: int = 0, *,
+                          paths: Iterable[str] = ()) -> int:
         with self._write() as cursor:
             cursor.execute(
                 "INSERT INTO collections (library_id, name, color, created_at)"
                 " VALUES (?, ?, ?, ?)",
                 (library_id, name, color, time.time()),
             )
-            return int(cursor.lastrowid)
+            collection_id = int(cursor.lastrowid)
+            added_at = time.time()
+            cursor.executemany(
+                "INSERT OR IGNORE INTO collection_items "
+                "(collection_id, path, sort_order, added_at) VALUES (?, ?, 0, ?)",
+                ((collection_id, nfc(path), added_at) for path in paths),
+            )
+            return collection_id
 
     def add_to_collection(self, collection_id: int, path: str | Path) -> None:
         with self._write() as cursor:
@@ -661,7 +694,7 @@ class FilesCatalog:
         with self._read() as cursor:
             rows = cursor.execute(
                 "SELECT path FROM collection_items WHERE collection_id = ?"
-                " ORDER BY sort_order, added_at",
+                " ORDER BY sort_order, added_at, rowid",
                 (collection_id,),
             ).fetchall()
         return [row[0] for row in rows]

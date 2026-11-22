@@ -1,0 +1,67 @@
+{
+  "plugin_id": "apps.quick_3d_viewer",
+  "display_name": "Topos 3D Viewer",
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "author": "Topos",
+  "description": "独立 3D 模型查看器；FBX 需额外安装 assimp-py。",
+  "category": "独立应用",
+  "source": "local_app",
+  "capabilities": [
+    {
+      "capability_id": "open",
+      "kind": "command",
+      "title": "打开文件",
+      "selection_mode": "single",
+      "run_location": "process",
+      "write_semantics": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "description": "Protocol v1 ready/opened/dirty/saved/exported/error/closed events"
+      }
+    }
+  ],
+  "metadata": {
+    "independent_app": {
+      "protocol": 1,
+      "entrypoint": "main.py",
+      "extensions": [
+        ".obj",
+        ".stl",
+        ".ply",
+        ".glb",
+        ".gltf",
+        ".off",
+        ".3mf",
+        ".fbx"
+      ],
+      "required_modules": {
+        "PyQt6": "PyQt6",
+        "numpy": "numpy",
+        "trimesh": "trimesh",
+        "PIL": "Pillow",
+        "OpenGL": "PyOpenGL"
+      },
+      "format_modules": {
+        ".fbx": {
+          "assimp_py": "assimp-py"
+        }
+      }
+    }
+  }
+}

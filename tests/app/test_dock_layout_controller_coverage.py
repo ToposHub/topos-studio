@@ -643,12 +643,82 @@ def test_enforce_image_mode_hides_video_only_docks(
         "image mode must hide the Color Timeline Clips strip")
     assert _hidden(host, "dockVideoBatchExport"), (
         "image mode must hide the video Batch Export dock")
-    # Image-only docks stay usable in image mode.
+    # Image editing tools stay usable in Color; export belongs to Deliver.
     assert not _hidden(host, "dock_library")
-    assert not _hidden(host, "dock_export")
+    assert _hidden(host, "dock_export")
     assert not _hidden(host, "dock_deblur")
     assert not _hidden(host, "dock_crop")
     assert not _hidden(host, "dock_info")
+
+
+def test_image_library_restores_with_only_the_browser(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_work_mode(host, "image", monkeypatch)
+    host._window_panels_menu = QMenu(host)
+    host.dock_library.setFloating(True)
+    host.dock_library.hide()
+    host.dock_info.show()
+    host.dock_viewport.show()
+    host.dock_files.show()
+    color_state = host.saveState()
+
+    host.current_page = "Library"
+    host.page_layouts["Library"] = color_state
+    host.restore_layout_state()
+
+    assert [dock for dock in host.all_docks if not dock.isHidden()] == [host.dock_library]
+    assert not host.dock_library.isFloating()
+    assert not host._window_panels_menu.menuAction().isVisible()
+
+    # Global commands can still ask Qt to show a dock. A queued guard must
+    # enforce the active page without clobbering a subsequent Color restore.
+    host.dock_info.show()
+    host._guard_image_library_layout(True)
+    assert host.dock_info.isHidden()
+
+    host.current_page = "Color"
+    assert host.restoreState(color_state)
+    host._enforce_page_dock_visibility()
+    host._guard_image_library_layout(True)
+    assert not host.dock_info.isHidden()
+    assert not host.dock_viewport.isHidden()
+    assert host._window_panels_menu.menuAction().isVisible()
+
+
+def test_image_batch_export_cannot_leak_from_a_restored_color_layout(host: _DockHost) -> None:
+    host._active_work_mode = "image"
+    host.current_page = "Color"
+    host.dock_export.show()
+    host.page_layouts["Color"] = host.saveState()
+    host.restore_layout_state()
+    assert host.dock_export.isHidden()
+    assert not host.dock_export.toggleViewAction().isVisible()
+
+    host.dock_export.show()
+    host._guard_image_batch_export(True)
+    assert host.dock_export.isHidden()
+
+    host.current_page = "Deliver"
+    host._enforce_page_dock_visibility()
+    assert not host.dock_export.isHidden()
+    assert host.dock_export.toggleViewAction().isVisible()
+
+
+def test_photo_color_default_places_sidebars_and_groups_tools(host: _DockHost) -> None:
+    host._active_work_mode = "image"
+    host.current_page = "Color"
+    host.apply_default_layout()
+    assert host.corner(Qt.Corner.TopLeftCorner) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert host.corner(Qt.Corner.TopRightCorner) == Qt.DockWidgetArea.RightDockWidgetArea
+    assert host.dockWidgetArea(host.dock_viewport) == Qt.DockWidgetArea.TopDockWidgetArea
+    assert host.dockWidgetArea(host.dock_presets) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert set(host.tabifiedDockWidgets(host.dock_presets)) == {host.dock_lut, host.dock_plugin}
+    assert host.dock_crop in host.tabifiedDockWidgets(host.dock_info)
+    assert host.dock_layers not in host.tabifiedDockWidgets(host.dock_info)
+    assert host.dock_raw in host.tabifiedDockWidgets(host.dock_grading)
+    assert host.dock_warper in host.tabifiedDockWidgets(host.dock_curves)
+    assert host.dock_grain in host.tabifiedDockWidgets(host.dock_analysis)
+    assert host.dock_export.isHidden()
 
 
 def test_enforce_caption_workspace_is_hidden_on_non_edit_pages(
@@ -865,7 +935,7 @@ def test_apply_default_layout_image_mode_hides_video_panels(
     layout_host.apply_default_layout()
     assert _hidden(layout_host, "dock_color_timeline_clips")
     assert _hidden(layout_host, "dockVideoBatchExport")
-    assert not _hidden(layout_host, "dock_library")
+    assert _hidden(layout_host, "dock_library")
     # 图片专属工具面板在图片模式保持可用。
     assert not _hidden(layout_host, "dock_deblur")
     assert not _hidden(layout_host, "dock_crop")

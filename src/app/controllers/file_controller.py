@@ -711,6 +711,9 @@ class FileOpsMixin:
                 release()
             self.current_file_path = None
             self.current_file_is_video = False
+            grade_set_panel = getattr(self, "grade_set_panel", None)
+            if grade_set_panel is not None:
+                grade_set_panel.set_active_path(None)
             self.save_router.clear_cache()
             # M19.2b：无已装配工程的媒体会话关闭同样清空进程级色彩
             # 覆盖（防御位——正常路径工程关闭时已清）。
@@ -777,10 +780,10 @@ class FileOpsMixin:
             )
             self._current_edit_project = project
             self._current_timeline_sequences = {}
-            if hasattr(self, "media_pool_panel"):
-                self.media_pool_panel.set_project(project)
-            if hasattr(self, "timeline_panel"):
-                self.timeline_panel.set_project(project)
+            for panel in (getattr(self, "media_pool_panel", None),
+                          getattr(self, "timeline_panel", None)):
+                if panel is not None:
+                    panel.set_project(project)
             self._setup_ai_editing()
 
         self._current_edit_project_filepath = project_path
@@ -812,6 +815,9 @@ class FileOpsMixin:
 
     def _open_media_path(self, path: str) -> None:
         """Open media, reusing its own project when one already exists."""
+        if os.path.splitext(path)[1].lower() == ".topos":
+            self._open_project_path(path)
+            return
         if self.current_page == "Mixer":
             pool = getattr(self, "media_pool_panel", None)
             if pool is not None:
@@ -819,7 +825,16 @@ class FileOpsMixin:
             else:
                 logger.warning("Cannot import Mixer media: Media Pool is unavailable")
             return
-        if _is_video_file(path):
+        # DNG is shared by raw stills and CinemaDNG sequences. Image
+        # workspaces must prefer the still-image declaration for that overlap.
+        from src.shared.feature_flags import get_product_mode
+        from src.shared.media.format_registry import IMAGE_EXTENSIONS
+
+        image_workflow = (self._get_work_mode() == "image"
+                          or get_product_mode() in ("color", "composite"))
+        image_source = (image_workflow
+                        and os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS)
+        if _is_video_file(path) and not image_source:
             if self.current_page in ("Color", "Library"):
                 self._reject_standalone_video_for_color(path)
                 return
@@ -897,6 +912,11 @@ class FileOpsMixin:
         create_standalone_session: bool = True,
         project_path: str | None = None,
     ):
+        grade_set_panel = getattr(self, "grade_set_panel", None)
+        managed_photo = create_standalone_session and grade_set_panel is not None
+        if managed_photo and not self._confirm_project_replacement_for_image(path):
+            return
+
         # 加载图像时，卸载当前视频（如果有）
         self.unload_video()
         if create_standalone_session and hasattr(self.canvas, "set_display_scene_size_override"):
@@ -909,7 +929,7 @@ class FileOpsMixin:
         if hasattr(self.engine, 'reset_sam_points'):
             self.engine.reset_sam_points()
 
-        if self.current_file_path:
+        if not managed_photo and self.current_file_path:
             self.save_router.save()
 
         # AUD-2805: 打开一张"独立会话"图像可能替换当前打开的异类工程
@@ -918,7 +938,8 @@ class FileOpsMixin:
         # 不会触发——未保存的工程修改必须经关闭确认流程处理，而不是被
         # 新图像工程静默覆盖。放在旧素材保存之后、新素材状态写入之前：
         # 用户取消时文档与面板状态均保持原样，加载就此中止。
-        if create_standalone_session and not self._confirm_project_replacement_for_image(path):
+        if (create_standalone_session and not managed_photo
+                and not self._confirm_project_replacement_for_image(path)):
             return
 
         # Check if original image exists
@@ -951,6 +972,8 @@ class FileOpsMixin:
 
                 if self.engine.enter_offline_mode(layers):
                     self.current_file_path = None  # No valid source path
+                    if grade_set_panel is not None:
+                        grade_set_panel.set_active_path(None)
                     self.engine.layers = layers
                     self.engine.active_layer_index = 0
 
@@ -1135,7 +1158,10 @@ class FileOpsMixin:
         is_raw = os.path.splitext(path)[1].lower() in _IE.RAW_EXTENSIONS
         # 每次加载新图片时，先重置面板到初始状态，再针对文件类型进行个性化设置
         # 顺序不能颠倒，否则 reset_all 会覆盖针对文件类型的特定默认值（如曝光度）
-        self.raw_panel.reset_all()
+        if managed_photo:
+            self.raw_panel.reset_all(emit=False)
+        else:
+            self.raw_panel.reset_all()
         self.raw_panel.set_enabled_for_file(is_raw)
 
         # If project had saved RAW params, restore them now (overriding defaults)
@@ -1151,6 +1177,8 @@ class FileOpsMixin:
 
         # 将当前文件添加到导出队列
         self.export_panel.add_current_file(path)
+        if grade_set_panel is not None:
+            grade_set_panel.set_active_path(path)
         # CV-B01：新素材进入 Color 视口——推进上下文 revision 并刷新能力
         # 回填（图片呈现路径下 transport 诚实禁用）。
         try:
@@ -1193,6 +1221,14 @@ class FileOpsMixin:
             )
             return
 
+        if self._has_grade_set_photo():
+            if self._save_photo_grade():
+                self.status_bar.showMessage(
+                    I18N.tr("status.image_grade_saved", "Image grade saved"), 3000)
+            else:
+                self.status_bar.showMessage(I18N.tr("error.save_project", "Failed to save project."), 5000)
+            return
+
         # 智能路由：有工程但还没保存路径 → 走统一另存为流程
         # （save_router.save() 在 EditProject 无 filepath 时只会返回 False，体验差）
         if (getattr(self, '_current_edit_project', None) is not None
@@ -1219,6 +1255,55 @@ class FileOpsMixin:
                 "Save failed. Please check project path and try again.", 5000
             )
             # 保持 dirty 状态，不换保存路径兜底
+
+    def _has_grade_set_photo(self) -> bool:
+        from src.shared.media.format_registry import is_image
+
+        project = getattr(self, "_current_edit_project", None)
+        path = getattr(self, "current_file_path", None)
+        return bool(getattr(self, "grade_set_model", None) is not None
+                    and project is not None and not getattr(project, "timelines", None)
+                    and path and is_image(path))
+
+    def _save_photo_grade(self) -> bool:
+        """Adopt the adjacent project after a successful save of the live photo."""
+        from src.shared.project.save_router import SaveContext
+
+        if self.edit_project_io.has_pending_archive_write():
+            return False
+        if not self.save_router.save_with_context(SaveContext.LIBRARY_SINGLE):
+            return False
+        path = self.save_router.get_current_project_path()
+        if not path:
+            return False
+        if self._current_edit_project_filepath != path:
+            self._current_edit_project_filepath = path
+            self._sync_mg_preset_project_root(path)
+        self._clear_all_dirty_states()
+        return True
+
+    def _on_image_grade_saved(self, source_path: str) -> None:
+        library = getattr(self, "library_panel", None)
+        if library is not None:
+            library.invalidate_image_grade_badge(source_path)
+
+    def _perform_debounced_save(self) -> None:
+        if getattr(self, "_confirming_photo_close", False):
+            return
+        if not self._has_grade_set_photo():
+            self.save_router.save()
+            return
+        if not self.edit_project_dirty:
+            return
+        if self.edit_project_io.has_pending_archive_write():
+            timer = getattr(self, "_autosave_router_timer", None)
+            if timer is not None:
+                timer.start()
+            return
+        path = self.save_router.get_current_project_path()
+        if path:
+            self._save_image_project_as(
+                path, self._get_edit_ui_state(), self._get_timeline_sequences(), autosave=True)
 
     # ------------------------------------------------------------------
     # Backup / Auto-save / Periodic save
@@ -1251,6 +1336,9 @@ class FileOpsMixin:
         跳过无变化的周期；Library 单素材模式（无 edit 工程）保持旧行为。
         """
         if not ((self.current_file_path or self._current_edit_project_filepath) and self.engine):
+            return
+        if self._has_grade_set_photo():
+            self._perform_debounced_save()
             return
         if getattr(self, '_current_edit_project', None) is not None:
             has_dirty = any(
@@ -1464,20 +1552,22 @@ class FileOpsMixin:
             return None
 
         # Get UI state from panels
+        timeline_panel = getattr(self, "timeline_panel", None)
+        media_pool_panel = getattr(self, "media_pool_panel", None)
         ui_state = UIState(
             active_timeline_id=self._current_edit_project.active_timeline_id,
-            playhead_frame=self.timeline_panel.get_playhead_frame() if hasattr(self.timeline_panel, 'get_playhead_frame') else 0,
-            zoom_level=self.timeline_panel.get_zoom_level() if hasattr(self.timeline_panel, 'get_zoom_level') else 1.0,
+            playhead_frame=timeline_panel.get_playhead_frame() if hasattr(timeline_panel, 'get_playhead_frame') else 0,
+            zoom_level=timeline_panel.get_zoom_level() if hasattr(timeline_panel, 'get_zoom_level') else 1.0,
             scroll_position=0,
-            selected_clip_ids=self.timeline_panel.get_selected_clip_ids() if hasattr(self.timeline_panel, 'get_selected_clip_ids') else [],
-            selected_track_ids=self.timeline_panel.get_selected_track_ids() if hasattr(self.timeline_panel, 'get_selected_track_ids') else [],
-            expanded_bins=self.media_pool_panel.get_expanded_bins() if hasattr(self.media_pool_panel, 'get_expanded_bins') else [],
-            view_mode=self.media_pool_panel.get_view_mode().name.lower() if hasattr(self.media_pool_panel, 'get_view_mode') else "list",
+            selected_clip_ids=timeline_panel.get_selected_clip_ids() if hasattr(timeline_panel, 'get_selected_clip_ids') else [],
+            selected_track_ids=timeline_panel.get_selected_track_ids() if hasattr(timeline_panel, 'get_selected_track_ids') else [],
+            expanded_bins=media_pool_panel.get_expanded_bins() if hasattr(media_pool_panel, 'get_expanded_bins') else [],
+            view_mode=media_pool_panel.get_view_mode().name.lower() if hasattr(media_pool_panel, 'get_view_mode') else "list",
         )
         # SUB-P1-06: capture per-timeline layout (track heights/scroll/area
         # ratios) so reopening the project restores the arrangement.
         try:
-            view = getattr(self.timeline_panel, 'timeline_view', None)
+            view = getattr(timeline_panel, 'timeline_view', None)
             if view is not None and getattr(view, '_timeline', None) is not None:
                 ui_state.timeline_layout = view.layout_state()
         except Exception:
@@ -1485,7 +1575,7 @@ class FileOpsMixin:
         # W07（接线计划 §6）：时间线展示偏好（缩略图/波形/zoom preset 与
         # 自定义 ppf+scroll/Position Lock/Tray/源目的轨 UI 路由）。
         try:
-            export = getattr(self.timeline_panel, 'export_presentation_state', None)
+            export = getattr(timeline_panel, 'export_presentation_state', None)
             if callable(export):
                 presentation = export()
                 if presentation:
@@ -1543,6 +1633,7 @@ class FileOpsMixin:
             "get_current_color_session": lambda: self._color_session_manager.get_current_session(),
             # P0-4: EditProject 更新回调（保持内存数据一致性）
             "on_edit_project_updated": self._on_edit_project_updated_from_save_router,
+            "on_image_grade_saved": self._on_image_grade_saved,
             # P0-4: Composite ID 创建回调（绑定闭环）
             "on_composite_id_created": self._on_composite_id_created,
         })
@@ -4587,10 +4678,10 @@ class FileOpsMixin:
         self._current_timeline_sequences = timeline_sequences or {}
         self.save_router.set_project_path(filepath)
         self._clear_all_dirty_states()
-        if hasattr(self, "media_pool_panel"):
-            self.media_pool_panel.set_project(project)
-        if hasattr(self, "timeline_panel"):
-            self.timeline_panel.set_project(project)
+        for panel in (getattr(self, "media_pool_panel", None),
+                      getattr(self, "timeline_panel", None)):
+            if panel is not None:
+                panel.set_project(project)
 
         # P2-13: 内容 schema 迁移提示
         self._report_content_migrations()
@@ -4611,6 +4702,23 @@ class FileOpsMixin:
         if project_mode is None:
             # Unreadable manifest — let the normal load path surface the error.
             return True
+        from src.shared.feature_flags import get_product_mode
+        if get_product_mode() != "studio":
+            # Standalone launchers have fixed feature sets; their synthetic
+            # default work_mode='video' does not describe image capability.
+            supported = (bool(getattr(self, "_color_available", True))
+                         if project_mode == "standalone_image"
+                         else bool(getattr(self, "_edit_available", False)))
+            if supported:
+                return True
+            QMessageBox.information(
+                None,
+                I18N.tr("project.unsupported_product.title", "Project unavailable in this product"),
+                I18N.tr("project.unsupported_product.message",
+                        "This project requires a workspace that is not available in this product. "
+                        "Open it with a Topos product that supports this project type."),
+            )
+            return False
         # standalone_image → image workflow; everything else needs Edit/timeline.
         expected = "image" if project_mode == "standalone_image" else "video"
         current = self._get_work_mode()
@@ -4854,35 +4962,50 @@ class FileOpsMixin:
         # 条件 save_router.save()，把用户刚丢弃的脏状态写回主工程文件，
         # 「不保存并关闭」的语义失效。
         self._user_discarded_changes = False
+        photo = FileOpsMixin._has_grade_set_photo(self)
+        if photo and self.edit_project_io.has_pending_archive_write():
+            self.status_bar.showMessage(
+                I18N.tr("status.wait_for_image_save", "Wait for the image project to finish saving."), 4000)
+            return False
         if not self._has_unsaved_changes():
             return True
-        reply = QMessageBox.question(
-            self,
-            I18N.tr("dialog.unsaved_changes", "Unsaved Changes"),
-            I18N.tr(
-                "dialog.unsaved_changes_close_message",
-                "The project has unsaved changes.\nDo you want to save before closing?"
-            ),
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-        )
-        if reply == QMessageBox.StandardButton.Save:
-            try:
-                self.save_file()
-            except Exception as e:
-                logger.error(f"Save before close failed: {e}")
-                # If save failed, let the user decide again rather than
-                # silently discarding.
+        timer = getattr(self, "_autosave_router_timer", None) if photo else None
+        remaining = timer.remainingTime() if timer is not None else -1
+        if remaining >= 0:
+            timer.stop()
+        self._confirming_photo_close = photo
+        proceed = False
+        try:
+            reply = QMessageBox.question(
+                self,
+                I18N.tr("dialog.unsaved_changes", "Unsaved Changes"),
+                I18N.tr(
+                    "dialog.unsaved_changes_close_message",
+                    "The project has unsaved changes.\nDo you want to save before closing?"
+                ),
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if photo and self.edit_project_io.has_pending_archive_write():
+                self.status_bar.showMessage(
+                    I18N.tr("status.wait_for_image_save", "Wait for the image project to finish saving."), 4000)
                 return False
-            # If still unsaved after the save attempt (e.g. user cancelled
-            # the "save as" dialog), abort the close.
-            return not self._has_unsaved_changes()
-        if reply == QMessageBox.StandardButton.Discard:
-            # 用户明确丢弃未保存修改：关闭流程不得再把它们写回主工程。
-            self._user_discarded_changes = True
-            return True
-        return False  # Cancel
+            if reply == QMessageBox.StandardButton.Save:
+                try:
+                    self.save_file()
+                except Exception:
+                    logger.exception("Save before close failed")
+                else:
+                    proceed = not self._has_unsaved_changes()
+            elif reply == QMessageBox.StandardButton.Discard:
+                self._user_discarded_changes = True
+                proceed = True
+            return proceed
+        finally:
+            self._confirming_photo_close = False
+            if not proceed and remaining >= 0:
+                timer.start(max(1, remaining))
 
     # ------------------------------------------------------------------
     # Quick Project
@@ -5381,6 +5504,9 @@ class FileOpsMixin:
 
         # 加载视频
         if self.video_controller.load_video(path):
+            grade_set_panel = getattr(self, "grade_set_panel", None)
+            if grade_set_panel is not None:
+                grade_set_panel.set_active_path(None)
             self.engine.set_video_stabilization_state({})
             service = getattr(self, 'stabilization_service', None)
             if service is not None:
@@ -7814,6 +7940,13 @@ class FileOpsMixin:
     def dropEvent(self, event) -> None:
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         if files:
+            from src.shared.media.format_registry import is_image
+
+            if (getattr(self, "grade_set_model", None) is not None
+                    and self.current_page == "Color" and all(is_image(path) for path in files)):
+                if self.canvas._accept_photo_copy(event):
+                    self._open_grade_set_drop(files)
+                return
             # AUD-2801: 拖入文件此前一律走 load_image——视频被塞进图像
             # 加载路径（解不出帧 → 误导性"找不到文件"错误框），非媒体
             # 文件同样误报。统一改走 _open_media_path 路由，与菜单
@@ -7838,12 +7971,19 @@ class FileOpsMixin:
 
     def _trigger_autosave(self) -> None:
         """通过 SaveRouter 触发延迟自动保存（2s 去抖）。"""
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if (uses_image_layer_workflow(getattr(self, "config_manager", None))
+                and getattr(self, "_current_edit_project", None) is not None
+                and getattr(getattr(self, "engine", None), "img_full_original", None) is not None):
+            # Mark the mutation immediately: switching files can happen before
+            # the debounce timer captures the current grade into the document.
+            self.edit_project_dirty = True
         if not self.current_file_path and not self._current_edit_project_filepath:
             return
         if not hasattr(self, '_autosave_router_timer'):
             self._autosave_router_timer = QTimer(self)
             self._autosave_router_timer.setSingleShot(True)
-            self._autosave_router_timer.timeout.connect(lambda: self.save_router.save())
+            self._autosave_router_timer.timeout.connect(self._perform_debounced_save)
         self._autosave_router_timer.start(2000)
 
     # ------------------------------------------------------------------

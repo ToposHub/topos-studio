@@ -40,7 +40,7 @@ Topos 用**同一份代码库**产出四个产品。裁剪发生在三层，各�
 
 `work_mode` 只在 studio 产品生效（`get_work_mode`，src/shared/feature_flags.py:200-218）：
 
-- `image`：`WORK_MODE_FEATURE_OVERRIDES` 强制 `edit=False`（:130-135），隐藏 Library/Image Batch Export 面板的工作模式过滤（`PanelDescriptor.work_mode`）。
+- `image`：`WORK_MODE_FEATURE_OVERRIDES` 默认关闭 Edit、Mixer 和视频 Composite；Color 使用调色图层，Deliver 仅显示图片 Batch Export。`PanelDescriptor.work_mode` 同时过滤 Window → Panels 与工作区面板入口，旧 Qt 布局恢复后再次强制隐藏不适用的工具。显式开发环境 feature override 仍遵循既有优先级。
 - `video`（默认）：时间线驱动，Edit 页可用；图片 Library 与图片批量导出 dock 被 `_enforce_page_dock_visibility` 强制隐藏（dock_layout_controller.py:2894-2905）。
 - 布局持久化按 `get_effective_layout_mode()` 分桶（`studio_image` / `studio_video`，:221-232），两种工作模式的页面布局互不覆盖。
 

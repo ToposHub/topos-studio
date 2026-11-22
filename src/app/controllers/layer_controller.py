@@ -60,7 +60,7 @@ from PyQt6.QtWidgets import QMessageBox, QGraphicsScene
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 
 from src.features.color.core.layer import (
-    DEFAULT_EXTENDED_GRADING_PARAMS, MaskShape, MaskGroup,
+    DEFAULT_EXTENDED_GRADING_PARAMS, Layer, MaskShape, MaskGroup,
 )
 
 
@@ -250,6 +250,11 @@ class LayerOpsMixin:
         if self.engine.img_full_original is not None:
              h, w = self.engine.img_full_original.shape[:2]
              self.info_panel.update_metadata({"Resolution": f"{w} x {h}"})
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+            resources = getattr(self, "color_resource_controller", None)
+            if resources is not None:
+                resources.refresh_target()
 
     def on_layer_selected(self, index) -> None:
         """图层面板选中变化：切换引擎激活层并回填所有面板与画布。"""
@@ -290,6 +295,40 @@ class LayerOpsMixin:
         self.engine.add_layer()
         self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
         self.on_layer_selected(self.engine.active_layer_index)
+        self._trigger_autosave()
+
+    def _apply_grade_set_layers(self, layers: list[Layer], active_index: int) -> None:
+        """Add the clipboard grade above the target's own layers in one undo step."""
+        engine = self.engine
+        self._cancel_warper_gestures()
+        self._push_layer_history()
+        target_size = len(engine.layers)
+        engine.replace_grade_layers([*engine.layers, *layers])
+        engine.active_layer_index = target_size + min(max(active_index, 0), len(layers) - 1)
+        self.layer_panel.update_layers(engine.layers, engine.active_layer_index)
+        self.on_layer_selected(engine.active_layer_index)
+        self.canvas.update_mask_overlay(engine.get_active_layer())
+        self.update_undo_redo_actions()
+        self.request_render()
+        self._trigger_autosave()
+
+    def on_layer_blend_mode_changed(self, mode: str) -> None:
+        """Persist an undoable blend-mode change on the active image layer."""
+        layer = self.engine.get_active_layer()
+        if layer is None or mode not in layer.BLEND_MODES or layer.blend_mode == mode:
+            return
+        self._push_layer_history()
+        self.engine.set_layer_blend_mode(mode)
+        self._trigger_autosave()
+
+    def on_layer_opacity_changed(self, opacity: float) -> None:
+        """Slider drags share their initial snapshot; discrete edits get one."""
+        layer = self.engine.get_active_layer()
+        if layer is None or layer.opacity == opacity:
+            return
+        if not self.layer_panel.opacity_slider.isSliderDown():
+            self._push_layer_history()
+        self.engine.set_layer_opacity(opacity)
         self._trigger_autosave()
 
     def on_layer_removed(self, index) -> None:
@@ -352,6 +391,8 @@ class LayerOpsMixin:
         """将剪贴板中的图层参数粘贴到当前图层。"""
         if index is None:
             index = self.engine.active_layer_index
+        if self.engine.can_paste_layer(index):
+            self._push_layer_history()
         if self.engine.paste_layer(index):
             self.status_bar.showMessage(f"已粘贴图层参数到 '{self.engine.layers[index].name}'", 2000)
             self.update_from_layer(self.engine.get_active_layer())
@@ -366,6 +407,8 @@ class LayerOpsMixin:
         """复制当前图层并创建新图层。"""
         if index is None:
             index = self.engine.active_layer_index
+        if 0 <= index < len(self.engine.layers):
+            self._push_layer_history()
         new_layer = self.engine.duplicate_layer(index)
         if new_layer:
             self.status_bar.showMessage(f"已复制图层为 '{new_layer.name}'", 2000)
@@ -3437,6 +3480,9 @@ class LayerOpsMixin:
         self._push_layer_history()
         self.engine.discard_changes(); self.request_render(); self.update_from_layer(self.engine.get_active_layer())
         self.raw_panel.reset_all()
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+            self._trigger_autosave()
 
     def on_reset_all_click(self) -> None:
         """Reset All 按钮：可选确认后重置全部图层、翻转与 RAW。"""
@@ -3457,6 +3503,9 @@ class LayerOpsMixin:
             self.request_render()
             self.update_from_layer(self.engine.get_active_layer())
             self.status_bar.showMessage("All layers reset.", 3000)
+            from src.shared.feature_flags import uses_image_layer_workflow
+            if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+                self._trigger_autosave()
 
     def on_layer_reset(self, index) -> None:
         """重置指定图层参数（先压栈保证可撤销，含关键帧轨道清空）。"""
@@ -3475,6 +3524,9 @@ class LayerOpsMixin:
                 self.update_from_layer(self.engine.layers[index])
             self.request_render()
             self.status_bar.showMessage(f"Layer '{self.engine.layers[index].name}' reset.", 3000)
+            from src.shared.feature_flags import uses_image_layer_workflow
+            if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+                self._trigger_autosave()
 
     def _edit_undo_redo_target(self, want_redo: bool = False):
         """E11: Edit 页激活时返回应驱动的时间线/媒体池命令栈持有者。
@@ -3645,6 +3697,9 @@ class LayerOpsMixin:
         # restored snapshot to the clip so Edit/export/save see the same frame.
         if stabilizer is not None:
             self._commit_stabilizer_change()
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(getattr(self, "config_manager", None)):
+            self._trigger_autosave()
 
     def on_color_picked(self, h, s, v, first) -> None:
         """画布取色器拾色：把 HSV 值交给 qualifier 面板（拖拽加色逻辑）。

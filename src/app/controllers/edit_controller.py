@@ -8883,6 +8883,11 @@ class EditControllerMixin:
             )
             return
 
+        grade_set_photo = getattr(self, "_has_grade_set_photo", None)
+        if callable(grade_set_photo) and grade_set_photo():
+            self.save_file()
+            return
+
         # Unsaved project → redirect to save-as so user picks name + location
         if not self._current_edit_project_filepath:
             self._save_current_project_as()
@@ -8891,15 +8896,18 @@ class EditControllerMixin:
         # P0-02：保存前显示音频路由图可定位错误（不阻断保存）
         self._warn_audio_routing_errors_on_save()
 
-        # 使用 SaveRouter 统一保存
-        # 临时切换到 Edit 页面以触发正确的路由
+        # Image close-time saves must capture the live engine layers through
+        # Color's route; Edit's route only persists the existing project model.
+        from src.shared.project.document_mode import infer_project_mode
+
         original_page = self.current_page
-        self.current_page = "Edit"
-
-        success = self.save_router.save()
-
-        # 恢复原始页面
-        self.current_page = original_page
+        self.current_page = ("Color" if infer_project_mode(
+            self._current_edit_project, work_mode=self._get_work_mode()) == "standalone_image"
+            else "Edit")
+        try:
+            success = self.save_router.save()
+        finally:
+            self.current_page = original_page
 
         if success:
             # Reset dirty flag and update window title
@@ -8937,11 +8945,13 @@ class EditControllerMixin:
 
         # Generate default filename from project name
         default_filename = self._current_edit_project.name + EDIT_PROJECT_EXTENSION
+        photo_path = (self.save_router.get_current_project_path()
+                      if getattr(self, "grade_set_model", None) is not None else None)
 
         filepath, _ = QFileDialog.getSaveFileName(
             self,
             I18N.tr("action.save_project_as", "Save Project As..."),
-            os.path.join(last_path, default_filename),
+            photo_path or os.path.join(last_path, default_filename),
             f"Topos Projects (*{EDIT_PROJECT_EXTENSION});;All Files (*)"
         )
 
@@ -8958,16 +8968,19 @@ class EditControllerMixin:
             timeline_sequences = self._get_timeline_sequences()
 
             # Save project
+            from src.shared.project.document_mode import infer_project_mode
+
+            project_mode = infer_project_mode(
+                self._current_edit_project, work_mode=self._get_work_mode())
+            if project_mode == "standalone_image":
+                self._save_image_project_as(filepath, ui_state, timeline_sequences)
+                return
             success = self.edit_project_io.save_project_as(
                 filepath,
                 self._current_edit_project,
                 ui_state,
                 timeline_sequences,
-                force_project_mode=(
-                    "edit_project"
-                    if self._get_work_mode() == "video"
-                    else "standalone_image"
-                ),
+                force_project_mode=project_mode,
             )
 
             if success:
@@ -8999,11 +9012,142 @@ class EditControllerMixin:
                     I18N.tr("error.save_project", "Failed to save project.")
                 )
 
+    def _save_image_project_as(self, filepath: str, ui_state: Any,
+                               timeline_sequences: dict[str, Any] | None, *,
+                               autosave: bool = False) -> None:
+        """Snapshot image layers now; adopt the path only after the write succeeds."""
+        project = self._current_edit_project
+        previous_path = self._current_edit_project_filepath
+        source_path = getattr(self, "current_file_path", None)
+        manager = getattr(self, "_color_session_manager", None)
+        session = manager.get_current_session() if manager is not None else None
+        stack_id = getattr(session, "color_stack_id", None)
+        if stack_id not in project.color_stacks:
+            stack_id = next(iter(project.color_stacks), None)
+        stack = project.color_stacks.get(stack_id)
+        asset_id = getattr(stack, "asset_id", None)
+
+        def capture(document: Any) -> Any:
+            return self.save_router.snapshot_color_project(
+                document, self.engine, asset_id=asset_id, stack_id=stack_id)
+
+        def grade_state(document: Any) -> dict[str, Any]:
+            payload = dict(document.color_stacks[stack_id].to_dict())
+            payload.pop("modified_at", None)
+            payload.pop("created_at", None)
+            return payload
+
+        try:
+            snapshot = capture(project)
+            saved_grade = grade_state(snapshot)
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            logger.exception("Image Save As snapshot failed")
+            QMessageBox.critical(self, I18N.tr("error.title", "Error"), str(exc))
+            return
+
+        io = self.edit_project_io
+
+        def disconnect() -> None:
+            for signal, callback in ((io.project_saved, completed),
+                                     (io.manual_save_failed, failed)):
+                try:
+                    signal.disconnect(callback)
+                except (TypeError, RuntimeError):
+                    pass  # The IO object may already be closing.
+
+        def still_current() -> bool:
+            if isinstance(self, QObject):
+                from PyQt6 import sip
+                if sip.isdeleted(self):
+                    return False
+            current = getattr(self, "_current_edit_project", None)
+            return (current is not None and current.project_id == project.project_id
+                    and self._current_edit_project_filepath in (previous_path, filepath))
+
+        def completed(saved_path: str) -> None:
+            if saved_path != filepath:
+                return
+            disconnect()
+            if not still_current():
+                return
+            notify = getattr(self, "_on_image_grade_saved", None)
+            if source_path and callable(notify):
+                notify(source_path)
+            # The user may keep grading while the archive worker runs. Preserve
+            # that newer live state and leave it dirty rather than reverting it
+            # to the older snapshot that was just written.
+            try:
+                model_unchanged = self._current_edit_project is project
+                current_snapshot = capture(self._current_edit_project)
+                unchanged = model_unchanged and grade_state(current_snapshot) == saved_grade
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                logger.exception("Image state changed incompatibly during Save As")
+                self.status_bar.showMessage(str(exc), 5000)
+                return
+            self._current_edit_project = current_snapshot
+            self._current_edit_project_filepath = filepath
+            self.save_router.set_project_path(filepath)
+            if previous_path != filepath:
+                self._sync_mg_preset_project_root(filepath)
+            if unchanged:
+                self._clear_all_dirty_states()
+            else:
+                self.edit_project_dirty = True
+            self.setWindowTitle(f"Topos - {current_snapshot.name}" + ("" if unchanged else " *"))
+            if not autosave:
+                self._add_to_recent_projects(filepath)
+                self.config_manager.set("last_project_path", os.path.dirname(filepath))
+                self.config_manager.save_config()
+                self.status_bar.showMessage(
+                    I18N.tr("status.edit_project_saved_as", f"Project saved: {os.path.basename(filepath)}"), 3000)
+
+        def failed(saved_path: str, message: str) -> None:
+            if saved_path != filepath:
+                return
+            disconnect()
+            if still_current():
+                self.status_bar.showMessage(message, 5000)
+
+        io.project_saved.connect(completed, Qt.ConnectionType.QueuedConnection)
+        io.manual_save_failed.connect(failed, Qt.ConnectionType.QueuedConnection)
+        accepted = io.save_project_as(
+            filepath, snapshot, ui_state, timeline_sequences,
+            force_project_mode="standalone_image")
+        if not accepted:
+            disconnect()
+            self.status_bar.showMessage(
+                I18N.tr("error.save_project", "Failed to save project."), 5000)
+
     def _close_current_project(self) -> bool:
         """Close the active project through the unified lifecycle."""
         if self._current_edit_project is None:
             return True
 
+        from src.shared.project.document_mode import infer_project_mode
+
+        standalone_image = infer_project_mode(self._current_edit_project) == "standalone_image"
+        project_io = getattr(self, "edit_project_io", None)
+        has_pending_write = getattr(project_io, "has_pending_archive_write", None)
+
+        def waiting_for_image_save() -> bool:
+            if not standalone_image or not callable(has_pending_write) or not has_pending_write():
+                return False
+            self.status_bar.showMessage(
+                I18N.tr("status.wait_for_image_save", "Wait for the image project to finish saving."), 4000)
+            return True
+
+        if waiting_for_image_save():
+            return False
+
+        grade_set_panel = getattr(self, "grade_set_panel", None)
+        autosave = getattr(self, "_autosave_router_timer", None) if grade_set_panel is not None else None
+        remaining_ms = autosave.remainingTime() if autosave is not None else -1
+        if remaining_ms >= 0:
+            # A modal confirmation pumps the Qt event loop. A pending photo
+            # autosave must wait for the Save/Discard/Cancel decision.
+            autosave.stop()
+        proceed = True
+        discarded = False
         if self._has_unsaved_changes():
             reply = QMessageBox.question(
                 self,
@@ -9018,10 +9162,27 @@ class EditControllerMixin:
             )
             if reply == QMessageBox.StandardButton.Save:
                 self._save_current_project()
-                if self._has_unsaved_changes():
-                    return False
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return False
+                proceed = not self._has_unsaved_changes()
+            else:
+                proceed = discarded = reply == QMessageBox.StandardButton.Discard
+        # The modal question can run a queued recovery write before it exits.
+        if not proceed or waiting_for_image_save():
+            if remaining_ms >= 0:
+                autosave.start(max(1, remaining_ms))
+            return False
+        if discarded and grade_set_panel is not None:
+            current_photo = getattr(self, "current_file_path", None)
+            if current_photo:
+                grade_set_panel.invalidate_graded_thumbnail(current_photo)
+        if standalone_image:
+            from src.shared.color.lut_resource_registry import get_lut_resource_session
+            from src.shared.project.resource_resolver import set_active_project_resolver
+
+            history = getattr(getattr(self, "engine", None), "history", None)
+            if history is not None:
+                history.clear()
+            set_active_project_resolver(None)
+            get_lut_resource_session().reset()
 
         # Stop source playback without routing another save after the project
         # reference is cleared.  This is important when closing a timeline
@@ -9085,6 +9246,8 @@ class EditControllerMixin:
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
+        if grade_set_panel is not None:
+            grade_set_panel.set_active_path(None)
         finish_recordings = getattr(self, "_finish_mixer_timeline_recordings", None)
         if callable(finish_recordings):
             finish_recordings()
@@ -9104,9 +9267,16 @@ class EditControllerMixin:
         self._sync_mg_preset_project_root(None)
 
         # Clear panels
-        self.media_pool_panel.clear_project()
-        clear_timeline = getattr(self.timeline_panel, "clear_project", self.timeline_panel.clear)
-        clear_timeline()
+        media_pool_panel = getattr(self, "media_pool_panel", None)
+        if media_pool_panel is not None:
+            media_pool_panel.clear_project()
+        timeline_panel = getattr(self, "timeline_panel", None)
+        if timeline_panel is not None:
+            clear_timeline = getattr(timeline_panel, "clear_project", None)
+            if not callable(clear_timeline):
+                clear_timeline = getattr(timeline_panel, "clear", None)
+            if callable(clear_timeline):
+                clear_timeline()
         edit_page = getattr(self, "edit_page", None)
         if edit_page is not None:
             edit_page.set_timeline(None)

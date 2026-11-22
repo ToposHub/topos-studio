@@ -130,8 +130,8 @@ DEFAULT_PRODUCT_MODE = "studio"
 # "studio"; other launchers ignore it. There is no "full" mode — every studio
 # user picks exactly one workflow, which keeps the UI focused and the codebase
 # free of three-way branches.
-#   "image" — image grading: hide the Edit page; the Composite page keeps its
-#             node effects but disables keyframe/animation inputs.
+#   "image" — image grading: layer-based Color and image batch export;
+#             Edit, Mixer and video Composite pages are hidden.
 #   "video" — video grading: timeline-driven workflows; all features on.
 #             (default — video grading is the richer workflow and the typical
 #             entry point for new users.)
@@ -139,13 +139,13 @@ WORK_MODES: tuple[str, ...] = ("image", "video")
 DEFAULT_WORK_MODE = "video"
 
 # Work-mode feature overrides applied on top of the product-mode preset. Only
-# effective for studio; only edit is toggled here (composite stays on so users
-# can still build static effects on an image). TOPOS_FEATURE_* env vars still
+# effective for studio. TOPOS_FEATURE_* env vars still
 # win over this (see load_feature_flags Step 7).
 WORK_MODE_FEATURE_OVERRIDES: dict[str, dict[str, bool]] = {
     "image": {
         "edit": False,
         "mixer": False,
+        "composite": False,
     },
     "video": {},
 }
@@ -265,6 +265,21 @@ def get_effective_layout_mode(config: Any = None) -> str:
         return product
     work_mode = get_work_mode(config)
     return f"{product}_{work_mode}"
+
+
+def uses_image_layer_workflow(config: Any = None) -> bool:
+    """Select the still-image layer UI without changing product flag semantics.
+
+    The standalone Color product has no Edit timeline. Studio explicitly
+    selects image/video; the video workflow keeps its node editor.
+    """
+    product = get_product_mode()
+    return product == "color" or (product == "studio" and get_work_mode(config) == "image")
+
+
+def get_workspace_work_mode(config: Any = None) -> str:
+    """Resolve the UI workflow, including the image-only Color launcher."""
+    return "image" if uses_image_layer_workflow(config) else get_work_mode(config)
 
 
 

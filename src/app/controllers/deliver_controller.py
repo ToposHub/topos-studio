@@ -1172,8 +1172,8 @@ class DeliverControllerMixin:
         timeline_info = self._build_timeline_info()
         # Work mode drives the default export tab so the dialog opens on the
         # tab that matches the active workflow, regardless of the current page.
-        from src.shared.feature_flags import get_work_mode
-        work_mode = get_work_mode(self.config_manager)
+        from src.shared.feature_flags import get_workspace_work_mode
+        work_mode = get_workspace_work_mode(self.config_manager)
         if work_mode == "image":
             initial_export_type = QuickExportDialog.EXPORT_IMAGE
         else:  # video (default)
@@ -1233,7 +1233,10 @@ class DeliverControllerMixin:
 
     def _goto_deliver_page(self) -> bool:
         """切到 Deliver 页；页面不可用时给状态提示并返回 False。"""
-        if getattr(self, "_deliver_available", False) and self.deliver_page is not None:
+        from src.shared.feature_flags import uses_image_layer_workflow
+        image_batch = (uses_image_layer_workflow(getattr(self, "config_manager", None))
+                       and getattr(self, "dock_export", None) is not None)
+        if getattr(self, "_deliver_available", False) and (self.deliver_page is not None or image_batch):
             self.switch_to_page("Deliver")
             return True
         self.status_bar.showMessage("Deliver 页不可用", 5000)

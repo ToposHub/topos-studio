@@ -1,0 +1,59 @@
+{
+  "plugin_id": "apps.topos_word",
+  "display_name": "Topos Word",
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "host_api": [
+    1,
+    1
+  ],
+  "author": "Topos",
+  "description": "文档编辑器；DOC/RTF 转换后打开，编辑结果需另存为 DOCX 等格式。",
+  "category": "独立应用",
+  "source": "local_app",
+  "capabilities": [
+    {
+      "capability_id": "open",
+      "kind": "command",
+      "title": "打开文件",
+      "selection_mode": "single",
+      "run_location": "process",
+      "write_semantics": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "description": "Protocol v1 ready/opened/dirty/saved/exported/error/closed events"
+      }
+    }
+  ],
+  "metadata": {
+    "independent_app": {
+      "protocol": 1,
+      "entrypoint": "main.py",
+      "extensions": [
+        ".docx",
+        ".doc",
+        ".rtf",
+        ".md",
+        ".html",
+        ".htm",
+        ".txt"
+      ],
+      "required_modules": {
+        "PyQt6": "PyQt6",
+        "docx": "python-docx"
+      },
+      "format_modules": {}
+    }
+  }
+}

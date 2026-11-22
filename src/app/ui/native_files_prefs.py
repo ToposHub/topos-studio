@@ -137,6 +137,28 @@ class NativeFilesPreferences:
     def plugin_shortcuts(self, values: dict[str, str]) -> None:
         self._write("plugin_shortcuts", dict(values))
 
+    @property
+    def app_trust(self) -> dict[str, Any]:
+        """Explicit local application grants, bound to directory and contents."""
+        raw = self._read("app_trust", {})
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    @app_trust.setter
+    def app_trust(self, values: dict[str, Any]) -> None:
+        self._write("app_trust", dict(values))
+
+    @property
+    def app_default_handlers(self) -> dict[str, str]:
+        raw = self._read("app_default_handlers", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {key: value for key, value in raw.items()
+                if isinstance(key, str) and isinstance(value, str)}
+
+    @app_default_handlers.setter
+    def app_default_handlers(self, values: dict[str, str]) -> None:
+        self._write("app_default_handlers", dict(values))
+
     def remember_search(self, term: str) -> None:
         text = str(term or "").strip()
         if not text:

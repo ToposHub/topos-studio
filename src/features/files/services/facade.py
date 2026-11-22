@@ -443,6 +443,15 @@ class FilesFacade:
 
     # ------------------------------------------------------------ 扫描/任务/元数据
 
+    def refresh_external_paths(self, paths: list[str], *, request_id: str,
+                               listener: Listener) -> None:
+        """Refresh a frozen external-save selection on the bounded worker."""
+        selection = list(paths) if isinstance(paths, list) else paths
+        self._submit(
+            key=f"external-refresh:{request_id}", request_id=request_id,
+            work=lambda: self.scan.refresh_external_paths(selection),
+            listener=listener, wrap=lambda result: result)
+
     def scan_library(self, library_id: str, *, request_id: str,
                      listener: Listener) -> None:
         self._submit(

@@ -238,6 +238,7 @@ class ImageEngine(QObject, WindowRasterizer):
             return False
     
     frame_ready = pyqtSignal(int)
+    grade_set_preview_ready = pyqtSignal(int, object)
     scope_snapshot_ready = pyqtSignal(object)
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     error_occurred = pyqtSignal(str)
@@ -717,6 +718,7 @@ class ImageEngine(QObject, WindowRasterizer):
         if self.renderer is None:
             self.renderer = AsyncRenderer(main_context)
             self.renderer.frame_ready.connect(self.frame_ready.emit)
+            self.renderer.grade_set_preview_ready.connect(self.grade_set_preview_ready.emit)
             self.renderer.scope_snapshot_ready.connect(self.scope_snapshot_ready.emit)
             # GPU scope: forward the descriptor frame only; no pixel data.
             if hasattr(self.renderer, 'gpu_scope_ready'):
@@ -749,6 +751,15 @@ class ImageEngine(QObject, WindowRasterizer):
         if not self.scope_snapshots_enabled or self.renderer is None:
             return
         self.renderer.submit(RenderCommand.RENDER_SCOPE, {'max_dim': max(1, int(max_dim))})
+
+    def request_grade_set_preview(self) -> None:
+        """Request a coalesced preview of the current still source."""
+        if self.renderer is not None and self.img_full_original is not None and not self._is_video_mode:
+            self.renderer.submit(RenderCommand.RENDER_SCOPE, {"grade_set_source_epoch": self._source_epoch})
+
+    @property
+    def source_epoch(self) -> int:
+        return self._source_epoch
 
     def request_gpu_scope(self, demand) -> None:
         """Queue a native GPU scope pass for ``ScopeDemand``.
@@ -1402,6 +1413,10 @@ class ImageEngine(QObject, WindowRasterizer):
         else:
             logger.info(f"copy layer: invalid index {index}")
 
+    def can_paste_layer(self, target_index: int) -> bool:
+        """Report whether a layer paste can mutate the requested target."""
+        return self._clipboard_layer is not None and 0 <= target_index < len(self.layers)
+
     def paste_layer(self, target_index: int):
         """将剪贴板中的图层参数粘贴到指定图层。
         
@@ -1684,6 +1699,16 @@ class ImageEngine(QObject, WindowRasterizer):
                     'size': (w, h),
                     'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
+
+    def replace_grade_layers(self, layers: list[Layer]) -> None:
+        """Replace the stack and rebuild its render-thread resource bindings."""
+        if self.renderer:
+            incoming = {layer.id for layer in layers}
+            for previous in self.layers:
+                if previous.id not in incoming:
+                    self.renderer.submit(RenderCommand.REMOVE_LAYER, previous.id)
+        self.layers = layers
+        self.sync_all_resources()
 
     def apply_curves(self, curves_lut: np.ndarray) -> None:
         """Attach an RGB curves LUT (256x3) to the active layer and preview it.
@@ -3017,6 +3042,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 'film_grain': self._effective_film_grain_params(),
                 'raw_preview': raw_params, # 始终传递参数，由 Shader 统一处理
                 'render_reason': render_reason,
+                'source_epoch': self._source_epoch,
                 # P1-COLOR-13: 全分辨率渲染（导出/应用更改）走降噪最高档
                 'video_denoise_quality_mode': 'export' if is_full_res else None,
                 # Snapshot the renderer's video generation so _do_render can drop
@@ -4386,7 +4412,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # 恢复图层
         layers_data = state.get('layers', [])
         if layers_data:
-            self.layers = HistoryManager.deserialize_layers(layers_data)
+            self.replace_grade_layers(HistoryManager.deserialize_layers(layers_data))
         history = getattr(self, "history", None)
         if history is not None:
             history.restore_extra_state(state)

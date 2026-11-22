@@ -133,6 +133,10 @@ class FilesMetadataService:
                 self._catalog.untag_asset(library_id, path, existing[name])
 
 
+GRADE_SET_SCOPE = "topos:color-grade-sets"
+_DEFAULT_GRADE_SET_KEY = "@topos/default-grade-set"
+
+
 class FilesCollectionsService:
     """集合 CRUD 与成员增删（数据归 catalog.collections）。"""
 
@@ -172,12 +176,26 @@ class FilesCollectionsService:
                 (int(collection_id),)).fetchone()
         return str(row["library_id"]) if row is not None else ""
 
-    def create_collection(self, library_id: str, name: str) -> ServiceResult:
+    def ensure_default_grade_set(self) -> int:
+        return self._catalog.ensure_collection(GRADE_SET_SCOPE, _DEFAULT_GRADE_SET_KEY)
+
+    def _is_default_grade_set(self, collection_id: int) -> bool:
+        return self._catalog.collection_id_for_name(GRADE_SET_SCOPE, _DEFAULT_GRADE_SET_KEY) == collection_id
+
+    @staticmethod
+    def _default_fixed(command_id: str) -> ServiceResult:
+        return rejected(command_id, error_code="DEFAULT_GRADE_SET_FIXED",
+                        message="默认调色集始终可用")
+
+    def create_collection(self, library_id: str, name: str, *,
+                          paths: Iterable[str] = ()) -> ServiceResult:
         if not name.strip():
             return rejected("files.collections.create", error_code="INVALID_NAME",
                             message="集合名不能为空")
+        if library_id == GRADE_SET_SCOPE and name.strip() == _DEFAULT_GRADE_SET_KEY:
+            return self._default_fixed("files.collections.create")
         try:
-            cid = self._catalog.create_collection(library_id, name.strip())
+            cid = self._catalog.create_collection(library_id, name.strip(), paths=paths)
         except Exception as exc:  # UNIQUE 冲突等
             return rejected("files.collections.create", error_code="CONFLICT",
                             message=str(exc))
@@ -207,6 +225,9 @@ class FilesCollectionsService:
         if not clean:
             return rejected("files.collections.rename", error_code="INVALID_NAME",
                             message="集合名不能为空")
+        if (self._is_default_grade_set(collection_id)
+                or clean == _DEFAULT_GRADE_SET_KEY and self.library_of(collection_id) == GRADE_SET_SCOPE):
+            return self._default_fixed("files.collections.rename")
         try:
             changed = self._catalog.rename_collection(collection_id, clean)
         except Exception as exc:  # 同库重名（UNIQUE）等
@@ -230,6 +251,8 @@ class FilesCollectionsService:
                              revision=self._catalog.revision)
 
     def delete_collection(self, collection_id: int) -> ServiceResult:
+        if self._is_default_grade_set(collection_id):
+            return self._default_fixed("files.collections.delete")
         if not self._catalog.delete_collection(collection_id):
             return rejected("files.collections.delete", error_code="NOT_FOUND",
                             message="集合不存在")
@@ -242,6 +265,61 @@ class FilesScanService:
 
     def __init__(self, catalog: FilesCatalog) -> None:
         self._catalog = catalog
+
+    def refresh_external_paths(self, paths: list[str]) -> ServiceResult:
+        """Reindex only files saved by an external application.
+
+        Library membership stays host-owned. Files outside registered libraries
+        are returned for view refresh without registering a library. Existing
+        user metadata and collection membership are never rewritten.
+        """
+        command_id = "files.external.refresh"
+        if (not isinstance(paths, list) or not 1 <= len(paths) <= 128
+                or any(not isinstance(path, str) or not path or "\0" in path
+                       or not os.path.isabs(path) for path in paths)):
+            return rejected(command_id, error_code="INVALID_PATHS",
+                            message="外部保存结果须包含 1–128 个有效的绝对文件路径")
+        items: list[ItemResult] = []
+        for raw in dict.fromkeys(paths):
+            path = nfc(os.path.normpath(raw))
+            try:
+                info = os.lstat(path)
+                if not stat.S_ISREG(info.st_mode):
+                    items.append(ItemResult(
+                        path, ok=False, error_code="NOT_A_FILE",
+                        message="保存结果不是普通文件"))
+                    continue
+                library = self._catalog.library_for_path(path)
+                if library is not None:
+                    # The file may have a different layout/codec after an edit;
+                    # do not preserve technical metadata from the old contents.
+                    technical = dict.fromkeys((
+                        "date_taken", "width", "height", "duration", "codec",
+                        "camera", "lens", "iso", "aperture", "shutter", "focal",
+                        "gps_lat", "gps_lon", "dom_color"))
+                    with self._catalog._write() as cursor:
+                        self._catalog.upsert_asset(
+                            library.library_id, path, size=info.st_size,
+                            mtime=info.st_mtime, indexed_at=time.time(), **technical)
+                        cursor.execute(
+                            "UPDATE assets SET missing = 0 WHERE library_id = ? AND path = ?",
+                            (library.library_id, path))
+                items.append(ItemResult(path, ok=True, result={
+                    "indexed": library is not None,
+                    "library_id": library.library_id if library else ""}))
+            except FileNotFoundError:
+                items.append(ItemResult(path, ok=False, error_code="NOT_FOUND",
+                                        message="保存结果不存在或已被移动"))
+            except PermissionError:
+                items.append(ItemResult(path, ok=False, error_code="PERMISSION",
+                                        message="没有读取保存结果的权限"))
+            except (OSError, CatalogError, sqlite3.Error) as exc:
+                items.append(ItemResult(path, ok=False, error_code="REFRESH_FAILED",
+                                        message=str(exc)))
+        return ServiceResult(
+            command_id=command_id, ok=all(item.ok for item in items),
+            accepted=True, stage="completed", items=tuple(items),
+            revision=self._catalog.revision)
 
     def scan_library(self, library_id: str, *,
                      cancel: CancelToken | None = None,

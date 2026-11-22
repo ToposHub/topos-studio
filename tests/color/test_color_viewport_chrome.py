@@ -139,6 +139,33 @@ def test_header_selector_stays_exactly_centered_without_overlapping_tools(chrome
         assert chrome.options_button.mapTo(toolbar, chrome.options_button.rect().topRight()).x() < toolbar.width()
 
 
+def test_open_photo_name_centers_and_elides_in_viewer_header(chrome, qapp) -> None:
+    toolbar = chrome.toolbar
+    toolbar.set_timeline_choices({"one": SimpleNamespace(name="Timeline 1")}, "one")
+    selector = toolbar._timeline_selector
+    title = chrome.photo_title
+    assert title.isHidden()
+
+    chrome.set_photo_name("树下 <01>.ARW")
+    assert title.text() == "树下 <01>.ARW"
+    assert title.geometry().center().x() == toolbar.rect().center().x()
+    assert selector.isHidden()
+
+    long_name = "Portrait_" + "abcdef" * 12 + ".ARW"
+    chrome.set_photo_name(long_name)
+    toolbar.resize(540, 30)
+    qapp.processEvents()
+    assert not title.isHidden()
+    assert title.text().endswith(".ARW") and "…" in title.text()
+    assert title.toolTip() == long_name
+    assert title.geometry().center().x() == toolbar.rect().center().x()
+    assert title.geometry().left() > chrome.header_left.geometry().right()
+    assert title.geometry().right() < chrome.header_right.geometry().left()
+
+    chrome.set_photo_name("")
+    assert title.isHidden() and not selector.isHidden()
+
+
 @pytest.mark.parametrize("width", [1000, 700, 500])
 def test_dark_theme_keeps_a_single_short_timeline_title_visible_and_centered(chrome, qapp, width) -> None:
     from src.shared.ui.style_sheet import DARK_THEME
