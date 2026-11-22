@@ -7459,8 +7459,12 @@ class TimelinePreviewRenderer(QObject):
 
         self._stash_pending_present_frame(frame, generation_id, present_frame)
         # A0.1：descriptor 已发出（fence 就绪）= submitted；同时登记
-        # slot→frame 映射供 ack 侧 annotate slot_released。
-        self._annotate_present_status(frame, "submitted", slot_id=int(slot_id))
+        # slot→frame 映射供 ack 侧 annotate slot_released。随 submitted 一并
+        # 记下该帧的实际渲染后端——入队时的值只知道"有没有 GPU 渲染器"。
+        self._annotate_present_status(
+            frame, "submitted", slot_id=int(slot_id),
+            render_backend=self._present_render_backend(present_frame),
+        )
         self._note_slot_frame(int(slot_id), int(frame))
         self._note_telemetry_present(frame, "submitted")
 
@@ -7516,12 +7520,14 @@ class TimelinePreviewRenderer(QObject):
     def _annotate_present_status(
         self, frame: int, status: str, *,
         slot_id: int | None = None, reason: str | None = None,
-        record_state: bool = True,
+        record_state: bool = True, render_backend: str | None = None,
     ) -> None:
         """A0.1：呈现状态事件写入发起帧 trace（迟到 annotate 通道）。
 
         submitted 事件附带 present_submitted_mono（displayed 时计算
         present_ms）。trace 滚出 ring / 旁路帧由 annotate 失败计数兜底。
+        ``render_backend`` 是该帧实际渲染它的后端（present descriptor
+        声明），覆盖入队时按"有无 GPU 渲染器"写的占位值。
         """
         try:
             trace_id = self._lookup_frame_trace_id(int(frame))
@@ -7535,11 +7541,33 @@ class TimelinePreviewRenderer(QObject):
                 fields["present_submitted_mono"] = time.monotonic()
             if reason:
                 fields["extra"] = {"present_drop_reason": reason}
+            if render_backend:
+                fields["backend"] = render_backend
             get_trace_collector().annotate(trace_id, **fields)
         except Exception:
             pass
         if record_state:
             self._record_frame_present_state(int(frame), status)
+
+    @staticmethod
+    def _present_render_backend(present_frame: object) -> str | None:
+        """present descriptor 声明的实际渲染后端（GRAPHICS_BACKENDS 词表）。
+
+        原生发布分支（Phase 1）把后端写在 ``native.api``；GL 槽位描述符
+        把它写在 ``extra["render_backend"]``。两者都没有时返回 None，
+        保留入队时的占位值。
+        """
+        from src.shared.video.frame_trace_schema import GRAPHICS_BACKENDS
+
+        declared = ""
+        native = getattr(present_frame, "native", None)
+        if native is not None:
+            declared = str(getattr(native, "api", "") or "")
+        if not declared:
+            extra = getattr(present_frame, "extra", None) or {}
+            declared = str(extra.get("render_backend") or "")
+        declared = declared.strip().lower()
+        return declared if declared in GRAPHICS_BACKENDS else None
 
     def _annotate_present_status_for_slot(self, slot_id: int, status: str) -> None:
         """A0.1：按 slot_id 反查发起帧后 annotate（slot→frame 映射有界 64）。"""
@@ -8600,11 +8628,29 @@ class TimelinePreviewRenderer(QObject):
         return entry
 
     def _lookup_frame_trace_id(self, frame: int) -> int:
-        """A0.1：查本帧最近的 trace_id（含已 pop 的历史帧；0 = 未知）。"""
+        """A0.1：查本帧最近的 trace_id（含已 pop 的历史帧；0 = 未知）。
+
+        先查在飞表：``present_frame_ready`` 总是先于 ``frame_ready`` 到达，
+        这一刻本帧的 in-flight 条目还没被 :meth:`_take_in_flight_frame_ids`
+        取走并登记进历史。只查历史会让此时发起的 annotate（submitted、
+        实际渲染后端）在正常播放路径上全部静默落空——只有迟到的描述符
+        才碰巧能查到。在飞条目是本帧最新一次派发的身份，重渲同帧时它
+        比历史里的上一次更新。
+        """
+        frame = int(frame)
+        pending = getattr(self, "_in_flight_frame_ids", None)
+        if pending:
+            try:
+                entry = pending.get(frame)
+            except (AttributeError, TypeError, ValueError):
+                entry = None
+            trace_id = int(entry[0] or 0) if entry else 0
+            if trace_id:
+                return trace_id
         history = getattr(self, "_frame_trace_id_history", None)
         if not history:
             return 0
-        return int(history.get(int(frame), 0) or 0)
+        return int(history.get(frame, 0) or 0)
 
     def _is_seeking_from_non_playing(self, frame: int) -> bool:
         """

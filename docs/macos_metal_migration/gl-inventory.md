@@ -1,0 +1,149 @@
+# GPU 调用清单（阶段 0.2）
+
+基线提交 `6249e136`，机器：i9-9900K + AMD Radeon RX 6900 XT（Intel 独显类，macOS 15.3.1）。
+对应 [迁移计划](../plans/2026-11-23-macos-metal-full-migration.md) 阶段 0.2；逐条原始命中见
+[evidence/gl-inventory-raw-6249e136.txt](evidence/gl-inventory-raw-6249e136.txt)。
+
+## 口径
+
+```bash
+rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
+```
+
+- 静态命中 **1623 条 / 189 个文件**。其中 **89 个文件直接绑定 GL API**（导入 moderngl / PyOpenGL /
+  `QOpenGLWidget` 子类、`.glo`、`glFenceSync` 等）；其余 100 个文件只在注释或文档字符串里声明
+  「不使用 GL」，或只经封装层（`gl_backend`、`iosurface_gl_bridge`、`yuv_gpu_upload`）间接访问。
+- 下表按**运行时真实到达的路径**组织（G-01 起），每条带入口、阶段、预计能力、计划编号、当前
+  实际后端与回退方式。文件清单只列直接绑定者，封装层调用方见原始命中。
+- 阶段 7 按本表逐条销账，状态取四种之一：`待迁` / `兼容保留` / `非图形` / `退役`。
+
+## 后端选择的真实现状
+
+生产中有两套并行的「选择器」，迁移期间必须同时处理：
+
+| 层 | 位置 | 状态 |
+|---|---|---|
+| 声明式四维选择器 | `src/shared/gpu/backend_types.py`、`backend_selector.py`、`capabilities.py` | 已完成但**生产未接线**（仅测试使用）；`auto` 偏好链为 `[OPENGL, METAL]`，与迁移目标相反 |
+| 实际生效 | `ConfigManager.get_backend_selection()`（`src/shared/config/config_manager.py:577`）+ 环境变量直读 | 导出端 `timeline_export.py:9890` 与预览端 `metal_timeline_preview.py:86` **各自解析** |
+
+`auto` 在生产中的真实语义：
+
+- **导出**（`TimelineExporter._select_timeline_graphics_backend`）：非 Windows 最终返回 `opengl`。
+- **预览**（`metal_preview_mode()`）：返回 `lut`——仅「NV12 SDR VT 帧 + 可选 LUT」走 Metal compute，
+  且结果仍经 BGRA IOSurface 转回 GL 槽位上屏；其余全部 GL。
+
+## 环境变量
+
+| 变量 | 位置 | 默认 | 语义 | 影响路径 |
+|---|---|---|---|---|
+| `TOPOS_BACKEND_GRAPHICS` | `timeline_export.py:9898`；`metal_timeline_preview.py:93` | 未设 → 配置（`auto`） | `auto/opengl/metal/d3d11/d3d12`，可带 `force_` | G-07 导出后端；G-03/04 预览门 |
+| `TOPOS_EDIT_METAL_PREVIEW` | `metal_timeline_preview.py:90` | 空 | 假值 → `off`；真值在 `auto` 下 → `all` | G-03/04 |
+| `TOPOS_EXPORT_NATIVE_VT` | `timeline_export.py:6050`、`:7423` | 空（禁用） | 真值启用 VT 导出桥与 Metal H.264 LUT 快路 | G-07 |
+| `TOPOS_EXPORT_GPU_RENDER` | `timeline_export.py:2789` | 生产启用；pytest 下默认 CPU | 强制 GPU / CPU 合成 | G-06 |
+| `TOPOS_EXPORT_METAL_PREFETCH` | `timeline_export.py:2755` | `1` | Metal 导出与 VT 解码重叠预取 | G-07 |
+| `TOPOS_METAL_COMPUTE` | `compute_shader_manager.py:247` | 禁用 | 启用 Composite Metal compute 桥（CPU staging） | G-18 |
+| `TOPOS_COLOR_GRAPH_RENDER` | `image_engine.py:885` | 关 | Color 页由图执行器接管 | G-16 |
+| `TOPOS_HEADLESS_GL` / `_REQUIRE` | `composite_export_renderer.py:560`、`:609` | 空 | 独立离屏上下文与版本协商 | G-19 |
+| `TOPOS_METAL_VIDEO_PREVIEW` | `macos_vt/source.py:54` | 关 | 开发者开关：Metal 视频零拷贝预览 | G-25 |
+| `TOPOS_VIDEO_ZERO_COPY*` | `macos_vt/capability.py:61-108` | `auto` | 零拷贝门禁与缓存 | G-25 |
+| `QSG_RHI_BACKEND` | `src/main.py:235`（硬编码 `opengl`） | — | Qt Quick 强制 OpenGL | G-01 |
+
+## 运行路径清单
+
+### 启动与全局
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-01 | `src/main.py:235-264`：`QSG_RHI_BACKEND=opengl`、`QSurfaceFormat` 4.5 Core、`AA_ShareOpenGLContexts` | 初始化 | 创建前能力探测；GL 初始化收拢到兼容会话 | 7.5 | 固定 OpenGL，无判定 | 无 | 待迁 |
+
+### Edit 页
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-02 | `edit/ui/program_viewer.py:809`（`QOpenGLWidget`）；`_copy_shared_texture_to_display` `:1907`；`paintGL` `:1301` | 呈现 | 原生 `CAMetalLayer` 视口适配器 | 2.1、2.3 | OpenGL（`glWaitSync` + `glBlitFramebuffer` 到 viewer 自有纹理） | 能力验证失败恢复 GL Viewer（待实现） | 待迁 |
+| G-03 | `edit/core/edit_gpu_preview_renderer.py:1338`（上下文）；`_finalize_present_frame` `:5430`（`glFenceSync` `:5502`）；`_ensure_composite_fbo` `:4094`；`_try_metal_preview` `:2609` | 处理 | 剪辑 GPU 计划全程 Metal | 2.2、2.6 | OpenGL 为主；合格单层 NV12+LUT 走 Metal compute，但落回 GL 槽位 | Metal 失败 → `_metal_preview_mode="off"`，本会话永久回 GL | 待迁 |
+| G-04 | `edit/core/metal_timeline_preview.py:143-199`（`_CGLTexImageIOSurface2D` `:186`）；`blit` `:271` | 呈现中转 | 原生视口接通后**退役** | 2.1 | Metal compute → BGRA IOSurface → `GL_TEXTURE_RECTANGLE` | GL 合成 | 待迁 |
+| G-05 | `edit/ui/source_viewer.py:683`（`QOpenGLWidget`） | 呈现 | 复用原生视口适配器 | 2.5、7.1 | OpenGL（`SourcePresentGate` 单槽 latest-wins） | GL Viewer | 待迁 |
+| G-06 | `edit/core/timeline_gpu_export_renderer.py:992`（独立上下文） | 导出 | Metal 导出渲染器覆盖后退役 | 3.3、3.4 | OpenGL；Metal 后端另走 `timeline_metal_export_renderer.py` | GPU 不可用 → CPU 合成器（`_record_gpu_fallback`） | 待迁 |
+| G-07 | `edit/core/timeline_export.py:7415`（`_try_export_metal_h264_lut`）、`:9890`（后端选择） | 导出 | 含音频、复杂图、HDR 的原生快路 | 3.1–3.3 | 条件启用：Metal → NV12 → VideoToolbox；`delivery_path=metal_h264_nv12_lut` | 白名单外 → 常规路径 | 待迁 |
+| G-08 | `edit/core/timeline_clip_frame_provider.py` | 上传 | 跟随 G-03 的 GPU 计划 | 2.6、3.3 | OpenGL 上传 | CPU 帧 | 待迁 |
+| G-09 | `edit/core/timeline_preview_renderer.py`（描述符 stash/pop 与门禁） | 协议 | 原生发布分支 | 1.1、2.2 | 仅透传 GL 描述符 | hold 上一帧 | 待迁 |
+| G-10 | `program_viewer.py` `_paintGL_impl` 叠加层（辅助线、字幕、手柄、错误态） | 呈现 | 独立叠加层 | 2.3 | `QPainter` 于 `paintGL` 内 | 复杂叠加回 GL | 待迁 |
+
+### Color 页
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-11 | `color/ui/gl_viewport.py:13`（`GLCanvasViewport`） | 呈现 | 阶段 2 宿主替换原生上屏 | 4.5 | OpenGL | GL 视口 | 待迁 |
+| G-12 | `color/core/async_renderer.py:529`；`image_engine.py`；`shader_compiler.py`；`color_graph_executor.py`；`color_graph_texture.py`；`corrector_render_service.py` | 处理 | 共享调色图的 Metal 纹理执行 | 4.1、4.2 | OpenGL；`ColorGraphMetalExecutor` 已存在但以 NumPy RGBA16F 暂存 | fail-closed（保留上一帧/报失败，不静默回退） | 待迁 |
+| G-13 | `color/core/opengl_render_backend.py:45`（`OpenGLRenderBackend`） | 兼容后端 | 保留为 `GraphicsBackend` 契约的 GL 实现 | 7.5 | OpenGL | — | 兼容保留 |
+| G-14 | `shared/gpu/gpu_scope_engine.py`；`shared/ui/widgets/gpu_scope_widget.py:149` | 处理 + 呈现 | GPU 示波器逐项迁移 | 4.5 | OpenGL | 保留 GL 示波器 | 待迁 |
+| G-15 | `color/core/export_denoise_bridge.py:62`；`video_denoise_gl.py`；`video_denoise_pipeline.py`；`video_spatial_denoise.py`；`video_temporal_denoise.py` | 导出 | 调色降噪导出桥 | 4.6 | OpenGL（独立上下文） | CPU 降噪 | 待迁 |
+| G-16 | `color/core/image_engine.py:885`（`TOPOS_COLOR_GRAPH_RENDER`） | 调度 | 共享图入口统一 | 4.1 | 开关控制 | 旧 layers 循环 | 待迁 |
+
+### Composite 页
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-17 | `composite/ui/composite_viewport.py:976`（`CompositeViewer`） | 呈现 | Composite Viewer | 5 | OpenGL | GL 视口 | 待迁 |
+| G-18 | `composite/render/composite_renderer.py:455`；`composite_render_worker.py`；`composite_render_output.py`；`gpu_resource_pool.py`；`pbo_readback.py`；`gl_utils.py`；`evaluators/*`（13）；`nodes/*`（平面节点） | 处理 | 2D 链、矩形/遮罩/效果、Tile 与缓存 | 5.1–5.3 | OpenGL；Metal compute 桥仅 blur/erode/dilate 且经 CPU staging、默认禁用 | `_fallback_callback` + fragment 回退 | 待迁 |
+| G-19 | `composite/render/composite_export_renderer.py:563/620/632`（`TOPOS_HEADLESS_GL`） | 导出 | 无头输出接同一 GPU 计划 | 5.6、7.4 | OpenGL 独立上下文 | CPU 渲染 | 待迁 |
+| G-20 | `composite/evaluators/histogram_manager.py` | 处理 | 随示波器迁移 | 4.5 | GL compute；不可用时自动切 Metal compute | fragment 回退 | 待迁 |
+| G-21 | `composite/render3d/gizmo_renderer.py`、`hdri.py`、`material_texture_loader.py`；`nodes/scene3d_node.py`（161 处）、`pointcloud3d_node.py`、`volume3d_node.py`、`particle_node.py` | 处理 | 3D 与 AOV | 5.5 | OpenGL | 无 | 待迁 |
+| G-22 | `shared/gpu/composite_gpu_frame_handle.py`（GLsync fence 生命周期） | 协议 | 接阶段 1 租约与完成语义 | 5.1 | GLsync | — | 待迁 |
+
+### 共享效果
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-23 | `features/shared/effects/effect_pass_runner.py` | 处理 | 内置效果与可译 `.tglsl` | 6.2、6.3 | OpenGL GLSL | 按 ID 保留兼容路径 | 待迁 |
+
+### 媒体与播放
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-24 | `shared/video/yuv_gpu_upload.py`（75 处）；`video_upload.py`；`video_texture_pool.py`；`external_yuv_renderer.py` | 上传 | 跟随共享 GPU 帧 | 2.6、7.1 | OpenGL 上传 | CPU 上传 | 待迁 |
+| G-25 | `shared/media/macos_vt/iosurface_gl_bridge.py` | 上传（零拷贝） | 原生帧进入视口后**退役** | 1、2 | IOSurface → GL 纹理 | CPU 上传 | 待迁 |
+| G-26 | `shared/playback/gl_video_canvas.py:134/234`；`gl_render_worker.py:88` | 呈现 + 处理 | 共用 GPU 帧描述与视口宿主 | 7.1 | OpenGL | GL 画布 | 待迁 |
+| G-27 | `shared/video/video_async_renderer.py:221` | 导出 | 能力探测 | 7.4 | OpenGL 独立上下文 | CPU | 待迁 |
+| G-28 | `shared/video/monitor_gpu_scale.py:67` | 呈现 | 外接监看接完成事件 | 7.3 | OpenGL 独立上下文 | CPU 缩放 | 待迁 |
+| G-29 | `shared/video/cfa_gpu_debayer.py` | 处理 | CFA 解拜耳 | 7.2、4.6 | OpenGL | CPU 解拜耳 | 待迁 |
+| G-30 | `shared/video/yuv_gpu_self_test.py`；`macos_vt/vt_zero_copy_probe.py:365` | 工具 | 非生产 | — | OpenGL | — | 非生产 |
+
+### App 与其他渲染模式
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-31 | `app/controllers/node_thumbnail_evaluator.py:223` | 处理 | 节点缩略图与画廊走共享帧 | 7.2、4.6 | OpenGL 独立上下文 | CPU 缩略图 | 待迁 |
+| G-32 | `app/controllers/file_controller.py`（监看帧、抓帧读取 viewer 帧） | 呈现 | 有界异步 GPU→CPU 搬运 | 7.3 | 经 viewer GL 帧 | 无帧可抓时跳过 | 待迁 |
+| G-33 | `app/controllers/deliver_controller.py:630` | 导出 | 交付走 GPU 计划 | 7.4 | 仅 CLI/测试路径建 GL；UI 会话明确拒绝 | 回退 Color 输出 | 待迁 |
+| G-34 | `features/teaching_animation/composite_node.py`（`.glo`）；`render/benchmark.py:501` | 处理 | 进入视频帧合成处接 GPU 帧 | 7.4 | OpenGL | — | 待迁 |
+
+### 共享基础设施
+
+| 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
+|---|---|---|---|---|---|---|---|
+| G-35 | `shared/gpu/gl_backend.py:97/150`；`gl_context_hub.py`；`framebuffer_scope.py`；`gl_pass_timer.py` | 兼容后端 | 集中到兼容会话 | 7.5 | OpenGL | — | 兼容保留 |
+| G-36 | `shared/gpu/present_frame.py` | 协议 | 新增原生发布分支，保留 GL 构造 | 1.1 | GL 纹理名 + GL fence | 旧消费者继续收 GL 描述符 | 待迁 |
+| G-37 | `shared/media/windows_hw/*`（D3D11 / CUDA 桥） | 跨平台 | 独立 OpenGL 路径，不在本次范围 | — | D3D11 / GL | — | 非本次范围 |
+
+### 非图形命中（不进入销账）
+
+`features/ai_workflow` 23 个文件、`features/ai_harness` 4 个文件，以及 `shared/node_canvas`、
+`shared/io/file_io.py`、`shared/project/color_graph.py`、`shared/control_surfaces/tangent/hub_client.py`、
+`app/services|integrations/.../edit_benchmark_service.py`、`app/ui/preferences_dialog.py`、
+`features/files/benchmark/benchmark.py`、`plugins/warm_tint.tglsl`：均为「不使用 GL」的声明或注释。
+
+## 可证明实际后端的日志与计数器
+
+| 证据 | 位置 | 用途 |
+|---|---|---|
+| `delivery_path` / `full_gpu` / 分阶段 `backend` | 导出阶段遥测（`stage_telemetry`） | 导出实际路径；`metal_h264_nv12_lut` 表示原生桥 |
+| `ExportGpuTrail` + `bridge_selection` | `src/shared/export/gpu_trail.py`；`timeline_export.py:2815`、`:2827` | 每段后端、回读/上传字节、回退原因 |
+| `"Timeline export graphics backend: %s"` | `timeline_export.py:2806` | 导出后端选择日志 |
+| `gpu_renderer.metal_preview` / `metal_preview_fallback` / `vt_import_failed` | `edit_gpu_preview_renderer.py:2668-2674`（`TOPOS_EDIT_PLAYBACK_TRACE`） | 预览 Metal 快路命中与回退 |
+| `EditPlaybackFrameTrace` | `src/shared/video/playback_frame_trace.py` | 每帧 `decode_path` / `render_path` / `fallback_reason` |
+| `pixel_copy_counters` | `src/shared/video/pixel_copy_counters.py` | CPU 上传 / GPU 回读字节，「零拷贝」只能由计数证明 |
+| `frame_presented` | `program_viewer.py:1386`；`engine.py:895` | 实际呈现帧数 |
+| `PerformanceMonitor._decode_path_counts` | `src/shared/media/performance_monitor.py:636` | 解码路径分布 |
+| `MetalComputeContext.get_stats` | `src/shared/gpu/metal/context.py:670` | Metal GPU 实测时间与内核缓存 |

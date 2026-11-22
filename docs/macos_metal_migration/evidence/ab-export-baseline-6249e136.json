@@ -1,0 +1,2846 @@
+{
+  "schema": "topos_metal_ab_export/1",
+  "generated_at_utc": "2026-11-22T16:56:21+00:00",
+  "commit": "3416549b6cc061194eb02db57368c9dd0cb40fff",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "hostname": "Mac Pro",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "gpus": [
+      "AMD Radeon RX 6900 XT",
+      "PHL 439P1"
+    ]
+  },
+  "ab_dir": "bench_out/metal-ab.2026-11-23",
+  "rounds": 6,
+  "extra_env": {},
+  "paths": [
+    {
+      "path": "gl_h264",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EXPORT_NATIVE_VT": "0"
+      },
+      "first_run": {
+        "path": "gl_h264",
+        "round": 0,
+        "name": "Topos_h264_LUT_to_h264_101",
+        "process_wall_s": 20.437,
+        "returncode": 0,
+        "success": true,
+        "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r101.log",
+        "error": "",
+        "wall_s": 11.149074836999716,
+        "delivery_path": "",
+        "full_gpu": false,
+        "full_gpu_blockers": [
+          "stage_backend_cpu:decode:provider_session",
+          "stage_backend_cpu:render:opengl",
+          "stage_backend_cpu:encode_submit:cpu_encoder",
+          "encode_backend_cpu:h264",
+          "cpu_path_marker:cpu_encoder_surface_path"
+        ],
+        "fallback_root_cause": "cpu_encoder_surface_path",
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0
+      },
+      "warm_runs": 5,
+      "warm_all_success": true,
+      "warm_median_s": 10.843,
+      "warm_min_s": 10.708,
+      "warm_max_s": 11.861,
+      "warm_walls_s": [
+        10.753,
+        10.843,
+        11.291,
+        11.861,
+        10.708
+      ],
+      "delivery_paths": [
+        ""
+      ],
+      "expected_delivery_path": "",
+      "backend_matches_expectation": true,
+      "full_gpu": [
+        false
+      ],
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "cpu_to_gpu_upload",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "decode",
+          "backends": [
+            "provider_session"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 6.57008800044423,
+          "wall_p95_ms_median": 7.789957999193575
+        },
+        {
+          "name": "encode",
+          "backends": [
+            "h264"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 13.895387999582454,
+          "wall_p95_ms_median": 23.727707999569247
+        },
+        {
+          "name": "encode_submit",
+          "backends": [
+            "cpu_encoder"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "mux",
+          "backends": [
+            "container_writer"
+          ],
+          "sample_count": 1,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 17.531712999698357,
+          "wall_p95_ms_median": 17.531712999698357
+        },
+        {
+          "name": "probe",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "queue_wait",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "render",
+          "backends": [
+            "opengl"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 23.093527001037728,
+          "wall_p95_ms_median": 26.078157001393265
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "first_run": {
+        "path": "metal_h264",
+        "round": 0,
+        "name": "Topos_h264_LUT_to_h264_201",
+        "process_wall_s": 16.176,
+        "returncode": 0,
+        "success": true,
+        "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r201.log",
+        "error": "",
+        "wall_s": 7.1140043630002765,
+        "delivery_path": "metal_h264_nv12_lut",
+        "full_gpu": true,
+        "full_gpu_blockers": [],
+        "fallback_root_cause": null,
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0
+      },
+      "warm_runs": 5,
+      "warm_all_success": true,
+      "warm_median_s": 7.124,
+      "warm_min_s": 7.05,
+      "warm_max_s": 7.302,
+      "warm_walls_s": [
+        7.218,
+        7.117,
+        7.302,
+        7.124,
+        7.05
+      ],
+      "delivery_paths": [
+        "metal_h264_nv12_lut"
+      ],
+      "expected_delivery_path": "metal_h264_nv12_lut",
+      "backend_matches_expectation": true,
+      "full_gpu": [
+        true
+      ],
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "cpu_to_gpu_upload",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "decode",
+          "backends": [
+            "videotoolbox"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 0.11108699982287362,
+          "wall_p95_ms_median": 0.1593329998286208
+        },
+        {
+          "name": "encode",
+          "backends": [
+            "videotoolbox"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 6.91012900097121,
+          "wall_p95_ms_median": 7.677425999645493
+        },
+        {
+          "name": "encode_submit",
+          "backends": [
+            "videotoolbox"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "mux",
+          "backends": [
+            "videotoolbox"
+          ],
+          "sample_count": 1,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 52.055125999686425,
+          "wall_p95_ms_median": 52.055125999686425
+        },
+        {
+          "name": "probe",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "queue_wait",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "render",
+          "backends": [
+            "metal"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 1.9430860011198092,
+          "wall_p95_ms_median": 2.152480001313961
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl"
+      },
+      "first_run": {
+        "path": "gl_dnxhr",
+        "round": 0,
+        "name": "Topos_dnxhr_LUT_to_dnxhr_301",
+        "process_wall_s": 30.028,
+        "returncode": 0,
+        "success": true,
+        "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r301.log",
+        "error": "",
+        "wall_s": 19.22516387900032,
+        "delivery_path": "",
+        "full_gpu": false,
+        "full_gpu_blockers": [
+          "stage_backend_cpu:decode:ffmpeg_planar",
+          "stage_backend_cpu:render:opengl",
+          "stage_backend_cpu:encode_submit:cpu_encoder",
+          "encode_backend_cpu:dnxhr",
+          "cpu_path_marker:cpu_encoder_surface_path"
+        ],
+        "fallback_root_cause": "cpu_encoder_surface_path",
+        "cpu_upload_bytes": 0,
+        "cpu_download_bytes": 0
+      },
+      "warm_runs": 5,
+      "warm_all_success": true,
+      "warm_median_s": 19.276,
+      "warm_min_s": 18.586,
+      "warm_max_s": 19.634,
+      "warm_walls_s": [
+        19.634,
+        18.665,
+        19.305,
+        18.586,
+        19.276
+      ],
+      "delivery_paths": [
+        ""
+      ],
+      "expected_delivery_path": "",
+      "backend_matches_expectation": true,
+      "full_gpu": [
+        false
+      ],
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "cpu_to_gpu_upload",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "decode",
+          "backends": [
+            "ffmpeg_planar"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 7.454955000866903,
+          "wall_p95_ms_median": 17.365313000482274
+        },
+        {
+          "name": "encode",
+          "backends": [
+            "dnxhr"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 43.2537400010915,
+          "wall_p95_ms_median": 62.86816200008616
+        },
+        {
+          "name": "encode_submit",
+          "backends": [
+            "cpu_encoder"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "mux",
+          "backends": [
+            "container_writer"
+          ],
+          "sample_count": 1,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 18.112785000994336,
+          "wall_p95_ms_median": 18.112785000994336
+        },
+        {
+          "name": "probe",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "queue_wait",
+          "backends": [
+            "none"
+          ],
+          "sample_count": 0,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": null,
+          "wall_p95_ms_median": null
+        },
+        {
+          "name": "render",
+          "backends": [
+            "opengl"
+          ],
+          "sample_count": 400,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "wall_p50_ms_median": 27.923079000174766,
+          "wall_p95_ms_median": 49.36393099887937
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "path": "gl_h264",
+      "round": 0,
+      "name": "Topos_h264_LUT_to_h264_101",
+      "process_wall_s": 20.437,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r101.log",
+      "error": "",
+      "wall_s": 11.149074836999716,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 6.551983999088407,
+          "wall_p95_ms": 8.124052999846754,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 23.763997000060044,
+          "wall_p95_ms": 26.964396000039415,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 14.488475999314687,
+          "wall_p95_ms": 24.127450999003486,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 20.651852000810322,
+          "wall_p95_ms": 20.651852000810322,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 0,
+      "name": "Topos_h264_LUT_to_h264_201",
+      "process_wall_s": 16.176,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r201.log",
+      "error": "",
+      "wall_s": 7.1140043630002765,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.11219000043638516,
+          "wall_p95_ms": 0.16568600040045567,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9345250002515968,
+          "wall_p95_ms": 2.1464929996000137,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.921542999407393,
+          "wall_p95_ms": 7.729168000878417,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 43.88046799977019,
+          "wall_p95_ms": 43.88046799977019,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 0,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_301",
+      "process_wall_s": 30.028,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r301.log",
+      "error": "",
+      "wall_s": 19.22516387900032,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.381072000498534,
+          "wall_p95_ms": 18.461446999936015,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 27.74095099994156,
+          "wall_p95_ms": 50.412516999131185,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 43.50550600065617,
+          "wall_p95_ms": 64.36984399988432,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 27.54277999883925,
+          "wall_p95_ms": 27.54277999883925,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 1,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_302",
+      "process_wall_s": 30.963,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r302.log",
+      "error": "",
+      "wall_s": 19.63382480600012,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.573131000754074,
+          "wall_p95_ms": 17.365313000482274,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 28.003328001432237,
+          "wall_p95_ms": 49.53518399997847,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 43.73132799992163,
+          "wall_p95_ms": 64.79967899940675,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 19.824482000331045,
+          "wall_p95_ms": 19.824482000331045,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 1,
+      "name": "Topos_h264_LUT_to_h264_202",
+      "process_wall_s": 16.356,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r202.log",
+      "error": "",
+      "wall_s": 7.217645003000143,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.11136899956909474,
+          "wall_p95_ms": 0.1593329998286208,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9341460010764422,
+          "wall_p95_ms": 2.152480001313961,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.953513000553357,
+          "wall_p95_ms": 7.721652998952777,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 55.501627999547054,
+          "wall_p95_ms": 55.501627999547054,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_h264",
+      "round": 1,
+      "name": "Topos_h264_LUT_to_h264_102",
+      "process_wall_s": 19.958,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r102.log",
+      "error": "",
+      "wall_s": 10.753045932000532,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 6.450797000070452,
+          "wall_p95_ms": 7.540304999565706,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 23.08730200093123,
+          "wall_p95_ms": 25.021938999998383,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 13.840912999512511,
+          "wall_p95_ms": 23.611115000676364,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 17.531712999698357,
+          "wall_p95_ms": 17.531712999698357,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_h264",
+      "round": 2,
+      "name": "Topos_h264_LUT_to_h264_103",
+      "process_wall_s": 20.058,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r103.log",
+      "error": "",
+      "wall_s": 10.842916810999668,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 6.57008800044423,
+          "wall_p95_ms": 7.789957999193575,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 23.07555500010494,
+          "wall_p95_ms": 26.078157001393265,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 13.860373999705189,
+          "wall_p95_ms": 23.727707999569247,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 15.782865000801394,
+          "wall_p95_ms": 15.782865000801394,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 2,
+      "name": "Topos_h264_LUT_to_h264_203",
+      "process_wall_s": 16.176,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r203.log",
+      "error": "",
+      "wall_s": 7.117467296000541,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.1109610002458794,
+          "wall_p95_ms": 0.1485190005041659,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9452830001682742,
+          "wall_p95_ms": 2.137134000804508,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.87201100117818,
+          "wall_p95_ms": 7.674726000914234,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 44.033582000338356,
+          "wall_p95_ms": 44.033582000338356,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 2,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_303",
+      "process_wall_s": 29.515,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r303.log",
+      "error": "",
+      "wall_s": 18.665287874999194,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.540734999565757,
+          "wall_p95_ms": 14.474718000201392,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 27.923079000174766,
+          "wall_p95_ms": 48.336850999476155,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 42.106561000764486,
+          "wall_p95_ms": 62.2514440001396,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 18.112785000994336,
+          "wall_p95_ms": 18.112785000994336,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 3,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_304",
+      "process_wall_s": 30.394,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r304.log",
+      "error": "",
+      "wall_s": 19.305218461999175,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.441263000146137,
+          "wall_p95_ms": 19.135043001369922,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 28.06521799902839,
+          "wall_p95_ms": 49.36393099887937,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 43.35320999962278,
+          "wall_p95_ms": 62.86816200008616,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 19.528360999174765,
+          "wall_p95_ms": 19.528360999174765,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 3,
+      "name": "Topos_h264_LUT_to_h264_204",
+      "process_wall_s": 16.346,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r204.log",
+      "error": "",
+      "wall_s": 7.302218496999558,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.11688400081766304,
+          "wall_p95_ms": 0.21194399960222654,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9425489990680944,
+          "wall_p95_ms": 2.280755999890971,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.901811000716407,
+          "wall_p95_ms": 7.677425999645493,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 52.055125999686425,
+          "wall_p95_ms": 52.055125999686425,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_h264",
+      "round": 3,
+      "name": "Topos_h264_LUT_to_h264_104",
+      "process_wall_s": 20.474,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r104.log",
+      "error": "",
+      "wall_s": 11.291420556999583,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 6.864701999802492,
+          "wall_p95_ms": 8.903192998332088,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 24.08504100094433,
+          "wall_p95_ms": 28.50655799920787,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 15.161721001277328,
+          "wall_p95_ms": 25.64922400051728,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 21.409291999589186,
+          "wall_p95_ms": 21.409291999589186,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_h264",
+      "round": 4,
+      "name": "Topos_h264_LUT_to_h264_105",
+      "process_wall_s": 21.133,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r105.log",
+      "error": "",
+      "wall_s": 11.861159984999176,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 7.400225998935639,
+          "wall_p95_ms": 9.45689400032279,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 25.398462999874027,
+          "wall_p95_ms": 31.372934001410613,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 17.132726999989245,
+          "wall_p95_ms": 28.541270999994595,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 21.299685999110807,
+          "wall_p95_ms": 21.299685999110807,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 4,
+      "name": "Topos_h264_LUT_to_h264_205",
+      "process_wall_s": 16.248,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r205.log",
+      "error": "",
+      "wall_s": 7.123754754999027,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.11093899956904352,
+          "wall_p95_ms": 0.15027500012365635,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9430860011198092,
+          "wall_p95_ms": 2.1778800000902265,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.934373001058702,
+          "wall_p95_ms": 7.5915389988949755,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 52.82996400092088,
+          "wall_p95_ms": 52.82996400092088,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 4,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_305",
+      "process_wall_s": 29.291,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r305.log",
+      "error": "",
+      "wall_s": 18.58554989699951,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.34760900013498,
+          "wall_p95_ms": 14.105513000686187,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 27.81609000157914,
+          "wall_p95_ms": 48.77016799946432,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 42.127018999963184,
+          "wall_p95_ms": 61.93314099982672,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 14.3133849996957,
+          "wall_p95_ms": 14.3133849996957,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_dnxhr",
+      "round": 5,
+      "name": "Topos_dnxhr_LUT_to_dnxhr_306",
+      "process_wall_s": 29.906,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_dnxhr_r306.log",
+      "error": "",
+      "wall_s": 19.275979791998907,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:ffmpeg_planar",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:dnxhr",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "ffmpeg_planar",
+          "sample_count": 400,
+          "wall_p50_ms": 7.454955000866903,
+          "wall_p95_ms": 17.981966000661487,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 27.842710000186344,
+          "wall_p95_ms": 51.45652600003814,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "dnxhr",
+          "sample_count": 400,
+          "wall_p50_ms": 43.2537400010915,
+          "wall_p95_ms": 63.999332000094,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 15.322343000661931,
+          "wall_p95_ms": 15.322343000661931,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "metal_h264",
+      "round": 5,
+      "name": "Topos_h264_LUT_to_h264_206",
+      "process_wall_s": 15.818,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/metal_h264_r206.log",
+      "error": "",
+      "wall_s": 7.049885045998963,
+      "delivery_path": "metal_h264_nv12_lut",
+      "full_gpu": true,
+      "full_gpu_blockers": [],
+      "fallback_root_cause": null,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 0.11108699982287362,
+          "wall_p95_ms": 0.16899699949135538,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "metal",
+          "sample_count": 400,
+          "wall_p50_ms": 1.9511669997882564,
+          "wall_p95_ms": 2.1429290009109536,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "videotoolbox",
+          "sample_count": 400,
+          "wall_p50_ms": 6.91012900097121,
+          "wall_p95_ms": 7.6851289995829575,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "videotoolbox",
+          "sample_count": 1,
+          "wall_p50_ms": 50.467631001083646,
+          "wall_p95_ms": 50.467631001083646,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    },
+    {
+      "path": "gl_h264",
+      "round": 5,
+      "name": "Topos_h264_LUT_to_h264_106",
+      "process_wall_s": 19.67,
+      "returncode": 0,
+      "success": true,
+      "log": "bench_out/metal-ab.2026-11-23/logs/gl_h264_r106.log",
+      "error": "",
+      "wall_s": 10.707948176999707,
+      "delivery_path": "",
+      "full_gpu": false,
+      "full_gpu_blockers": [
+        "stage_backend_cpu:decode:provider_session",
+        "stage_backend_cpu:render:opengl",
+        "stage_backend_cpu:encode_submit:cpu_encoder",
+        "encode_backend_cpu:h264",
+        "cpu_path_marker:cpu_encoder_surface_path"
+      ],
+      "fallback_root_cause": "cpu_encoder_surface_path",
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 0,
+      "stages": [
+        {
+          "name": "probe",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "decode",
+          "backend": "provider_session",
+          "sample_count": 400,
+          "wall_p50_ms": 6.529318001412321,
+          "wall_p95_ms": 7.576891999633517,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "cpu_to_gpu_upload",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "render",
+          "backend": "opengl",
+          "sample_count": 400,
+          "wall_p50_ms": 23.093527001037728,
+          "wall_p95_ms": 26.0398839982372,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "gpu_to_cpu_download",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode_submit",
+          "backend": "cpu_encoder",
+          "sample_count": 400,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "encode",
+          "backend": "h264",
+          "sample_count": 400,
+          "wall_p50_ms": 13.895387999582454,
+          "wall_p95_ms": 23.23410900135059,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "mux",
+          "backend": "container_writer",
+          "sample_count": 1,
+          "wall_p50_ms": 17.082619999200688,
+          "wall_p95_ms": 17.082619999200688,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        },
+        {
+          "name": "queue_wait",
+          "backend": "none",
+          "sample_count": 0,
+          "wall_p50_ms": null,
+          "wall_p95_ms": null,
+          "gpu_submit_ms": null,
+          "cpu_upload_bytes": 0,
+          "cpu_download_bytes": 0,
+          "fallback_reason": null
+        }
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "29781212",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_h264_LUT_to_h264_101.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 59565702,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.2121,
+          "mae_to_calculated_grade": 1.2073
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.1735,
+          "mae_to_calculated_grade": 1.1707
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.0977,
+          "mae_to_calculated_grade": 1.2093
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 7.6649,
+          "mae_to_calculated_grade": 1.1354
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.7659,
+          "mae_to_calculated_grade": 1.1247
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.823,
+          "mae_to_calculated_grade": 1.1183
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "28422796",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_h264_LUT_to_h264_201.mp4",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 56848810,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 7.6492,
+          "mae_to_calculated_grade": 0.9839
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 7.6654,
+          "mae_to_calculated_grade": 0.9382
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.376,
+          "mae_to_calculated_grade": 0.9566
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.0419,
+          "mae_to_calculated_grade": 0.9299
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 8.1717,
+          "mae_to_calculated_grade": 0.9271
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.9432,
+          "mae_to_calculated_grade": 0.9577
+        }
+      ],
+      "format_ok": true
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "avg_frame_rate": "25/1",
+      "duration": "16.000000",
+      "bit_rate": "728268800",
+      "codec_name": "dnxhd",
+      "profile": "DNXHR HQX",
+      "pix_fmt": "yuv422p10le",
+      "color_range": "tv",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "path": "Topos_dnxhr_LUT_to_dnxhr_301.mov",
+      "decoded_frames": 400,
+      "audio_streams": 0,
+      "size_bytes": 1456539990,
+      "encoder": null,
+      "samples": [
+        {
+          "timeline_frame": 0,
+          "source_frame": 25,
+          "mae_to_source": 9.1504,
+          "mae_to_calculated_grade": 0.9838
+        },
+        {
+          "timeline_frame": 60,
+          "source_frame": 85,
+          "mae_to_source": 9.2559,
+          "mae_to_calculated_grade": 1.0294
+        },
+        {
+          "timeline_frame": 199,
+          "source_frame": 224,
+          "mae_to_source": 8.9216,
+          "mae_to_calculated_grade": 1.0975
+        },
+        {
+          "timeline_frame": 200,
+          "source_frame": 275,
+          "mae_to_source": 8.1362,
+          "mae_to_calculated_grade": 1.0365
+        },
+        {
+          "timeline_frame": 270,
+          "source_frame": 345,
+          "mae_to_source": 7.4283,
+          "mae_to_calculated_grade": 1.2452
+        },
+        {
+          "timeline_frame": 399,
+          "source_frame": 474,
+          "mae_to_source": 7.2935,
+          "mae_to_calculated_grade": 1.3424
+        }
+      ],
+      "format_ok": true
+    }
+  ]
+}
