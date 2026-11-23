@@ -33,6 +33,8 @@
 | `evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.json` | 2.4 | 同上的逐会话明细 |
 | [evidence/ab-playback-9fe07060.md](evidence/ab-playback-9fe07060.md) | 2.4 | 采样工具的正式一轮：`gl` / `auto` / `metal` / `native` 各两轮（第二轮倒序），32 个用例全部有效；机器不空闲，绝对帧数低于 11-23 基线 |
 | `evidence/ab-playback-9fe07060.json`、`evidence/ab-playback-9fe07060-conditions.json` | 2.4 | 同上的逐例明细，以及八个会话的显示器状态与采集时间 |
+| [evidence/ab-playback-interleaved-gl-vs-native-9fe07060-2026-11-24.md](evidence/ab-playback-interleaved-gl-vs-native-9fe07060-2026-11-24.md) | 2.4 | 播放：`gl` 与原生配置交替各 4 轮——H.264 原生更高，DNxHR（GL 路径）稳定低约 3%，尚未归因 |
+| `evidence/ab-playback-interleaved-gl-vs-native-9fe07060-2026-11-24.json` | 2.4 | 同上的逐会话明细 |
 
 ## 工具
 

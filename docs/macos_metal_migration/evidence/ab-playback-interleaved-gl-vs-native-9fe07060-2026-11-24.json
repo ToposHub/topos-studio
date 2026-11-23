@@ -1,0 +1,186 @@
+{
+ "purpose": "interleaved playback: the GL configuration against the Metal backend with the native viewport",
+ "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+ "recorded": "2026-11-24T04:23:56+08:00",
+ "display_awake": true,
+ "other_load": "other programs were using the machine (load average about 4.5 on 16 threads)",
+ "denominator": 399,
+ "sessions": [
+  {
+   "config": "gl",
+   "round": 1,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 388
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 378
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 334
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 294
+    }
+   ]
+  },
+  {
+   "config": "native",
+   "round": 1,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 394
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 398
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 326
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 340
+    }
+   ]
+  },
+  {
+   "config": "native",
+   "round": 2,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 395
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 396
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 323
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 322
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 2,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 392
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 377
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 335
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 334
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 3,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 390
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 379
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 334
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 338
+    }
+   ]
+  },
+  {
+   "config": "native",
+   "round": 3,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 395
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 397
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 323
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 321
+    }
+   ]
+  },
+  {
+   "config": "native",
+   "round": 4,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 396
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 398
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 332
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 327
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 4,
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 393
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 384
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 334
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 334
+    }
+   ]
+  }
+ ]
+}
