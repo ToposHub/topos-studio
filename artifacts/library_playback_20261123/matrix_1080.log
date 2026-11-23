@@ -1,0 +1,45 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[dnxhd @ 0x7fe4f2f47fc0] Unsupported: variable ACT flag.
+qt.qpa.fonts: Populating font family aliases took 686 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+2026-11-23 21:51:21.314 Python[37614:409967] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 21:51:21.314 Python[37614:409967] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+{"file": "2K_DNxHR 444 10bit.mov", "route": "libav", "submitted_fps": 25.128381503475868, "swapped_fps": 24.784157099318666, "qt_frames_fps": 0.0, "decode_ms": {"count": 72, "mean": 7.964179097143642, "p50": 9.236529000190785, "p95": 12.017065399413694, "max": 14.106528000411345}, "worker_mode": "texture", "errors": null}
+{"file": "2K_DNxHR 444 12bit.mov", "route": "libav", "submitted_fps": 24.856345282490047, "swapped_fps": 24.856345282490047, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 8.406354128497437, "p50": 9.632737999709207, "p95": 11.982138751409366, "max": 15.049335997900926}, "worker_mode": "texture", "errors": null}
+{"file": "2K_DNxHR HQX 10bit.mov", "route": "libav", "submitted_fps": 24.994011919008354, "swapped_fps": 24.994011919008354, "qt_frames_fps": 0.0, "decode_ms": {"count": 80, "mean": 6.519120187522276, "p50": 7.28238749979937, "p95": 9.980105599242961, "max": 12.275203000172041}, "worker_mode": "texture", "errors": null}
+{"file": "2K_DNxHR HQX 12-bit.mov", "route": "libav", "submitted_fps": 24.995595815086123, "swapped_fps": 24.995595815086123, "qt_frames_fps": 0.0, "decode_ms": {"count": 80, "mean": 7.191390462776326, "p50": 7.583504999274737, "p95": 10.195870500501767, "max": 14.066158997593448}, "worker_mode": "texture", "errors": null}
+{"file": "2K_DNxHR HQX 12bit.mov", "route": "libav", "submitted_fps": 24.996711646871816, "swapped_fps": 24.996711646871816, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 6.97741517131882, "p50": 7.461150500603253, "p95": 11.207021250447722, "max": 13.267831000121078}, "worker_mode": "texture", "errors": null}
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/Users/heng/Documents/vscode/topos-studio/tests/test_videos/2K_H265.mov':
+  Metadata:
+    major_brand     : qt  
+    minor_version   : 512
+    compatible_brands: qt  
+    creation_time   : 2026-09-11T00:03:15.000000Z
+    encoder         : Blackmagic Design DaVinci Resolve Studio
+  Duration: 00:00:19.48, start: 0.000000, bitrate: 17393 kb/s
+  Stream #0:0[0x1]: Video: hevc (Main 10) (hvc1 / 0x31637668), yuv420p10le(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 15085 kb/s, 25 fps, 25 tbr, 12800 tbn (default)
+      Metadata:
+        creation_time   : 2026-09-11T00:03:15.000000Z
+        handler_name    : VideoHandler
+        vendor_id       :     
+        encoder         : H.265 10-bit
+        timecode        : 01:00:00:00
+  Stream #0:1[0x2]: Audio: pcm_s24le (lpcm / 0x6D63706C), 48000 Hz, stereo, s32 (24 bit), 2304 kb/s (default)
+      Metadata:
+        creation_time   : 2026-09-11T00:03:15.000000Z
+        handler_name    : SoundHandler
+        vendor_id       : [0][0][0][0]
+  Stream #0:2[0x3](eng): Data: none (tmcd / 0x64636D74), 0 kb/s (default)
+      Metadata:
+        creation_time   : 2026-09-11T00:03:15.000000Z
+        handler_name    : TimeCodeHandler
+        timecode        : 01:00:00:00
+{"file": "2K_H265.mov", "route": "qt", "submitted_fps": 0.0, "swapped_fps": 0.0, "qt_frames_fps": 26.753106834722203, "decode_ms": {"count": 0}, "worker_mode": null, "errors": null}
+Traceback (most recent call last):
+  File "/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/probe.py", line 173, in <lambda>
+    player.video_sink.videoFrameChanged.connect(lambda frame: active.setdefault("qt_frames", []).append(time.perf_counter()) if time.perf_counter() >= active["measure_start"] and frame.isValid() else None)
+                                                                                                                                                       ~~~~~~^^^^^^^^^^^^^^^^^
+KeyError: 'measure_start'

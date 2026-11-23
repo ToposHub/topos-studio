@@ -71,6 +71,8 @@ uniform float u_range_min;      // value mapped to bottom (e.g. -0.1)
 uniform float u_range_max;      // value mapped to top (e.g. 1.2)
 out float v_weight;
 out float v_range_flag; // +1 over 100%, -1 below 0%, 0 in legal range
+flat out vec2 v_column_bounds;
+flat out float v_center_y;
 void main() {
     int idx = gl_VertexID;
     int sx = idx % int(u_sample_size.x);
@@ -96,14 +98,15 @@ void main() {
     float half_cell = 1.0 / u_density_size.y;
     y_ndc = clamp(y_ndc, -1.0 + half_cell, 1.0 - half_cell);
     gl_Position = vec4(x_ndc, y_ndc, 0.0, 1.0);
-    // A 320px analysis row is intentionally cheaper than the display FBO
-    // (normally 1024px wide).  Splat each sample across the corresponding
-    // horizontal footprint so the scope is a continuous trace instead of a
-    // column of isolated one-pixel dots.  Minimum 2.0: Apple GPUs report
-    // corner gl_PointCoord values for 1-px sprites, which the fragment
-    // Gaussian would discard (losing most samples at dense analysis tiers).
+    // Cover every density pixel intersected by this source column. The
+    // fragment pass integrates that footprint instead of sampling a round
+    // Gaussian at different horizontal phases (768 -> 1024 caused bands).
     float horizontal_coverage = u_density_size.x / max(u_sample_size.x, 1.0);
-    gl_PointSize = clamp(horizontal_coverage * 0.98, 2.0, 3.0);
+    v_column_bounds = clamp(
+        vec2(float(sx), float(sx + 1)) * horizontal_coverage,
+        vec2(0.0), vec2(u_density_size.x));
+    v_center_y = (y_ndc * 0.5 + 0.5) * u_density_size.y;
+    gl_PointSize = max(2.0, ceil(horizontal_coverage) + 1.0);
     v_weight = sample_weight;
 }
 """
@@ -113,20 +116,26 @@ void main() {
 #define SCOPE_WAVEFORM_ACCUM_FRAGMENT """
 #version 330
 uniform int u_channel;
+uniform float u_viewport_x;
 in float v_weight;
 in float v_range_flag;
+flat in vec2 v_column_bounds;
+flat in float v_center_y;
 out vec4 f_color;
 void main() {
-    // Only render fragments inside the point; gl_PointCoord is in [0,1].
-    vec2 pc = gl_PointCoord - vec2(0.5);
-    float radius2 = dot(pc, pc) * 4.0;
-    if (radius2 > 1.0) {
+    // Source-column intervals tile the horizontal axis. Exact pixel overlap
+    // gives a uniform signal equal coverage at every analysis quality tier,
+    // including subpixel columns in each Parade viewport.
+    float x = gl_FragCoord.x - u_viewport_x;
+    float coverage = max(0.0,
+        min(x + 0.5, v_column_bounds.y) - max(x - 0.5, v_column_bounds.x));
+    float dy = gl_FragCoord.y - v_center_y;
+    if (coverage <= 0.0 || abs(dy) > 1.0) {
         discard;
     }
-    // Gaussian-ish splat: bright core plus a soft halo. Additive blending
-    // turns overlapping samples into the luminous trails seen in broadcast
-    // scopes while retaining channel separation in sparse areas.
-    float splat = exp(-radius2 * 4.0);
+    // Keep the narrow vertical glow and the established 512px trace strength
+    // without coupling either to horizontal point size or pixel phase.
+    float splat = coverage * exp(-1.0 - 4.0 * dy * dy);
     vec3 w = vec3(0.0);
     if (u_channel == 0)      w.r = v_weight * splat;
     else if (u_channel == 1) w.g = v_weight * splat;
@@ -152,8 +161,10 @@ uniform vec2 u_density_size;
 uniform float u_max_inv;     // 1.0 / max density seen (precomputed on CPU)
 uniform float u_range_min;
 uniform float u_range_max;
+uniform bool u_parade;
 in vec2 v_texcoord;
 out vec4 f_color;
+const float PARADE_DISPLAY_GAIN = 1.60;
 
 // Draw a 1px horizontal graticule line at normalized height h in [0,1].
 float graticule(float h) {
@@ -171,17 +182,30 @@ float value_to_uv(float value) {
 
 void main() {
     vec2 texel = 1.0 / u_density_size;
-    // A small vertical convolution creates the phosphor-like persistence of
-    // a reference scope. The horizontal taps close any residual gaps from
-    // the lower-resolution analysis grid without smearing the image across
-    // neighbouring columns.
-    vec4 density_rgba = texture(u_density, v_texcoord) * 0.40;
-    density_rgba += texture(u_density, v_texcoord + vec2(0.0, texel.y)) * 0.16;
-    density_rgba += texture(u_density, v_texcoord - vec2(0.0, texel.y)) * 0.16;
-    density_rgba += texture(u_density, v_texcoord + vec2(0.0, texel.y * 2.0)) * 0.06;
-    density_rgba += texture(u_density, v_texcoord - vec2(0.0, texel.y * 2.0)) * 0.06;
-    density_rgba += texture(u_density, v_texcoord + vec2(texel.x, 0.0)) * 0.08;
-    density_rgba += texture(u_density, v_texcoord - vec2(texel.x, 0.0)) * 0.08;
+    // Keep a narrow antialiased trace. Horizontal footprint integration
+    // already closes column gaps; blurring across columns and five rows
+    // obscures fine detail, especially when a Retina window magnifies it.
+    vec4 density_rgba = texture(u_density, v_texcoord) * 0.80;
+    density_rgba += texture(u_density, v_texcoord + vec2(0.0, texel.y)) * 0.10;
+    density_rgba += texture(u_density, v_texcoord - vec2(0.0, texel.y)) * 0.10;
+    if (u_parade) {
+        // Reconstruct missing display samples only where two opposite
+        // neighbours support the same channel. This joins one-texel gaps
+        // along horizontal, vertical and diagonal traces. Retain the narrow
+        // vertical antialiasing above; do not introduce a broad blur halo.
+        // The measurement density stays untouched.
+        vec3 left = texture(u_density, v_texcoord - vec2(texel.x, 0.0)).rgb;
+        vec3 right = texture(u_density, v_texcoord + vec2(texel.x, 0.0)).rgb;
+        vec3 up = texture(u_density, v_texcoord + vec2(0.0, texel.y)).rgb;
+        vec3 down = texture(u_density, v_texcoord - vec2(0.0, texel.y)).rgb;
+        vec3 upper_left = texture(u_density, v_texcoord + vec2(-texel.x, texel.y)).rgb;
+        vec3 lower_right = texture(u_density, v_texcoord + vec2(texel.x, -texel.y)).rgb;
+        vec3 upper_right = texture(u_density, v_texcoord + texel).rgb;
+        vec3 lower_left = texture(u_density, v_texcoord - texel).rgb;
+        vec3 bridge = max(max(min(left, right), min(up, down)),
+                          max(min(upper_left, lower_right), min(upper_right, lower_left)));
+        density_rgba.rgb = max(density_rgba.rgb, bridge * 0.65) * PARADE_DISPLAY_GAIN;
+    }
     vec3 density = density_rgba.rgb;
     float over_density = max(density_rgba.a, 0.0);
     float under_density = max(-density_rgba.a, 0.0);
@@ -199,6 +223,20 @@ void main() {
     float white_lift = overlap * 0.24
         + smoothstep(0.12, 0.45, overlap) * 0.32;
     mapped = clamp(mapped + white_lift, 0.0, 1.0);
+    if (u_parade) {
+        // Keep the coloured body vivid; stronger density, rather than a
+        // large constant white tint, provides the luminous phosphor core.
+        vec3 phosphor = mapped.r * vec3(1.0, 0.08, 0.12)
+                      + mapped.g * vec3(0.06, 1.0, 0.12)
+                      + mapped.b * vec3(0.14, 0.17, 1.0);
+        // Keep sparse trails dim and tinted; only dense regions turn white.
+        // Brightness gain must not lower the density at which the body
+        // turns white, otherwise brighter traces become washed out again.
+        float peak_density = max(density.r, max(density.g, density.b))
+                           * u_max_inv / PARADE_DISPLAY_GAIN;
+        float core = smoothstep(0.15, 0.65, peak_density);
+        mapped = mix(clamp(phosphor, 0.0, 1.0), vec3(1.0), core);
+    }
     // Out-of-range diagnostics.  Keep the legal waveform colour underneath,
     // then lift excursions above 100% in red and below 0% in blue.  The same
     // fixed density normalization is used so a single clipped pixel remains
@@ -216,7 +254,7 @@ void main() {
     // 10-bit-style minor divisions (0, 128, ... 1023), matching the
     // reference scope's evenly spaced amber graticule.
     for (int i = 1; i < 8; i++) {
-        grid = max(grid, graticule(value_to_uv(float(i) / 8.0)) * 0.55);
+        grid = max(grid, graticule(value_to_uv(float(i * 128) / 1023.0)) * 0.55);
     }
     // DaVinci's waveform uses a restrained amber graticule. Keep it bright
     // enough to read through the black background without competing with
@@ -284,7 +322,7 @@ void main() {
 // -----------------------------------------------------------------------------
 // 5. Vectorscope display / tone-map pass (full-screen quad)
 // -----------------------------------------------------------------------------
-// Tone-maps the R16F density into a colourful vectorscope, draws the circular
+// Tone-maps the R16F density into a chroma-coloured trace, draws the circular
 // graticule with an amber outer rim, angle ticks and crosshairs.
 // The presenter adds the six labelled chroma targets as UI annotations.
 #define SCOPE_VECTORSCOPE_DISPLAY_FRAGMENT """
@@ -303,27 +341,31 @@ vec2 to_cbcr(vec2 uv) {
     return ndc * 0.5 / u_zoom;        // back to Cb/Cr units
 }
 
-// Reverse-map a Cb/Cr pair to a display RGB (Y=0.5 mid gray, as the CPU
-// reference does at vectorscope_widget.py:257).
-vec3 cbcr_to_rgb(float cb, float cr) {
-    float y = 0.5;
-    float r = y + 1.402 * cr;
-    float g = y - 0.344136 * cb - 0.714136 * cr;
-    float b = y + 1.772 * cb;
-    return clamp(vec3(r, g, b), 0.0, 1.0);
-}
-
 void main() {
     vec2 uv = v_texcoord;
     vec2 cbcr = to_cbcr(uv);
     float sat = length(cbcr);
 
-    float density = texture(u_density, uv).r;
-    float norm = density * u_max_inv;
-    float brightness = clamp(pow(norm, 0.7) * 2.0, 0.0, 1.0);
-    vec3 heat = cbcr_to_rgb(cbcr.x, cbcr.y);
-    vec3 boosted = mix(vec3(dot(heat, vec3(0.2126, 0.7152, 0.0722))), heat, 1.5);
-    vec3 out_rgb = boosted * brightness;
+    vec2 texel = 1.0 / u_density_size;
+    float density = texture(u_density, uv).r * 0.60;
+    density += texture(u_density, uv + vec2(texel.x, 0.0)).r * 0.10;
+    density += texture(u_density, uv - vec2(texel.x, 0.0)).r * 0.10;
+    density += texture(u_density, uv + vec2(0.0, texel.y)).r * 0.10;
+    density += texture(u_density, uv - vec2(0.0, texel.y)).r * 0.10;
+    float norm = max(density * u_max_inv, 0.0);
+    // Soft saturation preserves sparse-to-dense detail instead of making
+    // every occupied texel equally bright.
+    float brightness = 1.0 - exp(-pow(norm, 0.65) * 0.55);
+    // Restore colour from the plotted Cb/Cr coordinates, as in the CPU
+    // vectorscope. Neutral chroma stays white; chromatic traces show their
+    // hue. Keep hue and density brightness independent, including at x2 zoom.
+    vec3 trace_color = clamp(vec3(0.5 + 1.402 * cbcr.y,
+        0.5 - 0.344136 * cbcr.x - 0.714136 * cbcr.y,
+        0.5 + 1.772 * cbcr.x), 0.0, 1.0);
+    float luma = dot(trace_color, vec3(0.2126, 0.7152, 0.0722));
+    trace_color = clamp(mix(vec3(luma), trace_color, 1.5), 0.0, 1.0);
+    trace_color /= max(max(trace_color.r, max(trace_color.g, trace_color.b)), 0.0001);
+    vec3 out_rgb = trace_color * brightness;
     // Keep the existing measurement-space clipping and zoom behaviour.
     if (sat > 0.5) out_rgb = vec3(0.0);
 
@@ -469,8 +511,8 @@ void main() {
 }
 """
 
-// Curves use a separate display surface: linear YRGB distributions, with
-// independent peak normalization. All reduction stays on the render thread.
+// Curves and standalone scopes share linear distributions, five-tap
+// smoothing, peak normalization and antialiased contour geometry. All reduction stays on the render thread.
 #define SCOPE_CURVES_HISTOGRAM_PEAK_FRAGMENT """
 #version 330
 uniform sampler2D u_hist_sum;
@@ -498,6 +540,7 @@ uniform sampler2D u_hist_peak;
 uniform vec2 u_display_size;
 uniform float u_line_width;
 uniform int u_curve_axis;
+uniform bool u_separate_rgb_rows;
 in vec2 v_texcoord;
 out vec4 f_color;
 vec4 counts(int col) {
@@ -522,6 +565,28 @@ void main() {
     float bin = clamp(v_texcoord.x * 512.0 - 0.5, 0.0, 511.0);
     int col = int(floor(bin));
     vec4 heights = mix(height_at(col), height_at(min(col + 1, 511)), fract(bin));
+    if (u_separate_rgb_rows) {
+        // The same curve as the Custom Curves underlay, separated into RGB
+        // rows. Only colour, background and layout differ; counts stay linear.
+        float row_position = min(v_texcoord.y * 3.0, 2.999999);
+        int channel = 2 - int(floor(row_position));
+        float y = fract(row_position);
+        float height = heights[channel] * (0.94 / 0.98);
+        float pixel = 3.0 / u_display_size.y;
+        float line = stroke(y - height) * step(pixel * 0.25, height);
+        float filled = smoothstep(-pixel * 0.5, pixel * 0.5, height - y);
+        vec3 colors[3] = vec3[3](vec3(1.0, 0.06, 0.055),
+                                vec3(0.04, 0.94, 0.07),
+                                vec3(0.045, 0.46, 1.0));
+        vec3 signal = colors[channel] * (filled * 0.14 + line * 0.82);
+        float gx = abs(v_texcoord.x * 8.0 - floor(v_texcoord.x * 8.0 + 0.5)) / 8.0;
+        float grid = 1.0 - smoothstep(0.25 / u_display_size.x,
+                                     1.0 / u_display_size.x, gx);
+        float baseline = 1.0 - smoothstep(0.0, pixel * 0.6, y);
+        vec3 amber = vec3(0.30, 0.24, 0.055);
+        f_color = vec4(max(signal, amber * max(grid * 0.65, baseline * 0.75)), 1.0);
+        return;
+    }
     if (u_curve_axis != 0) {
         vec3 background = vec3(v_texcoord.x * 0.805);
         if (u_curve_axis == 1) {
@@ -566,47 +631,8 @@ void main() {
 }
 """
 
-// -----------------------------------------------------------------------------
-// 9. Histogram display (full-screen quad, curve fill).
-// -----------------------------------------------------------------------------
-// Draws separate R/G/B rows over black with amber code-value grid lines.
-// Fixed normalization (see waveform) keeps
-// the pass free of any density readback.
-#define SCOPE_HISTOGRAM_DISPLAY_FRAGMENT """
-#version 330
-uniform sampler2D u_hist_sum;
-uniform vec2 u_display_size;
-uniform float u_max_inv;       // 1.0 / log1p(expected peak count)
-in vec2 v_texcoord;
-out vec4 f_color;
-void main() {
-    int col = int(clamp(v_texcoord.x, 0.0, 1.0) * 511.0 + 0.5);
-    vec3 log_sum = texelFetch(u_hist_sum, ivec2(col, 0), 0).rgb;
-    vec3 norm = clamp(log_sum * u_max_inv, vec3(0.0), vec3(1.0));
-    // GL bottom-up coordinates: B on the bottom, G in the middle, R on top.
-    float row_position = min(v_texcoord.y * 3.0, 2.999999);
-    int channel = 2 - int(floor(row_position));
-    float y = fract(row_position);
-    vec3 colors[3] = vec3[3](
-        vec3(1.0, 0.035, 0.06),
-        vec3(0.025, 1.0, 0.035),
-        vec3(0.025, 0.40, 1.0)
-    );
-    float height = norm[channel] * 0.94;
-    float trace_width = 3.0 / u_display_size.y;
-    float line = 1.0 - smoothstep(trace_width * 0.35, trace_width,
-                                 abs(y - height));
-    float under_curve = step(y, height);
-    vec3 signal = colors[channel] * (under_curve * 0.16 + line * 0.82);
-    // Eight major code divisions mirror the top ruler's 0..1023 labels.
-    float gx = abs(v_texcoord.x * 8.0 - floor(v_texcoord.x * 8.0 + 0.5)) / 8.0;
-    float grid = 1.0 - smoothstep(0.25 / u_display_size.x,
-                                 1.0 / u_display_size.x, gx);
-    float baseline = 1.0 - smoothstep(0.0, trace_width * 0.6, y);
-    vec3 amber = vec3(0.30, 0.24, 0.055);
-    f_color = vec4(max(signal, amber * max(grid * 0.65, baseline * 0.75)), 1.0);
-}
-"""
+// Standalone RGB histogram uses SCOPE_CURVES_HISTOGRAM_DISPLAY_FRAGMENT
+// with u_separate_rgb_rows=true. Keep both views on the same curve geometry.
 
 // -----------------------------------------------------------------------------
 // 10. CIE 1931 chromaticity accumulation (POINTS draw).

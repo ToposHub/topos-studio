@@ -25,6 +25,7 @@ from typing import Dict, Optional, Tuple
 
 import moderngl
 import numpy as np
+from src.shared.gpu.scope_publication import ScopePublication
 
 from src.features.color.core.scope_types import (
     DEFAULT_CIE_SIZE as CIE_SIZE,
@@ -80,6 +81,29 @@ class GpuScopeEngine:
         self._points_vao_cache: Dict[tuple, tuple] = {}
         self._quad_vbo: Optional[moderngl.Buffer] = None
         self._quad_vao_cache: Dict[int, moderngl.VertexArray] = {}
+        self._publication: Optional[ScopePublication] = None
+        self._curves_display_mode: Optional[str] = None
+        self._allocation_guard_tex: Optional[moderngl.Texture] = None
+        self._allocation_guard_fbo: Optional[moderngl.Framebuffer] = None
+
+    def begin_frame(self) -> None:
+        """Order output writes after any UI copies from the previous pass."""
+        if self._publication is not None:
+            self._publication.prepare_write()
+
+    def _invalidate_publication(self) -> None:
+        """Revoke descriptors before deleting their texture allocations."""
+        if self._publication is not None:
+            self._publication.retire()
+            self._publication = None
+
+    def publish(self) -> ScopePublication:
+        """Publish this batch through a flushed, non-blocking GPU fence."""
+        if self._publication is None:
+            self._publication = ScopePublication.publish(self.ctx.finish)
+        else:
+            self._publication.refresh(self.ctx.finish)
+        return self._publication
 
     # ------------------------------------------------------------------
     # Shader / resource lifecycle
@@ -126,7 +150,7 @@ class GpuScopeEngine:
         build("scope_histogram_reduce", passthrough,
               defs.get("SCOPE_HISTOGRAM_REDUCE_FRAGMENT", ""))
         build("scope_histogram_display", passthrough,
-              defs.get("SCOPE_HISTOGRAM_DISPLAY_FRAGMENT", ""))
+              defs.get("SCOPE_CURVES_HISTOGRAM_DISPLAY_FRAGMENT", ""))
         build("scope_curves_histogram_peak", passthrough,
               defs.get("SCOPE_CURVES_HISTOGRAM_PEAK_FRAGMENT", ""))
         build("scope_curves_histogram_display", passthrough,
@@ -164,10 +188,24 @@ class GpuScopeEngine:
         )
         pool = self._pool_cache.get(pool_key)
         if pool is None:
+            self._invalidate_publication()
             # N09 债务修复：尺寸键变化 = 旧尺寸池整体作废（浮窗/resize
             # 场景每次新键都会留一套全尺寸纹理——曾 1647MB/10min 泄漏）。
             # 单活动池语义：释放全部旧键池后再建新池。
             if self._pool_cache:
+                # ModernGL restores ctx.fbo while constructing each new FBO.
+                # Keep that restore target alive across old-pool retirement;
+                # otherwise a resize can restore an already deleted GL name.
+                if self._allocation_guard_fbo is None:
+                    self._allocation_guard_tex = self.ctx.texture((1, 1), 4, dtype='f1')
+                    try:
+                        self._allocation_guard_fbo = self.ctx.framebuffer(
+                            color_attachments=[self._allocation_guard_tex])
+                    except Exception:
+                        self._allocation_guard_tex.release()
+                        self._allocation_guard_tex = None
+                        raise
+                self._allocation_guard_fbo.use()
                 for _old_key, old_pool in self._pool_cache.items():
                     self._release_pool_entries(old_pool)
                 self._pool_cache.clear()
@@ -267,6 +305,7 @@ class GpuScopeEngine:
 
     def release(self) -> None:
         """Release every allocated scope resource (idempotent)."""
+        self._invalidate_publication()
         for pool in list(self._pool_cache.values()):
             for key, obj in list(pool.items()):
                 if key.endswith('_size') or not hasattr(obj, 'release'):
@@ -278,6 +317,12 @@ class GpuScopeEngine:
             pool.clear()
         self._pool_cache.clear()
         self._pool = None
+        if self._allocation_guard_fbo is not None:
+            self._allocation_guard_fbo.release()
+            self._allocation_guard_fbo = None
+        if self._allocation_guard_tex is not None:
+            self._allocation_guard_tex.release()
+            self._allocation_guard_tex = None
         for cached in self._points_vao_cache.values():
             for resource in cached:
                 try:
@@ -415,6 +460,7 @@ class GpuScopeEngine:
         prog['u_sample_tex'].value = 0
         prog['u_sample_size'].value = (float(aw), float(ah))
         prog['u_density_size'].value = (float(ww), float(wh))
+        prog['u_viewport_x'].value = 0.0
         prog['u_range_min'].value = SCOPE_RANGE_MIN
         prog['u_range_max'].value = SCOPE_RANGE_MAX
         self._enable_additive()
@@ -428,7 +474,7 @@ class GpuScopeEngine:
             self._restore_blend()
 
     def display_waveform(self, pool: dict, single_channel: bool = False,
-                         *, target: str = 'wf_display') -> None:
+                         *, target: str = 'wf_display', parade: bool = False) -> None:
         """Tone-map waveform/luma density -> RGBA8 with graticule."""
         prog = self.programs.get('scope_waveform_display')
         if prog is None:
@@ -440,12 +486,16 @@ class GpuScopeEngine:
         prog['u_density_size'].value = (float(ww), float(wh))
         prog['u_range_min'].value = SCOPE_RANGE_MIN
         prog['u_range_max'].value = SCOPE_RANGE_MAX
+        prog['u_parade'].value = parade
         _aw, ah = pool['analysis_size']
-        # Fixed scale derived from the analysis row count. The luma trace
-        # accumulates once (single channel) while RGB accumulates three
-        # passes, so its expected per-texel peak is three times lower.
-        divisor = 3.0 if single_channel else 1.0
+        # Fixed gain derived from sample/plot resolution. Single-channel
+        # scopes receive a stronger phosphor response than overlaid RGB;
+        # the density scaling keeps enlarged plots from becoming dimmer.
+        divisor = 3.0 if single_channel or parade else 1.0
         expected_peak = max(8.0, float(ah) * 0.10 / divisor)
+        # Source-column footprints tile X with unit coverage at any width;
+        # only the vertical value-bin density needs a resolution correction.
+        expected_peak *= 300.0 / float(wh)
         prog['u_max_inv'].value = 1.0 / expected_peak
         self._render_quad(prog)
 
@@ -479,7 +529,9 @@ class GpuScopeEngine:
         pool['vs_density'].use(0)
         prog['u_density'].value = 0
         prog['u_density_size'].value = (float(vw), float(vh))
-        prog['u_max_inv'].value = 1.0  # fixed normalization
+        aw, ah = pool['analysis_size']
+        prog['u_max_inv'].value = ((320.0 * 180.0) / float(aw * ah)
+                                   * (float(vw * vh) / (800.0 * 800.0)))
         prog['u_zoom'].value = float(zoom)
         self._render_quad(prog)
 
@@ -513,6 +565,7 @@ class GpuScopeEngine:
             vao = self._points_vao(prog, aw * ah)
             for ch in (0, 1, 2):
                 self.ctx.viewport = (ch * third, 0, third, wh)
+                prog['u_viewport_x'].value = float(ch * third)
                 prog['u_channel'].value = ch
                 vao.render(mode=moderngl.POINTS, vertices=aw * ah)
         finally:
@@ -523,7 +576,7 @@ class GpuScopeEngine:
         """Tone-map parade density (reuses the waveform display shader)."""
         # Each third carries exactly one channel, so the RGB tone-map renders
         # monochrome red/green/blue panels with the shared value graticule.
-        self.display_waveform(pool, target=target)
+        self.display_waveform(pool, target=target, parade=True)
 
     def accumulate_histogram(self, pool: dict, *, include_luma: bool = False,
                              curve_mode: str = 'Custom') -> None:
@@ -559,21 +612,30 @@ class GpuScopeEngine:
         prog['u_density'].value = 0
         self._render_quad(prog)
 
+    def _reduce_histogram_peak(self, pool: dict) -> None:
+        """Find smoothed linear peaks for both histogram views on the GPU."""
+        peak = self.programs['scope_curves_histogram_peak']
+        self._use_target(pool['hist_peak_fbo'], (1, 1))
+        pool['hist_sum'].use(0)
+        peak['u_hist_sum'].value = 0
+        self._render_quad(peak)
+
     def display_histogram(self, pool: dict) -> None:
-        """Rasterize the log-domain column sums into the RGBA8 display."""
+        """Draw the Curves distribution in separate RGB rows over black."""
         prog = self.programs.get('scope_histogram_display')
         if prog is None:
             return
+        self._reduce_histogram_peak(pool)
         dw, dh = HISTOGRAM_DISPLAY_SIZE
         self._use_target(pool['hist_display_fbo'], (dw, dh))
         pool['hist_sum'].use(0)
+        pool['hist_peak'].use(1)
         prog['u_hist_sum'].value = 0
+        prog['u_hist_peak'].value = 1
         prog['u_display_size'].value = (float(dw), float(dh))
-        _aw, ah = pool['analysis_size']
-        samples = float(_aw * ah)
-        # A column holding ~1/48 of all samples reaches full scale; the log
-        # mapping keeps low-count tails visible (fixed gain, no readback).
-        prog['u_max_inv'].value = 1.0 / max(1.0, np.log1p(samples / 48.0))
+        prog['u_line_width'].value = 1.0
+        prog['u_curve_axis'].value = 0
+        prog['u_separate_rgb_rows'].value = True
         self._render_quad(prog)
 
     def display_curves_histogram(
@@ -582,7 +644,13 @@ class GpuScopeEngine:
     ) -> None:
         """Draw a linear, peak-normalized YRGB underlay without CPU readback."""
         display_size = tuple(max(1, int(v)) for v in display_size)
+        # A delayed Custom descriptor must never copy a newer Hue/Sat
+        # distribution simply because both happened to reuse the same GL ID.
+        if curve_mode != self._curves_display_mode:
+            self._invalidate_publication()
+            self._curves_display_mode = curve_mode
         if pool['curves_hist_display_size'] != display_size:
+            self._invalidate_publication()
             tex = self.ctx.texture(display_size, 4, dtype='f1')
             tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
             tex.repeat_x = False
@@ -598,11 +666,7 @@ class GpuScopeEngine:
             pool['curves_hist_display'] = tex
             pool['curves_hist_display_size'] = display_size
             pool['curves_hist_display_fbo'] = fbo
-        peak = self.programs['scope_curves_histogram_peak']
-        self._use_target(pool['hist_peak_fbo'], (1, 1))
-        pool['hist_sum'].use(0)
-        peak['u_hist_sum'].value = 0
-        self._render_quad(peak)
+        self._reduce_histogram_peak(pool)
 
         prog = self.programs['scope_curves_histogram_display']
         self._use_target(pool['curves_hist_display_fbo'], display_size)
@@ -613,6 +677,7 @@ class GpuScopeEngine:
         prog['u_display_size'].value = tuple(float(v) for v in display_size)
         prog['u_line_width'].value = max(0.5, float(line_width))
         prog['u_curve_axis'].value = self._curve_axis(curve_mode)
+        prog['u_separate_rgb_rows'].value = False
         self._render_quad(prog)
 
     @staticmethod
@@ -717,20 +782,19 @@ class GpuScopeEngine:
                 vectorscope_zoom / scope_transfer / scope_primaries /
                 falsecolor_mode / zebra_threshold）。
 
-        Returns a dict of mode -> (texture_id, (w, h)).  The caller owns the
-        cross-context finish() and the ``ScopeGpuFrame`` publication.
+        Returns a dict of mode -> (texture_id, (w, h)). The caller invokes
+        ``publish()`` and includes its lifetime/fence token in ScopeGpuFrame.
         """
         from src.features.color.core.scope_types import (
             mode_needs_waveform, mode_needs_vectorscope, mode_needs_parade,
             mode_needs_luma, mode_needs_histogram, mode_needs_cie,
             mode_needs_falsecolor,
-            DEFAULT_WAVEFORM_DENSITY_SIZE, DEFAULT_VECTORSCOPE_DENSITY_SIZE,
+            scope_density_sizes,
         )
+        self.begin_frame()
         analysis = tuple(int(v) for v in demand.analysis_size)
-        pool = self.ensure_pool(
-            analysis, DEFAULT_WAVEFORM_DENSITY_SIZE,
-            DEFAULT_VECTORSCOPE_DENSITY_SIZE,
-        )
+        waveform_size, vectorscope_size = scope_density_sizes(demand.display_size, demand.mode)
+        pool = self.ensure_pool(analysis, waveform_size, vectorscope_size)
         mode = demand.mode
         outputs: Dict[str, tuple] = {}
 
@@ -765,9 +829,10 @@ class GpuScopeEngine:
             self.accumulate_histogram(pool, include_luma=bool(getattr(demand, 'histogram_overlay', False)),
                                       curve_mode=demand.curves_mode)
             self.reduce_histogram(pool)
-            self.display_histogram(pool)
-            outputs['histogram'] = (pool['hist_display'].glo,
-                                    HISTOGRAM_DISPLAY_SIZE)
+            if demand.standalone_enabled and mode_needs_histogram(mode):
+                self.display_histogram(pool)
+                outputs['histogram'] = (pool['hist_display'].glo,
+                                        HISTOGRAM_DISPLAY_SIZE)
             if bool(getattr(demand, 'histogram_overlay', False)):
                 self.display_curves_histogram(pool, demand.curves_display_size, demand.curves_line_width,
                                               demand.curves_mode)

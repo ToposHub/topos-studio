@@ -2140,7 +2140,7 @@ class AsyncRenderer(QThread):
             mode_needs_waveform, mode_needs_vectorscope,
             mode_needs_parade, mode_needs_luma, mode_needs_histogram,
             mode_needs_cie, mode_needs_falsecolor,
-            DEFAULT_WAVEFORM_DENSITY_SIZE, DEFAULT_VECTORSCOPE_DENSITY_SIZE,
+            scope_density_sizes,
             DEFAULT_HISTOGRAM_DISPLAY_SIZE, DEFAULT_CIE_SIZE,
             DEFAULT_FALSECOLOR_SIZE,
         )
@@ -2185,15 +2185,30 @@ class AsyncRenderer(QThread):
                                      demand_revision=self._scope_demand_revision)
             return
 
+        # A newer preview can arrive after the lane batch was drained. Give
+        # that work another chance before starting a non-preemptible scope
+        # pass; its front-publish callback will submit the fresh demand.
+        with self._pending_lock:
+            preview_pending = any(
+                self._pending_slots.get(lane) is not None for lane in (
+                    RenderLane.GRADING_REFRESH, RenderLane.VIDEO_PLAYBACK,
+                    RenderLane.VIEWPORT_REFRESH,
+                )
+            )
+        if preview_pending:
+            scope_diagnostics.record('execute', 'preview_priority', revision=demand.revision)
+            return
+
         t0 = time.monotonic()
         try:
             analysis_size = (
                 max(1, int(demand.analysis_size[0])),
                 max(1, int(demand.analysis_size[1])),
             )
-            waveform_size = DEFAULT_WAVEFORM_DENSITY_SIZE
-            vectorscope_size = DEFAULT_VECTORSCOPE_DENSITY_SIZE
+            waveform_size, vectorscope_size = scope_density_sizes(demand.display_size, demand.mode)
 
+            scope_engine = self._ensure_scope_engine()
+            scope_engine.begin_frame()
             pool = self._ensure_gpu_scope_pool(
                 analysis_size, waveform_size, vectorscope_size
             )
@@ -2205,7 +2220,7 @@ class AsyncRenderer(QThread):
             # keeps scope geometry stable and excludes the canvas background
             # from the signal.  Viewport-only refreshes reuse the cached output.
             # The scope-specific ColorOutput path skips its intermediate finish;
-            # the single finish below publishes the completed scope textures.
+            # the fence below publishes the completed scope textures.
             scope_source = None
             scope_source_is_full_frame = False
             scope_params = getattr(self, '_last_scope_render_params', None)
@@ -2272,9 +2287,19 @@ class AsyncRenderer(QThread):
                 mask_texture = self.layer_textures.get(
                     demand.mask_layer_id, {}
                 ).get('mask')
-            if demand.mode != 'falsecolor' or bool(
-                getattr(demand, 'histogram_overlay', False)
-            ):
+            histogram_key = (
+                content_revision, analysis_size,
+                demand.mask_layer_id if demand.mask_enabled else None,
+                (self.__dict__.get('_mask_epoch') or {}).get(demand.mask_layer_id, 0),
+                bool(demand.histogram_overlay), demand.curves_mode,
+            )
+            histogram_cached = pool.get('histogram_cache_key') == histogram_key
+            # A curve-canvas resize changes only its display texture. Reuse
+            # the GPU histogram counts for unchanged content/axis/mask instead
+            # of point-splatting the same 768x432 samples again.
+            if ((demand.mode not in ('falsecolor', 'histogram'))
+                    or (demand.mode == 'histogram' and not histogram_cached)
+                    or (demand.histogram_overlay and not histogram_cached)):
                 self._scope_sample_front(
                     scope_source,
                     pool,
@@ -2326,13 +2351,16 @@ class AsyncRenderer(QThread):
             if mode_needs_histogram(demand.mode) or bool(
                 getattr(demand, 'histogram_overlay', False)
             ):
-                if bool(getattr(demand, 'histogram_overlay', False)):
-                    self._scope_accumulate_histogram(pool, include_luma=True, curve_mode=demand.curves_mode)
-                else:
-                    self._scope_accumulate_histogram(pool)
-                self._scope_reduce_histogram(pool)
-                self._scope_display_histogram(pool)
-                hist_id = pool['hist_display'].glo
+                if not histogram_cached:
+                    if bool(getattr(demand, 'histogram_overlay', False)):
+                        self._scope_accumulate_histogram(pool, include_luma=True, curve_mode=demand.curves_mode)
+                    else:
+                        self._scope_accumulate_histogram(pool)
+                    self._scope_reduce_histogram(pool)
+                    pool['histogram_cache_key'] = histogram_key
+                if demand.standalone_enabled and mode_needs_histogram(demand.mode):
+                    self._scope_display_histogram(pool)
+                    hist_id = pool['hist_display'].glo
                 if bool(getattr(demand, 'histogram_overlay', False)):
                     self._scope_display_curves_histogram(pool, demand.curves_display_size,
                                                         demand.curves_line_width, demand.curves_mode)
@@ -2347,13 +2375,11 @@ class AsyncRenderer(QThread):
                 self._scope_display_falsecolor(pool, scope_source, demand)
                 fc_id = pool['fc_display'].glo
 
-            # Cross-context visibility: the presenter (UI thread / its own
-            # context) reads these textures via glBlitFramebuffer. Insert an
-            # explicit finish so the writes are visible before we publish the
-            # texture ids. This is a full-pipeline sync, but it runs only on
-            # the rate-limited, low-priority GPU_SCOPE lane rather than on
-            # every video render. Cheaper than a CPU readback.
-            self.ctx.finish()
+            # The UI GPU-copy waits on this flushed fence. The render worker
+            # can immediately accept the next grading/video command instead
+            # of blocking in glFinish. The lifetime guard also revokes IDs
+            # before a resize can recycle them for unrelated textures.
+            publication = scope_engine.publish()
 
             analysis_ms = (time.monotonic() - t0) * 1000.0
             demand_identity = getattr(demand, 'sample_identity', None)
@@ -2391,6 +2417,7 @@ class AsyncRenderer(QThread):
                     DEFAULT_FALSECOLOR_SIZE if fc_id is not None else (0, 0)
                 ),
                 analysis_ms=analysis_ms,
+                publication=publication,
             )
             self.gpu_scope_ready.emit(frame)
         except Exception as exc:

@@ -1,0 +1,399 @@
+/Users/heng/Documents/vscode/topos-player/Sources/ToposKit/ToposAudio.swift:168:28: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+166 | 
+167 |         let asset = AVURLAsset(url: alias)
+168 |         let tracks = asset.tracks(withMediaType: .audio)
+    |                            `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+169 |         guard tracks.indices.contains(trackIndex) else { return nil }
+170 |         let selectedTrack = tracks[trackIndex]
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposKit/ToposAudio.swift:181:44: warning: 'timeRange' was deprecated in macOS 13.0: Use load(.timeRange) instead
+179 |                                    interleaved: false,
+180 |                                    channelLayout: layout)
+181 |         let durationFrames = selectedTrack.timeRange.duration.seconds * expectedSampleRate
+    |                                            `- warning: 'timeRange' was deprecated in macOS 13.0: Use load(.timeRange) instead
+182 |         guard durationFrames.isFinite, durationFrames > 0,
+183 |               durationFrames < Double(Int.max) else { return nil }
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposKit/ToposAudio.swift:219:63: warning: 'timeRange' was deprecated in macOS 13.0: Use load(.timeRange) instead
+217 |         let offset = CMTime(value: Int64(start), timescale: timeScale)
+218 |         let duration = CMTime(value: Int64(requestedFrames), timescale: timeScale)
+219 |         reader.timeRange = CMTimeRange(start: CMTimeAdd(track.timeRange.start, offset),
+    |                                                               `- warning: 'timeRange' was deprecated in macOS 13.0: Use load(.timeRange) instead
+220 |                                        duration: duration)
+221 |         let outputSettings: [String: Any] = [
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposKit/ToposAudio.swift:395:28: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+393 |                                                trackIndex: Int) -> ToposAudioData? {
+394 |         let asset = AVURLAsset(url: fileURL)
+395 |         let tracks = asset.tracks(withMediaType: .audio)
+    |                            `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+396 |         guard tracks.indices.contains(trackIndex),
+397 |               let reader = try? AVAssetReader(asset: asset) else { return nil }
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposKit/ToposSubtitleRenderer.swift:118:19: warning: value 'renderer' was defined but never used; consider replacing with boolean test
+116 |         }
+117 |         renderer = rendererInit(library)
+118 |         guard let renderer else {
+    |                   `- warning: value 'renderer' was defined but never used; consider replacing with boolean test
+119 |             Self.libraryDone?(library)
+120 |             self.library = nil
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVEncodeSession.swift:80:30: warning: result of call to function returning 'Int32' is unused
+ 78 |              debugLog: Bool = false,
+ 79 |              onProgress: ((Double) -> Void)? = nil) -> Outcome {
+ 80 |         if debugLog { MPVLib.requestLogMessages(handle, "v") }
+    |                              `- warning: result of call to function returning 'Int32' is unused
+ 81 |         MPVLib.observeProperty(handle, 0, "percent-pos", MPVLib.Format.DOUBLE)
+ 82 |         MPVLib.observeProperty(handle, 0, "time-pos", MPVLib.Format.DOUBLE)
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVEncodeSession.swift:81:16: warning: result of call to function returning 'Int32' is unused
+ 79 |              onProgress: ((Double) -> Void)? = nil) -> Outcome {
+ 80 |         if debugLog { MPVLib.requestLogMessages(handle, "v") }
+ 81 |         MPVLib.observeProperty(handle, 0, "percent-pos", MPVLib.Format.DOUBLE)
+    |                `- warning: result of call to function returning 'Int32' is unused
+ 82 |         MPVLib.observeProperty(handle, 0, "time-pos", MPVLib.Format.DOUBLE)
+ 83 |         MPVLib.observeProperty(handle, 0, "duration", MPVLib.Format.DOUBLE)
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVEncodeSession.swift:82:16: warning: result of call to function returning 'Int32' is unused
+ 80 |         if debugLog { MPVLib.requestLogMessages(handle, "v") }
+ 81 |         MPVLib.observeProperty(handle, 0, "percent-pos", MPVLib.Format.DOUBLE)
+ 82 |         MPVLib.observeProperty(handle, 0, "time-pos", MPVLib.Format.DOUBLE)
+    |                `- warning: result of call to function returning 'Int32' is unused
+ 83 |         MPVLib.observeProperty(handle, 0, "duration", MPVLib.Format.DOUBLE)
+ 84 |         guard command(["loadfile", input.path, "replace"]) >= 0 else {
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVEncodeSession.swift:83:16: warning: result of call to function returning 'Int32' is unused
+ 81 |         MPVLib.observeProperty(handle, 0, "percent-pos", MPVLib.Format.DOUBLE)
+ 82 |         MPVLib.observeProperty(handle, 0, "time-pos", MPVLib.Format.DOUBLE)
+ 83 |         MPVLib.observeProperty(handle, 0, "duration", MPVLib.Format.DOUBLE)
+    |                `- warning: result of call to function returning 'Int32' is unused
+ 84 |         guard command(["loadfile", input.path, "replace"]) >= 0 else {
+ 85 |             return .failure
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:105:20: warning: result of call to function returning 'Int32' is unused
+103 |         ]
+104 |         for (k, v) in defaults {
+105 |             MPVLib.setOptionString(h, k, v)
+    |                    `- warning: result of call to function returning 'Int32' is unused
+106 |         }
+107 |         for (k, v) in overrides {
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:108:20: warning: result of call to function returning 'Int32' is unused
+106 |         }
+107 |         for (k, v) in overrides {
+108 |             MPVLib.setOptionString(h, k, v)
+    |                    `- warning: result of call to function returning 'Int32' is unused
+109 |         }
+110 |         guard MPVLib.initialize(h) == 0 else {
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:118:20: warning: result of call to function returning 'Int32' is unused
+116 | 
+117 |         func observe(_ name: String, _ format: Int32) {
+118 |             MPVLib.observeProperty(h, 0, name, format)
+    |                    `- warning: result of call to function returning 'Int32' is unused
+119 |         }
+120 |         observe("time-pos", MPVLib.Format.DOUBLE)
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:161:16: warning: result of call to function returning 'Int32' is unused
+159 |     func setPaused(_ paused: Bool) {
+160 |         guard let h = mpvHandle else { return }
+161 |         MPVLib.setPropertyString(h, "pause", paused ? "yes" : "no")
+    |                `- warning: result of call to function returning 'Int32' is unused
+162 |     }
+163 | 
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:165:19: warning: immutable value 'h' was never used; consider replacing with '_' or removing it
+163 | 
+164 |     func isPaused() -> Bool {
+165 |         guard let h = mpvHandle, let d = getDouble("pause") else { return true }
+    |                   `- warning: immutable value 'h' was never used; consider replacing with '_' or removing it
+166 |         return d != 0
+167 |     }
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:171:16: warning: result of call to function returning 'Int32' is unused
+169 |     func setSpeed(_ speed: Float) {
+170 |         guard let h = mpvHandle else { return }
+171 |         MPVLib.setPropertyString(h, "speed", String(format: "%.3f", speed))
+    |                `- warning: result of call to function returning 'Int32' is unused
+172 |     }
+173 | 
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:176:16: warning: result of call to function returning 'Int32' is unused
+174 |     func setLoopFile(_ loop: Bool) {
+175 |         guard let h = mpvHandle else { return }
+176 |         MPVLib.setPropertyString(h, "loop-file", loop ? "inf" : "no")
+    |                `- warning: result of call to function returning 'Int32' is unused
+177 |     }
+178 | 
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:212:16: warning: result of call to function returning 'Int32' is unused
+210 |     func setMuted(_ muted: Bool) {
+211 |         guard let h = mpvHandle else { return }
+212 |         MPVLib.setPropertyString(h, "mute", muted ? "yes" : "no")
+    |                `- warning: result of call to function returning 'Int32' is unused
+213 |     }
+214 | 
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:381:20: warning: result of call to function returning 'Int32' is unused
+379 |         if let scheme = URL(string: path)?.scheme?.lowercased(), scheme == "rtsp",
+380 |            let h = mpvHandle {
+381 |             MPVLib.setPropertyString(h, "rtsp-transport", "tcp")
+    |                    `- warning: result of call to function returning 'Int32' is unused
+382 |             MPVLib.setPropertyString(h, "cache", "no")
+383 |             MPVLib.setPropertyString(h, "latency-hacks", "yes")
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:382:20: warning: result of call to function returning 'Int32' is unused
+380 |            let h = mpvHandle {
+381 |             MPVLib.setPropertyString(h, "rtsp-transport", "tcp")
+382 |             MPVLib.setPropertyString(h, "cache", "no")
+    |                    `- warning: result of call to function returning 'Int32' is unused
+383 |             MPVLib.setPropertyString(h, "latency-hacks", "yes")
+384 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/ToposMPVKit/MPVCore.swift:383:20: warning: result of call to function returning 'Int32' is unused
+381 |             MPVLib.setPropertyString(h, "rtsp-transport", "tcp")
+382 |             MPVLib.setPropertyString(h, "cache", "no")
+383 |             MPVLib.setPropertyString(h, "latency-hacks", "yes")
+    |                    `- warning: result of call to function returning 'Int32' is unused
+384 |         }
+385 |         command(["loadfile", path, "replace"])
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/DiagnosticsLogger.swift:186:13: warning: variable 'message' was never mutated; consider changing to 'let' constant
+184 |         guard fd >= 0 else { return }
+185 |         let time = time(nil)
+186 |         var message: [UInt8] = Array("signal=\(number) at \(time)\n".utf8)
+    |             `- warning: variable 'message' was never mutated; consider changing to 'let' constant
+187 |         write(fd, crashHeader, crashHeader.count)
+188 |         write(fd, message, message.count)
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/MediaLibraryScanner.swift:217:50: warning: 'duration' was deprecated in macOS 13.0: Use load(.duration) instead
+215 |            item.duration == 0, url.isFileURL {
+216 |             let asset = AVURLAsset(url: url)
+217 |             let seconds = CMTimeGetSeconds(asset.duration)
+    |                                                  `- warning: 'duration' was deprecated in macOS 13.0: Use load(.duration) instead
+218 |             if seconds.isFinite, seconds > 0 { item.duration = seconds }
+219 |             if item.width == 0, let track = asset.tracks(withMediaType: .video).first {
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/MediaLibraryScanner.swift:219:51: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+217 |             let seconds = CMTimeGetSeconds(asset.duration)
+218 |             if seconds.isFinite, seconds > 0 { item.duration = seconds }
+219 |             if item.width == 0, let track = asset.tracks(withMediaType: .video).first {
+    |                                                   `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+220 |                 item.width = Int(track.naturalSize.width)
+221 |                 item.height = Int(track.naturalSize.height)
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/MediaLibraryScanner.swift:220:40: warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+218 |             if seconds.isFinite, seconds > 0 { item.duration = seconds }
+219 |             if item.width == 0, let track = asset.tracks(withMediaType: .video).first {
+220 |                 item.width = Int(track.naturalSize.width)
+    |                                        `- warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+221 |                 item.height = Int(track.naturalSize.height)
+222 |             }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/MediaLibraryScanner.swift:221:41: warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+219 |             if item.width == 0, let track = asset.tracks(withMediaType: .video).first {
+220 |                 item.width = Int(track.naturalSize.width)
+221 |                 item.height = Int(track.naturalSize.height)
+    |                                         `- warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+222 |             }
+223 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/PlayerReviewTools.swift:426:35: warning: 'copyCGImage(at:actualTime:)' was deprecated in macOS 15.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+424 |             generator.requestedTimeToleranceBefore = tolerance
+425 |             generator.requestedTimeToleranceAfter = tolerance
+426 |             return try? generator.copyCGImage(
+    |                                   `- warning: 'copyCGImage(at:actualTime:)' was deprecated in macOS 15.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+427 |                 at: CMTime(seconds: time, preferredTimescale: 600), actualTime: nil)
+428 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:57:13: warning: no calls to throwing functions occur within 'try' expression
+ 55 |         let sink = Unmanaged<FileSink>.fromOpaque(ctx).takeUnretainedValue()
+ 56 |         do {
+ 57 |             try sink.handle.seek(toFileOffset: offset)
+    |             `- warning: no calls to throwing functions occur within 'try' expression
+ 58 |             try sink.handle.write(contentsOf: Data(bytes: data, count: length))
+ 59 |             return 0
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:504:21: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+502 |     /// 探测显示尺寸（应用 preferredTransform 旋转后）
+503 |     static func probeDisplaySize(url: URL) throws -> (width: Int, height: Int) {
+504 |         let asset = AVAsset(url: url)
+    |                     `- warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+505 |         guard let track = asset.tracks(withMediaType: .video).first else {
+506 |             throw TranscodeError.notVideo
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:505:33: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+503 |     static func probeDisplaySize(url: URL) throws -> (width: Int, height: Int) {
+504 |         let asset = AVAsset(url: url)
+505 |         guard let track = asset.tracks(withMediaType: .video).first else {
+    |                                 `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+506 |             throw TranscodeError.notVideo
+507 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:508:54: warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+506 |             throw TranscodeError.notVideo
+507 |         }
+508 |         let rect = CGRect(origin: .zero, size: track.naturalSize)
+    |                                                      `- warning: 'naturalSize' was deprecated in macOS 13.0: Use load(.naturalSize) instead
+509 |             .applying(track.preferredTransform)
+510 |         return (max(1, Int(abs(rect.width).rounded())),
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:509:29: warning: 'preferredTransform' was deprecated in macOS 13.0: Use load(.preferredTransform) instead
+507 |         }
+508 |         let rect = CGRect(origin: .zero, size: track.naturalSize)
+509 |             .applying(track.preferredTransform)
+    |                             `- warning: 'preferredTransform' was deprecated in macOS 13.0: Use load(.preferredTransform) instead
+510 |         return (max(1, Int(abs(rect.width).rounded())),
+511 |                 max(1, Int(abs(rect.height).rounded())))
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:634:21: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+632 |     init(url: URL, target: (width: Int, height: Int)) throws {
+633 |         let display = try NativeToposEncoder.probeDisplaySize(url: url)
+634 |         let asset = AVAsset(url: url)
+    |                     `- warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+635 |         let trackFps = asset.tracks(withMediaType: .video).first?.nominalFrameRate ?? 0
+636 |         self.fps = Double(trackFps > 1 ? trackFps : 24)
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:635:30: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+633 |         let display = try NativeToposEncoder.probeDisplaySize(url: url)
+634 |         let asset = AVAsset(url: url)
+635 |         let trackFps = asset.tracks(withMediaType: .video).first?.nominalFrameRate ?? 0
+    |                              `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+636 |         self.fps = Double(trackFps > 1 ? trackFps : 24)
+637 |         self.width = display.width
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:635:67: warning: 'nominalFrameRate' was deprecated in macOS 13.0: Use load(.nominalFrameRate) instead
+633 |         let display = try NativeToposEncoder.probeDisplaySize(url: url)
+634 |         let asset = AVAsset(url: url)
+635 |         let trackFps = asset.tracks(withMediaType: .video).first?.nominalFrameRate ?? 0
+    |                                                                   `- warning: 'nominalFrameRate' was deprecated in macOS 13.0: Use load(.nominalFrameRate) instead
+636 |         self.fps = Double(trackFps > 1 ? trackFps : 24)
+637 |         self.width = display.width
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:689:21: warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+687 |     /// preferredTransform → mpv video-rotate 度数（nil = 不旋转）
+688 |     static func mpvRotationDegrees(url: URL) throws -> Int? {
+689 |         let asset = AVAsset(url: url)
+    |                     `- warning: 'init(url:)' was deprecated in macOS 15.0: Use AVURLAsset(url:) instead
+690 |         guard let track = asset.tracks(withMediaType: .video).first else {
+691 |             throw TranscodeError.notVideo
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:690:33: warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+688 |     static func mpvRotationDegrees(url: URL) throws -> Int? {
+689 |         let asset = AVAsset(url: url)
+690 |         guard let track = asset.tracks(withMediaType: .video).first else {
+    |                                 `- warning: 'tracks(withMediaType:)' was deprecated in macOS 13.0: Use loadTracks(withMediaType:) instead
+691 |             throw TranscodeError.notVideo
+692 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/ToposTranscodeEncoder.swift:693:23: warning: 'preferredTransform' was deprecated in macOS 13.0: Use load(.preferredTransform) instead
+691 |             throw TranscodeError.notVideo
+692 |         }
+693 |         let t = track.preferredTransform
+    |                       `- warning: 'preferredTransform' was deprecated in macOS 13.0: Use load(.preferredTransform) instead
+694 |         if abs(t.b) > 0.5 || abs(t.c) > 0.5 {
+695 |             return t.b < 0 ? 90 : 270
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/TMDBScraper.swift:105:13: warning: variable 'request' was never mutated; consider changing to 'let' constant
+103 |             throw TMDBScrapeError.badResponse("invalid URL")
+104 |         }
+105 |         var request = URLRequest(url: url, timeoutInterval: 15)
+    |             `- warning: variable 'request' was never mutated; consider changing to 'let' constant
+106 |         let (data, response) = try await URLSession.shared.data(for: request)
+107 |         guard let http = response as? HTTPURLResponse else {
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/TMDBScraper.swift:142:19: warning: variable 'components' was never mutated; consider changing to 'let' constant
+140 |         guard !meta.posterPath.isEmpty else { return nil }
+141 |         if let cached = cachedPoster(for: meta) { return cached }
+142 |         guard var components = URLComponents(string: imageHost + meta.posterPath) else {
+    |                   `- warning: variable 'components' was never mutated; consider changing to 'let' constant
+143 |             return nil
+144 |         }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/MediaLibraryStore.swift:361:10: warning: no calls to throwing functions occur within 'try' expression
+359 | 
+360 |     var itemCount: Int {
+361 |         (try? queue.sync {
+    |          `- warning: no calls to throwing functions occur within 'try' expression
+362 |             var stmt: OpaquePointer?
+363 |             defer { sqlite3_finalize(stmt) }
+
+/Users/heng/Documents/vscode/topos-player/Sources/Shared/SeekPreviewCache.swift:38:16: warning: immutable value 'cache' was never used; consider replacing with '_' or removing it
+36 |         lock.lock()
+37 |         let cache = files[file]
+38 |         if let cache, let index = order.firstIndex(of: file) {
+   |                `- warning: immutable value 'cache' was never used; consider replacing with '_' or removing it
+39 |             order.remove(at: index)
+40 |             order.append(file)   // 触碰 LRU
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:15:24: warning: 'NSOpenGLView' was deprecated in macOS 10.14: Please use MTKView instead.
+ 13 | ) -> Void
+ 14 | 
+ 15 | final class MPVGLView: NSOpenGLView {
+    |                        `- warning: 'NSOpenGLView' was deprecated in macOS 10.14: Please use MTKView instead.
+ 16 |     private var renderCtx: OpaquePointer?
+ 17 |     var pictureInPictureCaptureEnabled = false
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:46:21: warning: 'NSOpenGLPixelFormatAttribute' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 44 |     /// 自定义可失败 designated init（父类 init(frame:pixelFormat:) 可失败）。
+ 45 |     init?(videoFrame frameRect: NSRect) {
+ 46 |         let attrs: [NSOpenGLPixelFormatAttribute] = [
+    |                     `- warning: 'NSOpenGLPixelFormatAttribute' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 47 |             UInt32(NSOpenGLPFAOpenGLProfile),
+ 48 |             UInt32(NSOpenGLProfileVersion3_2Core),
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:47:20: warning: 'NSOpenGLPFAOpenGLProfile' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 45 |     init?(videoFrame frameRect: NSRect) {
+ 46 |         let attrs: [NSOpenGLPixelFormatAttribute] = [
+ 47 |             UInt32(NSOpenGLPFAOpenGLProfile),
+    |                    `- warning: 'NSOpenGLPFAOpenGLProfile' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 48 |             UInt32(NSOpenGLProfileVersion3_2Core),
+ 49 |             UInt32(NSOpenGLPFADoubleBuffer),
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:48:20: warning: 'NSOpenGLProfileVersion3_2Core' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 46 |         let attrs: [NSOpenGLPixelFormatAttribute] = [
+ 47 |             UInt32(NSOpenGLPFAOpenGLProfile),
+ 48 |             UInt32(NSOpenGLProfileVersion3_2Core),
+    |                    `- warning: 'NSOpenGLProfileVersion3_2Core' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 49 |             UInt32(NSOpenGLPFADoubleBuffer),
+ 50 |             0,
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:49:20: warning: 'NSOpenGLPFADoubleBuffer' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 47 |             UInt32(NSOpenGLPFAOpenGLProfile),
+ 48 |             UInt32(NSOpenGLProfileVersion3_2Core),
+ 49 |             UInt32(NSOpenGLPFADoubleBuffer),
+    |                    `- warning: 'NSOpenGLPFADoubleBuffer' was deprecated in macOS 10.14: OpenGL API deprecated; please use Metal and MetalKit.  (Define GL_SILENCE_DEPRECATION to silence these warnings.)
+ 50 |             0,
+ 51 |         ]
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:52:24: warning: 'NSOpenGLPixelFormat' was deprecated in macOS 10.14: Please use Metal or MetalKit.
+ 50 |             0,
+ 51 |         ]
+ 52 |         guard let pf = NSOpenGLPixelFormat(attributes: attrs) else { return nil }
+    |                        `- warning: 'NSOpenGLPixelFormat' was deprecated in macOS 10.14: Please use Metal or MetalKit.
+ 53 |         super.init(frame: frameRect, pixelFormat: pf)
+ 54 |         // 立即建上下文（NSOpenGLView 默认懒到上窗口才建——attach 需要它）
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/MPVGLView.instrumented.swift:55:22: warning: 'NSOpenGLContext' was deprecated in macOS 10.14: Please use Metal or MetalKit.
+ 53 |         super.init(frame: frameRect, pixelFormat: pf)
+ 54 |         // 立即建上下文（NSOpenGLView 默认懒到上窗口才建——attach 需要它）
+ 55 |         if let ctx = NSOpenGLContext(format: pf, share: nil) {
+    |                      `- warning: 'NSOpenGLContext' was deprecated in macOS 10.14: Please use Metal or MetalKit.
+ 56 |             openGLContext = ctx
+ 57 |             ctx.makeCurrentContext()
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/PlayerViews.instrumented.swift:2106:16: warning: value 'movie' was defined but never used; consider replacing with boolean test
+2104 |         guard let path = filePath else { return }
+2105 |         let frameIndex: Int
+2106 |         if let movie {
+     |                `- warning: value 'movie' was defined but never used; consider replacing with boolean test
+2107 |             frameIndex = displayedFrame
+2108 |         } else if let mpv {
+
+/Users/heng/Documents/vscode/topos-studio/artifacts/library_playback_20261123/PlayerViews.instrumented.swift:2711:31: warning: 'copyCGImage(at:actualTime:)' was deprecated in macOS 15.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+2709 |         generator.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 5)
+2710 |         generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 5)
+2711 |         return try? generator.copyCGImage(at: timestamp, actualTime: nil)
+     |                               `- warning: 'copyCGImage(at:actualTime:)' was deprecated in macOS 15.0: Use generateCGImageAsynchronouslyForTime:completionHandler: instead
+2712 |     }
+2713 | 

@@ -2152,7 +2152,9 @@ class LayerOpsMixin:
     def _submit_gpu_scope_demand(self, *, is_playing: bool, force: bool = False) -> None:
         """Build and submit the latest ``ScopeDemand`` to the renderer.
 
-        Standalone scopes are rate-limited and coalesced. Curve underlays
+        Standalone scopes are rate-limited and coalesced. Active multi-view
+        layouts use 320x180 at 5 Hz; single views keep 512x288 at 10 Hz.
+        Curve underlays
         are stills: frozen during playback/scrubbing/adjustment, deduplicated
         by final image and canvas geometry, and disabled on inactive tabs.
 
@@ -2198,7 +2200,6 @@ class LayerOpsMixin:
                 max_hz, analysis = MAX_HZ_INTERACTING, PLAYBACK_ANALYSIS_SIZE
             else:
                 max_hz, analysis = MAX_HZ_IDLE, DEFAULT_ANALYSIS_SIZE
-            min_interval = 1.0 / max_hz if max_hz > 0.0 else 0.0
             last = float(getattr(self, '_gpu_scope_last_submit', 0.0))
 
             # Idle high-quality top-up: after 150 ms of quiet, upgrade the
@@ -2216,6 +2217,13 @@ class LayerOpsMixin:
                 _scope_diag().record("submit", "panel_missing")
                 return
             state = panel.demand_state()
+            if (is_playing or interacting) and state['mode'] in ('split', 'quad', 'all'):
+                # Multiple displays share the source sample but each adds
+                # accumulation/display passes. Keep their interactive budget
+                # below the single-view lane; paused quality is unchanged.
+                analysis = DEFAULT_ANALYSIS_SIZE
+                max_hz = 5.0
+            min_interval = 1.0 / max_hz if max_hz > 0.0 else 0.0
             active_layer = engine.get_active_layer()
             mask_layer_id = None
             mask_enabled = False
@@ -2299,6 +2307,7 @@ class LayerOpsMixin:
                 mask_layer_id=mask_layer_id,
                 mask_enabled=mask_enabled,
                 histogram_overlay=curves_overlay,
+                standalone_enabled=scope_visible,
                 curves_display_size=curves_size,
                 curves_line_width=curves_line_width,
                 curves_mode=curves_mode,
@@ -2438,10 +2447,18 @@ class LayerOpsMixin:
                     and not self._scope_scrub_is_active()
                     and getattr(frame, 'curves_mode', 'Custom') == self._current_curve_mode()
                     and frame.curves_histogram_texture_id is not None):
-                curves_widget.set_scope_frame(
-                    frame.curves_histogram_texture_id,
-                    *frame.curves_histogram_size,
-                )
+                publication = getattr(frame, 'publication', None)
+                if publication is not None:
+                    curves_widget.set_scope_frame(
+                        frame.curves_histogram_texture_id,
+                        *frame.curves_histogram_size,
+                        publication=publication,
+                    )
+                else:
+                    curves_widget.set_scope_frame(
+                        frame.curves_histogram_texture_id,
+                        *frame.curves_histogram_size,
+                    )
                 pending = getattr(self, '_curves_scope_pending_key', None)
                 if pending is not None:
                     self._curves_scope_completed_key = (frame.source_revision, *pending[1:])
@@ -2463,6 +2480,9 @@ class LayerOpsMixin:
         """Return whether the actual ScopePanel is exposed to the user."""
         dock = getattr(self, 'dock_analysis', None)
         panel = getattr(self, 'scope_panel', None)
+        independent_visible = getattr(panel, 'is_independent_window_visible', None)
+        if independent_visible is not None and independent_visible():
+            return True
         return bool(
             dock is not None
             and panel is not None

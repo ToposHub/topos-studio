@@ -1,0 +1,9 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 469 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+2026-11-23 22:06:57.697 Python[41213:466228] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:06:57.697 Python[41213:466228] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+{"file": "4K_topos_4444xq.mov", "route": "topos", "submitted_fps": 25.631883850540135, "swapped_fps": 25.801631425709274, "qt_frames_fps": 0.0, "decode_ms": {"count": 158, "mean": 28.778291810075515, "p50": 31.902618999083643, "p95": 44.45237970121525, "max": 49.55906000031973}, "worker_mode": "texture", "errors": null}

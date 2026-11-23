@@ -1,0 +1,76 @@
+[
+  {
+    "avsync" : -1.1195854637546798e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "4K_H264.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 84.701184001460206,
+      "mean" : 35.507584294100525,
+      "p95" : 47.143743002379779
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0218026549991919,
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 22.503124049978105,
+    "observed_frame_interval_ms" : {
+      "max" : 84.701184001460206,
+      "mean" : 45.046935298485742,
+      "p95" : 79.57982999869273
+    },
+    "open_ms" : 244.45952799942461,
+    "time-pos" : 3.1200000000000001,
+    "video-codec" : "H.264 \/ AVC \/ MPEG-4 AVC \/ MPEG-4 part 10",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.5237196847872614e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_H265.mov",
+    "frame-drop-count" : 5,
+    "heartbeat_interval_ms" : {
+      "max" : 83.811386000888888,
+      "mean" : 41.255493876695702,
+      "p95" : 78.699761997995665
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0453336259997741,
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 19.702274814077942,
+    "observed_frame_interval_ms" : {
+      "max" : 119.943396999588,
+      "mean" : 51.044933101674346,
+      "p95" : 81.888063999940641
+    },
+    "open_ms" : 13.885521002521273,
+    "time-pos" : 3.48,
+    "video-codec" : "H.265 \/ HEVC (High Efficiency Video Coding)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  }
+]

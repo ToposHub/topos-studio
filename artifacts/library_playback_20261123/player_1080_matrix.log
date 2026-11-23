@@ -1,0 +1,86 @@
+2K_DNxHR 444 10bit.mov: renderer 25.00 fps, errors=[]
+2K_DNxHR 444 12bit.mov: renderer 24.99 fps, errors=[]
+2K_DNxHR HQX 10bit.mov: renderer 25.01 fps, errors=[]
+2K_DNxHR HQX 12-bit.mov: renderer 24.94 fps, errors=[]
+2K_DNxHR HQX 12bit.mov: renderer 25.05 fps, errors=[]
+2K_H265.mov: renderer 24.98 fps, errors=[]
+2K_h264.mp4: renderer 25.07 fps, errors=[]
+2K_prores422.mov: renderer 24.86 fps, errors=[]
+2K_prores422HQ.mov: renderer 25.06 fps, errors=[]
+2K_prores422LT.mov: renderer 25.12 fps, errors=[]
+2K_prores422Proxy.mov: renderer 25.24 fps, errors=[]
+2K_prores4444.mov: renderer 25.18 fps, errors=[]
+2K_prores4444XQ.mov: renderer 24.95 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_4444.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_4444xq.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_hq.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_lt.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_proxy.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_standard.mov: renderer 0.00 fps, errors=[]
+4K_DNxHR 444 10bit.mov: renderer 25.14 fps, errors=[]
+4K_DNxHR 444 12bit.mov: renderer 24.96 fps, errors=[]
+4K_DNxHR HQX 10bit.mov: renderer 25.21 fps, errors=[]
+4K_DNxHR HQX 12-bit.mov: renderer 25.23 fps, errors=[]
+4K_DNxHR HQX 12bit.mov: renderer 25.13 fps, errors=[]
+4K_H264.mov: renderer 25.03 fps, errors=[]
+4K_H265.mov: renderer 24.94 fps, errors=[]
+4K_prores422.mov: renderer 24.97 fps, errors=[]
+4K_prores422HQ.mov: renderer 25.06 fps, errors=[]
+4K_prores422LT.mov: renderer 25.18 fps, errors=[]
+4K_prores422Proxy.mov: renderer 25.16 fps, errors=[]
+4K_prores4444.mov: renderer 25.06 fps, errors=[]
+4K_prores4444XQ.mov: renderer 25.08 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_4444.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_4444xq.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_hq.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_lt.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_proxy.mov: renderer 0.00 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_standard.mov: renderer 0.00 fps, errors=[]

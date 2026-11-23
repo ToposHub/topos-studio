@@ -1,0 +1,46 @@
+[
+  {
+    "avsync" : -6.0806269175373018e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "4K_H265.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 82.310245001281146,
+      "mean" : 27.798464018511975,
+      "p95" : 72.933095001644688
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0202802310013794,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33109510492953437,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 72.242345999256941,
+    "renderer_interval_ms" : {
+      "max" : 49.004849002812989,
+      "mean" : 39.848370986680187,
+      "p95" : 42.744897000375204
+    },
+    "renderer_submissions_fps" : 25.163227974644613,
+    "time-pos" : 3.1600000000000001,
+    "video-codec" : "H.265 \/ HEVC (High Efficiency Video Coding)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      3600,
+      1900
+    ]
+  }
+]

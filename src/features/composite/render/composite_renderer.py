@@ -1474,8 +1474,7 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
             # so start from the live output FBO instead of a scope target.
             front_fbo.use()
             outputs = engine.render_demand(demand, tex)
-            # Cross-context visibility for the UI-thread presenter blit.
-            self.ctx.finish()
+            publication = engine.publish()
             frame = ScopeGpuFrame(
                 revision=demand.revision,
                 source_revision=demand.source_revision,
@@ -1494,6 +1493,7 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
                 falsecolor_texture_id=fc[0] if (fc := outputs.get('falsecolor')) else None,
                 falsecolor_size=fc[1] if fc else DEFAULT_FALSECOLOR_SIZE,
                 analysis_ms=(time.monotonic() - t0) * 1000.0,
+                publication=publication,
             )
             self.gpu_scope_ready.emit(frame)
         except Exception as exc:

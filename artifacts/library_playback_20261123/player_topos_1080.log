@@ -1,0 +1,92 @@
+Metal shader compilation: Error Domain=MTLLibraryErrorDomain Code=3 "program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+" UserInfo={NSLocalizedDescription=program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+}
+Metal unavailable; production app also falls back to CPU
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_4444.mov: renderer 8.23 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_4444xq.mov: renderer 7.13 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_hq.mov: renderer 8.64 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_lt.mov: renderer 9.20 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_proxy.mov: renderer 9.43 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2K_topos_standard.mov: renderer 8.66 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_4444.mov: renderer 2.99 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_4444xq.mov: renderer 0.33 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_hq.mov: renderer 4.99 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_lt.mov: renderer 7.51 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_proxy.mov: renderer 8.58 fps, errors=[]
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+4K_topos_standard.mov: renderer 6.32 fps, errors=[]

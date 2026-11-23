@@ -465,8 +465,42 @@ GPU 示波器（播放中安全）：
 request_gpu_scope(demand) → submit(RENDER_GPU_SCOPE)     [lane: GPU_SCOPE，最低优先]
   → _do_render_gpu_scope → 私有 scope ColorOutput（内容 revision 缓存）
   → GPU 侧 waveform/vectorscope/histogram/CIE/falsecolor 累积
-  → 一次跨上下文 finish 后发布纹理 → gpu_scope_ready(ScopeGpuFrame)
+  → glFenceSync + glFlush 发布可撤销纹理凭据 → gpu_scope_ready(ScopeGpuFrame)
+  → UI tryLock + glWaitSync → GPU 快照复制 → Qt 当前 FBO（resize 可重建）
 ```
+
+视图右键菜单通过 `ScopePanel.open_floating()` 打开无模式 `QDialog`，
+不使用浮动 `QDockWidget`，因此窗口没有停靠或合并入口。原有 ScopePanel
+及其 presenter 移入弹窗，原布局 dock 保留身份并隐藏；关闭弹窗后归还面板。
+控制器判定示波器可见性时包含独立弹窗，避免原 dock 隐藏后停止 GPU 更新。
+
+纹理凭据 `ScopePublication` 在分配存活期间复用；写入前等待各 UI 上下文的
+复制 fence，写入中标记不可读，成功后发布新的 producer fence。尺寸重分配、
+曲线分布模式切换和清理前撤销旧凭据，防止 GL 数字编号被视图纹理复用后
+串图。显示端只在新结果到达时复制到自有 GPU 快照；忙碌、旧凭据失效或
+复制失败时重绘上一快照。复制和重绘均处理 Qt 遗留 scissor 状态，不回读像素。
+正常支持 sync object 的驱动不调用 `finish`；不支持时保留正确性回退。
+`analysis_ms` 仅计 CPU 命令提交耗时，不再代表 GPU 完成耗时。
+
+播放/参数交互时单视图使用 512×288、10Hz，多视图使用 320×180、5Hz；
+静止时恢复原高质量档位。面板强制尺寸刷新合并到 150ms 安静窗口。
+曲线底图尺寸变化复用 GPU histogram counts（内容 revision、采样尺寸、
+遮罩 epoch、曲线模式及 Y 通道需求均匹配时），只重画显示纹理；
+曲线专用需求省略隐藏的独立直方图显示 pass。已排队的新调色/视频/视口
+预览优先于尚未开始的 scope pass。全帧 ColorOutput 的内容缓存继续保留，
+不直接复用可能含背景、遮罩预览或视口裁剪的 front，保持统计输入语义。
+
+直方图与曲线底图共用五点平滑、逐通道线性峰值归一化和抗锯齿轮廓
+shader；独立直方图只切换为 RGB 三行布局。波形/分量的密度纹理根据
+实际绘图区物理像素分档扩大（最高 2048×1200），矢量保持正方形
+（最高 1600×1600），避免 Retina/大浮窗放大固定 300 行波形。
+采样数仍由交互/播放/静止质量档位决定；密度增益按纹理尺寸补偿。
+显示通路保留窄幅垂直抗锯齿。分量图从原密度纹理读取八邻域，仅在同通道
+对向邻点均存在时重建单像素缺口；不会递归扩张，也不修改累计密度纹理。
+分量图另有显示亮度增益，白芯阈值按增益前密度计算，避免整体泛白；
+稀疏轨迹保留较饱满的 RGB 色相。矢量按 Cb/Cr 坐标显示色相，
+中心中性色保持白色，密度亮度使用柔和饱和映射。
+统计与显示均留在 GPU。
 
 层 bake：
 

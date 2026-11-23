@@ -34,6 +34,7 @@ from src.shared.ui.style_sheet import (
 )
 from src.shared.assets.icon_manager import icon_color_picker, icon_reset
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
+from src.shared.gpu.scope_publication import ScopePublication
 
 
 class _HslCurveOverlay(QWidget):
@@ -279,8 +280,11 @@ class HSLCurvesWidget(QWidget):
             self._scope_resize_timer.start()
         return super().event(event)
 
-    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
-        self._scope.set_scope_frame(tex_id, width, height)
+    def set_scope_frame(
+        self, tex_id: Optional[int], width: int, height: int, *,
+        publication: Optional[ScopePublication] = None,
+    ) -> None:
+        self._scope.set_scope_frame(tex_id, width, height, publication=publication)
         self._has_histogram = tex_id is not None
         self._scope.setVisible(self._has_histogram)
         self._overlay.raise_()

@@ -1,0 +1,39 @@
+[
+  {
+    "decode_ms_per_frame" : 43.471742769230787,
+    "decoded_frames" : 52,
+    "displayed_frame" : 10,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 7,
+    "file" : "4K_topos_4444xq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 29.402197000308661,
+      "mean" : 10.07034056375849,
+      "p95" : 10.898446998908184
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0041820799997367,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 0.33286930464617098,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 64.944906996970531,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      3600,
+      1900
+    ]
+  }
+]

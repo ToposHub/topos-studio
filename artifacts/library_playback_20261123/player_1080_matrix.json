@@ -1,0 +1,1614 @@
+[
+  {
+    "avsync" : 6.711172944068311e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_DNxHR 444 10bit.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 79.26222900277935,
+      "mean" : 22.322625503713628,
+      "p95" : 42.574192997562932
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0397961170019698,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32896943134010587,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 118.44686999756959,
+    "renderer_interval_ms" : {
+      "max" : 46.878162000211887,
+      "mean" : 40.216532333336851,
+      "p95" : 43.30596099680406
+    },
+    "renderer_submissions_fps" : 25.001676781848047,
+    "time-pos" : 3.5600000000000001,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv444p10",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.3296615467645045e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_DNxHR 444 12bit.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 79.214028002752457,
+      "mean" : 20.349217671238179,
+      "p95" : 41.910232001100667
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0010152169998037,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33322056960435115,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 15.864760000113165,
+    "renderer_interval_ms" : {
+      "max" : 44.61653099860996,
+      "mean" : 40.12832125674224,
+      "p95" : 43.706615000701277
+    },
+    "renderer_submissions_fps" : 24.991542720326336,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv444p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.7205340084203158e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_DNxHR HQX 10bit.mov",
+    "frame-drop-count" : 8,
+    "heartbeat_interval_ms" : {
+      "max" : 78.494523000699701,
+      "mean" : 20.892569007039231,
+      "p95" : 41.88934000194422
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0387413809985446,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32908361542481623,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 10.577406999800587,
+    "renderer_interval_ms" : {
+      "max" : 55.295021000347333,
+      "mean" : 40.120267413294641,
+      "p95" : 43.714003000786761
+    },
+    "renderer_submissions_fps" : 25.010354772286032,
+    "time-pos" : 3.6400000000000001,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p10",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.4068615467682788e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_DNxHR HQX 12-bit.mov",
+    "frame-drop-count" : 5,
+    "heartbeat_interval_ms" : {
+      "max" : 81.981382998492336,
+      "mean" : 27.466489287016209,
+      "p95" : 50.602348001120845
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0068721169991477,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33257150989114825,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 15.366501997050364,
+    "renderer_interval_ms" : {
+      "max" : 51.078599000902614,
+      "mean" : 40.125676378355251,
+      "p95" : 45.02018699713517
+    },
+    "renderer_submissions_fps" : 24.942863241836122,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 7.5578539207865614e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_DNxHR HQX 12bit.mov",
+    "frame-drop-count" : 5,
+    "heartbeat_interval_ms" : {
+      "max" : 87.503573999129003,
+      "mean" : 23.33011209302358,
+      "p95" : 44.058498999220319
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0334986580019176,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32965236274693871,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 15.480780999496346,
+    "renderer_interval_ms" : {
+      "max" : 47.066921000805451,
+      "mean" : 40.159022799974387,
+      "p95" : 43.733526999858441
+    },
+    "renderer_submissions_fps" : 25.053579568767343,
+    "time-pos" : 3.7600000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 9.8032835621764125e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_H265.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 87.506730000313837,
+      "mean" : 24.351323590158021,
+      "p95" : 44.942822001758032
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0025656599973445,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33304850359238586,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 14.740072998392861,
+    "renderer_interval_ms" : {
+      "max" : 45.626037001056829,
+      "mean" : 40.172035567593412,
+      "p95" : 44.535582997923484
+    },
+    "renderer_submissions_fps" : 24.978637769428939,
+    "time-pos" : 3.3999999999999999,
+    "video-codec" : "H.265 \/ HEVC (High Efficiency Video Coding)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.3390045670497175e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_h264.mp4",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 80.625112001143862,
+      "mean" : 26.653994203526352,
+      "p95" : 44.509019000543049
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.031789733999176,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32983817735965454,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 10.994455999025377,
+    "renderer_interval_ms" : {
+      "max" : 44.891105997521663,
+      "mean" : 40.173501319998955,
+      "p95" : 43.272495000564959
+    },
+    "renderer_submissions_fps" : 25.067701479333742,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "H.264 \/ AVC \/ MPEG-4 AVC \/ MPEG-4 part 10",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 5.4914261805039111e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "2K_prores422.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 79.760287997487467,
+      "mean" : 27.665521458702891,
+      "p95" : 44.787042003008537
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.017308973998297,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33142114666330635,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 12.594511001225328,
+    "renderer_interval_ms" : {
+      "max" : 45.27928799871006,
+      "mean" : 40.263437878378241,
+      "p95" : 44.814886998210568
+    },
+    "renderer_submissions_fps" : 24.856585999747978,
+    "time-pos" : 3.3599999999999999,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.1466615467942143e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_prores422HQ.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 80.971716000931337,
+      "mean" : 24.881944314052095,
+      "p95" : 43.493984998349333
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.033295913002803,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32967439665655723,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 14.446626999415457,
+    "renderer_interval_ms" : {
+      "max" : 45.288366000022506,
+      "mean" : 40.145843866630457,
+      "p95" : 43.137538999872049
+    },
+    "renderer_submissions_fps" : 25.055254145898349,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 5.5956154677294645e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_prores422LT.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 80.736907002574299,
+      "mean" : 26.816717535699095,
+      "p95" : 43.920367999817245
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0258159810000507,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33048936428364489,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 9.021026999107562,
+    "renderer_interval_ms" : {
+      "max" : 44.764093003323069,
+      "mean" : 40.062582093329787,
+      "p95" : 43.377002002671361
+    },
+    "renderer_submissions_fps" : 25.11719168555701,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.6239615467844581e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_prores422Proxy.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 81.74576000237721,
+      "mean" : 26.604856946924134,
+      "p95" : 43.666030000167666
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0112852230013232,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33208411888771805,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 12.0056960004149,
+    "renderer_interval_ms" : {
+      "max" : 46.385543002543272,
+      "mean" : 40.094451413315255,
+      "p95" : 43.495917998370714
+    },
+    "renderer_submissions_fps" : 25.238393035466572,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 2.842155649690481e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_prores4444.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 80.673126998590305,
+      "mean" : 29.211529126204042,
+      "p95" : 46.016364998649806
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0185861429999932,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33128092180472263,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 15.819406999071361,
+    "renderer_interval_ms" : {
+      "max" : 44.861374000902288,
+      "mean" : 40.155254639976192,
+      "p95" : 43.003922000934836
+    },
+    "renderer_submissions_fps" : 25.177350057158918,
+    "time-pos" : 3.6000000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 5.6509060754328377e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "2K_prores4444XQ.mov",
+    "frame-drop-count" : 6,
+    "heartbeat_interval_ms" : {
+      "max" : 75.808210000104737,
+      "mean" : 23.92009934679194,
+      "p95" : 42.991640002583154
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0056234330004372,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33270967647524807,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 12.459055000363151,
+    "renderer_interval_ms" : {
+      "max" : 45.553806998213986,
+      "mean" : 40.097945851369801,
+      "p95" : 43.446632000268437
+    },
+    "renderer_submissions_fps" : 24.953225735643606,
+    "time-pos" : 3.6800000000000002,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 8.7544852886597955,
+    "decoded_frames" : 97,
+    "displayed_frame" : 96,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 47,
+    "file" : "2K_topos_4444.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 167.0975550005096,
+      "mean" : 37.368600312493072,
+      "p95" : 104.31543399681686
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0448614689994429,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 12.480042322742189,
+    "observed_frame_interval_ms" : {
+      "max" : 219.70565099763917,
+      "mean" : 80.796973648633667,
+      "p95" : 182.59592100002919
+    },
+    "open_ms" : 59.607192000839859,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 10.974635872340425,
+    "decoded_frames" : 94,
+    "displayed_frame" : 94,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 52,
+    "file" : "2K_topos_4444xq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 136.21822299683117,
+      "mean" : 28.697781343141163,
+      "p95" : 88.314790998992976
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0056731210024736,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 10.313829465813853,
+    "observed_frame_interval_ms" : {
+      "max" : 288.01057800228591,
+      "mean" : 94.683404633299986,
+      "p95" : 205.33091499964939
+    },
+    "open_ms" : 20.067874000233132,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 8.7097755670103112,
+    "decoded_frames" : 97,
+    "displayed_frame" : 95,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 55,
+    "file" : "2K_topos_hq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 112.77232100110268,
+      "mean" : 34.696713447064049,
+      "p95" : 101.4767570013646
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0112568580007064,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 10.294704657171669,
+    "observed_frame_interval_ms" : {
+      "max" : 201.16346599752433,
+      "mean" : 98.307354766681485,
+      "p95" : 183.86730400015949
+    },
+    "open_ms" : 19.339349000802031,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 7.0089417894736865,
+    "decoded_frames" : 95,
+    "displayed_frame" : 98,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 56,
+    "file" : "2K_topos_lt.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 109.81564900066587,
+      "mean" : 27.767225981650206,
+      "p95" : 97.850853999261744
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0611775080033112,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 9.4734787264641795,
+    "observed_frame_interval_ms" : {
+      "max" : 360.72129699823563,
+      "mean" : 108.09384399999544,
+      "p95" : 216.21439500086126
+    },
+    "open_ms" : 17.857275001006201,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 5.7277297311827953,
+    "decoded_frames" : 93,
+    "displayed_frame" : 95,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 55,
+    "file" : "2K_topos_proxy.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 165.83211599936476,
+      "mean" : 26.66977233332689,
+      "p95" : 89.451005998853361
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0453313949983567,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 10.179516111420355,
+    "observed_frame_interval_ms" : {
+      "max" : 270.94591399873025,
+      "mean" : 98.955194566709295,
+      "p95" : 220.80440799982171
+    },
+    "open_ms" : 17.735831999743823,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 7.70682704255319,
+    "decoded_frames" : 94,
+    "displayed_frame" : 95,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 56,
+    "file" : "2K_topos_standard.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 156.84739100106526,
+      "mean" : 26.100878539850338,
+      "p95" : 95.302288002130808
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.003228024001146,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 9.3233013864515382,
+    "observed_frame_interval_ms" : {
+      "max" : 291.97495300104492,
+      "mean" : 109.23701018529957,
+      "p95" : 217.06871300193598
+    },
+    "open_ms" : 29.27202600039891,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.4199340084064538e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR 444 10bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 75.905219000560464,
+      "mean" : 21.943114788298466,
+      "p95" : 42.343032000644598
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0233124009973835,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33076303979373828,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 11.874877000082051,
+    "renderer_interval_ms" : {
+      "max" : 44.008590997691499,
+      "mean" : 40.101230399983855,
+      "p95" : 42.870383000263246
+    },
+    "renderer_submissions_fps" : 25.137991024324108,
+    "time-pos" : 3.6400000000000001,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv444p10",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 7.257906075558429e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR 444 12bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 76.548431999981403,
+      "mean" : 23.76721370634937,
+      "p95" : 42.460984997887863
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0053083069979039,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33274456323548751,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 9.9608429991349112,
+    "renderer_interval_ms" : {
+      "max" : 44.91808199963998,
+      "mean" : 40.145603202659373,
+      "p95" : 42.822694998903899
+    },
+    "renderer_submissions_fps" : 24.955842242661564,
+    "time-pos" : 3.6800000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv444p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.5291615467843966e-05,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR HQX 10bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 82.247345999348909,
+      "mean" : 27.12958046846849,
+      "p95" : 43.690552000043681
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0142827620002208,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33175387943247203,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 12.247148999449564,
+    "renderer_interval_ms" : {
+      "max" : 44.636424998316215,
+      "mean" : 40.167698719985005,
+      "p95" : 43.1599740004458
+    },
+    "renderer_submissions_fps" : 25.213294836867874,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p10",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 8.2629060755567973e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR HQX 12-bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 81.456334999529645,
+      "mean" : 25.933008775860674,
+      "p95" : 74.663403000158723
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0120697619968269,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33199762257068649,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 19.244027997046942,
+    "renderer_interval_ms" : {
+      "max" : 44.332098001177656,
+      "mean" : 40.139353640018577,
+      "p95" : 42.747375002363697
+    },
+    "renderer_submissions_fps" : 25.231819315372174,
+    "time-pos" : 3.6800000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 6.2688539206601224e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR HQX 12bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 80.034092003188562,
+      "mean" : 24.63574844260307,
+      "p95" : 41.82516099899658
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0241983199994138,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33066614493727842,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 10.832227999344468,
+    "renderer_interval_ms" : {
+      "max" : 45.756014002108714,
+      "mean" : 40.087903666668957,
+      "p95" : 44.208305000211112
+    },
+    "renderer_submissions_fps" : 25.130627015233159,
+    "time-pos" : 3.7600000000000002,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv422p12",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 7.7696154679174345e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_H264.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 79.035642000235384,
+      "mean" : 23.889853238090705,
+      "p95" : 42.525945002125809
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0359103080008936,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32939049528722297,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 15.126210000744322,
+    "renderer_interval_ms" : {
+      "max" : 43.857771001057699,
+      "mean" : 40.167748253346268,
+      "p95" : 42.742945999634685
+    },
+    "renderer_submissions_fps" : 25.033677641828948,
+    "time-pos" : 3.7200000000000002,
+    "video-codec" : "H.264 \/ AVC \/ MPEG-4 AVC \/ MPEG-4 part 10",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.0762835620237166e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_H265.mov",
+    "frame-drop-count" : 5,
+    "heartbeat_interval_ms" : {
+      "max" : 81.986851000692695,
+      "mean" : 21.088709014190066,
+      "p95" : 44.93996300152503
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0077402669994626,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33247551690944549,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 16.350284000509419,
+    "renderer_interval_ms" : {
+      "max" : 75.291494998964481,
+      "mean" : 40.198425216216052,
+      "p95" : 43.540035003388766
+    },
+    "renderer_submissions_fps" : 24.935663768208414,
+    "time-pos" : 3.3999999999999999,
+    "video-codec" : "H.265 \/ HEVC (High Efficiency Video Coding)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 6.3015564955026804e-07,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores422.mov",
+    "frame-drop-count" : 6,
+    "heartbeat_interval_ms" : {
+      "max" : 79.88476799800992,
+      "mean" : 21.064317404247731,
+      "p95" : 42.529703998297919
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0038083679974079,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.3329107178254132,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 10.141766000742791,
+    "renderer_interval_ms" : {
+      "max" : 44.822577998274937,
+      "mean" : 40.150128945930881,
+      "p95" : 43.394670999987284
+    },
+    "renderer_submissions_fps" : 24.968303836905989,
+    "time-pos" : 3.6000000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 1.5253400839632114e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores422HQ.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 82.01962699968135,
+      "mean" : 25.06646010000016,
+      "p95" : 47.759801000211155
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0324770739971427,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32976341637494677,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 19.582933000492631,
+    "renderer_interval_ms" : {
+      "max" : 47.134893000475131,
+      "mean" : 40.135142120028227,
+      "p95" : 44.622852001339197
+    },
+    "renderer_submissions_fps" : 25.062019644495955,
+    "time-pos" : 3.6400000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 4.1293400843134265e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores422LT.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 83.541477000835584,
+      "mean" : 22.320962797008328,
+      "p95" : 43.272815000818809
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0185122240000055,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33128903439550828,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 13.192586000513984,
+    "renderer_interval_ms" : {
+      "max" : 46.65025800204603,
+      "mean" : 40.108061546682926,
+      "p95" : 44.150964000436943
+    },
+    "renderer_submissions_fps" : 25.177966614058629,
+    "time-pos" : 3.6400000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 3.6339060756618302e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores422Proxy.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 75.78338700113818,
+      "mean" : 22.611061421059304,
+      "p95" : 44.318852000287734
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.020280233999074,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33109510460091518,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 13.964972000394482,
+    "renderer_interval_ms" : {
+      "max" : 44.495084999653045,
+      "mean" : 40.109479013335658,
+      "p95" : 42.854735002038069
+    },
+    "renderer_submissions_fps" : 25.163227949669555,
+    "time-pos" : 3.6800000000000002,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : 2.75517294423544e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores4444.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 75.147903000470251,
+      "mean" : 22.455581462678825,
+      "p95" : 43.666510002367431
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0327764909998223,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.32973085981365141,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 13.056054001935991,
+    "renderer_interval_ms" : {
+      "max" : 57.527324999682605,
+      "mean" : 40.166474986666195,
+      "p95" : 44.733699000062188
+    },
+    "renderer_submissions_fps" : 25.059545345837506,
+    "time-pos" : 3.5600000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "avsync" : -5.8984435052922279e-07,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_prores4444XQ.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 47.802343000512337,
+      "mean" : 19.067473677209875,
+      "p95" : 42.055877998791402
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0299871130009706,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33003440698121533,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 17.304674998740666,
+    "renderer_interval_ms" : {
+      "max" : 50.593790998391341,
+      "mean" : 40.196177946684962,
+      "p95" : 45.606981999299023
+    },
+    "renderer_submissions_fps" : 25.082614930572365,
+    "time-pos" : 3.6000000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 31.852176837499997,
+    "decoded_frames" : 80,
+    "displayed_frame" : 94,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 74,
+    "file" : "4K_topos_4444.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 116.76323500068975,
+      "mean" : 17.63329602941025,
+      "p95" : 83.859913000196684
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0047876839998935,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 6.3232421049821745,
+    "observed_frame_interval_ms" : {
+      "max" : 394.53907499773777,
+      "mean" : 166.53668472220792,
+      "p95" : 295.80193099900498
+    },
+    "open_ms" : 40.605296999274287,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 38.911483057971019,
+    "decoded_frames" : 69,
+    "displayed_frame" : 33,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 27,
+    "file" : "4K_topos_4444xq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 125.0063820007199,
+      "mean" : 10.455390432048816,
+      "p95" : 10.946822996629635
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0089670769993972,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 0.66467992132185116,
+    "observed_frame_interval_ms" : {
+      "max" : 594.71695499814814,
+      "mean" : 594.71695499814814,
+      "p95" : 594.71695499814814
+    },
+    "open_ms" : 44.262169998546597,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 30.446359241379305,
+    "decoded_frames" : 87,
+    "displayed_frame" : 93,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 69,
+    "file" : "4K_topos_hq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 130.93769600163796,
+      "mean" : 18.071759439758846,
+      "p95" : 89.249251999717671
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0028542599975481,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 5.9942969060425524,
+    "observed_frame_interval_ms" : {
+      "max" : 322.79322399699595,
+      "mean" : 175.41281429422429,
+      "p95" : 269.02089099894511
+    },
+    "open_ms" : 40.968825000163633,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 22.409399846153839,
+    "decoded_frames" : 91,
+    "displayed_frame" : 96,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 65,
+    "file" : "4K_topos_lt.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 110.3962409979431,
+      "mean" : 22.200752897066089,
+      "p95" : 89.718137001909781
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0523162130011769,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.1905013292901447,
+    "observed_frame_interval_ms" : {
+      "max" : 327.76348300103564,
+      "mean" : 125.80426641670783,
+      "p95" : 167.6186320000852
+    },
+    "open_ms" : 32.769309000286739,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 16.273784620689653,
+    "decoded_frames" : 87,
+    "displayed_frame" : 95,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 63,
+    "file" : "4K_topos_proxy.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 114.4341399995028,
+      "mean" : 27.893098330248304,
+      "p95" : 106.07586699916283
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0547296879994974,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.511391401386831,
+    "observed_frame_interval_ms" : {
+      "max" : 178.4215289990243,
+      "mean" : 121.6139087198826,
+      "p95" : 144.99266400162014
+    },
+    "open_ms" : 28.650970998569392,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 28.500313674698788,
+    "decoded_frames" : 83,
+    "displayed_frame" : 91,
+    "engine" : "topos-metal",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 68,
+    "file" : "4K_topos_standard.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 121.10812699756934,
+      "mean" : 17.3414802312105,
+      "p95" : 84.966099999292055
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0091273479993106,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 5.6494784148310808,
+    "observed_frame_interval_ms" : {
+      "max" : 617.89334000059171,
+      "mean" : 182.57463393752005,
+      "p95" : 222.46444200209226
+    },
+    "open_ms" : 41.180177999194711,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  }
+]

@@ -1162,7 +1162,7 @@ class MenuToolbarMixin:
     # ------------------------------------------------------------------
 
     def _show_welcome_dialog(self) -> None:
-        """Show the welcome dialog on startup."""
+        """Show the welcome dialog at startup or from the image-mode home button."""
         from src.app.ui.welcome_dialog import WelcomeDialog
         dlg = WelcomeDialog(self.config_manager, self)
         dlg.open_file_requested.connect(self.open_file)
@@ -1717,27 +1717,26 @@ class MenuToolbarMixin:
         self.pref_btn.clicked.connect(self.show_preferences_dialog)
         right_layout.addWidget(self.pref_btn)
 
-        # Project Manager button — video mode only. It remains available after
-        # the startup manager is closed, matching the File menu action.
+        # Home reopens the startup panel for the current workspace mode.
+        self.project_manager_btn = QPushButton()
+        self.project_manager_btn.setIcon(icon_home())
         if self._is_video_work_mode():
-            self.project_manager_btn = QPushButton()
-            self.project_manager_btn.setIcon(icon_home())
-            self.project_manager_btn.setToolTip(
-                I18N.tr("action.open_project_manager", "Open Project Manager...")
-            )
-            self.project_manager_btn.setAccessibleName(
-                I18N.tr("action.open_project_manager", "Open Project Manager...")
-            )
-            self.project_manager_btn.setFixedSize(28, 28)
-            self.project_manager_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent; border: none; border-radius: 4px;
-                }
-                QPushButton:hover { background-color: #3d3d3d; }
-                QPushButton:pressed { background-color: #2d2d2d; }
-            """)
+            home_label = I18N.tr("action.open_project_manager", "Open Project Manager...")
             self.project_manager_btn.clicked.connect(self._show_project_manager)
-            right_layout.addWidget(self.project_manager_btn)
+        else:
+            home_label = I18N.tr("welcome.recent_projects", "Recent Projects")
+            self.project_manager_btn.clicked.connect(self._show_welcome_dialog)
+        self.project_manager_btn.setToolTip(home_label)
+        self.project_manager_btn.setAccessibleName(home_label)
+        self.project_manager_btn.setFixedSize(28, 28)
+        self.project_manager_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; border: none; border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #3d3d3d; }
+            QPushButton:pressed { background-color: #2d2d2d; }
+        """)
+        right_layout.addWidget(self.project_manager_btn)
         right_layout.addSpacing(8)
 
         # Layout combo

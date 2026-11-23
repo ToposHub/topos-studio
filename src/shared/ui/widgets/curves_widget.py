@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
 from PyQt6.QtCore import Qt, QEvent, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
+from src.shared.gpu.scope_publication import ScopePublication
 
 try:
     from scipy.interpolate import PchipInterpolator
@@ -194,9 +195,12 @@ class CurvesWidget(QWidget):
         my = (wy - rect.top()) / rect.height() * 255
         return mx, my
 
-    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
+    def set_scope_frame(
+        self, tex_id: Optional[int], width: int, height: int, *,
+        publication: Optional[ScopePublication] = None,
+    ) -> None:
         """Present histogram inside the same bounds used by curve coordinates."""
-        self._scope.set_scope_frame(tex_id, width, height)
+        self._scope.set_scope_frame(tex_id, width, height, publication=publication)
         self._has_histogram = tex_id is not None
         self._scope.setVisible(tex_id is not None)
         self._overlay.raise_()

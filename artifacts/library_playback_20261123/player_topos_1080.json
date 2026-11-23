@@ -1,0 +1,492 @@
+[
+  {
+    "decode_ms_per_frame" : 9.7335353536585369,
+    "decoded_frames" : 82,
+    "displayed_frame" : 87,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 58,
+    "file" : "2K_topos_4444.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 126.03099300031317,
+      "mean" : 29.403288728150358,
+      "p95" : 105.57600399988587
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0359013160014001,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.564178243528918,
+    "observed_frame_interval_ms" : {
+      "max" : 188.3654680023028,
+      "mean" : 121.14154955997947,
+      "p95" : 177.93543500010855
+    },
+    "open_ms" : 69.766466996952659,
+    "renderer_interval_ms" : {
+      "max" : 208.07697700001881,
+      "mean" : 122.0385410832326,
+      "p95" : 158.50701000090339
+    },
+    "renderer_submissions_fps" : 8.2347867726239592,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 12.052926303370786,
+    "decoded_frames" : 89,
+    "displayed_frame" : 96,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 65,
+    "file" : "2K_topos_4444xq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 118.9382119991933,
+      "mean" : 25.150645256195457,
+      "p95" : 111.36252700089244
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0871737900015432,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 7.4501798617526171,
+    "observed_frame_interval_ms" : {
+      "max" : 393.68012699924293,
+      "mean" : 138.32854890907501,
+      "p95" : 225.31438000078197
+    },
+    "open_ms" : 24.713042999792378,
+    "renderer_interval_ms" : {
+      "max" : 377.64006700308528,
+      "mean" : 140.77276157141091,
+      "p95" : 258.33815599980881
+    },
+    "renderer_submissions_fps" : 7.1262589981981552,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 9.9536098750000033,
+    "decoded_frames" : 88,
+    "displayed_frame" : 94,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 59,
+    "file" : "2K_topos_hq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 216.08768499936559,
+      "mean" : 27.61567520181816,
+      "p95" : 94.685334999667248
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0102319809993787,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.9694083945770071,
+    "observed_frame_interval_ms" : {
+      "max" : 386.72980499904952,
+      "mean" : 115.37359873070203,
+      "p95" : 227.41379400031292
+    },
+    "open_ms" : 19.505045002006227,
+    "renderer_interval_ms" : {
+      "max" : 280.03640799943241,
+      "mean" : 116.62459932005731,
+      "p95" : 150.59830700192833
+    },
+    "renderer_submissions_fps" : 8.6372080836667475,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 7.0873233626373597,
+    "decoded_frames" : 91,
+    "displayed_frame" : 95,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 56,
+    "file" : "2K_topos_lt.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 120.88356599997496,
+      "mean" : 27.857618084096863,
+      "p95" : 102.83831400010968
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0421464200007904,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 9.2040277272363262,
+    "observed_frame_interval_ms" : {
+      "max" : 347.77866500007804,
+      "mean" : 110.39870870364312,
+      "p95" : 241.24081400077557
+    },
+    "open_ms" : 18.75664899853291,
+    "renderer_interval_ms" : {
+      "max" : 308.68185999861453,
+      "mean" : 107.46330037040428,
+      "p95" : 148.37025599990739
+    },
+    "renderer_submissions_fps" : 9.2040277272363262,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 6.2100855999999993,
+    "decoded_frames" : 90,
+    "displayed_frame" : 95,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 58,
+    "file" : "2K_topos_proxy.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 117.4717209978553,
+      "mean" : 27.449954796288189,
+      "p95" : 104.30643200015766
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0768813639988366,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 9.1001233676458995,
+    "observed_frame_interval_ms" : {
+      "max" : 430.94006799947238,
+      "mean" : 109.79981918515276,
+      "p95" : 247.16447199898539
+    },
+    "open_ms" : 13.98778699876857,
+    "renderer_interval_ms" : {
+      "max" : 335.97401900260593,
+      "mean" : 106.02703357147091,
+      "p95" : 150.13379599986365
+    },
+    "renderer_submissions_fps" : 9.4251277736332533,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 8.5558525777777739,
+    "decoded_frames" : 90,
+    "displayed_frame" : 94,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 60,
+    "file" : "2K_topos_standard.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 187.46345099862083,
+      "mean" : 28.516645813700354,
+      "p95" : 107.73469500054489
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0007893689980847,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.3311412184678257,
+    "observed_frame_interval_ms" : {
+      "max" : 283.3143750031013,
+      "mean" : 116.6179099582223,
+      "p95" : 213.44584399776068
+    },
+    "open_ms" : 18.261018998600775,
+    "renderer_interval_ms" : {
+      "max" : 275.95675900010974,
+      "mean" : 115.17449659993872,
+      "p95" : 141.51944799959892
+    },
+    "renderer_submissions_fps" : 8.6643868672065381,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 34.985404837209309,
+    "decoded_frames" : 86,
+    "displayed_frame" : 80,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 64,
+    "file" : "4K_topos_4444.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 119.79654899914749,
+      "mean" : 13.333289328891421,
+      "p95" : 10.959998999169329
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0066002200001094,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 3.3260158545453828,
+    "observed_frame_interval_ms" : {
+      "max" : 428.55310999948415,
+      "mean" : 276.65613844470096,
+      "p95" : 373.41749500046717
+    },
+    "open_ms" : 43.181670997000765,
+    "renderer_interval_ms" : {
+      "max" : 428.31065800055512,
+      "mean" : 259.90751562494552,
+      "p95" : 324.29301099909935
+    },
+    "renderer_submissions_fps" : 2.9934142690908447,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 40.073201782608692,
+    "decoded_frames" : 69,
+    "displayed_frame" : 25,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 22,
+    "file" : "4K_topos_4444xq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 106.23535400009132,
+      "mean" : 10.343275890037832,
+      "p95" : 10.831012001290219
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0099418550016708,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 0.66446466288927364,
+    "observed_frame_interval_ms" : {
+      "max" : 266.85432700105594,
+      "mean" : 266.85432700105594,
+      "p95" : 266.85432700105594
+    },
+    "open_ms" : 46.114830998703837,
+    "renderer_interval_ms" : {
+
+    },
+    "renderer_submissions_fps" : 0.33223233144463682,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 29.493137666666662,
+    "decoded_frames" : 87,
+    "displayed_frame" : 85,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 61,
+    "file" : "4K_topos_hq.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 119.97103000248899,
+      "mean" : 16.574726055250974,
+      "p95" : 83.43871499891975
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0034148080012528,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 5.3272694658677082,
+    "observed_frame_interval_ms" : {
+      "max" : 246.85009899985744,
+      "mean" : 176.34426899991618,
+      "p95" : 238.28592499921797
+    },
+    "open_ms" : 38.959757999691647,
+    "renderer_interval_ms" : {
+      "max" : 258.02820500030066,
+      "mean" : 176.73661378570873,
+      "p95" : 233.98524399817688
+    },
+    "renderer_submissions_fps" : 4.9943151242509769,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 23.240919273809514,
+    "decoded_frames" : 84,
+    "displayed_frame" : 96,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 66,
+    "file" : "4K_topos_lt.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 115.78654400000232,
+      "mean" : 22.659682473266642,
+      "p95" : 101.82903000168153
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0644157629976689,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 7.5055089709827651,
+    "observed_frame_interval_ms" : {
+      "max" : 218.5050299995055,
+      "mean" : 134.92810927263318,
+      "p95" : 176.88245099998312
+    },
+    "open_ms" : 33.711762000166345,
+    "renderer_interval_ms" : {
+      "max" : 224.63946300194948,
+      "mean" : 136.33722568176216,
+      "p95" : 183.43476500012912
+    },
+    "renderer_submissions_fps" : 7.5055089709827651,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 16.807500170454546,
+    "decoded_frames" : 88,
+    "displayed_frame" : 95,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 59,
+    "file" : "4K_topos_proxy.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 115.3152310034784,
+      "mean" : 28.19733506603027,
+      "p95" : 101.3239390013041
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0305114219991083,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 8.9093873080303947,
+    "observed_frame_interval_ms" : {
+      "max" : 200.35095999992336,
+      "mean" : 114.95836603843109,
+      "p95" : 161.66509300092002
+    },
+    "open_ms" : 30.660429001727607,
+    "renderer_interval_ms" : {
+      "max" : 166.6664460026368,
+      "mean" : 115.01881332005723,
+      "p95" : 158.12831800212734
+    },
+    "renderer_submissions_fps" : 8.5794100003255664,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  },
+  {
+    "decode_ms_per_frame" : 28.244247461538464,
+    "decoded_frames" : 91,
+    "displayed_frame" : 93,
+    "engine" : "topos-cpu",
+    "errors" : [
+
+    ],
+    "estimated_dropped_frames" : 66,
+    "file" : "4K_topos_standard.mov",
+    "heartbeat_interval_ms" : {
+      "max" : 115.45783200199367,
+      "mean" : 17.949665310563592,
+      "p95" : 80.081766998773674
+    },
+    "measured_presentation_fps" : 0,
+    "measured_seconds" : 3.0058992379999836,
+    "metal_enabled" : false,
+    "metal_output_sizes" : [
+
+    ],
+    "observed_frame_changes_fps" : 6.3209038279812439,
+    "observed_frame_interval_ms" : {
+      "max" : 392.37255699845264,
+      "mean" : 158.37722922232285,
+      "p95" : 248.69608500011964
+    },
+    "open_ms" : 43.382175001170253,
+    "renderer_interval_ms" : {
+      "max" : 371.79885899968212,
+      "mean" : 160.72098116658,
+      "p95" : 266.86807300211512
+    },
+    "renderer_submissions_fps" : 6.3209038279812439,
+    "source_fps" : 25,
+    "upload_ms_per_frame" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  }
+]

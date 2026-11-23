@@ -1,0 +1,46 @@
+[
+  {
+    "avsync" : -5.7381943641132693e-10,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "测试素材01.mov",
+    "frame-drop-count" : 2,
+    "heartbeat_interval_ms" : {
+      "max" : 81.457962001877604,
+      "mean" : 25.315368732757133,
+      "p95" : 43.150272998900618
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0091180759991403,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33232328368103747,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 79.025888000614941,
+    "renderer_interval_ms" : {
+      "max" : 43.568728997342987,
+      "mean" : 40.223761824342326,
+      "p95" : 42.726303996460047
+    },
+    "renderer_submissions_fps" : 24.92424627607781,
+    "time-pos" : 3.3599999999999999,
+    "video-codec" : "H.264 \/ AVC \/ MPEG-4 AVC \/ MPEG-4 part 10",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      1920,
+      1080
+    ]
+  }
+]

@@ -1,0 +1,9 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 610 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+2026-11-23 22:07:22.009 Python[41376:470188] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:07:22.010 Python[41376:470188] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+{"file": "4K_H265.mov", "route": "libav", "submitted_fps": 24.992340280274377, "swapped_fps": 25.167111890625943, "qt_frames_fps": 0.0, "decode_ms": {"count": 148, "mean": 26.51690035137919, "p50": 25.198853498295648, "p95": 37.35079609978129, "max": 58.63745900205686}, "worker_mode": "texture", "errors": null}

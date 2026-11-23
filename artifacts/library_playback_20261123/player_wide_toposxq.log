@@ -1,0 +1,39 @@
+Metal shader compilation: Error Domain=MTLLibraryErrorDomain Code=3 "program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+" UserInfo={NSLocalizedDescription=program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+}
+Metal unavailable; production app also falls back to CPU
+[ass] libass API version: 0x1705000
+[ass] libass source: tarball: 0.17.5
+[ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.1 (COMPLEX)
+[ass] Using font provider coretext
+2026-11-23 22:09:53.151 comparison[42421:479495] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:09:53.151 comparison[42421:479495] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+4K_topos_4444xq.mov: renderer 0.00 fps, errors=[]

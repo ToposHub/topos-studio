@@ -1,7 +1,9 @@
 """Panel switches share real Qt dock state without taking viewport ownership."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
+import pytest
 from pytest import MonkeyPatch
 from PyQt6.QtCore import QPoint, QPointF, QSettings, QSize, Qt
 from PyQt6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QImage
@@ -181,8 +183,10 @@ def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(
         assert browser.wait_for_shutdown(3)
 
 
-def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch) -> None:
-    window = _Window(_Config())
+@pytest.mark.parametrize("mode", ["image", "video"])
+def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch, mode: str) -> None:
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    window = _Window(_Config(work_mode=mode, show_welcome_on_startup=False), mode=mode)
     qtbot.addWidget(window)
     window.setStyleSheet(DARK_THEME)
     window.add_panel("dock_edit_media_pool", Qt.DockWidgetArea.LeftDockWidgetArea)
@@ -191,7 +195,12 @@ def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch) ->
     window._composite_available = False
     window._deliver_available = False
     window.menuBar().addMenu("File").addAction("Open")
-    monkeypatch.setattr(window, "_is_video_work_mode", lambda: False, raising=False)
+    monkeypatch.setattr(window, "_is_video_work_mode",
+                        lambda: MenuToolbarMixin._is_video_work_mode(window), raising=False)
+    welcome = Mock()
+    project_manager = Mock()
+    monkeypatch.setattr(window, "_show_welcome_dialog", welcome, raising=False)
+    monkeypatch.setattr(window, "_show_project_manager", project_manager, raising=False)
     for name in (
         "switch_to_page", "on_reset_all_click", "show_preferences_dialog",
         "on_layout_combo_activated", "update_layout_combobox", "export_file_as",
@@ -203,6 +212,21 @@ def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch) ->
     main_button = window.application_menu_button
     panel_button = window.workspace_panel_bar._panels_button
     qtbot.waitUntil(panel_button.isVisible)
+
+    home_button = window.project_manager_btn
+    assert home_button.isVisible()
+    assert home_button.size() == QSize(28, 28)
+    assert not home_button.icon().isNull()
+    home_label = (I18N.tr("welcome.recent_projects", "Recent Projects") if mode == "image"
+                  else I18N.tr("action.open_project_manager", "Open Project Manager..."))
+    assert home_button.toolTip() == home_button.accessibleName() == home_label
+    qtbot.mouseClick(home_button, Qt.MouseButton.LeftButton)
+    if mode == "image":
+        welcome.assert_called_once()
+        project_manager.assert_not_called()
+    else:
+        project_manager.assert_called_once()
+        welcome.assert_not_called()
 
     assert main_button.size() == panel_button.size() == QSize(28, 28)
     assert main_button.iconSize() == panel_button.iconSize() == QSize(16, 16)
