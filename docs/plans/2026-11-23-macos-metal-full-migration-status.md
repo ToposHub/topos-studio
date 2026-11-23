@@ -15,11 +15,12 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 | 1 共享 GPU 帧 | ✅ 1.1–1.3 完成 | 原生发布分支、租约键与带键 ack 已在生产协议上生效；帧事务自阶段 2 起承载原生预览帧 |
 | 2 原生视口和剪辑 | 🟡 2.1–2.3、2.5（Source Viewer）代码与定向测试完成，默认关闭；2.4 的真机性能验收待做 | 需 `TOPOS_EDIT_METAL_VIEWPORT=1` 显式开启。本机已验证：像素逐位一致、真实图层呈现成功、真实应用冒烟正常。播放帧数、seek p95、GPU 时间、换屏与叠加交互对照**尚未测量**（测量时显示器已休眠） |
 | 2.6 | ✅ 代码、对拍与定向测试完成，显式开启 | 多层、变换、裁切、混合、交叉溶解、`dip_to_color` 走 Metal；31 个场景对 GL 逐像素一致。片段效果、planar 源、comp 句柄、空间转场仍回退 GL。真实应用多层工程播放未测 |
-| 4.1–4.3 | 🟡 实现与对拍完成；Metal 执行器尚无生产调用方 | 共享入口（计划步骤与需求键）已接进预览；纹理执行器已对拍但未启用。4.4–4.6 进行中 |
-| 5.1–5.3 | 🟡 实现与对拍完成，默认关闭，无生产调用方 | `TOPOS_COMPOSITE_METAL=1`；Constant/Transform/Merge/Output/Crop/Premult/矩形遮罩已迁，其余节点整图回退。5.4–5.6 进行中 |
+| 4.1–4.5 | 🟡 实现与对拍完成；Metal 执行器、I/O、示波器与 Color Viewer 呈现端均无生产调用方 | 共享入口（计划步骤与需求键）已接进预览。4.4 帧色彩描述与输入/展示 kernel、4.5 示波器引擎与带 EDR 的呈现端已对拍；4.6 的读回队列与缩略图服务搁置（见文末） |
+| 5.1–5.6 | 🟡 实现与对拍完成，默认关闭，无生产调用方 | `TOPOS_COMPOSITE_METAL=1`；Constant/Transform/Merge/Output/Crop/Premult/矩形遮罩已迁，有界异步发布、时间契约、导出桥与最小 3D 验证 pass 已做；3D 节点与其余效果节点整图回退 |
 | 8.5 / 8.6 | 🟡 回退开关与启用台账代码完成 | `TOPOS_METAL_DISABLE`；能力矩阵与长时验收留到最后 |
 | 3.1 / 3.2 | ✅ 含音频的 H.264 原生导出与精确时间戳，默认路径，真机两条路径对照一致 | 同容器封装一条 AAC；分数帧率保持自己的 timescale。B 帧（PTS≠DTS）只在混流器层用合成包验证 |
-| 3.3 / 3.4、6、7 | ⏳ 进行中或未开始 | 复杂场景/HDR 白名单、DNxHR 遥测、插件效果、辅助渲染 |
+| 6.1–6.5 | 🟡 转译器、登记表、兼容矩阵与真机对拍完成；无生产调用方 | 21 个 `.tglsl` 插件在本机通过 GL↔Metal 门限并声明 `metal`，3 个噪声类被门限挡住；效果仍一律走 GLSL |
+| 3.3 / 3.4、7.1–7.5、8.1–8.4 | ⏳ 未完成 | 复杂场景/HDR 白名单、DNxHR 遥测、辅助渲染、GL 所有权收拢、能力矩阵其余域、画质与性能验收、安装包。其中 3.3/3.4、7.1、7.2/7.3 已有未测试的初稿，搁置在仓库外 |
 
 既有失败（与迁移无关，均在基线代码上复现或属本机环境）：
 `tests/edit/test_ef01_aud_part1.py::TestAud15506::test_hotpath_dependencies_imported_at_module_level`；
@@ -400,6 +401,8 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 | 4.1 | `6cc7a7f4` | 共享入口 `color_graph_entry.py`：需求键、共享计划、Metal 优先 + 兼容回退 |
 | 4.2 | `6cc7a7f4` | `ColorGraphMetalTextureExecutor`（`color_graph_texture_metal.py`）与 MSL（`metal_texture_kernels.py`） |
 | 4.3 | `6cc7a7f4` | qualifier、窗口、组合遮罩、key 通道、关键帧 |
+| 4.4 | `716d7f9c` | 帧色彩描述（`frame_color_description.py`）、输入解码与展示编码 kernel（`metal_color_io.py`）、原生发布（`metal_frame_publish.py`） |
+| 4.5 | `716d7f9c` | 示波器引擎（`metal_scope_engine.py`）、Color Viewer 呈现端（`ui/metal_color_viewer.py`） |
 
 - **4.1 已接进生产的只有两处**：`async_renderer._execute_graph_frame` 的计划步骤改经
   `plan_color_graph_frame(backend="gl")`（同一计划与计划缓存，资源预检问题记为诊断，GL 执行器不变），
@@ -408,8 +411,29 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 - **4.2 / 4.3 的执行器处于「已实现、已对拍、未启用」**：已接 Primary、RGB/HSL 曲线、LUT3D、Mixer、Warper、
   soft clip、混合收尾，以及 qualifier、窗口、组合遮罩、key 通道与同一帧时间的关键帧。时域类（降噪、时域
   分析、跟踪）、Normalize、fx/blur 显式拒绝（fail-closed），不会把失败节点的输出换成原图。
-- **未做**：4.4 色彩管理与 HDR、4.5 Color Viewer / 示波器、4.6 静帧入口（进行中）；异步提交与完成回调；
-  节点级结果缓存。
+- **未做**：异步提交与完成回调；节点级结果缓存；4.6 静帧入口（见文末「搁置的工作」）。
+
+### 4.4 色彩管理和 HDR、4.5 Color Viewer 和示波器（`716d7f9c`）
+
+- **4.4**：`ColorFrameDescription` 承载输入侧元数据——YUV 矩阵与 range 复用 `gpu_frame` 的共享词表、色度采样
+  位置、transfer、色域、位深、可见区。`MetalColorIO` 把 NV12（R8 / RG8）与 P010（R16 / RG16）平面或
+  RGBA16F 源解码到工作空间且不 clamp，再把工作纹理按显示目标编码：**展示变换只在写呈现槽位这一步施加一次**。
+  左对齐色度用与 GL 路径逐位一致的最近邻，其余采样位置用带偏移的双线性。色条在 signal 与 linear 两种模式下
+  与共享变换 provider 一致，HDR PQ 往返、HDR→SDR 色调映射与 provider 一致，EDR 线性输出不被 clamp。
+- **4.5**：`MetalScopeEngine` 用原子定点累加在 Metal 上算波形、Parade、矢量示波器、直方图与 CIE，数据留在
+  设备上，只读回展示纹理（计数）；峰值与增益和 GL 公式一致。GL 的 2–3 px 高斯点溅在 Metal 侧改为「单位 bin
+  累加 + 展示卷积」，展示 kernel 移植了 GL 的 7-tap 纵向卷积与 tone-map，**溅射核本身不同**。
+  `ColorMetalViewportHost` / `ColorMetalViewerPresenter` 在屏幕支持时用浮点图层与 EDR 配置呈现已发布的帧；
+  `TOPOS_COLOR_METAL=1` 显式开启，`TOPOS_METAL_DISABLE=color_graph_metal` 可关。
+- **没有生产接线**：`gl_viewport.py`、示波器控件、调色页渲染器与交付都仍是 GL 路径。
+- **HDR 输入全部是合成数据**：本机没有 HDR 素材，真实 HDR 素材上的显示变换与 EDR 未测。
+
+| 项目 | 结果 | 方式 |
+|---|---|---|
+| 帧色彩描述 | ✅ 19 项通过 | 共享词表、别名、位深一致性、可见区、HDR 判定、需求键 |
+| Metal 输入 / 展示 I/O | ✅ 20 项通过 | 真实设备：与 `kernels_video` 码值域一致、色条对 provider、左对齐 = GL 最近邻、P010、PQ 往返、EDR 不 clamp |
+| 示波器引擎 | ✅ 23 项通过 | 真实设备：色条 / 灰阶 / 纯色的波形、Parade、矢量、直方图、CIE；峰值与增益对 GL 公式；完成后才发布 |
+| Color Viewer 呈现端 | ✅ 13 项通过（Cocoa） | 显式开启、回退开关、EDR 能力、缩放平移、真实 `CAMetalLayer` 的发布→呈现→确认 |
 
 ### 验证结果（4.1–4.3）
 
@@ -431,6 +455,13 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
    GL 宿主（`async_renderer.py` 等）直接传原值，GL 预览与 CPU 的 qualifier 色相选择疑似有既有点位偏差。
 3. **qualifier 饱和度边界**：`s_high == 1.0` 且 `soft == 0` 时 CPU 与 GLSL 对 s == 1 的像素取舍不同。
 
+合成域对拍时发现的既有差异（未改动，已登记在 `docs/architecture/composite.md`）：
+
+4. **GL 路径的 checker 垂直相位**：`ConstantNode` 的 checker 走 numpy → 纹理上传且没有翻 Y（gradient / radial 的
+   shader 路径显式翻），无头读回后与 `_make_checker` 自身不一致；Metal 侧与 `_make_checker` 一致。
+5. **crop-reformat 的输出画布**：同一张图 Metal 计划输出裁剪后的尺寸，GL 无头路径仍输出上游 Merge 画布，
+   需按 crop 节点的权威语义裁决。
+
 ## 阶段 5 二维合成、时间类效果和 3D
 
 | 编号 | 提交 | 内容 |
@@ -438,6 +469,9 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 | 5.1 | `94b2c3a2` | `src/features/composite/render/metal/`：预检 → 计划 → halo → 渲染 → 池与缓存 |
 | 5.2（部分） | `94b2c3a2` | Rectangle、Crop、32 种混合模式、Premultiply / Unpremultiply |
 | 5.3 | `94b2c3a2` | `input_roi`、halo 沿图反向传播、tile 裁回中心、缓存键、按字节计量的纹理池 |
+| 5.4 | `935d95fa` | 时间契约 `time_contract.py`：历史跨度登记、确定性种子、重置边界状态机 |
+| 5.5 | `935d95fa` | 最小 3D 验证 pass `mesh3d.py`（不接图链） |
+| 5.6 | `935d95fa` | 有界异步发布、按格式计量的纹理池、导出桥 `export_bridge.py`、传输策略 `transfer_policy.py` |
 
 - **默认关闭、无生产调用方**：入口 `CompositeGraphRenderService.render_metal()`（`TOPOS_COMPOSITE_METAL=1`），
   `render_cpu` / `render_gpu` 未改。输出的句柄是 Metal 纹理，GL 消费者（时间线 comp clip）读不了，接线留给 5.6。
@@ -447,8 +481,31 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 - **已知差异**（写在 `docs/architecture/composite.md`）：Transform 固定中间画布（GL 的 bbox 跟随会保留到
   Merge 画布）；每帧 `waitUntilCompleted` 后发布（同步）；GL `_MASK_FRAGMENT` 的 SDF 实测是「形状内 0、形状外 1」，
   与其注释相反，Metal 复刻了实测行为。
-- **未做**：5.4 历史与多帧、5.5 3D / AOV、5.6 输出与资源池（进行中）；Keyer、Matte、模糊、形态学、Glow、
-  Light Wrap、文本、PSD、媒体输入节点。
+- **未做**：Keyer、Matte、模糊、形态学、Glow、Light Wrap、文本、PSD、媒体输入节点。
+
+### 5.4–5.6（`935d95fa`）
+
+- **5.6**：不再每帧 `waitUntilCompleted`。渲染器在编码前预留环容量、注册完成回调，拥有者线程 `poll` 时才回收
+  中间纹理、写 tile 缓存并构造句柄；环满或等待超时都是显式回退且仍归还租约。纹理池按格式计量
+  （RGBA16F / R32F / RGBA32F）。`MetalCompositeExportBridge` 让多 pass、图像序列与无头输出走同一份计划：
+  **每个 AOV pass 显式回退 GL**，取消不产半帧。定义了设备 / 代际不匹配的传输策略：代际过期直接释放不搬运，
+  设备不同走 CPU 读回。
+- **5.4**：历史跨度只对能无歧义推导的节点给精确数字（deflicker 的因果窗），retime / 光流 / 跟踪 / 粒子只登记
+  分类；种子与播放顺序无关；seek、方向翻转、跨剪切、代际变化重置历史，同帧重试不重置。**顺带发现并修掉**：
+  Metal 链此前完全忽略关键帧轨道与表达式（动画图会按基值渲染出错像素），现在预检显式回退
+  （`node.metal_animated_params`），缓存键纳入动画轨道。
+- **5.5**：最小 3D 验证 pass（基本网格 + 固定相机）复用 `render3d` 的数学，核对矩阵、裁剪空间与深度约定；
+  **不接图链**——Scene3D 端口携带运行时载荷，序列化参数无法无歧义重建，预检显式回退
+  （`node.metal_3d_unmapped`）。近平面裁剪、透明排序、多相机、粒子、AOV、Cryptomatte 未做。
+- **仍无生产接线**：comp clip 帧、`CompositeRenderOutput` 的导出循环、独立合成页渲染器与 Viewer。
+
+| 项目 | 结果 | 方式 |
+|---|---|---|
+| 计划阶段 5 命令 + 全部合成套件 + 回退开关 | ✅ 293 通过 | 含异步发布、环满回退、清理租约、时间契约、导出桥、3D pass |
+| Metal ↔ GL 服务级同帧 | ✅ 最大差 4.9e-4（1 ulp fp16） | 真机，GL 侧在独立子进程渲染 |
+| Metal 3D 光栅化 | ✅ | 真机对 CPU 参考与 GL 同式着色器：颜色、R32F 深度、覆盖 |
+| 压测后回到空闲 | ✅ | 12+ 帧含中途 seek、取消、错误序列后 `in_flight == 0`，池与缓存有界 |
+| 传输策略、边界状态机、AOV 回退文案 | 🟡 仅逻辑层 | 无 GPU |
 
 ### 验证结果（5.1–5.3）
 
@@ -475,6 +532,47 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
   快路径与 opt-in 的常规 VT 桥）。
 - 测试：`tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的回退测试。
 - **未做**：8.2 画质与工程兼容、8.3 性能与稳定性、8.4 安装包，以及把任何一项转为默认开启。
+
+## 阶段 6 着色器插件和内置效果
+
+| 编号 | 提交 | 内容 |
+|---|---|---|
+| 6.1 | `4cbbe500` `b6ace562` | 验证登记表 `msl_plugin_verification.py`、兼容矩阵 `docs/macos_metal_migration/effect-compat-matrix.md`（生成器 `tools/build_effect_compat_matrix.py`） |
+| 6.2 | `4cbbe500` | 内置曝光 `builtin:exposure`（`msl_effect_registry.py` 的 `migration_exposure` helper）与 `metal_effect_runtime.py` |
+| 6.3 | `4cbbe500` | 受限转译器 `tglsl_front.py` → `tglsl_msl_transpiler.py` → `metal_abi.py`（显式纹理 / sampler 绑定、参数布局、指纹） |
+| 6.4 / 6.5 | `4cbbe500` | 编译缓存键（源码指纹、宿主 ABI、编译选项、像素格式、设备能力、插件版本）；按效果 ID 的诊断 `effect_backend_fallback.py`、`tglsl_metal_support.py` |
+
+- **没有生产路径在 Metal 上执行效果**：效果一律经 GLSL 的 `EffectPassRunner`，能力预检不参与路由。本阶段登记的是
+  能力与证据。
+- **21 个 `.tglsl` 插件在本机（AMD RX 6900 XT）通过 GL↔Metal 门限并声明 `@graphics_backends opengl,metal`**（只改
+  声明行，着色器代码未动；其中 14 个原为显式 OpenGL-only 声明）。3 个含算术哈希噪声的插件（`Film_Grain`、
+  `Glitch_Blocks`、`HighPass_Retouch`）两端不可复现，被门限挡住、不声明 metal。未声明的旧插件仍按 OpenGL 能力解析。
+- 生效后端 = 作者声明 ∩ 宿主可译；循环、宏、扩展、深度、多入口给出带插件 ID 的诊断并保留该 ID 的 GL 路径。
+- 对拍测试每次重跑全部已验证插件，并在「声明集合 ≠ 已验证集合」时失败。
+
+| 项目 | 结果 | 方式 |
+|---|---|---|
+| 计划阶段 6 命令 + 新增套件 | ✅ 602 通过 | 真实设备；`test_effect_catalog_contract` 的 3 个失败在父提交上已存在 |
+| 21 个已验证插件 GL↔Metal | ✅ 42 项通过 | 5 种尺寸 × 3 类图像（HDR 负值 / 超白、边缘极值、渐变）× 参数扫描；Alpha 逐位相同，差异 ≤ 1–2 个 fp16 ulp |
+| 内置曝光 | ✅ 逐位相同 | −5…+5 档对 GL 逐位相同，0 档透传，两实例独立，存盘重开渲染一致 |
+| 坐标约定 | ✅ 逐位互为镜像 | 两种约定在 fp32 下算同一算式，`1 − y/H` 的写法会差 1 ulp |
+| 证据 | ✅ 已落盘 | `evidence/effect-metal-parity-2026-11-23.json` 与 22 份生成的 MSL（`evidence/effect-metal-msl/`） |
+| 生产接线 | ⏳ 无调用方 | — |
+
+子代理中断时遗留的两个坐标约定测试已对齐到最终写法（`tests/shared/test_metal_abi.py` 另加一条不依赖 GPU 的
+镜像断言）。
+
+## 搁置的工作（初稿在仓库外，补完测试后再进）
+
+子代理在 2026-11-23 因用量上限中断，以下初稿**没有任何测试**，没有进入仓库；原样存放在仓库外的
+`/tmp/topos-26/pending/`（附 `README.txt`），恢复后需补完并测试：
+
+| 编号 | 初稿内容 | 状态 |
+|---|---|---|
+| 3.3 / 3.4 | `verify_dnxhr_copy_runs()`（智能复用的包哈希证据）、预取管线的 `queue_wait` 遥测、Metal 导出渲染器一行回读计时 | 未测试；改在默认导出路径上，故撤回 |
+| 4.6 | `metal_readback_queue.py`（显式 / 播放读回分开计数的异步读回队列）、`metal_node_thumbnail.py`（缩略图服务）与 `color_graph_entry` 的 `viewer_target` 参数 | 未测试、无调用方 |
+| 7.1 | `shared/playback/metal_playback.py`、`metal_render_worker.py`、`metal_yuv_renderer.py` | 首稿；作者已判定 `metal_render_worker.py` 需整体重写（未初始化属性、teardown 顺序会让槽位不归队） |
+| 7.2 / 7.3 | `shared/video/cfa_metal_debayer.py`、`explicit_readback_queue.py` | 未测试 |
 
 ## 阶段 8.1 能力矩阵（逻辑层：剪辑预览）
 
