@@ -144,6 +144,18 @@ def node_layer_payload(node: Any, *,
             payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
                 dict(hsl_data), calibration_version=int(calibrated),
             ).tolist()
+    if include_lut_cache and payload.get("warper_params") is None:
+        warper = payload.get("warper_state")
+        if isinstance(warper, Mapping):
+            from src.features.color.core.warper_state import (
+                RESOLVE_HS_ALGORITHM, WarperStateV2, renderable_projection,
+            )
+
+            if warper.get("algorithm_version") == RESOLVE_HS_ALGORITHM:
+                offsets, space = renderable_projection(WarperStateV2.from_dict(warper))
+                if offsets is not None:
+                    payload["warper_params"] = offsets.tolist()
+                    payload["warper_space"] = space
     return payload
 
 

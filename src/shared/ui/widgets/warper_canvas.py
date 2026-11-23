@@ -1,8 +1,7 @@
 """Color Warper presentation and pointer gestures; no image-processing backend.
 
 The legacy Hue/Saturation coordinate encoding remains in ColorWarper. Display
-rotation is deliberately separate so old projects keep the same hue mapping.
-Other modes publish UI snapshots only, never a legacy warp texture.
+rotation is separate so saved grades keep the same hue mapping.
 """
 from __future__ import annotations
 
@@ -21,6 +20,8 @@ from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.color_warper import ColorWarper
 
 PointKey = tuple[int, int]
+CALIBRATED_SAT_SCALE = 2.0 / math.sqrt(3.0)
+CALIBRATED_MAX_RADIUS = 1.6
 
 
 class WarperCanvas(ColorWarper):
@@ -29,6 +30,7 @@ class WarperCanvas(ColorWarper):
     ui_edited = pyqtSignal()
     selection_changed = pyqtSignal()
     grid_activated = pyqtSignal(int)
+    interaction_cancelled = pyqtSignal()
 
     def __init__(self, mode: str = "hue_saturation", parent: QWidget | None = None) -> None:
         self.mode = mode
@@ -45,6 +47,7 @@ class WarperCanvas(ColorWarper):
         self.lock_axis = "columns"
         self.axis_angle = 0.0
         self.color_space = "HSP"
+        self.calibrated_hs = False
         self.show_grid = True
         self.show_density = True
         self.density_image: QImage | None = None
@@ -56,6 +59,7 @@ class WarperCanvas(ColorWarper):
         self._moved = False
         self._deselect_on_release: PointKey | None = None
         self._component_gesture = False
+        self._calibrated_base: tuple[np.ndarray, set[PointKey], dict[PointKey, float]] | None = None
         self._range = (0.0, 1.0)
         super().__init__(parent)
         self._padding = 29
@@ -102,7 +106,14 @@ class WarperCanvas(ColorWarper):
         self._lasso.clear()
         if self._gesture_active:
             self._gesture_active = False
-            self.interaction_ended.emit()
+            if self._calibrated_base is not None:
+                self.points, self.pins, self.luma_values = self._calibrated_base
+                self._calibrated_base = None
+                self.interaction_cancelled.emit()
+                self.selection_changed.emit()
+                self.update()
+            else:
+                self.interaction_ended.emit()
 
     def set_grid_size(self, size: int) -> None:
         self.set_resolution(size, size)
@@ -112,6 +123,30 @@ class WarperCanvas(ColorWarper):
             raise ValueError("Warper resolution must be between 3 and 24")
         self.grid_size, self.ring_count = columns, rows
         self.reset_grid()
+
+    def calibrated_offsets(self) -> np.ndarray:
+        """Return internal hue, normalized radius, and luma offsets."""
+        radius = np.linalg.norm(self.points.astype(np.float64), axis=2)
+        hue = (-np.arctan2(self.points[:, :, 1], self.points[:, :, 0]) - math.pi / 2) / math.tau
+        dh = (hue - np.arange(self.grid_size) / self.grid_size + 0.5) % 1.0 - 0.5
+        dh[radius < 1e-7] = 0.0
+        ds = radius - np.arange(1, self.ring_count + 1)[:, None] / self.ring_count
+        dl = np.zeros_like(radius)
+        for key, value in self.luma_values.items():
+            dl[key] = value - 0.5
+        offsets = np.stack((dh, ds, dl), axis=2).astype(np.float32)
+        offsets[np.abs(offsets) < 1e-7] = 0.0
+        return offsets
+
+    def apply_calibrated_offsets(self, offsets: np.ndarray) -> None:
+        """Project a hydrated HS grid into the Cartesian canvas."""
+        hue = offsets[:, :, 0] + np.arange(self.grid_size) / self.grid_size
+        radius = np.maximum(0.0, offsets[:, :, 1] + np.arange(1, self.ring_count + 1)[:, None] / self.ring_count)
+        angle = -hue * math.tau - math.pi / 2
+        self.points = np.stack((radius * np.cos(angle), radius * np.sin(angle)), axis=2).astype(np.float32)
+        self.luma_values = {tuple(key): float(offsets[key[0], key[1], 2]) + 0.5
+                            for key in np.argwhere(offsets[:, :, 2])}
+        self.update()
 
     def reset(self) -> None:
         self.reset_grid()
@@ -326,11 +361,17 @@ class WarperCanvas(ColorWarper):
     def _start_edit(self) -> None:
         if not self._gesture_active:
             self._gesture_active = True
+            if self.calibrated_hs:
+                self._calibrated_base = (self.points.copy(), self.pins.copy(), self.luma_values.copy())
             self.interaction_started.emit()
 
     def _publish_mesh(self) -> None:
         self.ui_edited.emit()
-        if self.mode == "hue_saturation" and self.ring_count == self.grid_size:
+        if self.calibrated_hs:
+            self._pending_deltas = self.calibrated_offsets()
+            if not self._changed_timer.isActive():
+                self._changed_timer.start()
+        elif self.mode == "hue_saturation" and self.ring_count == self.grid_size:
             self._pending_deltas = self._compute_deltas()
             if not self._changed_timer.isActive():
                 self._changed_timer.start()
@@ -343,6 +384,7 @@ class WarperCanvas(ColorWarper):
             self._emit_pending_change()
         if self._gesture_active:
             self._gesture_active = False
+            self._calibrated_base = None
             self.interaction_ended.emit()
 
     def begin_component_drag(self) -> None:
@@ -364,7 +406,7 @@ class WarperCanvas(ColorWarper):
                 if self.mode == "hue_saturation":
                     dt = min(dt, self.grid_size - dt)
                 distance = dt if self.lock_axis == "columns" else dr
-                if self.lock_axis == "single":
+                if self.calibrated_hs or self.lock_axis == "single":
                     distance = max(dr, dt)
                 if distance == self.lock_points:
                     self.pins.add(key)
@@ -392,8 +434,14 @@ class WarperCanvas(ColorWarper):
             self.selection_changed.emit(); self.update()
             return
         if self.tool == "pin":
+            if self.calibrated_hs:
+                self._start_edit()
             self.pins.symmetric_difference_update({key})
-            self.ui_edited.emit(); self.update()
+            if self.calibrated_hs:
+                self._publish_mesh()
+                self._end_edit()
+            else:
+                self.ui_edited.emit(); self.update()
             return
         if additive:
             self.selected.symmetric_difference_update({key})
@@ -401,7 +449,8 @@ class WarperCanvas(ColorWarper):
             self.selected = {key}
         else:
             self._deselect_on_release = key
-        self._auto_pin()
+        if not self.calibrated_hs:
+            self._auto_pin()
         if key not in self.pins and key in self.selected:
             self.dragging_point = key
             self._drag_origin = self._normalized(event.position())
@@ -416,6 +465,9 @@ class WarperCanvas(ColorWarper):
             delta = self._normalized(event.position()) - self._drag_origin
             if np.linalg.norm(delta) < 0.004 and not self._moved:
                 return
+            if self.calibrated_hs and not self._moved:
+                self._start_edit()
+                self._auto_pin()
             self._moved = True
             self._start_edit()
             target = self._drag_points.copy()
@@ -436,8 +488,14 @@ class WarperCanvas(ColorWarper):
                         target[key] += direction / distance * np.linalg.norm(delta) * (1 if self.tool == "push" else -1) * max(0, 1 - distance)
                 else:
                     target[key] += delta * weight
-            # Only mesh display bounds, not an image/HDR pixel clamp.
-            self.points = np.clip(target, -1.1, 1.1)
+            if self.calibrated_hs:
+                moved = np.any(target != self._drag_points, axis=2)
+                radius = np.linalg.norm(target, axis=2)
+                outside = moved & (radius > CALIBRATED_MAX_RADIUS)
+                target[outside] *= CALIBRATED_MAX_RADIUS / radius[outside, None]
+                self.points = target
+            else:
+                self.points = np.clip(target, -1.1, 1.1)
             self._publish_mesh()
         else:
             key = self._get_point_at(event.position())
@@ -466,9 +524,12 @@ class WarperCanvas(ColorWarper):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            if self._drag_points is not None and self._moved:
+            if not self.calibrated_hs and self._drag_points is not None and self._moved:
                 self.points = self._drag_points.copy(); self._publish_mesh()
-            self._end_edit(); self.cancel_gesture(); self.selected.clear()
+            if not self.calibrated_hs:
+                self._end_edit()
+            self.cancel_gesture()
+            self.selected.clear()
             self.selection_changed.emit(); self.update()
         elif event.key() == Qt.Key.Key_A and event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
             self.perform("all")
@@ -488,6 +549,7 @@ class WarperCanvas(ColorWarper):
 
     def perform(self, action: str) -> None:
         keys = set(self._keys())
+        previous_pins = self.pins.copy() if self.calibrated_hs else None
         if action == "invert":
             self.selected = keys - self.selected
         elif action == "convert_pin":
@@ -514,7 +576,14 @@ class WarperCanvas(ColorWarper):
             self._start_edit()
             for key in self.selected - self.pins:
                 self.points[key] = self._initial_position(*key)
+                if self.calibrated_hs:
+                    self.luma_values.pop(key, None)
             self._publish_mesh(); self._end_edit()
+        if previous_pins is not None and previous_pins != self.pins:
+            # Pins can change through a selection tool without moving any points.
+            self._start_edit()
+            self._publish_mesh()
+            self._end_edit()
         self.selection_changed.emit(); self.ui_edited.emit(); self.update()
 
     def edit_component(self, component: str, value: float | None = None, smooth: bool = False) -> None:
@@ -522,12 +591,22 @@ class WarperCanvas(ColorWarper):
         if not editable:
             return
         if self.mode == "hue_saturation" and component == "luma":
+            if self.calibrated_hs:
+                self._start_edit()
+                self._auto_pin()
             for key in editable:
                 self.luma_values[key] = 0.5 if value is None else value
-            self.ui_edited.emit()
-            self.selection_changed.emit()
+            if self.calibrated_hs:
+                self._publish_mesh()
+                if not self._component_gesture:
+                    self._end_edit()
+            else:
+                self.ui_edited.emit()
+                self.selection_changed.emit()
             return
         self._start_edit()
+        if self.calibrated_hs:
+            self._auto_pin()
         original = self.points.copy()
         for key in editable:
             point = self.points[key]
@@ -544,12 +623,13 @@ class WarperCanvas(ColorWarper):
                 hue = self._hue_from_pos(original[key])
                 radius = float(np.linalg.norm(original[key]))
                 if component == "hue":
-                    hue = self._hue_from_pos(initial) if value is None else value
+                    hue = self._hue_from_pos(initial) if value is None else (-value if self.calibrated_hs else value)
                     if smooth and neighbor_keys:
                         angles = [self._hue_from_pos(original[k]) * math.tau for k in [key, *neighbor_keys]]
                         hue = math.atan2(sum(math.sin(a) for a in angles), sum(math.cos(a) for a in angles)) / math.tau % 1
                 else:
-                    radius = float(np.linalg.norm(initial)) if value is None else value
+                    radius = (float(np.linalg.norm(initial)) if value is None else
+                              value / CALIBRATED_SAT_SCALE if self.calibrated_hs else value)
                     if smooth and neighbor_keys:
                         radius = (np.linalg.norm(original[key]) + np.mean([np.linalg.norm(original[k]) for k in neighbor_keys])) / 2
                 angle = -hue * math.tau - math.pi / 2
@@ -565,6 +645,10 @@ class WarperCanvas(ColorWarper):
         if self.mode == "hue_saturation":
             values = {"hue": np.array([self._hue_from_pos(p) for p in points]), "sat": np.linalg.norm(points, axis=1),
                       "luma": np.array([self.luma_values.get(key, 0.5) for key in sorted(self.selected)])}
+            if self.calibrated_hs:
+                values["hue"] = (-values["hue"]) % 1.0
+                values["hue"][np.isclose(values["hue"], 1.0, atol=1e-7, rtol=0.0)] = 0.0
+                values["sat"] *= CALIBRATED_SAT_SCALE
         else:
             values = {"chroma": points[:, 0], "luma": (1 - points[:, 1]) / 2}
         return {key: float(v[0]) if np.ptp(v) < 1e-5 else None for key, v in values.items()}

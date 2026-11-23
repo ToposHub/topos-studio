@@ -37,7 +37,9 @@ from src.features.color.core.curves_calibration import (
     build_calibrated_curves_lut,
     is_calibrated_curves_lut,
 )
-from src.features.color.core.warper_state import WarperStateV2, WarperStateError
+from src.features.color.core.warper_state import (
+    RESOLVE_HS_ALGORITHM, WarperStateV2, WarperStateError, renderable_projection,
+)
 
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
@@ -1077,23 +1079,23 @@ class Layer:
                 calibration_version=self.curves_edit.get(CURVES_CALIBRATION_VERSION_KEY, 0),
             )
 
-        if "warper_params" in wanted and "warper_params" in patch:
-            if patch["warper_params"] is not None:
-                self.warper_params = np.array(patch["warper_params"], dtype=np.float32)
+        raw_grid_pasted = "warper_params" in wanted and "warper_params" in patch
+        state_pasted = "warper_state" in wanted and "warper_state" in patch
+        if raw_grid_pasted or state_pasted:
+            raw_state = patch.get("warper_state") if state_pasted else None
+            state = WarperStateV2.from_dict(copy.deepcopy(raw_state)) if raw_state is not None else None
+            if state is not None and state.algorithm_version == RESOLVE_HS_ALGORITHM:
+                offsets, space = renderable_projection(state)
+            elif raw_grid_pasted:
+                raw_grid = patch["warper_params"]
+                offsets = np.array(raw_grid, dtype=np.float32) if raw_grid is not None else None
+                space = int(patch.get("warper_space", 0) or 0)
+            elif self.warper_state is not None and self.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM:
+                offsets, space = None, 0
             else:
-                self.warper_params = None
-            # CW-B08:warper 域粘贴携带空间变体;缺省按 legacy HSV
-            self.warper_space = int(patch.get("warper_space", 0) or 0)
-
-        # CW-B01: warper 域粘贴同时携带版本化状态;载荷不可解析时抛
-        # WarperStateError(ValueError),不部分应用、不覆盖现值。
-        if "warper_state" in wanted and "warper_state" in patch:
-            if patch["warper_state"] is None:
-                self.warper_state = None
-                self.warper_state_unparsed = None
-            else:
-                self.warper_state = WarperStateV2.from_dict(copy.deepcopy(patch["warper_state"]))
-                self.warper_state_unparsed = None
+                offsets, space = self.warper_params, self.warper_space
+            self.warper_params, self.warper_space = offsets, space
+            self.warper_state, self.warper_state_unparsed = state, None
 
         if "mask_shapes" in wanted and "mask_shapes" in patch:
             self.mask_shapes = [
@@ -1419,6 +1421,11 @@ class Layer:
 
         return data
 
+    def _project_calibrated_warper(self) -> None:
+        state = self.warper_state
+        if state is not None and state.algorithm_version == RESOLVE_HS_ALGORITHM:
+            self.warper_params, self.warper_space = renderable_projection(state)
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any], assets_dir: str | None = None) -> 'Layer':
         """
@@ -1548,6 +1555,7 @@ class Layer:
             else:
                 try:
                     layer.warper_state = WarperStateV2.from_dict(raw_warper_state)
+                    layer._project_calibrated_warper()
                 except WarperStateError as exc:
                     layer.warper_state = None
                     layer.warper_state_unparsed = raw_warper_state

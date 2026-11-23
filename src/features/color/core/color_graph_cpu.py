@@ -12,8 +12,9 @@ Corrector 两层（B12.2 起）：
   ``shader_nodes.GRADING_SNIPPET``/``CURVES_SNIPPET``（GLSL 权威），
   参数经 ``composition_uniform_values`` 同一提取路径，覆盖点态基础
   调色（exposure/WB/contrast/色轮/shadows/highlights/tonal sat/
-  vibrance/hue/saturation）与 256 点 curves LUT。非点态（mid_detail/
-  sharpness 邻域）、插件、mixer/warper/LUT3D/fx 等显式 unsupported。
+  vibrance/hue/saturation）、RGB/HSL 曲线、柔化裁切、709 Hue–Saturation
+  Warper 和 LUT3D。邻域调色、插件、mixer、旧 Warper 和非中性 FX
+  显式声明为 unsupported。
 """
 
 from __future__ import annotations
@@ -577,9 +578,8 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
 
     返回 unsupported 原因列表（空 = 基础域可执行）。**fail-closed** 且
     **与 GL 有效域一致**：GL 忽略的别名死键同样忽略；fx/blur 组在中性
-    值（关闭 + 幅度零）时等价 no-op，不拒绝。插件、非中性 mixer/warper/
-    LUT3D/fx/hsl 曲线/soft-clip 曲线、邻域参数、非 Normal 混合、
-    curves_data 未预构建 LUT 都显式列出，不静默近似。
+    值（关闭 + 幅度零）时等价 no-op，不拒绝。插件、非中性 mixer/旧
+    warper/fx、邻域参数和 curves_data 未预构建 LUT 都显式列出。
 
     ``spatial_mask_supplied``：调用方已显式求值 qualifier/窗口空间域并
     以 ``mask`` 传入（N02 的 ``run_plan_cpu`` 路径）时置 True——裸
@@ -592,6 +592,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     恢复不一次性取消 fail-closed。
     """
     from src.features.color.core.primary_calibration import grade_uses_calibration
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
 
     errors: list[str] = []
     grading = layer.get("grading_params")
@@ -618,7 +619,13 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     if isinstance(mixer, Mapping) and mixer:
         errors.append("mixer_params 不在基础域")
     if layer.get("warper_params") is not None:
-        errors.append("warper_params 不在基础域")
+        if layer.get("warper_space") == RESOLVE_HS709_SPACE:
+            try:
+                calibrated_warper_offsets(layer)
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
+        else:
+            errors.append("warper_params 不在基础域")
     # N14 v1：LUT3D 已实现（trilinear + R05 强度混合；强度 0 = 恒等）
     # Calibrated HSL also has a pointwise bake path. The experimental Metal
     # graph executor still does not bind HSL auxiliary textures.
@@ -674,6 +681,21 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
 
 
 _LUT3D_CACHE: dict[str, tuple] = {}
+
+
+def calibrated_warper_offsets(layer: Mapping[str, Any]) -> np.ndarray | None:
+    """Return the calibrated HS texture payload, if active."""
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+
+    data = layer.get("warper_params")
+    if data is None or layer.get("warper_space") != RESOLVE_HS709_SPACE:
+        return None
+    offsets = np.asarray(data, dtype=np.float32)
+    if offsets.ndim != 3 or min(offsets.shape[:2]) < 2 or offsets.shape[2] != 3:
+        raise ValueError("Invalid 709 Color Warper grid shape")
+    if not np.isfinite(offsets).all():
+        raise ValueError("Invalid 709 Color Warper grid values")
+    return offsets
 
 
 def _apply_lut3d_cpu(graded: np.ndarray, path: str,
@@ -762,6 +784,18 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
     csc = layer.get("curves_soft_clip")
     if isinstance(csc, Mapping) and csc:
         graded = apply_curves_soft_clip_image(graded, dict(csc)).astype(_F32)
+    warper = calibrated_warper_offsets(layer)
+    if warper is not None:
+        from src.features.color.core.warper_color import apply_resolve_hs709
+
+        flat = graded.reshape(-1, 3)
+        warped = np.empty_like(flat)
+        # Limit interpolation temporaries during 4K+ CPU delivery.
+        block_size = 262_144
+        for start in range(0, len(flat), block_size):
+            block = slice(start, start + block_size)
+            warped[block] = apply_resolve_hs709(flat[block], warper)
+        graded = warped.reshape(graded.shape)
     # N14 v1：LUT3D 域（R05 顺序在 curves 之后；GL 同序——trilinear
     # 采样 + blend_node_lut_strength HDR/负值语义同源）
     lut_path = layer.get("active_lut_path")

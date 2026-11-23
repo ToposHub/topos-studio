@@ -600,7 +600,7 @@ def soft_clip_reference(
 #   曲线外线性外推 + 软性保护与 GLSL 同序）。
 # - HDR 语义：RGB 路径不 clamp（负值/HDR >1 保留）；key 域按 spec 有界
 #   [0,1]（key_mix/补集是 matte 语义，非图像域）。
-# - 邻域参数（mid_detail/sharpness）、插件、mixer/warper/LUT3D/fx 不在
+# - 邻域参数（mid_detail/sharpness）、插件、mixer/旧 Warper/LUT3D/fx 不在
 #   kernel 内——N10 执行器按能力矩阵 fail-closed 拒绝，不静默近似。
 
 _GRAPH_SIZE_PARAMS_MSL = """
@@ -1101,7 +1101,7 @@ static inline float3 graph_apply_calibrated_curves(float3 color,
 """
 
 _GRAPH_GRADING_KERNEL_MSL = """
-// Corrector 单 pass：grading → curves → epilogue（mix(input, graded, k*op)）
+// Corrector 单 pass：grading → curves → 709 warper → epilogue
 kernel void graph_grading(
     device const half4* src      [[buffer(0)]],
     device const half4* mask     [[buffer(1)]],
@@ -1109,6 +1109,9 @@ kernel void graph_grading(
     device const float* curves   [[buffer(3)]],   // 768 legacy or 1536 calibrated floats
     constant GraphGradingParams& p [[buffer(4)]],
     constant GraphSizeParams& s [[buffer(5)]],
+#ifdef TOPOS_GRAPH_WARPER_709
+    texture2d<float> warper [[texture(0)]],
+#endif
     uint2 gid [[thread_position_in_grid]])
 {
     if (gid.x >= s.width || gid.y >= s.height) { return; }
@@ -1122,6 +1125,9 @@ kernel void graph_grading(
     } else if (p.has_curves == 1u) {
         color = graph_apply_curves(color, curves);
     }
+#ifdef TOPOS_GRAPH_WARPER_709
+    color = msl_apply_resolve_hs709(color, warper);
+#endif
 
     float k = p.opacity;
     if (p.mask_mode == 1u) {
@@ -1140,7 +1146,7 @@ METAL_POINTWISE_GRADING_MSL = (
 )
 
 # 保持完整图 kernel 的源码和定义顺序。
-METAL_GRAPH_OPS_MSL = (
+_METAL_GRAPH_COMMON_MSL = (
     _GRAPH_SIZE_PARAMS_MSL
     + _GRAPH_GRADING_PARAMS_MSL
     + _GRAPH_COPY_MIX_MSL
@@ -1148,8 +1154,15 @@ METAL_GRAPH_OPS_MSL = (
     + _GRAPH_NODE_OPS_MSL
     + _GRAPH_APPLY_GRADING_MSL
     + _GRAPH_APPLY_CURVES_MSL
-    + _GRAPH_GRADING_KERNEL_MSL
 )
+
+METAL_GRAPH_OPS_MSL = _METAL_GRAPH_COMMON_MSL + _GRAPH_GRADING_KERNEL_MSL
+
+
+def build_metal_graph_warper_msl(warper_code: str) -> str:
+    """Compile calibrated Warper with its own texture-binding variant."""
+    return ("#define TOPOS_GRAPH_WARPER_709\n#define graph_grading graph_grading_709\n"
+            + _METAL_GRAPH_COMMON_MSL + warper_code + _GRAPH_GRADING_KERNEL_MSL)
 
 # GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）
 GRAPH_SIZE_PARAMS_DTYPE = np.dtype([

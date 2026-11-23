@@ -47,7 +47,7 @@ import os
 import logging
 import threading
 from contextlib import AbstractContextManager, nullcontext
-from typing import Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Optional, List, Dict, Any
 from PyQt6.QtGui import QOpenGLContext
 from PyQt6.QtCore import (
     QObject, pyqtSignal, pyqtSlot, Qt, QThread, QEventLoop, QTimer,
@@ -63,6 +63,9 @@ from src.features.color.core.curves_soft_clip import (
     uses_calibrated_soft_clip,
 )
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
+
+if TYPE_CHECKING:
+    from src.shared.project.color_graph import ColorGraphData
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT, ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT
 from src.features.color.core.shader_compiler import ShaderPipeline
 from src.features.color.core.async_renderer import AsyncRenderer, RenderCommand
@@ -829,6 +832,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._active_graph_stack_id = str(stack_id or "")
         key = (id(graph), getattr(graph, "graph_revision", 0))
         if key != getattr(self, '_active_graph_key', None):
+            self._warper_preview_graph = None
             self._active_graph_key = key
             self._color_graph_revision = int(
                 getattr(self, '_color_graph_revision', 0)) + 1
@@ -837,6 +841,7 @@ class ImageEngine(QObject, WindowRasterizer):
     def clear_active_color_graph(self) -> None:
         """清除活动图（clip 切换到无图栈：scope/渲染回 legacy layers）。"""
         if getattr(self, '_active_color_graph', None) is not None:
+            self._warper_preview_graph = None
             self._active_color_graph = None
             self._active_graph_stack_id = ""
             self._active_graph_key = None
@@ -864,7 +869,7 @@ class ImageEngine(QObject, WindowRasterizer):
         图本体与帧无关（temporal 缓存未落地），帧号身份由
         ``ScopeSampleIdentity.frame`` 承载——plan 缓存在播放期间保持命中。
         """
-        graph = getattr(self, '_active_color_graph', None)
+        graph = self.__dict__.get('_warper_preview_graph') or getattr(self, '_active_color_graph', None)
         if graph is None:
             return None
         cache = getattr(self, '_active_graph_snapshot_cache', None)
@@ -879,6 +884,14 @@ class ImageEngine(QObject, WindowRasterizer):
         )
         self._active_graph_snapshot_cache = snapshot
         return snapshot
+
+    def set_warper_preview_graph(self, graph: "ColorGraphData | None") -> None:
+        """Install or clear a render-only Warper draft for the current bound graph."""
+        if self.__dict__.get('_warper_preview_graph') is graph:
+            return
+        self._warper_preview_graph = graph
+        self._active_graph_snapshot_cache = None
+        self._color_graph_revision = self.color_graph_revision + 1
 
     def _attach_color_graph_params(self, render_params: dict,
                                    *, execute: bool = False) -> None:
@@ -1684,6 +1697,8 @@ class ImageEngine(QObject, WindowRasterizer):
             layer.grading_params.update(results['grading'])
             layer.curves_lut = results['curves']
             layer.warper_params = results['warper']
+            layer.warper_space = 0
+            layer.warper_state = None
             layer.active_lut_path = None # Disable the 3D LUT as it's now decompiled
             
             # Sync with GPU
@@ -2594,11 +2609,10 @@ class ImageEngine(QObject, WindowRasterizer):
 
     def set_warper_params(self, grid_data: Optional[np.ndarray],
                           warper_space: int = 0) -> None:
-        """Set the warper mesh (HxWx2 位移网格) on the active layer and preview.
+        """Set the warper mesh on the active layer and preview.
 
         None 表示清除 warper；非 None 时归一为 float32 网格纹理上传。
-        CW-B08:``warper_space`` 选择色彩空间变体(0=legacy HSV/1=HSL/
-        2=HSP);space>0 时 composition shader 编译 apply_warper_v2。
+        ``warper_space`` 选择 HSV、HSL、HSP 或三分量的 709 HSP。
         """
         layer = self.get_active_layer()
         if layer:
@@ -3555,16 +3569,23 @@ class ImageEngine(QObject, WindowRasterizer):
 
                     # Warper
                     if flags["has_warper"]:
-                        wp = np.array(layer.warper_params)
-                        wh, ww = wp.shape[:2]
-                        w_tex = ctx.texture((ww, wh), 2, data=wp.astype(np.float32).tobytes(), dtype='f4')
+                        from src.features.color.core.warper_color import (
+                            RESOLVE_HS709_SPACE, prepare_resolve_hs709_texture,
+                        )
+
+                        wp = np.ascontiguousarray(layer.warper_params, dtype=np.float32)
+                        if flags["warper_space"] == RESOLVE_HS709_SPACE:
+                            wp = prepare_resolve_hs709_texture(wp)
+                        wh, ww, components = wp.shape
+                        w_tex = ctx.texture((ww, wh), components, data=wp.tobytes(), dtype='f4')
+                        texture_garbage.append(w_tex)
                         w_tex.repeat_x = w_tex.repeat_y = False
                         w_tex.use(tex_unit)
                         prog_comp['u_warper_tex'].value = tex_unit
-                        prog_comp['u_warper_grid_size'].value = float(wh)
+                        if 'u_warper_grid_size' in prog_comp:
+                            prog_comp['u_warper_grid_size'].value = float(wh)
                         if 'u_warper_space' in prog_comp:
                             prog_comp['u_warper_space'].value = int(getattr(layer, 'warper_space', 0) or 0)
-                        texture_garbage.append(w_tex)
                         tex_unit += 1
                 
                     # 3D LUT
@@ -5119,6 +5140,7 @@ class ImageEngine(QObject, WindowRasterizer):
             'hsl_curve_data': layer.hsl_curve_data.copy() if layer.hsl_curve_data else {},
             'mixer_params': layer.mixer_params.copy() if layer.mixer_params else {},
             'warper_params': _copy_array_like(layer.warper_params),
+            'warper_space': int(layer.warper_space),
             'effects_params': layer.effects_params.copy(),
             'active_lut_path': layer.active_lut_path,
             'lut_intensity': layer.lut_intensity,

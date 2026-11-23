@@ -2108,6 +2108,35 @@ class ColorGraphAppHost:
             {"node_ids": (node_id,), "payload": domains, "domains": tuple(domains)},
             transaction_id, compound_path=self._tool_compound_path())
 
+    def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
+                             transaction_id: str) -> bool:
+        """Store a complete Warper mesh as one grade-transfer transaction."""
+        if self.grade_gesture_open():
+            self.end_grade_gesture()
+        self.begin_grade_gesture(transaction_id)
+        accepted = self._bridge.submit_buffered(
+            "paste_selected_domains",
+            {"node_ids": (node_id,), "payload": {"warper": payload}, "domains": ("warper",)},
+            transaction_id, compound_path=self._tool_compound_path())
+        committed = self.end_grade_gesture()
+        return accepted and committed
+
+    def preview_warper_change(self, node_id: str, payload: Mapping[str, Any]) -> bool:
+        """Render the mesh draft against the bound graph without publishing it."""
+        graph = self.bound_graph()
+        engine = self._engine_provider() if self._engine_provider else None
+        if graph is None or engine is None:
+            return False
+        from src.features.color.core.color_graph_service import ColorGraphService
+
+        result = ColorGraphService().apply_intent(graph, "paste_selected_domains", {
+            "node_ids": (node_id,), "payload": {"warper": payload}, "domains": ("warper",),
+            "_compound_path": self._tool_compound_path(),
+        })
+        if result.ok:
+            engine.set_warper_preview_graph(result.graph)
+        return result.ok
+
     def submit_qualifier_change(self, node_id: str,
                                 qualifier_patch: Mapping[str, Any],
                                 transaction_id: str) -> bool:

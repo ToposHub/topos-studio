@@ -1199,3 +1199,65 @@ vec3 apply_calibrated_soft_clip(vec3 color, vec3 low, vec3 low_soft,
     );
 }
 """
+
+
+RESOLVE_HS709_SNIPPET = """
+vec3 hs709_basis(float hue) {
+    vec3 phase = fract(hue + vec3(0.0, 2.0/3.0, 1.0/3.0));
+    return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+}
+
+vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
+    vec3 work = pow(max(color, 0.0), vec3(1.605 / 2.4));
+    vec3 hsv = rgb2hsv(work);
+    float peak = hsv.z;
+    float chroma = peak - min(work.r, min(work.g, work.b));
+    if (chroma <= 1e-10) return color;
+
+    float hue = hsv.x;
+    float radius = min(0.876 * chroma / pow(max(peak, 1e-10), 1.074), 1.0);
+    float neutral_fade = min(radius * 1.755, 1.0);
+    ivec2 size = textureSize(mesh, 0);
+    float cols = float(size.x);
+    float angular = hue * cols;
+    float angular_base = floor(angular);
+    float saturation = 0.0;
+    float lightness = 0.0;
+    vec3 hue_change = vec3(0.0);
+    float radial = radius * float(size.y - 1);
+    int row = int(floor(radial));
+    int next_row = min(row + 1, size.y - 1);
+    float blend = fract(radial);
+    for (int side = -1; side <= 2; ++side) {
+        int column = (int(angular_base) + side + size.x) % size.x;
+        float separation = angular - angular_base - float(side);
+        float distance = abs(separation);
+        if (distance >= 1.084) continue;
+        vec3 lower = texelFetch(mesh, ivec2(column, row), 0).rgb;
+        vec3 upper = texelFetch(mesh, ivec2(column, next_row), 0).rgb;
+        vec3 delta = mix(lower, upper, blend);
+        saturation += delta.y * pow(max(1.0 - distance / 0.819, 0.0), 1.225);
+        lightness += delta.z * pow(max(1.0 - distance / 1.084, 0.0), 1.2);
+
+        float hue_weight = pow(max(1.0 - distance / 1.082, 0.0), 1.38);
+        float center = hue - separation / cols;
+        float anchor = center + separation * 0.047 / cols;
+        vec3 basis = hs709_basis(anchor);
+        vec3 direction = 0.654 * (hs709_basis(anchor + delta.x) - basis);
+        direction -= 0.294 * (hs709_basis(anchor - delta.x) - basis);
+        direction += (hs709_basis(center) - 0.5) * (abs(delta.x) * 1.154 * (0.7 - radius));
+        direction -= 1.93 * dot(direction, vec3(0.091, 0.642, 0.267));
+        hue_change += direction * hue_weight;
+    }
+
+    if (saturation == 0.0 && lightness == 0.0 && all(equal(hue_change, vec3(0.0)))) return color;
+    vec3 direction = hs709_basis(hue);
+    direction -= dot(direction, vec3(0.451, 0.379, 0.170));
+    float saturation_gain = saturation > 0.0 ? 2.395 : 4.568;
+    vec3 hue_shift = hue_change * pow(peak, 1.031);
+    vec3 sat_shift = direction * (saturation * saturation_gain * pow(peak, 1.120));
+    vec3 warped = (work + (hue_shift + sat_shift) * neutral_fade);
+    warped *= exp(1.981 * lightness * neutral_fade);
+    return pow(max(warped, 0.0), vec3(2.4 / 1.605)) + min(color, 0.0);
+}
+"""

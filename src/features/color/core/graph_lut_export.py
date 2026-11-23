@@ -87,12 +87,10 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
         payload = dict(payload)
         lut_ref = payload.pop("active_lut_path", None)
         payload.pop("lut_intensity", None)
-        # CW-B09:HS 两分量 warper(legacy 方阵或 v2 状态,任意空间)是
-        # 纯点态效果——可表达时从域预检弹出,由 bake 路径真实应用;
-        # 不可表达(三分量/CL/CW)保留明确错误,不产出少效果的 cube
+        # HS legacy 与校准网格可点态烘焙，CL/CW 仍需明确拒绝。
         if _pointwise_warper(payload) is None and _has_warper(payload):
             errors.append(f"{candidate.node_id}: warper 不在点态表达域"
-                          "（仅 HS 两分量网格;Luma/双网格/笔画无 LUT 后端）")
+                          "（仅支持两分量 HS 与三分量 709 HS 网格）")
         else:
             payload.pop("warper_params", None)
             payload.pop("warper_space", None)
@@ -119,25 +117,37 @@ def _has_warper(payload: Mapping[str, Any]) -> bool:
             or payload.get("warper_state") is not None)
 
 
-def _pointwise_warper(payload: Mapping[str, Any]):
+def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | None:
     """可点态表达的 warper → (offsets ndarray, space int);否则 None。"""
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
     from src.features.color.core.warper_state import (
+        HS_GRID_NAME,
         WarperStateError,
         WarperStateV2,
         renderable_projection,
     )
     if payload.get("warper_params") is not None:
-        offsets = np.asarray(payload["warper_params"], dtype=np.float32)
-        if offsets.ndim == 3 and offsets.shape[2] == 2:
-            return offsets, int(payload.get("warper_space", 0) or 0)
+        try:
+            offsets = np.asarray(payload["warper_params"], dtype=np.float32)
+            space = int(payload.get("warper_space", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if space in (0, 1, 2, RESOLVE_HS709_SPACE):
+            components = 3 if space == RESOLVE_HS709_SPACE else 2
+            if (offsets.ndim == 3 and offsets.shape[2] == components
+                    and min(offsets.shape[:2]) >= 2 and np.isfinite(offsets).all()):
+                return offsets, space
         return None
     raw_state = payload.get("warper_state")
     if isinstance(raw_state, Mapping):
         try:
-            offsets, space = renderable_projection(
-                WarperStateV2.from_dict(raw_state))
+            state = WarperStateV2.from_dict(raw_state)
+            offsets, space = renderable_projection(state)
         except WarperStateError:
             return None
+        if offsets is None and space == RESOLVE_HS709_SPACE:
+            # Enabling 709 or creating pins alone is exportable identity.
+            offsets = state.grids[HS_GRID_NAME].offsets
         return (offsets, space) if offsets is not None else None
     return None
 
@@ -182,17 +192,20 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
     warper = _pointwise_warper(layer)
     if warper is not None:
         from src.features.color.core.warper_color import (
+            RESOLVE_HS709_SPACE,
             apply_warper_in_space,
             apply_warper_legacy_hsv,
         )
         offsets, space = warper
-        space_names = {0: "hsv", 1: "hsl", 2: "hsp"}
-        if space == 0:
-            warper_apply = lambda c: apply_warper_legacy_hsv(c, offsets)
+        if space == RESOLVE_HS709_SPACE:
+            from src.features.color.core.warper_color import apply_resolve_hs709
+
+            out = apply_resolve_hs709(out, offsets).astype(np.float64, copy=False)
+        elif space == 0:
+            out = np.stack([apply_warper_legacy_hsv(pixel, offsets) for pixel in out])
         else:
-            warper_apply = lambda c: apply_warper_in_space(
-                c, offsets, space_names[space])
-        out = np.stack([warper_apply(pixel) for pixel in out]).astype(np.float64)
+            space_name = {1: "hsl", 2: "hsp"}[space]
+            out = np.stack([apply_warper_in_space(pixel, offsets, space_name) for pixel in out])
     lut_ref = layer.get("active_lut_path")
     if isinstance(lut_ref, str) and lut_ref:
         loaded = lut_cache.get(lut_ref)

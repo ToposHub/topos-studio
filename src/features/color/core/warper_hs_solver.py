@@ -24,9 +24,13 @@ Topos 声明的语义(B00 行为矩阵「实测/Topos 声明」分级;Resolve �
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
-from src.features.color.core.warper_state import WarperGrid, WarperStateError, _as_offsets
+from src.features.color.core.warper_state import (
+    MAX_GRID_DIM, WarperGrid, WarperStateError, _as_offsets, make_point_id,
+)
 
 __all__ = [
     "neighbor_weights",
@@ -34,6 +38,7 @@ __all__ = [
     "apply_move",
     "smooth_component",
     "pull_push",
+    "resample_calibrated_grid",
     "with_luma_component",
 ]
 
@@ -197,6 +202,37 @@ def pull_push(
             continue
         offsets[row, col, :] *= factor
     return grid.with_offsets(offsets)
+
+
+def _interpolate_offsets(start: np.ndarray, end: np.ndarray, weight: np.ndarray) -> np.ndarray:
+    delta = end - start
+    delta[..., 0] = (delta[..., 0] + 0.5) % 1.0 - 0.5
+    return start + delta * weight[..., None]
+
+
+def resample_calibrated_grid(grid: WarperGrid, rows: int, cols: int) -> WarperGrid:
+    """Resample the HS rings with a fixed neutral center and periodic hue."""
+    if not (2 <= rows <= MAX_GRID_DIM and 2 <= cols <= MAX_GRID_DIM):
+        raise WarperStateError("size_exceeded", f"grid resolution {(rows, cols)} is out of range")
+    if (rows, cols) == (grid.rows, grid.cols):
+        return grid
+    source = np.pad(grid.offsets, ((1, 0), (0, 0), (0, 0)))
+    x = np.arange(cols) * (grid.cols / cols)
+    col = np.floor(x).astype(int)
+    shifted = _interpolate_offsets(source[:, col], source[:, (col + 1) % grid.cols], x - col)
+    y = np.arange(1, rows + 1) * (grid.rows / rows)
+    row = np.floor(y).astype(int)
+    offsets = _interpolate_offsets(shifted[row], shifted[np.minimum(row + 1, grid.rows)], (y - row)[:, None])
+    offsets[..., 0] = (offsets[..., 0] + 0.5) % 1.0 - 0.5
+    pins = {}
+    for pin in grid.pins:
+        _, old_row, old_col = pin.point_id.rsplit(":", 2)
+        new_row = min(rows - 1, max(0, round((int(old_row) + 1) * rows / grid.rows) - 1))
+        new_col = round(int(old_col) * cols / grid.cols) % cols
+        point_id = make_point_id(grid.name, new_row, new_col)
+        pins.setdefault(point_id, replace(pin, point_id=point_id))
+    return replace(grid, rows=rows, cols=cols, pins=tuple(pins.values()),
+                   offsets=_as_offsets(offsets, rows, cols, grid.components, grid.name))
 
 
 def with_luma_component(grid: WarperGrid) -> WarperGrid:

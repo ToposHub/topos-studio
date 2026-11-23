@@ -100,6 +100,10 @@ _OPERATIONS: Dict[str, Dict[str, str]] = {
         "label_key": "delivery.op_warper", "label": "色彩扭曲器 (Warper)",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_DROPPED, TARGET_LUT: DELIVERY_DROPPED,
     },
+    "warper_709": {
+        "label_key": "delivery.op_warper_709", "label": "色彩扭曲器 Hue–Saturation 709",
+        TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
+    },
     "effects": {
         "label_key": "delivery.op_effects", "label": "锐化/纹理/光晕效果",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_DROPPED, TARGET_LUT: DELIVERY_DROPPED,
@@ -258,7 +262,9 @@ def _layer_operations(data: Dict[str, Any]) -> set:
     if data.get("active_lut_path") or data.get("lut_path"):
         ops.add("lut")
     if data.get("warper_params") is not None:
-        ops.add("warper")
+        from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+
+        ops.add("warper_709" if data.get("warper_space") == RESOLVE_HS709_SPACE else "warper")
     if (data.get("effects_params") or {}).get("enabled"):
         ops.add("effects")
     qp = data.get("qualifier_params") or {}
@@ -748,6 +754,9 @@ CONSUMER_CAPABILITY_MATRIX: Dict[str, Dict[str, str]] = {
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
     "warper":         {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
+    "warper_709":     {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
+                       "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL,
+                       "lut_export": CAP_BAKED},
     "effects":        {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
     "video_denoise":  {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,

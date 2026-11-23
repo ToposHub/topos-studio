@@ -131,3 +131,26 @@ def test_paste_categories_carry_v2_state(tmp_path) -> None:
     assert target.warper_state is not None
     np.testing.assert_array_equal(
         target.warper_state.grids["hs"].offsets, state.grids["hs"].offsets)
+
+
+def test_pasting_raw_legacy_mesh_over_calibration_does_not_resurrect_calibration() -> None:
+    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM, WarperGrid
+
+    mesh = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl"))
+    offsets = mesh.mutable_offsets()
+    offsets[2, 0, 1] = 0.1
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": mesh.with_offsets(offsets)},
+    )
+    layer = Layer.from_dict({"warper_state": state.to_dict()})
+    assert layer.warper_space == 3
+    np.testing.assert_array_equal(layer.warper_params, offsets)
+    old_mesh = np.full((6, 6, 2), 0.125, np.float32)
+    layer.apply_grade_patch({"warper_params": old_mesh}, categories=("warper",))
+
+    restored = Layer.from_dict(layer.to_dict(None))
+    assert restored.warper_state is None
+    assert restored.warper_space == 0
+    np.testing.assert_array_equal(restored.warper_params, old_mesh)

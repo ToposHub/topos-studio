@@ -2066,6 +2066,7 @@ class VideoPlaybackEngine(QObject):
                     'curves_lut': L.curves_lut,
                     'hsl_curve_lut': L.hsl_curve_lut,
                     'warper_params': L.warper_params,
+                    'warper_space': int(getattr(L, 'warper_space', 0) or 0),
                     'mixer_params': L.mixer_params.copy() if L.mixer_params else None,
                     'effects_params': effects_params,
                     'mask_shapes': [s.to_dict() for s in L.mask_shapes],

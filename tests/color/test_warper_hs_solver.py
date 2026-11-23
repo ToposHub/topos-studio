@@ -10,6 +10,7 @@ from src.features.color.core.warper_hs_solver import (
     locked_cells,
     neighbor_weights,
     pull_push,
+    resample_calibrated_grid,
     smooth_component,
     with_luma_component,
 )
@@ -52,6 +53,19 @@ def test_weights_wrap_across_hue_seam() -> None:
     assert weights[(1, 7)] == pytest.approx(0.5)  # 跨缝邻接 = 距离 1
     assert weights[(1, 1)] == pytest.approx(0.5)  # 与近侧对称
     assert weights[(1, 6)] == pytest.approx(0.25) # 跨缝距离 2
+
+
+def test_calibrated_grid_resamples_through_center_and_hue_seam() -> None:
+    grid = _grid(6, 6, pins=("hs:2:5",))
+    source = grid.mutable_offsets()
+    source[:, -1, 0] = 0.48
+    source[:, 0, 0] = -0.48
+    source[0, 0, 1] = 0.2
+    resized = resample_calibrated_grid(grid.with_offsets(source), 12, 12)
+    assert abs(resized.offsets[1, -1, 0]) == pytest.approx(0.5)
+    assert resized.offsets[0, 0, 1] == pytest.approx(0.1)
+    assert resized.offsets[1, 0, 1] == pytest.approx(0.2)
+    assert resized.pins[0].point_id == "hs:5:10"
 
 
 def test_multi_selection_takes_max_weight() -> None:

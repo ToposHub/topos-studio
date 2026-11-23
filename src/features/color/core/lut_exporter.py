@@ -473,13 +473,14 @@ class LutExportWorker(QObject):
         3. hsl_curve_lut: HSL curves (6 modes)
         4. soft_clip_params: Filmic tone mapping
         5. mixer_params: RGB mixer (hue/sat/lum adjustments per color range)
-        6. active_lut_path + lut_intensity: Applied 3D LUT
+        6. warper_params: Calibrated Hue–Saturation 709 grid
+        7. active_lut_path + lut_intensity: Applied 3D LUT
 
         This order matches the shader pipeline in shader_compiler.py:
-        Grading → Curves → HSL Curves → Soft Clip → Mixer → LUT
+        Grading → Curves → HSL Curves → Soft Clip → Mixer → Warper → LUT
 
         Excluded operations (pixel-dependent):
-        - warper_params: Grid-based color warping (depends on input color position)
+        - Legacy Warper variants (unsupported by the flat LUT exporter)
         - mask_shapes: Spatial masks
         - qualifier_params: HSL keyer (depends on original image content)
         - blur/sharpen: Spatial operations
@@ -527,7 +528,15 @@ class LutExportWorker(QObject):
         if self._has_active_mixer_params(mixer_params):
             result = self._apply_mixer_cpu(result, mixer_params)
 
-        # 6. Apply existing 3D LUT (if any)
+        from src.features.color.core.color_graph_cpu import calibrated_warper_offsets
+
+        offsets = calibrated_warper_offsets(layer_data)
+        if offsets is not None:
+            from src.features.color.core.warper_color import apply_resolve_hs709
+
+            result = apply_resolve_hs709(result, offsets)
+
+        # 7. Apply existing 3D LUT (if any)
         lut_path = layer_data.get('active_lut_path')
         if lut_path and os.path.isfile(lut_path):
             lut3d, lut_size = self._load_lut_file(lut_path)
@@ -1163,7 +1172,7 @@ class LutExporter:
 
     # Operations that CANNOT be exported (pixel-dependent)
     NON_EXPORTABLE_OPERATIONS = [
-        'warper_params',       # Grid-based color warping
+        'warper_params',       # Legacy Warper variants
         'mask_shapes',         # Spatial masks
         'qualifier_params',    # HSL keyer
         'effects_params',      # Blur/sharpen
@@ -1289,6 +1298,13 @@ class LutExporter:
         if hasattr(layer, 'mixer_params') and LutExportWorker._has_active_mixer_params(layer.mixer_params):
             data['mixer_params'] = copy.deepcopy(layer.mixer_params)
 
+        from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+
+        if (getattr(layer, 'warper_space', 0) == RESOLVE_HS709_SPACE
+                and layer.warper_params is not None):
+            data['warper_params'] = layer.warper_params.copy()
+            data['warper_space'] = RESOLVE_HS709_SPACE
+
         # Soft clip
         if hasattr(layer, 'soft_clip_params') and layer.soft_clip_params:
             data['soft_clip_params'] = copy.deepcopy(layer.soft_clip_params)
@@ -1320,10 +1336,11 @@ class LutExporter:
 • HSL 曲线
 • RGB 混色器
 • 软剪裁 (Soft Clip)
+• 色彩扭曲器 Hue–Saturation 709
 • 已应用的 3D LUT
 
 无法导出的操作 (依赖图像内容或空间位置):
-• 色彩扭曲器 (Warper)
+• 其他色彩扭曲器模式
 • 蒙版 (Mask)
 • 限定器 (Qualifier)
 • 模糊/锐化

@@ -1116,6 +1116,9 @@
     "reset_blur_tooltip": "重置全部模糊参数"
   },
   "warper": {
+    "rec709_calibration": "Rec.709 Gamma 2.4 色相与饱和度校准",
+    "rec709_hsp_required": "选择 HSP 后即可启用 Rec.709 校准",
+    "rec709_reset_first": "重置色相与饱和度网格后即可关闭校准",
     "grid_density": "网格密度:",
     "reset": "重置网格",
     "chroma_warp": "色度扭曲",

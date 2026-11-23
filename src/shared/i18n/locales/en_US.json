@@ -1076,6 +1076,9 @@
     "reset_blur_tooltip": "Reset All Blur Parameters"
   },
   "warper": {
+    "rec709_calibration": "Rec.709 Gamma 2.4 Hue–Saturation calibration",
+    "rec709_hsp_required": "Select HSP to enable Rec.709 calibration",
+    "rec709_reset_first": "Reset Hue–Saturation before switching calibration off",
     "grid_density": "Grid Density:",
     "reset": "Reset Grid",
     "chroma_warp": "Chroma Warp",

@@ -51,6 +51,7 @@ __all__ = [
 
 #: CW-B08:shader ``u_warper_space`` 的取值(0=HSV/1=HSL/2=HSP)。
 WARPER_SPACE_INDEX = {"hsv": 0, "hsl": 1, "hsp": 2}
+RESOLVE_HS709_SPACE = 3
 
 #: HSP 感知权重(经典 NTSC 系数;冻结于测试,改动即破坏 round-trip 语义)。
 HSP_WEIGHTS = (0.299, 0.587, 0.114)
@@ -272,3 +273,85 @@ def apply_warper_in_space(rgb, texels: np.ndarray, space: str) -> np.ndarray:
     else:
         rgb_out = hsv_to_rgb(warped)
     return sign_c * rgb_out
+
+
+def _hs709_basis(hue: np.ndarray) -> np.ndarray:
+    """RGB basis on a unit-chroma hue ring (red at zero, towards yellow)."""
+    phase = (hue[..., None] + (0.0, 2.0 / 3.0, 1.0 / 3.0)) % 1.0
+    return np.clip(np.abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0)
+
+
+def prepare_resolve_hs709_texture(offsets: np.ndarray) -> np.ndarray:
+    """Prefilter the editable rings into a small, continuous radial texture."""
+    rows, cols, components = offsets.shape
+    if components != 3 or rows < 1 or cols < 1:
+        raise ValueError("709 Hue–Saturation requires a nonempty three-channel mesh")
+    radius = np.linspace(0.0, 1.0, 129)[:, None]
+    centers = np.arange(1, rows + 1) / rows
+    distance = (radius - centers) * (rows / 6.0)
+    width = np.where(distance < 0.0, 0.397, 0.325)
+    weights = np.exp(-0.5 * (distance / width) ** 2)
+    weights /= np.maximum(1.0, weights.sum(axis=1, keepdims=True) / 3.5)
+    weights = weights[..., None] ** np.array((1.475, 0.883, 1.865))
+    return np.einsum("rkc,kjc->rjc", weights, offsets).astype(np.float32)
+
+
+def apply_resolve_hs709(rgb: np.ndarray, offsets: np.ndarray) -> np.ndarray:
+    """Apply the measured HSP Hue–Saturation approximation to linear Rec.709 RGB."""
+    texture = prepare_resolve_hs709_texture(offsets)
+    source = np.asarray(rgb)
+    colors = source.reshape(-1, 3)
+    nonnegative = np.maximum(colors, 0.0)
+    work = nonnegative ** (1.605 / 2.4)
+    peak = np.max(work, axis=-1)
+    chroma = peak - np.min(work, axis=-1)
+    r, g, b = work.T
+    hue = np.select((r == peak, g == peak), (g - b, b - r), default=r - g)
+    hue /= 6.0 * np.maximum(chroma, 1.0e-10)
+    hue = (hue + np.select((r == peak, g == peak), (0.0, 1.0 / 3.0), default=2.0 / 3.0)) % 1.0
+    radius = np.minimum(0.876 * chroma / np.maximum(peak, 1.0e-10) ** 1.074, 1.0)
+    neutral_fade = np.minimum(radius * 1.755, 1.0)
+
+    cols = offsets.shape[1]
+    angular = hue * cols
+    angular_base = np.floor(angular)
+    left = angular_base.astype(np.intp)
+    radial = radius * (texture.shape[0] - 1)
+    row = np.floor(radial).astype(np.intp)
+    next_row = np.minimum(row + 1, texture.shape[0] - 1)
+    blend = (radial - row)[:, None]
+    saturation = np.zeros_like(peak)
+    lightness = np.zeros_like(peak)
+    hue_change = np.zeros_like(work)
+    for side in range(-1, 3):
+        column = (left + side) % cols
+        separation = angular - angular_base - side
+        lower = texture[row, column]
+        upper = texture[next_row, column]
+        dh, ds, dl = (lower + (upper - lower) * blend).T
+        distance = np.abs(separation)
+        saturation += ds * np.maximum(1.0 - distance / 0.819, 0.0) ** 1.225
+        lightness += dl * np.maximum(1.0 - distance / 1.084, 0.0) ** 1.2
+
+        hue_weight = np.maximum(1.0 - distance / 1.082, 0.0) ** 1.38
+        center = hue - separation / cols
+        anchor = center + separation * 0.047 / cols
+        basis = _hs709_basis(anchor)
+        direction = 0.654 * (_hs709_basis(anchor + dh) - basis)
+        direction -= 0.294 * (_hs709_basis(anchor - dh) - basis)
+        direction += (_hs709_basis(center) - 0.5) * (np.abs(dh) * 1.154 * (0.7 - radius))[:, None]
+        direction -= (1.93 * (direction @ (0.091, 0.642, 0.267)))[:, None]
+        hue_change += direction * hue_weight[:, None]
+
+    direction = _hs709_basis(hue)
+    direction -= (direction @ (0.451, 0.379, 0.170))[:, None]
+    saturation_gain = np.where(saturation > 0.0, 2.395, 4.568)
+    hue_shift = hue_change * peak[:, None] ** 1.031
+    sat_shift = direction * (saturation * saturation_gain * peak ** 1.120)[:, None]
+    warped = (work + (hue_shift + sat_shift) * neutral_fade[:, None])
+    warped *= np.exp(1.981 * lightness[:, None] * neutral_fade[:, None])
+    # Keep the SDR fit above black while carrying the original negative headroom.
+    result = np.maximum(warped, 0.0) ** (2.4 / 1.605) + np.minimum(colors, 0.0)
+    unchanged = (chroma <= 1.0e-10) | ((saturation == 0.0) & (lightness == 0.0)
+                                        & np.all(hue_change == 0.0, axis=-1))
+    return np.where(unchanged[:, None], colors, result).reshape(source.shape).astype(source.dtype, copy=False)

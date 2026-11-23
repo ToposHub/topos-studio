@@ -4,8 +4,8 @@
 
 - **能力 fail-closed**：``METAL_CAPABILITY_CATALOG`` 预检，pending/
   unsupported 拒绝执行（不跳节点）；Corrector 仅生产基础点态域
-  （grading + 256 点 curves + Normal/opacity epilogue），插件/邻域/
-  mixer/warper/LUT3D/fx 显式拒绝（与 CPU oracle 的
+  （grading、曲线、709 Hue–Saturation Warper、Normal/opacity），
+  插件/邻域/mixer/旧 Warper/LUT3D/fx 显式拒绝（与 CPU oracle 的
   ``production_layer_domain_errors`` 同一判据）。
 - **buffer lease**：scratch MTLBuffer 按尺寸池化；按 plan 的
   ``release_after`` liveness 归还（分叉输入在所有消费者结束后归还），
@@ -34,12 +34,14 @@ from src.features.color.core.color_graph_compiler import (
     RenderPass,
 )
 from src.features.color.core.color_graph_cpu import (
+    calibrated_warper_offsets,
     production_layer_domain_errors,
 )
 from src.features.color.core.curves_calibration import is_calibrated_curves_lut
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.gpu.metal.kernels_color import (
     METAL_GRAPH_OPS_MSL,
+    build_metal_graph_warper_msl,
     curves_lut_to_flat_buffer,
     make_graph_grading_params,
     make_graph_size_params,
@@ -651,13 +653,33 @@ class ColorGraphMetalExecutor:
         curves_buf = self._curves_buffer(lut)
         matte = key_buf if key_buf is not None else self._white_buffer(
             width, height)
+        offsets = calibrated_warper_offsets(layer)
+        warper_tex = None
+        if offsets is not None:
+            import Metal
+
+            from src.features.color.core.warper_color import prepare_resolve_hs709_texture
+
+            sampled = prepare_resolve_hs709_texture(offsets)
+            rows, columns, _ = sampled.shape
+            rgba = np.zeros((rows, columns, 4), dtype=np.float32)
+            rgba[..., :3] = sampled
+            warper_tex = self.ctx.create_texture_from_numpy(
+                rgba, Metal.MTLPixelFormatRGBA32Float, columns, rows)
         out = self._pool.acquire(width * height * 8)
-        self._dispatch("graph_grading",
-                       {0: input_buf, 1: matte, 2: out, 3: curves_buf,
-                        4: self._params_buffer(params),
-                        5: self._params_buffer(
-                            make_graph_size_params(width, height))},
-                       (width, height))
+        dispatched = False
+        try:
+            self._dispatch(
+                "graph_grading" if warper_tex is None else "graph_grading_709",
+                {0: input_buf, 1: matte, 2: out, 3: curves_buf,
+                 4: self._params_buffer(params),
+                 5: self._params_buffer(make_graph_size_params(width, height))},
+                (width, height), textures=None if warper_tex is None else {0: warper_tex},
+            )
+            dispatched = True
+        finally:
+            if not dispatched:
+                self._pool.release(out)
         return out
 
     # ── 工具 ──
@@ -684,13 +706,20 @@ class ColorGraphMetalExecutor:
         return out
 
     def _dispatch(self, kernel_name: str, buffers: dict,
-                  size: tuple[int, int]) -> None:
+                  size: tuple[int, int], *, textures: dict[int, Any] | None = None) -> None:
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
-            kernel = self.ctx.compile_kernel(kernel_name,
-                                             METAL_GRAPH_OPS_MSL)
+            source = METAL_GRAPH_OPS_MSL
+            if kernel_name == "graph_grading_709":
+                from src.features.color.core.shader_nodes_msl import (
+                    MSL_HSV_FUNCS, MSL_RESOLVE_HS709,
+                )
+
+                source = build_metal_graph_warper_msl(MSL_HSV_FUNCS + MSL_RESOLVE_HS709)
+            kernel = self.ctx.compile_kernel(kernel_name, source)
             self._kernels[kernel_name] = kernel
         self.ctx.dispatch(kernel, buffers=buffers,
+                          textures=textures,
                           threads=(size[0], size[1], 1))
 
     def _params_buffer(self, params: np.ndarray):

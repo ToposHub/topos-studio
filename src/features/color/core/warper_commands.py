@@ -93,6 +93,8 @@ class WarperGestureSession:
     base_revision: int
     base_state: WarperStateV2 | None
     working: WarperStateV2 | None
+    base_offsets: np.ndarray | None = None
+    base_space: int = 0
     history_pushed: bool = False
     dirty: bool = False
 
@@ -122,11 +124,13 @@ class WarperCommandService:
         history_discard: Callable[[], None] | None = None,
         on_applied: Callable[[Layer, WarperStateV2 | None], None] | None = None,
         gesture_finished: Callable[[Layer, bool], None] | None = None,
+        commit_state: Callable[[Layer], bool] | None = None,
     ) -> None:
         self._history_push = history_push or (lambda layer: None)
         self._history_discard = history_discard or (lambda: None)
         self._on_applied = on_applied or (lambda layer, state: None)
         self._gesture_finished = gesture_finished or (lambda layer, committed: None)
+        self._commit_state = commit_state or (lambda layer: True)
         self._revisions: dict[str, int] = {}
         self._sessions: dict[str, WarperGestureSession] = {}
 
@@ -191,6 +195,8 @@ class WarperCommandService:
             base_revision=self.revision(layer),
             base_state=layer.warper_state.copy() if layer.warper_state is not None else None,
             working=layer.warper_state.copy() if layer.warper_state is not None else None,
+            base_offsets=layer.warper_params,
+            base_space=layer.warper_space,
         )
         return WarperCommandResult(True, "ok", self.revision(layer))
 
@@ -227,6 +233,9 @@ class WarperCommandService:
             return WarperCommandResult(False, "stale_revision", self.revision(layer))
         self._sessions.pop(layer.id, None)
         if session.dirty:
+            if not self._commit_state(layer):
+                self._finish_cancel(session, restore=True)
+                return WarperCommandResult(False, "commit_rejected", self.revision(layer))
             self._revisions[layer.id] = self.revision(layer) + 1
             self._gesture_finished(layer, True)
             return WarperCommandResult(True, "ok", self.revision(layer), True)
@@ -249,7 +258,10 @@ class WarperCommandService:
         if not restore:
             return
         if session.dirty:
-            self._write(layer, session.base_state)
+            layer.warper_state = session.base_state
+            layer.warper_params = session.base_offsets
+            layer.warper_space = session.base_space
+            self._on_applied(layer, session.base_state)
         if session.history_pushed:
             self._history_discard()
         self._gesture_finished(layer, False)

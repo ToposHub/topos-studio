@@ -243,7 +243,8 @@ class LayerOpsMixin:
         self.qualifier_panel.set_params(layer.qualifier_params)
         # D2：旧 LutPanel 实例已删除——LUT 状态展示在 ColorLutBrowser
         # （R03 ack 水合）与节点 LUT 菜单（N04），不再经图层回填
-        self.warper_panel.set_params(layer.warper_params)
+        if not self.warper_panel.set_warper_state(layer.warper_state, target_id=layer.id):
+            self.warper_panel.set_params(layer.warper_params)
         if layer.mask_shapes:
             s = layer.mask_shapes[-1]
             if isinstance(s, MaskGroup):
@@ -3150,11 +3151,21 @@ class LayerOpsMixin:
         if adapter is not None:
             return adapter
         from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
+        from src.features.color.core.layer import Layer
         from src.features.color.core.warper_commands import WarperCommandService
+        from src.features.color.core.warper_state import WarperStateV2
 
-        def _push_history(layer) -> None:
+        graph_gesture = None
+
+        def _push_history(layer: Layer) -> None:
+            nonlocal graph_gesture
             # 镜像 MenuToolbar.on_interaction_started:手势前基线一次
             self.engine.set_interaction_mode(True, "warper")
+            route = getattr(self, "_calibrated_warper_route", None)
+            if route is not None:
+                graph_host, node_id = route
+                graph_gesture = (graph_host, node_id, graph_host.active_grade_node_identity())
+                return
             if self.engine.img_full_original is not None:
                 self.engine.history.push_state(
                     self.engine.img_full_original,
@@ -3164,22 +3175,54 @@ class LayerOpsMixin:
                 )
 
         def _discard_history() -> None:
-            self.engine.history.discard_last_snapshot()
+            if graph_gesture is None:
+                self.engine.history.discard_last_snapshot()
             self.engine.set_interaction_mode(False)
 
-        def _on_applied(layer, state) -> None:
-            # 服务已写 layer.warper_params(legacy 可表达投影);此处复用
-            # 既有 UPDATE_AUX_TEX + 渲染失效路径(与 on_warper_changed 同尾)
-            if self.engine.get_current_image() is None: return
-            self.engine.set_warper_params(
-                layer.warper_params, warper_space=int(getattr(layer, "warper_space", 0) or 0))
+        def _graph_payload(layer: Layer) -> dict[str, Any]:
+            state, grid = layer.warper_state, layer.warper_params
+            return {
+                "warper_state": state.to_dict() if state is not None else None,
+                "warper_params": grid.tolist() if grid is not None else None,
+                "warper_space": layer.warper_space,
+            }
+
+        def _on_applied(layer: Layer, state: WarperStateV2 | None) -> None:
+            if self.engine.get_current_image() is None:
+                return
+            if graph_gesture is not None:
+                graph_host, node_id, identity = graph_gesture
+                if (graph_host.active_grade_node_identity() != identity or
+                        not graph_host.preview_warper_change(node_id, _graph_payload(layer))):
+                    return
+            if self.engine.get_active_layer() is layer:
+                self.engine.set_warper_params(layer.warper_params, warper_space=layer.warper_space)
+            elif graph_gesture is None:
+                return
             self._invalidate_video_render_params_if_playing()
             if self._is_video_playing():
                 self._debounce_grading_render()
             else:
                 self.request_render()
 
-        def _gesture_finished(layer, committed: bool) -> None:
+        def _commit_state(layer: Layer) -> bool:
+            if graph_gesture is None:
+                return True
+            graph_host, node_id, identity = graph_gesture
+            if self._graph_tool_route() != (graph_host, node_id) or graph_host.active_grade_node_identity() != identity:
+                return False
+            counter = int(getattr(self, "_graph_gesture_counter", 0)) + 1
+            self._graph_gesture_counter = counter
+            return graph_host.submit_warper_change(node_id, _graph_payload(layer), f"warper-{counter}")
+
+        def _gesture_finished(layer: Layer, committed: bool) -> None:
+            nonlocal graph_gesture
+            if graph_gesture is not None:
+                self.engine.set_warper_preview_graph(None)
+                self._invalidate_video_render_params_if_playing()
+                if not committed:
+                    self.request_render()
+            graph_gesture = None
             self.engine.set_interaction_mode(False)
             idle = getattr(self, "idle_render_timer", None)
             if idle is not None:
@@ -3193,6 +3236,7 @@ class LayerOpsMixin:
             history_discard=_discard_history,
             on_applied=_on_applied,
             gesture_finished=_gesture_finished,
+            commit_state=_commit_state,
         )
         adapter = WarperCommandAdapter(
             service, self._warper_command_target,
@@ -3212,6 +3256,9 @@ class LayerOpsMixin:
     def _warper_command_target(self):
         """命令目标 = 当前活动层(无图/无层 → None,命令如实 no_target)。"""
         if self.engine.get_current_image() is None: return None
+        draft = getattr(self, "_warper_graph_draft", None)
+        if draft is not None:
+            return draft[1]
         try:
             return self.engine.get_active_layer()
         except (IndexError, ValueError):
@@ -3219,13 +3266,40 @@ class LayerOpsMixin:
 
     def on_warper_command_requested(self, command: dict) -> None:
         """WarperPanel.command_requested → 命令服务(失败仅诊断,不抛出)。"""
+        calibrated = command.get("action") == "calibrated_mesh"
+        if calibrated:
+            timer = getattr(self, "_warper_flush_timer", None)
+            if timer is not None:
+                timer.stop()
+        route = self._graph_tool_route() if calibrated else None
         adapter = self._warper_command_adapter()
+        if route is not None:
+            graph_host, node_id = route
+            identity = graph_host.active_grade_node_identity()
+            draft = getattr(self, "_warper_graph_draft", None)
+            if draft is not None and draft[0] != identity:
+                adapter.cancel()
+                self._warper_graph_draft = draft = None
+            if draft is None and not graph_host.align_engine_active_layer(node_id):
+                payload = graph_host.panel_layer_payload(node_id)
+                if payload is None:
+                    return
+                self._warper_graph_draft = (identity, Layer.from_dict(payload))
+        self._calibrated_warper_route = route
         try:
             result = adapter.submit(command)
         except Exception:
             logger.warning("warper command failed: %s", command.get("action"), exc_info=True)
             return
-        if result.get("handled"):
+        finally:
+            self._calibrated_warper_route = None
+        if calibrated and not result.get("ok"):
+            layer = self._warper_command_target()
+            if layer is not None and not self.warper_panel.set_warper_state(layer.warper_state, target_id=layer.id):
+                self.warper_panel.set_params(layer.warper_params)
+        if calibrated and command.get("payload", {}).get("phase") != "update":
+            self._warper_graph_draft = None
+        if result.get("handled") and not calibrated:
             timer = getattr(self, "_warper_flush_timer", None)
             if timer is not None:
                 timer.start()
@@ -3238,6 +3312,7 @@ class LayerOpsMixin:
         adapter = getattr(self, "_warper_command_adapter_obj", None)
         if adapter is not None:
             adapter.cancel()
+        self._warper_graph_draft = None
 
     def on_blur_sharpen_changed(self, params) -> None:
         """模糊/锐化（effects）参数变化：写引擎 + 播放态防抖渲染。"""

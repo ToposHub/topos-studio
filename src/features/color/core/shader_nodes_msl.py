@@ -582,6 +582,68 @@ float3 msl_apply_warper(float3 color, texture2d<float> warper_tex,
 }
 """
 
+MSL_RESOLVE_HS709 = """
+// RESOLVE_HS709_SNIPPET, used in both the fragment and graph compute paths.
+float3 msl_hs709_basis(float hue) {
+    float3 phase = fract(hue + float3(0.0, 2.0 / 3.0, 1.0 / 3.0));
+    return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+}
+
+float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh) {
+    float3 work = pow(max(color, 0.0), float3(1.605 / 2.4));
+    float3 hsv = msl_rgb2hsv(work);
+    float peak = hsv.z;
+    float chroma = peak - min(work.r, min(work.g, work.b));
+    if (chroma <= 1e-10) return color;
+
+    float hue = hsv.x;
+    float radius = min(0.876 * chroma / pow(max(peak, 1e-10), 1.074), 1.0);
+    float neutral_fade = min(radius * 1.755, 1.0);
+    int2 size = int2(mesh.get_width(), mesh.get_height());
+    float cols = float(size.x);
+    float angular = hue * cols;
+    float angular_base = floor(angular);
+    float saturation = 0.0;
+    float lightness = 0.0;
+    float3 hue_change = float3(0.0);
+    float radial = radius * float(size.y - 1);
+    int row = int(floor(radial));
+    int next_row = min(row + 1, size.y - 1);
+    float blend = fract(radial);
+    for (int side = -1; side <= 2; ++side) {
+        int column = (int(angular_base) + side + size.x) % size.x;
+        float separation = angular - angular_base - float(side);
+        float distance = abs(separation);
+        if (distance >= 1.084) continue;
+        float3 lower = mesh.read(uint2(column, row)).rgb;
+        float3 upper = mesh.read(uint2(column, next_row)).rgb;
+        float3 delta = mix(lower, upper, blend);
+        saturation += delta.y * pow(max(1.0 - distance / 0.819, 0.0), 1.225);
+        lightness += delta.z * pow(max(1.0 - distance / 1.084, 0.0), 1.2);
+
+        float hue_weight = pow(max(1.0 - distance / 1.082, 0.0), 1.38);
+        float center = hue - separation / cols;
+        float anchor = center + separation * 0.047 / cols;
+        float3 basis = msl_hs709_basis(anchor);
+        float3 direction = 0.654 * (msl_hs709_basis(anchor + delta.x) - basis);
+        direction -= 0.294 * (msl_hs709_basis(anchor - delta.x) - basis);
+        direction += (msl_hs709_basis(center) - 0.5) * (abs(delta.x) * 1.154 * (0.7 - radius));
+        direction -= 1.93 * dot(direction, float3(0.091, 0.642, 0.267));
+        hue_change += direction * hue_weight;
+    }
+
+    if (saturation == 0.0 && lightness == 0.0 && all(hue_change == float3(0.0))) return color;
+    float3 direction = msl_hs709_basis(hue);
+    direction -= dot(direction, float3(0.451, 0.379, 0.170));
+    float saturation_gain = saturation > 0.0 ? 2.395 : 4.568;
+    float3 hue_shift = hue_change * pow(peak, 1.031);
+    float3 sat_shift = direction * (saturation * saturation_gain * pow(peak, 1.120));
+    float3 warped = (work + (hue_shift + sat_shift) * neutral_fade);
+    warped *= exp(1.981 * lightness * neutral_fade);
+    return pow(max(warped, 0.0), float3(2.4 / 1.605)) + min(color, 0.0);
+}
+"""
+
 
 # ── BLUR_SHARPEN_SNIPPET 的 MSL 翻译 ─────────────────────────────────────
 

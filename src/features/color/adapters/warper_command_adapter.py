@@ -26,14 +26,22 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
+import numpy as np
+
 from src.features.color.core.layer import Layer
-from src.features.color.core.warper_commands import WarperCommandService
+from src.features.color.core.warper_commands import WarperCommandResult, WarperCommandService
 from src.features.color.core.warper_state import (
     CL_GRID_NAMES,
     HS_GRID_NAME,
+    RESOLVE_HS_ALGORITHM,
+    WARPER_SCHEMA_VERSION,
     WarperCommandRequest,
+    WarperGrid,
+    WarperPin,
+    WarperStateV2,
     make_point_id,
 )
 
@@ -59,6 +67,7 @@ _COMPONENT_SEMANTICS = {"hue": "dh", "sat": "ds", "luma": "dl", "chroma": "dc"}
 CONTINUOUS_ACTIONS = frozenset({"axis_angle"})
 
 _GRID_BY_INDEX = {0: CL_GRID_NAMES[0], 1: CL_GRID_NAMES[1]}
+_CALIBRATED_SIGNATURE = ("replace_state", "calibrated_mesh")
 
 
 def _legacy_published(command: Mapping[str, Any]) -> bool:
@@ -93,6 +102,7 @@ class WarperCommandAdapter:
         self._gesture_ids = itertools.count(1)
         self._open_signature: tuple[str, str] | None = None
         self._open_gesture_id: str | None = None
+        self._open_layer: Layer | None = None
 
     # ---- 对外 ----
 
@@ -116,56 +126,106 @@ class WarperCommandAdapter:
                     "revision": None, "dirty": False}
 
         layer = self._resolve_layer()
+        if self._open_layer is not None and self._open_layer is not layer:
+            self._finish_open("cancel")
+            return {"ok": False, "reason": "stale_target", "handled": True,
+                    "revision": self._service.revision(layer) if layer is not None else None, "dirty": False}
         if layer is None:
             return {"ok": False, "reason": "no_target", "handled": True,
                     "revision": None, "dirty": False}
+
+        calibrated_phase = None
+        if action == "calibrated_mesh":
+            calibrated_phase = (command.get("payload") or {}).get("phase")
+            if calibrated_phase in {"commit", "cancel"}:
+                return self._finish_calibrated(calibrated_phase, layer)
+            if calibrated_phase not in {"update", "atomic"}:
+                return {"ok": False, "reason": "invalid_mesh_phase", "handled": True,
+                        "revision": self._service.revision(layer), "dirty": False}
 
         operation, payload = self._translate(action, command, layer)
         if operation is None:
             return {"ok": False, "reason": "unsupported_targeting", "handled": True,
                     "revision": None, "dirty": False}
 
-        signature = (operation, self._target_key(payload))
-        if action in CONTINUOUS_ACTIONS and signature == self._open_signature:
+        continuous = action in CONTINUOUS_ACTIONS or calibrated_phase == "update"
+        signature = _CALIBRATED_SIGNATURE if calibrated_phase else (operation, self._target_key(payload))
+        if continuous and signature == self._open_signature:
             # 同一手势的后续 update
             request = self._request("update", operation, payload, layer,
                                     gesture_id=self._open_gesture_id)
             result = self._service.handle(request, layer)
+            if calibrated_phase and not result.ok:
+                self._finish_calibrated("cancel", layer)
         else:
             self.flush()  # 不同签名:先收口旧手势,保证一次手势一次 undo
             gesture_id = f"warper-{next(self._gesture_ids)}"
-            self._service.handle(self._request("begin", operation, payload, layer,
-                                               gesture_id=gesture_id), layer)
+            begun = self._service.handle(
+                self._request("begin", operation, payload, layer, gesture_id=gesture_id), layer)
+            if not begun.ok:
+                return self._result_dict(begun, handled=True)
             result = self._service.handle(
                 self._request("update", operation, payload, layer, gesture_id=gesture_id), layer)
-            if action in CONTINUOUS_ACTIONS and result.ok:
+            if continuous and result.ok:
                 self._open_signature = signature
                 self._open_gesture_id = gesture_id
+                self._open_layer = layer
                 return self._result_dict(result, handled=True)
-            self._service.handle(
-                self._request("commit", operation, payload, layer, gesture_id=gesture_id), layer)
-            self._open_signature = None
-            self._open_gesture_id = None
+            finish = "commit" if result.ok else "cancel"
+            finished = self._service.handle(
+                self._request(finish, operation, payload, layer, gesture_id=gesture_id), layer)
+            if calibrated_phase and result.ok:
+                result = finished
         return self._result_dict(result, handled=True)
 
     def flush(self) -> None:
         """收口打开的连续手势(宿主静默定时器/生命周期钩子调用)。"""
-        if self._open_gesture_id is None:
-            return
-        layer = self._resolve_layer()
-        gesture_id, self._open_gesture_id, self._open_signature = \
-            self._open_gesture_id, None, None
-        if layer is not None:
-            self._service.handle(
-                self._request("commit", "replace_state", {}, layer, gesture_id=gesture_id), layer)
+        if self._open_layer is not None:
+            self._finish_open("commit" if self._resolve_layer() is self._open_layer else "cancel")
 
     def cancel(self) -> None:
         """取消打开的手势(切层/undo/reset/关面板钩子)。"""
         self._open_gesture_id = None
         self._open_signature = None
+        self._open_layer = None
         self._service.cancel_all("host_lifecycle")
 
     # ---- 内部 ----
+
+    def _finish_calibrated(self, phase: str, layer: Layer) -> dict[str, Any]:
+        result = self._finish_open(phase) if self._open_signature == _CALIBRATED_SIGNATURE else None
+        if result is None:
+            return {"ok": True, "reason": "no_mesh_edit", "handled": False,
+                    "revision": self._service.revision(layer), "dirty": False}
+        return self._result_dict(result, handled=True)
+
+    def _finish_open(self, phase: str) -> WarperCommandResult | None:
+        layer = self._open_layer
+        gesture_id = self._open_gesture_id
+        self._open_signature = self._open_gesture_id = None
+        self._open_layer = None
+        if layer is None or gesture_id is None:
+            return None
+        request = self._request(phase, "replace_state", {}, layer, gesture_id=gesture_id)
+        return self._service.handle(request, layer)
+
+    @staticmethod
+    def _calibrated_state(payload: Mapping[str, Any], layer: Layer) -> WarperStateV2:
+        offsets = np.asarray(payload["offsets"], dtype=np.float32)
+        rows, cols, _ = offsets.shape
+        previous = layer.warper_state
+        if previous is None or previous.algorithm_version != RESOLVE_HS_ALGORITHM:
+            previous = WarperStateV2(
+                schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+                mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+                grids={HS_GRID_NAME: WarperGrid.identity(HS_GRID_NAME, rows, cols, ("dh", "ds", "dl"))})
+        grid = previous.grids[HS_GRID_NAME]
+        old_pins = {pin.point_id: pin for pin in grid.pins}
+        pins = tuple(old_pins.get(point_id, WarperPin(point_id)) for point_id in payload.get("pins", ()))
+        if (grid.rows, grid.cols) != (rows, cols):
+            resized = WarperGrid.identity(HS_GRID_NAME, rows, cols, ("dh", "ds", "dl"))
+            grid = replace(grid, rows=rows, cols=cols, offsets=resized.offsets)
+        return previous.with_grid(replace(grid.with_offsets(offsets), pins=pins))
 
     def _request(self, phase: str, operation: str, payload: Any, layer: Layer,
                  *, gesture_id: str | None) -> WarperCommandRequest:
@@ -191,6 +251,10 @@ class WarperCommandAdapter:
         payload_in = command.get("payload") or {}
         state = command.get("state") or {}
         mode = command.get("mode")
+
+        if action == "calibrated_mesh":
+            state = self._calibrated_state(payload_in, layer) if payload_in.get("enabled") else None
+            return "replace_state", {"state": state.to_dict() if state is not None else None}
 
         if action == "resolution":
             grid = self._grid_name(mode, state)

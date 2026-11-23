@@ -32,6 +32,7 @@ from typing import Sequence
 from src.features.color.core.composition_uniforms import (
     CompositionUniformManifest,
 )
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
     MSL_BLUR_SHARPEN,
@@ -204,6 +205,7 @@ def emit_composition_msl(
         # 激活时注入，其余管线变体保持既有数值形态。
         parts.append("#pragma clang fp contract(off)")
     parts += [_MSL_HEADER, manifest.to_msl_struct("CompositionParams")]
+    pipeline_calls = _PIPELINE_CALLS
     # MSL_CURVES 同时承载 apply_hsl_curves（RGB curves 与 HSL curves 同在
     # CURVES_SNIPPET）；mixer/warper/blend modes 也依赖 HSV 函数——任一
     # 启用即发射。
@@ -219,7 +221,14 @@ def emit_composition_msl(
     if "mixer" in active_effects:
         parts.append(MSL_MIXER)
     if "warper" in active_effects:
-        parts.append(MSL_WARPER)
+        if manifest.warper_space == RESOLVE_HS709_SPACE:
+            from src.features.color.core.shader_nodes_msl import MSL_RESOLVE_HS709
+
+            parts.append(MSL_RESOLVE_HS709)
+            pipeline_calls = {**_PIPELINE_CALLS,
+                              "warper": "color = msl_apply_resolve_hs709(color, u_warper_tex);"}
+        else:
+            parts.append(MSL_WARPER)
     if "blur_sharpen" in active_effects:
         parts.append(MSL_BLUR_SHARPEN)
     if "blend_modes" in active_effects:
@@ -243,8 +252,8 @@ def emit_composition_msl(
     signature = ",\n                                   ".join(args)
     # blend_modes 语义在 main 尾部（matte 采样 + blend/mix），film_grain
     # 在 mix 之后（GL main 末位）；其余效果按 composition 顺序发射调用。
-    body_lines = [f"    {_PIPELINE_CALLS[e]}" for e in active_effects
-                  if e in _PIPELINE_CALLS]
+    body_lines = [f"    {pipeline_calls[e]}" for e in active_effects
+                  if e in pipeline_calls]
     if "blend_modes" in active_effects:
         body_lines.insert(0, _MSL_FRAGMENT_MASK_SAMPLE)
         body_lines.append(

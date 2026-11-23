@@ -6,6 +6,8 @@ GPU 部分在真实 GL 上下文编译生产 ShaderPipeline(无 GL 环境 skip);
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -196,3 +198,132 @@ def test_v2_variant_renders_fixture_grid_consistently_with_cpu() -> None:
                                    err_msg=f"pipeline hsp parity {color}")
     warper_tex.release(); input_tex.release(); matte_tex.release(); fbo.release()
     quad.release(); vao.release()
+
+
+@pytest.fixture
+def calibrated_graph_case() -> tuple:
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.shared.project.color_graph import ColorEdgeData, ColorGraphData, ColorNodeData, NodeType
+
+    colors = np.array([[
+        (0.75, 0.18, 0.14, 1.0), (0.75, 0.14, 0.18, 0.5), (0.11, 0.67, 0.62, 1.0),
+        (0.23, 0.24, 0.80, 0.8), (0.3, 0.3, 0.3, 0.6), (-0.1, 1.5, 0.45, 1.0),
+    ]], np.float32)
+    offsets = np.zeros((6, 8, 3), np.float32)
+    offsets[1:5, (0, 4, 7), :] = (0.06, -0.08, 0.09)
+    payload = {
+        "grading_params": {}, "warper_params": offsets.tolist(),
+        "warper_space": RESOLVE_HS709_SPACE, "opacity": 0.7,
+    }
+    nodes = (
+        ColorNodeData(node_id="source", node_type=NodeType.SOURCE.value),
+        ColorNodeData(node_id="grade", node_type=NodeType.CORRECTOR.value, legacy_payload=payload),
+        ColorNodeData(node_id="output", node_type=NodeType.OUTPUT.value),
+    )
+    edges = (
+        ColorEdgeData(edge_id="e1", src_node="source", src_port="image",
+                      dst_node="grade", dst_port="image"),
+        ColorEdgeData(edge_id="e2", src_node="grade", src_port="image",
+                      dst_node="output", dst_port="image"),
+    )
+    graph = ColorGraphData(nodes=nodes, edges=edges, source_node_id="source", output_node_id="output")
+    return graph, payload, colors
+
+
+def test_calibrated_warper_graph_texture_matches_cpu(calibrated_graph_case: tuple) -> None:
+    from src.features.color.core.color_graph_cpu import corrector_production_oracle
+    from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
+
+    graph, payload, colors = calibrated_graph_case
+    ctx = _pipeline().ctx
+    source = ctx.texture((colors.shape[1], 1), 4, colors.tobytes(), dtype="f4")
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        output = renderer.render(source, graph, 0)
+        got = np.frombuffer(output.read(), dtype=np.float32).reshape(colors.shape)
+        expected = corrector_production_oracle(colors, payload)
+        assert np.max(np.abs(expected[..., :3] - colors[..., :3])) > 0.01
+        np.testing.assert_allclose(got, expected, atol=2e-3, rtol=1e-2)
+    finally:
+        renderer.release()
+        source.release()
+
+
+def test_same_size_warper_texture_reallocates_only_when_channels_change() -> None:
+    from types import SimpleNamespace
+
+    from src.features.color.core.async_renderer import AsyncRenderer
+    from src.features.color.core.warper_color import (
+        RESOLVE_HS709_SPACE, prepare_resolve_hs709_texture,
+    )
+
+    ctx = _pipeline().ctx
+    renderer = SimpleNamespace(ctx=ctx, layer_textures={})
+    payload = {"layer_id": "layer", "size": (8, 6), "type": "warper"}
+    legacy = np.zeros((6, 8, 2), np.float32)
+    calibrated = np.full((6, 8, 3), 0.125, np.float32)
+
+    def update(grid: np.ndarray, space: int) -> Any:
+        AsyncRenderer._do_update_aux_tex(renderer, {**payload, "data": grid.tobytes(), "space": space})
+        return renderer.layer_textures["layer"]["warper"]
+
+    legacy_tex = update(legacy, 0)
+    calibrated_tex = update(calibrated, RESOLVE_HS709_SPACE)
+    try:
+        assert calibrated_tex is not legacy_tex
+        assert calibrated_tex.components == 3
+        assert update(calibrated, RESOLVE_HS709_SPACE) is calibrated_tex
+        assert update(calibrated * 2, RESOLVE_HS709_SPACE) is calibrated_tex
+        assert calibrated_tex.read() == prepare_resolve_hs709_texture(calibrated * 2).tobytes()
+    finally:
+        calibrated_tex.release()
+
+
+def test_calibrated_warper_has_no_grid_boundary_steps() -> None:
+    from src.features.color.core.warper_color import apply_resolve_hs709, hsv_to_rgb
+
+    offsets = np.zeros((6, 6, 3), np.float32)
+    offsets[2, 1] = (0.10, 0.0, 0.0)
+    offsets[-1, 0] = (0.0, 0.08, 0.0)
+    hue_seam = np.stack([hsv_to_rgb((h, 0.55, 0.7)) for h in (1.0 - 1e-5, 1e-5)])
+    # The calibrated radial domain crosses a ring near radius 0.5.
+    ring_saturation = 0.5 * 0.7 ** 0.074 / 0.876
+    ring_boundary = np.stack([
+        hsv_to_rgb((0.0, ring_saturation + d, 0.7)) for d in (-1e-5, 1e-5)
+    ])
+    work = np.stack((hue_seam, ring_boundary))
+    warped = apply_resolve_hs709(work ** (2.4 / 1.605), offsets)
+    np.testing.assert_allclose(warped[:, 0], warped[:, 1], atol=2e-4, rtol=0)
+
+
+def test_calibrated_warper_metal_compute_matches_cpu(calibrated_graph_case: tuple) -> None:
+    from src.features.color.core.color_graph_compiler import compile_graph
+    from src.features.color.core.color_graph_cpu import corrector_production_oracle
+    from src.features.color.core.color_graph_metal import ColorGraphMetalExecutor
+    from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+    from src.features.color.core.color_graph_snapshot import freeze_graph
+    from src.features.color.core.msl_composition import emit_composition_msl
+    from src.shared.gpu.metal.context import MetalComputeContext
+
+    supported, reason = MetalComputeContext.availability_reason()
+    if not supported:
+        pytest.skip(reason)
+    graph, payload, colors = calibrated_graph_case
+    size = (colors.shape[1], 1)
+    plan = compile_graph(freeze_graph(graph, session_id="warper-test", source_frame=0), size=size)
+    ctx = MetalComputeContext()
+    manifest = build_composition_uniform_manifest(
+        has_warper=True, warper_space=payload["warper_space"],
+    )
+    msl = emit_composition_msl(manifest, ("grading", "warper", "blend_modes"))
+    library, error = ctx.device.newLibraryWithSource_options_error_(msl, None, None)
+    assert library is not None, error
+    executor = ColorGraphMetalExecutor(ctx)
+    source = colors.astype(np.float16)
+    result = executor.execute_plan(plan, source, layer_param_provider=graph_node_layer_provider(graph))
+    assert result.published, result.diagnostic_message
+    try:
+        expected = corrector_production_oracle(source.astype(np.float32), payload)
+        np.testing.assert_allclose(result.output, expected, atol=2e-3, rtol=2e-3)
+    finally:
+        executor.release_revision(result.request_id)
