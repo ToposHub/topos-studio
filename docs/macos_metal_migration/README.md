@@ -118,7 +118,7 @@ TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
 | `native_viewport` | 关 | `TOPOS_EDIT_METAL_VIEWPORT=1` | 显示器清醒时验证 resize、隐藏、全屏、换屏、关闭 |
 | `composite_metal` | 关 | `TOPOS_COMPOSITE_METAL=1` | 有生产调用方（comp clip、无头导出）且与 CPU/GL 取帧一致 |
 | `color_graph_metal` | 关 | 无（执行器尚无生产调用方） | 剪辑渲染与交付经共享入口取图 |
-| `export_native_vt` | 开（macOS，graphics 为 auto/metal） | `TOPOS_EXPORT_NATIVE_VT=0` 关闭 | 导出文件上验证音频、分数帧率与取消 |
+| `export_native_vt` | 开（macOS，graphics 为 auto/metal） | `TOPOS_EXPORT_NATIVE_VT=0` 关闭 | 导出文件上验证音频、分数帧率与取消（同机已做，见实施记录 3.1/3.2；B 帧与 29.97 仅有合成/生成素材的证据） |
 
 `tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的
 可复现回退测试。

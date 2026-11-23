@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Callable
+from fractions import Fraction
 from pathlib import Path
 from tempfile import mkstemp
 from typing import TYPE_CHECKING, Any
@@ -14,9 +15,11 @@ from src.shared.media.macos_vt.gpu_encode_surface import (
     VideoToolboxGpuSurfaceProvider,
 )
 from src.shared.media.macos_vt.vt_compression import (
+    FrameRate,
     VideoToolboxCompressionError,
     VideoToolboxCompressionSession,
     VideoToolboxPacketMuxer,
+    coerce_frame_rate,
 )
 
 if TYPE_CHECKING:
@@ -33,11 +36,18 @@ class VideoToolboxGpuExportBridge:
     P010 output into VideoToolbox H.264/HEVC MP4/MOV when the caller selects
     a matching pixel format and codec.
 
+    ``fps`` is exact. An integer, a ``Fraction`` (30000/1001) or the plan-side
+    rational (``num``/``den``) all keep their frame spacing in the container,
+    so the video clock and the sample-count audio clock stay aligned.
+
     By default the finished movie replaces the destination atomically.
     ``expected_frames`` enables exact packet-count validation. An existing
     destination, an expected count, or a cancellation check requires staging.
     ``should_cancel`` must read caller state without blocking or calling back
     into the bridge.
+
+    An audio stream declared with ``required=True`` is part of the delivery
+    contract: :meth:`close` refuses to publish a movie that received no audio.
     """
 
     # TimelineExporter may be given this bridge directly.  The bridge owns the
@@ -46,6 +56,11 @@ class VideoToolboxGpuExportBridge:
     close_on_export = True
     handles_timeline_video = True
 
+    # Defaults for the audio delivery state, so ``close`` reads the same
+    # contract from any instance, including ones assembled in unit tests.
+    _audio_required = False
+    _audio_samples_fed = 0
+
     def __init__(
         self,
         metal_context: Any,
@@ -53,7 +68,7 @@ class VideoToolboxGpuExportBridge:
         *,
         width: int,
         height: int,
-        fps: int = 30,
+        fps: FrameRate = 30,
         codec: str = "h264",
         pixel_format: str = "nv12",
         container_format: str | None = None,
@@ -68,7 +83,8 @@ class VideoToolboxGpuExportBridge:
         self.output_path = str(output_path)
         self.width = int(width)
         self.height = int(height)
-        self.fps = max(1, int(fps))
+        # Exact rate; 30000/1001 is not rounded to an integer frame rate.
+        self.fps: Fraction = coerce_frame_rate(fps)
         self.codec = str(codec).strip().lower()
         if expected_frames is not None and (type(expected_frames) is not int or expected_frames <= 0):
             raise ValueError("expected_frames must be a positive integer")
@@ -78,6 +94,8 @@ class VideoToolboxGpuExportBridge:
         self._closed = False
         self._abort_requested = False
         self._published = False
+        self._audio_required = False
+        self._audio_samples_fed = 0
         self._close_lock = threading.Lock()
 
         target = Path(self.output_path)
@@ -141,27 +159,55 @@ class VideoToolboxGpuExportBridge:
     def packet_count(self) -> int:
         return int(self._muxer.packet_count)
 
+    @property
+    def audio_required(self) -> bool:
+        """Whether a declared audio track must be present in the delivery."""
+        return bool(self._audio_required)
+
     def add_audio_stream(
         self,
         codec: str = "aac",
         sample_rate: int = 48000,
         channels: int = 2,
         bitrate: int | None = None,
+        *,
+        required: bool = False,
     ) -> None:
-        """Configure TimelineExporter audio before the first video packet."""
-        self._muxer.add_audio_stream(
+        """Configure TimelineExporter audio before the first video packet.
+
+        ``required`` makes the track part of the delivery: without it the
+        bridge keeps the historical behaviour where a declared stream that
+        receives no samples is dropped by the container.
+        """
+        options: dict[str, Any] = dict(
             codec=codec,
             sample_rate=sample_rate,
             channels=channels,
             bitrate=bitrate,
         )
+        if required:
+            # Only opt in, so a muxer that predates the flag is still called
+            # with its original keyword set.
+            options["required"] = True
+        self._muxer.add_audio_stream(**options)
+        self._audio_required = bool(required)
+        self._audio_samples_fed = 0
 
     def write_audio_samples(
         self,
         samples: np.ndarray,  # AUD-35010：float-planar 音频样本，弱类型 Any 收紧
         sample_rate: int = 48000,
-    ) -> None:
-        self._muxer.write_audio_samples(samples, sample_rate=sample_rate)
+    ) -> int:
+        """Encode PCM into the declared stream and return the next sample offset.
+
+        The muxer stamps every audio frame with its cumulative sample offset,
+        so successive calls continue the timeline at the returned value.
+        """
+        import numpy as np
+
+        next_sample = self._muxer.write_audio_samples(samples, sample_rate=sample_rate)
+        self._audio_samples_fed += int(np.asarray(samples).shape[-1])
+        return next_sample if isinstance(next_sample, int) else self._audio_samples_fed
 
     def acquire(self, **kwargs: Any) -> GpuEncodeSurface:
         return self._provider.acquire(**kwargs)
@@ -186,6 +232,12 @@ class VideoToolboxGpuExportBridge:
             if self._expected_frames is not None and count != self._expected_frames:
                 raise VideoToolboxCompressionError(
                     f"videotoolbox_packet_count_mismatch:{count}!={self._expected_frames}")
+            if self._audio_required and self._audio_samples_fed <= 0:
+                # The delivery contract names an audio track. Never publish a
+                # movie that silently lacks it. The muxer enforces the same
+                # contract on its own counter for callers that bypass the bridge.
+                raise VideoToolboxCompressionError(
+                    "videotoolbox_audio_track_missing")
             self._muxer.close()
             with self._close_lock:
                 if self._abort_requested or (self._should_cancel is not None and self._should_cancel()):

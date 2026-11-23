@@ -138,6 +138,29 @@ def test_the_viewport_switch_wins_over_the_session_opt_in(monkeypatch: pytest.Mo
     assert EditGpuPreviewRenderer(main_context=None).native_viewport_opted_in() is True
 
 
+def test_the_export_switch_keeps_the_native_export_family_on_the_regular_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both native VideoToolbox export entries: the default-on Metal H.264
+    fast path and the opt-in regular bridge (plan 3.1/3.2, 8.6)."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from src.features.edit.core.timeline_export import (
+        TimelineExporter,
+        native_export_switched_off,
+    )
+
+    monkeypatch.setenv("TOPOS_EXPORT_NATIVE_VT", "1")
+    assert native_export_switched_off() is False
+    monkeypatch.setenv("TOPOS_METAL_DISABLE", "export_native_vt")
+    assert native_export_switched_off() is True
+    # A bare exporter: the switch is read before anything of the export is
+    # touched, so neither entry gets as far as needing exporter state.
+    exporter = TimelineExporter.__new__(TimelineExporter)
+    assert exporter._try_export_metal_h264_lut(object(), object(), 0, 1) is None
+    exporter._maybe_create_default_native_gpu_bridge("/unused/out.mp4", object())
+    assert not hasattr(exporter, "_gpu_encode_surface_provider")
+
+
 def test_the_composite_graph_switch_wins_over_its_own_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.features.composite.render.composite_graph_render_service import (
         composite_metal_enabled,

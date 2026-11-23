@@ -2363,6 +2363,26 @@ class _MetalH264Clip:
         return tuple(corrector.operation for corrector in self.correctors)
 
 
+def native_export_switched_off() -> bool:
+    """Whether ``TOPOS_METAL_DISABLE=export_native_vt`` turned the native
+    VideoToolbox export family off (migration plan 8.6): the Metal H.264
+    fast path and the opt-in regular bridge alike stay on the regular path.
+    ``TOPOS_EXPORT_NATIVE_VT`` itself keeps its own meaning per path."""
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    return feature_disabled(MetalFeature.EXPORT_NATIVE_VT)
+
+
+@dataclass(frozen=True)
+class _MetalH264Audio:
+    """The single master-mix stream the native Metal H.264 path carries."""
+
+    codec: str
+    sample_rate: int
+    channels: int
+    bitrate: Optional[int]
+
+
 #: 首版 native VT bridge 支持的源像素格式 → 允许的输出 surface。
 #: T-P0-31（TOPOS 422 R16 → NV12/P010 GPU 转换）落地前，4:2:2 源没有
 #: GPU 路径——必须在此提前拒绝，而不是运行中途把 CPU frame 送进 bridge。
@@ -6051,6 +6071,8 @@ class TimelineExporter:
             "1", "true", "yes", "on",
         }:
             return
+        if native_export_switched_off():
+            return
         from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
         if os.environ.get(MACOS_HW_ENCODE_DISABLE_ENV):
             return
@@ -6080,6 +6102,10 @@ class TimelineExporter:
         # 会被取整封装，与按精确 Rational 渲染的音频随片长累积漂移。
         # bridge 支持分数 timescale 前对非整数 fps 显式拒绝并记录
         # reason_code，留在普通 encoder 路径（其 fps 为精确 Rational）。
+        # Plan 3.2：桥现已接受精确有理数 fps（``VideoToolboxGpuExportBridge``），
+        # LUT 快路径已放开分数帧率。本门只守 opt-in 的常规渲染管线，其分数
+        # 帧率端到端验证未做，故保留；放开时连同
+        # ``test_aud_18406_bridge_rejects_non_integer_fps`` 一并复核。
         bridge_fps = getattr(config, "fps", None)
         fps_num = int(getattr(bridge_fps, "num", 0) or 0)
         fps_den = int(getattr(bridge_fps, "den", 0) or 0)
@@ -7412,17 +7438,138 @@ class TimelineExporter:
             variants.add((left.operations, right.operations))
         return eligible, variants
 
+    def _metal_h264_has_audio(self, config: TimelineExportConfig) -> bool:
+        """Whether the export window holds audio clips that must be delivered."""
+        audio_sequence = getattr(self, "_audio_render_sequence", None) or self._sequence
+        return bool(config.include_audio and any(
+            track.clips for track in getattr(audio_sequence, "audio_tracks", ()) or ()))
+
+    def _metal_h264_audio(self, config: TimelineExportConfig) -> Optional[_MetalH264Audio]:
+        """Describe the master mix this path can carry, or None to decline it.
+
+        The native container takes one AAC stream at 48 kHz with a mono or
+        stereo layout, resolved from the same source as the regular exporter's
+        stream declaration. Stems, PCM codecs, other rates and surround
+        layouts stay on the regular path.
+        """
+        if (str(config.audio_codec).strip().lower() != "aac"
+                or int(config.audio_sample_rate) != 48000
+                or tuple(getattr(config, "audio_stems", ()) or ())):
+            return None
+        from src.features.edit.core.channel_layout import resolve_export_channels
+
+        try:
+            channels = int(resolve_export_channels(
+                config.audio_channels, config.audio_channel_layout))
+        except ValueError:
+            # An unknown layout name is the regular exporter's to diagnose.
+            return None
+        if channels not in (1, 2):
+            return None
+        bitrate: Optional[int] = None
+        if config.audio_bitrate:
+            bitrate = int(config.audio_bitrate)
+            if bitrate <= 0:
+                return None
+        return _MetalH264Audio(
+            codec="aac", sample_rate=48000, channels=channels, bitrate=bitrate)
+
+    def _start_metal_h264_audio(
+        self,
+        encoder_guard: Any,
+        start_frame: int,
+        end_frame: int,
+        config: TimelineExportConfig,
+    ) -> None:
+        """Render the master mix beside the GPU loop, as the regular path does.
+
+        The worker only produces PCM. ``encoder_guard`` is the liveness
+        sentinel the mixer requires; the export thread owns every write.
+        """
+        self._audio_stem_tracks = []
+        self._audio_stem_pcms = []
+        self._audio_master_pcm = None
+        self._audio_render_error = None
+        self._audio_render_thread = threading.Thread(
+            target=self._audio_export_worker,
+            args=(start_frame, end_frame, config, encoder_guard),
+            name="topos-export-audio",
+            daemon=True,
+        )
+        self._audio_render_thread.start()
+
+    def _finish_metal_h264_audio(
+        self,
+        bridge: Any,
+        audio: _MetalH264Audio,
+        config: TimelineExportConfig,
+        start_frame: int,
+        end_frame: int,
+    ) -> None:
+        """Join the mix, validate it against the export window and mux it.
+
+        A mix that is missing, failed, or not the length and channel count of
+        this export window raises, so the caller aborts the staged movie and
+        the regular path redoes the whole range. A delivery that asked for
+        audio is never published without it.
+        """
+        import numpy as np
+
+        self._join_audio_render_thread()
+        if self._cancel_requested:
+            # The mix stops early on cancellation; the caller reports it.
+            return
+        if self._audio_render_error is not None:
+            error = self._audio_render_error
+            self._audio_render_error = None
+            self._audio_master_pcm = None
+            raise error
+        pcm = self._audio_master_pcm
+        self._audio_master_pcm = None
+        if pcm is None:
+            raise RuntimeError("Metal H.264 export rendered no master mix")
+        from src.features.edit.core.interchange import frames_to_samples
+
+        expected = frames_to_samples(
+            end_frame - start_frame, self._get_sequence_fps_rational(),
+            audio.sample_rate,
+        )
+        length = int(pcm.shape[-1]) if getattr(pcm, "ndim", 0) == 2 else -1
+        if (getattr(pcm, "ndim", 0) != 2
+                or int(pcm.shape[0]) != audio.channels
+                or pcm.dtype != np.float32
+                or length < expected
+                or (not getattr(config, "include_fx_tail", False)
+                    and length != expected)):
+            raise RuntimeError(
+                "Metal H.264 master mix does not match the export window: "
+                f"shape={getattr(pcm, 'shape', None)} dtype={getattr(pcm, 'dtype', None)} "
+                f"expected={audio.channels}x{expected}")
+        bridge.write_audio_samples(
+            self._quantize_audio_delivery(pcm, config), audio.sample_rate)
+
     def _try_export_metal_h264_lut(
         self, config: TimelineExportConfig, encoder_config: "FFmpegEncoderConfig",
         start_frame: int, end_frame: int,
     ) -> Optional[ExportOutcome]:
-        """Export SDR LUT graphs and supported transitions with native surfaces."""
+        """Export SDR LUT graphs and supported transitions with native surfaces.
+
+        Plan 3.1/3.2: a timeline with audio is carried in the same container as
+        one AAC stream. The audio worker renders the master mix beside the GPU
+        loop, exactly as the regular exporter does, and the export thread
+        writes it after the last frame through the bridge's serial muxing
+        boundary. The track is declared ``required``: a delivery that asked
+        for audio is never published without it.
+        """
+        from fractions import Fraction
+
         from src.shared.codec.color_metadata_config import ColorMetadataConfig
         from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
 
         native = os.getenv("TOPOS_EXPORT_NATIVE_VT", "").strip().lower()
         preference = getattr(self, "_timeline_graphics_requested", "auto")
         if (sys.platform != "darwin" or native in {"0", "false", "off", "no"}
+                or native_export_switched_off()
                 or preference not in {"auto", "metal"}
                 or os.environ.get(MACOS_HW_ENCODE_DISABLE_ENV)
                 or getattr(self, "_gpu_render_disabled", True)
@@ -7431,13 +7578,19 @@ class TimelineExporter:
                 or encoder_config.hwaccel not in {"auto", "videotoolbox"}
                 or encoder_config.has_alpha or encoder_config.max_bitrate is not None
                 or encoder_config.color_metadata != ColorMetadataConfig.sdr()
-                or os.path.splitext(config.output_path)[1].lower() not in {".mp4", ".mov"}
-                or (config.include_audio and any(
-                    track.clips for track in self._audio_render_sequence.audio_tracks))):
+                or os.path.splitext(config.output_path)[1].lower() not in {".mp4", ".mov"}):
             return None
+        audio = None
+        if self._metal_h264_has_audio(config):
+            audio = self._metal_h264_audio(config)
+            if audio is None:
+                # Audio the native path cannot carry keeps the regular path.
+                return None
         width, height = encoder_config.width, encoder_config.height
+        # The rate is exact: 24000/1001 and 30000/1001 keep their own timescale
+        # instead of being rounded onto the audio clock.
         rate = self._rational_pair(encoder_config.fps)
-        if (width % 2 or height % 2 or rate is None or rate[1] != 1
+        if (width % 2 or height % 2 or rate is None
                 or rate != self._rational_pair(self._sequence.fps)
                 or (width, height) != self._get_sequence_resolution()):
             return None
@@ -7485,13 +7638,21 @@ class TimelineExporter:
             if self._cancel_requested:
                 return ExportOutcome.user_cancelled()
             bridge = VideoToolboxGpuExportBridge(
-                context, config.output_path, width=width, height=height, fps=rate[0],
+                context, config.output_path, width=width, height=height, fps=Fraction(*rate),
                 h264_profile=encoder_config.profile, bit_rate=videotoolbox_target_bitrate(encoder_config),
                 bt709_limited=True, expected_frames=end_frame - start_frame,
                 should_cancel=lambda: self._cancel_requested,
             )
+            if audio is not None:
+                # The container must know the track before the first video packet.
+                bridge.add_audio_stream(
+                    codec=audio.codec, sample_rate=audio.sample_rate,
+                    channels=audio.channels, bitrate=audio.bitrate, required=True,
+                )
             self._timeline_graphics_backend = "metal"
             self._gpu_encode_surface_provider = bridge
+            if audio is not None:
+                self._start_metal_h264_audio(bridge, start_frame, end_frame, config)
             for frame_idx in range(start_frame, end_frame):
                 if not self._wait_if_paused() or self._cancel_requested:
                     return ExportOutcome.user_cancelled()
@@ -7582,6 +7743,14 @@ class TimelineExporter:
             if self._cancel_requested:
                 return ExportOutcome.user_cancelled()
             started = time.perf_counter()
+            if audio is not None:
+                # The video frames are all in. Join the mix and hand it to the
+                # same serial muxing boundary before the encoder drains.
+                self._finish_metal_h264_audio(bridge, audio, config, start_frame, end_frame)
+                if self._cancel_requested:
+                    # Cancelled while the mix drained: nothing was written, so
+                    # do not ask the bridge to finalize a movie without audio.
+                    return ExportOutcome.user_cancelled()
             published = bridge.close()
             mux_ms = (time.perf_counter() - started) * 1000.0
             if not published and not self._cancel_requested:
@@ -7590,6 +7759,15 @@ class TimelineExporter:
             fallback = f"metal_h264_lut_retry:{type(error).__name__}"
             logger.warning("Metal H.264 LUT export failed, retrying the full range: %s", error)
         finally:
+            if audio is not None:
+                # AUD-18401: the audio worker shares exporter state. Join it
+                # on success, cancel and failure alike, before the clip
+                # sessions go away, or it outlives this export and writes
+                # stale PCM into the next one. A video-only export starts no
+                # worker and keeps its original cleanup untouched.
+                self._join_audio_render_thread()
+                self._audio_master_pcm = None
+                self._audio_render_error = None
             try:
                 if bridge is not None and not published:
                     bridge.abort()
