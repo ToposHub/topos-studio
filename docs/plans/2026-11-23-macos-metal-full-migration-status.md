@@ -472,4 +472,28 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
   VideoToolbox 导出快路径默认开启。
 - 已接：剪辑预览模式、剪辑合成计划、原生视口开启判定、合成图链。导出开关待 3.1 / 3.2 落地后接。
 - 测试：`tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的回退测试。
-- **未做**：8.1 能力矩阵、8.2 画质与工程兼容、8.3 性能与稳定性、8.4 安装包，以及把任何一项转为默认开启。
+- **未做**：8.2 画质与工程兼容、8.3 性能与稳定性、8.4 安装包，以及把任何一项转为默认开启。
+
+## 阶段 8.1 能力矩阵（逻辑层：剪辑预览）
+
+`tests/edit/test_metal_capability_matrix.py` 把这张表写成可执行断言：12 类帧 × 4 种配置，无需 GPU
+（没有 Metal 的机器能给的证据就是这些判定逻辑）。Metal 列里落在 GL 的每一格都必须是一个带原因的拒绝。
+
+| 帧 | 默认 `auto` | 显式 Metal | 显式 OpenGL | Metal 不可用 |
+|---|---|---|---|---|
+| 未调色的 H.264 片段 | GL | 单片段 Metal | GL | GL |
+| H.264 + 单个 LUT | 单片段 Metal | 单片段 Metal | GL | GL |
+| 交叉溶解（两层不透明度） | GL | 合成 | GL | GL |
+| 位移 + 裁切的片段 | GL | 合成 | GL | GL |
+| 纯色垫底 + 片段 | GL | 合成 | GL | GL |
+| `dip_to_color` | GL | 合成 | GL | GL |
+| 带视频效果的片段 | GL（`clip_effects`） | 同左 | GL | GL |
+| DNxHR / ProRes（planar） | GL（`source_unsupported:planar`） | 同左 | GL | GL |
+| comp clip（GPU 句柄） | GL（`source_unsupported:comp_gpu_handle`） | 同左 | GL | GL |
+| 空间转场（wipe） | GL（`transition_unsupported:wipe`） | 同左 | GL | GL |
+| 调整剪辑 | GL（`adjustment_layers`） | 同左 | GL | GL |
+| 非单 LUT 的调色 | GL（`grade_unsupported`） | 同左 | GL | GL |
+
+- 设备不可用的一列：构建 Metal 预览失败 → 帧未被消费、会话回到 GL、日志写明原因。回退开关
+  （`TOPOS_METAL_DISABLE`）把整列移到 GL；只关 `edit_metal_composite` 时单片段仍走 Metal。
+- **未做**：导出、插件、合成、调色域的矩阵（等对应实现落地）；真机上的实际运行结果、日志、机器配置与日期。
