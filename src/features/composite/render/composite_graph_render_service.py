@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -38,6 +39,18 @@ import numpy as np
 from src.shared.gpu.composite_gpu_frame_handle import CompositeGpuFrameHandle
 
 logger = logging.getLogger(__name__)
+
+# 阶段 5 Metal 合成链开关（默认关闭）：
+#   TOPOS_COMPOSITE_METAL=1 且本机 Metal compute 可用时，render_metal()
+#   才会真正走 Metal；auto/opengl 及未设置时行为与既有 CPU/GL 路径完全
+#   一致（预检不通过的图同样整图回退，见 render_metal 的诊断句柄）。
+_COMPOSITE_METAL_ENV = "TOPOS_COMPOSITE_METAL"
+
+
+def composite_metal_enabled() -> bool:
+    """Metal 合成链是否被显式启用（默认关闭，纯环境变量判定）。"""
+    raw = os.environ.get(_COMPOSITE_METAL_ENV, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 @dataclass(frozen=True)
@@ -71,6 +84,7 @@ class CompositeGraphRenderService:
     def __init__(self, gl_context=None) -> None:
         self._gl_context = gl_context
         self._composite_renderer = None
+        self._metal_renderer = None
         self._revision_counter = 0
         self._telemetry: list[dict] = []
 
@@ -236,6 +250,91 @@ class CompositeGraphRenderService:
             logger.error("CompositeGraphRenderService GPU render failed: %s", e)
             return None
 
+    def render_metal(
+        self,
+        graph_data: dict,
+        timeline_frame: int = 0,
+        generation: int = 0,
+        quality: str = "preview",
+        tile_size: tuple | None = None,
+        trace_id: str | None = None,
+    ) -> Optional[CompositeGpuFrameHandle]:
+        """Render composite graph on the Metal compute chain (stage 5).
+
+        Opt-in: requires ``TOPOS_COMPOSITE_METAL=1`` and a usable local
+        Metal device.  Graphs that fail the Metal capability preflight
+        (unmigrated node types, structural errors) come back as an
+        explicitly-unavailable handle whose ``fallback_reason`` lists the
+        blocking node IDs/types — the caller falls back to the existing
+        CPU/GL path for the whole graph; nodes are never skipped.
+
+        ``quality`` only distinguishes preview/export bookkeeping here;
+        the Metal chain renders at full internal precision (RGBA16F).
+
+        Returns:
+            A presentable or explicitly-unavailable composite GPU handle;
+            ``None`` only when the chain is disabled/unavailable as a
+            whole (caller should use render_cpu/render_gpu).
+        """
+        import time as _time
+
+        if not composite_metal_enabled():
+            self._record_telemetry(
+                frame=timeline_frame, path="metal", elapsed_ms=0.0,
+                success=False,
+                error=f"{_COMPOSITE_METAL_ENV} not enabled",
+            )
+            return None
+
+        from src.shared.gpu.metal import MetalComputeContext
+        if not MetalComputeContext.is_supported():
+            self._record_telemetry(
+                frame=timeline_frame, path="metal", elapsed_ms=0.0,
+                success=False,
+                error="Metal compute 不可用",
+            )
+            return None
+
+        from src.features.composite.render.metal.renderer import (
+            MetalCompositeRenderer,
+        )
+
+        t0 = _time.monotonic()
+        if not isinstance(graph_data, dict) or "nodes" not in graph_data:
+            self._record_telemetry(
+                frame=timeline_frame, path="metal", elapsed_ms=0.0,
+                success=False, error="empty or invalid graph_data",
+            )
+            return None
+
+        try:
+            if self._metal_renderer is None:
+                self._metal_renderer = MetalCompositeRenderer()
+            handle = self._metal_renderer.render(
+                graph_data,
+                timeline_frame=timeline_frame,
+                generation=generation,
+                tile_size=tile_size,
+                use_cache=True,
+                trace_id=trace_id or "",
+            )
+            elapsed_ms = (_time.monotonic() - t0) * 1000.0
+            self._record_telemetry(
+                frame=timeline_frame, path="metal", elapsed_ms=elapsed_ms,
+                success=bool(getattr(handle, "available", False)),
+                error="" if getattr(handle, "available", False)
+                else str(getattr(handle, "fallback_reason", "")),
+            )
+            return handle
+        except Exception as e:
+            elapsed_ms = (_time.monotonic() - t0) * 1000.0
+            self._record_telemetry(
+                frame=timeline_frame, path="metal", elapsed_ms=elapsed_ms,
+                success=False, error=str(e),
+            )
+            logger.error("CompositeGraphRenderService Metal render failed: %s", e)
+            return None
+
     def get_telemetry(self) -> list[dict]:
         """Get recent render telemetry entries."""
         return list(self._telemetry[-100:])  # Last 100 entries
@@ -266,3 +365,9 @@ class CompositeGraphRenderService:
             except Exception:
                 pass
             self._composite_renderer = None
+        if self._metal_renderer is not None:
+            try:
+                self._metal_renderer.cleanup()
+            except Exception:
+                pass
+            self._metal_renderer = None

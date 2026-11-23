@@ -375,6 +375,82 @@ CompositeRenderDialog → CompositeRenderExporter.export(settings, context)
 
 ---
 
+## 8.5 Metal 合成链（阶段 5.1 / 5.2 部分 / 5.3，默认关闭）
+
+`src/features/composite/render/metal/` 是合成域自己的 Metal compute 执行
+链，与既有 CPU/GL 路径共用同一份序列化图数据（`NodeGraph.to_dict()`），
+**不经 GL**，输出经 `CompositeGpuFrameHandle`（backend="metal"）发布。
+
+### 模块与数据流
+
+```
+graph_data（序列化合成图）
+  → node_support.evaluate_metal_support     纯预检：结构预检（graph_preflight）
+      + 节点能力表；任一参与节点未迁移/参数受限 → 整图回退（不跳节点）
+  → graph_plan.build_execution_plan          纯计划：参数合并（注册类默认）、
+      拓扑序、每节点 canvas/数据窗口/alpha 语义（FrameMeta）
+  → roi.propagate_input_halos / input_roi    tile halo 推导（计划参考实现 5A）
+  → renderer.MetalCompositeRenderer          真机执行（全帧或分块）：
+      · 节点按扩张区域 dispatch，Output 节点只写 tile 中心（裁回中心）
+      · 中间纹理 = 区域大小、按绝对画布坐标放置（pack rect）
+      · 一次提交：中间纹理 retire → MetalSubmissionScheduler 完成回调
+        各 finalize 一次；waitUntilCompleted 后才构造 handle（fence_ns=0，
+        内容完整语义），handle.release() 幂等归还输出纹理
+  → texture_pool.MetalTexturePool           按字节计量（RGBA16F 8B/px）、
+      GPU 完成后回收、(池代次, 槽号) 租约键
+  → tile_cache.MetalTileCache                内容寻址 tile 缓存，键 =
+      渲染器版本|工程修订|帧|节点:端口|尺寸|tile 区域|色彩描述|参数哈希
+```
+
+`cpu_reference.py` 是同一计划/参数包的 numpy 参考实现（对拍与无 GPU
+测试），`kernels.py` 的 MSL 与 GL 路径的 GLSL 逐条对齐（混合模式索引同
+`BLEND_MODES`）。
+
+### 已迁移登记（本批次）
+
+| 节点 | 状态 | 限制 |
+|---|---|---|
+| constant | 已迁移 | solid/checker/gradient/radial 全模式 |
+| transform | 已迁移 | linear/nearest；运动模糊子帧采样回退 |
+| merge | 已迁移 | 32 混合模式、mask 通道/反相、alpha 策略、mix/opacity；psd_srgb 回退 |
+| output | 已迁移 | input/custom 画布、alpha 策略、背景合成、srgb 编码；project 画布回退 |
+| crop | 已迁移 | reformat 两种模式、black/transparent/repeat/mirror 越界策略 |
+| premult / unpremult | 已迁移 | — |
+| mask | 仅 rectangle | ellipse/polygon/circle 与圆角未迁移 → 回退 |
+| noop / dot | 直通 | — |
+| 其余全部 | 未迁移 → 整图回退 | 含 Keyer/Matte/模糊/形态学/Glow/Light Wrap/文本/PSD/3D |
+
+### 启用与回退
+
+- 开关：`TOPOS_COMPOSITE_METAL=1`（默认关闭）+ 本机
+  `MetalComputeContext.is_supported()`。`auto`/`opengl` 与未设置时行为
+  与既有 CPU/GL 完全一致；入口是
+  `CompositeGraphRenderService.render_metal()`（`render_cpu`/`render_gpu`
+  不变）。
+- 预检不通过（未迁移节点/结构错误/参数受限）返回**显式不可用**句柄，
+  `fallback_reason` 含节点 ID 与类型；调用方整图回退 CPU/GL。
+- 提交环满（back-pressure）时丢弃本帧编码组并显式回退，不发布半成品。
+
+### 与 GL 路径的已知差异（有意/待办）
+
+1. **Transform 固定画布语义**：移出中间画布的内容在该级被裁掉（GL 的
+   bbox 跟随语义会保留到 Merge 画布）。画布内的翻转/缩放/平移逐像素
+   一致（含像素中心对齐与插值余量）。
+2. **Mask 内外语义**：复刻 GL `_MASK_FRAGMENT` 的实测行为（SDF
+   `step(0.0, d)` → 形状内 0、形状外 1；GLSL 注释「1 inside」与实现不符，
+   已用 standalone GL 探针核实）。`invert` 参数提供翻转。
+3. **分块限制**：tile pass 假设单画布空间链（crop-reformat 换画布的图
+   走全帧单 tile）；中间节点级 GPU 纹理缓存未接（缓存当前在输出 tile
+   粒度，命中后重新上传）。
+4. **同步发布**：服务 API 语义要求内容完整，当前提交后
+   `waitUntilCompleted` 再发布（handle 契约的 finish 兜底）；异步发布/
+   Metal→GL fence 留给视口接入（阶段 2/5.6）。
+
+测试：`tests/composite/test_metal_composite_chain.py`（无 GPU 机器跑逻辑
+层，真机层自动 skip；容差依据 RGBA16F 舍入 ≈ 2^-11 相对误差）。
+
+---
+
 ## 9. 依据的源文件
 
 以下文件均在本文撰写时逐段通读核对（行号以当前 dev 分支为准）：
