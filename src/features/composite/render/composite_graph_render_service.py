@@ -48,7 +48,15 @@ _COMPOSITE_METAL_ENV = "TOPOS_COMPOSITE_METAL"
 
 
 def composite_metal_enabled() -> bool:
-    """Metal 合成链是否被显式启用（默认关闭，纯环境变量判定）。"""
+    """Metal 合成链是否被显式启用（默认关闭，纯环境变量判定）。
+
+    ``TOPOS_METAL_DISABLE=composite_metal`` 可单独关掉它（迁移计划 8.6 的
+    回退开关），无论 ``TOPOS_COMPOSITE_METAL`` 是否设置。
+    """
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    if feature_disabled(MetalFeature.COMPOSITE_GRAPH):
+        return False
     raw = os.environ.get(_COMPOSITE_METAL_ENV, "").strip().lower()
     return raw in ("1", "true", "yes", "on")
 

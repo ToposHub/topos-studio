@@ -97,3 +97,28 @@ python tools/bench_metal_ab_playback.py \
 - 报告里的 `实际呈现面` 一列（`present_path_counts`）区分 `native_metal` 与 `gl_viewer`。只看
   `实际渲染后端` 不够：Metal 计算的帧也可以经 IOSurface 落回 GL 上屏。
 - 播放采样器带 `native` 配置；显示器休眠时拒绝测量，除非显式 `--allow-display-asleep`（数值不可比）。
+
+## 回退开关与启用台账（阶段 8.5 / 8.6）
+
+发现回归时先关掉对应能力（整个会话留在兼容路径），再修正、复测、去掉开关：
+
+```bash
+TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
+```
+
+开关优先于各能力自己的开启方式；被关掉的能力在日志与 trace 里的原因是
+`disabled_by_switch:<能力>`，可与设备、格式、shader、drawable 失败区分。未知名称只是被忽略
+（不关掉任何东西）。能力清单与各自的状态在 `src/shared/gpu/metal/feature_switches.py` 的
+`ROLLOUT`，每次把某项改成默认开启时在那里记下提交与兼容条件。
+
+| 能力 | 默认 | 开启方式 | 转为默认的前提 |
+|---|---|---|---|
+| `edit_metal_preview` | 关 | `TOPOS_EDIT_METAL_PREVIEW=1` 或 `TOPOS_BACKEND_GRAPHICS=metal` | Intel 独显与 Apple Silicon 上守住 UHD 播放帧数和 seek p95 |
+| `edit_metal_composite` | 关 | 同上（`all` 模式） | 真机多层工程播放通过并测过播放期开销 |
+| `native_viewport` | 关 | `TOPOS_EDIT_METAL_VIEWPORT=1` | 显示器清醒时验证 resize、隐藏、全屏、换屏、关闭 |
+| `composite_metal` | 关 | `TOPOS_COMPOSITE_METAL=1` | 有生产调用方（comp clip、无头导出）且与 CPU/GL 取帧一致 |
+| `color_graph_metal` | 关 | 无（执行器尚无生产调用方） | 剪辑渲染与交付经共享入口取图 |
+| `export_native_vt` | 开（macOS，graphics 为 auto/metal） | `TOPOS_EXPORT_NATIVE_VT=0` 关闭 | 导出文件上验证音频、分数帧率与取消 |
+
+`tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的
+可复现回退测试。

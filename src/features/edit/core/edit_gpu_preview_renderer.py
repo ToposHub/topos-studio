@@ -2697,9 +2697,17 @@ class EditGpuPreviewRenderer(QThread):
         composite has passed the default-rollout gates.  A refusal is a
         per-frame decision: the GL path renders that frame unchanged.
         """
-        if (getattr(self, "_metal_preview_mode", "off") != "all"
+        from src.shared.gpu.metal.feature_switches import (
+            MetalFeature,
+            switch_refusal,
+        )
+
+        switched_off = switch_refusal(MetalFeature.EDIT_COMPOSITE)
+        if (switched_off is not None or getattr(self, "_metal_preview_mode", "off") != "all"
                 or getattr(self, "_effect_hdr", False)
                 or task.background or task.cached_composite):
+            if switched_off is not None:
+                self._note_metal_composite_refusal(switched_off)
             return None
         from src.features.edit.core.metal_edit_compositor import (
             PlanRefusal,
@@ -5711,7 +5719,10 @@ void main() {
         自己的线程上创建呈现端口与原生帧生产器。默认关闭
         （TOPOS_EDIT_METAL_VIEWPORT=1 显式开启）；任何失败都回到 GL Viewer。
         """
-        self._native_viewport_opt_in = _env_flag("TOPOS_EDIT_METAL_VIEWPORT")
+        from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+        self._native_viewport_opt_in = (_env_flag("TOPOS_EDIT_METAL_VIEWPORT")
+                                        and not feature_disabled(MetalFeature.NATIVE_VIEWPORT))
         self._native_viewport_lock = threading.Lock()
         self._native_viewport_request: Optional[tuple] = None
         self._native_port: Optional[Any] = None        # render thread only

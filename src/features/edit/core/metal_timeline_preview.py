@@ -103,6 +103,10 @@ def metal_preview_mode() -> Literal["off", "lut", "all"]:
     """Resolve which eligible frames an Edit preview worker sends to Metal."""
     if sys.platform != "darwin":
         return "off"
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    if feature_disabled(MetalFeature.EDIT_PREVIEW):
+        return "off"
     override = os.getenv("TOPOS_EDIT_METAL_PREVIEW", "").strip().lower()
     if override in {"0", "false", "off", "no"}:
         return "off"
