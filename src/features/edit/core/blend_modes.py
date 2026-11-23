@@ -56,8 +56,11 @@ def _clip_color_simple(c: np.ndarray) -> np.ndarray:
     l = _lum(c)[..., None]
     mn = c.min(axis=-1)[..., None]
     mx = c.max(axis=-1)[..., None]
-    low = np.where(mn < 0.0, (c - l) * l / np.maximum(l - mn, _EPS), c)
-    high = np.where(mx > 1.0, (c - l) * (1.0 - l) / np.maximum(mx - l, _EPS), low)
+    # W3C：C = L + ((C - L) × L) / (L - n)，再 C = L + ((C - L) × (1 - L)) / (x - L)。
+    # 两个分支都要加回 L；漏掉时超出范围的分量会被拉向 0 而不是等亮度点，
+    # 四种 HSL 模式的 CPU 导出因此与 blend.glsl 的 GPU 预览不一致。
+    low = np.where(mn < 0.0, l + (c - l) * l / np.maximum(l - mn, _EPS), c)
+    high = np.where(mx > 1.0, l + (c - l) * (1.0 - l) / np.maximum(mx - l, _EPS), low)
     return np.where((mn < 0.0) | (mx > 1.0), high, c)
 
 
