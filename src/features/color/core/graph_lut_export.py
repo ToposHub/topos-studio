@@ -71,7 +71,7 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
     )
     for candidate in chain:
         payload = node_layer_payload(candidate)
-        if payload is None:
+        if payload is None or payload.get("visible") is False:
             continue
         # N05：节点 Color Space/Gamma 变换未在 bake 数学内（v1）——
         # 显式拒绝，不产出少变换的 cube
@@ -97,9 +97,7 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
             payload.pop("warper_params", None)
             payload.pop("warper_space", None)
             payload.pop("warper_state", None)
-        # N14-B：LUT 导出为点态 bake 语义——HSL/soft_clip/blend 等
-        # 逐像素域不在 pointwise 表达域（backend 显式声明，不随 CPU
-        # 图路径接线放开）
+        # Check the pointwise backend's effect limits before rendering the grid.
         domain_errors = production_layer_domain_errors(
             payload, backend="pointwise")
         # LUT 由烘焙路径处理（点态）——其余域错误全部保留
@@ -149,11 +147,9 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
     """单 Corrector 的 pointwise CPU 求值（R05 v1 顺序：grading → curves
     → … → LUT；本导出仅承载基础域 + LUT，其余已在预检拒绝）。"""
     from src.features.color.core.color_graph_cpu import (
+        UnsupportedNode,
         apply_curves_cpu,
-        apply_grading_uniforms_cpu,
-    )
-    from src.features.color.core.composition_uniforms import (
-        composition_uniform_values,
+        apply_layer_grading_cpu,
     )
     from src.features.color.core.color_node_lut_spec import (
         blend_node_lut_strength,
@@ -162,11 +158,25 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
         load_lut, resample_to_unit_domain, sample_lut_trilinear,
     )
     layer = dict(payload)
-    values = composition_uniform_values(layer, width=1, height=1)
-    out = apply_grading_uniforms_cpu(color, values)
+    try:
+        out, _ = apply_layer_grading_cpu(color, layer, width=1, height=1)
+    except UnsupportedNode as exc:
+        raise ValueError(str(exc)) from exc
     curves = layer.get("curves_lut")
     if curves is not None:
         out = apply_curves_cpu(out, curves)
+    hsl_curves = layer.get("hsl_curve_lut")
+    if hsl_curves is not None:
+        from src.features.color.core.advanced_grade_cpu import apply_hsl_curves_image
+
+        out = apply_hsl_curves_image(out, hsl_curves)
+    from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+
+    soft_clip = layer.get("curves_soft_clip")
+    if uses_calibrated_soft_clip(soft_clip):
+        from src.features.color.core.advanced_grade_cpu import apply_curves_soft_clip_image
+
+        out = apply_curves_soft_clip_image(out, dict(soft_clip))
     # CW-B09:warper 在 grading/curves 之后、LUT 之前(与 composition
     # 管线位序一致:... → mixer → WARPER → lut3d)
     warper = _pointwise_warper(layer)
@@ -229,7 +239,7 @@ def bake_graph_lut(graph: ColorGraphData, size: int = 33,
         if nxt is None or nxt.node_type == NodeType.OUTPUT.value:
             break
         payload = node_layer_payload(nxt)
-        if payload is not None:
+        if payload is not None and payload.get("visible") is not False:
             current = _apply_pointwise_corrector(current, payload, lut_cache)
         node = nxt
     table = np.clip(current, dmin, dmax).reshape(size, size, size, 3)

@@ -1,4 +1,7 @@
 {
+  "grading": {
+    "rec709_calibration": "启用 Rec.709 Gamma 2.4 实测一级调色"
+  },
   "color_keyframes": {
     "title": "关键帧",
     "demo": "示例",

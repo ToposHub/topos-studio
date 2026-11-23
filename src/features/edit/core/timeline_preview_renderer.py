@@ -2065,6 +2065,7 @@ class PreviewRenderWorker(QThread):
             (success, trace_info) tuple.
         """
         from src.features.edit.core.edit_gpu_preview_renderer import EditRenderTask
+        from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.shared.media.gpu_frame import safe_release_gpu_frame
 
         # F2.8：变速插值 GPU 门控（与导出 GPU 路径同语义，预览/成片一致）
@@ -2305,8 +2306,14 @@ class PreviewRenderWorker(QThread):
             # source frame). Transform/Opacity are carried by ``layer``.
             # FX-C02 计划（ApplyAdjustment）已携带构建时采集的 effects 与
             # T-P1-22 ColorStack grade 快照。
+            preview_grade = (op.grade if isinstance(op, ApplyAdjustment)
+                             else self._get_preview_color_grade(layer))
+            if any(grade_uses_calibration({"grading_params": extra})
+                   for extra in ((preview_grade or {}).get("chain_extra_params") or ())):
+                trace_info["fallback_reason"] = "measured_color_chain_cpu_compositor"
+                return False, trace_info
             if isinstance(op, ApplyAdjustment):
-                adjustment_layers.append((layer, op.effects, op.grade))
+                adjustment_layers.append((layer, op.effects, preview_grade))
                 continue
 
             # A ColorStack belongs to the timeline clip, not to the source
@@ -2324,7 +2331,6 @@ class PreviewRenderWorker(QThread):
                 # that path can represent the same full projective ordering.
                 trace_info["fallback_reason"] = "video_stabilization_source_space"
                 return False, trace_info
-            preview_grade = self._get_preview_color_grade(layer)
             # Same pattern for the clip's video filters (blur / sharpen / ...):
             # snapshot the effect chain on the UI thread so the GPU renderer
             # can apply each effect on the per-track texture without touching
@@ -4940,14 +4946,24 @@ class PreviewRenderWorker(QThread):
         """
         clip = getattr(layer, "clip", None)
         stack_id = getattr(clip, "color_stack_id", None)
-        if not stack_id:
-            return None
-
         project = getattr(self._asset_resolver, "_project", None)
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
-        if stack is None:
+        if not stacks or clip is None:
             return None
+
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+        from src.features.edit.core.color_chain import chain_extra_params, extras_active
+
+        current_timeline = getattr(self._asset_resolver, "_current_timeline", None)
+        if current_timeline is None:
+            current_timeline = getattr(self, "_timeline_sequence", None)
+        timeline_id = str(getattr(current_timeline, "timeline_id", "") or "")
+        extras = chain_extra_params(project, timeline_id, clip,
+                                    exclude_timeline=exclude_timeline)
+        measured_extras = any(grade_uses_calibration({"grading_params": extra}) for extra in extras)
+        if stack is None:
+            return {"grading_params": {}, "chain_extra_params": extras} if measured_extras else None
 
         grading_params = dict(getattr(stack, "grading_params", {}) or {})
         wheel_defaults = {
@@ -5031,21 +5047,11 @@ class PreviewRenderWorker(QThread):
         # 恒为 ""）→ timeline 段在 Edit 预览/调整剪辑/磁盘缓存全部出口被
         # 跳过而导出应用——预览≠成片。以 worker 自持的 `_timeline_sequence`
         # 兜底（resolver 属性保留为优先源，防既有注入方依赖）。
-        from src.features.edit.core.color_chain import (
-            chain_extra_params, extras_active,
-        )
-        current_timeline = getattr(
-            self._asset_resolver, "_current_timeline", None) \
-            if self._asset_resolver is not None else None
-        if current_timeline is None:
-            current_timeline = getattr(self, "_timeline_sequence", None)
-        timeline_id = str(
-            getattr(current_timeline, "timeline_id", "") or "")
-        extras = chain_extra_params(project, timeline_id, clip,
-                                    exclude_timeline=exclude_timeline)
-        extras_on = extras_active(extras)
+        extras_on = measured_extras or extras_active(extras)
 
-        graph = getattr(stack, "color_graph", None)
+        from src.features.color.core.color_graph_migration import stack_primary_execution_graph
+
+        graph = stack_primary_execution_graph(stack)
         if graph is not None:
             return {"stack_id": str(stack_id), "color_graph": graph,
                     "source_frame": int(getattr(layer, "source_frame", 0)),
@@ -5325,7 +5331,9 @@ class PreviewRenderWorker(QThread):
         return apply_stabilization_cpu(graded, state, int(getattr(layer, "source_frame", 0)))
 
     def _clip_color_graph(self, layer: ClipLayerInfo) -> Optional[Any]:
-        """clip 调色栈携带的权威图（无图栈返回 None）。"""
+        """Resolve the clip's explicit graph or its measured primary execution graph."""
+        from src.features.color.core.color_graph_migration import stack_primary_execution_graph
+
         clip = getattr(layer, "clip", None)
         stack_id = getattr(clip, "color_stack_id", None)
         if not stack_id:
@@ -5334,7 +5342,7 @@ class PreviewRenderWorker(QThread):
             if self._asset_resolver is not None else None
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
-        return getattr(stack, "color_graph", None) if stack is not None else None
+        return stack_primary_execution_graph(stack)
 
     def _apply_preview_color_graph_cpu(
         self,
@@ -5415,6 +5423,13 @@ class PreviewRenderWorker(QThread):
         if grade is None:
             return frame_data
 
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+
+        extras = [entry for entry in (grade.get("chain_extra_params") or ())
+                  if isinstance(entry, dict)]
+        measured = grade_uses_calibration(grade) or any(
+            grade_uses_calibration({"grading_params": extra}) for extra in extras)
+
         # P1-COLOR-03: 有关键帧轨道时按当前帧求值（与导出同一函数）
         grading_params = grade["grading_params"]
         if grade.get("grade_keyframes"):
@@ -5445,19 +5460,19 @@ class PreviewRenderWorker(QThread):
             # M05（S08）：链段按 _chain_segment 分侧——pre 段在主栈之前，
             # trim/post 段在主栈之后（pre→main→trim→post；未标记载荷按
             # 主栈之后处理，与旧行为一致）。
-            extras = [
-                e for e in (grade.get("chain_extra_params") or ())
-                if isinstance(e, dict)]
-
             def _apply_chain_entries(buf, entries):
                 for extra in entries:
+                    measured_entry = grade_uses_calibration({"grading_params": extra})
                     if extra.get("_unsupported_advanced", False):
+                        if measured_entry:
+                            raise RuntimeError("Measured color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Edit preview color chain: clip %s 链段含 curves/"
                             "LUT 等高级操作，primary 预览跳过该段（成片渲染"
                             "路径不受影响）", layer.clip_id)
                         continue
-                    if any(abs(float(extra.get(name, 0.0) or 0.0)) > 1e-6
+                    if measured_entry or any(
+                           abs(float(extra.get(name, 0.0) or 0.0)) > 1e-6
                            for name in ("exposure", "temp", "tint", "contrast",
                                         "shadow", "highlights", "saturation",
                                         "vibrance", "mid_detail", "sharpness",
@@ -5495,6 +5510,8 @@ class PreviewRenderWorker(QThread):
                 layer.clip_id,
                 error,
             )
+            if measured:
+                raise
             return frame_data
 
     def _is_identity_layer(self, layer: ClipLayerInfo) -> bool:

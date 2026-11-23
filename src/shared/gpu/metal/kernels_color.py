@@ -645,7 +645,7 @@ struct GraphGradingParams {
     float lum_mix;
     float opacity;
     uint32_t mask_mode;   // 0 = 无 matte（k = opacity）；1 = matte buffer
-    uint32_t has_curves;  // 0 = 跳过 curves
+    uint32_t has_curves;  // 0 = bypass, 1 = absolute RGB, 2 = calibrated YRGB
 };
 """
 
@@ -1074,6 +1074,30 @@ static inline float3 graph_apply_curves(float3 color, device const float* curves
     }
     return res;
 }
+
+static inline float graph_curve_delta(float x, int ch, int offset,
+                                      device const float* curves) {
+    float index = clamp(x, 0.0, 1.0) * 255.0;
+    int low = int(index);
+    int high = min(low + 1, 255);
+    return mix(curves[(offset + low) * 3 + ch], curves[(offset + high) * 3 + ch],
+               index - float(low));
+}
+
+static inline float3 graph_apply_calibrated_curves(float3 color,
+                                                    device const float* curves) {
+    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+    const float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float3 delta = float3(
+        graph_curve_delta(encoded.r, 0, 0, curves),
+        graph_curve_delta(encoded.g, 1, 0, curves),
+        graph_curve_delta(encoded.b, 2, 0, curves)
+    );
+    float y = graph_curve_delta(dot(encoded, weights), 0, 256, curves);
+    float3 response = delta + float3(y - dot(delta, weights));
+    float3 mapped = encoded + response;
+    return select(sign(mapped) * pow(abs(mapped), float3(2.4)), color, response == 0.0);
+}
 """
 
 _GRAPH_GRADING_KERNEL_MSL = """
@@ -1082,7 +1106,7 @@ kernel void graph_grading(
     device const half4* src      [[buffer(0)]],
     device const half4* mask     [[buffer(1)]],
     device half4*       out      [[buffer(2)]],
-    device const float* curves   [[buffer(3)]],   // 768 float（恒绑定）
+    device const float* curves   [[buffer(3)]],   // 768 legacy or 1536 calibrated floats
     constant GraphGradingParams& p [[buffer(4)]],
     constant GraphSizeParams& s [[buffer(5)]],
     uint2 gid [[thread_position_in_grid]])
@@ -1093,7 +1117,9 @@ kernel void graph_grading(
     float3 color = src4.rgb;
 
     color = graph_apply_grading(color, p);
-    if (p.has_curves != 0u) {
+    if (p.has_curves == 2u) {
+        color = graph_apply_calibrated_curves(color, curves);
+    } else if (p.has_curves == 1u) {
         color = graph_apply_curves(color, curves);
     }
 
@@ -1170,7 +1196,7 @@ def make_graph_grading_params(
     saturation: float, vibrance: float, shadow: float, highlights: float,
     hue_shift: float, lift_saturation: float, gamma_saturation: float,
     gain_saturation: float, lift, gamma, gain, opacity: float,
-    mask_mode: int, has_curves: bool,
+    mask_mode: int, has_curves: bool, calibrated_curves: bool = False,
     pivot: float = 0.18,
     offset=(0.0, 0.0, 0.0),
     log_shadow=(0.0, 0.0, 0.0),
@@ -1212,11 +1238,11 @@ def make_graph_grading_params(
     params["lum_mix"] = float(lum_mix)
     params["opacity"] = float(opacity)
     params["mask_mode"] = int(mask_mode)
-    params["has_curves"] = 1 if has_curves else 0
+    params["has_curves"] = 2 if calibrated_curves else int(has_curves)
     return params
 
 
 def curves_lut_to_flat_buffer(lut) -> np.ndarray:
-    """(256, 1, 3)/(256, 3) LUT → kernel 侧 768 float 线性 buffer。"""
-    arr = np.asarray(lut, dtype=np.float32).reshape(256, 3)
+    """Flatten legacy RGB and calibrated YRGB LUTs for the Metal kernel."""
+    arr = np.asarray(lut, dtype=np.float32).reshape(-1, 3)
     return np.ascontiguousarray(arr.reshape(-1))

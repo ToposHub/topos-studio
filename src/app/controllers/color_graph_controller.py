@@ -2100,6 +2100,14 @@ class ColorGraphAppHost:
         return tuple(node_id for _, node_id in
                      getattr(self._panel, "_parents", ()))
 
+    def submit_curve_change(self, node_id: str, domains: Mapping[str, Any],
+                            transaction_id: str) -> bool:
+        """Commit the same curve-domain payload used by grade transfer."""
+        return self._bridge.submit_buffered(
+            "paste_selected_domains",
+            {"node_ids": (node_id,), "payload": domains, "domains": tuple(domains)},
+            transaction_id, compound_path=self._tool_compound_path())
+
     def submit_qualifier_change(self, node_id: str,
                                 qualifier_patch: Mapping[str, Any],
                                 transaction_id: str) -> bool:

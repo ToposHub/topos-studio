@@ -289,7 +289,8 @@ def _hsv_to_rgb(hsv: np.ndarray) -> np.ndarray:
 
 
 def apply_grading_uniforms_cpu(color: np.ndarray,
-                               values: Mapping[str, Any]) -> np.ndarray:
+                               values: Mapping[str, Any], *,
+                               source_color: np.ndarray | None = None) -> np.ndarray:
     """GRADING_SNIPPET.apply_grading 的 numpy 移植（基础点态域，逐条同序）。
 
     ``values`` 为 ``composition_uniform_values`` 的产物（与 GL 同一
@@ -303,7 +304,7 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
     c = np.ascontiguousarray(color, dtype=_F32)
 
     # 0. 原始亮度（Lum Mix 用）
-    luma_original = _luma601(c)
+    luma_original = _luma601(c if source_color is None else np.asarray(source_color, dtype=_F32))
 
     # 1. Exposure
     exposure = _F32(values.get("u_exposure", 0.0))
@@ -470,13 +471,42 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
     return c
 
 
+def apply_layer_grading_cpu(color: np.ndarray, layer: Mapping[str, Any], *,
+                            width: int, height: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """Evaluate the primary grade stage for CPU rendering and pointwise bake."""
+    from src.features.color.core.composition_uniforms import composition_uniform_values
+    from src.features.color.core.primary_calibration import (
+        apply_calibration_grid, calibrated_grade_inputs,
+    )
+
+    try:
+        calibrated = calibrated_grade_inputs(layer)
+    except (OSError, ValueError) as exc:
+        raise UnsupportedNode(f"Primary calibration: {exc}") from exc
+    legacy_params = None
+    source_color = color
+    if calibrated is not None:
+        grid, legacy_params = calibrated
+        if grid is not None:
+            color = apply_calibration_grid(color, grid)
+    values = composition_uniform_values(
+        dict(layer), width=width, height=height, grading_params_override=legacy_params)
+    return apply_grading_uniforms_cpu(color, values, source_color=source_color), values
+
+
 def apply_curves_cpu(color: np.ndarray, lut: np.ndarray) -> np.ndarray:
     """CURVES_SNIPPET.apply_curves 的 numpy 移植（256×3 LUT）。
 
     GL 经 LINEAR 纹理在 texel 中心采样（数学上等价最近邻取整）；区间外
     线性外推 + 暗部/高光软性保护 + 通道平衡（与 GLSL 逐条同序）。
     """
-    lut = np.asarray(lut, dtype=_F32).reshape(256, 3)
+    from src.features.color.core.curves_calibration import (
+        apply_calibrated_curves_cpu, is_calibrated_curves_lut,
+    )
+    lut = np.asarray(lut, dtype=_F32)
+    if is_calibrated_curves_lut(lut):
+        return apply_calibrated_curves_cpu(color, lut)
+    lut = lut.reshape(256, 3)
     res = np.empty_like(color)
     v0, v1 = lut[0], lut[1]
     v254, v255 = lut[254], lut[255]
@@ -517,6 +547,7 @@ CPU_GRADING_BASIC_KEYS = frozenset({
     # apply_grading_uniforms_cpu 已实现同序数学，CPU oracle 显式支持。
     "offset", "pivot", "log_shadow", "log_midtone", "log_highlight",
     "log_offset", "log_low_range", "log_high_range", "lum_mix",
+    "primary_calibration_version",
 })
 
 #: GL composition 忽略的别名死键（Layer 默认 dict 携带；CPU 同样忽略，
@@ -560,9 +591,18 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     拒绝（Metal kernel 参数位未扩、LUT 导出为点态 bake 语义），逐域
     恢复不一次性取消 fail-closed。
     """
+    from src.features.color.core.primary_calibration import grade_uses_calibration
+
     errors: list[str] = []
     grading = layer.get("grading_params")
     grading = grading if isinstance(grading, Mapping) else {}
+    try:
+        calibrated = grade_uses_calibration(layer)
+    except ValueError as exc:
+        errors.append(str(exc))
+    else:
+        if calibrated and backend == "metal":
+            errors.append("实验性 Metal 图路径不支持实测初级调色")
     unknown = sorted(set(grading) - CPU_GRADING_BASIC_KEYS
                      - _CPU_DEAD_GRADING_KEYS)
     if unknown:
@@ -580,21 +620,25 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     if layer.get("warper_params") is not None:
         errors.append("warper_params 不在基础域")
     # N14 v1：LUT3D 已实现（trilinear + R05 强度混合；强度 0 = 恒等）
-    # N14-B：HSL 曲线 / curves_soft_clip 在 CPU 后端已接线
-    # （advanced_grade_cpu 同式）；Metal/pointwise 维持拒绝。
+    # Calibrated HSL also has a pointwise bake path. The experimental Metal
+    # graph executor still does not bind HSL auxiliary textures.
     _cpu_backend = backend == "cpu"
     hsl_data = layer.get("hsl_curve_data")
     hsl_active = layer.get("hsl_curve_lut") is not None or (
         isinstance(hsl_data, Mapping) and bool(hsl_data))
+    if backend == "pointwise" and hsl_active:
+        from src.features.color.core.hsl_curve_calibration import is_calibrated_hsl_lut
+
+        hsl_active = not is_calibrated_hsl_lut(np.asarray(layer.get("hsl_curve_lut")))
     if hsl_active and not _cpu_backend:
         errors.append("HSL 曲线不在基础域")
     soft_clip = layer.get("curves_soft_clip")
     if isinstance(soft_clip, Mapping) and soft_clip:
         from src.features.color.core.curves_soft_clip import (
-            default_curves_soft_clip,
+            curves_soft_clip_is_identity, uses_calibrated_soft_clip,
         )
-        if dict(soft_clip) != default_curves_soft_clip() \
-                and not _cpu_backend:
+        if (not curves_soft_clip_is_identity(dict(soft_clip)) and not _cpu_backend
+                and not (backend == "pointwise" and uses_calibrated_soft_clip(soft_clip))):
             errors.append("curves_soft_clip 非默认（不在基础域）")
     fx = layer.get("effects_params")
     if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx):
@@ -675,14 +719,10 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         layer, spatial_mask_supplied=mask is not None, backend="cpu")
     if errors:
         raise UnsupportedNode("; ".join(errors))
-    from src.features.color.core.composition_uniforms import (
-        composition_uniform_values,
-    )
     h, w = image.shape[:2]
-    values = composition_uniform_values(
-        dict(layer), width=width or w, height=height or h)
     src = np.ascontiguousarray(image, dtype=_F32)
-    graded = apply_grading_uniforms_cpu(src[..., :3], values)
+    graded, values = apply_layer_grading_cpu(
+        src[..., :3], layer, width=width or w, height=height or h)
     lut = layer.get("curves_lut")
     if lut is not None:
         graded = apply_curves_cpu(graded, lut)
@@ -696,7 +736,12 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
                 build_hsl_curve_lut_from_data,
             )
             try:
-                hsl_lut = build_hsl_curve_lut_from_data(dict(hsl_data))
+                from src.features.color.core.curves_calibration import curves_calibration_enabled
+
+                hsl_lut = build_hsl_curve_lut_from_data(
+                    dict(hsl_data),
+                    calibration_version=int(curves_calibration_enabled(layer.get("curves_edit"))),
+                )
             except (TypeError, ValueError):
                 hsl_lut = None
     if hsl_lut is not None:

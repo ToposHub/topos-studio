@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 import pytest
@@ -142,3 +144,68 @@ def test_lut_order_is_baked_after_grading(tmp_path: Path) -> None:
     # grading 恒等 → LUT 交换：R↔B（0.8↔0.2）
     assert np.allclose(out, [[0.2, 0.5, 0.8]], atol=2e-3)
     set_active_project_resolver(None)
+
+
+def test_calibrated_grade_matches_cpu_and_baked_lut_with_legacy_controls(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.color.core import primary_calibration
+    from src.features.color.core.color_graph_cpu import (
+        corrector_production_oracle,
+        production_layer_domain_errors,
+        run_graph_frame_cpu,
+    )
+    from src.features.color.core.color_graph_param_source import node_layer_payload
+    from src.shared.color.lut_loader import parse_cube, sample_lut_trilinear
+
+    grid = np.zeros((2, 2, 2, 3), dtype=np.float32)
+    grid[..., 0] = 0.125
+
+    def calibration_inputs(layer: Mapping[str, Any]) -> tuple[np.ndarray, dict[str, float]] | None:
+        if not primary_calibration.grade_uses_calibration(layer):
+            return None
+        return grid, {"exposure": 10.0}
+
+    monkeypatch.setattr(primary_calibration, "calibrated_grade_inputs", calibration_inputs)
+    graph = _minimal_chain_graph()
+    source, corrector, output = graph.nodes
+    corrector = replace(corrector, params={
+        "grade": {"primary_calibration_version": 1, "exposure": 10.0, "temp": 80.0},
+    })
+    graph = replace(graph, nodes=(source, corrector, output))
+    layer = node_layer_payload(corrector)
+    assert layer is not None
+    assert not production_layer_domain_errors(layer, backend="cpu")
+    assert not production_layer_domain_errors(layer, backend="pointwise")
+    assert production_layer_domain_errors(layer, backend="metal")
+    assert not graph_pointwise_export_errors(graph)
+
+    samples = np.array([[[0.125, 0.25, 0.375, 0.7]]], dtype=np.float32)
+    encoded = samples[..., :3] ** (1.0 / 2.4)
+    encoded[..., 0] += 0.125
+    expected = encoded ** 2.4 * 2.0 ** 0.06
+    rendered = corrector_production_oracle(samples, layer)
+    np.testing.assert_allclose(rendered[..., :3], expected, atol=1e-7)
+    np.testing.assert_array_equal(rendered[..., 3], samples[..., 3])
+    np.testing.assert_array_equal(
+        run_graph_frame_cpu(graph, samples[..., [2, 1, 0, 3]], 0), rendered[..., [2, 1, 0, 3]],
+    )
+    np.testing.assert_array_equal(
+        corrector_production_oracle(samples, layer, mask=np.zeros((1, 1, 1), dtype=np.float32)), samples,
+    )
+
+    baked = parse_cube(bake_graph_lut(graph, size=9))
+    np.testing.assert_allclose(sample_lut_trilinear(baked, samples[..., :3]), expected, atol=6e-7)
+    disabled = replace(graph, nodes=(source, replace(corrector, enabled=False), output))
+    identity = parse_cube(bake_graph_lut(disabled, size=9))
+    np.testing.assert_array_equal(sample_lut_trilinear(identity, samples[..., :3]), samples[..., :3])
+
+
+def test_unknown_calibration_version_fails_pointwise_preflight() -> None:
+    graph = _minimal_chain_graph()
+    source, corrector, output = graph.nodes
+    corrector = replace(corrector, params={"grade": {"primary_calibration_version": 99}})
+    graph = replace(graph, nodes=(source, corrector, output))
+
+    assert graph_pointwise_export_errors(graph)
+    with pytest.raises(ValueError, match="not exportable"):
+        bake_graph_lut(graph, size=3)

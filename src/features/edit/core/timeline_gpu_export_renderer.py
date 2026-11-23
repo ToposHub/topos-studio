@@ -771,7 +771,11 @@ def grade_params_to_uniforms(grading_params: Dict[str, Any]) -> Dict[str, Any]:
     （轮盘 lift/gamma/gain 经 ``GradingMath.params_to_rgb`` 求值），保证
     导出 GPU 路径与预览 shader 消费同一组 uniform。
     """
+    from src.features.color.core.primary_calibration import grade_uses_calibration
     from src.features.color.core.the_decompiler import GradingMath
+
+    if grade_uses_calibration({"grading_params": grading_params}):
+        raise ValueError("Measured primary calibration requires the color graph or CPU compositor")
 
     def scalar(name: str) -> float:
         try:

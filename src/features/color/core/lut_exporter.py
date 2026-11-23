@@ -86,8 +86,11 @@ class LutExportWorker(QObject):
         """
         if lut is None:
             return False
+        from src.features.color.core.curves_calibration import is_calibrated_curves_lut
         try:
             arr = np.asarray(lut, dtype=np.float32)
+            if is_calibrated_curves_lut(arr):
+                return bool(np.any(arr))
             if arr.shape[0] != 256:
                 return True
             if arr.ndim == 3:
@@ -112,7 +115,7 @@ class LutExportWorker(QObject):
         Identity is all-ones except row 1 (HueHue) which is zero.
 
         Args:
-            lut: ``Layer.hsl_curve_lut`` ndarray of shape (6, 256) or anything.
+            lut: ``Layer.hsl_curve_lut`` ndarray of shape (6, 256) or (6, 512).
 
         Returns:
             bool: True if the LUT would change colors (parse failure also
@@ -122,9 +125,9 @@ class LutExportWorker(QObject):
             return False
         try:
             arr = np.asarray(lut, dtype=np.float32)
-            if arr.shape != (6, 256):
+            if arr.shape not in ((6, 256), (6, 512)):
                 return True
-            expected = np.ones((6, 256), dtype=np.float32)
+            expected = np.ones_like(arr)
             expected[1, :] = 0.0
             return not np.allclose(arr, expected, atol=1.0e-4)
         except Exception:
@@ -540,6 +543,13 @@ class LutExportWorker(QObject):
 
         This mirrors the GLSL apply_grading function from shader_nodes.py.
         """
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+
+        layer = {"grading_params": params}
+        if grade_uses_calibration(layer):
+            from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
+
+            return apply_layer_grading_cpu(color, layer, width=1, height=1)[0]
         result = color.copy()
 
         # Exposure
@@ -794,6 +804,11 @@ class LutExportWorker(QObject):
         Returns:
             Processed LUT array
         """
+        from src.features.color.core.curves_calibration import (
+            apply_calibrated_curves_cpu, is_calibrated_curves_lut,
+        )
+        if is_calibrated_curves_lut(curves_lut):
+            return apply_calibrated_curves_cpu(lut, curves_lut)
         result = lut.copy()
 
         # curves_lut shape: (256, 1, 3) for RGB or (256, 1) for master
@@ -833,6 +848,13 @@ class LutExportWorker(QObject):
         Returns:
             Processed LUT array
         """
+        from src.features.color.core.hsl_curve_calibration import (
+            apply_calibrated_hsl_curves,
+            is_calibrated_hsl_lut,
+        )
+        if hsl_curve_lut is not None and is_calibrated_hsl_lut(hsl_curve_lut):
+            return apply_calibrated_hsl_curves(lut, hsl_curve_lut)
+
         result = lut.copy()
         
         if hsl_curve_lut is None or hsl_curve_lut.shape[0] != 6:

@@ -248,6 +248,11 @@ def generate_analysis(
             os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "node_badges"),
             "src/features/color/ui/node_badges",
         ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "primary_calibration_rec709_g24_v1.npz"),
+            "src/features/color/core/data",
+        ),
         # Node usage help documents (per-node bilingual Markdown).
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "node_help", "docs"),

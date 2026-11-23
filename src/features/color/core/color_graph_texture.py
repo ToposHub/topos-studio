@@ -242,8 +242,12 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
         hsl_default[1] = 0.0
         hsl = layer.get("hsl_curve_lut")
         if hsl is None and layer.get("hsl_curve_data"):
+            from src.features.color.core.curves_calibration import curves_calibration_enabled
             from src.features.color.core.layer import build_hsl_curve_lut_from_data
-            hsl = build_hsl_curve_lut_from_data(dict(layer["hsl_curve_data"]))
+            hsl = build_hsl_curve_lut_from_data(
+                dict(layer["hsl_curve_data"]),
+                calibration_version=int(curves_calibration_enabled(layer.get("curves_edit"))),
+            )
         for uniform, key, size, components, default in (
             ("u_curves_tex", "curves_lut", (256, 1), 3, np.linspace(0,1,256)[:,None].repeat(3,1)),
             ("u_hsl_curve_tex", "hsl_curve_lut", (6,256), 1, hsl_default),
@@ -253,7 +257,10 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             value = hsl if key == "hsl_curve_lut" else layer.get(key)
             array = np.asarray(value if value is not None else default, dtype="f4")
             if key == "hsl_curve_lut":
+                size = array.shape
                 array = array.T.copy()
+            else:
+                size = (array.shape[0], 1)
             tex = self._texture(size, components, array.tobytes())
             unit = 2 if uniform == "u_curves_tex" else 3
             tex.use(unit)

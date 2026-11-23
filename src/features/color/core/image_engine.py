@@ -58,7 +58,10 @@ from src.features.color.core.corrector_render_service import (
 )
 from src.features.color.core.layer import Layer, MaskShape, MaskGroup
 from src.features.color.core.window_rasterizer import WindowRasterizer
-from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.features.color.core.curves_soft_clip import (
+    curves_soft_clip_is_identity,
+    uses_calibrated_soft_clip,
+)
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT, ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT
 from src.features.color.core.shader_compiler import ShaderPipeline
@@ -125,7 +128,7 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         })
 
     mask_shapes = [shape.to_dict() for shape in layer.mask_shapes]
-    return {
+    data = {
         "id": layer.id,
         "visible": layer.visible,
         "opacity": layer.opacity,
@@ -147,6 +150,12 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         "plugins": plugins,
         "is_baked": bool(getattr(layer, "is_baked", False)),
     }
+    # Versioned nodes opt into this stage in the preview and bake DTOs.
+    # Keep older DTO digests stable so existing baked grades still resolve.
+    csc = layer.curves_soft_clip
+    if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+        data["curves_soft_clip"] = copy.deepcopy(csc)
+    return data
 
 
 class Tile:
@@ -1890,7 +1899,8 @@ class ImageEngine(QObject, WindowRasterizer):
         from src.features.color.core.layer import build_curves_lut_from_data
         layer.curves_edit = normalize_curves_edit(params)
         layer.curves_lut = build_curves_lut_from_data(
-            layer.curves_data, layer.curves_edit.get("amounts"))
+            layer.curves_data, layer.curves_edit.get("amounts"),
+            calibration_version=layer.curves_edit.get("calibration_version", 0))
         if self.renderer and layer.curves_lut is not None:
             lut = layer.curves_lut
             if lut.dtype != np.float32:
@@ -1899,6 +1909,37 @@ class ImageEngine(QObject, WindowRasterizer):
                 'layer_id': layer.id, 'type': 'curves', 'data': lut.tobytes()
             })
         self.render_pipeline(render_reason='grading')
+
+    def set_curves_calibration_state(self, state: Dict[str, Any]) -> None:
+        """Switch the three curve stages together before submitting the new grade."""
+        layer = self.get_active_layer()
+        if not layer:
+            return
+        from src.features.color.core.curves_soft_clip import (
+            normalize_curves_edit,
+            normalize_curves_soft_clip,
+        )
+        from src.features.color.core.layer import (
+            build_curves_lut_from_data,
+            build_hsl_curve_lut_from_data,
+        )
+        layer.curves_edit = normalize_curves_edit(state.get("curves_edit"))
+        layer.curves_soft_clip = normalize_curves_soft_clip(state.get("curves_soft_clip"))
+        version = layer.curves_edit.get("calibration_version", 0)
+        if layer.curves_data:
+            layer.curves_lut = build_curves_lut_from_data(
+                layer.curves_data, layer.curves_edit["amounts"], calibration_version=version)
+        if layer.hsl_curve_data:
+            layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
+                layer.hsl_curve_data, calibration_version=version)
+        if self.renderer:
+            for kind, lut in (("curves", layer.curves_lut), ("hsl_curve", layer.hsl_curve_lut)):
+                if lut is not None:
+                    self.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
+                        "layer_id": layer.id, "type": kind,
+                        "data": np.asarray(lut, dtype=np.float32).tobytes(),
+                    })
+        self.render_pipeline(render_reason="grading")
 
     def set_qualifier_params(self, params: Dict[str, Any]) -> None:
         """Merge qualifier (keyer) params into the active layer and submit a grading render."""
@@ -3481,42 +3522,39 @@ class ImageEngine(QObject, WindowRasterizer):
                         width=w, height=h,
                         aspect_ratio=aspect_ratio,
                         tex_size=(float(w), float(h)),
+                        grading_params_override=self.pipeline.bind_primary_calibration(
+                            prog_comp, layer, temporary_textures=texture_garbage),
                         bindings=layer_plugins,
                     )
                     upload_composition_uniforms(prog_comp, values)
 
                     # Bind auxiliary textures
                     tex_unit = 2
+                    flags = prepared.flags
 
                     # Curves
-                    if has_curves:
-                        lut_data = np.array(layer.curves_lut)
-                        if lut_data.ndim == 2:
-                            lut_data = lut_data.reshape(256, 1, 3)
-                        lut_f32 = lut_data.astype(np.float32)
-                        c_tex = ctx.texture((256, 1), 3, data=lut_f32.tobytes(), dtype='f4')
+                    if flags["has_curves"]:
+                        lut_data = np.asarray(layer.curves_lut, dtype=np.float32)
+                        c_tex = ctx.texture((lut_data.shape[0], 1), 3,
+                                            data=lut_data.tobytes(), dtype='f4')
+                        texture_garbage.append(c_tex)
                         c_tex.repeat_x = c_tex.repeat_y = False
                         c_tex.use(tex_unit)
                         prog_comp['u_curves_tex'].value = tex_unit
-                        texture_garbage.append(c_tex)
                         tex_unit += 1
 
-                    # HSL Curve (6 curves, 256 samples each)
-                    if has_hsl_curve:
-                        hsl_lut_data = np.array(layer.hsl_curve_lut, dtype=np.float32)
-                        # HSL curve LUT is (6, 256): 6 curves, each with 256 samples
-                        # Transpose to (256, 6) so each column is a curve for texture sampling
-                        # Texture size: width=6 (curves), height=256 (samples)
-                        hsl_lut_f32 = hsl_lut_data.T.astype(np.float32)
-                        hsl_tex = ctx.texture((6, 256), 1, data=hsl_lut_f32.tobytes(), dtype='f4')
+                    if flags["has_hsl_curve"]:
+                        hsl_lut_data = np.asarray(layer.hsl_curve_lut, dtype=np.float32)
+                        hsl_tex = ctx.texture(hsl_lut_data.shape, 1,
+                                              data=hsl_lut_data.T.tobytes(), dtype='f4')
+                        texture_garbage.append(hsl_tex)
                         hsl_tex.repeat_x = hsl_tex.repeat_y = False
                         hsl_tex.use(tex_unit)
                         prog_comp['u_hsl_curve_tex'].value = tex_unit
-                        texture_garbage.append(hsl_tex)
                         tex_unit += 1
 
                     # Warper
-                    if has_warper:
+                    if flags["has_warper"]:
                         wp = np.array(layer.warper_params)
                         wh, ww = wp.shape[:2]
                         w_tex = ctx.texture((ww, wh), 2, data=wp.astype(np.float32).tobytes(), dtype='f4')
@@ -3530,7 +3568,7 @@ class ImageEngine(QObject, WindowRasterizer):
                         tex_unit += 1
                 
                     # 3D LUT
-                    if has_lut3d:
+                    if flags["has_lut3d"]:
                         lut_tex = self._load_lut_sync(ctx, layer.active_lut_path)
                         if lut_tex:
                             lut_tex.use(tex_unit)
@@ -5093,4 +5131,7 @@ class ImageEngine(QObject, WindowRasterizer):
             'plugins': layer.plugins.copy() if layer.plugins else [],
             'is_baked': False,  # Always False for baking - we're creating the baked result
         }
+        csc = layer.curves_soft_clip
+        if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+            snapshot["curves_soft_clip"] = copy.deepcopy(csc)
         return snapshot

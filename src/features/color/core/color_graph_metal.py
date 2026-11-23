@@ -36,6 +36,7 @@ from src.features.color.core.color_graph_compiler import (
 from src.features.color.core.color_graph_cpu import (
     production_layer_domain_errors,
 )
+from src.features.color.core.curves_calibration import is_calibrated_curves_lut
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.gpu.metal.kernels_color import (
     METAL_GRAPH_OPS_MSL,
@@ -78,6 +79,7 @@ def graph_grading_params_for_layer(
     )
 
     values = composition_uniform_values(dict(layer), width=width, height=height)
+    curves = layer.get("curves_lut")
     return make_graph_grading_params(
         exposure=float(values["u_exposure"]),
         temp=float(values["u_temp"]),
@@ -105,7 +107,8 @@ def graph_grading_params_for_layer(
         lum_mix=float(values["u_lum_mix"]),
         opacity=float(values["u_opacity"]),
         mask_mode=1 if has_mask else 0,
-        has_curves=layer.get("curves_lut") is not None,
+        has_curves=curves is not None,
+        calibrated_curves=curves is not None and is_calibrated_curves_lut(np.asarray(curves)),
     )
 
 

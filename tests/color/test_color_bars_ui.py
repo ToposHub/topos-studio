@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from PyQt6.QtCore import QPoint, Qt
 
 from src.features.color.ui.color_wheel import (
     MODE_BARS, MODE_LOG, MODE_TONAL, MODE_WHEELS, GradingPanel,
@@ -106,6 +107,26 @@ def test_bars_edit_publishes_extended_signal_for_offset(qtbot):
     assert extended, "offset bars edit must publish grading_extended_changed"
     assert extended[-1]["offset"][1] > 0.0
     assert base == []
+
+
+def test_visible_offset_dial_publishes_grade_before_ending_gesture(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.resize(974, 380)
+    panel.show()
+    panel._mode_buttons["bars"].click()
+    dial = panel.color_bars_panel.offset._dial
+    qtbot.waitUntil(dial.isVisible)
+
+    events = []
+    panel.interaction_started.connect(lambda: events.append("start"))
+    panel.grading_extended_changed.connect(lambda _: events.append("change"))
+    panel.interaction_ended.connect(lambda: events.append("end"))
+    qtbot.mousePress(dial, Qt.MouseButton.LeftButton, pos=QPoint(30, 7))
+    qtbot.mouseRelease(dial, Qt.MouseButton.LeftButton, pos=QPoint(70, 7))
+
+    assert events == ["start", "change", "end"]
+    assert panel.offset_wheel.brightness == pytest.approx(0.04)
 
 
 def test_bars_drag_is_relative_and_fine(qtbot):

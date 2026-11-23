@@ -513,6 +513,38 @@ class TestCurvesParity:
     def hdr_pattern(cls):
         return _pattern_hdr()
 
+    def test_calibrated_yrgb_texture(
+        self, gl, gl_progs, metal_ctx, psos, hdr_pattern,
+    ) -> None:
+        import Metal
+
+        from src.features.color.core.layer import build_curves_lut_from_data
+
+        lut = build_curves_lut_from_data({
+            "M": [(0, 255), (128, 80), (255, 0)],
+            "G": [(0, 255), (64, 211), (255, 0)],
+        }, calibration_version=1)
+        width = lut.shape[0]
+        gl_tex = gl.texture((width, 1), 3, data=lut.tobytes(), dtype="f4")
+        gl_tex.filter = (gl.LINEAR, gl.LINEAR)
+        gl_tex.repeat_x = gl_tex.repeat_y = False
+        rgba = np.zeros((1, width, 4), dtype=np.float32)
+        rgba[..., :3] = lut[:, 0, :]
+        metal_tex = metal_ctx.create_texture_from_numpy(
+            rgba, Metal.MTLPixelFormatRGBA32Float, width, 1)
+        values = _values_for({"opacity": 1.0, "blend_mode": "Normal"})
+        dtype = build_composition_uniform_manifest(
+            **VARIANTS["curves"]["flags"]).to_numpy_dtype()
+        names = _VARIANT_AUX["curves"]
+        try:
+            gl_out = _gl_render(gl, gl_progs["curves"], names,
+                                {"u_curves_tex": gl_tex}, hdr_pattern, values, True)
+            mt_out = _metal_render(metal_ctx, psos["curves"], hdr_pattern, values,
+                                   dtype, names, {"u_curves_tex": metal_tex})
+        finally:
+            gl_tex.release()
+        _assert_hdr(gl_out, mt_out, "calibrated YRGB/HDR")
+
     def _run(self, gl, gl_progs, gl_aux, metal_ctx, psos, metal_aux,
              pattern, hdr, params, lut_intensity):
         layer = {"opacity": 1.0, "blend_mode": "Normal",
@@ -557,6 +589,42 @@ class TestHslCurveParity:
     @classmethod
     def hdr_pattern(cls):
         return _pattern_hdr()
+
+    def test_calibrated_hsl_texture(
+        self, gl, gl_progs, metal_ctx, psos, hdr_pattern,
+    ) -> None:
+        import Metal
+
+        from src.features.color.core.layer import build_hsl_curve_lut_from_data
+
+        lut = build_hsl_curve_lut_from_data({
+            "LumSat": [(80, 116)],
+            "HueHue": [(80, 114)],
+            "HueSat": [(0, 127.5), (82, 84), (255, 127.5)],
+            "HueLum": [(80, 107)],
+            "SatSat": [(70, 140)],
+            "SatLum": [(150, 110)],
+        }, calibration_version=1)
+        width, height = lut.shape
+        data = np.ascontiguousarray(lut.T[..., None])
+        gl_tex = gl.texture((width, height), 1, data=data.tobytes(), dtype="f4")
+        gl_tex.filter = (gl.LINEAR, gl.LINEAR)
+        gl_tex.repeat_x = gl_tex.repeat_y = False
+        metal_tex = metal_ctx.create_texture_from_numpy(
+            data, Metal.MTLPixelFormatR32Float, width, height,
+        )
+        values = _values_for({"opacity": 1.0, "blend_mode": "Normal"})
+        dtype = build_composition_uniform_manifest(
+            **VARIANTS["hsl"]["flags"]).to_numpy_dtype()
+        names = _VARIANT_AUX["hsl"]
+        try:
+            gl_out = _gl_render(gl, gl_progs["hsl"], names,
+                                {"u_hsl_curve_tex": gl_tex}, hdr_pattern, values, True)
+            metal_out = _metal_render(metal_ctx, psos["hsl"], hdr_pattern, values,
+                                      dtype, names, {"u_hsl_curve_tex": metal_tex})
+        finally:
+            gl_tex.release()
+        _assert_hdr(gl_out, metal_out, "calibrated HSL/HDR")
 
     def _run(self, gl, gl_progs, gl_aux, metal_ctx, psos, metal_aux,
              pattern, hdr, params):

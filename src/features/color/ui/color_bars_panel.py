@@ -281,6 +281,7 @@ class _BarsColumn(QWidget):
                                        "log_highlight", "log_offset") else "mult"
         self._channels = _ADD_CHANNELS if self._math == "add" else _CHANNELS
         self._is_offset = (mode == "offset")
+        self._add_display_base = 0.0
 
         self.hue = 0.0
         self.sat = 0.0
@@ -341,7 +342,6 @@ class _BarsColumn(QWidget):
         num_row = QHBoxLayout()
         num_row.setContentsMargins(0, 0, 0, 0)
         num_row.setSpacing(4)
-        num_row.addStretch(1)
         self._nums: dict[str, _GradingValue] = {}
         box_width = 52 if self._math == "add" else 34
         box_span = 30.0 if self._math == "add" else 2.0
@@ -356,20 +356,20 @@ class _BarsColumn(QWidget):
             num.setToolTip(ch)
             self._nums[ch] = num
             num_row.addWidget(num)
-        num_row.addStretch(1)
-        layout.addLayout(num_row)
+        num_container = QWidget()
+        num_container.setLayout(num_row)
+        value_width = num_row.minimumSize().width()
+        num_container.setFixedWidth(value_width)
+        layout.addWidget(num_container, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        self._dial = KnurledJogWheel(min_width=140)
+        self._dial = KnurledJogWheel(value_width)
         self._dial.setToolTip(I18N.tr("grading.brightness_dial_tooltip",
             "Drag left/right to adjust master brightness; double-click to reset. Shift: fine."))
-        dial_row = QHBoxLayout()
-        dial_row.setContentsMargins(8, 0, 8, 0)
-        dial_row.addWidget(self._dial)
-        layout.addLayout(dial_row)
+        layout.addWidget(self._dial, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         for ch in self._channels:
             self._bars[ch].valueChanged.connect(lambda v, c=ch: self._on_channel(c, v))
-            self._nums[ch].valueChanged.connect(lambda v, c=ch: self._on_channel(c, v))
+            self._nums[ch].valueChanged.connect(lambda v, c=ch: self._on_channel(c, v - self._add_display_base))
             self._bars[ch].interaction_started.connect(self.interaction_started.emit)
             self._nums[ch].interaction_started.connect(self.interaction_started.emit)
             self._bars[ch].interaction_ended.connect(self._on_interaction_ended)
@@ -391,7 +391,7 @@ class _BarsColumn(QWidget):
         if self._updating:
             return
         if self._math == "add":
-            display = {ch: self._nums[ch].value() for ch in self._channels}
+            display = {ch: self._nums[ch].value() - self._add_display_base for ch in self._channels}
             display[channel] = value
             self.hue, self.sat, self.brightness = offset_display_to_hsb(
                 display.get("R", 0.0), display.get("G", 0.0),
@@ -450,8 +450,16 @@ class _BarsColumn(QWidget):
                       "B": b - self._display_offset}
         for ch in self._channels:
             self._bars[ch].setValue(values[ch])
-            self._nums[ch].setValue(values[ch])
+            self._nums[ch].setValue(values[ch] + self._add_display_base)
         self._updating = False
+
+    def set_display_base(self, base: float) -> None:
+        self._add_display_base = base
+        self._updating = True
+        for field in self._nums.values():
+            field.setRange(-200.0 + base, 200.0 + base)
+            field.setDefaultValue(base)
+        self._refresh_displays()
 
     def _emit_changed(self) -> None:
         if self._pending is not None:
@@ -506,23 +514,18 @@ class ColorBarsPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 8)
+        layout.setContentsMargins(10, 6, 10, 2)
         layout.setSpacing(12)
         self.lift = _BarsColumn(I18N.tr("grading.lift", "暗部"), "lift")
         self.gamma = _BarsColumn(I18N.tr("grading.gamma", "中灰"), "gamma")
         self.gain = _BarsColumn(I18N.tr("grading.gain", "亮部"), "gain")
         self.offset = _BarsColumn(I18N.tr("grading.offset", "偏移"), "offset")
-        # Offset 列暂时隐藏（与色轮页一致）；控件保留并照常参与状态
-        # 同步 / flush / blockSignals，随时可恢复。列间不放纵向分割线
-        # （对齐达芬奇：仅用横向细线区分功能区）。
-        for column in (self.lift, self.gamma, self.gain):
+        for column in self.columns():
             column.setSizePolicy(QSizePolicy.Policy.Expanding,
                                  QSizePolicy.Policy.Expanding)
             column.interaction_started.connect(self.interaction_started.emit)
             column.interaction_ended.connect(self.interaction_ended.emit)
             layout.addWidget(column, 1)
-        self.offset.setParent(self)
-        self.offset.setVisible(False)
 
     def columns(self) -> tuple[_BarsColumn, _BarsColumn, _BarsColumn,
                                _BarsColumn]:

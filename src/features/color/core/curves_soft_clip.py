@@ -10,6 +10,8 @@
 - 算法 = 指数软膝（膝内斜率从 1 无缝衔接、渐近衰减到 0）；默认值即恒等
   映射，超白/负 RGB 原样保留给后续节点。GLSL/MSL/CPU 端逐式对齐本模块
   的 :func:`apply_soft_clip_channel`，修改时必须三端同步。
+- 桌面可选的 ``calibration_version=1`` 在 Rec.709 Gamma 2.4 编码域
+  使用四参数二次曲线，缺省版本仍按上述移动端模型处理。
 - 旧 8 参数 ``soft_clip_params``（threshold/shoulder 等）是独立的旧工程
   兼容路径，本模块不读不写、不做等价转换。
 """
@@ -18,6 +20,8 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Mapping
+from numbers import Real
 from typing import Any, Dict
 
 SOFT_CLIP_PARAM_KEYS = ("low_clip", "low_soft", "high_clip", "high_soft")
@@ -41,6 +45,14 @@ _MOBILE_KEY_ALIASES = {
 }
 
 _CHANNEL_ALIASES = {"R": ("R", "red"), "G": ("G", "green"), "B": ("B", "blue")}
+
+
+def uses_calibrated_soft_clip(params: Any) -> bool:
+    """Read the four-control soft clip algorithm version."""
+    version = params.get("calibration_version", 0) if isinstance(params, Mapping) else 0
+    if isinstance(version, bool) or not isinstance(version, Real) or version not in (0, 1):
+        raise ValueError(f"Unsupported soft clip calibration version: {version!r}")
+    return version == 1
 
 
 def default_curves_soft_clip() -> Dict[str, Any]:
@@ -102,6 +114,8 @@ def normalize_curves_soft_clip(data: Any) -> Dict[str, Any]:
     result = default_curves_soft_clip()
     if not isinstance(data, dict):
         return result
+    if uses_calibrated_soft_clip(data):
+        result["calibration_version"] = 1
     linked = data.get("linked", True)
     result["linked"] = bool(linked) if isinstance(linked, bool) else True
     channels = data.get("channels")
@@ -122,6 +136,11 @@ def normalize_curves_edit(data: Any) -> Dict[str, Any]:
         return result
     linked = data.get("linked", True)
     result["linked"] = bool(linked) if isinstance(linked, bool) else True
+    from src.features.color.core.curves_calibration import (
+        CURVES_CALIBRATION_VERSION, CURVES_CALIBRATION_VERSION_KEY, curves_calibration_enabled,
+    )
+    if curves_calibration_enabled(data):
+        result[CURVES_CALIBRATION_VERSION_KEY] = CURVES_CALIBRATION_VERSION
     amounts = data.get("amounts")
     if not isinstance(amounts, dict):
         return result
@@ -275,4 +294,5 @@ __all__ = [
     "normalize_curves_soft_clip",
     "set_soft_clip_control",
     "sanitize_payload",
+    "uses_calibrated_soft_clip",
 ]

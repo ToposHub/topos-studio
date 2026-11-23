@@ -1394,6 +1394,7 @@
   },
   "curves_palette": {
     "custom": "Custom",
+    "rec709_calibration": "Rec.709 Gamma 2.4 curve calibration",
     "edit": "Edit",
     "soft_clip": "Soft Clip",
     "low": "Low",

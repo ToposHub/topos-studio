@@ -62,6 +62,9 @@ from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 from src.features.color.core.layer import (
     DEFAULT_EXTENDED_GRADING_PARAMS, Layer, MaskShape, MaskGroup,
 )
+from src.features.color.core.curves_calibration import curves_calibration_enabled
+from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 
 
 def _scope_diag():
@@ -2905,7 +2908,7 @@ class LayerOpsMixin:
         tracks = getattr(layer, 'grade_keyframes', None) or {}
         wrote = False
         for name, value in patch.items():
-            if name not in self._GRADING_EXTENDED_KEYS:
+            if name not in self._GRADING_EXTENDED_KEYS or name == PRIMARY_CALIBRATION_VERSION_KEY:
                 continue
             if record_mode or name in tracks:
                 if engine.record_grade_keyframe(frame, name, value):
@@ -3266,12 +3269,46 @@ class LayerOpsMixin:
         if not self._is_video_playing():
             self.request_render()
 
+    def _preview_curve_change(self, domains: dict[str, Any]) -> bool:
+        """Store an authoritative curve edit before applying a live layer preview."""
+        route = self._graph_tool_route()
+        if route is None:
+            return True
+        graph_host, node_id = route
+        if not graph_host.grade_gesture_open():
+            counter = int(getattr(self, "_graph_gesture_counter", 0)) + 1
+            self._graph_gesture_counter = counter
+            self._graph_gesture_tid = f"curves-{counter}"
+            graph_host.begin_grade_gesture(self._graph_gesture_tid)
+        committed = graph_host.submit_curve_change(node_id, domains, self._graph_gesture_tid)
+        self._tool_flush_timer().start()
+        return committed and graph_host.align_engine_active_layer(node_id)
+
+    def on_curves_calibration_changed(self, state: dict[str, Any]) -> None:
+        if self._preview_curve_change(state):
+            self.engine.set_curves_calibration_state(state)
+        self._invalidate_video_render_params_if_playing()
+
+    def on_curves_edit_changed(self, state: dict[str, Any]) -> None:
+        if (not curves_calibration_enabled(state)
+                or self._preview_curve_change({"curves_edit": state})):
+            self.engine.set_curves_edit_params(state)
+        self._invalidate_video_render_params_if_playing()
+
+    def on_curves_soft_clip_changed(self, state: dict[str, Any]) -> None:
+        if (not uses_calibrated_soft_clip(state)
+                or self._preview_curve_change({"curves_soft_clip": state})):
+            self.engine.set_curves_soft_clip_params(state)
+        self._invalidate_video_render_params_if_playing()
+
     def on_curves_changed(self, lut, curves_data) -> None:
         """RGB 曲线变化：应用 LUT 并把曲线数据存回当前图层。"""
         if self.engine.get_current_image() is None: return
-        self.engine.apply_curves(lut)
+        if self.curves_widget.calibrated and not self._preview_curve_change({"curves": curves_data}):
+            return
         layer = self.engine.get_active_layer()
         if layer: layer.curves_data = curves_data
+        self.engine.apply_curves(lut)
         # S5.C: 播放中调色参数变化时更新 cached render params
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
@@ -3282,9 +3319,12 @@ class LayerOpsMixin:
     def on_hsl_curve_changed(self, lut, curves_data) -> None:
         """Handle HSL curve changes."""
         if self.engine.get_current_image() is None: return
-        self.engine.apply_hsl_curve(lut)
+        if (self.hsl_curves_panel.hsl_curves_widget.calibrated
+                and not self._preview_curve_change({"hsl": curves_data})):
+            return
         layer = self.engine.get_active_layer()
         if layer: layer.hsl_curve_data = curves_data
+        self.engine.apply_hsl_curve(lut)
         # S5.C: 播放中调色参数变化时更新 cached render params
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():

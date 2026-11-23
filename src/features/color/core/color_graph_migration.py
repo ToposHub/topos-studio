@@ -20,7 +20,9 @@
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from dataclasses import replace
+from threading import Lock
 from typing import Any, Mapping
 
 from src.shared.project.color_graph import (
@@ -100,6 +102,8 @@ def _corrector_from_layer(layer_dict: Mapping[str, Any], index: int,
 
 
 _UUID_CACHE: dict[str, str] = {}
+_PRIMARY_EXECUTION_GRAPHS: OrderedDict[str, tuple[ColorStackData, ColorGraphData]] = OrderedDict()
+_PRIMARY_EXECUTION_GRAPHS_LOCK = Lock()
 
 
 def _stable_node_uuid(layer_id: str) -> str:
@@ -197,12 +201,71 @@ def migrate_legacy_stack(stack: ColorStackData) -> ColorGraphData:
 
 
 def _flat_view_nonempty(stack: ColorStackData) -> bool:
+    from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+    from src.features.color.core.primary_calibration import (
+        PRIMARY_CALIBRATION_VERSION_KEY, grade_uses_calibration,
+    )
+
     grading = stack.grading_params or {}
     defaults = ColorStackData.create(asset_id=None, name="probe").grading_params
-    differs = any(grading.get(k) != v for k, v in defaults.items())
-    return bool(differs or stack.curves_data or stack.hsl_curve_data
+    differs = any(grading.get(k) != v for k, v in defaults.items()
+                  if k != PRIMARY_CALIBRATION_VERSION_KEY)
+    return bool(grade_uses_calibration({"grading_params": grading}) or differs
+                or stack.curves_data or stack.hsl_curve_data
                 or stack.mixer_params or stack.lut_path
+                or not curves_soft_clip_is_identity(stack.curves_soft_clip)
                 or stack.soft_clip_params.get("enabled"))
+
+
+def _uses_calibrated_grade(layer: Any) -> bool:
+    from src.features.color.core.curves_calibration import curves_calibration_enabled
+    from src.features.color.core.curves_soft_clip import (
+        curves_soft_clip_is_identity,
+        uses_calibrated_soft_clip,
+    )
+    from src.features.color.core.primary_calibration import grade_uses_calibration
+
+    get = layer.get if isinstance(layer, Mapping) else lambda key: getattr(layer, key, None)
+    clip = get("curves_soft_clip")
+    return bool(
+        grade_uses_calibration(layer)
+        or (curves_calibration_enabled(get("curves_edit"))
+            and (get("curves_data") or get("hsl_curve_data")))
+        or (uses_calibrated_soft_clip(clip) and not curves_soft_clip_is_identity(clip))
+    )
+
+
+def stack_primary_execution_graph(stack: ColorStackData | None) -> ColorGraphData | None:
+    """Use the authoritative graph or build one for a calibrated legacy stack."""
+    if stack is None:
+        return None
+    graph = getattr(stack, "color_graph", None)
+    if graph is not None:
+        return graph
+
+    layers = getattr(stack, "layers", None) or ()
+    if layers:
+        calibrated = any(_uses_calibrated_grade(layer) for layer in layers)
+    else:
+        calibrated = _uses_calibrated_grade(stack)
+    if not calibrated:
+        return None
+
+    with _PRIMARY_EXECUTION_GRAPHS_LOCK:
+        cached = _PRIMARY_EXECUTION_GRAPHS.get(stack.stack_id)
+        if cached is not None and cached[0] is stack:
+            _PRIMARY_EXECUTION_GRAPHS.move_to_end(stack.stack_id)
+            return cached[1]
+        graph = replace(
+            migrate_legacy_stack(stack),
+            graph_id=_stable_node_uuid(f"primary-execution/{stack.stack_id}"),
+            graph_revision=max(1, round(stack.modified_at * 1_000_000)),
+        )
+        _PRIMARY_EXECUTION_GRAPHS[stack.stack_id] = (stack, graph)
+        _PRIMARY_EXECUTION_GRAPHS.move_to_end(stack.stack_id)
+        if len(_PRIMARY_EXECUTION_GRAPHS) > 8:
+            _PRIMARY_EXECUTION_GRAPHS.popitem(last=False)
+        return graph
 
 
 def reconcile_projectable_graph(
@@ -331,6 +394,8 @@ def _flat_layer_view(stack: ColorStackData) -> dict[str, Any]:
         "hsl_curve_data": dict(stack.hsl_curve_data or {}),
         "mixer_params": dict(stack.mixer_params or {}),
         "soft_clip_params": dict(stack.soft_clip_params or {}),
+        "curves_edit": dict(stack.curves_edit or {}),
+        "curves_soft_clip": dict(stack.curves_soft_clip or {}),
         "active_lut_path": stack.lut_path,
         "lut_intensity": stack.lut_intensity,
     }

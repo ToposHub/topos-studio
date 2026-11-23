@@ -30,6 +30,13 @@ except ModuleNotFoundError:
     HAS_SCIPY = False
 
 from src.features.color.core.window_softness import normalize_edge_softness
+from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
+from src.features.color.core.curves_calibration import (
+    CURVES_CALIBRATION_VERSION,
+    CURVES_CALIBRATION_VERSION_KEY,
+    build_calibrated_curves_lut,
+    is_calibrated_curves_lut,
+)
 from src.features.color.core.warper_state import WarperStateV2, WarperStateError
 
 from src.features.color.core.curves_soft_clip import (
@@ -515,6 +522,7 @@ _DEFAULT_QUALIFIER_PARAMS: Dict[str, Any] = {
 # `__init__` 与 `reset_params` 的默认表尾部即引用此处；image_engine 的
 # 扩展参数补丁白名单也以此为准（非扩展键一律拒绝）。
 DEFAULT_EXTENDED_GRADING_PARAMS: Dict[str, Any] = {
+    PRIMARY_CALIBRATION_VERSION_KEY: 0,
     "offset": (0, 0, 0),
     "pivot": 0.18,
     "log_shadow": (0, 0, 0),
@@ -607,7 +615,7 @@ class Layer:
         self.curves_edit = default_curves_edit()
 
         # HSL Curve (6 curves: LumSat, HueHue, HueSat, HueLum, SatSat, SatLum)
-        self.hsl_curve_lut = None # np.ndarray (6, 256) float32
+        self.hsl_curve_lut = None  # np.ndarray (6, samples) float32
         self.hsl_curve_data = {} # { 'LumSat': [(x, y), ...], ... }
         
         self.mixer_params = {} # { 'red': [h, s, l], ... }
@@ -1043,22 +1051,31 @@ class Layer:
 
         if "curves_data" in wanted and "curves_data" in patch:
             self.curves_data = copy.deepcopy(patch["curves_data"])
-            self.curves_lut = build_curves_lut_from_data(
-                self.curves_data, self.curves_edit.get("amounts"))
 
         if "curves_edit" in wanted and "curves_edit" in patch:
             self.curves_edit = normalize_curves_edit(patch["curves_edit"])
-            # 强度变化改变曲线 LUT 的合成结果，与 curves_data 同步重建
+
+        if ("curves_data" in wanted and "curves_data" in patch
+                or "curves_edit" in wanted and "curves_edit" in patch):
             self.curves_lut = build_curves_lut_from_data(
-                self.curves_data, self.curves_edit.get("amounts"))
+                self.curves_data, self.curves_edit.get("amounts"),
+                calibration_version=self.curves_edit.get(CURVES_CALIBRATION_VERSION_KEY, 0),
+            )
 
         if "curves_soft_clip" in wanted and "curves_soft_clip" in patch:
             self.curves_soft_clip = normalize_curves_soft_clip(
                 patch["curves_soft_clip"])
 
-        if "hsl_curve_data" in wanted and "hsl_curve_data" in patch:
+        hsl_curve_updated = "hsl_curve_data" in wanted and "hsl_curve_data" in patch
+        if hsl_curve_updated:
             self.hsl_curve_data = copy.deepcopy(patch["hsl_curve_data"])
-            self.hsl_curve_lut = build_hsl_curve_lut_from_data(self.hsl_curve_data)
+        if hsl_curve_updated or (
+            self.hsl_curve_data and "curves_edit" in wanted and "curves_edit" in patch
+        ):
+            self.hsl_curve_lut = build_hsl_curve_lut_from_data(
+                self.hsl_curve_data,
+                calibration_version=self.curves_edit.get(CURVES_CALIBRATION_VERSION_KEY, 0),
+            )
 
         if "warper_params" in wanted and "warper_params" in patch:
             if patch["warper_params"] is not None:
@@ -1160,6 +1177,8 @@ class Layer:
         # 默认线性 LUT: [0/255, 1/255, ..., 255/255]
         if self.curves_lut is not None:
             lut = self.curves_lut
+            if is_calibrated_curves_lut(lut) and np.any(lut):
+                return True
             # curves_lut 形状为 (256, 1, 3) BGR 或 (256, 1)
             if lut.shape[0] == 256:
                 # 检查是否是线性 LUT（允许浮点误差）
@@ -1180,6 +1199,15 @@ class Layer:
                         break
                 if not is_linear:
                     return True
+
+        if self.hsl_curve_lut is not None:
+            from src.features.color.core.hsl_curve_calibration import is_calibrated_hsl_lut
+
+            hsl = self.hsl_curve_lut
+            if is_calibrated_hsl_lut(hsl) and (
+                    not np.allclose(hsl[[0, 2, 3, 4, 5]], 1.0, atol=1.0e-4)
+                    or not np.allclose(hsl[1], 0.0, atol=1.0e-4)):
+                return True
 
         # 检查 RGB Mixer 参数 - 默认是空字典，有内容才认为有调色
         if self.mixer_params and len(self.mixer_params) > 0:
@@ -1471,7 +1499,9 @@ class Layer:
             if isinstance(curves_data, dict):
                 layer.curves_data = curves_data
                 layer.curves_lut = build_curves_lut_from_data(
-                    curves_data, layer.curves_edit.get("amounts"))
+                    curves_data, layer.curves_edit.get("amounts"),
+                    calibration_version=layer.curves_edit.get(CURVES_CALIBRATION_VERSION_KEY, 0),
+                )
             else:
                 logger.warning(
                     "Layer.from_dict: curves_data 结构非法（%s），忽略曲线",
@@ -1486,7 +1516,10 @@ class Layer:
             hsl_curve_data = data["hsl_curve_data"]
             if isinstance(hsl_curve_data, dict):
                 layer.hsl_curve_data = hsl_curve_data
-                layer.hsl_curve_lut = build_hsl_curve_lut_from_data(hsl_curve_data)
+                layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
+                    hsl_curve_data,
+                    calibration_version=layer.curves_edit.get(CURVES_CALIBRATION_VERSION_KEY, 0),
+                )
             else:
                 logger.warning(
                     "Layer.from_dict: hsl_curve_data 结构非法（%s），忽略 HSL 曲线",
@@ -1753,8 +1786,10 @@ def compose_curves_lut(
 def build_curves_lut_from_data(
     curves_data: dict,
     edit_amounts: Optional[Dict[str, float]] = None,
+    *,
+    calibration_version: int = 0,
 ) -> np.ndarray:
-    """Build a (256, 1, 3) LUT from curves control points data.
+    """Build an RGB LUT or a calibrated YRGB response from control points.
 
     合成顺序与 ``CurvesWidget._compute_lut`` 一致：先 master（M）后通道，
     通道曲线在 master 映射出的浮点索引处采样。此前实现按"通道覆盖
@@ -1773,12 +1808,17 @@ def build_curves_lut_from_data(
                       100 = 全额生效（与无强度一致），0 = 该级曲线直通。
 
     Returns:
-        LUT array of shape (256, 1, 3) with values normalized to 0.0-1.0.
-        无任何有效曲线时返回恒等斜坡（``has_active_curves_lut`` 据此判定
-        为非活动，不再触发无谓的曲线 pass）。
+        Legacy (256, 1, 3) LUT with absolute mappings, or calibrated
+        (512, 1, 3) LUT with RGB and Y deltas in Gamma 2.4.
     """
     if not isinstance(curves_data, dict):
         curves_data = {}
+
+    if type(calibration_version) is int and calibration_version == CURVES_CALIBRATION_VERSION:
+        return build_calibrated_curves_lut(
+            {ch: _sanitize_control_points(curves_data.get(ch)) for ch in "MRGB"},
+            {ch: _edit_amount_factor(edit_amounts, "Y" if ch == "M" else ch) for ch in "MRGB"},
+        )
 
     master = _interpolate_curve_255(curves_data.get('M'))
     channel_vals = {
@@ -1789,8 +1829,10 @@ def build_curves_lut_from_data(
     return np.clip(lut, 0.0, 1.0)
 
 
-def build_hsl_curve_lut_from_data(hsl_curve_data: dict) -> np.ndarray:
-    """Build a (6, 256) HSL curve LUT from control points data.
+def build_hsl_curve_lut_from_data(
+    hsl_curve_data: dict, *, calibration_version: int = 0,
+) -> np.ndarray:
+    """Build an HSL curve LUT from control points data.
     
     Args:
         hsl_curve_data: Dictionary with keys 'LumSat', 'HueHue', 'HueSat', 
@@ -1798,20 +1840,33 @@ def build_hsl_curve_lut_from_data(hsl_curve_data: dict) -> np.ndarray:
                         (x, y) control points in 0-255 range.
     
     Returns:
-        LUT array of shape (6, 256) float32
+        LUT array of shape (6, 256) float32 for legacy projects or
+        (6, 512) for the calibrated response.
         Index order: LumSat=0, HueHue=1, HueSat=2, HueLum=3, SatSat=4, SatLum=5
         - Multiplier types: values in 0.0-2.0 range (default 1.0)
         - Shift type (HueHue): values in -0.5 to +0.5 range (default 0.0)
     """
-    mode_order = ['LumSat', 'HueHue', 'HueSat', 'HueLum', 'SatSat', 'SatLum']
-    lut = np.zeros((6, 256), dtype=np.float32)
-
     if not isinstance(hsl_curve_data, dict):
         # AUD-0701：容器非法时按"全部默认曲线"处理（乘子 1.0 / HueHue 0）
         hsl_curve_data = {}
 
+    if calibration_version == 1:
+        from src.features.color.core.hsl_curve_calibration import build_calibrated_hsl_lut
+
+        return build_calibrated_hsl_lut(hsl_curve_data)
+
+    mode_order = ['LumSat', 'HueHue', 'HueSat', 'HueLum', 'SatSat', 'SatLum']
+    lut = np.zeros((6, 256), dtype=np.float32)
     for i, mode in enumerate(mode_order):
-        sanitized = _sanitize_control_points(hsl_curve_data.get(mode))
+        points = hsl_curve_data.get(mode)
+        if isinstance(points, (list, tuple)) and len(points) == 1:
+            # A grade edited with the calibrated canvas can have a single
+            # anchor. It remains a flat curve when switching color models.
+            from src.features.color.core.hsl_curve_calibration import calibrated_hsl_curve_samples
+
+            lut[i].fill(calibrated_hsl_curve_samples(points, mode)[0])
+            continue
+        sanitized = _sanitize_control_points(points)
         if sanitized is not None:
             xs, ys = sanitized
             if len(xs) == 2:

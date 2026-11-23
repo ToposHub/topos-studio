@@ -1434,6 +1434,7 @@
   },
   "curves_palette": {
     "custom": "自定义曲线",
+    "rec709_calibration": "Rec.709 Gamma 2.4 曲线校准",
     "edit": "编辑",
     "soft_clip": "柔化裁切",
     "low": "低点",

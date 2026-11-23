@@ -116,25 +116,49 @@ def node_layer_payload(node: Any, *,
     # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
     # oracle 侧 np.asarray 同样可用）
     if include_lut_cache and payload.get("curves_data") and not _lut_current(payload):
+        from src.features.color.core.curves_soft_clip import normalize_curves_edit
         from src.features.color.core.layer import build_curves_lut_from_data
         try:
-            lut = build_curves_lut_from_data(dict(payload["curves_data"]))
+            edit = normalize_curves_edit(payload.get("curves_edit"))
+            lut = build_curves_lut_from_data(
+                dict(payload["curves_data"]), edit["amounts"],
+                calibration_version=edit.get("calibration_version", 0),
+            )
             payload["curves_lut"] = np.asarray(lut).tolist()
         except Exception:  # noqa: BLE001 —— 坏曲线按 identity（缺省）处理
             payload.pop("curves_lut", None)
             payload.pop("curves_data", None)
+    hsl_data = payload.get("hsl_curve_data")
+    if include_lut_cache and isinstance(hsl_data, Mapping) and hsl_data:
+        from src.features.color.core.curves_calibration import curves_calibration_enabled
+        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+        from src.features.color.core.layer import build_hsl_curve_lut_from_data
+
+        calibrated = curves_calibration_enabled(payload.get("curves_edit"))
+        expected_shape = (6, CALIBRATED_HSL_SAMPLES if calibrated else 256)
+        try:
+            cache_shape = np.shape(payload.get("hsl_curve_lut"))
+        except (TypeError, ValueError):
+            cache_shape = ()
+        if cache_shape != expected_shape:
+            payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
+                dict(hsl_data), calibration_version=int(calibrated),
+            ).tolist()
     return payload
 
 
 def _lut_current(payload: Mapping[str, Any]) -> bool:
-    """payload 已带有效 256×3 LUT 时不必重建。"""
-    lut = payload.get("curves_lut")
+    """Reuse a packed LUT already generated from the current snapshot."""
+    from src.features.color.core.curves_calibration import (
+        curves_calibration_enabled, is_calibrated_curves_lut,
+    )
     try:
-        import numpy as np
-        arr = np.asarray(lut)
-        return arr.shape == (256, 3)
-    except Exception:  # noqa: BLE001
+        arr = np.asarray(payload.get("curves_lut"))
+    except (TypeError, ValueError):
         return False
+    if curves_calibration_enabled(payload.get("curves_edit")):
+        return is_calibrated_curves_lut(arr)
+    return arr.shape in ((256, 3), (256, 1, 3))
 
 
 def _iter_corrector_nodes(graph: ColorGraphData):

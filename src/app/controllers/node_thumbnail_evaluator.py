@@ -223,7 +223,7 @@ class ColorNodeOutputPreview(QObject):
         ctx = moderngl.create_standalone_context(require=330)
         try:
             executor = ColorGraphExecutor(ctx, pipeline=ShaderPipeline(ctx))
-            lut_cache: dict[str, Any] = {}
+            lut_cache: dict[str | tuple[str, bytes], Any] = {}
 
             def bind_aux(prog, layer, _cache=lut_cache):
                 _bind_aux_with_lut(ctx, prog, layer, _cache)
@@ -322,13 +322,17 @@ def _bind_aux_with_lut(ctx, prog, layer, cache: dict) -> None:
     has_curves = "u_curves_tex" in prog
     has_lut = "u_lut_tex" in prog
     if has_curves:
-        ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
-        data = np.ascontiguousarray(
-            np.stack([ramp] * 3, axis=-1).reshape(256, 1, 3)).tobytes()
-        key = "identity-curves"
+        lut = layer.get("curves_lut") if isinstance(layer, Mapping) else None
+        if lut is None:
+            ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+            pixels = np.repeat(ramp[:, None], 3, axis=1)
+        else:
+            pixels = np.asarray(lut, dtype=np.float32).reshape(-1, 3)
+        data = np.ascontiguousarray(pixels).tobytes()
+        key = ("curves", data)
         tex = cache.get(key)
         if tex is None:
-            tex = ctx.texture((256, 1), components=3, dtype="f4", data=data)
+            tex = ctx.texture((len(pixels), 1), components=3, dtype="f4", data=data)
             tex.filter = (ctx.LINEAR, ctx.LINEAR)
             cache[key] = tex
         tex.use(unit)

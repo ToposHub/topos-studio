@@ -4633,6 +4633,7 @@ class AsyncRenderer(QThread):
             tex_size=(float(src_w), float(src_h))
             if src_w > 0 and src_h > 0 else None,
             visible_rect=visible_rect,
+            grading_params_override=self.pipeline.bind_primary_calibration(prog, layer),
             bindings=bindings,
         )
         upload_composition_uniforms(prog, values)
@@ -4869,43 +4870,39 @@ class AsyncRenderer(QThread):
                 arr_u8 = np.frombuffer(tex_data, dtype=np.uint8)
                 tex_data = (arr_u8.astype(np.float32) / 255.0).tobytes()
 
+            from src.features.color.core.curves_calibration import (
+                CALIBRATED_CURVES_WIDTH, CURVE_SAMPLES,
+            )
+            width, remainder = divmod(len(tex_data), 3 * np.dtype(np.float32).itemsize)
+            if remainder or width not in (CURVE_SAMPLES, CALIBRATED_CURVES_WIDTH):
+                raise ValueError("Invalid curves texture size")
+            tex_size = (width, 1)
             tex = self.layer_textures[l_id].get('curves')
-            if not tex:
-                tex = self.ctx.texture((256, 1), 3, data=tex_data, dtype='f4')
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                tex.repeat_x = tex.repeat_y = False
-                self.layer_textures[l_id]['curves'] = tex
-            else:
-                # If texture exists but might have been created with different dtype (unlikely but safe)
-                if tex.dtype != 'f4':
+            if not tex or tex.size != tex_size or tex.dtype != 'f4':
+                replacement = self.ctx.texture(tex_size, 3, data=tex_data, dtype='f4')
+                replacement.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                replacement.repeat_x = replacement.repeat_y = False
+                if tex:
                     tex.release()
-                    tex = self.ctx.texture((256, 1), 3, data=tex_data, dtype='f4')
-                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    tex.repeat_x = tex.repeat_y = False
-                    self.layer_textures[l_id]['curves'] = tex
-                else:
-                    tex.write(tex_data)
+                self.layer_textures[l_id]['curves'] = replacement
+            else:
+                tex.write(tex_data)
         elif tex_type == 'hsl_curve':
-            # HSL Curves: 2D R32F texture (6, 256) with 6 curves
-            # Texture layout: width=6 (curve types), height=256 (sample points)
-            # Data comes as (6, 256) array, needs transpose for correct memory layout
-            lut_array = np.frombuffer(data['data'], dtype=np.float32).reshape(6, 256)
-            tex_data = lut_array.T.tobytes()  # Transpose to (256, 6) memory layout
+            lut_array = np.frombuffer(data['data'], dtype=np.float32).reshape(6, -1)
+            if lut_array.shape[1] not in (256, 512):
+                raise ValueError("Invalid HSL curves texture size")
+            size = lut_array.shape
+            tex_data = lut_array.T.tobytes()
             tex = self.layer_textures[l_id].get('hsl_curve')
-            if not tex:
-                tex = self.ctx.texture((6, 256), 1, data=tex_data, dtype='f4')
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                tex.repeat_x = tex.repeat_y = False
-                self.layer_textures[l_id]['hsl_curve'] = tex
-            else:
-                if tex.dtype != 'f4' or tex.size != (6, 256):
+            if not tex or tex.dtype != 'f4' or tex.size != size:
+                updated = self.ctx.texture(size, 1, data=tex_data, dtype='f4')
+                updated.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                updated.repeat_x = updated.repeat_y = False
+                self.layer_textures[l_id]['hsl_curve'] = updated
+                if tex:
                     tex.release()
-                    tex = self.ctx.texture((6, 256), 1, data=tex_data, dtype='f4')
-                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    tex.repeat_x = tex.repeat_y = False
-                    self.layer_textures[l_id]['hsl_curve'] = tex
-                else:
-                    tex.write(tex_data)
+            else:
+                tex.write(tex_data)
         elif tex_type == 'lut3d':
             path = data['path']
             tex = self._upload_3dlut(path)
@@ -7305,6 +7302,7 @@ class AsyncRenderer(QThread):
             current_src_tex = source_tex
             current_src_fbo = None  # (source_tex 是外部纹理，无配对 FBO)
 
+            from src.features.color.core.primary_calibration import grade_uses_calibration
             from src.features.color.core.shader_compiler import (
                 plugin_bindings_from_instances,
             )
@@ -7389,6 +7387,7 @@ class AsyncRenderer(QThread):
                         has_mixer=has_mixer,
                         has_curves_soft_clip=has_curves_soft_clip,
                         plugins=layer_plugins,
+                        has_primary_calibration=grade_uses_calibration(prefix_layer),
                         request_id=render_request_id,
                         layer_id=pl_id,
                     )

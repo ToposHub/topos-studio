@@ -41,7 +41,7 @@ class _CurveOverlay(QWidget):
 
 
 class CurvesWidget(QWidget):
-    # Emits the LUT array (256, 1, 3) BGR and the control points data
+    # Emits the sampled curve LUT and the control points.
     changed = pyqtSignal(np.ndarray, dict)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
@@ -82,6 +82,7 @@ class CurvesWidget(QWidget):
         # 默认值 = 既有单通道编辑行为，行为零回归。
         self.edit_amounts = {"Y": 100.0, "R": 100.0, "G": 100.0, "B": 100.0}
         self.edit_linked = False
+        self.calibrated = False
         # AUD-38211: 左键 press 是否已发射 interaction_started（release 时
         # 据此配对 interaction_ended，避免点击空白处的孤儿 started 信号）
         self._press_interaction = False
@@ -148,7 +149,7 @@ class CurvesWidget(QWidget):
         reset_btn.setFixedSize(28, 24)
         reset_btn.setToolTip(I18N.tr("tooltip.reset_curves", "重置所有曲线"))
         reset_btn.setStyleSheet(CURVE_RESET_BTN_STYLE)
-        reset_btn.clicked.connect(lambda _checked=False: self.reset(emit_changed=True))
+        reset_btn.clicked.connect(self._reset_from_toolbar)
         btn_layout.addWidget(reset_btn)
             
         self.btn_container.adjustSize()
@@ -381,6 +382,11 @@ class CurvesWidget(QWidget):
         pts = sorted(points, key=lambda p: p.x())
         xs = np.array([p.x() for p in pts])
         ys = np.array([p.y() for p in pts])
+
+        if self.calibrated:
+            from src.features.color.core.curves_calibration import calibrated_curve_samples
+            xs, indices = np.unique(xs, return_index=True)
+            return 255.0 * (1.0 - calibrated_curve_samples(xs, ys[indices]))
         
         try:
             if len(xs) < 2:
@@ -466,6 +472,7 @@ class CurvesWidget(QWidget):
                     pts.append(new_point)
                     pts.sort(key=lambda p: p.x())
                     self.selected_point_idx = pts.index(new_point)
+                    self._lut_dirty[self.active_channel] = True
                     # 链接编辑：新点同步到全部通道（同一 x/y）
                     if self.edit_linked:
                         for ch in self.channels:
@@ -495,6 +502,7 @@ class CurvesWidget(QWidget):
                                 self._lut_dirty[ch] = True
                                 break
                 self.update_lut()
+                self.flush()
                 self.interaction_ended.emit()
         
         self.update()
@@ -534,17 +542,21 @@ class CurvesWidget(QWidget):
             prev_x = pts[self.selected_point_idx].x()
             prev_y = pts[self.selected_point_idx].y()
             pts[self.selected_point_idx] = QPointF(mx, my)
-            # 链接编辑：把本帧的纵向增量镜像到其余通道同 x 的控制点
-            # （只镜像 dy——各通道端点约束不同，横向位置保持独立）
             if self.edit_linked and self.selected_point_idx >= 0:
                 dy = my - prev_y
-                if dy != 0.0:
+                if dy != 0.0 or (self.calibrated and mx != prev_x):
                     for ch in self.channels:
                         if ch == self.active_channel:
                             continue
-                        for p in self.curves[ch]:
+                        other = self.curves[ch]
+                        for i, p in enumerate(other):
                             if abs(p.x() - prev_x) <= 0.5:
                                 p.setY(max(0.0, min(255.0, p.y() + dy)))
+                                if self.calibrated:
+                                    lower = other[i - 1].x() + 0.1 if i else 0.0
+                                    upper = other[i + 1].x() - 0.1 if i + 1 < len(other) else 255.0
+                                    p.setX(max(lower, min(upper, mx)))
+                                self._lut_dirty[ch] = True
                                 break
             self._lut_dirty[self.active_channel] = True
             self._final_lut_dirty = True
@@ -558,6 +570,9 @@ class CurvesWidget(QWidget):
         # started 成为孤儿信号，undo/空闲渲染状态被破坏。
         if event.button() == Qt.MouseButton.LeftButton and self._press_interaction:
             self._press_interaction = False
+            if self._pending_lut is not None:
+                self._update_timer.stop()
+                self._emit_changed_signal()
             self.interaction_ended.emit()
         self.selected_point_idx = -1
         self.update()
@@ -576,6 +591,16 @@ class CurvesWidget(QWidget):
         self.selected_point_idx = -1
         self.update_lut()
         self.update()
+        self.flush()
+        self.interaction_ended.emit()
+
+    def _reset_from_toolbar(self) -> None:
+        if not self.calibrated:
+            self.reset()
+            return
+        self.interaction_started.emit()
+        self.reset()
+        self.flush()
         self.interaction_ended.emit()
 
     def update_lut(self, emit_changed: bool = True) -> None:
@@ -599,8 +624,9 @@ class CurvesWidget(QWidget):
         # 仅对脏通道执行计算，结果存入缓存
         for ch in self.channels:
             if self._lut_dirty.get(ch, True):
-                curve_y = self.calculate_curve(self.curves[ch])
-                self._lut_cache[ch] = (255.0 - curve_y) / 255.0
+                if not self.calibrated:
+                    curve_y = self.calculate_curve(self.curves[ch])
+                    self._lut_cache[ch] = (255.0 - curve_y) / 255.0
                 self._lut_dirty[ch] = False
                 self._final_lut_dirty = True
 
@@ -608,16 +634,20 @@ class CurvesWidget(QWidget):
             # 合成走 layer.compose_curves_lut 权威实现（先 master 后通道 +
             # Edit 强度缩放），保证与工程重开/导出逐位一致。widget 的
             # 通道缓存不做 0-1 裁剪（GPU 采样 edge clamp，语义不变）。
-            from src.features.color.core.layer import compose_curves_lut
+            from src.features.color.core.layer import build_curves_lut_from_data, compose_curves_lut
 
             amounts = (self.edit_amounts
                        if any(v != 100.0 for v in self.edit_amounts.values())
                        else None)
-            final_lut = compose_curves_lut(
-                self._lut_cache.get('M'),
-                {ch: self._lut_cache.get(ch) for ch in ('R', 'G', 'B')},
-                amounts,
-            )
+            if self.calibrated:
+                final_lut = build_curves_lut_from_data(
+                    self.get_curves_data(), amounts, calibration_version=1)
+            else:
+                final_lut = compose_curves_lut(
+                    self._lut_cache.get('M'),
+                    {ch: self._lut_cache.get(ch) for ch in ('R', 'G', 'B')},
+                    amounts,
+                )
 
             self._final_lut_cache = final_lut
             self._final_lut_dirty = False
@@ -789,6 +819,14 @@ class CurvesWidget(QWidget):
     # Edit 强度 / 链接编辑（曲线面板侧栏状态）
     # ============================================================
 
+    def set_calibrated(self, enabled: bool) -> None:
+        if self.calibrated != enabled:
+            self.calibrated = enabled
+            self._lut_dirty = dict.fromkeys(self.channels, True)
+            self._curve_cache.clear()
+            self.update_lut(emit_changed=False)
+            self.update()
+
     def set_edit_amounts(self, amounts: Dict[str, Any],
                          emit_changed: bool = False) -> None:
         """设置 YRGB 侧栏强度（0-100，100 = 全额生效）并重算最终 LUT。
@@ -856,7 +894,9 @@ class CurvesWidget(QWidget):
         ch = self.active_channel
 
         # Calculate X coordinate based on active channel
-        if ch == 'M':
+        if ch == 'M' and self.calibrated:
+            x_coord = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        elif ch == 'M':
             # Master: use luminance (BT.601 formula)
             # Y = 0.299*R + 0.587*G + 0.114*B
             x_coord = 0.299 * r + 0.587 * g + 0.114 * b
@@ -899,7 +939,7 @@ class CurvesWidget(QWidget):
                 self.update()
                 return True
 
-        # Insert new point
+        self.interaction_started.emit()
         pts.append(new_point)
         pts.sort(key=lambda p: p.x())
 
@@ -911,8 +951,7 @@ class CurvesWidget(QWidget):
         self.update_lut()
         self.update()
 
-        # Emit interaction signals for proper render pipeline
-        self.interaction_started.emit()
+        self.flush()
         self.interaction_ended.emit()
 
         return True

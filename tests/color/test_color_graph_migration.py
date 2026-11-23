@@ -19,6 +19,7 @@ from src.features.color.core.color_graph_migration import (
     can_project_to_legacy_layers,
     migrate_legacy_stack,
     project_legacy_layers,
+    stack_primary_execution_graph,
 )
 from src.features.color.core.layer import Layer, MaskShape
 from src.shared.project.color_graph import (
@@ -36,6 +37,30 @@ def _stack_with_layers(layers: list[Layer], active: int = 0) -> ColorStackData:
     stack = ColorStackData.create(asset_id="a1", name="legacy")
     return stack.with_layers([l.to_dict(None) for l in layers],
                              active_layer_index=active)
+
+
+@pytest.mark.parametrize("control", ["offset", "log_shadow"])
+def test_measured_flat_stack_projects_even_when_only_extended_wheel_is_active(control: str) -> None:
+    stack = ColorStackData.create(asset_id="a1", name="legacy")
+    params = {**stack.grading_params, control: (210.0, 0.2, 0.0)}
+    assert stack_primary_execution_graph(stack.with_grading_params(params)) is None
+    assert stack_primary_execution_graph(stack.with_grading_params({
+        **params, "primary_calibration_version": 0,
+    })) is None
+
+    measured = stack.with_grading_params({**params, "primary_calibration_version": 1})
+    graph = stack_primary_execution_graph(measured)
+    assert graph is not None and measured.color_graph is None
+    assert stack_primary_execution_graph(measured) is graph
+    [layer] = project_legacy_layers(graph)
+    assert tuple(layer["grading_params"][control]) == params[control]
+    assert layer["grading_params"]["primary_calibration_version"] == 1
+    restored = stack_primary_execution_graph(ColorStackData.from_dict(measured.to_dict()))
+    assert restored == graph
+    changed = measured.with_grading_params({**measured.grading_params, "contrast": 2.0})
+    updated = stack_primary_execution_graph(changed)
+    assert updated is not None and updated.graph_id == graph.graph_id
+    assert updated.graph_revision != graph.graph_revision
 
 
 # ── v2+ layers 迁移 ──────────────────────────────────────────────────────
