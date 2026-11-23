@@ -22,15 +22,19 @@
 | [evidence/metal-preview-gate-diag-auto.json](evidence/metal-preview-gate-diag-auto.json) | 0.4 | 同上，`auto` 配置 |
 | [samples.md](samples.md) | 0.3 / 0.5 | 回归样本工程清单（A～G）、媒体实测事实、测量前置条件 |
 | `evidence/ab-playback-native-smoke-5292d843.json` | 2.4 | 原生视口在真实应用里的功能冒烟（显示器休眠，帧数不作比较） |
+| [effect-compat-matrix.md](effect-compat-matrix.md) | 6.1 | 效果、`.tglsl` 插件、转场、预设与其它插件类型的兼容矩阵（生成物，不手改） |
+| `evidence/effect-metal-parity-2026-11-23.json` | 6.2 / 6.3 | 21 个已验证插件与内置曝光的 GL↔Metal 真机对拍：度量、门限、编译缓存键、反射绑定、编译器身份 |
+| `evidence/effect-metal-msl/*.metal` | 6.3 | 对拍时生成的 MSL 源（每个效果一份） |
+| `evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-23.json` | 7.5 | 图形调用台账：启动自检与一次导出（两条路径）创建的图形上下文 |
 
 ## 工具
 
 | 工具 | 用途 |
 |---|---|
 | `tools/bench_metal_ab_topos.py` | 导出 A/B 采样：隔离目录、首跑 + N 次暖跑、逐轮交替顺序、成片核验、汇总 JSON / Markdown |
-| `tools/bench_metal_ab_playback.py` | 播放 A/B 采样：三种后端配置显式声明、用例有效性判定、停滞看门狗、显示器清醒检查 |
+| `tools/bench_metal_ab_playback.py` | 播放 A/B 采样：`gl` / `auto` / `metal` / `native` 四种配置显式声明（`native` = `TOPOS_BACKEND_GRAPHICS=metal` + `TOPOS_EDIT_METAL_VIEWPORT=1`，Metal 帧直接进 `CAMetalLayer`）、用例有效性判定、停滞看门狗、显示器清醒检查 |
 | `tools/diag_edit_metal_preview_gate.py` | 预览门控诊断：统计每帧首个不满足的条件与实际由 Metal 渲染的帧数 |
-| `tools/bench_metal_ab_playback.py` 的 `native` 配置 | `TOPOS_BACKEND_GRAPHICS=metal` + `TOPOS_EDIT_METAL_VIEWPORT=1`：Metal 帧直接进 `CAMetalLayer` |
+| `tools/build_effect_compat_matrix.py` | 从效果目录与验证登记表生成效果兼容矩阵（`--check` 在文档过期时返回 1） |
 
 ## 重跑
 
