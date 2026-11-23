@@ -307,37 +307,85 @@ def _layer_provider(graph) -> Callable[[str], Mapping[str, Any] | None]:
         if isinstance(payload, Mapping):
             payload = dict(payload)
             payload.pop("_plugin_bindings", None)  # 真实注册表路径
+            payload = _with_hsl_curve_lut(payload)
         return payload
     return provide
 
 
+def _with_hsl_curve_lut(payload: dict) -> dict:
+    """HSL 曲线的 LUT 由控制点重建（图层只持久化控制点，LUT 是渲染侧缓存）。
+
+    GL 图着色器只凭 ``hsl_curve_lut`` 判定 HSL 曲线是否生效；CPU 与 Metal
+    图后端在 LUT 缺失时自己按数据重建。评估器不补的话，带 HSL 曲线的节点
+    缩略图看起来像没调过。
+    """
+    if payload.get("hsl_curve_lut") is None and payload.get("hsl_curve_data"):
+        from src.features.color.core.layer import build_hsl_curve_lut_from_data
+        payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
+            dict(payload["hsl_curve_data"]))
+    return payload
+
+
+def _curve_array(layer) -> np.ndarray:
+    """The layer's curve as ``(256, 3)`` in [0, 1]; a straight line when it has none."""
+    lut = layer.get("curves_lut") if isinstance(layer, Mapping) else None
+    if lut is None:
+        ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+        return np.stack([ramp] * 3, axis=-1)
+    return np.asarray(lut, dtype=np.float32).reshape(256, 3)
+
+
+def _hsl_curve_array(layer) -> np.ndarray:
+    """The layer's six HSL curves as ``(256, 6)`` -- one texture row per sample
+    point, as the production renderer lays the (6, 256) LUT out; all defaults
+    (multipliers 1, hue shift 0) when it has none."""
+    lut = layer.get("hsl_curve_lut") if isinstance(layer, Mapping) else None
+    if lut is None:
+        lut = np.ones((6, 256), dtype=np.float32)
+        lut[1] = 0.0                                   # HueHue is a shift
+    return np.asarray(lut, dtype=np.float32).reshape(6, 256).T.copy()
+
+
+def _aux_texture(ctx, cache: dict, name: str, size: tuple, components: int, data: np.ndarray):
+    """A float texture of ``data``, one per distinct content (the cache lives as long as the context)."""
+    payload = np.ascontiguousarray(data, dtype=np.float32).tobytes()
+    key = f"{name}:{hash(payload)}"
+    tex = cache.get(key)
+    if tex is None:
+        tex = ctx.texture(size, components, data=payload, dtype="f4")
+        tex.filter = (ctx.LINEAR, ctx.LINEAR)
+        tex.repeat_x = tex.repeat_y = False
+        cache[key] = tex
+    return tex
+
+
 def _bind_aux_with_lut(ctx, prog, layer, cache: dict) -> None:
-    """最小 aux 绑定：curves（identity 兜底）+ LUT3D（按内容缓存）。
+    """One layer's auxiliary textures in the production order.
+
+    The same four as ``AsyncRenderer._bind_aux_textures_single_layer``: the
+    layer's own curves and HSL curves (a straight line / the defaults when it
+    has none), the neutral warper (the evaluator has no warper textures, so a
+    warper shows unwarped rather than wrong) and its LUT3D.  Every curve used
+    to be bound as a straight line, so a node's thumbnail never showed its
+    curve, and the other two samplers were left to whatever unit 0 held.
 
     LUT 纹理数据与生产 ``_load_lut_sync`` 同构（重采样单位域、f4 字节序）；
     强度 uniform（u_lut_intensity）由执行器通用 uniform 上传路径按
     layer.lut_intensity 设置（R05 投影）。
     """
     unit = 2
-    has_curves = "u_curves_tex" in prog
-    has_lut = "u_lut_tex" in prog
-    if has_curves:
-        ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
-        data = np.ascontiguousarray(
-            np.stack([ramp] * 3, axis=-1).reshape(256, 1, 3)).tobytes()
-        key = "identity-curves"
-        tex = cache.get(key)
-        if tex is None:
-            tex = ctx.texture((256, 1), components=3, dtype="f4", data=data)
-            tex.filter = (ctx.LINEAR, ctx.LINEAR)
-            cache[key] = tex
-        tex.use(unit)
-        prog["u_curves_tex"].value = unit
-        unit += 1
-    if has_lut:
-        lut_path = layer.get("active_lut_path") if isinstance(layer, Mapping) else None
-        lut_path = lut_path if isinstance(lut_path, str) and lut_path else None
-        if lut_path is None:
+    mapping = layer if isinstance(layer, Mapping) else {}
+    for name, size, components, data in (
+            ("u_curves_tex", (256, 1), 3, _curve_array(mapping)),
+            ("u_hsl_curve_tex", (6, 256), 1, _hsl_curve_array(mapping)),
+            ("u_warper_tex", (2, 2), 2, np.zeros((2, 2, 2), dtype=np.float32))):
+        if name in prog:
+            _aux_texture(ctx, cache, name, size, components, data).use(unit)
+            prog[name].value = unit
+            unit += 1
+    if "u_lut_tex" in prog:
+        lut_path = mapping.get("active_lut_path")
+        if not (isinstance(lut_path, str) and lut_path):
             raise RuntimeError("aux_texture_missing: LUT shader 无 LUT 引用")
         tex = cache.get(lut_path)
         if tex is None:

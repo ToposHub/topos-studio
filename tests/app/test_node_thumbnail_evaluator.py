@@ -274,3 +274,194 @@ def _image_bytes(image) -> np.ndarray:
     ptr.setsize(image.sizeInBytes())
     arr = np.frombuffer(ptr, dtype=np.uint8).reshape(h, image.bytesPerLine())
     return arr[:, :w * 3].reshape(h, w, 3)
+
+
+# ── 辅助纹理：节点自己的曲线与 HSL 曲线 ───────────────────────────────────
+
+def _one_layer_graph(layer):
+    project, sid = EditProject.create(name="r08").create_color_stack(
+        asset_id="a1", name="s")
+    return migrate_legacy_stack(
+        project.color_stacks[sid].with_layers([layer.to_dict(None)]))
+
+
+def _evaluate(graph, source=None) -> _Sink:
+    """Evaluate every corrector of ``graph`` and return what was delivered."""
+    sink = _Sink()
+    preview = ColorNodeOutputPreview(size=(64, 36), debounce_ms=10)
+    preview.node_thumbnail_ready.connect(sink.on_ready)
+    preview.evaluation_failed.connect(sink.on_failed)
+    nodes = _correctors(graph)
+    try:
+        payload = graph.to_dict()
+        preview.set_identity("s", "stack", graph.graph_revision)
+        preview.request(lambda: payload,
+                        lambda: source if source is not None else _ramp(),
+                        [n.node_id for n in nodes])
+        assert _drive(preview, sink, count=len(nodes)), (
+            f"缩略图未投递: ready={list(sink.ready)} failed={sink.failed}")
+    finally:
+        preview.shutdown()
+    assert sink.failed == [], sink.failed
+    return sink
+
+
+class TestLayerCurves:
+    """缩略图过去给每个曲线采样器绑恒等纹理：带曲线的节点看起来像没调过。"""
+
+    def test_a_curve_node_thumbnail_shows_its_curve(self, qapp) -> None:
+        from src.features.color.core.layer import build_curves_lut_from_data
+        from tests.color.fixtures.color_graph import _neutral_layer
+        layer = _neutral_layer("to black")
+        layer.curves_data = {"M": [(0, 255), (255, 255)]}   # UI 坐标：y = 255 是最低输出
+        layer.curves_lut = build_curves_lut_from_data(layer.curves_data)
+
+        (image,) = _evaluate(_one_layer_graph(layer)).ready.values()
+
+        assert _image_bytes(image).max() <= 8               # 几乎全黑，而不是源图
+
+    def test_a_straight_line_curve_looks_like_no_curve(self, qapp) -> None:
+        from src.features.color.core.layer import build_curves_lut_from_data
+        from tests.color.fixtures.color_graph import _neutral_layer
+        plain = _neutral_layer("plain")
+        straight = _neutral_layer("straight")
+        straight.curves_data = {"M": [(0, 255), (255, 0)]}
+        straight.curves_lut = build_curves_lut_from_data(straight.curves_data)
+
+        (without,) = _evaluate(_one_layer_graph(plain)).ready.values()
+        (with_line,) = _evaluate(_one_layer_graph(straight)).ready.values()
+
+        assert np.abs(_image_bytes(without).astype(int)
+                      - _image_bytes(with_line).astype(int)).max() <= 1
+
+    def test_an_hsl_curve_node_thumbnail_shows_its_hsl_curve(self, qapp) -> None:
+        from tests.color.fixtures.color_graph import _neutral_layer
+        layer = _neutral_layer("no saturation")
+        layer.hsl_curve_data = {"SatSat": [(0, 255), (255, 255)]}   # 乘数处处为 0
+
+        (image,) = _evaluate(_one_layer_graph(layer)).ready.values()
+
+        pixels = _image_bytes(image).astype(int)
+        assert (pixels.max(axis=-1) - pixels.min(axis=-1)).max() <= 6   # 处处灰
+        (control,) = _evaluate(_one_layer_graph(_neutral_layer("plain"))).ready.values()
+        control = _image_bytes(control).astype(int)
+        assert (control.max(axis=-1) - control.min(axis=-1)).max() > 200
+
+    def test_gl_and_metal_agree_for_the_three_layer_stack(self, qapp) -> None:
+        """两个后端给同一张图同一帧源：每个节点的缩略图最多差 1 级。"""
+        from src.features.color.core.color_graph_entry import SharedColorGraphEntry
+        from src.features.color.core.metal_node_thumbnail import (
+            MetalNodeThumbnailService,
+        )
+        from src.shared.gpu.metal.context import MetalComputeContext
+        if not MetalComputeContext.is_supported():
+            pytest.skip(f"no Metal device: {MetalComputeContext.availability_reason()[1]}")
+        graph = _graph()
+        source = _ramp()
+        delivered = _evaluate(graph).ready
+        rgba = np.concatenate(
+            [source[..., :3], np.ones(source.shape[:2] + (1,), np.float32)], axis=-1)
+        results = MetalNodeThumbnailService(
+            SharedColorGraphEntry(MetalComputeContext())).evaluate(
+            graph, rgba, tuple(n.node_id for n in _correctors(graph)))
+
+        assert results.keys() == delivered.keys()
+        for node_id, image in delivered.items():
+            picture, backend = results[node_id]
+            assert backend == "metal_texture", (node_id, backend)
+            diff = np.abs(_image_bytes(image).astype(int)
+                          - picture[..., :3].astype(int))
+            assert diff.mean() <= 0.5 and diff.max() <= 1, (node_id, diff.mean(), diff.max())
+
+
+class _FakeTexture:
+    def __init__(self, size, components, data, dtype) -> None:
+        self.size, self.components, self.data, self.dtype = size, components, data, dtype
+        self.units: list[int] = []
+
+    def use(self, unit) -> None:
+        self.units.append(unit)
+
+
+class _FakeContext:
+    LINEAR = "linear"
+
+    def __init__(self) -> None:
+        self.made: list[_FakeTexture] = []
+
+    def texture(self, size, components, data, dtype) -> _FakeTexture:
+        self.made.append(_FakeTexture(size, components, data, dtype))
+        return self.made[-1]
+
+
+class _Sampler:
+    def __init__(self) -> None:
+        self.value = None
+
+
+class TestAuxiliaryBinding:
+    """绑定的内容与顺序（不需要 GPU）。"""
+
+    def test_a_layer_saved_with_hsl_control_points_alone_gets_its_lut_rebuilt(self) -> None:
+        """GL 图着色器只凭 LUT 判定 HSL 曲线生效；CPU 与 Metal 图后端自己按数据重建。"""
+        from src.app.controllers.node_thumbnail_evaluator import _with_hsl_curve_lut
+        saved = {"hsl_curve_data": {"SatSat": [(0, 255), (255, 255)]}}
+
+        rebuilt = _with_hsl_curve_lut(dict(saved))
+
+        lut = np.asarray(rebuilt["hsl_curve_lut"], np.float32)
+        assert lut.shape == (6, 256)
+        assert np.allclose(lut[4], 0.0) and np.allclose(lut[0], 1.0)
+        assert "hsl_curve_lut" not in saved                    # the input is left alone
+        # Already there, or no curve at all: nothing is added or replaced.
+        kept = {"hsl_curve_data": {"SatSat": [(0, 255), (255, 255)]}, "hsl_curve_lut": [[1.0] * 256] * 6}
+        assert _with_hsl_curve_lut(dict(kept)) == kept
+        assert _with_hsl_curve_lut({"name": "no curves"}) == {"name": "no curves"}
+
+    def test_each_declared_sampler_is_bound_from_the_layer_in_turn(self) -> None:
+        from src.app.controllers.node_thumbnail_evaluator import _bind_aux_with_lut
+        from src.features.color.core.layer import build_hsl_curve_lut_from_data
+        ramp = np.linspace(0, 1, 256, dtype=np.float32)
+        curve = np.stack([ramp * 0.5, ramp, ramp], axis=-1).reshape(256, 1, 3)
+        hsl = build_hsl_curve_lut_from_data({"SatSat": [(0, 255), (255, 255)]})
+        layer = {"curves_lut": curve.tolist(), "hsl_curve_lut": hsl.tolist()}
+        prog = {name: _Sampler() for name in
+                ("u_curves_tex", "u_hsl_curve_tex", "u_warper_tex")}
+        ctx = _FakeContext()
+
+        _bind_aux_with_lut(ctx, prog, layer, {})
+
+        curves, hsl, warper = ctx.made
+        assert [prog[n].value for n in prog] == [2, 3, 4]
+        assert curves.size == (256, 1) and curves.components == 3
+        assert np.allclose(np.frombuffer(curves.data, np.float32).reshape(256, 3),
+                           np.stack([ramp * 0.5, ramp, ramp], axis=-1), atol=1e-6)
+        # (256, 6)：每个采样点一行，六条曲线一列——与生产渲染器的排布相同
+        hsl_data = np.frombuffer(hsl.data, np.float32).reshape(256, 6)
+        assert hsl.size == (6, 256)
+        assert np.allclose(hsl_data[:, 4], 0.0)             # SatSat：乘数处处为 0
+        assert np.allclose(hsl_data[:, [0, 2, 3, 5]], 1.0) and np.allclose(hsl_data[:, 1], 0.0)
+        assert warper.size == (2, 2) and warper.components == 2
+        assert not np.frombuffer(warper.data, np.float32).any()
+
+    def test_a_layer_without_curves_gets_a_straight_line_and_the_default_hsl_curves(self) -> None:
+        from src.app.controllers.node_thumbnail_evaluator import _bind_aux_with_lut
+        prog = {"u_curves_tex": _Sampler(), "u_hsl_curve_tex": _Sampler()}
+        ctx = _FakeContext()
+
+        _bind_aux_with_lut(ctx, prog, {}, {})
+
+        curves, hsl = ctx.made
+        assert np.allclose(np.frombuffer(curves.data, np.float32).reshape(256, 3),
+                           np.tile(np.linspace(0, 1, 256, dtype=np.float32)[:, None], (1, 3)),
+                           atol=1e-6)
+        assert [prog[n].value for n in prog] == [2, 3]
+
+    def test_only_declared_samplers_are_bound_and_equal_content_shares_a_texture(self) -> None:
+        from src.app.controllers.node_thumbnail_evaluator import _bind_aux_with_lut
+        ctx, cache = _FakeContext(), {}
+        for _ in range(2):
+            prog = {"u_curves_tex": _Sampler()}
+            _bind_aux_with_lut(ctx, prog, {}, cache)
+            assert prog["u_curves_tex"].value == 2
+        assert len(ctx.made) == 1 and ctx.made[0].units == [2, 2]
