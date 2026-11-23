@@ -163,7 +163,7 @@ def test_gpu_yuv422p10_delivery_gate_requires_topos_bt709_contract():
     assert not ex._gpu_yuv422p10_output_allowed(config, 192, 108)
 
 
-def test_dnxhr_planar_output_requires_opengl_and_final_delivery() -> None:
+def test_dnxhr_planar_output_requires_a_supported_backend_and_final_delivery() -> None:
     exporter = _make_exporter()
     exporter._timeline_graphics_backend = "opengl"
     exporter._encoder = SimpleNamespace(_config=SimpleNamespace(
@@ -183,6 +183,8 @@ def test_dnxhr_planar_output_requires_opengl_and_final_delivery() -> None:
     assert not exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
     exporter._sequence.format_settings = {}
     exporter._timeline_graphics_backend = "metal"
+    assert exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
+    exporter._timeline_graphics_backend = "d3d11"
     assert not exporter._gpu_yuv422p10_output_allowed(config, 192, 108)
 
 
@@ -958,6 +960,20 @@ def test_fused_lut_delivery_matches_the_color_graph(
         assert fused is not None and reference_frame is not None
         for actual, expected in zip(fused.planes, reference_frame.planes):
             np.testing.assert_allclose(actual, expected, atol=1, rtol=0)
+        if pixel_format == "yuv422p10le":
+            from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+
+            if TimelineMetalExportRenderer.is_supported():
+                monkeypatch.setattr("src.shared.color.lut_loader.resolve_lut_path", lambda _ref: str(path))
+                metal = TimelineMetalExportRenderer()
+                try:
+                    graded = metal.render_dnxhr_hqx_lut(source, reference, 0.8)
+                    ungraded = metal.render_dnxhr_hqx_lut(source, reference, 0.0)
+                    assert not np.array_equal(graded.planes[0], ungraded.planes[0])
+                    for actual, expected in zip(graded.planes, fused.planes, strict=True):
+                        np.testing.assert_allclose(actual, expected, atol=1, rtol=0)
+                finally:
+                    metal.release()
     finally:
         renderer.release()
 

@@ -27,6 +27,32 @@ orientation, so the kernels only ever see image coordinates.
 from __future__ import annotations
 
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
+from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
+
+
+EDIT_PRIMARY_GRADE_MSL = """
+#include <metal_stdlib>
+using namespace metal;
+""" + METAL_POINTWISE_GRADING_MSL + """
+
+// Edit feeds the GL Color graph a quantized RGBA8 track. Only the final
+// Color graph output goes back to RGBA8, after all float32 Correctors.
+kernel void edit_track_primary(
+    texture2d<float, access::read> source [[texture(0)]],
+    texture2d<float, access::write> out [[texture(1)]],
+    constant GraphGradingParams *grades [[buffer(0)]],
+    constant uint &count [[buffer(1)]],
+    uint2 px [[thread_position_in_grid]]) {
+    if (px.x >= out.get_width() || px.y >= out.get_height()) return;
+    float4 color = source.read(px);
+    for (uint index = 0; index < count; ++index) {
+        constant GraphGradingParams &params = grades[index];
+        float3 graded = graph_apply_grading(color.rgb, params);
+        color.rgb = mix(color.rgb, graded, params.opacity);
+    }
+    out.write(color, px);
+}
+"""
 
 
 EDIT_COMPOSITE_MSL = """
@@ -141,8 +167,25 @@ kernel void edit_layer_solid(
     track.write(color, px);
 }
 
-// The crop matte as its own pass, over a layer that is already stored in its
-// track texture (the GL order for solids: clear, transform, crop).
+// Edit transforms the already-quantized track texture after a planar upload.
+// The GL track texture uses linear filtering and the default repeat wrap.
+kernel void edit_transform_track(
+    texture2d<float> source [[texture(0)]],
+    texture2d<float, access::write> out [[texture(1)]],
+    constant edit_layer_params &p [[buffer(0)]],
+    uint2 px [[thread_position_in_grid]]) {
+    uint2 size = uint2(out.get_width(), out.get_height());
+    if (any(px >= size)) return;
+    float2 tc;
+    if (!edit_layer_texcoord(p, px, size, tc)) {
+        out.write(float4(0.0), px);
+        return;
+    }
+    constexpr sampler track_sampler(coord::normalized, filter::linear, address::repeat);
+    out.write(source.sample(track_sampler, tc), px);
+}
+
+// The crop matte as its own pass, over a transformed track texture.
 kernel void edit_crop_matte_pass(
     texture2d<float, access::read> source [[texture(0)]],
     texture2d<float, access::write> out [[texture(1)]],

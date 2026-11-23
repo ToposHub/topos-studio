@@ -146,7 +146,11 @@ def _compare_on_render_thread(path: Path, layer: Any, publisher: Any) -> dict:
             source_a.release()
         if layer is not None:
             done = threading.Event()
-            renderer._apply_native_viewport_request(("detach", done))
+            renderer._native_detach_done = done
+            deadline = time.monotonic() + 2.0
+            while not done.is_set() and time.monotonic() < deadline:
+                renderer._poll_native_viewport()
+                time.sleep(0.002)
             assert done.is_set()
         if metal is not None:
             metal.release()
@@ -173,11 +177,12 @@ def _exercise_port(renderer: Any, present: Any, size: tuple) -> dict:
     ) is True
     port = renderer._native_port
     deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline and port.in_flight == 0 and port.pending:
+    while time.monotonic() < deadline and not port.stats["actually_presented"]:
         renderer._poll_native_viewport()
         time.sleep(0.002)
     renderer._poll_native_viewport()
     stats["presented"] = port.stats["presented"]
+    stats["actually_presented"] = port.stats["actually_presented"]
     stats["no_drawable"] = port.stats["no_drawable"]
     stats["stale"] = port.stats["stale"]
     stats["in_flight"] = port.in_flight
@@ -205,7 +210,7 @@ def test_native_slot_matches_the_iosurface_route(tmp_path: Path) -> None:
 @pytest.mark.gpu_renderer
 @pytest.mark.real_media
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS Metal and CGL interop")
-def test_native_frame_reaches_a_real_layer(qapp) -> None:
+def test_native_frame_reaches_a_real_layer(qapp, qtbot) -> None:
     path = _needs_video()
     if qapp.platformName() != "cocoa":
         pytest.skip("a CAMetalLayer needs the cocoa Qt platform")
@@ -219,14 +224,17 @@ def test_native_frame_reaches_a_real_layer(qapp) -> None:
         if not host.attach():
             pytest.skip(f"no Metal layer on this machine: {host.failure}")
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="NativePreviewTest") as worker:
-            result = worker.submit(
-                _compare_on_render_thread, path, host.layer, host.publisher).result()
+            future = worker.submit(_compare_on_render_thread, path, host.layer, host.publisher)
+            qtbot.waitUntil(future.done, timeout=15000)
+            result = future.result()
         assert result["mae"] < 0.5 and result["p99"] <= 2, result
         port = result["port"]
         # A drawable is only handed out while the layer is on screen; with the
         # display asleep the port keeps the last picture and reports it.
         assert port["stale"] == 0, port
         assert port["presented"] + port["no_drawable"] >= 1, port
+        if port["actually_presented"]:
+            assert port["actually_presented"] == 1, port
     finally:
         host.detach()
         host.close()

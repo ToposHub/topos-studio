@@ -46,12 +46,10 @@ from src.features.edit.core.gpu_transition_shaders import (
 from src.shared.gpu.gl_backend import GLContextManager
 
 
-def _env_flag(name: str) -> bool:
-    """An opt-in environment switch; only explicit truthy values enable it."""
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "on", "yes"}
-
-
 _NATIVE_STATE_LOCK = threading.Lock()
+# Driver callbacks can outlive a stopped renderer on sleep or device loss.
+# Keep its layer, pools and texture import context alive through process exit.
+_NATIVE_VIEWPORTS_AWAITING_GPU: list[tuple[Any, Any, Any]] = []
 
 logger = logging.getLogger(__name__)
 
@@ -625,6 +623,7 @@ class EditGpuPreviewRenderer(QThread):
     # GL Viewer。
     native_frame_presented = pyqtSignal(int)  # frame
     native_viewport_failed = pyqtSignal(str)  # reason
+    native_viewport_attach_requested = pyqtSignal()
     render_error = pyqtSignal(int, str)  # frame, error_message
     # 合成快照（1/4 分辨率 QImage）：暂停态 seek/scrub-settle 的帧回填
     # CPU 帧缓存，让"seek 回看刚看过的帧"无需重新解码。只在
@@ -2142,7 +2141,6 @@ class EditGpuPreviewRenderer(QThread):
         # All per-track conversion passes target this preview canvas. Keeping
         # it per task avoids creating source-resolution RGB intermediates.
         self._active_output_size = (w, h)
-        self._configure_planar_upload_mode(task, w, h)
         coordinate_size = task.coordinate_size
         if coordinate_size is not None and coordinate_size[0] > 0 and coordinate_size[1] > 0:
             self._active_transform_coordinate_size = (
@@ -2218,6 +2216,7 @@ class EditGpuPreviewRenderer(QThread):
                 self.__dict__.get("_metal_preview_track_count", 1), metal=True)
             return
 
+        self._configure_planar_upload_mode(task, w, h)
         # Render each layer to its own FBO (YUV→RGB conversion)
         track_textures = []
         # FX-C02: parallel list of the track_index (z-order) for each entry in
@@ -2693,9 +2692,8 @@ class EditGpuPreviewRenderer(QThread):
 
         Metal migration plan 2.6: several layers, transforms, crops, blend
         modes, opacities (which is what a cross dissolve is) and
-        ``dip_to_color``.  Explicit opt-in only (``all`` mode) until the
-        composite has passed the default-rollout gates.  A refusal is a
-        per-frame decision: the GL path renders that frame unchanged.
+        ``dip_to_color``. Enabled with the full Metal preview mode. A plan
+        refusal hands the frame to the compatible renderer.
         """
         from src.shared.gpu.metal.feature_switches import (
             MetalFeature,
@@ -2775,6 +2773,7 @@ class EditGpuPreviewRenderer(QThread):
             if self._metal_preview is None:
                 self._metal_preview = MetalTimelinePreview(self.ctx)
             coordinate_size = tuple(self._active_transform_coordinate_size)
+            started = time.perf_counter()
             rendered = self._metal_preview.render_composite(
                 plan, (width, height), coordinate_size)
             if rendered is None:
@@ -2799,11 +2798,25 @@ class EditGpuPreviewRenderer(QThread):
             layer["vt_pixel_buffer"] = None
             source.release()
             self._note_zero_copy_import(source, timeline_frame=task.frame)
+        self._note_metal_planar_upload(task.frame, plan, started)
         self._metal_preview_track_count = len(plan.layers)
         playback_trace("gpu_renderer.metal_composite", frame=task.frame,
                        generation=task.generation_id, layers=len(plan.layers),
                        gpu_submit_ms=self._metal_preview.last_gpu_time_ms)
         return True
+
+    def _note_metal_planar_upload(self, frame: int, plan: Any, started: float) -> None:
+        """Record the CPU plane uploads of a completed Metal submission."""
+        sources = [layer.source for layer in plan.layers if layer.kind == "planar"]
+        if sources:
+            self._store_planar_upload_stats(frame, {
+                "bytes": sum(plane.nbytes for source in sources for plane in (source.y, source.u, source.v)),
+                "ms": (time.perf_counter() - started) * 1000.0,
+                "tracks": len(sources),
+                "mode": "metal_planar",
+                "pixel_format": sources[-1].pixel_format,
+                "gbr": False,
+            })
 
     def _publish_composited_frame(
         self, task: EditRenderTask, final_tex: Any, w: int, h: int, track_count: int,
@@ -5716,15 +5729,18 @@ void main() {
 
     def _init_native_viewport_state(self) -> None:
         """State of the native viewport.  GUI 线程请求 attach，渲染线程在
-        自己的线程上创建呈现端口与原生帧生产器。默认关闭
-        （TOPOS_EDIT_METAL_VIEWPORT=1 显式开启）；任何失败都回到 GL Viewer。
+        自己的线程上创建呈现端口与原生帧生产器。默认在首个合格帧之后挂载，
+        失败回到兼容视口。
         """
-        from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+        from src.features.edit.core.metal_timeline_preview import native_viewport_mode
 
-        self._native_viewport_opt_in = (_env_flag("TOPOS_EDIT_METAL_VIEWPORT")
-                                        and not feature_disabled(MetalFeature.NATIVE_VIEWPORT))
+        viewport_mode = native_viewport_mode()
+        self._native_viewport_opt_in = viewport_mode != "off"
+        self._native_viewport_deferred = viewport_mode == "deferred"
+        self._native_attach_requested = False
         self._native_viewport_lock = threading.Lock()
         self._native_viewport_request: Optional[tuple] = None
+        self._native_detach_done: Optional[threading.Event] = None
         self._native_port: Optional[Any] = None        # render thread only
         self._native_producer: Optional[Any] = None    # render thread only
         self._native_request_generation: Optional[int] = None
@@ -5745,10 +5761,16 @@ void main() {
         self._ensure_native_viewport_state()
         return bool(self._native_viewport_opt_in)
 
+    def native_viewport_deferred(self) -> bool:
+        """Wait for an eligible render task before allocating the window layer."""
+        self._ensure_native_viewport_state()
+        return self._native_viewport_deferred
+
     def set_native_frames_wanted(self, wanted: bool) -> None:
         """GUI thread: whether new frames should take the native path."""
         self._ensure_native_viewport_state()
-        self._native_frames_wanted = bool(wanted)
+        with self._native_viewport_lock:
+            self._native_frames_wanted = bool(wanted) and self._native_detach_done is None
 
     def native_viewport_active(self) -> bool:
         """Whether the render thread currently presents through a Metal layer."""
@@ -5763,6 +5785,10 @@ void main() {
         """
         self._ensure_native_viewport_state()
         with self._native_viewport_lock:
+            done = self._native_detach_done
+            if done is not None and not done.is_set():
+                return
+            self._native_detach_done = None
             self._native_viewport_request = ("attach", layer, publisher)
 
     def detach_native_viewport(self, timeout_s: float = 2.0) -> bool:
@@ -5772,24 +5798,16 @@ void main() {
         the caller must then keep the layer alive and try again later.
         """
         self._ensure_native_viewport_state()
-        done = threading.Event()
         with self._native_viewport_lock:
-            self._native_viewport_request = ("detach", done)
-            port = self._native_port
-        running = self.isRunning()
-        if port is None and not self.is_initialized:
-            # Nothing was ever built and no render thread will pick the
-            # request up: settle it here.
-            with self._native_viewport_lock:
-                self._native_viewport_request = None
-            done.set()
-        elif not running:
-            # The render thread is gone and can no longer touch the layer:
-            # nothing to wait for (it released the port on its way out).
-            with self._native_viewport_lock:
+            self._native_frames_wanted = False
+            done = self._native_detach_done
+            if done is None:
+                done = self._native_detach_done = threading.Event()
+                self._native_viewport_request = ("detach", done)
+            if not self.isRunning():
                 self._native_viewport_request = None
                 self._native_port = None
-            done.set()
+                done.set()
         return done.wait(timeout=max(0.0, float(timeout_s)))
 
     def submit_native_present(
@@ -5808,13 +5826,14 @@ void main() {
         self._ensure_native_viewport_state()
         with self._native_viewport_lock:
             port = self._native_port
-            if port is None or self._native_viewport_request is not None:
+            if (port is None or self._native_viewport_request is not None
+                    or self._native_detach_done is not None):
                 return False
         # The scrub token and the deadline travel inside the descriptor; the
         # port binds them to this frame so a later frame cannot loosen them.
         return port.submit(
             present, rect=tuple(rect), display_rect_px=tuple(display_rect_px),
-            on_presented=self._note_native_frame_presented, on_released=on_released,
+            on_displayed=self._note_native_frame_presented, on_released=on_released,
         )
 
     def release_native_frame(self, present: Any, reason: str = "unclaimed") -> None:
@@ -5831,7 +5850,7 @@ void main() {
         """GUI thread: show the on-screen frame again (resize, zoom, pan)."""
         self._ensure_native_viewport_state()
         with self._native_viewport_lock:
-            port = self._native_port
+            port = self._native_port if self._native_detach_done is None else None
         if port is None:
             return False
         return port.represent_displayed(tuple(rect))
@@ -5849,8 +5868,13 @@ void main() {
         with self._native_viewport_lock:
             request = self._native_viewport_request
             self._native_viewport_request = None
+            detach_done = self._native_detach_done
         if request is not None:
             self._apply_native_viewport_request(request)
+        elif detach_done is not None and not detach_done.is_set():
+            self._apply_native_viewport_request(("detach", detach_done))
+        if detach_done is not None and not detach_done.is_set():
+            return
         port, producer = self._native_port, self._native_producer
         with self._native_viewport_lock:
             unclaimed, self._native_release_requests = self._native_release_requests, []
@@ -5937,22 +5961,31 @@ void main() {
         if kind == "detach":
             _kind, done = request
             port, producer = self._native_port, self._native_producer
-            self._native_port = None
-            self._native_producer = None
             if port is not None:
                 try:
-                    for outcome in port.shutdown():
-                        if outcome.event == "released":
-                            self._release_native_frame(outcome.frame, "shutdown", producer)
-                finally:
-                    done.set()
+                    closed, outcomes = port.close_when_idle()
+                except Exception:  # noqa: BLE001 - the driver may already have stopped
+                    logger.warning("Edit native viewport shutdown failed", exc_info=True)
+                    closed, outcomes = not port.in_flight, []
+                for outcome in outcomes:
+                    if outcome.event == "released":
+                        self._release_native_frame(outcome.frame, outcome.reason, producer)
+                if not closed:
+                    return
             if producer is not None:
                 try:
-                    producer.shutdown()
+                    published, failed = producer.poll()
+                    for item in published:
+                        self._release_native_frame(item.present, "shutdown", producer)
+                    for item in failed:
+                        self._fail_native_frame(item)
+                    if producer.in_flight or not producer.shutdown():
+                        return
                 except Exception:  # noqa: BLE001
                     logger.warning("Edit native producer shutdown failed", exc_info=True)
-            if port is None:
-                done.set()
+            self._native_port = None
+            self._native_producer = None
+            done.set()
 
     def _emit_native_present(self, item: Any) -> None:
         """Render thread: a native frame finished on the GPU — publish it."""
@@ -5974,23 +6007,25 @@ void main() {
         """Render thread, at exit: release the viewport before Metal goes away."""
         if "_native_viewport_lock" not in self.__dict__:
             return
-        port, producer = self._native_port, self._native_producer
-        self._native_port = None
-        self._native_producer = None
-        if port is not None:
-            try:
-                for outcome in port.shutdown():
-                    if outcome.event == "released":
-                        self._release_native_frame(outcome.frame, "shutdown", producer)
-            except Exception:  # noqa: BLE001
-                logger.warning("Edit native viewport shutdown failed", exc_info=True)
-        if producer is not None:
-            try:
-                if not producer.shutdown():
-                    logger.warning(
-                        "Edit native producer: GPU still busy at exit; keeping resources")
-            except Exception:  # noqa: BLE001
-                logger.warning("Edit native producer shutdown failed", exc_info=True)
+        with self._native_viewport_lock:
+            done = self._native_detach_done
+            if done is None:
+                done = self._native_detach_done = threading.Event()
+            self._native_viewport_request = None
+        deadline = time.monotonic() + 0.25
+        while not done.is_set():
+            self._apply_native_viewport_request(("detach", done))
+            if done.is_set():
+                break
+            if time.monotonic() >= deadline:
+                _NATIVE_VIEWPORTS_AWAITING_GPU.append((
+                    self._native_port, self._native_producer, getattr(self, "_metal_preview", None),
+                ))
+                self._native_port = self._native_producer = self._metal_preview = None
+                logger.warning("Edit native viewport still has GPU work at exit; retained its resources")
+                done.set()
+                break
+            time.sleep(0.002)
 
     def _fail_native_frame(self, item: Any) -> None:
         """Render thread: a native frame failed — report it and why."""
@@ -6026,7 +6061,9 @@ void main() {
     def _try_native_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
         """Take an eligible frame to the native viewport.  ``True``: settled here."""
         producer = self.__dict__.get("_native_producer")
-        if producer is None or not producer.enabled:
+        request_attach = (producer is None and self.__dict__.get("_native_viewport_deferred", False)
+                          and not self._native_attach_requested and self._native_detach_done is None)
+        if (producer is None and not request_attach) or (producer is not None and not producer.enabled):
             return False
         if not self.__dict__.get("_native_frames_wanted", True):
             return False
@@ -6049,6 +6086,11 @@ void main() {
             composite = self._metal_composite_plan(task)
             if composite is None:
                 return False
+        if request_attach:
+            self._native_attach_requested = True
+            self.native_viewport_attach_requested.emit()
+            return False
+        assert producer is not None
         from src.features.edit.core.native_metal_preview import DROPPED, FALLBACK, SUBMITTED
 
         # Ownership of the VT frames passes to the frame transaction; nothing
@@ -6067,6 +6109,7 @@ void main() {
                 entry["vt_pixel_buffer"] = frame_source
 
         taken = _take_sources()
+        started = time.perf_counter()
         try:
             if composite is not None:
                 outcome = producer.try_composite(
@@ -6074,15 +6117,19 @@ void main() {
                     tuple(self._active_transform_coordinate_size))
             else:
                 outcome = producer.try_render(task, (width, height), source, lut)
-        except Exception:
+        except Exception as error:
             _give_back(taken)                   # untouched: the GL path may use them
-            raise
+            playback_trace("gpu_renderer.metal_preview_fallback", frame=task.frame,
+                           error=error, native=True)
+            return False
         if outcome == FALLBACK:
             _give_back(taken)
             return False
         self._task_used_io_surface_source = True
         for _entry, frame_source in taken:
             self._note_zero_copy_import(frame_source, timeline_frame=task.frame)
+        if outcome == SUBMITTED and composite is not None:
+            self._note_metal_planar_upload(task.frame, composite, started)
         if outcome == DROPPED:
             self._emit_task_render_error(task, "native_preview_dropped")
         return True

@@ -76,7 +76,7 @@ DISPLAY_PARAMS_DTYPE = np.dtype([
                                    # 3 pq / 4 edr 线性×scale
     ("target_peak", "<f4"),        # tonemap 参考白（nit）
     ("out_scale", "<f4"),          # edr headroom / pq 的 nit 缩放
-    ("pad0", "<i4"),
+    ("composite_background", "<i4"),
 ])
 
 #: transfer_mode 编码（与 MSL kernel 的 switch 一致）
@@ -284,7 +284,7 @@ struct DisplayParams {
     int mode;
     float target_peak;
     float out_scale;
-    int pad0;
+    int composite_background;
 };
 
 float linear_to_srgb(float c) {
@@ -339,6 +339,10 @@ kernel void working_to_display(
         rgb = rgb * p.out_scale;
     }
     // mode 0（sdr_passthrough）：恒等——编码信号直通（F5.1 三路语义表）
+    if (p.composite_background != 0) {
+        rgb = mix(float3(0.1), rgb, src.a);
+        src.a = 1.0;
+    }
     out_tex.write(float4(rgb, src.a), gid);
 }
 """
@@ -554,7 +558,7 @@ class MetalColorIO:
 
     def encode_for_display(
         self, working_tex: Any, output: DisplayOutputDescription,
-        *, target: Any = None,
+        *, target: Any = None, composite_viewport_background: bool = False,
     ) -> Any:
         """工作空间线性 → 展示码值纹理（不提交）。
 
@@ -569,9 +573,11 @@ class MetalColorIO:
         if self._display_kernel is None:
             self._display_kernel = self.ctx.compile_kernel(
                 "working_to_display", _MSML_DISPLAY_ENCODE)
+        params = build_display_params(output)
+        params["composite_background"] = int(composite_viewport_background)
         self.ctx.dispatch(
             self._display_kernel,
-            buffers={0: self._param_buffer(build_display_params(output))},
+            buffers={0: self._param_buffer(params)},
             textures={0: working_tex, 1: target},
             threads=(width, height, 1))
         return target

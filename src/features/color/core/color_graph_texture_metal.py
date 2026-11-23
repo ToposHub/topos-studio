@@ -179,6 +179,7 @@ class _TexturePool:
     def __init__(self, ctx: MetalComputeContext) -> None:
         self._ctx = ctx
         self._free: dict[tuple, list] = {}
+        self._retained_sizes: frozenset[tuple[int, int]] | None = None
         self.allocated = 0
 
     def acquire(self, pixel_format: Any, width: int, height: int) -> Any:
@@ -195,11 +196,19 @@ class _TexturePool:
             return 0
         key = (int(texture.pixelFormat()), int(texture.width()),
                int(texture.height()))
+        if self._retained_sizes is not None and key[1:] not in self._retained_sizes:
+            return 1
         slot = self._free.setdefault(key, [])
         if len(slot) < self._MAX_PER_KEY:
             slot.append(texture)
         # 池满：Python 引用离场即释放 MTLTexture（无 deferred GC 需求）
         return 1
+
+    def retain_sizes(self, sizes: frozenset[tuple[int, int]]) -> None:
+        if self._retained_sizes != sizes:
+            self._retained_sizes = sizes
+            self._free = {key: values for key, values in self._free.items()
+                          if key[1:] in sizes}
 
     def release_all(self) -> int:
         released = sum(len(v) for v in self._free.values())
@@ -508,7 +517,9 @@ class ColorGraphMetalTextureExecutor:
                     pool.release(current)
                 current = out
                 folded = True
-            return current
+            # A mixer with no connected branches leaves `current` owned by
+            # its input lease. Give the mixer output its own texture.
+            return current if folded else self._copy(current, width, height)
 
         if render_pass.op == "layer_mixer":
             slots = [self._input_for_slot(render_pass, node_outputs,
@@ -539,7 +550,7 @@ class ColorGraphMetalTextureExecutor:
                     pool.release(current)
                 current = out
                 folded = True
-            return current
+            return current if folded else self._copy(current, width, height)
 
         if render_pass.op == "key_mixer":
             refs = [ref for _port, ref in sorted(
@@ -886,6 +897,8 @@ class ColorGraphMetalTextureExecutor:
         flat = curves_lut_to_flat_buffer(lut)
         key = hashlib.sha256(flat.tobytes()).hexdigest()
         if key not in self._curves_buffers:
+            if len(self._curves_buffers) >= 16:
+                self._curves_buffers.pop(next(iter(self._curves_buffers)))
             self._curves_buffers[key] = \
                 self.ctx.create_buffer_from_numpy(flat)
         return self._curves_buffers[key]
@@ -903,6 +916,8 @@ class ColorGraphMetalTextureExecutor:
             np.asarray(hsl_lut, dtype=np.float32).reshape(6, 256).T)
         key = hashlib.sha256(arr.tobytes()).hexdigest()
         if key not in self._hsl_textures:
+            if len(self._hsl_textures) >= 16:
+                self._hsl_textures.pop(next(iter(self._hsl_textures)))
             self._hsl_textures[key] = self._upload_r32(arr, 6, 256)
         return self._hsl_textures[key]
 
@@ -936,6 +951,8 @@ class ColorGraphMetalTextureExecutor:
             tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow_(
                 self._metal.MTLRegionMake2D(0, 0, width, height), 0,
                 array.tobytes(), array.strides[0])
+            if len(self._warper_textures) >= 16:
+                self._warper_textures.pop(next(iter(self._warper_textures)))
             self._warper_textures[key] = tex
         return self._warper_textures[key]
 
@@ -1042,6 +1059,12 @@ class ColorGraphMetalTextureExecutor:
     def pool_allocated(self) -> int:
         """诊断：本执行器累计分配的 scratch 纹理数（池增长审计）。"""
         return self._pool.allocated
+
+    def retain_preview_sizes(self, sizes: frozenset[tuple[int, int]]) -> None:
+        """Keep current viewer and scope sizes across live viewport resizes."""
+        self._pool.retain_sizes(sizes)
+        self._white_mattes = {size: tex for size, tex in self._white_mattes.items()
+                              if size in sizes}
 
     def release_pool(self) -> int:
         """释放池与全部资源缓存（宿主清理时调用）。"""

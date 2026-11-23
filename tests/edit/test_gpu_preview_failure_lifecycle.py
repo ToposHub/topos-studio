@@ -317,7 +317,8 @@ def test_metal_composite_failure_keeps_the_frame_for_gl_and_ends_the_session(ren
 
 
 @pytest.mark.parametrize(('platform', 'graphics', 'override', 'expected'), [
-    ('darwin', 'auto', '', 'lut'), ('darwin', 'auto', '1', 'all'),
+    ('darwin', 'auto', '', 'all'), ('darwin', 'auto', '1', 'all'),
+    ('darwin', 'auto', 'lut', 'lut'),
     ('darwin', 'force_opengl', '1', 'off'), ('darwin', 'force_metal', '', 'all'),
     ('darwin', 'metal', '0', 'off'), ('linux', 'metal', '1', 'off'),
 ])
@@ -332,7 +333,7 @@ def test_metal_preview_preference(monkeypatch: pytest.MonkeyPatch, platform: str
     assert metal_timeline_preview.metal_preview_mode() == expected
 
 
-def test_metal_preview_auto_keeps_ordinary_nv12_on_existing_route(renderer) -> None:
+def test_metal_preview_lut_only_keeps_ordinary_nv12_on_existing_route(renderer) -> None:
     worker, _ = renderer
     task, _ = _metal_preview_task()
     worker._metal_preview_mode = "lut"

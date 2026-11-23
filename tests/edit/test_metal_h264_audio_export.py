@@ -46,7 +46,7 @@ from src.features.edit.core.timeline_export import (
     TimelineExporter,
 )
 from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
-from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, Rational, TimelineSequence
+from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, Rational, TimelineSequence, TransitionInstance
 from src.shared.export.export_stage_telemetry import ExportTelemetryRecorder
 from src.shared.export.video_encoder import MACOS_HW_ENCODE_DISABLE_ENV
 from src.shared.media.macos_vt.vt_compression import VideoToolboxCompressionError
@@ -623,7 +623,8 @@ def _decode_audio(path: Path) -> np.ndarray:
     return np.concatenate(chunks, axis=1)
 
 
-def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("with_dip", [False, True], ids=["primary_grade", "dip_to_color"])
+def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch, with_dip: bool) -> None:
     """Real VideoToolbox: both delivery paths produce the same audio track."""
     from src.shared.gpu.metal.context import MetalComputeContext
 
@@ -657,6 +658,18 @@ def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch)
         clip_id="v1", asset_id="source", track_id="v1", timeline_start=0,
         timeline_duration=frames, source_start=100, source_duration=frames,
         color_stack_id=stack_id)
+    video_track = EditTrack(track_id="v1", name="V1", track_type="video", index=0, clips=(video_clip,))
+    dip_color = (0.7, 0.15, 0.35)
+    if with_dip:
+        middle = frames // 2
+        left = replace(video_clip, timeline_duration=middle, source_duration=middle, color_stack_id=None)
+        right = replace(left, clip_id="v1-right", timeline_start=middle, source_start=180)
+        transition = TransitionInstance(
+            track_id="v1", left_clip_id=left.clip_id, right_clip_id=right.clip_id,
+            transition_type="dip_to_color", center_frame=middle, duration=8,
+            params={"color": dip_color},
+        )
+        video_track = replace(video_track, clips=(left, right), transitions=(transition,))
     # An offset cut: source frame 50 (2.0 s, where the tone starts) plays at
     # timeline frame 6, so the programme opens with 0.24 s of silence.
     mix_clip = ClipInstance(
@@ -665,14 +678,14 @@ def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch)
     sequence = TimelineSequence(
         timeline_id="native", name="Native audio", fps=Rational(25, 1),
         width=SIZE[0], height=SIZE[1],
-        video_tracks=(EditTrack(track_id="v1", name="V1", track_type="video", index=0,
-                                clips=(video_clip,)),),
+        video_tracks=(video_track,),
         audio_tracks=(EditTrack(track_id="a1", name="A1", track_type="audio", index=0,
                                 clips=(mix_clip,)),))
     monkeypatch.setenv("TOPOS_EXPORT_GPU_RENDER", "1")
     monkeypatch.delenv(MACOS_HW_ENCODE_DISABLE_ENV, raising=False)
     outputs: dict[str, Path] = {}
     selections: dict[str, dict] = {}
+    delivery_paths: dict[str, str] = {}
     for label, native in (("fast", ""), ("regular", "0")):
         monkeypatch.setenv("TOPOS_EXPORT_NATIVE_VT", native)
         path = tmp_path / f"{label}.mp4"
@@ -687,9 +700,12 @@ def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch)
         assert outcome.success, f"{label}: {outcome.cause}"
         outputs[label] = path
         selections[label] = dict(exporter.bridge_selection)
+        delivery_paths[label] = outcome.delivery_path
     if not selections["fast"]["selected"]:
         pytest.skip(f"the native path declined this machine: {selections['fast']}")
     assert selections["regular"]["selected"] is False
+    if with_dip:
+        assert delivery_paths["fast"] == "metal_h264_nv12_dip_to_color"
 
     import av
 
@@ -698,14 +714,27 @@ def test_native_audio_delivery_matches_the_regular_export(tmp_path, monkeypatch)
     # AAC priming is trimmed by an edit list: the first packet starts a frame early.
     assert fast[0][0] == -1024
     samples = frames_to_samples(frames, Rational(25, 1), SAMPLE_RATE)
-    for path in outputs.values():
+    dip_samples: dict[str, dict[int, np.ndarray]] = {}
+    for label, path in outputs.items():
+        dip_samples[label] = {}
         with av.open(str(path)) as container:
             assert [stream.type for stream in container.streams] == ["video", "audio"]
-            assert sum(1 for _ in container.decode(video=0)) == frames
+            video_count = 0
+            for frame in container.decode(video=0):
+                if with_dip and middle - 4 <= video_count < middle + 4:
+                    dip_samples[label][video_count] = frame.to_ndarray(format="rgb24")[::12, ::12].astype(np.int16)
+                video_count += 1
+            assert video_count == frames
             audio = container.streams.audio[0]
             assert audio.start_time == 0
             assert abs(audio.duration * audio.time_base - Fraction(samples, SAMPLE_RATE)) < Fraction(
                 1024, SAMPLE_RATE)
+    if with_dip:
+        np.testing.assert_allclose(
+            dip_samples["fast"][middle].mean(axis=(0, 1)), np.array(dip_color) * 255, atol=4,
+        )
+        for index, pixels in dip_samples["fast"].items():
+            assert float(np.abs(pixels - dip_samples["regular"][index]).mean()) <= 3.0, index
     # The tone starts 0.24 s in, in both channels, in the right order.
     decoded = _decode_audio(outputs["fast"])[:, :samples]
     onset = frames_to_samples(6, Rational(25, 1), SAMPLE_RATE)

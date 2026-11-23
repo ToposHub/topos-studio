@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import QMainWindow
 
 from PyQt6.QtWidgets import (QFileDialog, QMessageBox, QInputDialog,
                              QDialog)
-from PyQt6.QtCore import QByteArray, QTimer, QObject, QEvent, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QByteArray, QTimer, QObject, QEvent, QRunnable, QThreadPool, Qt, pyqtSignal
 
 from src.features.color.core.layer import Layer
 from src.features.edit.core.playback_debug import playback_trace
@@ -271,20 +271,38 @@ logger = logging.getLogger(__name__)
 _LEAKED_GPU_OBJECTS: list = []
 
 
-def _enable_native_program_viewport(host, gpu_renderer) -> None:
-    """Let the Program Viewer present frames on a Metal layer (opt-in).
+def _watch_native_viewport_request(widget: QObject, renderer: QObject) -> bool:
+    deferred = getattr(renderer, "native_viewport_deferred", None)
+    if not callable(deferred) or not deferred():
+        return False
+    renderer.native_viewport_attach_requested.connect(
+        widget.attach_requested_native_viewport, Qt.ConnectionType.QueuedConnection)
+    return True
 
-    Metal 迁移 2.1–2.3：会话显式开启时（TOPOS_EDIT_METAL_VIEWPORT=1）合格的帧
-    直接呈现到 CAMetalLayer。未开启、平台不支持或挂载失败时什么都不变——
-    GL Viewer 照常呈现每一帧。  模块级函数：``host`` 可以是任何持有
+
+def _set_native_viewport_candidate(widget: QObject | None, renderer: QObject | None) -> None:
+    setter = getattr(widget, "set_native_viewport_candidate", None)
+    if callable(setter):
+        setter(renderer)
+
+
+def _enable_native_program_viewport(host, gpu_renderer) -> None:
+    """Enable native presentation when the first compatible frame arrives.
+
+    Metal 迁移 2.1–2.3：合格的帧直接呈现到 CAMetalLayer，显式请求可提前挂载。
+    平台、格式和挂载失败时由兼容视口显示。模块级函数：``host`` 可以是任何持有
     ``program_viewer_widget`` 的控制器（含测试宿主）。
     """
     widget = getattr(host, "program_viewer_widget", None)
     enable = getattr(widget, "enable_native_viewport", None)
     opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
     if not callable(enable) or not callable(opted_in) or not opted_in():
+        _set_native_viewport_candidate(widget, None)
         return
     try:
+        _set_native_viewport_candidate(widget, gpu_renderer)
+        if _watch_native_viewport_request(widget, gpu_renderer):
+            return
         enabled = bool(enable(gpu_renderer))
     except Exception:  # noqa: BLE001 - a refusal must leave the GL viewer intact
         logger.exception("Program Viewer: native viewport could not be enabled; using OpenGL")
@@ -296,6 +314,7 @@ def _enable_native_program_viewport(host, gpu_renderer) -> None:
 def _disable_native_program_viewport(host) -> None:
     """Take the Metal layer back while the render thread can still confirm."""
     widget = getattr(host, "program_viewer_widget", None)
+    _set_native_viewport_candidate(widget, None)
     disable = getattr(widget, "disable_native_viewport", None)
     enabled = getattr(widget, "native_viewport_enabled", None)
     if not callable(disable) or not callable(enabled) or not enabled():
@@ -307,13 +326,17 @@ def _disable_native_program_viewport(host) -> None:
 
 
 def _enable_native_source_viewport(host, gpu_renderer) -> None:
-    """Let the Source Viewer present frames on a Metal layer (same opt-in)."""
+    """Route eligible source frames to the native Metal layer."""
     widget = getattr(host, "source_viewer_widget", None)
     enable = getattr(widget, "enable_native_viewport", None)
     opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
     if not callable(enable) or not callable(opted_in) or not opted_in():
+        _set_native_viewport_candidate(widget, None)
         return
     try:
+        _set_native_viewport_candidate(widget, gpu_renderer)
+        if _watch_native_viewport_request(widget, gpu_renderer):
+            return
         enabled = bool(enable(gpu_renderer))
     except Exception:  # noqa: BLE001 - a refusal must leave the GL canvas intact
         logger.exception("Source Viewer: native viewport could not be enabled; using OpenGL")
@@ -325,6 +348,7 @@ def _enable_native_source_viewport(host, gpu_renderer) -> None:
 def _disable_native_source_viewport(host) -> None:
     """Take the Source Viewer's Metal layer back while its thread can confirm."""
     widget = getattr(host, "source_viewer_widget", None)
+    _set_native_viewport_candidate(widget, None)
     disable = getattr(widget, "disable_native_viewport", None)
     enabled = getattr(widget, "native_viewport_enabled", None)
     if not callable(disable) or not callable(enabled) or not enabled():
@@ -2745,14 +2769,14 @@ class FileOpsMixin:
             # Start the GPU render thread
             gpu_renderer.start()
 
+            # Bind before the preview renderer can submit the first frame.
+            _enable_native_program_viewport(self, gpu_renderer)
+
             # Pass to TimelinePreviewRenderer (which also connects frame_ready signal)
             self.timeline_preview_renderer.set_gpu_renderer(
                 gpu_decode_manager=gpu_decode_manager,
                 gpu_renderer=gpu_renderer,
             )
-
-            # Metal 迁移 2.1–2.3：仅在会话显式开启时生效（见函数说明）。
-            _enable_native_program_viewport(self, gpu_renderer)
 
             # 注入主 GL context 给 worker，用于渲染 comp_clip（合成片段嵌入时间线）。
             # worker 在 GUI 线程创建共享 context + offscreen surface 后转交自身线程，
@@ -2871,11 +2895,10 @@ class FileOpsMixin:
             # Store reference for cleanup
             self._source_gpu_renderer = source_renderer
 
-            # Wire the provider that submits tasks to this renderer
-            self._setup_source_gpu_provider(gpu_decode_manager, source_renderer)
-
-            # Metal 迁移 2.5：与节目监视器同一个 opt-in 开关。
             _enable_native_source_viewport(self, source_renderer)
+
+            # Wire the provider that submits tasks to this renderer.
+            self._setup_source_gpu_provider(gpu_decode_manager, source_renderer)
 
             logger.info("Source Viewer GPU renderer created and started")
         except Exception as e:

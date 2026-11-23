@@ -63,6 +63,11 @@ class _FakePort:
         outcomes, self.shutdown_outcomes = self.shutdown_outcomes, []
         return outcomes
 
+    def close_when_idle(self) -> tuple[bool, list]:
+        if self.in_flight:
+            return False, []
+        return True, self.shutdown()
+
 
 class _FakeProducer:
     def __init__(self, outcome=SUBMITTED) -> None:
@@ -138,7 +143,9 @@ def native(renderer):
 
 
 class TestAttachAndDetach:
-    def test_off_by_default_and_refused_without_opt_in(self, renderer) -> None:
+    def test_explicit_disable_refuses_attach(self, renderer, monkeypatch) -> None:
+        monkeypatch.setenv("TOPOS_EDIT_METAL_VIEWPORT", "0")
+        renderer._init_native_viewport_state()
         assert renderer.native_viewport_opted_in() is False
         failures: list = []
         renderer.native_viewport_failed.connect(failures.append)
@@ -146,6 +153,19 @@ class TestAttachAndDetach:
         renderer._apply_native_viewport_request(renderer._native_viewport_request)
         assert failures == ["native_viewport_disabled"]
         assert renderer.native_viewport_active() is False
+
+    def test_deferred_viewport_requests_the_layer_only_for_the_first_eligible_frame(self, renderer) -> None:
+        renderer._native_viewport_deferred = True
+        renderer._metal_preview_mode = "all"
+        requests: list[bool] = []
+        renderer.native_viewport_attach_requested.connect(lambda: requests.append(True))
+        assert not renderer._try_native_metal_preview(_task(None), 960, 540)
+        assert requests == []
+        for _ in range(2):
+            task = _task(_VtFrame())
+            assert not renderer._try_native_metal_preview(task, 960, 540)
+            assert task.layers[0]["vt_pixel_buffer"] is not None
+        assert requests == [True]
 
     def test_refused_when_the_metal_preview_is_off(self, renderer) -> None:
         renderer._native_viewport_opt_in = True
@@ -192,6 +212,24 @@ class TestAttachAndDetach:
         # The frame the viewport still held went back to the producer.
         assert producer.acked == [(released, "shutdown")]
 
+    def test_detach_keeps_the_port_and_the_same_event_until_gpu_finishes(self, native) -> None:
+        native.isRunning = lambda: True
+        port = native._native_port
+        port.in_flight = 1
+        assert not native.detach_native_viewport(timeout_s=0.0)
+        done = native._native_viewport_request[1]
+        native._poll_native_viewport()
+        assert not done.is_set() and native._native_port is port
+        assert native._native_viewport_request is None
+        assert not native.detach_native_viewport(timeout_s=0.0)
+        assert native._native_detach_done is done
+        assert not native.submit_native_present(object(), rect=(0, 0, 1, 1),
+                                                display_rect_px=(0, 0, 100, 100))
+        port.in_flight = 0
+        native._poll_native_viewport()
+        assert done.is_set() and native._native_port is None
+        assert native.detach_native_viewport(timeout_s=0.0)
+
 
 class TestHandingFramesOver:
     def test_refused_without_a_viewport(self, renderer) -> None:
@@ -218,7 +256,7 @@ class TestHandingFramesOver:
         assert kwargs["rect"] == (0.0, 0.1, 1.0, 0.8)
         assert kwargs["display_rect_px"] == (0, 54, 1920, 972)
         assert kwargs["on_released"] is released
-        assert kwargs["on_presented"] == native._note_native_frame_presented
+        assert kwargs["on_displayed"] == native._note_native_frame_presented
 
     def test_represent_reaches_the_port(self, native) -> None:
         assert native.represent_native_viewport((0.1, 0.1, 0.8, 0.8)) is True
@@ -341,7 +379,7 @@ class TestTakingAFrame:
         assert errors == [(9, "native_preview_dropped")]
         assert [layer["vt_pixel_buffer"] for layer in task.layers] == [None, None]
 
-    def test_a_failing_composite_gives_every_frame_back_and_raises(self, native) -> None:
+    def test_a_failing_composite_gives_every_frame_back_for_gl(self, native) -> None:
         first, second = _VtFrame(), _VtFrame()
         task = _task(first)
         task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
@@ -352,8 +390,7 @@ class TestTakingAFrame:
             raise RuntimeError("encode failed")
 
         native._native_producer.try_composite = explode
-        with pytest.raises(RuntimeError, match="encode failed"):
-            native._try_native_metal_preview(task, 960, 540)
+        assert native._try_native_metal_preview(task, 960, 540) is False
         assert [layer["vt_pixel_buffer"] for layer in task.layers] == [first, second]
         assert (first.releases, second.releases) == (0, 0)
 
@@ -370,7 +407,7 @@ class TestTakingAFrame:
         assert native._native_producer.composites == []
         assert [layer["vt_pixel_buffer"] for layer in task.layers] == [first, second]
 
-    def test_a_failing_producer_gives_the_frame_back_and_raises(self, native) -> None:
+    def test_a_failing_producer_gives_the_frame_back_for_gl(self, native) -> None:
         source = _VtFrame()
         task = _task(source)
 
@@ -378,8 +415,7 @@ class TestTakingAFrame:
             raise RuntimeError("encode failed")
 
         native._native_producer.try_render = explode
-        with pytest.raises(RuntimeError, match="encode failed"):
-            native._try_native_metal_preview(task, 960, 540)
+        assert native._try_native_metal_preview(task, 960, 540) is False
         assert task.layers[0]["vt_pixel_buffer"] is source
         assert source.releases == 0
 

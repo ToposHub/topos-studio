@@ -56,7 +56,7 @@ from PyQt6.QtWidgets import (
     QMenu, QComboBox,
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QPoint, QPointF, QSize, QRectF, QSignalBlocker, QEvent, QObject, QTimer,
+    Qt, pyqtSignal, pyqtSlot, QPoint, QPointF, QSize, QRectF, QSignalBlocker, QEvent, QObject, QTimer,
 )
 from PyQt6.QtGui import (
     QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QColor, QPen, QBrush,
@@ -3866,6 +3866,16 @@ class ProgramViewerWidget(QWidget):
 
     # ==================== Native Metal viewport (plan 2.1 / 2.2 / 2.3) ====================
 
+    def set_native_viewport_candidate(self, renderer: Optional[QObject]) -> None:
+        self._native_candidate = renderer
+        self._native_pending_attach = None
+
+    @pyqtSlot()
+    def attach_requested_native_viewport(self) -> None:
+        renderer = self.sender()
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
+
     def enable_native_viewport(self, renderer: Optional[QObject]) -> bool:
         """Show eligible frames on a CAMetalLayer instead of the GL viewer.
 
@@ -3874,10 +3884,18 @@ class ProgramViewerWidget(QWidget):
         cannot host the layer, or attaching fails; the GL viewer then keeps
         presenting every frame.
         """
-        if self.__dict__.get("_native_renderer", None) is not None:
-            return self._native_renderer is renderer
         opted_in = getattr(renderer, "native_viewport_opted_in", None)
         if renderer is None or not callable(opted_in) or not opted_in():
+            return False
+        is_running = getattr(renderer, "isRunning", None)
+        if callable(is_running) and not is_running():
+            return False
+        current = self.__dict__.get("_native_renderer")
+        if current is not None:
+            if current is renderer:
+                return True
+            self._native_pending_attach = renderer
+            self.disable_native_viewport()
             return False
         from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
 
@@ -3899,9 +3917,9 @@ class ProgramViewerWidget(QWidget):
         self._viewer._overlay_dirty_hook = self._schedule_native_refresh
         self._viewer._native_covered_hook = self._native_layer_is_showing
         host.hide()
-        renderer.attach_native_viewport(host.layer, host.publisher)
         renderer.native_viewport_failed.connect(self._on_native_viewport_failed)
         renderer.native_frame_presented.connect(self._on_native_frame_presented)
+        renderer.attach_native_viewport(host.layer, host.publisher)
         self._layout_native_host()
         return True
 
@@ -3923,42 +3941,48 @@ class ProgramViewerWidget(QWidget):
         self._set_native_showing(False)
         host.hide()
         host.set_overlay_image(None)
-        released = renderer.detach_native_viewport(timeout_s=2.0)
+        released = renderer.detach_native_viewport(timeout_s=0.0)
         if released:
-            self._native_renderer = None
-            host.detach()
-            host.deleteLater()
-            self._metal_host = None
+            self._finish_native_detach(host)
         else:
             # The render thread still holds the layer: keep host and renderer
             # (native_viewport_enabled() stays True) and try again; the
             # viewport stays hidden meanwhile.
-            logger.warning("ProgramViewerWidget: native viewport still in use; retrying")
-            QTimer.singleShot(200, self._retry_native_detach)
+            self._queue_native_detach_retry(host, renderer)
+
+    def _queue_native_detach_retry(self, host: QWidget, renderer: QObject) -> None:
+        if self.__dict__.get("_native_retry_target") is None:
+            QTimer.singleShot(30, self._retry_native_detach)
+        self._native_retry_target = (host, renderer)
 
     def _retry_native_detach(self) -> None:
         host = self.__dict__.get("_metal_host")
         renderer = self.__dict__.get("_native_renderer")
-        if host is None:
+        target = self.__dict__.pop("_native_retry_target", None)
+        if target is None or host is not target[0] or renderer is not target[1]:
             return
         is_running = getattr(renderer, "isRunning", None)
-        if renderer is not None and callable(is_running) and not is_running():
-            # The render thread is gone and can no longer touch the layer.
-            self._metal_host = None
-            self._native_renderer = None
-            host.detach()
-            host.deleteLater()
+        if (renderer is not None and (not callable(is_running) or is_running())
+                and not renderer.detach_native_viewport(timeout_s=0.0)):
+            self._queue_native_detach_retry(host, renderer)
             return
-        released = True
-        if renderer is not None:
-            released = renderer.detach_native_viewport(timeout_s=2.0)
-        if not released:
-            QTimer.singleShot(200, self._retry_native_detach)
-            return
+        self._finish_native_detach(host)
+
+    def _finish_native_detach(self, host: QWidget) -> None:
+        previous = self._native_renderer
+        if previous is not None:
+            try:
+                previous.native_viewport_failed.disconnect(self._on_native_viewport_failed)
+                previous.native_frame_presented.disconnect(self._on_native_frame_presented)
+            except (TypeError, RuntimeError):
+                pass
         host.detach()
         host.deleteLater()
         self._metal_host = None
         self._native_renderer = None
+        renderer = self.__dict__.pop("_native_pending_attach", None)
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
 
     def _native_host_can_show(self) -> bool:
         """Whether the layer can cover the viewer right now.
@@ -4005,7 +4029,7 @@ class ProgramViewerWidget(QWidget):
         if wanted:
             if host.isHidden():
                 host.show()
-            host.raise_()
+                host.raise_()
         elif not host.isHidden():
             host.hide()
             # The viewer's own picture is visible again; it was not repainted
@@ -4048,7 +4072,7 @@ class ProgramViewerWidget(QWidget):
             self._layout_native_host()
         rect_px = viewer._calculate_display_rect_qt()
         display_rect_px = (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height())
-        rect = normalized_rect(display_rect_px, host.drawable_size)
+        rect = normalized_rect(display_rect_px, (viewer.width(), viewer.height()))
         taken = renderer.submit_native_present(
             present, rect=rect, display_rect_px=display_rect_px,
             on_released=lambda released, reason: self.native_release_requested.emit(
@@ -4061,9 +4085,6 @@ class ProgramViewerWidget(QWidget):
         viewer._error_state = "none"
         viewer._error_message = ""
         viewer._offline_media = ()
-        transform = getattr(viewer, "_view_transform", None)
-        if transform is not None and transform.mode == "fit":
-            viewer._fit_to_window()
         _annotate_present_path(trace_id, "native_metal")
         if trace_id:
             traces = self.__dict__.setdefault("_native_trace_by_frame", {})
@@ -4071,7 +4092,9 @@ class ProgramViewerWidget(QWidget):
             while len(traces) > 64:
                 traces.pop(next(iter(traces)), None)
         self._set_native_showing(True)
-        self._refresh_native_view()
+        # The queued frame already carries this display rectangle. A
+        # repeat present is only needed when zoom or layout changes.
+        host.set_overlay_image(viewer.render_overlay_image())
         return True
 
     def _unclaim_native_frame(self, present: Any, ack_cb: Any, trace_id: int, reason: str) -> None:
@@ -4128,9 +4151,11 @@ class ProgramViewerWidget(QWidget):
         self._layout_native_host()
         if not self._native_host_can_show():
             return
-        rect_px = self._viewer._calculate_display_rect_qt()
+        viewer = self._viewer
+        rect_px = viewer._calculate_display_rect_qt()
         rect = normalized_rect(
-            (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height()), host.drawable_size)
+            (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height()),
+            (viewer.width(), viewer.height()))
         represent = getattr(renderer, "represent_native_viewport", None)
         if callable(represent):
             represent(rect)
@@ -4138,6 +4163,9 @@ class ProgramViewerWidget(QWidget):
 
     def _on_native_frame_presented(self, frame: int) -> None:
         """A native frame was handed to the display: same accounting as paintGL."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
         trace_id = self.__dict__.get("_native_trace_by_frame", {}).pop(int(frame), 0)
         if trace_id:
             try:
@@ -4149,6 +4177,9 @@ class ProgramViewerWidget(QWidget):
 
     def _on_native_viewport_failed(self, reason: str) -> None:
         """The renderer cannot present natively: fall back to the GL viewer."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
         logger.warning("ProgramViewerWidget: native viewport unavailable, using OpenGL: %s", reason)
         self._set_native_showing(False)
         renderer = self.__dict__.get("_native_renderer")

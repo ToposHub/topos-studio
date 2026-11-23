@@ -28,6 +28,8 @@ from src.features.edit.core.metal_edit_compositor import (
     layer_params,
 )
 from src.features.edit.core.timeline_render_plan import TransitionBlendInfo
+from src.shared.media.frame import DecodedFrame, PlaneInfo
+from src.shared.media.metadata import Rational, VideoMetadata
 
 OUTPUT = (960, 540)            # a proxy-sized preview canvas
 CANVAS = (1920, 1080)          # the sequence resolution transforms are in
@@ -52,6 +54,24 @@ def _solid(rgb=(0.2, 0.4, 0.9), **track_info) -> dict:
     info = {"is_solid": True, "solid_color": rgb}
     info.update(track_info)
     return {"frame_type": "solid", "track_info": info}
+
+
+def _planar(depth: int = 10, *, matrix: str = "bt709", range_tag: str = "limited",
+            transfer: str = "bt709") -> dict:
+    dtype = np.uint8 if depth == 8 else np.uint16
+    pixel_format = "yuv422p" if depth == 8 else f"yuv422p{depth}le"
+    shapes = ((20, 32), (20, 16), (20, 16))
+    planes = tuple(np.zeros(shape, dtype=dtype) for shape in shapes)
+    infos = tuple(PlaneInfo.create(index, width, height, name, dtype, depth)
+                  for index, ((height, width), name) in enumerate(zip(shapes, "YUV")))
+    metadata = VideoMetadata(
+        32, 20, Rational(25, 1), 400, "dnxhd", "HQX", pixel_format, depth,
+        color_matrix=matrix, color_range=range_tag, color_transfer=transfer,
+        chroma_siting=0,
+    )
+    return {"frame_type": "planar", "track_info": {},
+            "decoded_frame": DecodedFrame(2, 2, 0.08, planes=planes, metadata=metadata,
+                                          plane_infos=infos, pixel_format=pixel_format)}
 
 
 def _task(*layers, transition_jobs: tuple = ()) -> EditRenderTask:
@@ -197,6 +217,27 @@ class TestLayers:
     ])
     def test_sources_outside_the_kernel_contract_stay_on_gl(self, overrides: dict) -> None:
         assert _refusal(_task(_nv12(_source(**overrides)))) == "source_unsupported"
+
+    @pytest.mark.parametrize(("depth", "matrix", "matrix_code", "range_tag", "range_code"), [
+        (8, "smpte170m", 6, "full", 1), (10, "bt709", 1, "limited", 0),
+        (12, "bt2020nc", 9, "tv", 0), (16, "bt470bg", 5, "pc", 1),
+    ])
+    def test_planar_contract_keeps_planes_depth_and_edit_gl_sampling(
+        self, depth: int, matrix: str, matrix_code: int, range_tag: str, range_code: int,
+    ) -> None:
+        layer = _planar(depth, matrix=matrix, range_tag=range_tag)
+        plan = _plan(_task(_nv12(), layer))
+        converted = plan.layers[1].source
+        original = layer["decoded_frame"]
+        assert plan.layers[1].kind == "planar"
+        assert converted.bit_depth == depth and converted.subsampling == "422"
+        assert (converted.matrix, converted.color_range, converted.chroma_siting) == (matrix_code, range_code, 1)
+        assert (converted.y is original.planes[0] and converted.u is original.planes[1]
+                and converted.v is original.planes[2])
+
+    def test_unsupported_planar_hdr_and_upload_saturation_are_whole_frame_fallbacks(self) -> None:
+        assert _refusal(_task(_nv12(), _planar(transfer="smpte2084"))) == "planar_color_contract_unsupported"
+        assert _refusal(_task(*(_planar() for _ in range(5)))) == "too_many_planar_layers:5"
 
 
 class TestGrades:

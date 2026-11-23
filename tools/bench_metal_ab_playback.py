@@ -63,14 +63,14 @@ class PlaybackConfig:
     env: Mapping[str, str]
 
 
-# Declared explicitly: ``auto`` keeps the default preview gate (single-LUT
-# frames on Metal), ``gl`` forces the OpenGL compositor, ``metal`` asks every
-# eligible frame to use the Metal preview path.
+# ``auto`` uses the production rollout. ``metal`` isolates Metal rendering
+# with the compatible presentation path, and ``native`` enables eager attach.
 CONFIGS: Dict[str, PlaybackConfig] = {
     "gl": PlaybackConfig("gl", {"TOPOS_BACKEND_GRAPHICS": "opengl",
                                 "TOPOS_EDIT_METAL_PREVIEW": "0"}),
     "auto": PlaybackConfig("auto", {"TOPOS_BACKEND_GRAPHICS": "auto"}),
-    "metal": PlaybackConfig("metal", {"TOPOS_BACKEND_GRAPHICS": "metal"}),
+    "metal": PlaybackConfig("metal", {"TOPOS_BACKEND_GRAPHICS": "metal",
+                                      "TOPOS_EDIT_METAL_VIEWPORT": "0"}),
     # The native CAMetalLayer viewport (plan 2.1-2.3): Metal frames go straight
     # to the layer instead of through the IOSurface -> GL slot detour.
     "native": PlaybackConfig("native", {"TOPOS_BACKEND_GRAPHICS": "metal",
@@ -336,7 +336,7 @@ def tag_record(
         "graded": bool(record.get("graded")),
         "round": record.get("repeat"),
         "wall_s": record.get("wall_s"),
-        "presented_frames": len(frames),
+        "presented_frames": len({int(frame[1]) for frame in frames}),
         "last_frame": frames[-1][1] if frames else None,
         "timeline_frames": start["timeline_frames"] if start else None,
         # A case is only comparable when the timeline loaded (400 frames),
@@ -437,7 +437,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
            < (report.get('display_power_state') or [1, 1])[1] else ""),
         *(f"- {note}" for note in report.get("notes") or []),
         "",
-        "呈现帧数取 `frame_presented`（paintGL 之后发射），中位数跨有效轮次；"
+        "呈现帧数按 `frame_presented` 的帧号去重。OpenGL 取绘制事件，Metal 取 drawable 显示回调。中位数跨有效轮次。"
         "时间线未加载或 0 帧的用例计为无效轮，不进入统计。",
         "",
         "| 配置 | 环境变量 | 时间线 | 呈现帧中位数 | 各轮呈现帧 | 无效轮 | 丢帧中位数 | "

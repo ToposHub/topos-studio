@@ -13,7 +13,7 @@ switch-off from a device, format, shader or drawable failure.
 
 :class:`Rollout` is the ledger of which capability is on by default and
 under which compatibility condition it may move on (plan 8.5: "记录每次
-默认切换和兼容条件").  Today every entry is explicit opt-in only.
+默认切换和兼容条件").
 """
 
 from __future__ import annotations
@@ -57,20 +57,20 @@ class Rollout:
 
 ROLLOUT: Tuple[Rollout, ...] = (
     Rollout(
-        MetalFeature.EDIT_PREVIEW, "opt-in",
-        "TOPOS_EDIT_METAL_PREVIEW=1, or TOPOS_BACKEND_GRAPHICS=metal",
+        MetalFeature.EDIT_PREVIEW, "default",
+        "macOS graphics auto or metal; TOPOS_EDIT_METAL_PREVIEW=0 turns it off",
         "plan 2 (before this plan)",
         "UHD playback frame counts and seek p95 held on Intel discrete and Apple Silicon",
     ),
     Rollout(
-        MetalFeature.EDIT_COMPOSITE, "opt-in",
-        "the same switch as edit_metal_preview, in its 'all' mode",
+        MetalFeature.EDIT_COMPOSITE, "default",
+        "the same switch as edit_metal_preview, in its full mode",
         "plan 2.6",
         "multi-layer project playback on a real machine; playback-time cost measured",
     ),
     Rollout(
-        MetalFeature.NATIVE_VIEWPORT, "opt-in",
-        "TOPOS_EDIT_METAL_VIEWPORT=1",
+        MetalFeature.NATIVE_VIEWPORT, "default",
+        "eligible Metal preview frames attach lazily; TOPOS_EDIT_METAL_VIEWPORT=0 turns it off",
         "plan 2.1–2.3",
         "resize, hide, fullscreen, screen change and close verified with the display awake",
     ),

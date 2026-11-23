@@ -465,10 +465,11 @@ macOS 上有**三条互补的硬件通路**，接入点各不相同：
    Session`（native 压缩会话，`require_hardware=True`）、`VideoToolboxPacket
    Muxer`（压缩包 mux）、`VideoToolboxGpuSurfaceProvider`（Metal surface 池）。
    - macOS 的 `auto` 与 `metal` 会优先尝试原生 H.264 路径。适用范围是
-     同尺寸整数帧率、BT.709 限幅的 8-bit H.264 原片与 MP4/MOV 输出。
-     可执行单层的静态一级调色和 LUT，支持最多四个串行 Corrector，也支持
-     两段相邻合格素材的双边 cross-dissolve。控制点曲线、遮罩、插件、关键帧、
-     可见字幕、烧入遮幅、音轨、其他转场以及调色组或时间线附加链走常规路径。
+     同尺寸同帧率、BT.709 限幅的 8-bit H.264 原片与 MP4/MOV 输出。
+     可执行最多四个串行静态 Corrector（一级调色与 LUT）、双边交叉溶解及双边无调色
+     `dip_to_color`。支持精确有理数帧率和一条 48 kHz mono/stereo AAC 主混音。
+     控制点曲线、遮罩、插件、关键帧、可见字幕、烧入遮幅、其他布局或音轨配置、
+     未覆盖的转场以及调色组或时间线附加链使用常规路径。
      解码后的 NV12 和目标 NV12 是 Metal 纹理。合成与交付像素保持在 GPU，
      码率和 H.264 profile 由交付设置传给 VideoToolbox。
    - 原生桥写入同目录临时容器，排空编码、校验帧数并完成封装后发布。初始化
@@ -489,6 +490,11 @@ macOS 上有**三条互补的硬件通路**，接入点各不相同：
    驻留 + 逐 clip 预取与 VT 解码重叠。VT **解码**侧（`macos_vt/source.py`、
    `vt_session.py`、`packet_demux.py` 等）为同一 macOS_vt 包的另一半，供
    预览与导出取帧。
+
+**DNxHR HQX** 在包复用时先对临时容器的剪辑边界包做哈希核验，再发布成片。需要调色时，macOS 的
+`auto` 或 `metal` 可用 Metal 渲染符合条件的单层同尺寸 SDR BT.709 10-bit 4:2:2 单 LUT，输出
+`yuv422p10le` 平面到 PyAV 编码队列。`dnxhd` 仍在 CPU 上编码。平面格式、图能力或 GPU 执行不满足时
+使用既有渲染链；正式文件由编码器在排空、帧数核验和取消检查完成之后发布。
 
 ### 5.2 Windows：D3D11 / AMF / NVENC
 

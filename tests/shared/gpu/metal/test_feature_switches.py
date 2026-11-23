@@ -82,7 +82,12 @@ class TestLedger:
         """Only the export fast path is on by default; the rest waits for its
         compatibility condition (plan 8.5: explicit first, default later)."""
         by_default = [entry.feature.value for entry in ROLLOUT if entry.default == "default"]
-        assert by_default == [MetalFeature.EXPORT_NATIVE_VT.value]
+        assert by_default == [
+            MetalFeature.EDIT_PREVIEW.value,
+            MetalFeature.EDIT_COMPOSITE.value,
+            MetalFeature.NATIVE_VIEWPORT.value,
+            MetalFeature.EXPORT_NATIVE_VT.value,
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +137,9 @@ def test_the_composite_switch_keeps_composites_on_gl_but_leaves_the_single_clip(
 def test_the_viewport_switch_wins_over_the_session_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("PyQt6.QtWidgets")
     from src.features.edit.core.edit_gpu_preview_renderer import EditGpuPreviewRenderer
+    from src.features.edit.core import metal_timeline_preview
 
+    monkeypatch.setattr(metal_timeline_preview, "metal_preview_mode", lambda: "lut")
     monkeypatch.setenv("TOPOS_EDIT_METAL_VIEWPORT", "1")
     monkeypatch.setenv(ENV, "native_viewport")
     assert EditGpuPreviewRenderer(main_context=None).native_viewport_opted_in() is False

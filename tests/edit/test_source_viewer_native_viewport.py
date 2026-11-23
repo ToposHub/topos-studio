@@ -189,11 +189,22 @@ class TestRouting:
         widget.set_native_gpu_frame(_present(frame=40), frame=40, generation=6)
         (_present_, kwargs), = renderer.submits
         assert kwargs["rect"] == normalized_rect(
-            viewer._calculate_display_rect_px(), host.drawable_size)
+            viewer._calculate_display_rect_px(), (viewer.width(), viewer.height()))
         rect_px = viewer._calculate_display_rect_px()
         # The rect is whole pixels: its ratio may be a pixel's width off 4:3
         # (a real Cocoa window does not always fit an exact multiple).
         assert abs(rect_px[2] / rect_px[3] - 4 / 3) <= 1.0 / rect_px[3]
+
+    def test_retina_drawable_keeps_the_canvas_fit(self, widget, monkeypatch) -> None:
+        renderer = _FakeRenderer()
+        host = _arm(widget, renderer)
+        monkeypatch.setattr(host, "devicePixelRatioF", lambda: 2.0)
+        viewer = widget.viewer
+        widget.set_native_gpu_frame(_present(frame=40), frame=40, generation=6)
+        _, kwargs = renderer.submits[0]
+        assert host.drawable_size == (viewer.width() * 2, viewer.height() * 2)
+        assert kwargs["rect"] == normalized_rect(
+            viewer._calculate_display_rect_px(), (viewer.width(), viewer.height()))
 
     def test_the_first_frame_normalizes_to_the_canvas_size_not_the_start_up_size(self, widget) -> None:
         """The viewport is enabled before the canvas is laid out: the layer

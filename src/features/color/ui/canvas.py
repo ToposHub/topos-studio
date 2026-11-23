@@ -4002,9 +4002,13 @@ class Canvas(QGraphicsView):
         
         self.gl_viewport = GLCanvasViewport()
         self.setViewport(self.gl_viewport)
+        self._color_metal_host = None
+        self._color_metal_ready = False
+        self.gl_viewport.gl_initialized.connect(self._schedule_color_metal_viewer)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.pixmap_item = QGraphicsPixmapItem()
+        self.pixmap_item.setVisible(False)
         self.scene.addItem(self.pixmap_item)
         self._timeline_preview_active = False
         self._timeline_preview_needs_fit = False
@@ -4265,6 +4269,7 @@ class Canvas(QGraphicsView):
         if image is None or image.isNull():
             return
         self._timeline_preview_active = True
+        self._sync_color_metal_host()
         pixmap = QPixmap.fromImage(image)
         width, height = pixmap.width(), pixmap.height()
         if width <= 0 or height <= 0:
@@ -4303,6 +4308,7 @@ class Canvas(QGraphicsView):
         front texture.
         """
         self._timeline_preview_active = True
+        self._sync_color_metal_host()
         self._timeline_preview_needs_fit = True
         self.pixmap_item.setVisible(False)
         self.viewport().update()
@@ -6525,6 +6531,7 @@ class Canvas(QGraphicsView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_color_metal_host()
         # CV-B09：状态栏定位/折叠统一由 update_video_control_bar_position
         # 裁决（预留 transport 高度的安全区 + 窄窗折叠），此处不再单独
         # 搬移一份（旧路径不预留 footer，随后又被 update 覆盖）。
@@ -6548,7 +6555,114 @@ class Canvas(QGraphicsView):
     def showEvent(self, event) -> None:
         """Handle show event - position video control bar."""
         super().showEvent(event)
+        self._sync_color_metal_host()
         self.update_video_control_bar_position()
+
+    def hideEvent(self, event) -> None:
+        host = self.__dict__.get("_color_metal_host")
+        if host is not None:
+            self._color_metal_ready = False
+            host.hide()
+            host.publisher.publish(visible=False)
+        super().hideEvent(event)
+
+    def _schedule_color_metal_viewer(self) -> None:
+        from src.features.color.ui.metal_color_viewer import color_metal_viewer_enabled
+
+        if not color_metal_viewer_enabled()[0]:
+            return
+        # Native window creation can reenter Qt's layout. Let initializeGL
+        # return before changing the canvas' native widget hierarchy.
+        QTimer.singleShot(0, self._attach_color_metal_viewer)
+
+    def _attach_color_metal_viewer(self) -> None:
+        from src.features.color.ui.metal_color_viewer import (
+            ColorMetalViewportHost,
+            color_metal_viewer_enabled,
+        )
+
+        enabled, _reason = color_metal_viewer_enabled()
+        renderer = getattr(self.engine, "renderer", None)
+        if not enabled or renderer is None or self._color_metal_host is not None:
+            return
+        from src.features.color.core.metal_color_preview import ColorMetalSurface
+
+        host = ColorMetalViewportHost(self)
+        host.setObjectName("ColorViewerMetalHost")
+        host.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        try:
+            if not host.attach():
+                host.deleteLater()
+                return
+            host.configure_display(False)
+        except Exception:
+            logger.warning("Color Metal viewport attach failed", exc_info=True)
+            host.deleteLater()
+            return
+        self._color_metal_host = host
+        renderer.color_metal_frame_status.connect(self._on_color_metal_frame_status)
+        self._sync_color_metal_host()
+        renderer.submit("attach_color_metal_preview", (
+            host.device, ColorMetalSurface(host.layer, host.publisher)))
+
+    def _on_color_metal_frame_status(self, serial: int, generation: int, ready: bool) -> None:
+        renderer = getattr(self.engine, "renderer", None)
+        if renderer is None or generation != renderer._video_generation_id:
+            return
+        if serial < self.__dict__.get("_color_metal_status_serial", 0):
+            return
+        self._color_metal_status_serial = serial
+        self._color_metal_ready = ready and self._color_metal_host_can_show()
+        if not self._sync_color_metal_host():
+            self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
+            self.viewport().update()
+
+    def _color_metal_host_can_show(self) -> bool:
+        renderer = getattr(self.engine, "renderer", None)
+        if (not self.isVisible() or self.window().isMinimized()
+                or self._timeline_preview_active or renderer is None
+                or not self._should_present_renderer_front_texture(renderer)
+                or getattr(self.engine, "split_view_active", False)
+                or self.is_picking or self.inspector_mode_active
+                or self.hsl_picker_mode or self.curves_picker_mode
+                or self.is_drawing or self.brush_mode_active or self.sam_mode_active
+                or self._crop_preview_angle != 0.0):
+            return False
+        if self.color_inspector.isVisible() or self.color_status_bar.isVisible():
+            return False
+        # Native windows sit above Qt graphics items, including editing
+        # overlays. Preserve the GL viewer whenever a scene item needs painting.
+        return not any(item.isVisible() for item in self.scene.items())
+
+    def _sync_color_metal_host(self) -> bool:
+        host = self.__dict__.get("_color_metal_host")
+        if host is None:
+            return False
+        geometry = self.viewport().geometry()
+        transport = self.video_control_bar
+        if transport.isVisible() and transport.parentWidget() is self:
+            # The transport normally overlays the lower edge of the GL
+            # viewport. Cover only the part above it with the native window.
+            transport_top = transport.geometry().top()
+            if geometry.top() <= transport_top <= geometry.bottom():
+                geometry.setBottom(transport_top - 1)
+        if host.geometry() != geometry:
+            self._color_metal_ready = False
+            host.setGeometry(geometry)
+            host.sync_surface()
+        allowed = self._color_metal_host_can_show()
+        if not allowed:
+            self._color_metal_ready = False
+        show = allowed and self._color_metal_ready
+        if show and host.isHidden():
+            host.show()
+            host.raise_()
+        elif not show and not host.isHidden():
+            host.hide()
+        # Allow the first drawable to be requested before the host covers
+        # the GL canvas. Reset visibility when an editing overlay takes over.
+        host.publisher.publish(visible=allowed)
+        return show
 
     def update_video_control_bar_position(self) -> None:
         """Update video control bar position to bottom of canvas."""
@@ -6591,6 +6705,8 @@ class Canvas(QGraphicsView):
         _diag_blit_tex = None
         _diag_pending = None
         try:
+            if self._sync_color_metal_host():
+                return
             # Never mix the QGraphics timeline pixmap with the native OpenGL
             # source texture.  Besides producing the one-pixel seams visible
             # around a fitted frame, that mix is unsafe on macOS while the GL

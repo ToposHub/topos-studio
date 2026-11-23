@@ -393,18 +393,30 @@ class PlaybackYuvRenderer:
     # 一帧
     # ------------------------------------------------------------------
 
-    def encode(self, frame: YuvFrame, output: Any, out_size: Tuple[int, int]) -> Callable[[], None]:
+    def encode(
+        self, frame: YuvFrame, output: Any, out_size: Tuple[int, int], *,
+        picture_rect: Optional[Tuple[int, int, int, int]] = None,
+    ) -> Callable[[], None]:
         """Upload ``frame`` and encode its conversion into ``output``.
 
         Returns the function that frees the upload textures again; register it
         as an input of the frame transaction so it runs when the GPU has
         finished reading them.  Raises :class:`BackPressure` (nothing encoded)
         when every upload set is still being read by an earlier frame.
+        The default rectangle letterboxes the source. Edit uses an explicit
+        full-canvas rectangle before applying the clip's own geometry.
         """
+        width, height = out_size
+        if picture_rect is None:
+            picture_rect = letterbox_rect(frame.width, frame.height, width, height)
+        left, top, picture_width, picture_height = picture_rect
+        if (left < 0 or top < 0 or picture_width <= 0 or picture_height <= 0
+                or left + picture_width > width or top + picture_height > height):
+            raise ValueError(f"YUV picture rectangle {picture_rect} outside {out_size}")
         slot = self._acquire_upload(frame)
         try:
             self._upload(slot, frame)
-            params = self._params_buffer(frame, out_size)
+            params = self._params_buffer(frame, picture_rect)
             kernel = self._kernels[16 if int(frame.bit_depth) > 8 else 8]
             self._context.dispatch(
                 kernel,
@@ -470,8 +482,7 @@ class PlaybackYuvRenderer:
             )
             self.stats["uploaded_bytes"] += int(plane.nbytes)
 
-    def _params_buffer(self, frame: YuvFrame, out_size: Tuple[int, int]) -> Any:
-        rect = letterbox_rect(frame.width, frame.height, int(out_size[0]), int(out_size[1]))
+    def _params_buffer(self, frame: YuvFrame, rect: Tuple[int, int, int, int]) -> Any:
         key = params_key(frame, rect)
         buffer = self._params.get(key)
         if buffer is None:

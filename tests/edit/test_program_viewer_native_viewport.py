@@ -247,7 +247,20 @@ class TestRouting:
         viewer = widget._viewer
         rect_px = viewer._calculate_display_rect_qt()
         assert kwargs["rect"] == normalized_rect(
-            (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height()), host.drawable_size)
+            (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height()),
+            (viewer.width(), viewer.height()))
+
+    def test_retina_drawable_does_not_shrink_the_picture(self, widget, monkeypatch) -> None:
+        renderer = _FakeRenderer()
+        host = _arm(widget, renderer)
+        monkeypatch.setattr(host, "devicePixelRatioF", lambda: 2.0)
+        widget.set_frame(1, _result(_native_present(frame=1), _Ack()))
+        _, kwargs = renderer.submits[0]
+        viewer = widget._viewer
+        rect = viewer._calculate_display_rect_qt()
+        assert host.drawable_size == (viewer.width() * 2, viewer.height() * 2)
+        assert kwargs["rect"] == normalized_rect(
+            (rect.x(), rect.y(), rect.width(), rect.height()), (viewer.width(), viewer.height()))
 
     def test_a_refused_submission_returns_the_lease(self, widget) -> None:
         renderer = _FakeRenderer()
@@ -360,6 +373,15 @@ class TestStateEffects:
         assert host.overlay_images[-1] is None
 
 class TestRefreshAndOverlays:
+    def test_a_new_frame_does_not_present_the_previous_frame_again(self, widget, qapp) -> None:
+        renderer = _FakeRenderer()
+        _arm(widget, renderer)
+        for frame in (1, 2):
+            widget.set_frame(frame, _result(_native_present(frame=frame), _Ack()))
+        qapp.processEvents()
+        assert len(renderer.submits) == 2
+        assert renderer.represented == []
+
     def test_zoom_change_re_presents_the_kept_frame(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
         host = _arm(widget, renderer)
@@ -600,6 +622,23 @@ class TestFailureAndTeardown:
         qapp.processEvents()
         assert host.detached is True
         assert widget.native_viewport_enabled() is False
+
+    def test_old_detach_retry_cannot_close_a_replacement(self, widget, monkeypatch) -> None:
+        old, replacement = _FakeRenderer(), _FakeRenderer()
+        old_host = _arm(widget, old)
+        old.detach_native_viewport = lambda timeout_s: False
+        widget.disable_native_viewport()
+        widget.set_native_viewport_candidate(replacement)
+        assert widget.enable_native_viewport(replacement) is False
+        attached: list[_FakeHost] = []
+        monkeypatch.setattr(widget, "enable_native_viewport",
+                            lambda renderer: attached.append(_arm(widget, renderer)))
+        old.detach_native_viewport = lambda timeout_s: True
+        widget.disable_native_viewport()
+        assert old_host.detached and len(attached) == 1
+        widget._retry_native_detach()
+        assert widget._native_renderer is replacement
+        assert replacement.detached == 0 and not attached[0].detached
 
     def test_disable_takes_the_layer_back_and_clears_the_hook(self, widget) -> None:
         renderer = _FakeRenderer()

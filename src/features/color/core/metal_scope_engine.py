@@ -122,7 +122,8 @@ kernel void scope_waveform_accum(
 
     uint fixed_weight = uint(clamp(weight, 0.0, 1.0) * 65536.0 + 0.5);
 
-    // 行（top-down：range_max → 第 0 行，与 GL 展示的图像方向一致）
+    // Density rows run from range_min to range_max. The display pass flips
+    // them into top-down image coordinates.
     uint column_span = uint(density_w);
     if (mode_p0 == 1) {
         column_span = uint(density_w / 3);   // Parade：三等分
@@ -352,11 +353,10 @@ float wf_graticule(float h, float yb, int density_h) {
     return 1.0 - smoothstep(0.0, pixel * 1.5, d);
 }
 
-// 波形密度 tap（行偏移以「底起 +y」语义传入 → top-down 行取反）
 float3 wf_density_tap(const device uint* density, uint area,
                       int density_w, int density_h,
-                      int row_td, int col, float dy, float dx) {
-    int r = clamp(row_td + int(round(-dy)), 0, density_h - 1);
+                      int row_bu, int col, float dy, float dx) {
+    int r = clamp(row_bu + int(round(dy)), 0, density_h - 1);
     int c = clamp(col + int(round(dx)), 0, density_w - 1);
     uint base = uint(r) * uint(density_w) + uint(c);
     return float3(float(density[base]) * (1.0 / 65536.0),
@@ -385,32 +385,31 @@ kernel void scope_display_waveform(
     float yb = (float(density_h - 1 - int(gid.y)) + 0.5) / float(density_h);
     float xf = (float(gid.x) + 0.5) / float(density_w);
     int col = clamp(int(xf * float(density_w)), 0, density_w - 1);
-    int row_td = int(gid.y);
+    int row_bu = density_h - 1 - int(gid.y);
 
     float texel_y = 1.0;
     float texel_x = 1.0;
     float3 density_rgb = wf_density_tap(
-        density, area, density_w, density_h, row_td, col, 0.0, 0.0) * 0.40;
+        density, area, density_w, density_h, row_bu, col, 0.0, 0.0) * 0.40;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col, texel_y, 0.0) * 0.16;
+        density, area, density_w, density_h, row_bu, col, texel_y, 0.0) * 0.16;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col, -texel_y, 0.0) * 0.16;
+        density, area, density_w, density_h, row_bu, col, -texel_y, 0.0) * 0.16;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col,
+        density, area, density_w, density_h, row_bu, col,
         texel_y * 2.0, 0.0) * 0.06;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col,
+        density, area, density_w, density_h, row_bu, col,
         -texel_y * 2.0, 0.0) * 0.06;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col,
+        density, area, density_w, density_h, row_bu, col,
         0.0, texel_x) * 0.08;
     density_rgb += wf_density_tap(
-        density, area, density_w, density_h, row_td, col,
+        density, area, density_w, density_h, row_bu, col,
         0.0, -texel_x) * 0.08;
-    // over/under 平面（top-down 与 RGB 平面同向）
-    uint base_td = uint(row_td) * uint(density_w) + uint(col);
-    float over_density = float(density[area * 3u + base_td]) * weight_inv;
-    float under_density = float(density[area * 4u + base_td]) * weight_inv;
+    uint base = uint(row_bu) * uint(density_w) + uint(col);
+    float over_density = float(density[area * 3u + base]) * weight_inv;
+    float under_density = float(density[area * 4u + base]) * weight_inv;
 
     float3 norm_density = clamp(density_rgb * max_inv, float3(0.0), float3(1.0));
     float3 mapped = pow(norm_density, float3(0.54));
@@ -521,15 +520,15 @@ kernel void scope_display_histogram(
     // top-down：R 顶 / G 中 / B 底（GL 底起 B 底的同屏方向）
     float row_position = min(uv.y * 3.0, 2.999999);
     int channel = min(int(row_position), 2);
-    float y_in_band = fract(row_position);
+    float y_in_band = 1.0 - fract(row_position);
     // MSL 无 log1p：log(1+x) 数值稳定式（x ≥ 0 时与 numpy log1p 同义）
     float hist_w = float(hist[uint(channel) * 512u + uint(col)])
                    * weight_inv;
     float log_sum = log(1.0 + hist_w);
     float norm = clamp(log_sum * max_inv, 0.0, 1.0);
     float colors0r = channel == 0 ? 1.0 : 0.025;
-    float colors0g = channel == 1 ? 1.0 : (channel == 2 ? 0.40 : 0.025);
-    float colors0b = channel == 2 ? 1.0 : 0.025;
+    float colors0g = channel == 1 ? 1.0 : (channel == 2 ? 0.40 : 0.035);
+    float colors0b = channel == 2 ? 1.0 : (channel == 0 ? 0.06 : 0.035);
     float3 channel_color = float3(colors0r, colors0g, colors0b);
     float height = norm * 0.94;
     float trace_width = 3.0 / float(out_tex.get_height());
@@ -714,11 +713,21 @@ class MetalScopeEngine:
         *,
         source_size: Optional[Tuple[int, int]] = None,
     ) -> bool:
-        """编码 demand 请求的全部 pass（**只 dispatch，不提交不等待**）。
+        """Encode and register a demand for async publication through poll."""
+        frame = self.encode_display(demand, source_texture, source_size=source_size)
+        if frame is None:
+            return False
+        self._pending.append((int(demand.revision), demand))
+        return True
 
-        ``demand``：``scope_types.ScopeDemand``。返回 True=已编码；
-        False=输入不合法（如实失败，不产出半帧描述）。
-        """
+    def encode_display(
+        self,
+        demand: Any,
+        source_texture: Any,
+        *,
+        source_size: Optional[Tuple[int, int]] = None,
+    ) -> Optional[MetalScopeFrame]:
+        """Encode the scope and expose its textures for same-command-buffer use."""
         from src.features.color.core.scope_types import (
             DEFAULT_CIE_SIZE,
             DEFAULT_HISTOGRAM_DISPLAY_SIZE,
@@ -736,12 +745,12 @@ class MetalScopeEngine:
         if mode_needs_falsecolor(demand.mode):
             # falsecolor 单 pass 读源纹理——Metal 侧未接线（如实拒绝，
             # 不产出少效果结果）
-            return False
+            return None
         width = int(source_texture.width())
         height = int(source_texture.height())
         if source_size not in (None, (0, 0)) and tuple(source_size) \
                 != (width, height):
-            return False
+            return None
         analysis = tuple(int(v) for v in demand.analysis_size)
         pool = self._ensure_pool(
             analysis, DEFAULT_WAVEFORM_DENSITY_SIZE,
@@ -796,8 +805,7 @@ class MetalScopeEngine:
             self._display_cie(pool, DEFAULT_CIE_SIZE)
 
         self.stats["demands"] += 1
-        self._pending.append((int(demand.revision), demand))
-        return True
+        return self._make_frame(demand)
 
     # ── 提交/完成 ──
 

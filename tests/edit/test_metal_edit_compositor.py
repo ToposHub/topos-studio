@@ -21,6 +21,7 @@ from __future__ import annotations
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -34,6 +35,7 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 CLIP = Path(__file__).resolve().parents[1] / "test_videos" / "2K_h264.mp4"
+DNXHR = CLIP.with_name("2K_DNxHR HQX 10bit.mov")
 SOURCE_SIZE = (1920, 1080)
 PROXY = (832, 468)
 
@@ -45,6 +47,10 @@ SOLID_RGB = (0.8, 0.1, 0.2)
 
 def _video(source: Any, **info: Any) -> dict:
     return {"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": source, "track_info": dict(info)}
+
+
+def _planar(source: Any, **info: Any) -> dict:
+    return {"frame_type": "planar", "decoded_frame": source, "track_info": dict(info)}
 
 
 def _solid(rgb: tuple, **info: Any) -> dict:
@@ -126,6 +132,7 @@ def _gl_reference(renderer: Any, spec: dict) -> np.ndarray:
     from src.shared.media.gpu_frame import safe_release_gpu_frame
 
     width, height = spec["size"]
+    renderer._active_output_size = (width, height)
     renderer._active_transform_coordinate_size = tuple(spec["coordinate"])
     tracks = []
     imported = []
@@ -137,6 +144,11 @@ def _gl_reference(renderer: Any, spec: dict) -> np.ndarray:
                     index, width, height, info["solid_color"], None)
                 track_tex = renderer._apply_clip_transform(
                     track_tex, index, width, height, info.get("transform"))
+            elif layer["frame_type"] == "planar":
+                rendered = renderer._upload_and_render_planar(layer["decoded_frame"], index, track_info=info)
+                assert rendered is not None
+                track_tex = renderer._apply_clip_transform(
+                    rendered[0], index, width, height, info.get("transform"))
             else:
                 frame = renderer._import_vt_pixel_buffer_frame(layer["vt_pixel_buffer"])
                 assert frame is not None
@@ -271,6 +283,23 @@ def _lut_graph(cube: Path) -> dict:
     return {"color_graph": applied.graph, "source_frame": 25}
 
 
+def _primary_graph(*operations: dict) -> dict:
+    from src.features.color.core.color_graph_service import ColorGraphData, ColorGraphService
+
+    service = ColorGraphService()
+    graph = ColorGraphData.create_serial()
+    anchor = graph.source_node_id
+    for params in operations:
+        existing = {node.node_id for node in graph.nodes}
+        inserted = service.apply_intent(graph, "insert_corrector", {"active_node_id": anchor})
+        assert inserted.ok
+        anchor = next(node.node_id for node in inserted.graph.nodes if node.node_id not in existing)
+        graph = replace(inserted.graph, nodes=tuple(
+            replace(node, params=params) if node.node_id == anchor else node
+            for node in inserted.graph.nodes))
+    return {"color_graph": graph, "source_frame": 25}
+
+
 def _run_on_render_thread(path: Path, cube: Path) -> dict[str, Any]:
     import src.features.color.core.color_graph_texture as graph_texture
     import src.shared.color.lut_loader as lut_loader
@@ -403,12 +432,18 @@ def _run_on_render_thread(path: Path, cube: Path) -> dict[str, Any]:
                 real_release = owned.release
                 owned.release = lambda tag=tag, done=real_release: (  # type: ignore[method-assign]
                     releases.append(tag), done())
-            layers = [_video(frame_c), _video(frame_d, transform=SHRINK)]
+            primary_grade = _primary_graph(
+                {"grade": {"exposure": 49.0, "contrast": 13.0, "temp": 9.0}},
+                {"grade": {"exposure": -46.0, "saturation": -16.0}, "opacity": 0.9},
+            )
+            layers = [_video(frame_c), _video(frame_d, transform=SHRINK, preview_grade=primary_grade)]
             final_texture = context.texture(SOURCE_SIZE, 4)
             final_fbo = context.framebuffer([final_texture])
             renderer._composite_fbo, renderer._composite_tex = final_fbo, final_texture
             # The GL reference gets frames of its own.
-            gl_rgb = _gl_reference(renderer, _scenario("transform-over-untouched", frame, grade))
+            gl_spec = _scenario("transform-over-untouched", frame, grade)
+            gl_spec["layers"][1]["track_info"]["preview_grade"] = primary_grade
+            gl_rgb = _gl_reference(renderer, gl_spec)
             task = EditRenderTask(25, 1, layers, output_fbo_size=SOURCE_SIZE,
                                   coordinate_size=SOURCE_SIZE)
             assert renderer._try_native_metal_preview(task, SOURCE_SIZE[0], SOURCE_SIZE[1]) is True
@@ -474,3 +509,104 @@ def test_metal_composite_matches_the_gl_preview(tmp_path: Path) -> None:
             assert difference["max"] <= 16, (name, difference)
     assert result["native"]["mean"] < 0.8 and result["native"]["p99"] <= 2, result["native"]
     assert result["native_releases"] == ["c", "d"], result["native_releases"]
+
+
+def _compare_planar_on_render_thread(path: Path, cube: Path) -> None:
+    import moderngl
+
+    import src.features.color.core.color_graph_texture as graph_texture
+    import src.shared.color.lut_loader as lut_loader
+    from src.features.edit.core.edit_gpu_preview_renderer import EditRenderTask
+    from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
+    from src.features.edit.core.native_metal_preview import NativePreviewProducer
+    from src.shared.gpu.metal.context import MetalComputeContext
+    from src.shared.media.ffmpeg_source import FFmpegMediaSource
+    from src.shared.video.yuv_gpu_upload import YUVGPUUploader
+
+    if not MetalComputeContext.is_supported():
+        pytest.skip("Metal is unavailable")
+    try:
+        context = moderngl.create_standalone_context(require=410)
+    except (RuntimeError, OSError) as error:
+        pytest.skip(f"A CGL render context is unavailable: {error}")
+
+    with FFmpegMediaSource(str(path), preserve_planes=True, output_mode="planar_yuv") as decoder:
+        first, second = decoder.read_frame_planar(25), decoder.read_frame_planar(27)
+    assert first.pixel_format == second.pixel_format == "yuv422p10le"
+    assert all(plane.dtype == np.uint16 for plane in first.planes)
+    renderer = _new_renderer(context)
+    renderer._yuv_uploader = YUVGPUUploader(context, pool_size=3)
+    parking_texture = context.texture((1, 1), 4)
+    parking = context.framebuffer([parking_texture])
+    parking.use()
+    metal = MetalTimelinePreview(context)
+    renderer._ensure_native_viewport_state()
+    renderer._metal_preview_mode = "all"
+    renderer._native_producer = producer = NativePreviewProducer(metal)
+    published: list = []
+    renderer.present_frame_ready.connect(published.append)
+    grade = _lut_graph(cube)
+    primary = {"grade": {"exposure": 31.0, "temp": 12.0, "contrast": 15.0, "saturation": 11.0}}
+    trim = {"grade": {"exposure": -37.0, "tint": 9.0, "hue_shift": -18.0}, "opacity": 0.82}
+    cases = (
+        ((1920, 1080), [_planar(first)]),
+        ((832, 500), [_planar(first, preview_grade=grade)]),
+        (PROXY, [_planar(first), _planar(second, transform=MOVE, opacity=0.45,
+                                       crop=(0.1, 0.0, 0.0, 0.2, 40.0), preview_grade=grade)]),
+        (PROXY, [_planar(first, preview_grade=_primary_graph(primary))]),
+        (PROXY, [_planar(first), _planar(second, opacity=0.82, crop=(0.1, 0.0, 0.0, 0.2, 40.0),
+                                       preview_grade=_primary_graph(primary, trim))]),
+    )
+    try:
+        with patch.object(lut_loader, "resolve_lut_path", lambda reference: cube), \
+                patch.object(graph_texture, "resolve_lut_path", lambda reference: cube):
+            for number, (size, layers) in enumerate(cases):
+                width, height = size
+                texture = context.texture(size, 4)
+                fbo = context.framebuffer([texture])
+                renderer._composite_fbo, renderer._composite_tex = fbo, texture
+                try:
+                    reference = _gl_reference(renderer, {"size": size, "coordinate": SOURCE_SIZE,
+                                                            "layers": layers, "dip": None})
+                    task = EditRenderTask(number, 1, layers, output_fbo_size=size, coordinate_size=SOURCE_SIZE)
+                    assert renderer._try_native_metal_preview(task, width, height)
+                    deadline = time.monotonic() + 3.0
+                    while time.monotonic() < deadline and not published:
+                        renderer._poll_native_viewport()
+                        time.sleep(0.002)
+                    assert len(published) == 1
+                    present = published.pop()
+                    assert present.frame == number and present.native.api == "metal"
+                    stored = metal.metal_context.read_texture(
+                        present.native.resource, width * 4, height, np.uint8,
+                        region_width=width).reshape(height, width, 4)
+                    error = _difference(stored[:, :, 2::-1], reference)
+                    assert error["mean"] < 0.8 and error["p99"] <= 2, (number, error)
+                    upload = renderer.consume_planar_upload_stats(number)
+                    assert upload["mode"] == "metal_planar" and upload["tracks"] == len(layers)
+                    producer.ack(present, "test_read_done")
+                finally:
+                    parking.use()
+                    fbo.release()
+                    texture.release()
+    finally:
+        assert producer.shutdown()
+        metal.release()
+        renderer._yuv_uploader.release()
+        _release_renderer(renderer)
+        parking.release()
+        parking_texture.release()
+        context.release()
+
+
+@pytest.mark.gpu_renderer
+@pytest.mark.real_media
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Metal and CGL on macOS")
+def test_native_metal_preview_matches_gl_for_dnxhr_422(tmp_path: Path) -> None:
+    if not DNXHR.is_file():
+        pytest.skip("10-bit DNxHR HQX test clip is unavailable")
+    cube = tmp_path / "swap.cube"
+    cube.write_text("LUT_3D_SIZE 2\n" + "".join(
+        f"{b} {g} {r}\n" for b in range(2) for g in range(2) for r in range(2)), encoding="utf-8")
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="MetalPlanarTest") as worker:
+        worker.submit(_compare_planar_on_render_thread, DNXHR, cube).result()

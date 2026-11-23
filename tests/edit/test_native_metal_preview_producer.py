@@ -83,6 +83,9 @@ class _FailingContext:
     def __init__(self, message: str) -> None:
         self._message = message
 
+    def has_pending_work(self) -> bool:
+        return False
+
     def submit(self, *, completion, wait=False, raise_after_commit=True):
         buffer = SimpleNamespace(error=lambda: self._message)
         completion(buffer)
@@ -231,6 +234,25 @@ class TestFallbacks:
         preview.refuse = False
         assert made.try_render(_task(1), (W, H), source, None) == SUBMITTED
 
+    def test_encode_exception_discards_commands_and_returns_the_slot(self, producer, monkeypatch) -> None:
+        made, preview = producer
+        source = _VtFrame(1)
+        encode = preview.encode_native
+
+        def fail_after_dispatch(*args, **kwargs):
+            imported = encode(*args, **kwargs)
+            imported.release()
+            raise RuntimeError("encode failed")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(preview, "encode_native", fail_after_dispatch)
+            with pytest.raises(RuntimeError, match="encode failed"):
+                made.try_render(_task(1), (W, H), source, None)
+        assert not preview.metal_context.has_pending_work()
+        assert made.in_flight == 0 and source.releases == 0
+        assert all(slot.state is SlotState.FREE for slot in made._pool._slots.values())
+        assert made.try_render(_task(1), (W, H), source, None) == SUBMITTED
+
     def test_commit_failure_reports_the_frame_as_dropped(self, producer) -> None:
         made, _preview = producer
         source = _VtFrame(1)
@@ -285,6 +307,23 @@ class TestFailureAndRetirement:
         time.sleep(0.01)
         made.poll()
         assert made._retired == []
+
+    def test_repeated_resizes_preserve_unacknowledged_slots_and_bound_old_pools(self, producer) -> None:
+        made, _preview = producer
+        presents = []
+        for index in (1, 2, 3):
+            size = (W * index, H * index)
+            assert made.try_render(_task(index), size, _VtFrame(index), None) == SUBMITTED
+            (item,) = _settle(made)[0]
+            presents.append(item.present)
+        assert len(made._retired) == 2
+        source = _VtFrame(4)
+        assert made.try_render(_task(4), (W * 4, H * 4), source, None) == FALLBACK
+        assert made._size == (W * 3, H * 3) and source.releases == 0
+        assert len(made._retired) == 2
+        made.ack(presents[0], "replaced")
+        assert made.try_render(_task(4), (W * 4, H * 4), source, None) == SUBMITTED
+        assert len(made._retired) == 2
 
     def test_dropped_frame_stays_dropped(self, producer) -> None:
         made, preview = producer

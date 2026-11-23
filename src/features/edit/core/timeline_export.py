@@ -3193,6 +3193,8 @@ class TimelineExporter:
         )
         self._cancel_pending_before_start = False
         self._current_frame = 0
+        self._dnxhr_metal_fell_back = False
+        self._dnxhr_metal_frames = 0
 
         # 计算帧范围
         start_frame, end_frame = self._calculate_frame_range(config)
@@ -3228,6 +3230,7 @@ class TimelineExporter:
             f"codec={config.codec}"
         )
 
+        previous_graphics_backend = self._timeline_graphics_backend
         try:
             # 创建渲染计划
             # NOTE: TimelineRenderPlan 仅在 TYPE_CHECKING 块中导入（类型注解用），
@@ -3243,6 +3246,9 @@ class TimelineExporter:
                     config, encoder_config, start_frame, end_frame)
                 if outcome is not None:
                     return outcome
+                if (sys.platform == "darwin" and not self._gpu_render_disabled
+                        and self._timeline_graphics_requested == "auto"):
+                    self._timeline_graphics_backend = "metal"
 
             # T-P1-10：TOPOS identity 直通快路径——严格 eligibility 判定，
             # 任一不满足立刻走普通 render path 并记录原因。
@@ -3409,6 +3415,7 @@ class TimelineExporter:
             # 关闭编码器。用户取消时优先 abort()（支持该方法的编码器——
             # 如 ToposVideoEncoder——丢弃未定稿数据并删除临时文件，
             # 取消不会留下被误识别为成功的输出文件）。
+            published: Optional[bool] = None
             if self._encoder:
                 if self._cancel_requested and hasattr(self._encoder, 'abort'):
                     try:
@@ -3419,7 +3426,16 @@ class TimelineExporter:
                     # T-P0-20：mux（定稿封装）阶段 wall 计时。
                     _mux_started = time.perf_counter()
                     try:
-                        self._encoder.close()
+                        from src.shared.export.video_encoder import FFmpegVideoEncoder
+
+                        if (config.codec == ExportCodec.DNXHR_HQX
+                                and isinstance(self._encoder, FFmpegVideoEncoder)):
+                            published = self._encoder.close(
+                                should_cancel=lambda: self._cancel_requested,
+                                expected_frames=self._total_frames or None,
+                            )
+                        else:
+                            self._encoder.close()
                     finally:
                         _recorder = getattr(self, "_export_telemetry", None)
                         if _recorder is not None:
@@ -3433,7 +3449,7 @@ class TimelineExporter:
             self._cleanup_clips()
 
             # P0-05：取消与成功显式分型（不再共用 False）
-            if self._cancel_requested:
+            if published is False or (published is None and self._cancel_requested):
                 logger.info("Export cancelled: frames_encoded=%s",
                             self._current_frame)
                 return ExportOutcome.user_cancelled()
@@ -3443,12 +3459,21 @@ class TimelineExporter:
                 f"frames_encoded={self._current_frame}"
             )
 
+            delivery_path = ""
+            if self._dnxhr_metal_frames:
+                delivery_path = (
+                    "metal_dnxhr_hqx_partial" if self._dnxhr_metal_fell_back
+                    else "metal_dnxhr_hqx_422_planar"
+                )
+                self._export_telemetry.set_delivery_path(delivery_path)
+
             # P1-18: 交付 manifest 归档——源 hash/revision/能力快照/QC/preflight。
             # 源素材可能是数 GB，完整 SHA-256 必须在后台生成，不能把磁盘
             # 扫描时间算进视频导出关键路径；sidecar 仍会在后台原子替换完成。
             self._write_success_manifest_async(config)
 
-            return ExportOutcome.ok(
+            return ExportOutcome(
+                success=True, delivery_path=delivery_path,
                 audio_omitted=self._audio_omitted,
                 hw_fallback_reason=getattr(
                     self._encoder, "hw_fallback_reason", ""
@@ -3506,6 +3531,8 @@ class TimelineExporter:
             # P0-GPU-1: 释放导出 GPU 合成渲染器（串行模式创建线程=导出
             # 线程；流水线模式已在生产者线程 finally 释放，此处幂等空操作）
             self._release_gpu_export_renderer()
+            if config.codec == ExportCodec.DNXHR_HQX:
+                self._timeline_graphics_backend = previous_graphics_backend
 
     def _write_success_manifest(
         self,
@@ -7203,6 +7230,25 @@ class TimelineExporter:
                 black = self._burn_in_subtitles(black, frame_idx, width, height)
             return self._apply_program_guide_matte(black)
 
+        if (getattr(config, "codec", None) == ExportCodec.DNXHR_HQX
+                and getattr(self, "_timeline_graphics_backend", None) == "metal"
+                and not self._gpu_render_disabled):
+            try:
+                native_frame = self._render_metal_dnxhr_hqx(frame_plan, frame_idx, config)
+            except Exception as error:
+                logger.warning("Metal DNxHR rendering failed, using OpenGL: %s", error)
+                self._record_gpu_fallback(f"metal_dnxhr_hqx_render_failed:{type(error).__name__}")
+            else:
+                if native_frame is not None:
+                    self._dnxhr_metal_frames += 1
+                    return native_frame
+                self._record_gpu_fallback("metal_dnxhr_hqx_unsupported_frame")
+            # Release on the render owner thread before constructing a GL
+            # renderer. The ordinary compositor renders this same frame.
+            self._release_gpu_export_renderer()
+            self._dnxhr_metal_fell_back = True
+            self._timeline_graphics_backend = "opengl"
+
         # 合成层
         composite = self._composite_layers(
             frame_plan.layers, frame_plan.transitions, config, frame_idx)
@@ -7215,6 +7261,70 @@ class TimelineExporter:
         if composite is not None:
             composite = self._apply_program_guide_matte(composite)
         return composite
+
+    def _render_metal_dnxhr_hqx(
+        self, frame_plan: Any, frame_idx: int, config: TimelineExportConfig,
+    ) -> Optional[DecodedFrame]:
+        """Render a proven single-LUT case through the normal DNxHR encoder."""
+        from src.features.color.core.color_graph_texture import serial_lut_only
+        from src.features.edit.core.color_chain import chain_extra_params
+        from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+        from src.shared.media.frame import DecodedFrame
+
+        width, height = self._get_output_resolution(config)
+        if (not self._gpu_yuv422p10_output_allowed(config, width, height, frame_idx)
+                or (width, height) != self._get_sequence_resolution()):
+            return None
+        identity = self._identity_delivery_layer(frame_plan, frame_idx, config, allow_color_graph=True)
+        if identity is None:
+            return None
+        layer, source_frame, _opacity = identity
+        graph = self._clip_color_graph(layer)
+        lut = serial_lut_only(graph) if graph is not None else None
+        if lut is None or chain_extra_params(self._project, self._sequence.timeline_id, layer.clip):
+            return None
+        asset = self._project.get_asset_by_id(layer.asset_id)
+        if asset is None or asset.media_type != "video":
+            return None
+        path = export_source_path(self._project, asset)
+        metadata = asset.metadata or {}
+        if (not path or path != asset.path
+                or (metadata.get("codec") or metadata.get("codec_name")) not in ("dnxhd", "dnxhr")
+                or metadata.get("pixel_format") != "yuv422p10le"
+                or metadata.get("is_vfr") or metadata.get("is_hdr") or metadata.get("rotation")
+                or metadata.get("field_order") not in (None, "unknown", "progressive")):
+            return None
+        decoded = self._request_high_depth_decoded_frame(
+            path, source_frame, layer.asset_id, session_key=self._layer_session_key(layer))
+        if (decoded is None or decoded.frame_index != source_frame
+                or decoded.pixel_format != "yuv422p10le"
+                or (decoded.width, decoded.height) != (width, height)):
+            return None
+        color = decoded.metadata
+        if (color is None or color.color_range != "limited" or color.color_matrix != "bt709"
+                or color.color_transfer != "bt709" or color.color_primaries != "bt709"):
+            return None
+        source = self._gpu_planar_source_from_decoded(decoded)
+        if source is None:
+            return None
+        renderer = self._gpu_export_renderer
+        if renderer is None:
+            renderer = TimelineMetalExportRenderer(self._gpu_trail)
+            self._gpu_export_renderer = renderer
+        reference, strength = lut
+        result = renderer.render_dnxhr_hqx_lut(
+            source, reference, strength, getattr(self._encoder, "allocate_yuv422p10_frame", None))
+        recorder = self._export_telemetry
+        if recorder is not None:
+            # The renderer already records these transfers in the legacy trail.
+            recorder.record_stage_sample("cpu_to_gpu_upload", "metal", cpu_upload_bytes=4 * width * height)
+            recorder.record_stage_sample("gpu_to_cpu_download", "metal", cpu_download_bytes=4 * width * height)
+        return DecodedFrame(
+            frame_index=frame_idx, pts=frame_idx,
+            time_seconds=frame_idx / self._get_sequence_fps(),
+            planes=result.planes, pixel_format="yuv422p10le", width=width, height=height,
+            extra={"yuv422p10_frame": result.encoder_frame} if result.encoder_frame is not None else {},
+        )
 
     @staticmethod
     def _rational_pair(value: Any) -> Optional[Tuple[int, int]]:
@@ -7310,13 +7420,28 @@ class TimelineExporter:
             self._current_frame = frames
             self._notify_progress()
 
+        fps = Fraction(*rate)
+
+        def verify_staged(path: str) -> None:
+            try:
+                verified, evidence = verify_dnxhr_copy_runs(source, path, runs, fps=fps)
+            except Exception as error:
+                verified, evidence = False, f"verify_error:{type(error).__name__}"
+                logger.warning("DNxHR packet-hash verification failed: %s", error)
+            if not verified:
+                if self._export_telemetry is not None:
+                    self._export_telemetry.set_fallback_root_cause(
+                        f"dnxhr_packet_copy_unverified:{evidence}")
+                raise DnxhrPacketCopyUnsupported(f"Packet hash mismatch: {evidence}")
+            logger.info("DNxHR packet copy verified: %s", evidence)
+
         started = time.perf_counter()
         try:
             complete = copy_dnxhr_hqx_mov(
                 source, config.output_path, runs, width=encoder_config.width,
-                height=encoder_config.height, fps=Fraction(*rate),
+                height=encoder_config.height, fps=fps,
                 continue_export=lambda: not self._cancel_requested and self._wait_if_paused(),
-                progress=progress,
+                progress=progress, verify_staged=verify_staged,
             )
         except DnxhrPacketCopyUnsupported as error:
             logger.info("DNxHR packet copy ineligible: %s", error)
@@ -7324,31 +7449,6 @@ class TimelineExporter:
             return None
         if not complete:
             return ExportOutcome.user_cancelled()
-
-        # Plan 3.4: smart reuse is confirmed by packet-hash evidence before the
-        # delivery counts as a success. A movie whose probe packets no longer
-        # hash like the master is discarded and the regular render redoes the
-        # range, so an unverifiable file is never left behind as a delivery.
-        try:
-            verified, evidence = verify_dnxhr_copy_runs(
-                source, config.output_path, runs, fps=Fraction(*rate))
-        except Exception as error:  # noqa: BLE001 — unconfirmed reuse must fail closed
-            verified, evidence = False, f"verify_error:{type(error).__name__}"
-            logger.warning("DNxHR packet-hash verification failed: %s", error)
-        if not verified:
-            logger.warning(
-                "DNxHR packet copy did not verify (%s); retrying the full range",
-                evidence)
-            try:
-                os.unlink(config.output_path)
-            except OSError:
-                logger.exception("Could not discard the unverified delivery")
-            self._current_frame = 0
-            if self._export_telemetry is not None:
-                self._export_telemetry.set_fallback_root_cause(
-                    f"dnxhr_packet_copy_unverified:{evidence}")
-            return None
-        logger.info("DNxHR packet copy verified: %s", evidence)
 
         path = "dnxhr_packet_copy"
         if self._export_telemetry is not None:
@@ -7498,7 +7598,8 @@ class TimelineExporter:
             for transition in track.transitions:
                 if transition.start_frame >= end_frame or transition.end_frame <= start_frame:
                     continue
-                if transition.transition_type != "cross_dissolve" or transition.is_one_sided:
+                if (transition.transition_type not in {"cross_dissolve", "dip_to_color"}
+                        or transition.is_one_sided):
                     return unsupported
                 transitions.append(transition)
             for clip in track.clips:
@@ -7562,6 +7663,10 @@ class TimelineExporter:
             left = eligible.get(transition.left_clip_id)
             right = eligible.get(transition.right_clip_id)
             if left is None or right is None:
+                return unsupported
+            if transition.transition_type == "dip_to_color" and (left.correctors or right.correctors):
+                # The dip stack covers plain SDR sources. Keep graph grading
+                # on both sides in the regular compositor until parity exists.
                 return unsupported
             variants.add((left.operations, right.operations))
         return eligible, variants
@@ -7726,6 +7831,7 @@ class TimelineExporter:
         renderer = bridge = None
         fallback = None
         published = False
+        used_dip = False
         recorder = self._export_telemetry
         try:
             clips, variants = self._metal_h264_lut_clips(config, width, height, start_frame, end_frame)
@@ -7787,13 +7893,17 @@ class TimelineExporter:
                 frame_plan = self._render_plan.get_frame_plan(frame_idx)
                 layers = frame_plan.layers
                 transitions = frame_plan.transitions
+                dip_transition = False
                 if transitions:
                     transition = transitions[0]
                     if (len(transitions) != 1 or len(layers) != 2
-                            or transition.transition_type != "cross_dissolve"
+                            or transition.transition_type not in {"cross_dissolve", "dip_to_color"}
                             or (layers[0].clip_id, layers[1].clip_id) != (
                                 transition.left_clip_id, transition.right_clip_id)):
                         raise RuntimeError("Two-source Metal transition coverage changed")
+                    dip_transition = transition.transition_type == "dip_to_color"
+                    if dip_transition and any(clips[layer.clip_id].correctors for layer in layers):
+                        raise RuntimeError("Metal dip does not support a graded source")
                 elif len(layers) != 1:
                     raise RuntimeError("Metal LUT delivery requires one visible layer")
 
@@ -7846,14 +7956,22 @@ class TimelineExporter:
                     if surface is None:
                         raise RuntimeError("VideoToolbox output surface unavailable")
                     started = time.perf_counter()
-                    if transitions:
-                        values[opacity_offset:opacity_offset + 2] = (
-                            transition.left_opacity, transition.right_opacity)
-                    if changed or transitions:
-                        context.write_buffer(param_buffer, values)
-                    gpu_ms = renderer.render_lut_to_nv12(
-                        tuple(zip(sources, active_textures)), active_kernel, param_buffer,
-                        grading_buffer, surface)
+                    if dip_transition:
+                        gpu_ms = renderer.render_dip_to_nv12(
+                            (sources[0], sources[1]),
+                            (transition.left_opacity, transition.right_opacity),
+                            transition.blend_color, transition.get_color_factor(), surface,
+                        )
+                        used_dip = True
+                    else:
+                        if transitions:
+                            values[opacity_offset:opacity_offset + 2] = (
+                                transition.left_opacity, transition.right_opacity)
+                        if changed or transitions:
+                            context.write_buffer(param_buffer, values)
+                        gpu_ms = renderer.render_lut_to_nv12(
+                            tuple(zip(sources, active_textures)), active_kernel, param_buffer,
+                            grading_buffer, surface)
                     recorder.record_stage_sample(
                         "render", "metal", wall_ms=(time.perf_counter() - started) * 1000.0,
                         gpu_submit_ms=gpu_ms, frame_index=frame_idx)
@@ -7916,7 +8034,9 @@ class TimelineExporter:
                     self._timeline_graphics_backend = previous_backend
 
         if published:
-            if any(len(ops) == 2 for ops in variants):
+            if used_dip:
+                delivery_path = "metal_h264_nv12_dip_to_color"
+            elif any(len(ops) == 2 for ops in variants):
                 delivery_path = "metal_h264_nv12_cross_dissolve"
             elif any(ops[0] not in ((), ("lut",)) for ops in variants):
                 delivery_path = "metal_h264_nv12_serial_grade"
@@ -9286,7 +9406,7 @@ class TimelineExporter:
                 or codec not in ("topos", "dnxhr")):
             return False
         if codec == "dnxhr":
-            if (getattr(self, "_timeline_graphics_backend", "opengl") != "opengl"
+            if (getattr(self, "_timeline_graphics_backend", "opengl") not in ("opengl", "metal")
                     or getattr(self, "_nested_render_stack", None)):
                 # A nested sequence returns pixels to the parent compositor.
                 return False

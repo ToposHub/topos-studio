@@ -115,9 +115,23 @@ def metal_preview_mode() -> Literal["off", "lut", "all"]:
         from src.shared.config.config_manager import ConfigManager
 
         graphics = ConfigManager().get_backend_selection().graphics.value
-    if graphics == "metal" or (graphics == "auto" and override in {"1", "true", "on", "yes"}):
-        return "all"
-    return "lut" if graphics == "auto" else "off"
+    if graphics not in {"auto", "metal"}:
+        return "off"
+    return "lut" if override == "lut" else "all"
+
+
+def native_viewport_mode() -> Literal["off", "deferred", "eager"]:
+    """Prepare the native viewer when an eligible edit frame first arrives."""
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    override = os.getenv("TOPOS_EDIT_METAL_VIEWPORT", "").strip().lower()
+    if (override in {"0", "false", "off", "no"}
+            or feature_disabled(MetalFeature.NATIVE_VIEWPORT)
+            or metal_preview_mode() == "off"):
+        return "off"
+    if override in {"1", "true", "on", "yes"}:
+        return "eager"
+    return "deferred"
 
 
 @dataclass
@@ -293,13 +307,10 @@ class MetalTimelinePreview:
         slot = self._acquire(size)
         if slot is None:
             return None
-        source = self._import_source(vt_frame)
-        if source is None:
+        source_lease = self.encode_native(vt_frame, slot.metal_texture, size, lut=lut)
+        if source_lease is None:
             return None
-        (y_plane, uv_plane), source_lease = source
         try:
-            self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
-                         slot.metal_texture, size, lut=lut)
             self._metal.finish()
         finally:
             source_lease.release()
@@ -322,7 +333,7 @@ class MetalTimelinePreview:
         if source is None:
             return None
         (y_plane, uv_plane), source_lease = source
-        fresh = not self._metal.has_pending_work
+        fresh = not self._metal.has_pending_work()
         try:
             self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
                          output, size, lut=lut)

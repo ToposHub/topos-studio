@@ -62,7 +62,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSizePolicy, QSlider,
 )
 from PyQt6.QtCore import (
-    Qt, QObject, pyqtSignal, QPoint, QSize, QTimer, QEvent,
+    Qt, QObject, pyqtSignal, pyqtSlot, QPoint, QSize, QTimer, QEvent,
     QByteArray, QMimeData,
 )
 from PyQt6.QtGui import (
@@ -2357,6 +2357,16 @@ class SourceViewerWidget(QWidget):
 
     # ==================== Native Metal viewport (plan 2.5) ====================
 
+    def set_native_viewport_candidate(self, renderer: Optional[QObject]) -> None:
+        self._native_candidate = renderer
+        self._native_pending_attach = None
+
+    @pyqtSlot()
+    def attach_requested_native_viewport(self) -> None:
+        renderer = self.sender()
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
+
     def enable_native_viewport(self, renderer: Optional[QObject]) -> bool:
         """Show eligible frames on a CAMetalLayer instead of the GL canvas.
 
@@ -2364,10 +2374,18 @@ class SourceViewerWidget(QWidget):
         was.  The canvas keeps its mouse handling — the layer's views take no
         events — and its FPS readout is drawn above the layer.
         """
-        if self.__dict__.get("_native_renderer", None) is not None:
-            return self._native_renderer is renderer
         opted_in = getattr(renderer, "native_viewport_opted_in", None)
         if renderer is None or not callable(opted_in) or not opted_in():
+            return False
+        is_running = getattr(renderer, "isRunning", None)
+        if callable(is_running) and not is_running():
+            return False
+        current = self.__dict__.get("_native_renderer")
+        if current is not None:
+            if current is renderer:
+                return True
+            self._native_pending_attach = renderer
+            self.disable_native_viewport()
             return False
         from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
 
@@ -2388,9 +2406,9 @@ class SourceViewerWidget(QWidget):
         self._native_renderer = renderer
         host.hide()
         self.viewer.installEventFilter(self)
-        renderer.attach_native_viewport(host.layer, host.publisher)
         renderer.native_viewport_failed.connect(self._on_native_viewport_failed)
         renderer.native_frame_presented.connect(self._on_native_frame_presented)
+        renderer.attach_native_viewport(host.layer, host.publisher)
         self._layout_native_host()
         return True
 
@@ -2408,35 +2426,45 @@ class SourceViewerWidget(QWidget):
             return
         host.hide()
         host.set_overlay_image(None)
-        released = renderer.detach_native_viewport(timeout_s=2.0)
+        released = renderer.detach_native_viewport(timeout_s=0.0)
         if released:
-            self._native_renderer = None
-            host.detach()
-            host.deleteLater()
-            self._metal_host = None
+            self._finish_native_detach(host)
         else:
-            logger.warning("SourceViewerWidget: native viewport still in use; retrying")
-            QTimer.singleShot(200, self._retry_native_detach)
+            self._queue_native_detach_retry(host, renderer)
+
+    def _queue_native_detach_retry(self, host: QWidget, renderer: QObject) -> None:
+        if self.__dict__.get("_native_retry_target") is None:
+            QTimer.singleShot(30, self._retry_native_detach)
+        self._native_retry_target = (host, renderer)
 
     def _retry_native_detach(self) -> None:
         host = self.__dict__.get("_metal_host")
         renderer = self.__dict__.get("_native_renderer")
-        if host is None:
+        target = self.__dict__.pop("_native_retry_target", None)
+        if target is None or host is not target[0] or renderer is not target[1]:
             return
         is_running = getattr(renderer, "isRunning", None)
-        if renderer is None or (callable(is_running) and not is_running()):
-            self._metal_host = None
-            self._native_renderer = None
-            host.detach()
-            host.deleteLater()
+        if (renderer is not None and (not callable(is_running) or is_running())
+                and not renderer.detach_native_viewport(timeout_s=0.0)):
+            self._queue_native_detach_retry(host, renderer)
             return
-        if not renderer.detach_native_viewport(timeout_s=2.0):
-            QTimer.singleShot(200, self._retry_native_detach)
-            return
+        self._finish_native_detach(host)
+
+    def _finish_native_detach(self, host: QWidget) -> None:
+        previous = self._native_renderer
+        if previous is not None:
+            try:
+                previous.native_viewport_failed.disconnect(self._on_native_viewport_failed)
+                previous.native_frame_presented.disconnect(self._on_native_frame_presented)
+            except (TypeError, RuntimeError):
+                pass
         self._metal_host = None
         self._native_renderer = None
         host.detach()
         host.deleteLater()
+        renderer = self.__dict__.pop("_native_pending_attach", None)
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
 
     def _native_host_can_show(self) -> bool:
         viewer = self.viewer
@@ -2462,7 +2490,7 @@ class SourceViewerWidget(QWidget):
         if self.__dict__.get("_native_showing") and allowed:
             if host.isHidden():
                 host.show()
-            host.raise_()
+                host.raise_()
             if not self._native_overlay_timer.isActive():
                 self._native_overlay_timer.start()
             self._refresh_native_overlay()
@@ -2523,15 +2551,13 @@ class SourceViewerWidget(QWidget):
         viewer._shared_tex_id = None
         if viewer._video_aspect_ratio <= 0 and present.width > 0 and present.height > 0:
             viewer._video_aspect_ratio = present.width / present.height
-        if viewer._view_transform.mode == "fit":
-            viewer.fit_to_window()
         if self._metal_host.geometry() != viewer.geometry():
             # The canvas is laid out after the viewport is enabled: the first
             # native frame finds the layer at its start-up size.
             self._layout_native_host()
         rect_px = viewer._calculate_display_rect_px()
         taken = renderer.submit_native_present(
-            present, rect=normalized_rect(rect_px, self._metal_host.drawable_size),
+            present, rect=normalized_rect(rect_px, (viewer.width(), viewer.height())),
             display_rect_px=rect_px)
         if not taken:
             self._gpu_stats["results_discarded"] += 1
@@ -2558,12 +2584,18 @@ class SourceViewerWidget(QWidget):
 
     def _on_native_frame_presented(self, frame: int) -> None:
         """A native frame reached the display: count it like a canvas paint."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
         indicator = getattr(self.viewer, "_fps_indicator", None)
         if indicator is not None:
             indicator.record_presented_frame(int(frame))
 
     def _on_native_viewport_failed(self, reason: str) -> None:
         """The renderer cannot present natively: back to the GL canvas."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
         logger.warning("SourceViewerWidget: native viewport unavailable, using OpenGL: %s", reason)
         self._set_native_showing(False)
         renderer = self.__dict__.get("_native_renderer")

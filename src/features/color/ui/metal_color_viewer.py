@@ -276,6 +276,7 @@ class ColorMetalViewerPresenter:
         image_size: Tuple[int, int],
         zoom: float = 1.0,
         pan: Tuple[float, float] = (0.0, 0.0),
+        display_rect_px: Optional[Tuple[float, float, float, float]] = None,
         on_presented: Any = None,
         on_released: Any = None,
     ) -> bool:
@@ -284,8 +285,10 @@ class ColorMetalViewerPresenter:
             return False
         assert self._port is not None
         surface = self._host.publisher.current()
-        rect_px = fit_display_rect(
-            image_size, surface.drawable_size, zoom=zoom, pan=pan)
+        rect_px = display_rect_px
+        if rect_px is None:
+            rect_px = fit_display_rect(
+                image_size, surface.drawable_size, zoom=zoom, pan=pan)
         self.stats["submits"] += 1
         return self._port.submit(
             published.present, rect=normalized_rect(rect_px, surface.drawable_size),

@@ -128,18 +128,9 @@ class MetalViewportHost(QWidget):
         self._overlay_buffer: Optional[bytes] = None
         super().__init__(parent)
         self.setObjectName("MetalViewportHost")
-        # A native window of our own: the NSView must exist before anything
-        # can be added to it.  Nothing else may turn native with it.  Qt
-        # gives every sibling of a native widget a window of its own unless
-        # this is set, and the ancestors follow (Qt 6.11, measured in the
-        # real application: thirteen windows around the program viewer, each
-        # flushed in software on every repaint of the page, which halved the
-        # frame rate).  The layer is then always stacked above its non-native
-        # siblings; whatever has to show above the picture goes into the
-        # overlay image.
-        QCoreApplication.setAttribute(
-            Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        # Ancestors stay in Qt's backing store; the layer is stacked above
+        # its siblings.  The native window itself is made by attach(), when
+        # there is a layer to put in it.
         self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
 
@@ -200,12 +191,34 @@ class MetalViewportHost(QWidget):
     # 装拆
     # ------------------------------------------------------------------
 
+    def _become_native(self) -> None:
+        """Give this widget a window of its own -- and nothing else in its window one.
+
+        Qt gives every sibling of a native widget a window of its own unless
+        the application says otherwise, and the ancestors follow
+        (``WA_DontCreateNativeAncestors`` alone does not stop it; Qt 6.11).
+        Measured in the real application: thirteen windows around the program
+        viewer, each flushed in software on every repaint of the page, which
+        halved the frame rate.  So the application attribute is set first,
+        and the layer is then always stacked above its non-native siblings;
+        whatever has to show above the picture goes into the overlay image.
+
+        It is an application-wide setting, so it is made here, when a layer
+        is really attached -- a host that is made and never used (a platform
+        that cannot host the layer) leaves the application as it was.
+        """
+        if self.testAttribute(Qt.WidgetAttribute.WA_NativeWindow):
+            return
+        QCoreApplication.setAttribute(
+            Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+
     def attach(self, device: Optional[Any] = None) -> bool:
         """Create the layer and its view inside this widget's native view.
 
-        Call once the widget has a native window (it is created on demand by
-        ``winId()``).  ``device`` is the Metal device the frames are rendered
-        with; pass it so presentation needs no cross-device copy.
+        The widget gets its native window here, just before the layer needs
+        the ``NSView``.  ``device`` is the Metal device the frames are
+        rendered with; pass it so presentation needs no cross-device copy.
         """
         if self._layer is not None:
             return True
@@ -223,6 +236,7 @@ class MetalViewportHost(QWidget):
             if device is None:
                 self._failure = "no_metal_device"
                 return False
+        self._become_native()
         try:
             host_view = objc.objc_object(c_void_p=ctypes.c_void_p(int(self.winId())))
             bounds = host_view.bounds()

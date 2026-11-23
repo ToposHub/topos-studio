@@ -225,7 +225,8 @@ class TestNativeNeighbours:
         real application, which halved the frame rate).
         """
         _needs_cocoa(qapp)
-        qapp.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, False)
+        made = False
+        qapp.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, made)
         page = QWidget()
         body = QWidget(page)
         container = QWidget(body)
@@ -235,8 +236,15 @@ class TestNativeNeighbours:
         qapp.processEvents()
         host = MetalViewportHost(container)    # created once the page is shown, as in the app
         host.resize(160, 90)
+        made = qapp.testAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
         try:
+            # Nothing happens to the application until a layer is attached.
+            host = MetalViewportHost(container)    # created once the page is shown, as in the app
+            host.resize(160, 90)
+            assert host.testAttribute(Qt.WidgetAttribute.WA_NativeWindow) is False
+            assert qapp.testAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings) is made
             assert host.attach() is True, host.failure
+            assert host.testAttribute(Qt.WidgetAttribute.WA_NativeWindow) is True
             assert host.windowHandle() is not None
             for widget in (sibling, container, body):
                 assert widget.windowHandle() is None, widget

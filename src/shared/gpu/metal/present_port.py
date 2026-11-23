@@ -116,10 +116,11 @@ def normalized_rect(
     display_rect_px: Tuple[float, float, float, float],
     drawable_size: Tuple[int, int],
 ) -> Tuple[float, float, float, float]:
-    """Convert a top-left-origin pixel rectangle to the shader's convention.
+    """Convert a top-left-origin rectangle to the shader's convention.
 
-    ``display_rect_px`` is ``(x, y, width, height)`` with the origin at the
-    top-left, as Qt and the viewer's view transform report it.
+    Both the rectangle and the surface dimensions must use the same units.
+    Qt widget rectangles use logical units, while Metal drawable sizes use
+    physical pixels.
     """
     x, y, width, height = (float(value) for value in display_rect_px)
     surface_w = float(max(1, int(drawable_size[0])))
@@ -204,6 +205,7 @@ class HeldFrame:
     display_rect_px: Tuple[float, float, float, float]
     on_presented: Optional[Callable[[Any], None]] = None
     on_released: Optional[Callable[[Any, str], None]] = None
+    on_displayed: Optional[Callable[[Any], None]] = None
     token: int = 0                          # assigned when committed
     status: str = "pending"                 # pending | in_flight | done
     released: bool = False
@@ -471,6 +473,7 @@ class MetalPresentPort:
         self._starved = False
         self._lock = threading.Lock()
         self._pending: Deque[HeldFrame] = deque()
+        self._closing = False
         # Frames pushed out of a full wait queue.  They are released by the
         # owner thread in poll(), never on the submitting thread.
         self._displaced: Deque[HeldFrame] = deque()
@@ -484,7 +487,7 @@ class MetalPresentPort:
         self._latest_scrub_token: Optional[int] = None
         self._has_submission = False
         self._completed: Deque[Tuple[int, Optional[str]]] = deque()
-        self._presented_tokens: Deque[int] = deque()
+        self._displayed_callbacks: Deque[Tuple[Optional[Callable[[Any], None]], Any]] = deque()
         self.stats: Dict[str, int] = {
             "submitted": 0, "presented": 0, "released": 0, "actually_presented": 0,
             "no_drawable": 0, "stale": 0, "past_deadline": 0, "displaced": 0,
@@ -556,6 +559,7 @@ class MetalPresentPort:
         display_rect_px: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         on_presented: Optional[Callable[[Any], None]] = None,
         on_released: Optional[Callable[[Any, str], None]] = None,
+        on_displayed: Optional[Callable[[Any], None]] = None,
         scrub_token: Any = _UNSET,
         deadline_ns: int = 0,
     ) -> bool:
@@ -570,6 +574,8 @@ class MetalPresentPort:
         at submission: a later frame cannot loosen what a waiting frame has
         to satisfy.  Unless given, both are read from the descriptor — the
         producer stores them in ``extra`` (``None`` means playback, not scrub).
+        ``on_presented`` reports a committed present. ``on_displayed`` reports
+        the drawable's display notification, when the sink provides one.
         """
         extra = getattr(frame, "extra", None)
         extra = extra if isinstance(extra, dict) else {}
@@ -580,10 +586,12 @@ class MetalPresentPort:
             deadline_ns = int(extra.get("deadline_ns") or 0)
         held = HeldFrame(
             frame=frame, rect=tuple(rect), display_rect_px=tuple(display_rect_px),
-            on_presented=on_presented, on_released=on_released,
+            on_presented=on_presented, on_released=on_released, on_displayed=on_displayed,
             scrub_token=scrub_token, deadline_ns=int(deadline_ns or 0),
         )
         with self._lock:
+            if self._closing:
+                return False
             while len(self._pending) >= self._max_pending:
                 self._displaced.append(self._pending.popleft())
                 self.stats["displaced"] += 1
@@ -602,7 +610,7 @@ class MetalPresentPort:
         """
         with self._lock:
             source = self._displayed
-            if source is None or source.released:
+            if self._closing or source is None or source.released:
                 return False
             self._pending = deque(item for item in self._pending if not item.is_repeat)
             if len(self._pending) >= self._max_pending:
@@ -621,9 +629,9 @@ class MetalPresentPort:
         with self._lock:
             self._completed.append((token, None if error is None else str(error)))
 
-    def _record_actual_present(self, token: int) -> None:
+    def _record_actual_present(self, callback: Optional[Callable[[Any], None]], frame: Any) -> None:
         with self._lock:
-            self._presented_tokens.append(token)
+            self._displayed_callbacks.append((callback, frame))
 
     # ------------------------------------------------------------------
     # 资源线程：呈现与回收
@@ -686,8 +694,9 @@ class MetalPresentPort:
         with self._lock:
             completed = list(self._completed)
             self._completed.clear()
-            self.stats["actually_presented"] += len(self._presented_tokens)
-            self._presented_tokens.clear()
+            displayed = list(self._displayed_callbacks)
+            self._displayed_callbacks.clear()
+            self.stats["actually_presented"] += len(displayed)
             for token, _error in completed:
                 record = self._records.get(token)
                 if record is not None:
@@ -695,6 +704,12 @@ class MetalPresentPort:
             if self._in_flight_locked() == 0:
                 self._in_flight_since = None
         outcomes: List[PresentOutcome] = []
+        for callback, frame in displayed:
+            if callback is not None:
+                try:
+                    callback(frame)
+                except Exception:
+                    logger.exception("MetalPresentPort: on_displayed failed")
         for token, error in completed:
             record = self._records.get(token)
             if record is not None and error is not None:
@@ -727,7 +742,7 @@ class MetalPresentPort:
         outcomes: List[PresentOutcome] = []
         while True:
             with self._lock:
-                if not self._pending or self._in_flight_locked() >= self._max_in_flight:
+                if self._closing or not self._pending or self._in_flight_locked() >= self._max_in_flight:
                     return outcomes
                 held = self._pending.popleft()
             reason = self._rejection_reason(held)
@@ -768,7 +783,8 @@ class MetalPresentPort:
                     held, drawable, self._sink,
                     on_complete=lambda command_buffer, _token=token: self._record_completion(
                         _token, command_buffer.error()),
-                    on_actual_present=lambda _token=token: self._record_actual_present(_token),
+                    on_actual_present=lambda callback=held.on_displayed, frame=held.frame:
+                    self._record_actual_present(callback, frame),
                 )
             except Exception as error:
                 logger.warning("MetalPresentPort: present failed: %s", error)
@@ -801,12 +817,16 @@ class MetalPresentPort:
         surface = self.publisher.current()
         if not surface.is_usable():
             return "stale_surface_unavailable"
-        if held.is_repeat:
-            return ""
         frame = held.frame
         request = self.current_request()
         if request.generation and int(getattr(frame, "generation_id", 0)) != request.generation:
             return "stale_generation"
+        if held.is_repeat:
+            with self._lock:
+                source = held.source
+                if source is None or source is not self._displayed or source.released:
+                    return "stale_repeat"
+            return ""
         if request.scrub_token is not None:
             # Explicitly invalidated by the owner (a newer request exists).
             if held.scrub_token != request.scrub_token:
@@ -844,6 +864,20 @@ class MetalPresentPort:
                 logger.exception("MetalPresentPort: on_released failed")
         return PresentOutcome(held.frame, "released", reason)
 
+    def close_when_idle(self) -> Tuple[bool, List[PresentOutcome]]:
+        """Stop submissions and close after the final GPU read completes.
+
+        Poll on the owner thread. While a command still reads a source
+        texture, its lease stays with the port.
+        """
+        with self._lock:
+            self._closing = True
+        outcomes = self._apply_completions()
+        if self.in_flight:
+            return False, outcomes
+        outcomes.extend(self.shutdown())
+        return True, outcomes
+
     def shutdown(self) -> List[PresentOutcome]:
         """Release everything the port still holds.  Owner thread, at teardown.
 
@@ -852,10 +886,13 @@ class MetalPresentPort:
         (``MetalFrameTransactionPool.drain`` returned ``True``); otherwise a
         released texture may still be read by the pending present.
         """
+        with self._lock:
+            self._closing = True
         outcomes = self._apply_completions()
         with self._lock:
-            waiting = list(self._pending)
+            waiting = [*self._pending, *self._displaced]
             self._pending.clear()
+            self._displaced.clear()
             records = list(self._records.values())
             self._stalled = False
             self._in_flight_since = None

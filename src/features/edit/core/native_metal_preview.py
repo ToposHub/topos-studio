@@ -26,7 +26,6 @@ renderer then takes the GL path for new frames until the GPU drains.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -54,7 +53,7 @@ SUBMITTED = "submitted"   # frame is on its way; poll() will publish it
 FALLBACK = "fallback"     # nothing was taken: the GL path may render this frame
 DROPPED = "dropped"       # the frame is consumed but will not be published
 
-_RETIRED_POOL_TIMEOUT_S = 2.0
+_MAX_RETIRED_POOLS = 2
 
 
 @dataclass
@@ -89,7 +88,7 @@ class NativePreviewProducer:
         self._pool: Optional[OutputSlotPool] = None
         self._slot_textures: Dict[int, Any] = {}
         self._size: Optional[Tuple[int, int]] = None
-        self._retired: List[Tuple[OutputSlotPool, Dict[int, Any], float]] = []
+        self._retired: List[Tuple[OutputSlotPool, Dict[int, Any]]] = []
         self._transactions = MetalFrameTransactionPool(
             self._context, max_in_flight=max_in_flight,
             completion_timeout_s=completion_timeout_s,
@@ -138,21 +137,27 @@ class NativePreviewProducer:
     # 一帧
     # ------------------------------------------------------------------
 
-    def ensure_size(self, size: Tuple[int, int]) -> None:
-        """Create the slot pool for ``size``; retire the previous one."""
+    @staticmethod
+    def _pool_in_use(pool: OutputSlotPool) -> bool:
+        states = pool.stats().get("states", {})
+        return any(states.get(state, 0) for state in ("WRITING", "READY", "IN_VIEWER"))
+
+    def ensure_size(self, size: Tuple[int, int]) -> bool:
+        """Build a new slot pool if the old sizes can be retained safely."""
         size = (int(size[0]), int(size[1]))
         if size == self._size and self._pool is not None:
-            return
-        if self._pool is not None:
-            self._retired.append((self._pool, self._slot_textures, time.monotonic()))
-        self._size = size
-        self._pool = OutputSlotPool(size=self._pool_size)
-        self._slot_textures = {}
+            return True
+        self._drain_retired()
+        previous_in_use = self._pool is not None and self._pool_in_use(self._pool)
+        if previous_in_use and len(self._retired) >= _MAX_RETIRED_POOLS:
+            return False
+        pool = OutputSlotPool(size=self._pool_size)
+        textures = {}
         for slot_id in range(self._pool_size):
             texture = self._context.create_texture_2d(
                 MTL_PIXEL_FORMAT_BGRA8_UNORM, size[0], size[1], shader_write=True)
-            self._slot_textures[slot_id] = texture
-            self._pool.register_slot(
+            textures[slot_id] = texture
+            pool.register_slot(
                 slot_id, texture_glo=0, width=size[0], height=size[1],
                 resource=GpuPlaneResource(
                     api="metal", native_handle=texture,
@@ -161,6 +166,13 @@ class NativePreviewProducer:
                     device_identity=self._context.device_identity,
                 ),
             )
+        if self._pool is not None:
+            if previous_in_use:
+                self._retired.append((self._pool, self._slot_textures))
+            else:
+                self._pool.release_all()
+        self._size, self._pool, self._slot_textures = size, pool, textures
+        return True
 
     def try_render(
         self, task: Any, size: Tuple[int, int], source: Any,
@@ -180,9 +192,8 @@ class NativePreviewProducer:
     ) -> str:
         """Encode and submit a composite plan (plan task 2.6).
 
-        Every NV12 layer's VT frame is an input of the frame transaction and
-        is released once when the GPU finished reading it — the same rule the
-        GL path applies per layer.
+        Each NV12 frame and each imported or uploaded texture set stays
+        leased until the GPU finishes reading it.
         """
         sources: Tuple[Any, ...] = tuple(
             layer.source for layer in plan.layers if layer.kind == "nv12")
@@ -204,13 +215,20 @@ class NativePreviewProducer:
         path may render it.  With ``DROPPED`` the VT frames were released
         and the caller must report the frame as failed.
         """
-        self.ensure_size(size)
+        source_releases = tuple(item.release for item in sources)
         if self._transactions.paused:
             self.stats["fallbacks"] += 1
             return FALLBACK
         if self._transactions.in_flight >= self._transactions.max_in_flight:
             # Capacity is checked before anything is imported, so a full ring
             # leaves the frame untouched for the GL path.
+            self.stats["pool_full"] += 1
+            return FALLBACK
+        if self._context.has_pending_work():
+            # This transaction must be the sole owner of all encoded work.
+            self.stats["fallbacks"] += 1
+            return FALLBACK
+        if not self.ensure_size(size):
             self.stats["pool_full"] += 1
             return FALLBACK
         lease = self._pool.acquire_for_writing(
@@ -220,20 +238,25 @@ class NativePreviewProducer:
         if lease is None:
             self.stats["pool_full"] += 1
             return FALLBACK
-        imported = encode(lease.resource.native_handle)
-        if imported is None:
-            lease.abort_writing()
-            self.stats["fallbacks"] += 1
-            return FALLBACK
-        transaction = self._transactions.begin(
-            inputs=tuple(item.release for item in (*imported, *sources)), payload=task,
-        )
+        transaction = self._transactions.begin(payload=task)
         if transaction is None:
-            for item in imported:
-                item.release()
             lease.abort_writing()
             self.stats["fallbacks"] += 1
             return FALLBACK
+        try:
+            imported = encode(lease.resource.native_handle)
+        except Exception:
+            self._context.discard_pending()
+            self._transactions.abort(transaction, "native_preview_encode_failed")
+            lease.abort_writing()
+            raise
+        if imported is None:
+            self._context.discard_pending()
+            self._transactions.abort(transaction, "native_preview_encode_unavailable")
+            lease.abort_writing()
+            self.stats["fallbacks"] += 1
+            return FALLBACK
+        transaction.inputs = tuple(item.release for item in imported) + source_releases
         if not self._transactions.submit(transaction):
             # The pool released every input exactly once.
             lease.abort_writing()
@@ -308,7 +331,7 @@ class NativePreviewProducer:
         slot_id = int(getattr(present, "slot_id", -1))
         if slot_id < 0:
             return
-        pools = [self._pool] + [pool for pool, _tex, _at in self._retired]
+        pools = [self._pool] + [pool for pool, _tex in self._retired]
         for pool in pools:
             if pool is None:
                 continue
@@ -321,23 +344,12 @@ class NativePreviewProducer:
         """Drop retired slot textures once no frame of them is out."""
         if not self._retired:
             return
-        now = time.monotonic()
-        remaining: List[Tuple[OutputSlotPool, Dict[int, Any], float]] = []
-        for pool, textures, retired_at in self._retired:
-            states = pool.stats().get("states", {})
-            busy = states.get("READY", 0) or states.get("IN_VIEWER", 0) or states.get("WRITING", 0)
-            if busy and now - retired_at < _RETIRED_POOL_TIMEOUT_S:
-                remaining.append((pool, textures, retired_at))
-                continue
-            if busy:
-                # A frame never came back (viewport gone).  The textures are
-                # only referenced by this producer now; the port was shut
-                # down first, so nothing on the GPU reads them.
-                logger.warning(
-                    "NativePreviewProducer: retiring pool %s with %d slot(s) still out",
-                    pool.generation, busy,
-                )
-            pool.release_all()
+        remaining: List[Tuple[OutputSlotPool, Dict[int, Any]]] = []
+        for pool, textures in self._retired:
+            if self._pool_in_use(pool):
+                remaining.append((pool, textures))
+            else:
+                pool.release_all()
         self._retired = remaining
 
     def shutdown(self) -> bool:
@@ -346,7 +358,7 @@ class NativePreviewProducer:
         self.poll()
         if not drained:
             return False
-        for pool, _textures, _at in self._retired:
+        for pool, _textures in self._retired:
             pool.release_all()
         self._retired = []
         if self._pool is not None:

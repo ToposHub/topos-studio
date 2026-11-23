@@ -510,6 +510,31 @@ def test_metal_selects_serial_grading_and_two_sided_dissolve(metal_grade_timelin
     assert variants == {(("lut", "primary"),), (("lut", "primary"), ("lut", "primary"))}
 
 
+@pytest.mark.parametrize("has_grade", [False, True])
+def test_metal_dip_eligibility_keeps_graded_inputs_on_the_regular_route(
+    metal_grade_timeline, has_grade: bool,
+) -> None:
+    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
+    from src.features.edit.core.timeline_v2 import TransitionInstance
+
+    exporter, config, track = metal_grade_timeline
+    transition = TransitionInstance(
+        track_id="v1", left_clip_id="left", right_clip_id="right", transition_type="dip_to_color",
+        center_frame=20, duration=8, params={"color": (0.5, 0.0, 0.25)},
+    )
+    clips = track.clips if has_grade else tuple(replace(clip, color_stack_id=None) for clip in track.clips)
+    track = replace(track, clips=clips, transitions=(transition,))
+    sequence = replace(exporter._sequence, video_tracks=(track,))
+    exporter._sequence = sequence
+    exporter._render_plan = TimelineRenderPlan(sequence)
+    eligible, variants = exporter._metal_h264_lut_clips(config, 1920, 1080, 5, 34)
+    if has_grade:
+        assert not eligible and not variants
+    else:
+        assert set(eligible) == {"left", "right"}
+        assert variants == {((),), ((), ())}
+
+
 @pytest.mark.parametrize("clip_patch", [{"timeline_start": 21}, {"opacity": 0.4},
                                        {"fade_in_duration": 2}, {"freeze_source_frame": 13}])
 def test_metal_preserves_standard_export_for_unsupported_edits(metal_grade_timeline, clip_patch) -> None:

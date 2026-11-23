@@ -716,6 +716,25 @@ class TestTextureGraphMixerWarper:
 
 @requires_metal
 class TestTextureGraphLifecycle:
+    @pytest.mark.parametrize("intent", ["add_parallel_branch", "add_layer_branch"])
+    def test_mixer_with_single_input_keeps_published_frame(self, metal_ctx, intent):
+        grown = ColorGraphService().apply_intent(_graph_for([_rich_layer()]), intent, {})
+        assert grown.ok
+        mixer = next(node for node in grown.graph.nodes if node.node_type.endswith("mixer"))
+        edge = next(edge for edge in reversed(grown.graph.edges)
+                    if edge.dst_node == mixer.node_id and edge.dst_port in ("branch", "slot"))
+        graph = _replace(grown.graph, edges=tuple(e for e in grown.graph.edges if e != edge))
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        first, reference = _run_graph(metal_ctx, executor, graph, f02_patches(32))
+        second, _ = _run_graph(metal_ctx, executor, graph, f01_hdr_ramp(32))
+        try:
+            assert first.published and second.published
+            _assert_dual(executor.read_output_rgba16f(first), reference.output, intent)
+        finally:
+            executor.release_revision(first.request_id)
+            executor.release_revision(second.request_id)
+            executor.release_pool()
+
     def test_pool_reuse_across_executions(self, metal_ctx):
         graph = _graph_for([_rich_layer()])
         executor = ColorGraphMetalTextureExecutor(metal_ctx)

@@ -133,11 +133,11 @@ TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
 
 | 能力 | 默认 | 开启方式 | 转为默认的前提 |
 |---|---|---|---|
-| `edit_metal_preview` | 关 | `TOPOS_EDIT_METAL_PREVIEW=1` 或 `TOPOS_BACKEND_GRAPHICS=metal` | Intel 独显与 Apple Silicon 上守住 UHD 播放帧数和 seek p95 |
-| `edit_metal_composite` | 关 | 同上（`all` 模式） | 真机多层工程播放通过并测过播放期开销 |
-| `native_viewport` | 关 | `TOPOS_EDIT_METAL_VIEWPORT=1` | 真机播放已到实时（H.264 392～398 / 399 帧）；仍待：显示器清醒时验证 resize、隐藏、全屏、换屏、关闭，叠加层像素与交互对照，Source 监视器真机对照 |
+| `edit_metal_preview` | macOS 的 `auto` / `metal` | `TOPOS_EDIT_METAL_PREVIEW=0` 回退 | 每帧按实际输入和调色能力选择 |
+| `edit_metal_composite` | 跟随剪辑预览 | `TOPOS_METAL_DISABLE=edit_metal_composite` 回退 | 本机已跑 4K 多轨工程，Apple Silicon 单独验收 |
+| `native_viewport` | 首个合格帧触发挂载 | `TOPOS_EDIT_METAL_VIEWPORT=0` 关闭原生呈现 | Retina 坐标、过期帧、异步卸载有定向测试 |
 | `composite_metal` | 关 | `TOPOS_COMPOSITE_METAL=1` | 有生产调用方（comp clip、无头导出）且与 CPU/GL 取帧一致 |
-| `color_graph_metal` | 关 | `TOPOS_COLOR_METAL=1`（已接线：节点缩略图；Color Viewer 呈现端未接线） | Color Viewer 呈现端接线并在真机上对照 GL；剪辑渲染与交付经共享入口取图 |
+| `color_graph_metal` | 关 | `TOPOS_COLOR_METAL=1` | 已接调色图、Color Viewer、节点缩略图及无蒙版波形和直方图，在 Intel 独显上对照 GL |
 | `export_native_vt` | 开（macOS，graphics 为 auto/metal） | `TOPOS_EXPORT_NATIVE_VT=0` 关闭 | 导出文件上验证音频、分数帧率与取消（同机已做，见实施记录 3.1/3.2；B 帧与 29.97 仅有合成/生成素材的证据） |
 
 `tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的

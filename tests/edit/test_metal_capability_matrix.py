@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
@@ -32,12 +34,14 @@ from src.features.edit.core.metal_edit_compositor import (
     build_metal_composite_plan,
 )
 from src.shared.media.gpu_frame import GpuFrameRelease
+from src.shared.media.frame import DecodedFrame, PlaneInfo
 
 SINGLE = "metal_single"        # the fused one-pass kernel
 COMPOSITE = "metal_composite"  # plan 2.6
 GL = "gl"
 
-DEFAULT, METAL, OPENGL = "lut", "all", "off"     # metal_preview_mode() per column
+DEFAULT = METAL = "all"       # metal_preview_mode() per column
+OPENGL = "off"
 
 
 def _frame() -> SimpleNamespace:
@@ -49,6 +53,16 @@ def _frame() -> SimpleNamespace:
 
 def _video(**info) -> dict:
     return {"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": _frame(), "track_info": dict(info)}
+
+
+def _planar() -> dict:
+    y = np.zeros((8, 16), dtype=np.uint16)
+    u = v = np.zeros((8, 8), dtype=np.uint16)
+    planes = (y, u, v)
+    infos = tuple(PlaneInfo.create(i, plane.shape[1], plane.shape[0], name, plane.dtype, 10)
+                  for i, (plane, name) in enumerate(zip(planes, "YUV")))
+    decoded = DecodedFrame(0, 0, 0.0, planes=planes, plane_infos=infos, pixel_format="yuv422p10le")
+    return {"frame_type": "planar", "decoded_frame": decoded, "track_info": {}}
 
 
 def _lut_grade() -> dict:
@@ -65,11 +79,23 @@ def _lut_grade() -> dict:
     return {"color_graph": applied.graph, "source_frame": 0}
 
 
+def _primary_grade(**overrides) -> dict:
+    from src.features.color.core.color_graph_service import ColorGraphData, ColorGraphService
+
+    inserted = ColorGraphService().apply_intent(ColorGraphData.create_serial(), "insert_corrector", {})
+    assert inserted.ok
+    graph = replace(inserted.graph, nodes=tuple(
+        replace(node, params={"grade": {"exposure": 25.0, "saturation": -15.0}, **overrides})
+        if node.node_type == "corrector" else node for node in inserted.graph.nodes))
+    return {"color_graph": graph, "source_frame": 8}
+
+
 def _rows() -> dict[str, EditRenderTask]:
     """One task per row of the matrix."""
     return {
         "untouched H.264 clip": EditRenderTask(1, 1, [_video()]),
         "H.264 clip with one LUT": EditRenderTask(1, 1, [_video(preview_grade=_lut_grade())]),
+        "H.264 clip with primary grade": EditRenderTask(1, 1, [_video(preview_grade=_primary_grade())]),
         "cross dissolve (two opacities)": EditRenderTask(
             1, 1, [_video(opacity=0.35), _video(opacity=0.65)]),
         "moved and cropped clip": EditRenderTask(
@@ -82,7 +108,8 @@ def _rows() -> dict[str, EditRenderTask]:
             (SimpleNamespace(transition_type="dip_to_color", get_color_factor=lambda: 0.6,
                              blend_color=(0.0, 0.0, 0.0)), None),)),
         "clip with a video effect": EditRenderTask(1, 1, [_video(clip_effects=(object(),))]),
-        "DNxHR / ProRes (planar) clip": EditRenderTask(
+        "DNxHR HQX (SDR 4:2:2 10-bit) clip": EditRenderTask(1, 1, [_planar()]),
+        "unsupported planar clip": EditRenderTask(
             1, 1, [{"frame_type": "planar", "decoded_frame": object(), "track_info": {}}]),
         "comp clip (GPU handle)": EditRenderTask(
             1, 1, [{"frame_type": "comp_gpu_handle", "gpu_handle": object(), "track_info": {}}]),
@@ -90,26 +117,31 @@ def _rows() -> dict[str, EditRenderTask]:
             1, 1, [_video(), _video()],
             transition_jobs=((SimpleNamespace(transition_type="wipe"), object()),)),
         "adjustment clip above": EditRenderTask(1, 1, [_video()], adjustment_layers=[(object(), (), None)]),
-        "grade that is not a single LUT": EditRenderTask(
-            1, 1, [_video(preview_grade={"color_graph": object()})]),
+        "spatial grade": EditRenderTask(
+            1, 1, [_video(preview_grade=_primary_grade(grade={"mid_detail": 20.0}))]),
+        "animated grade": EditRenderTask(
+            1, 1, [_video(preview_grade=_primary_grade(grade_keyframes={"exposure": {"keyframes": [{}]}}))]),
     }
 
 
 #: row → (default ``auto``, explicit Metal, explicit OpenGL); the fourth
 #: column, Metal unavailable, is GL for every row.
 EXPECTED: dict[str, tuple[str, str, str]] = {
-    "untouched H.264 clip": (GL, SINGLE, GL),
+    "untouched H.264 clip": (SINGLE, SINGLE, GL),
     "H.264 clip with one LUT": (SINGLE, SINGLE, GL),
-    "cross dissolve (two opacities)": (GL, COMPOSITE, GL),
-    "moved and cropped clip": (GL, COMPOSITE, GL),
-    "solid under a clip": (GL, COMPOSITE, GL),
-    "dip to color": (GL, COMPOSITE, GL),
+    "H.264 clip with primary grade": (COMPOSITE, COMPOSITE, GL),
+    "cross dissolve (two opacities)": (COMPOSITE, COMPOSITE, GL),
+    "moved and cropped clip": (COMPOSITE, COMPOSITE, GL),
+    "solid under a clip": (COMPOSITE, COMPOSITE, GL),
+    "dip to color": (COMPOSITE, COMPOSITE, GL),
     "clip with a video effect": (GL, GL, GL),
-    "DNxHR / ProRes (planar) clip": (GL, GL, GL),
+    "DNxHR HQX (SDR 4:2:2 10-bit) clip": (COMPOSITE, COMPOSITE, GL),
+    "unsupported planar clip": (GL, GL, GL),
     "comp clip (GPU handle)": (GL, GL, GL),
     "spatial transition (wipe)": (GL, GL, GL),
     "adjustment clip above": (GL, GL, GL),
-    "grade that is not a single LUT": (GL, GL, GL),
+    "spatial grade": (GL, GL, GL),
+    "animated grade": (GL, GL, GL),
 }
 
 
@@ -186,6 +218,12 @@ def test_the_default_column_is_what_an_untouched_installation_gets(
     assert metal_timeline_preview.metal_preview_mode() == DEFAULT
 
 
+def test_the_lut_diagnostic_mode_takes_only_a_single_lut() -> None:
+    for name in EXPECTED:
+        expected = SINGLE if name == "H.264 clip with one LUT" else GL
+        assert _decide("lut", name) == expected, name
+
+
 def test_every_gl_cell_of_the_metal_column_is_a_refusal_with_a_reason() -> None:
     reasons: dict[str, str] = {}
     for name, task in _rows().items():
@@ -196,11 +234,12 @@ def test_every_gl_cell_of_the_metal_column_is_a_refusal_with_a_reason() -> None:
         reasons[name] = plan.reason
     assert reasons == {
         "clip with a video effect": "clip_effects",
-        "DNxHR / ProRes (planar) clip": "source_unsupported:planar",
+        "unsupported planar clip": "source_unsupported:planar",
         "comp clip (GPU handle)": "source_unsupported:comp_gpu_handle",
         "spatial transition (wipe)": "transition_unsupported:wipe",
         "adjustment clip above": "adjustment_layers",
-        "grade that is not a single LUT": "grade_unsupported",
+        "spatial grade": "grade_unsupported",
+        "animated grade": "grade_unsupported",
     }
 
 
@@ -211,6 +250,9 @@ def test_the_rows_cover_both_metal_entries_and_every_refusal_kind() -> None:
                       MetalCompositePlan)
     plan = build_metal_composite_plan(_rows()["H.264 clip with one LUT"])
     assert isinstance(plan, MetalCompositePlan) and plan.is_single_untouched_clip
+    primary = build_metal_composite_plan(_rows()["H.264 clip with primary grade"])
+    assert isinstance(primary, MetalCompositePlan) and not primary.is_single_untouched_clip
+    assert primary.layers[0].correctors[0]["exposure"][0] == 25.0
 
 
 def test_the_kill_switch_moves_the_whole_metal_column_to_gl(

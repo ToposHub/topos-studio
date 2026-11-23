@@ -233,6 +233,14 @@ denoise）。无 qualifier 且无 mask shapes 的常见层**早退 white_tex**�
 
 ### 2.5 OpenGLRenderBackend 与 msl_composition：契约门面与 Metal 对应物
 
+macOS 的 `TOPOS_COLOR_METAL=1` 启用调色工作线程的 Metal 图执行与原生视口。`AsyncRenderer` 先按原有规则
+准备图输入，`ColorMetalPreview` 用同设备的 RGBA16F IOSurface 在 GL 与 Metal 间传递工作纹理，再从权威
+调色图执行 Metal 计划。视口直接消费 Metal 结果，兼容显示和工具取得同一结果的 GPU 纹理。遮罩、邻域效果
+及其他不满足能力的图继续按权威 GL 计划求值。取色、分屏和需要覆盖编辑手柄的状态使用兼容视口。
+
+无蒙版的波形和 RGB 直方图可以用 `MetalScopeEngine` 计算，并经 IOSurface 将示波器的 GPU 显示纹理交给
+现有控件。原生视口的已验证显示域为 SDR。HDR、时间线传输和其余示波器有各自的兼容呈现路径。
+
 - **`opengl_render_backend.py`**：`AsyncRenderer` 的 GraphicsBackend 契约
   （`src/shared/gpu/graphics_backend.py`）'opengl' 维度实现，放 feature 侧是为
   不违反模块边界（它包装的就是 feature 侧 orchestrator）。关键约束：**不创建

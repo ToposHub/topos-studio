@@ -195,3 +195,24 @@ def test_a_verifier_that_raises_fails_closed(master, tmp_path, monkeypatch) -> N
     snapshot = _export(project, sequence, path)
     assert _delivered(path) == FRAMES[1] - FRAMES[0]
     assert snapshot["fallback_root_cause"] == "dnxhr_packet_copy_unverified:verify_error:OSError"
+
+
+@pytest.mark.real_media
+def test_metal_hqx_render_failure_uses_existing_opengl_delivery(
+    master: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, sequence = _timeline(master)
+    path = tmp_path / "out.mov"
+    monkeypatch.setenv("TOPOS_BACKEND_GRAPHICS", "metal")
+    monkeypatch.setenv("TOPOS_EXPORT_GPU_RENDER", "1")
+    monkeypatch.setattr(export_module.TimelineExporter, "_try_copy_dnxhr_hqx", lambda *_args: None)
+    monkeypatch.setattr(export_module.TimelineExporter, "_try_render_planar_passthrough", lambda *_args: None)
+
+    def render_failure(*_args: object) -> None:
+        raise RuntimeError("simulated Metal device failure")
+
+    monkeypatch.setattr(export_module.TimelineExporter, "_render_metal_dnxhr_hqx", render_failure)
+    snapshot = _export(project, sequence, path)
+    assert _delivered(path) == FRAMES[1] - FRAMES[0]
+    assert snapshot["fallback_root_cause"] == "metal_dnxhr_hqx_render_failed:RuntimeError"
+    assert _stage(snapshot, "render")["backend"] == "opengl"

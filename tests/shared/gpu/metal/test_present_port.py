@@ -203,16 +203,20 @@ class TestHappyPath:
 
     def test_actual_presentation_is_counted_separately(self) -> None:
         port, sink, _presenter = _port()
-        port.submit(_frame(1))
+        frame, shown = _frame(1), []
+        port.submit(frame, on_displayed=shown.append)
         port.poll()
         assert port.stats["presented"] == 1
         assert port.stats["actually_presented"] == 0
+        assert shown == []
         sink.complete_next()
         port.poll()
         assert port.stats["actually_presented"] == 0
         sink.show_next()
+        assert shown == []
         port.poll()
         assert port.stats["actually_presented"] == 1
+        assert shown == [frame]
 
 
 class TestRequestMatching:
@@ -515,8 +519,38 @@ class TestRepeatedShowing:
         port.represent_displayed((0.2, 0.2, 0.6, 0.6))
         assert port.pending == 1
 
+    def test_waiting_repeat_never_reads_a_released_picture(self) -> None:
+        port, sink, presenter = _port(max_in_flight=1)
+        old, new, lease = _frame(1), _frame(2), _Lease()
+        port.submit(old, on_released=lease)
+        port.poll()
+        _drain(sink, port)
+        port.submit(new)
+        assert port.represent_displayed((0.1, 0.1, 0.8, 0.8))
+        port.poll()
+        _drain(sink, port)
+        assert lease.released == ["replaced"]
+        assert [held.frame for held, _ in presenter.calls] == [old, new]
+
 
 class TestShutdown:
+    def test_close_waits_for_last_gpu_read_and_refuses_new_submissions(self) -> None:
+        port, sink, _presenter = _port(max_in_flight=1, max_pending=1)
+        leases = [_Lease() for _ in range(3)]
+        assert port.submit(_frame(1), on_released=leases[0])
+        port.poll()
+        assert port.submit(_frame(2), on_released=leases[1])
+        assert port.submit(_frame(3), on_released=leases[2])
+        assert port.close_when_idle() == (False, [])
+        assert not port.submit(_frame(4))
+        assert not port.represent_displayed((0.0, 0.0, 1.0, 1.0))
+        assert all(not lease.released for lease in leases)
+        sink.complete_next()
+        closed, outcomes = port.close_when_idle()
+        assert closed and len(outcomes) == len(leases)
+        assert all(lease.released == ["shutdown"] for lease in leases)
+        assert port.close_when_idle() == (True, [])
+
     def test_shutdown_releases_everything_once(self) -> None:
         port, sink, _presenter = _port(max_in_flight=1)
         frames = [_frame(n) for n in range(3)]
