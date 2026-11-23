@@ -46,7 +46,7 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 | `TOPOS_EXPORT_NATIVE_VT` | `timeline_export.py`（`_maybe_create_default_native_gpu_bridge`、`_try_export_metal_h264_lut`） | 空 | 假值关闭 Metal H.264 快路（它在 macOS 上默认开启）；真值另启用 opt-in 的常规 VT 桥 | G-07 |
 | `TOPOS_EDIT_METAL_VIEWPORT` | `edit_gpu_preview_renderer.py` | 空 | 真值：合格帧由原生 `CAMetalLayer` 呈现（节目与 Source 监视器） | G-02、G-05 |
 | `TOPOS_COMPOSITE_METAL` | `composite_graph_render_service.py` | 空（关） | 真值：合成图走 Metal compute 链（尚无生产调用方） | G-18、G-19 |
-| `TOPOS_COLOR_METAL` | `color/ui/metal_color_viewer.py` | 空（关） | 真值：Color Viewer 的 Metal 呈现端（尚未接线） | G-11、G-14 |
+| `TOPOS_COLOR_METAL` | `shared/gpu/metal/feature_switches.py`（`opt_in_enabled`） | 空（关） | 真值：调色域的 Metal 路径——节点缩略图（已接线）；Color Viewer 呈现端沿用同一开关、尚未接线 | G-31；G-11、G-14 |
 | `TOPOS_METAL_DISABLE` | `shared/gpu/metal/feature_switches.py` | 空 | 逗号分隔的能力名，单独关掉对应能力，优先于以上各开关 | 全部 |
 | `TOPOS_GRAPHICS_LEDGER` / `_FILE` | `src/main.py`（`start_session_ledger`） | 空（关） | 真值：记录本次会话经 moderngl 工厂与 `MetalComputeContext` 构造函数取得的每个图形上下文，被 moderngl 接管的 Qt 上下文也计入并标 `adopt`（没被接管的 `QOpenGLWidget` 上下文不计），退出时写快照 | 全部（度量） |
 | `TOPOS_GRAPHICS_FACTORY` | `shared/gpu/graphics_ledger.py` | `allow` | `deny`：台账钩子已安装时，GL 上下文工厂创建前即拒绝（测试注入） | 全部（测试） |
@@ -125,7 +125,7 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 
 | 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
 |---|---|---|---|---|---|---|---|
-| G-31 | `app/controllers/node_thumbnail_evaluator.py:223` | 处理 | 节点缩略图与画廊走共享帧 | 7.2、4.6 | OpenGL 独立上下文；Metal 缩略图服务与读回队列已实现（4.6 / 7.2，第一部分），未接线 | CPU 缩略图 | 待迁 |
+| G-31 | `app/controllers/node_thumbnail_evaluator.py:223` | 处理 | 节点缩略图与画廊走共享帧 | 7.2、4.6 | 默认 OpenGL 独立上下文；`TOPOS_COLOR_METAL=1` 时节点缩略图走 Metal（4.6，真实应用里该线程不再建 GL 上下文）；画廊未接 | CPU 缩略图 | 待迁 |
 | G-32 | `app/controllers/file_controller.py`（监看帧、抓帧读取 viewer 帧） | 呈现 | 有界异步 GPU→CPU 搬运 | 7.3 | 经 viewer GL 帧；显式读回队列已实现（7.3，第一部分），截图与抓帧入口未接 | 无帧可抓时跳过 | 待迁 |
 | G-33 | `app/controllers/deliver_controller.py:630` | 导出 | 交付走 GPU 计划 | 7.4 | 仅 CLI / 测试路径建 GL；UI 会话明确拒绝 | 回退 Color 输出 | 待迁 |
 | G-34 | `features/teaching_animation/composite_node.py`（`.glo`）；`render/benchmark.py:501` | 处理 | 进入视频帧合成处接 GPU 帧 | 7.4 | OpenGL | — | 待迁 |

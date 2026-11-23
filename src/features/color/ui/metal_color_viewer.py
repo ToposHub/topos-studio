@@ -27,7 +27,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
@@ -57,21 +56,13 @@ VIEWER_BACKGROUND = (25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 1.0)
 def color_metal_viewer_enabled() -> Tuple[bool, str]:
     """``(enabled, reason)``：Color 视口 Metal 原生呈现是否开启。
 
-    开启 = ``TOPOS_COLOR_METAL`` 为真值 **且** 统一 kill switch 未关
-    ``color_graph_metal`` 能力。``reason`` 在关闭时给出稳定原因键（诊断
-    可见，不静默降级）。
+    调色域的会话开关（``TOPOS_COLOR_METAL``），与节点缩略图评估器同一个
+    判定：开启 = 变量为真值 **且** 统一 kill switch 未关 ``color_graph_metal``
+    能力。``reason`` 在关闭时给出稳定原因键（诊断可见，不静默降级）。
     """
-    from src.shared.gpu.metal.feature_switches import (
-        MetalFeature,
-        feature_disabled,
-    )
+    from src.shared.gpu.metal.feature_switches import MetalFeature, opt_in_enabled
 
-    flag = os.environ.get("TOPOS_COLOR_METAL", "").strip().lower()
-    if flag not in ("1", "true", "yes", "on"):
-        return False, "opt_in_missing"
-    if feature_disabled(MetalFeature.COLOR_GRAPH_TEXTURE):
-        return False, "disabled_by_switch:color_graph_metal"
-    return True, ""
+    return opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE)
 
 
 # ── EDR 决策（纯逻辑） ───────────────────────────────────────────────────

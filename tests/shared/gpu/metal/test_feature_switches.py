@@ -17,10 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from src.shared.gpu.metal.feature_switches import (
     ENV,
+    OPT_IN_ENV,
     ROLLOUT,
     MetalFeature,
     disabled_features,
     feature_disabled,
+    opt_in_enabled,
     parse_disabled,
     rollout_of,
     switch_refusal,
@@ -171,3 +173,42 @@ def test_the_composite_graph_switch_wins_over_its_own_opt_in(monkeypatch: pytest
     assert composite_metal_enabled() is False
     monkeypatch.setenv(ENV, "")
     assert composite_metal_enabled() is True
+
+
+class TestOptIn:
+    """A capability asked for by its own variable, and not switched off."""
+
+    @pytest.fixture(autouse=True)
+    def asking_for_nothing(self, monkeypatch: pytest.MonkeyPatch):
+        for variable in OPT_IN_ENV.values():
+            monkeypatch.delenv(variable, raising=False)
+        monkeypatch.delenv(ENV, raising=False)
+
+    def test_off_unless_asked_for(self) -> None:
+        assert opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE) == (False, "opt_in_missing")
+
+    @pytest.mark.parametrize("value", ["1", "true", "YES", " on "])
+    def test_on_when_asked_for(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        monkeypatch.setenv("TOPOS_COLOR_METAL", value)
+        assert opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE) == (True, "")
+
+    def test_the_kill_switch_wins_over_the_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+        monkeypatch.setenv(ENV, "color_graph_metal")
+        assert opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE) == (
+            False, "disabled_by_switch:color_graph_metal")
+
+    def test_another_capability_in_the_kill_switch_does_not_matter(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+        monkeypatch.setenv(ENV, "native_viewport")
+        assert opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE) == (True, "")
+
+    def test_a_capability_without_a_variable_of_its_own_is_not_guessed(self) -> None:
+        with pytest.raises(KeyError):
+            opt_in_enabled(MetalFeature.EDIT_PREVIEW)
+
+    def test_every_variable_in_the_table_is_named_in_its_ledger_entry(self) -> None:
+        for feature, variable in OPT_IN_ENV.items():
+            assert f"{variable}=1" in rollout_of(feature).opt_in

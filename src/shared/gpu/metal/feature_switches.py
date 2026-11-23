@@ -36,7 +36,7 @@ class MetalFeature(str, Enum):
     EDIT_COMPOSITE = "edit_metal_composite"     # multi-layer Edit preview composite (plan 2.6)
     NATIVE_VIEWPORT = "native_viewport"         # frames presented by a CAMetalLayer (plan 2.1–2.3, 2.5)
     COMPOSITE_GRAPH = "composite_metal"         # 2D composite graph on Metal (plan 5)
-    COLOR_GRAPH_TEXTURE = "color_graph_metal"   # colour graph on Metal textures (plan 4; no production caller yet)
+    COLOR_GRAPH_TEXTURE = "color_graph_metal"   # colour graph on Metal textures (plan 4): node thumbnails follow it
     EXPORT_NATIVE_VT = "export_native_vt"       # Metal → VideoToolbox H.264 export (plan 3)
 
 
@@ -82,7 +82,8 @@ ROLLOUT: Tuple[Rollout, ...] = (
     ),
     Rollout(
         MetalFeature.COLOR_GRAPH_TEXTURE, "opt-in",
-        "none: the executor has no production caller",
+        "TOPOS_COLOR_METAL=1: node thumbnails (plan 4.6); the Color Viewer presenter "
+        "follows the same switch and is not wired yet",
         "plan 4.2–4.3",
         "edit renderer and delivery take their colour graph from the shared entry",
     ),
@@ -109,6 +110,31 @@ def parse_disabled(raw: str) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
         elif name not in unknown:
             unknown.append(name)
     return tuple(disabled), tuple(unknown)
+
+
+#: The opt-in variable of each capability that is asked for by a plain
+#: true/false variable of its own.  The others have more than one way in
+#: (``edit_metal_preview`` also follows the graphics backend setting).
+OPT_IN_ENV = {
+    MetalFeature.COLOR_GRAPH_TEXTURE: "TOPOS_COLOR_METAL",
+}
+
+_TRUE = ("1", "true", "yes", "on")
+
+
+def opt_in_enabled(feature: MetalFeature) -> Tuple[bool, str]:
+    """``(enabled, reason)``: asked for by its opt-in variable and not switched off.
+
+    ``reason`` is a stable key when off, so a log or a trace tells a session
+    that never asked for the capability from one where the kill switch
+    turned it off.
+    """
+    variable = OPT_IN_ENV[feature]
+    if os.environ.get(variable, "").strip().lower() not in _TRUE:
+        return False, "opt_in_missing"
+    if feature_disabled(feature):
+        return False, f"{DISABLED_REASON}:{feature.value}"
+    return True, ""
 
 
 def disabled_features() -> frozenset:
@@ -140,9 +166,11 @@ __all__ = [
     "ENV",
     "ROLLOUT",
     "MetalFeature",
+    "OPT_IN_ENV",
     "Rollout",
     "disabled_features",
     "feature_disabled",
+    "opt_in_enabled",
     "parse_disabled",
     "rollout_of",
     "switch_refusal",

@@ -28,6 +28,7 @@
 | `evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-24.json` | 7.5 | 图形调用台账：启动自检与一次导出（两条路径）的图形上下文；用修正了重复计数的台账重采 |
 | `evidence/graphics-ledger-session-{gl,auto,metal,native}-2026-11-24.json` | 7.5 | 同上，四种配置各一次真实 GUI 会话（启动 → Edit 页 → 四条时间线各播一遍 → 退出） |
 | `evidence/graphics-ledger-pages-{gl,metal,native}-2026-11-24.json` | 7.5 | 同上，遍历全部页面（Edit → Color → Composite → Deliver → Library）的三种配置 |
+| `evidence/graphics-ledger-pages-metal-colormetal-2026-11-24.json` | 4.6 / 7.5 | 同上，Metal 配置加 `TOPOS_COLOR_METAL=1`：节点缩略图不再建 GL 上下文 |
 | [evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md](evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md) | 2.4 | 播放：迁移前基线与当前提交同机交替对照（`gl` / `metal` 各两轮，16 组总和相差 +0.4%） |
 | `evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.json` | 2.4 | 同上的逐会话明细 |
 
@@ -132,7 +133,7 @@ TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
 | `edit_metal_composite` | 关 | 同上（`all` 模式） | 真机多层工程播放通过并测过播放期开销 |
 | `native_viewport` | 关 | `TOPOS_EDIT_METAL_VIEWPORT=1` | 真机播放已到实时（H.264 392～398 / 399 帧）；仍待：显示器清醒时验证 resize、隐藏、全屏、换屏、关闭，叠加层像素与交互对照，Source 监视器真机对照 |
 | `composite_metal` | 关 | `TOPOS_COMPOSITE_METAL=1` | 有生产调用方（comp clip、无头导出）且与 CPU/GL 取帧一致 |
-| `color_graph_metal` | 关 | 无（执行器尚无生产调用方） | 剪辑渲染与交付经共享入口取图 |
+| `color_graph_metal` | 关 | `TOPOS_COLOR_METAL=1`（已接线：节点缩略图；Color Viewer 呈现端未接线） | Color Viewer 呈现端接线并在真机上对照 GL；剪辑渲染与交付经共享入口取图 |
 | `export_native_vt` | 开（macOS，graphics 为 auto/metal） | `TOPOS_EXPORT_NATIVE_VT=0` 关闭 | 导出文件上验证音频、分数帧率与取消（同机已做，见实施记录 3.1/3.2；B 帧与 29.97 仅有合成/生成素材的证据） |
 
 `tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的
@@ -212,4 +213,7 @@ comp clip）：
 
 Metal 配置与 GL 配置在这一轮里的 GL 上下文**数量相同**：Metal 预览只是把 H.264 帧的渲染挪到 Metal，剪辑预览线程仍然要
 GL 上下文（DNxHR 与 GL Viewer 路线都用它），调色页、合成页与节点缩略图评测器完全没动。这五处就是 7.5 余下的清单。
+
+再加 `TOPOS_COLOR_METAL=1`（Metal 配置，`evidence/graphics-ledger-pages-metal-colormetal-2026-11-24.json`）：GL 上下文 4 个、
+Metal 2 个——节点缩略图评测器的线程不再建 standalone GL 上下文，改为自持一个 Metal 上下文（4.6 接线后的样子）。
 

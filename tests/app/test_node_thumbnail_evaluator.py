@@ -17,7 +17,10 @@ moderngl = pytest.importorskip("moderngl", reason="ModernGL 不可用")
 
 from PyQt6.QtWidgets import QApplication
 
-from src.app.controllers.node_thumbnail_evaluator import ColorNodeOutputPreview
+from src.app.controllers.node_thumbnail_evaluator import (
+    ColorNodeOutputPreview,
+    _thumbnail_backend,
+)
 from src.features.color.core.color_graph_service import ColorGraphService
 from src.features.color.core.color_graph_migration import migrate_legacy_stack
 from src.features.edit.core.project import EditProject
@@ -285,8 +288,11 @@ def _one_layer_graph(layer):
         project.color_stacks[sid].with_layers([layer.to_dict(None)]))
 
 
-def _evaluate(graph, source=None) -> _Sink:
-    """Evaluate every corrector of ``graph`` and return what was delivered."""
+def _evaluate(graph, source=None, report: dict | None = None) -> _Sink:
+    """Evaluate every corrector of ``graph`` and return what was delivered.
+
+    ``report`` (optional) receives the evaluator's ``stats()`` afterwards.
+    """
     sink = _Sink()
     preview = ColorNodeOutputPreview(size=(64, 36), debounce_ms=10)
     preview.node_thumbnail_ready.connect(sink.on_ready)
@@ -302,6 +308,8 @@ def _evaluate(graph, source=None) -> _Sink:
             f"缩略图未投递: ready={list(sink.ready)} failed={sink.failed}")
     finally:
         preview.shutdown()
+        if report is not None:
+            report.update(preview.stats())
     assert sink.failed == [], sink.failed
     return sink
 
@@ -465,3 +473,199 @@ class TestAuxiliaryBinding:
             _bind_aux_with_lut(ctx, prog, {}, cache)
             assert prog["u_curves_tex"].value == 2
         assert len(ctx.made) == 1 and ctx.made[0].units == [2, 2]
+
+
+# ── Metal 后端（会话开关 TOPOS_COLOR_METAL=1） ─────────────────────────────
+
+def _has_metal() -> bool:
+    from src.shared.gpu.metal.context import MetalComputeContext
+    return MetalComputeContext.is_supported()
+
+
+@pytest.fixture()
+def colour_metal(monkeypatch):
+    """调色域的 Metal 路径在本会话开启（需有 Metal 设备）。"""
+    if not _has_metal():
+        pytest.skip("needs a Metal device")
+    monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+    monkeypatch.delenv("TOPOS_METAL_DISABLE", raising=False)
+
+
+def _running(graph) -> tuple[ColorNodeOutputPreview, _Sink]:
+    """Request every corrector once and wait; the evaluator is left running."""
+    sink = _Sink()
+    preview = ColorNodeOutputPreview(size=(64, 36), debounce_ms=10)
+    preview.node_thumbnail_ready.connect(sink.on_ready)
+    preview.evaluation_failed.connect(sink.on_failed)
+    nodes = _correctors(graph)
+    payload = graph.to_dict()
+    preview.set_identity("s", "stack", graph.graph_revision)
+    preview.request(lambda: payload, lambda: _ramp(), [n.node_id for n in nodes])
+    assert _drive(preview, sink, count=len(nodes)), (
+        f"缩略图未投递: ready={list(sink.ready)} failed={sink.failed}")
+    return preview, sink
+
+
+def _device_gone(self) -> None:
+    raise RuntimeError("device gone")
+
+
+class TestMetalBackend:
+    def test_with_the_switch_on_no_gl_context_is_made(
+        self, qapp, colour_metal, monkeypatch,
+    ) -> None:
+        def no_gl(*args, **kwargs):
+            raise AssertionError("the thumbnail evaluator made a GL context")
+
+        monkeypatch.setattr(moderngl, "create_standalone_context", no_gl)
+        report: dict = {}
+
+        sink = _evaluate(_graph(), report=report)
+
+        assert len(sink.ready) == 3
+        assert (report["jobs_metal"], report["jobs_gl"], report["metal_failure"]) == (1, 0, None)
+
+    def test_metal_and_gl_deliver_the_same_pictures(self, qapp, colour_metal, monkeypatch) -> None:
+        graph = _graph()
+        on_metal = _evaluate(graph)
+        monkeypatch.delenv("TOPOS_COLOR_METAL")             # same machine, same source: GL
+        on_gl = _evaluate(graph)
+
+        assert on_metal.ready.keys() == on_gl.ready.keys()
+        for node_id, image in on_metal.ready.items():
+            diff = np.abs(_image_bytes(image).astype(int)
+                          - _image_bytes(on_gl.ready[node_id]).astype(int))
+            assert diff.mean() <= 0.5 and diff.max() <= 1, (node_id, diff.mean(), diff.max())
+
+    def test_the_kill_switch_keeps_the_evaluator_on_gl(
+        self, qapp, colour_metal, monkeypatch,
+    ) -> None:
+        monkeypatch.setenv("TOPOS_METAL_DISABLE", "color_graph_metal")
+        made: list = []
+        real = moderngl.create_standalone_context
+
+        def counted(**kwargs):
+            made.append(kwargs)
+            return real(**kwargs)
+
+        monkeypatch.setattr(moderngl, "create_standalone_context", counted)
+        report: dict = {}
+
+        sink = _evaluate(_graph(), report=report)
+
+        assert len(sink.ready) == 3 and made
+        assert (report["jobs_metal"], report["jobs_gl"]) == (0, 1)
+
+    def test_a_metal_failure_is_reported_and_the_job_still_runs_on_gl(
+        self, qapp, colour_metal, monkeypatch, caplog,
+    ) -> None:
+        import logging
+
+        monkeypatch.setattr(ColorNodeOutputPreview, "_metal_service", _device_gone)
+        report: dict = {}
+        caplog.set_level(logging.WARNING, logger="src.app.controllers.node_thumbnail_evaluator")
+
+        sink = _evaluate(_graph(), report=report)
+
+        assert len(sink.ready) == 3 and sink.failed == []
+        assert (report["jobs_metal"], report["jobs_gl"]) == (1, 1)
+        assert "device gone" in report["metal_failure"]
+        assert any("Metal evaluation failed" in r.getMessage() for r in caplog.records)
+
+    def test_after_a_metal_failure_the_cache_of_the_gl_pictures_is_used(
+        self, qapp, colour_metal, monkeypatch,
+    ) -> None:
+        """之后的任务不再试 Metal，按 GL 的键缓存——同一份 demand 再来时命中缓存。"""
+        monkeypatch.setattr(ColorNodeOutputPreview, "_metal_service", _device_gone)
+        graph = _graph()
+        nodes = [n.node_id for n in _correctors(graph)]
+        preview, sink = _running(graph)
+        try:
+            stats = preview.stats()
+            assert (stats["jobs_metal"], stats["jobs_gl"]) == (1, 1)
+            payload = graph.to_dict()
+
+            sink.ready.clear()
+            preview.request(lambda: payload, lambda: _ramp(), nodes)
+            assert _drive(preview, sink, count=3)
+            stats = preview.stats()
+            assert (stats["jobs_metal"], stats["jobs_gl"]) == (1, 1)   # nothing evaluated again
+
+            # A new revision is a new job: it goes to GL straight away, Metal is not tried again.
+            sink.ready.clear()
+            preview.set_identity("s", "stack", graph.graph_revision + 1)
+            preview.request(lambda: payload, lambda: _ramp(), nodes)
+            assert _drive(preview, sink, count=3)
+            stats = preview.stats()
+            assert (stats["jobs_metal"], stats["jobs_gl"]) == (1, 2)
+        finally:
+            preview.shutdown()
+
+    def test_the_cache_does_not_share_pictures_between_backends(
+        self, qapp, colour_metal, monkeypatch,
+    ) -> None:
+        monkeypatch.delenv("TOPOS_COLOR_METAL")             # start on GL
+        graph = _graph()
+        nodes = [n.node_id for n in _correctors(graph)]
+        payload = graph.to_dict()
+        preview, sink = _running(graph)
+        try:
+            assert (preview.stats()["jobs_gl"], preview.stats()["jobs_metal"]) == (1, 0)
+
+            monkeypatch.setenv("TOPOS_COLOR_METAL", "1")   # same revision, other backend
+            sink.ready.clear()
+            preview.request(lambda: payload, lambda: _ramp(), nodes)
+            assert _drive(preview, sink, count=3)
+            stats = preview.stats()
+            assert (stats["jobs_gl"], stats["jobs_metal"]) == (1, 1)
+        finally:
+            preview.shutdown()
+
+    def test_the_metal_service_is_dropped_when_the_worker_exits(self, qapp, colour_metal) -> None:
+        preview, _sink = _running(_graph())
+        worker = preview._worker
+        assert worker is not None and preview._metal is not None
+
+        preview.shutdown()
+        worker.join(5.0)
+
+        assert not worker.is_alive() and preview._metal is None
+
+    def test_without_the_switch_the_evaluator_stays_on_gl(self, qapp, monkeypatch) -> None:
+        monkeypatch.delenv("TOPOS_COLOR_METAL", raising=False)
+        report: dict = {}
+
+        sink = _evaluate(_graph(), report=report)
+
+        assert len(sink.ready) == 3
+        assert (report["jobs_metal"], report["jobs_gl"]) == (0, 1)
+
+
+class TestBackendChoice:
+    """``_thumbnail_backend()``：开关、kill switch 与设备三者决定后端。"""
+
+    def test_gl_without_the_switch_and_says_why(self, monkeypatch) -> None:
+        monkeypatch.delenv("TOPOS_COLOR_METAL", raising=False)
+        assert _thumbnail_backend() == ("gl", "opt_in_missing")
+
+    def test_gl_when_the_kill_switch_is_on(self, monkeypatch) -> None:
+        monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+        monkeypatch.setenv("TOPOS_METAL_DISABLE", "color_graph_metal")
+        assert _thumbnail_backend() == ("gl", "disabled_by_switch:color_graph_metal")
+
+    def test_metal_when_switched_on_and_there_is_a_device(self, monkeypatch) -> None:
+        if not _has_metal():
+            pytest.skip("needs a Metal device")
+        monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+        monkeypatch.delenv("TOPOS_METAL_DISABLE", raising=False)
+        assert _thumbnail_backend() == ("metal", "")
+
+    def test_gl_with_the_reason_when_there_is_no_device(self, monkeypatch) -> None:
+        from src.shared.gpu.metal import context
+
+        monkeypatch.setenv("TOPOS_COLOR_METAL", "1")
+        monkeypatch.delenv("TOPOS_METAL_DISABLE", raising=False)
+        monkeypatch.setattr(
+            context.MetalComputeContext, "availability_reason",
+            classmethod(lambda cls: (False, "no Metal hardware")))
+        assert _thumbnail_backend() == ("gl", "metal_unavailable:no Metal hardware")

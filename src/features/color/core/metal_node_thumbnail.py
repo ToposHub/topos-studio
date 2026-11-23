@@ -17,8 +17,10 @@
   （与 GL 评估器同一 ``freeze_graph(viewer_target=...)`` 契约），执行后
   读回小图 (H, W, 4) uint8（sRGB 展示编码在输出边界施加一次）。
 
-待接线（本阶段不改 app 域文件）：``node_thumbnail_evaluator`` 的
-``_evaluate_job`` 增加 backend 分支调用本服务；接线前生产路径仍走 GL。
+已接线（4.6）：``ColorNodeOutputPreview._evaluate_on_metal``（``src/app/controllers/
+node_thumbnail_evaluator.py``）在会话开关 ``TOPOS_COLOR_METAL=1`` 时调用本服务
+（``color_metal_session.node_thumbnail_backend``）；GL 评估器保留为默认路径与
+出错时的回退。
 """
 
 from __future__ import annotations

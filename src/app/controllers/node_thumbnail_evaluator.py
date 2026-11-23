@@ -5,14 +5,20 @@
 - **demand 驱动**：只评估可见 Corrector/Compound 卡片请求的节点输出
   （上限预算），**不逐帧同步 readback 4K 节点**——按（图 revision + 资源
   指纹 + 源身份 + 尺寸）缓存，去抖合并 demand。
-- **独立 worker 线程 + 独立 standalone GL 上下文**：GUI 线程零 GL 调用。
-  低分辨率（默认 320×180）经既有 ``compile_graph``（viewer target =
-  ``viewer:<node_id>``，依赖锥自然裁剪）+ ``ColorGraphExecutor`` 执行；
-  LUT3D/曲线 aux 纹理由本评估器按内容缓存提供（含 R05 强度规格路径的
-  u_lut_intensity uniform），插件经 ShaderPipeline 正常编译执行。
-- **缓存/失效**：键 = (node_id, graph_revision, resource_fingerprint,
-  source_identity, size)；改上游节点 → 依赖节点 revision/指纹变化自然
-  失效重算（独立分支不受影响——它们的键未变，直接命中缓存）。
+- **独立 worker 线程，GUI 线程零 GL 调用**。低分辨率（默认 320×180）经
+  既有 ``compile_graph``（viewer target = ``viewer:<node_id>``，依赖锥自然
+  裁剪）执行；两个后端，会话开关 ``TOPOS_COLOR_METAL=1`` 选定（Metal
+  迁移 4.6）：
+  - GL：每个任务一个 standalone GL 上下文 + ``ColorGraphExecutor``；
+    LUT3D / 曲线 / HSL 曲线 aux 纹理由本评估器按内容缓存提供（含 R05
+    强度规格路径的 u_lut_intensity uniform），插件经 ShaderPipeline 正常
+    编译执行。
+  - Metal：worker 线程自持一个 Metal 上下文与 ``MetalNodeThumbnailService``
+    （阶段 4 共享图入口），不建任何 GL 上下文；Metal 不可用、被
+    ``TOPOS_METAL_DISABLE=color_graph_metal`` 关闭或出错时回到 GL。
+- **缓存/失效**：键 = (node_id, graph_revision, size, backend)；改上游
+  节点 → 依赖节点 revision 变化自然失效重算（独立分支不受影响——它们的
+  键未变，直接命中缓存）。两个后端的图不互认缓存。
 - **世代守卫**：切 clip/换会话 generation+1，在途与晚到结果全部丢弃；
   删节点后回调按 node_id 查无卡片即忽略。失败/未评估 → 保留源缩略图
   fallback（视图层已保证 per-node 缩略图不覆盖、源图不被冒充）。
@@ -29,6 +35,8 @@ from typing import Any, Callable, Iterable, Mapping
 import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
+
+from src.shared.gpu.metal.feature_switches import MetalFeature, opt_in_enabled
 
 import logging
 
@@ -62,6 +70,11 @@ class ColorNodeOutputPreview(QObject):
         self._wakeup = threading.Event()
         self._shutdown = False
         self._last_dispatch = 0.0
+        # Metal 路径（仅 worker 线程读写）：(线程 id, 服务)；线程换过就重建
+        self._metal: tuple | None = None
+        self._metal_failure: str | None = None     # set once Metal failed: GL from then on
+        self._jobs_gl = 0
+        self._jobs_metal = 0
 
     # ── demand（GUI 线程调用） ─────────────────────────────────────
     def set_identity(self, session_id: str, stack_id: str,
@@ -100,11 +113,15 @@ class ColorNodeOutputPreview(QObject):
             return
         _LOGGER.debug("node thumbnail dispatch: %d nodes", len(demand[2]))
         generation, identity, node_list, graph_provider, source_provider = demand
+        backend, _why = _thumbnail_backend()
+        with self._lock:
+            # Metal 出过错之后任务都按 GL 评估、按 GL 的键缓存：查缓存要用同一个键
+            if backend == "metal" and self._metal_failure is not None:
+                backend = "gl"
         # 缓存命中先行（GUI 线程直接投递）
         pending_nodes: list[str] = []
         for node_id in node_list:
-            key = (node_id, identity[2], self._size)
-            cached = self._cache_get(key)
+            cached = self._cache_get(self._cache_key(node_id, identity, backend))
             if cached is not None:
                 self.node_thumbnail_ready.emit(node_id, cached.toImage())
             else:
@@ -123,8 +140,12 @@ class ColorNodeOutputPreview(QObject):
         self._ensure_worker()
         with self._lock:
             self._queue = (generation, identity, pending_nodes,
-                           graph_provider, source_provider)
+                           graph_provider, source_provider, backend)
         self._wakeup.set()
+
+    def _cache_key(self, node_id: str, identity: tuple, backend: str) -> tuple:
+        """One thumbnail per node, revision, size and backend (two backends never share a picture)."""
+        return (node_id, identity[2], self._size, backend)
 
     # ── worker（独立线程 + 独立 GL 上下文） ────────────────────────
     def _ensure_worker(self) -> None:
@@ -146,6 +167,7 @@ class ColorNodeOutputPreview(QObject):
             while True:
                 with self._lock:
                     if self._shutdown:
+                        self._release_metal()
                         return
                     job = self._queue
                     self._queue = None
@@ -192,13 +214,8 @@ class ColorNodeOutputPreview(QObject):
                 self._cache.popitem(last=False)
 
     def _evaluate_job(self, job: tuple) -> None:
-        import moderngl
-        from src.features.color.core.color_graph_compiler import compile_graph
-        from src.features.color.core.color_graph_executor import ColorGraphExecutor
-        from src.features.color.core.color_graph_snapshot import freeze_graph
-        from src.features.color.core.shader_compiler import ShaderPipeline
         from src.shared.project.color_graph import ColorGraphData
-        _generation, identity, node_list, graph_provider, source_provider = job
+        _generation, identity, node_list, graph_provider, source_provider, backend = job
         graph_payload = graph_provider()
         source = source_provider()
         if not isinstance(graph_payload, Mapping) or source is None:
@@ -218,8 +235,77 @@ class ColorNodeOutputPreview(QObject):
             if resolved and resolved not in resolved_seen:
                 resolved_seen.add(resolved)
                 targets.append((requested, resolved))
+        source = _resize_to(source, *self._size)
+        if backend == "metal":            # dispatch 把出过错之后的任务都派给 GL
+            self._jobs_metal += 1
+            try:
+                self._evaluate_on_metal(_generation, identity, targets, graph, source)
+                return
+            except Exception as exc:  # noqa: BLE001 — 缩略图照样要送到：这个任务起改走 GL
+                self._metal_failure = f"{type(exc).__name__}: {exc}"[:200]
+                _LOGGER.warning(
+                    "node thumbnail: Metal evaluation failed, using OpenGL from "
+                    "now on (%s)", self._metal_failure)
+                self._release_metal()
+            # 这个任务按 GL 的键缓存，图与 GL 的一致
+            backend = "gl"
+        self._jobs_gl += 1
+        self._evaluate_on_gl(_generation, identity, targets, graph, source, backend)
+
+    def _evaluate_on_metal(self, generation: int, identity: tuple,
+                           targets: list[tuple[str, str]], graph, source: np.ndarray) -> None:
+        """Metal：worker 线程自持的服务逐节点出图，不建 GL 上下文。
+
+        图里不支持的域（如 GLSL 插件效果）由服务按节点给出诊断——不拿
+        源图顶替，也不回头再走 GL。
+        """
+        service = self._metal_service()
+        rgba = np.concatenate(
+            [source[..., :3], np.ones(source.shape[:2] + (1,), np.float32)], axis=-1)
+        results = service.evaluate(
+            graph, rgba, tuple(resolved for _requested, resolved in targets),
+            identity=identity)
+        for requested, resolved in targets:
+            picture, outcome = results[resolved]
+            if picture is None:
+                self._emit_failed(requested, generation, outcome)
+                continue
+            image = _rgba8_to_qimage(picture)
+            self._cache_put(self._cache_key(requested, identity, "metal"),
+                            QPixmap.fromImage(image))
+            self._emit_ready(requested, generation, image)
+
+    def _metal_service(self):
+        """本线程的 Metal 服务（首次使用时建；只在 worker 线程调用）。
+
+        Metal 上下文与服务跟着创建它们的线程走：worker 线程换过了就重建。
+        """
+        from src.features.color.core.color_graph_entry import SharedColorGraphEntry
+        from src.features.color.core.metal_node_thumbnail import (
+            MetalNodeThumbnailService,
+        )
+        from src.shared.gpu.metal.context import MetalComputeContext
+        thread_id = threading.get_ident()
+        if self._metal is None or self._metal[0] != thread_id:
+            self._metal = (thread_id, MetalNodeThumbnailService(
+                SharedColorGraphEntry(MetalComputeContext())))
+        return self._metal[1]
+
+    def _release_metal(self) -> None:
+        """Drop the Metal service (on the worker thread, before it exits or after a failure)."""
+        self._metal = None
+
+    def _evaluate_on_gl(self, generation: int, identity: tuple,
+                        targets: list[tuple[str, str]], graph, source: np.ndarray,
+                        backend: str) -> None:
+        """GL：每个任务一个 standalone 上下文。``backend`` 是缓存键里的名字
+        （Metal 出错后的任务用 ``"gl"``）。"""
+        import moderngl
+        from src.features.color.core.color_graph_compiler import compile_graph
+        from src.features.color.core.color_graph_executor import ColorGraphExecutor
+        from src.features.color.core.color_graph_snapshot import freeze_graph
+        from src.features.color.core.shader_compiler import ShaderPipeline
         width, height = self._size
-        source = _resize_to(source, width, height)
         ctx = moderngl.create_standalone_context(require=330)
         try:
             executor = ColorGraphExecutor(ctx, pipeline=ShaderPipeline(ctx))
@@ -241,7 +327,7 @@ class ColorNodeOutputPreview(QObject):
                     layer_param_provider=_layer_provider(graph),
                     bind_aux=bind_aux)
                 if not result.published or result.output_texture is None:
-                    self._emit_failed(requested, _generation,
+                    self._emit_failed(requested, generation,
                                       result.diagnostic_code or "not_published")
                     executor.release_revision(f"thumb-{requested}")
                     continue
@@ -252,17 +338,37 @@ class ColorNodeOutputPreview(QObject):
                 image = _rgba8_to_qimage(raw)
                 fbo.release()
                 executor.release_revision(f"thumb-{requested}")
-                self._cache_put((requested, identity[2], self._size),
+                self._cache_put(self._cache_key(requested, identity, backend),
                                 QPixmap.fromImage(image))
-                self._emit_ready(requested, _generation, image)
+                self._emit_ready(requested, generation, image)
             src_tex.release()
             executor.release_pool()
         finally:
             ctx.release()
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, Any]:
+        """Cache size, generation, how many jobs each backend ran, and why Metal gave up (if it did)."""
         with self._lock:
-            return {"cached": len(self._cache), "generation": self._generation}
+            return {"cached": len(self._cache), "generation": self._generation,
+                    "jobs_gl": self._jobs_gl, "jobs_metal": self._jobs_metal,
+                    "metal_failure": self._metal_failure}
+
+
+def _thumbnail_backend() -> tuple[str, str]:
+    """``(backend, reason)``：本会话的节点缩略图用 ``"metal"`` 还是 ``"gl"``。
+
+    调色域的会话开关（``TOPOS_COLOR_METAL=1``）开启且有 Metal 设备时用 Metal；
+    否则 GL，``reason`` 说明为什么是 GL。
+    """
+    enabled, reason = opt_in_enabled(MetalFeature.COLOR_GRAPH_TEXTURE)
+    if not enabled:
+        return "gl", reason
+    from src.shared.gpu.metal.context import MetalComputeContext
+
+    ok, why = MetalComputeContext.availability_reason()
+    if not ok:
+        return "gl", f"metal_unavailable:{why}"
+    return "metal", ""
 
 
 def _resolve_viewer_node(payload: Mapping[str, Any], node_id: str) -> str:
