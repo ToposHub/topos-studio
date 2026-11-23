@@ -27,6 +27,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QWidget
 
+from src.features.edit.ui import program_viewer as _module
 from src.features.edit.ui.program_viewer import ProgramViewerWidget
 from src.shared.gpu.metal.present_port import normalized_rect
 from src.shared.gpu.present_frame import (
@@ -221,6 +222,23 @@ class TestRouting:
         # The GL viewer is not repainted for it.
         assert shown == []
 
+    def test_the_first_frame_normalizes_to_the_viewer_size_not_the_start_up_size(
+        self, widget, qapp,
+    ) -> None:
+        """The viewport is enabled before the viewer is laid out: the layer
+        still has Qt's start-up size when the first native frame comes."""
+        renderer = _FakeRenderer()
+        host = _arm(widget, renderer)
+        host.resize(100, 30)                      # what the host was at enable time
+        widget.set_frame(1, _result(_native_present(frame=1), _Ack()))
+
+        (present, kwargs), = renderer.submits
+        x, y, w, h = kwargs["rect"]
+        assert 0.0 <= x and x + w <= 1.0 + 1e-6 and 0.0 <= y and y + h <= 1.0 + 1e-3
+        assert abs((w * host.drawable_size[0]) / (h * host.drawable_size[1])
+                   - FRAME_W / FRAME_H) < 0.01
+        assert host.geometry() == widget._viewer.geometry()
+
     def test_the_picture_rectangle_follows_the_viewer_geometry(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
         host = _arm(widget, renderer)
@@ -401,6 +419,103 @@ class TestRefreshAndOverlays:
         image.fill(0)
         widget.set_frame(2, image)
         assert host.overlay_images[-1] is None
+
+
+class _RepaintCounter:
+    """Stands in for ``QOpenGLWidget.update``: how often Qt was asked to repaint."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __call__(self, *args) -> None:      # sip hands over no bound self
+        self.count += 1
+
+
+class TestCoveredViewer:
+    """While the layer covers the GL viewer, the viewer is not repainted.
+
+    A repaint under the layer copies a stale frame and flushes the window on
+    the GUI thread for a picture nobody sees (measured in the real
+    application: about 50 ms a frame, which halved the frame rate).
+    """
+
+    @staticmethod
+    def _covering(widget, renderer: _FakeRenderer) -> _FakeHost:
+        host = _arm(widget, renderer)
+        widget._viewer._native_covered_hook = widget._native_layer_is_showing
+        widget.set_frame(1, _result(_native_present(frame=1), _Ack()))
+        return host
+
+    def test_no_gl_repaint_is_requested_under_the_layer(self, widget, qapp, monkeypatch) -> None:
+        from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
+        renderer = _FakeRenderer()
+        host = self._covering(widget, renderer)
+        counter = _RepaintCounter()
+        monkeypatch.setattr(QOpenGLWidget, "update", counter)
+        viewer = widget._viewer
+
+        viewer.set_error_state("render_error", "boom")   # an overlay change: update()
+        qapp.processEvents()
+
+        assert counter.count == 0
+        assert host.overlay_images[-1] is not None      # the overlay reached the layer
+
+    def test_the_viewer_is_repainted_when_a_gl_frame_takes_the_screen_back(
+        self, widget, qapp, monkeypatch,
+    ) -> None:
+        from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
+        renderer = _FakeRenderer()
+        host = self._covering(widget, renderer)
+        counter = _RepaintCounter()
+        monkeypatch.setattr(QOpenGLWidget, "update", counter)
+        viewer = widget._viewer
+
+        widget.set_frame(2, QImage(8, 8, QImage.Format.Format_RGB32))   # a CPU snapshot
+
+        assert host.isHidden()
+        assert counter.count >= 1                   # the picture is visible again
+        before = counter.count
+        viewer.update()
+        assert counter.count == before + 1          # and requests reach Qt again
+
+    def test_leaving_native_mode_without_a_new_frame_repaints_the_viewer_once(
+        self, widget, monkeypatch,
+    ) -> None:
+        """A viewport failure takes the layer away and no frame follows: the
+        viewer's own picture, not repainted while it was covered, must come
+        back on its own."""
+        from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
+        renderer = _FakeRenderer()
+        host = self._covering(widget, renderer)
+        counter = _RepaintCounter()
+        monkeypatch.setattr(QOpenGLWidget, "update", counter)
+
+        widget._set_native_showing(False)           # what _on_native_viewport_failed does
+
+        assert host.isHidden()
+        assert counter.count == 1
+
+    def test_a_repaint_under_the_layer_clears_instead_of_copying_the_frame(self, widget, monkeypatch) -> None:
+        self._covering(widget, _FakeRenderer())
+        viewer = widget._viewer
+        viewer._gl_initialized = True
+        calls: list = []
+        monkeypatch.setattr(_module, "_gl", SimpleNamespace(
+            glViewport=lambda *args: calls.append(("viewport", args)),
+            glClearColor=lambda *args: calls.append(("clear_colour", args)),
+            glClear=lambda *args: calls.append(("clear", args))))
+        monkeypatch.setattr(viewer, "_reset_copy_gl_state", lambda: calls.append(("reset", ())))
+        monkeypatch.setattr(viewer, "_copy_shared_texture_to_display",
+                            lambda: calls.append(("copy",)))
+        viewer._pending_tex_delete = 5
+        viewer._shared_tex_id = 7
+
+        viewer._paintGL_impl()
+
+        assert [name for name, _args in calls] == ["reset", "viewport", "clear_colour", "clear"]
 
 
 class TestFileControllerHooks:

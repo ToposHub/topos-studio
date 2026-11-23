@@ -1338,6 +1338,14 @@ class ProgramViewer(QOpenGLWidget):
     def _paintGL_impl(self) -> None:
         if not self._gl_initialized:
             return
+        if self._native_layer_covers():
+            # Repainted for another reason (expose, resize): nothing of this
+            # widget is visible under the layer.  Do not copy the stale frame.
+            self._reset_copy_gl_state()
+            _gl.glViewport(0, 0, max(1, self.width()), max(1, self.height()))
+            _gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+            _gl.glClear(GL_COLOR_BUFFER_BIT)
+            return
 
         # AUD-20402: 执行 clear_texture 排队的 deferred 纹理释放（此处
         # 上下文必然 current）。防御性比对当前纹理名，绝不删除已被
@@ -1494,20 +1502,31 @@ class ProgramViewer(QOpenGLWidget):
         self._overlay_shown = True
         return image
 
+    def _native_layer_covers(self) -> bool:
+        """Whether the native Metal viewport is on top of this widget now."""
+        covered = getattr(self, "_native_covered_hook", None)
+        return callable(covered) and bool(covered())
+
     def update(self, *args) -> None:  # noqa: N802 - Qt override
         """Request a repaint; tell the native viewport if overlays may have changed.
 
         Overlay state changes only ever call ``update()``.  While the native
         Metal viewport covers this widget, its own paint is not visible, so
-        the owner re-renders the overlay image instead.
+        the owner re-renders the overlay image instead -- and no GL repaint
+        is requested at all: one costs a texture copy and a flush of the
+        window on the GUI thread for a picture nobody sees (measured in the
+        real application: about 50 ms a frame, which halved the frame rate).
+        The owner requests the repaint when the layer goes away.
         """
-        super().update(*args)
         hook = getattr(self, "_overlay_dirty_hook", None)
         if hook is not None:
             try:
                 hook()
             except Exception:  # noqa: BLE001 - never break a repaint request
                 logger.debug("overlay dirty hook failed", exc_info=True)
+        if self._native_layer_covers():
+            return
+        super().update(*args)
 
     def _calculate_display_rect(self) -> Tuple[float, float, float, float]:
         """
@@ -3878,6 +3897,7 @@ class ProgramViewerWidget(QWidget):
         self._metal_host = host
         self._native_renderer = renderer
         self._viewer._overlay_dirty_hook = self._schedule_native_refresh
+        self._viewer._native_covered_hook = self._native_layer_is_showing
         host.hide()
         renderer.attach_native_viewport(host.layer, host.publisher)
         renderer.native_viewport_failed.connect(self._on_native_viewport_failed)
@@ -3896,6 +3916,7 @@ class ProgramViewerWidget(QWidget):
         viewer = self.__dict__.get("_viewer")
         if viewer is not None:
             viewer._overlay_dirty_hook = None
+            viewer._native_covered_hook = None
         if renderer is None or host is None:
             self._native_renderer = None
             return
@@ -3956,6 +3977,11 @@ class ProgramViewerWidget(QWidget):
             and (monitor is None or monitor.isHidden())
         )
 
+    def _native_layer_is_showing(self) -> bool:
+        """The layer is on screen over the viewer, hiding the viewer's own paint."""
+        host = self.__dict__.get("_metal_host")
+        return bool(self.__dict__.get("_native_showing")) and host is not None and not host.isHidden()
+
     def _layout_native_host(self) -> None:
         """Keep the layer over the viewer exactly while a native frame is shown."""
         host = self._metal_host
@@ -3969,13 +3995,22 @@ class ProgramViewerWidget(QWidget):
         set_wanted = getattr(renderer, "set_native_frames_wanted", None)
         if callable(set_wanted):
             set_wanted(allowed)
-        host.setGeometry(self._viewer.geometry())
+        if host.geometry() != self._viewer.geometry():
+            host.setGeometry(self._viewer.geometry())
+            # A hidden host's resize event is still pending: publish the size
+            # now, the picture rectangle is normalized to it.
+            sync = getattr(host, "sync_surface", None)
+            if callable(sync):
+                sync()
         if wanted:
             if host.isHidden():
                 host.show()
             host.raise_()
         elif not host.isHidden():
             host.hide()
+            # The viewer's own picture is visible again; it was not repainted
+            # while the layer covered it.
+            self._viewer.update()
 
     def _set_native_showing(self, showing: bool) -> None:
         showing = bool(showing)
@@ -4007,6 +4042,10 @@ class ProgramViewerWidget(QWidget):
         viewer = self._viewer
         # The view transform and the overlays work from the texture size.
         viewer._tex_width, viewer._tex_height = int(present.width), int(present.height)
+        if host.geometry() != viewer.geometry():
+            # The viewer is laid out after the viewport is enabled: the first
+            # native frame finds the layer at its start-up size.
+            self._layout_native_host()
         rect_px = viewer._calculate_display_rect_qt()
         display_rect_px = (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height())
         rect = normalized_rect(display_rect_px, host.drawable_size)

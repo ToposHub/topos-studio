@@ -195,6 +195,20 @@ class TestRouting:
         # (a real Cocoa window does not always fit an exact multiple).
         assert abs(rect_px[2] / rect_px[3] - 4 / 3) <= 1.0 / rect_px[3]
 
+    def test_the_first_frame_normalizes_to_the_canvas_size_not_the_start_up_size(self, widget) -> None:
+        """The viewport is enabled before the canvas is laid out: the layer
+        still has Qt's start-up size when the first native frame comes."""
+        renderer = _FakeRenderer()
+        host = _arm(widget, renderer)
+        host.resize(100, 30)                        # what the host was at enable time
+
+        assert widget.set_native_gpu_frame(_present(frame=40), frame=40, generation=6) is True
+
+        (_submitted, kwargs), = renderer.submits
+        x, y, w, h = kwargs["rect"]
+        assert 0.0 <= x and x + w <= 1.0 + 1e-6 and 0.0 <= y and y + h <= 1.0 + 1e-3
+        assert host.geometry() == widget.viewer.geometry()
+
     def test_old_generation_is_returned_not_shown(self, widget) -> None:
         renderer = _FakeRenderer()
         _arm(widget, renderer)

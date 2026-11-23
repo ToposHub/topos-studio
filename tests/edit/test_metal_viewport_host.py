@@ -173,6 +173,81 @@ class TestAddedViews:
         # Detaching again is harmless.
         window.detach()
 
+    def test_resized_while_hidden_the_views_match_the_widget_once_shown(self, qapp) -> None:
+        """The application enables the viewport before the viewer has its size
+        and keeps the host hidden until a native frame comes, so the size is
+        set while hidden.  It must be applied once: not once by the host and
+        once more by AppKit, which stretched and cropped the picture."""
+        _needs_cocoa(qapp)
+        container = QWidget()
+        container.resize(700, 400)
+        container.show()
+        qapp.processEvents()
+        host = MetalViewportHost(container)
+        try:
+            assert host.attach() is True, host.failure
+            host.set_overlay_image(QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied))
+            host.setGeometry(0, 0, 640, 360)               # still hidden: no resize event yet
+            assert host.publisher.current().drawable_size == (100, 30)
+            # The owner asks for the size to be applied before it normalizes
+            # a picture rectangle to it.
+            assert host.sync_surface().drawable_size == (640, 360)
+            assert _frame(host._metal_view)[1] == (640.0, 360.0)
+            host.show()
+            qapp.processEvents()
+            assert host.publisher.current().drawable_size == (640, 360)
+            # Applied once: AppKit must not add the same difference again.
+            assert _frame(host._metal_view)[1] == (640.0, 360.0)
+            assert tuple(host.layer.bounds().size) == (640.0, 360.0)
+            assert tuple(host._overlay_view.frame().size) == (640.0, 360.0)
+            # The next native mode does the same: hidden, resized, shown.
+            host.hide()
+            qapp.processEvents()
+            host.setGeometry(0, 0, 480, 270)
+            host.show()
+            qapp.processEvents()
+            assert _frame(host._metal_view)[1] == (480.0, 270.0)
+            assert tuple(host.layer.bounds().size) == (480.0, 270.0)
+        finally:
+            host.detach()
+            host.close()
+            container.close()
+            qapp.processEvents()
+
+
+class TestNativeNeighbours:
+    def test_only_the_host_gets_a_window_of_its_own(self, qapp) -> None:
+        """A native child must not turn its siblings and ancestors native.
+
+        Qt's default gives every sibling of a native widget a window of its
+        own, and the ancestors follow; each of them is then flushed in
+        software on every repaint (thirteen around the program viewer in the
+        real application, which halved the frame rate).
+        """
+        _needs_cocoa(qapp)
+        qapp.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, False)
+        page = QWidget()
+        body = QWidget(page)
+        container = QWidget(body)
+        sibling = QWidget(container)
+        page.resize(320, 200)
+        page.show()
+        qapp.processEvents()
+        host = MetalViewportHost(container)    # created once the page is shown, as in the app
+        host.resize(160, 90)
+        try:
+            assert host.attach() is True, host.failure
+            assert host.windowHandle() is not None
+            for widget in (sibling, container, body):
+                assert widget.windowHandle() is None, widget
+            # How the host asked for it: once, for the whole application.
+            assert qapp.testAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings) is True
+        finally:
+            host.detach()
+            host.close()
+            page.close()
+            qapp.processEvents()
+
 
 class TestOverlay:
     def test_overlay_shows_a_transparent_image_above_the_video(self, window, qapp) -> None:

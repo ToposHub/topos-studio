@@ -31,7 +31,7 @@ import sys
 import threading
 from typing import Any, Optional
 
-from PyQt6.QtCore import QEvent, QObject, Qt
+from PyQt6.QtCore import QCoreApplication, QEvent, QObject, Qt
 from PyQt6.QtGui import QGuiApplication, QImage
 from PyQt6.QtWidgets import QWidget
 
@@ -129,7 +129,16 @@ class MetalViewportHost(QWidget):
         super().__init__(parent)
         self.setObjectName("MetalViewportHost")
         # A native window of our own: the NSView must exist before anything
-        # can be added to it, and ancestors stay in Qt's backing store.
+        # can be added to it.  Nothing else may turn native with it.  Qt
+        # gives every sibling of a native widget a window of its own unless
+        # this is set, and the ancestors follow (Qt 6.11, measured in the
+        # real application: thirteen windows around the program viewer, each
+        # flushed in software on every repaint of the page, which halved the
+        # frame rate).  The layer is then always stacked above its non-native
+        # siblings; whatever has to show above the picture goes into the
+        # overlay image.
+        QCoreApplication.setAttribute(
+            Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
@@ -222,9 +231,14 @@ class MetalViewportHost(QWidget):
             view = view_class.alloc().initWithFrame_((bounds.origin, bounds.size))
             view.setLayer_(layer)
             view.setWantsLayer_(True)
-            view.setAutoresizingMask_(
-                Quartz.NSViewWidthSizable | Quartz.NSViewHeightSizable)
-            host_view.setAutoresizesSubviews_(True)
+            # Sized by _sync_surface() only.  With an autoresizing mask the
+            # host's size change is applied twice: Qt delivers the resize
+            # event (we set the whole size) before AppKit enlarges the native
+            # view, whose autoresizing then adds the same difference again.
+            # A host resized while hidden -- the application always is, the
+            # viewer only gets its size later -- ended at old size plus twice
+            # the difference, which stretched and cropped the picture.
+            view.setAutoresizingMask_(Quartz.NSViewNotSizable)
             host_view.addSubview_(view)
         except Exception as error:  # noqa: BLE001 - any AppKit failure is a refusal
             self._failure = f"attach_failed:{error}"
@@ -286,6 +300,15 @@ class MetalViewportHost(QWidget):
     def _is_really_visible(self) -> bool:
         window = self.window()
         return bool(self.isVisible() and (window is None or not window.isMinimized()))
+
+    def sync_surface(self) -> SurfaceState:
+        """Apply the widget's size now and return the published state.
+
+        A hidden widget gets its resize event only once it is shown, so the
+        state the picture rectangle is normalized to would lag behind; the
+        owner calls this right after moving or resizing the host.
+        """
+        return self._sync_surface()
 
     def resizeEvent(self, event: Any) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
@@ -368,8 +391,7 @@ class MetalViewportHost(QWidget):
             layer.setContentsGravity_(Quartz.kCAGravityTopLeft)
             view.setLayer_(layer)
             view.setWantsLayer_(True)
-            view.setAutoresizingMask_(
-                Quartz.NSViewWidthSizable | Quartz.NSViewHeightSizable)
+            view.setAutoresizingMask_(Quartz.NSViewNotSizable)   # see attach()
             host_view.addSubview_(view)
         except Exception:  # noqa: BLE001
             logger.warning("MetalViewportHost: overlay view failed", exc_info=True)

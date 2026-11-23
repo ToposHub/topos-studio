@@ -2452,7 +2452,13 @@ class SourceViewerWidget(QWidget):
         set_wanted = getattr(renderer, "set_native_frames_wanted", None)
         if callable(set_wanted):
             set_wanted(allowed)
-        host.setGeometry(self.viewer.geometry())
+        if self._metal_host.geometry() != self.viewer.geometry():
+            self._metal_host.setGeometry(self.viewer.geometry())
+            # A hidden host's resize event is still pending: publish the size
+            # now, the picture rectangle is normalized to it.
+            sync = getattr(self._metal_host, "sync_surface", None)
+            if callable(sync):
+                sync()
         if self.__dict__.get("_native_showing") and allowed:
             if host.isHidden():
                 host.show()
@@ -2519,6 +2525,10 @@ class SourceViewerWidget(QWidget):
             viewer._video_aspect_ratio = present.width / present.height
         if viewer._view_transform.mode == "fit":
             viewer.fit_to_window()
+        if self._metal_host.geometry() != viewer.geometry():
+            # The canvas is laid out after the viewport is enabled: the first
+            # native frame finds the layer at its start-up size.
+            self._layout_native_host()
         rect_px = viewer._calculate_display_rect_px()
         taken = renderer.submit_native_present(
             present, rect=normalized_rect(rect_px, self._metal_host.drawable_size),
