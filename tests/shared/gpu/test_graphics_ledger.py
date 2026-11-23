@@ -158,7 +158,10 @@ class TestRefusal:
         assert create.calls == [] and standalone.calls == []
         error = refused.value
         assert (error.api, error.domain) == (L.OPENGL, "tests")
-        assert "graphics factory refused" in str(error)
+        assert error.factory == "moderngl.create_context"
+        assert str(error) == (
+            "graphics factory refused: opengl context via moderngl.create_context for tests "
+            "(test_graphics_ledger.test_gl_factories_are_refused_before_creating_anything)")
 
     def test_a_refused_factory_leaves_no_entry(self, hooked, monkeypatch) -> None:
         monkeypatch.setenv(L.FACTORY_ENV, "deny")

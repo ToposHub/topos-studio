@@ -64,11 +64,13 @@ _DOMAINS = (
 class GraphicsFactoryRefused(RuntimeError):
     """A GL context factory was refused by ``TOPOS_GRAPHICS_FACTORY``."""
 
-    def __init__(self, api: str, domain: str, reason: str) -> None:
-        super().__init__(f"graphics factory refused: {api} context for {domain} ({reason})")
+    def __init__(self, api: str, domain: str, reason: str, factory: str = "") -> None:
+        via = f" via {factory}" if factory else ""
+        super().__init__(f"graphics factory refused: {api} context{via} for {domain} ({reason})")
         self.api = api
         self.domain = domain
         self.reason = reason
+        self.factory = factory
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,7 @@ def _before_factory(api: str, factory: str) -> None:
     if api == OPENGL and factory_policy() == "deny":
         # Refused before anything is created: the caller sees the same
         # situation as a machine without a usable GL.
-        raise GraphicsFactoryRefused(api, domain, reason)
+        raise GraphicsFactoryRefused(api, domain, reason, factory)
     _LEDGER.record(api, domain, reason, factory)
 
 
