@@ -1,0 +1,86 @@
+{
+ "session": "pagetour.py",
+ "counts": {
+  "opengl": 6,
+  "metal": 0
+ },
+ "by_domain": {
+  "app": {
+   "opengl": 2,
+   "metal": 0
+  },
+  "color": {
+   "opengl": 1,
+   "metal": 0
+  },
+  "composite": {
+   "opengl": 1,
+   "metal": 0
+  },
+  "edit": {
+   "opengl": 1,
+   "metal": 0
+  },
+  "shared_gpu": {
+   "opengl": 1,
+   "metal": 0
+  }
+ },
+ "opengl_threads": [
+  "Dummy-2",
+  "Dummy-3",
+  "Dummy-4",
+  "MainThread",
+  "node-thumbnail-evaluator"
+ ],
+ "calls": [
+  {
+   "api": "opengl",
+   "domain": "edit",
+   "reason": "edit_gpu_preview_renderer.run",
+   "thread": "Dummy-2",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_context"
+  },
+  {
+   "api": "opengl",
+   "domain": "shared_gpu",
+   "reason": "gl_backend.initialize",
+   "thread": "MainThread",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_context"
+  },
+  {
+   "api": "opengl",
+   "domain": "color",
+   "reason": "async_renderer.run",
+   "thread": "Dummy-3",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_context"
+  },
+  {
+   "api": "opengl",
+   "domain": "app",
+   "reason": "node_thumbnail_evaluator._evaluate_job",
+   "thread": "node-thumbnail-evaluator",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_standalone_context"
+  },
+  {
+   "api": "opengl",
+   "domain": "app",
+   "reason": "node_thumbnail_evaluator._evaluate_job",
+   "thread": "node-thumbnail-evaluator",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_context"
+  },
+  {
+   "api": "opengl",
+   "domain": "composite",
+   "reason": "composite_renderer.run",
+   "thread": "Dummy-4",
+   "session": "pagetour.py",
+   "factory": "moderngl.create_context"
+  }
+ ]
+}

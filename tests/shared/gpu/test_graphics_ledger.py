@@ -1,9 +1,10 @@
-"""The graphics ledger counts every context Topos creates (plan 7.5).
+"""The graphics ledger counts the contexts Topos makes through the factories (plan 7.5).
 
 The hooks wrap the moderngl factories and the Metal context constructor.
-Here the moderngl factories are stubs, so no GL context is ever made: the
-tests are about what is recorded and refused, and that the wrappers call
-straight through.
+Contexts Qt makes for its own ``QOpenGLWidget`` s are not among them, so the
+count is a lower bound on the GL contexts of a session.  Here the moderngl
+factories are stubs, so no GL context is ever made: the tests are about
+what is recorded and refused, and that the wrappers call straight through.
 """
 
 from __future__ import annotations

@@ -6,10 +6,16 @@ thread once a path has moved to Metal, and the compatible mode still
 works where it has to.  A count needs somewhere to be kept.
 
 :func:`install_factory_hooks` wraps the two ``moderngl`` context factories
-and the Metal compute context constructor, so every context Topos creates is
-recorded with its API, the *domain* of the caller, the *reason* (the calling
-function), the thread and the session.  Nothing else changes: the wrappers
-call straight through.
+and the Metal compute context constructor, so every context Topos creates
+through them is recorded with its API, the *domain* of the caller, the
+*reason* (the calling function), the thread and the session.  Nothing else
+changes: the wrappers call straight through.
+
+Not counted are the contexts Qt makes for its own widgets (every
+``QOpenGLWidget``): they do not pass through the factories.  So
+``counts["opengl"]`` is the number of moderngl contexts and a lower bound
+on the GL contexts of a session; a viewer that is a ``QOpenGLWidget`` keeps
+its context even at ``counts["opengl"] == 0``.
 
 The same hooks are the test injection of the plan ("用测试注入拒绝 GL
 工厂"): with ``TOPOS_GRAPHICS_FACTORY=deny`` a GL factory raises
@@ -20,10 +26,10 @@ Off by default.  ``TOPOS_GRAPHICS_LEDGER=1`` starts a session ledger at
 application start (:func:`start_session_ledger`) and, when the process
 exits, writes the snapshot to ``TOPOS_GRAPHICS_LEDGER_FILE`` or to stderr.
 
-Reading a snapshot: ``counts["opengl"]`` is the number of GL contexts
-created; ``opengl_threads`` are the threads that created them (a render
-thread shows up here the moment it makes its context); ``by_domain`` splits
-both APIs by the domain of the caller.
+Reading a snapshot: ``counts["opengl"]`` is the number of moderngl GL
+contexts created; ``opengl_threads`` are the threads that created them (a
+render thread shows up here the moment it makes its context);
+``by_domain`` splits both APIs by the domain of the caller.
 """
 
 from __future__ import annotations

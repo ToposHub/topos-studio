@@ -48,7 +48,7 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 | `TOPOS_COMPOSITE_METAL` | `composite_graph_render_service.py` | 空（关） | 真值：合成图走 Metal compute 链（尚无生产调用方） | G-18、G-19 |
 | `TOPOS_COLOR_METAL` | `color/ui/metal_color_viewer.py` | 空（关） | 真值：Color Viewer 的 Metal 呈现端（尚未接线） | G-11、G-14 |
 | `TOPOS_METAL_DISABLE` | `shared/gpu/metal/feature_switches.py` | 空 | 逗号分隔的能力名，单独关掉对应能力，优先于以上各开关 | 全部 |
-| `TOPOS_GRAPHICS_LEDGER` / `_FILE` | `src/main.py`（`start_session_ledger`） | 空（关） | 真值：记录本次会话创建的每个图形上下文，退出时写快照 | 全部（度量） |
+| `TOPOS_GRAPHICS_LEDGER` / `_FILE` | `src/main.py`（`start_session_ledger`） | 空（关） | 真值：记录本次会话经 moderngl 工厂与 `MetalComputeContext` 构造函数创建的每个图形上下文（Qt 自己的 `QOpenGLWidget` 上下文不计），退出时写快照 | 全部（度量） |
 | `TOPOS_GRAPHICS_FACTORY` | `shared/gpu/graphics_ledger.py` | `allow` | `deny`：台账钩子已安装时，GL 上下文工厂创建前即拒绝（测试注入） | 全部（测试） |
 | `TOPOS_EXPORT_GPU_RENDER` | `timeline_export.py:2789` | 生产启用；pytest 下默认 CPU | 强制 GPU / CPU 合成 | G-06 |
 | `TOPOS_EXPORT_METAL_PREFETCH` | `timeline_export.py:2755` | `1` | Metal 导出与 VT 解码重叠预取 | G-07 |
@@ -71,10 +71,10 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 
 | 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
 |---|---|---|---|---|---|---|---|
-| G-02 | `edit/ui/program_viewer.py:809`（`QOpenGLWidget`）；`_copy_shared_texture_to_display` `:1907`；`paintGL` `:1301` | 呈现 | 原生 `CAMetalLayer` 视口适配器 | 2.1、2.3 | 默认 OpenGL；`TOPOS_EDIT_METAL_VIEWPORT=1` 时合格帧由原生 `CAMetalLayer` 呈现（2.1–2.3） | 开关关闭、非 Cocoa、图层挂载失败、呈现停滞 → GL Viewer | 待迁 |
+| G-02 | `edit/ui/program_viewer.py:809`（`QOpenGLWidget`）；`_copy_shared_texture_to_display` `:1907`；`paintGL` `:1301` | 呈现 | 原生 `CAMetalLayer` 视口适配器 | 2.1、2.3 | 默认 OpenGL；`TOPOS_EDIT_METAL_VIEWPORT=1` 时合格帧由原生 `CAMetalLayer` 呈现（2.1–2.3）；真机（显示器清醒）H.264 时间线 392～398 / 399 帧，画面位置与 GL Viewer 逐像素一致（`572d9f4c`、`c92d8703`） | 开关关闭、非 Cocoa、图层挂载失败、呈现停滞 → GL Viewer | 待迁 |
 | G-03 | `edit/core/edit_gpu_preview_renderer.py:1338`（上下文）；`_finalize_present_frame` `:5430`（`glFenceSync` `:5502`）；`_ensure_composite_fbo` `:4094`；`_try_metal_preview` `:2609` | 处理 | 剪辑 GPU 计划全程 Metal | 2.2、2.6 | OpenGL 为主；默认 `lut` 模式下单 LUT NV12 走 Metal compute 后落回 GL 槽位；`all` 模式下合成帧（多层、变换、裁切、混合、dissolve、dip）也走 Metal（2.6） | 片段效果、planar 源、comp 句柄、空间转场、调整剪辑 → GL；Metal 失败 → 本会话回 GL | 待迁 |
 | G-04 | `edit/core/metal_timeline_preview.py:143-199`（`_CGLTexImageIOSurface2D` `:186`）；`blit` `:271` | 呈现中转 | 原生视口接通后**退役** | 2.1 | Metal compute → BGRA IOSurface → `GL_TEXTURE_RECTANGLE`（GL Viewer 路线仍在用） | GL 合成 | 待迁 |
-| G-05 | `edit/ui/source_viewer.py:683`（`QOpenGLWidget`） | 呈现 | 复用原生视口适配器 | 2.5、7.1 | 默认 OpenGL（`SourcePresentGate` 单槽 latest-wins）；`TOPOS_EDIT_METAL_VIEWPORT=1` 时原生视口（2.5） | GL Viewer | 待迁 |
+| G-05 | `edit/ui/source_viewer.py:683`（`QOpenGLWidget`） | 呈现 | 复用原生视口适配器 | 2.5、7.1 | 默认 OpenGL（`SourcePresentGate` 单槽 latest-wins）；`TOPOS_EDIT_METAL_VIEWPORT=1` 时原生视口（2.5）；真机对照未做 | GL Viewer | 待迁 |
 | G-06 | `edit/core/timeline_gpu_export_renderer.py:992`（独立上下文） | 导出 | Metal 导出渲染器覆盖后退役 | 3.3、3.4 | OpenGL；白名单场景（同尺寸 BT.709 H.264、串联 LUT、两段 dissolve、含音频、分数帧率）默认走 Metal 导出渲染器（3.0–3.2） | GPU 不可用 → CPU 合成器 | 待迁 |
 | G-07 | `edit/core/timeline_export.py:7415`（`_try_export_metal_h264_lut`）、`:9890`（后端选择） | 导出 | 含音频、复杂图、HDR 的原生快路 | 3.1–3.3 | macOS 默认启用：Metal → NV12 → VideoToolbox；同容器封装 AAC 48 kHz；精确有理数帧率（3.1 / 3.2） | 白名单外 → 常规路径；`TOPOS_EXPORT_NATIVE_VT=0` 或 `TOPOS_METAL_DISABLE=export_native_vt` 关闭 | 待迁 |
 | G-08 | `edit/core/timeline_clip_frame_provider.py` | 上传 | 跟随 G-03 的 GPU 计划 | 2.6、3.3 | OpenGL 上传 | CPU 帧 | 待迁 |
