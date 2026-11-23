@@ -62,7 +62,10 @@ from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from fractions import Fraction
+from typing import (
+    Any, Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING,
+)
 
 from src.features.edit.core.proxy_policy import export_source_path
 from src.features.edit.core.audio_playback import unpack_send
@@ -2381,6 +2384,77 @@ class _MetalH264Audio:
     sample_rate: int
     channels: int
     bitrate: Optional[int]
+
+
+def _sha256_packet(packet: Any) -> str:
+    """Hash one compressed packet's bytes (dnxhr smart-reuse evidence)."""
+    import hashlib
+
+    return hashlib.sha256(memoryview(packet)).hexdigest()
+
+
+def verify_dnxhr_copy_runs(
+    source: str,
+    target: str,
+    runs: Sequence[Tuple[int, int]],
+    *,
+    fps: Fraction,
+) -> Tuple[bool, str]:
+    """Confirm a packet-copied delivery still hashes like its source runs.
+
+    Plan 3.4 smart-reuse evidence. The copy itself validates every packet's
+    structure and timing before muxing; this pass re-reads a bounded probe
+    set — the first and last packet of every run, in source and delivery —
+    and compares SHA-256 digests, so a delivery whose bytes diverged from the
+    master is never reported as a reuse. All packets would double the I/O of
+    the copy, so the probe set stays bounded by the number of runs.
+    """
+    import av
+
+    if not runs:
+        return False, "no_runs"
+    with av.open(source) as source_movie, av.open(target) as delivery:
+        in_video = source_movie.streams.video[0]
+        out_video = delivery.streams.video[0]
+        frame_ticks = 1 / (Fraction(fps) * Fraction(in_video.time_base))
+        if frame_ticks.denominator != 1 or not out_video.time_base:
+            return False, "probe_time_base_mismatch"
+        ticks = int(frame_ticks)
+        # Output packet index (delivery order) -> source frame number.
+        probes: Dict[int, int] = {}
+        written = 0
+        for start, count in runs:
+            probes.setdefault(written, start)
+            probes.setdefault(written + count - 1, start + count - 1)
+            written += count
+        expected_hashes: Dict[int, str] = {}
+        for out_index in sorted(probes):
+            frame_number = probes[out_index]
+            expected_pts = frame_number * ticks
+            source_movie.seek(expected_pts, stream=in_video,
+                              backward=True, any_frame=False)
+            for packet in source_movie.demux(in_video):
+                if packet.pts is None or packet.pts < expected_pts:
+                    continue
+                if packet.pts > expected_pts:
+                    return False, f"source_packet_missing:{frame_number}"
+                expected_hashes[out_index] = _sha256_packet(packet)
+                break
+            else:
+                return False, f"source_packet_missing:{frame_number}"
+        index = 0
+        for packet in delivery.demux(out_video):
+            if not packet.size:
+                continue
+            if index in expected_hashes:
+                if _sha256_packet(packet) != expected_hashes[index]:
+                    return False, f"packet_hash_mismatch:{probes[index]}"
+            index += 1
+            if index >= written:
+                break
+        if index != written:
+            return False, f"delivery_packet_count:{index}!={written}"
+    return True, f"sha256:{len(expected_hashes)}-of-{written}-packets"
 
 
 #: 首版 native VT bridge 支持的源像素格式 → 允许的输出 surface。
@@ -6973,15 +7047,39 @@ class TimelineExporter:
         stop = _threading.Event()
         producer_done = _threading.Event()
         producer_error: list = []
+        # getattr: exporters assembled without __init__ (tests, tools) have
+        # no backend attribute yet; their waits are still worth a name.
+        backend = str(getattr(self, "_timeline_graphics_backend", None) or "cpu")
+
+        def _record_queue_wait(kind: str, stalled_since: Optional[float]) -> None:
+            """Plan 3.4: one ``queue_wait`` sample per item that was held up.
+
+            The samples are kept without bound, so an item that went straight
+            through records nothing; only a producer that found the queue
+            full, or a consumer that found it empty, leaves a sample, with
+            the whole time it was held up.
+            """
+            if stalled_since is None:
+                return
+            seconds = time.perf_counter() - stalled_since
+            recorder = getattr(self, "_export_telemetry", None)
+            if recorder is not None:
+                recorder.record_stage_sample(
+                    "queue_wait", f"{backend}_pipeline_{kind}",
+                    wall_ms=seconds * 1000.0)
 
         def enqueue(item: tuple) -> bool:
             """有界入队；消费侧退出（stop）→ 返回 False 丢弃剩余帧。"""
+            stalled_since = None
             while not stop.is_set():
                 try:
                     q.put(item, timeout=0.25)
-                    return True
                 except _queue.Full:
+                    if stalled_since is None:
+                        stalled_since = time.perf_counter()
                     continue
+                _record_queue_wait("producer_full", stalled_since)
+                return True
             return False
 
         def produce() -> None:
@@ -7011,11 +7109,16 @@ class TimelineExporter:
             target=produce, name="export-render-pipeline", daemon=True)
         producer.start()
         try:
+            waiting_since = None
             while not producer_done.is_set() or not q.empty():
                 try:
                     item = q.get(timeout=0.1)
                 except _queue.Empty:
+                    if waiting_since is None:
+                        waiting_since = time.perf_counter()
                     continue
+                _record_queue_wait("consumer_empty", waiting_since)
+                waiting_since = None
                 frame_idx, frame_data = item
                 if not self._wait_if_paused():
                     logger.info("Export cancelled while paused")
@@ -7221,6 +7324,31 @@ class TimelineExporter:
             return None
         if not complete:
             return ExportOutcome.user_cancelled()
+
+        # Plan 3.4: smart reuse is confirmed by packet-hash evidence before the
+        # delivery counts as a success. A movie whose probe packets no longer
+        # hash like the master is discarded and the regular render redoes the
+        # range, so an unverifiable file is never left behind as a delivery.
+        try:
+            verified, evidence = verify_dnxhr_copy_runs(
+                source, config.output_path, runs, fps=Fraction(*rate))
+        except Exception as error:  # noqa: BLE001 — unconfirmed reuse must fail closed
+            verified, evidence = False, f"verify_error:{type(error).__name__}"
+            logger.warning("DNxHR packet-hash verification failed: %s", error)
+        if not verified:
+            logger.warning(
+                "DNxHR packet copy did not verify (%s); retrying the full range",
+                evidence)
+            try:
+                os.unlink(config.output_path)
+            except OSError:
+                logger.exception("Could not discard the unverified delivery")
+            self._current_frame = 0
+            if self._export_telemetry is not None:
+                self._export_telemetry.set_fallback_root_cause(
+                    f"dnxhr_packet_copy_unverified:{evidence}")
+            return None
+        logger.info("DNxHR packet copy verified: %s", evidence)
 
         path = "dnxhr_packet_copy"
         if self._export_telemetry is not None:
